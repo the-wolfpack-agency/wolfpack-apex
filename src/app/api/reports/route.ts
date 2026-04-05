@@ -6,7 +6,10 @@ import {
   generateReport,
   getReportHistory,
   saveAsTemplate,
+  renderReportHtml,
+  cleanAiArtifacts,
 } from "@/lib/report-templates";
+import { generateCustomReport } from "@/lib/claude-report-generator";
 
 /**
  * GET /api/reports — List templates and past reports.
@@ -82,6 +85,47 @@ export async function POST(req: NextRequest) {
         user.role,
       );
       return NextResponse.json({ template: { id: template.id, name: template.name } }, { status: 201 });
+    }
+
+    // Custom AI-generated report when using "Create Your Own" with a prompt
+    const reportDescription = (context?.reportDescription as string) || "";
+    if (templateId === "custom" && reportDescription.length > 10) {
+      try {
+        const aiResult = await generateCustomReport({
+          prompt: reportDescription,
+          clientName: (context?.clientName as string) || "Client",
+          productContext: (context?.customNotes as string) || undefined,
+          sections: sections,
+          userId: user.id,
+          userRole: user.role,
+        });
+
+        // Combine AI content with any selected template sections
+        const report = await generateReport(templateId, sections, {
+          clientName: (context?.clientName as string) || "",
+          reportDescription: aiResult.content,
+          customNotes: (context?.customNotes as string) || undefined,
+          userId: user.id,
+          userRole: user.role,
+        });
+
+        return NextResponse.json({
+          reportId: report.reportId,
+          markdown: report.markdown,
+          html: report.html,
+          generatedAt: report.generatedAt,
+          sectionsIncluded: report.sectionsIncluded,
+          ai: {
+            tokensUsed: aiResult.tokensUsed,
+            latencyMs: aiResult.latencyMs,
+            model: aiResult.model,
+            cached: aiResult.cached,
+          },
+        });
+      } catch (err) {
+        // AI failed — fall through to template-only generation
+        console.warn("[reports] Claude generation failed, using template-only:", (err as Error).message);
+      }
     }
 
     const reportContext = {

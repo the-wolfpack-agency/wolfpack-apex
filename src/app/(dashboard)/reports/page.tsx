@@ -81,6 +81,7 @@ export default function ReportsPage() {
   const [dateStart, setDateStart] = useState("");
   const [dateEnd, setDateEnd] = useState("");
   const [customNotes, setCustomNotes] = useState("");
+  const [promptInput, setPromptInput] = useState("");
 
   // Generation state
   const [generating, setGenerating] = useState(false);
@@ -164,6 +165,7 @@ export default function ReportsPage() {
             productName: productName || undefined,
             dateRange: dateStart && dateEnd ? { start: dateStart, end: dateEnd } : undefined,
             customNotes: customNotes || undefined,
+            reportDescription: promptInput || undefined,
           },
         }),
       });
@@ -402,6 +404,29 @@ export default function ReportsPage() {
               Report Details
             </h2>
             <div className="space-y-4">
+              {/* Prompt input — prominent for Create Your Own */}
+              {selectedTemplate.id === "custom" && (
+                <div>
+                  <label className="block text-sm font-medium mb-2" style={{ color: "var(--wp-gold)" }}>
+                    What do you need?
+                  </label>
+                  <textarea
+                    value={promptInput}
+                    onChange={(e) => setPromptInput(e.target.value)}
+                    placeholder="e.g. Generate a compliance report for Client X explaining our data security, GDPR stance, and encryption methods..."
+                    rows={4}
+                    className="w-full px-3 py-2 rounded-lg text-sm resize-y"
+                    style={{
+                      background: "var(--wp-dark-surface2)",
+                      border: "2px solid var(--wp-gold)",
+                      color: "var(--wp-text)",
+                    }}
+                  />
+                  <p className="text-xs mt-1" style={{ color: "var(--wp-text-muted)" }}>
+                    Describe the report you need. The sections you check below will be included as building blocks.
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium mb-1" style={{ color: "var(--wp-text-dim)" }}>
                   Client Name *
@@ -487,15 +512,35 @@ export default function ReportsPage() {
                   />
                 </div>
               </div>
+              {/* Report description prompt for all templates */}
+              {selectedTemplate.id !== "custom" && (
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: "var(--wp-text-dim)" }}>
+                    Report Description (optional)
+                  </label>
+                  <textarea
+                    value={promptInput}
+                    onChange={(e) => setPromptInput(e.target.value)}
+                    rows={2}
+                    placeholder="e.g. Focus on data flow and compliance for this client..."
+                    className="w-full px-3 py-2 rounded-lg text-sm resize-y"
+                    style={{
+                      background: "var(--wp-dark-surface2)",
+                      border: "1px solid var(--wp-dark-border)",
+                      color: "var(--wp-text)",
+                    }}
+                  />
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium mb-1" style={{ color: "var(--wp-text-dim)" }}>
-                  Custom Notes
+                  Additional Notes
                 </label>
                 <textarea
                   value={customNotes}
                   onChange={(e) => setCustomNotes(e.target.value)}
-                  rows={3}
-                  placeholder="Additional context for the report..."
+                  rows={2}
+                  placeholder="Any extra details for the report..."
                   className="w-full px-3 py-2 rounded-lg text-sm resize-none"
                   style={{
                     background: "var(--wp-dark-surface2)",
