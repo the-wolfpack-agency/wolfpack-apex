@@ -1048,11 +1048,165 @@ const TEMPLATES: ReportTemplate[] = [
 // Public API
 // ---------------------------------------------------------------------------
 
+// Custom templates saved by users (persisted to DB)
+const customTemplates: ReportTemplate[] = [];
+
 /**
- * Get all 6 report templates.
+ * The "Create Your Own" meta-template. Users define their own sections via prompt.
+ */
+const CREATE_YOUR_OWN: ReportTemplate = {
+  id: "custom",
+  name: "Create Your Own",
+  description: "Build a custom report from scratch. Describe what you need and select the building blocks. Once generated, save it as a reusable template for the team.",
+  category: "client",
+  sections: [
+    {
+      id: "custom_intro",
+      title: "Introduction",
+      description: "Overview and purpose of this document",
+      dataSource: "user_input",
+      generator: async (ctx) => `## Introduction\n\n${ctx.reportDescription || "This document was prepared by Wolfpack Agency for " + ctx.clientName + "."}\n`,
+    },
+    {
+      id: "custom_platform_overview",
+      title: "Platform Overview",
+      description: "High-level summary of the Wolfpack platform",
+      dataSource: "codebase",
+      generator: async (ctx) => {
+        const repo = ctx.repoPath || process.env.WOLFPACK_AUTO_REPO_PATH || "";
+        const stats = analyzeCodebase(repo);
+        if (stats.totalFiles === 0) {
+          return `## Platform Overview\n\nWolfpack Auto is a full-stack automotive dealer platform with 215+ API routes, 110+ database tables, 55 migrations, multi-tenant RLS, and real-time behavioral analytics.\n`;
+        }
+        return `## Platform Overview\n\n- ${stats.totalFiles} source files across ${Object.keys(stats.filesByType).length} languages\n- ${stats.apiRoutes} API routes\n- ${stats.migrations} database migrations\n- ${stats.testFiles} test files\n`;
+      },
+    },
+    {
+      id: "custom_data_flow",
+      title: "Data Flow and Architecture",
+      description: "How data moves through the system",
+      dataSource: "static",
+      generator: async () => `## Data Flow and Architecture\n\nEvery user action flows through a triple-write pipeline:\n\n1. **PostgreSQL** stores structured records (leads, vehicles, deals, analytics events)\n2. **Qdrant** stores vector embeddings for semantic search and knowledge retrieval\n3. **Neo4j** stores relationship graphs for customer journey mapping\n\nAll writes are fire-and-forget to secondary stores, so the primary request is never blocked. Analytics events are tracked on every API route (192 routes, 100% coverage) and feed into 12 learning views that power the propensity model and behavioral intelligence.\n`,
+    },
+    {
+      id: "custom_compliance",
+      title: "Compliance and Security",
+      description: "Security posture, data protection, and regulatory compliance",
+      dataSource: "static",
+      generator: async () => `## Compliance and Security\n\n- **Encryption at rest**: AES-256-GCM for all PII fields\n- **Multi-tenant isolation**: Row-Level Security (RLS) policies on all tenant tables\n- **Authentication**: JWT with bcrypt password hashing, optional TOTP MFA\n- **Rate limiting**: Sliding window with Redis (fails closed, in-memory fallback)\n- **HTTPS enforced**: HSTS headers with 2-year max-age, preload\n- **Privacy**: GDPR/CCPA compliant with data export and deletion APIs\n- **Cookie consent**: Granular preferences (essential, analytics, marketing)\n- **Regulatory**: TILA, FCRA, ECOA, FTC, GLBA compliance rules built into document analysis\n`,
+    },
+    {
+      id: "custom_analytics",
+      title: "Analytics and Intelligence",
+      description: "Behavioral analytics, scoring, and insights",
+      dataSource: "static",
+      generator: async () => `## Analytics and Intelligence\n\n**57 behavioral signals** captured per customer session, feeding into:\n\n- **Propensity model**: Gradient-descent trained logistic regression predicting 7-day purchase probability\n- **5 micro-behavioral signals**: Photo comparison dwell, price sensitivity fingerprinting, decision velocity, device handoff intent, night owl premium\n- **12 learning views**: Feature engagement, module adoption, error impact, delivery performance, reinsurance ROI, survey NPS, plus 6 micro-behavioral views\n- **Real-time dashboards**: Conversion funnels, lead temperature, inventory aging\n\nThe system gets measurably smarter the longer a dealer uses it. Zero-token-first design means most queries are answered from cached data, not AI calls.\n`,
+    },
+    {
+      id: "custom_features",
+      title: "Feature Summary",
+      description: "Key features and capabilities",
+      dataSource: "static",
+      generator: async (ctx) => `## Feature Summary for ${ctx.clientName || "Client"}\n\n**Customer-Facing:**\n- Responsive dealer website with inventory search and filtering\n- Trade-in wizard with VIN autofill (NHTSA)\n- Financing calculator, service booking, AI chat\n- Session replay, heatmaps, video walkarounds\n\n**Admin Portal (90+ pages):**\n- Lead management with predictive scoring\n- F&I desking with multi-scenario comparison\n- Multi-company general ledger with consolidation\n- Payment processing (Stripe Connect)\n- Payroll integration (Gusto/ADP/Paychex)\n- Document vault with compliance checking\n- Reputation monitoring, SMS messaging, drip campaigns\n\n**Infrastructure:**\n- Deployed on Vercel, PostgreSQL on Neon\n- Shadow mode (works without database for demos)\n- Best-in-class onboarding (5 industry templates, drag-and-drop CSV)\n`,
+    },
+    {
+      id: "custom_pricing",
+      title: "Pricing and Timeline",
+      description: "Investment and implementation timeline",
+      dataSource: "user_input",
+      generator: async (ctx) => `## Pricing and Timeline\n\n${ctx.customNotes || "Pricing details and implementation timeline to be discussed based on specific requirements."}\n`,
+    },
+    {
+      id: "custom_next_steps",
+      title: "Next Steps",
+      description: "Recommended actions and contact information",
+      dataSource: "user_input",
+      generator: async (ctx) => `## Next Steps\n\n1. Schedule a demo walkthrough of the platform\n2. Review technical requirements and integration needs\n3. Finalize scope and timeline\n4. Begin onboarding\n\nFor questions, contact the Wolfpack Agency team.\n`,
+    },
+  ],
+  defaultIncluded: ["custom_intro", "custom_platform_overview", "custom_data_flow", "custom_features", "custom_next_steps"],
+};
+
+/**
+ * Get all report templates (built-in + custom saved by users).
  */
 export function getTemplates(): ReportTemplate[] {
-  return TEMPLATES;
+  return [...TEMPLATES, CREATE_YOUR_OWN, ...customTemplates];
+}
+
+/**
+ * Save a generated report as a reusable template for the team.
+ */
+export async function saveAsTemplate(
+  name: string,
+  description: string,
+  category: "client" | "internal" | "technical",
+  sectionIds: string[],
+  userId: string,
+  userRole: string,
+): Promise<ReportTemplate> {
+  // Pull sections from CREATE_YOUR_OWN
+  const sections = CREATE_YOUR_OWN.sections.filter((s) => sectionIds.includes(s.id));
+
+  const template: ReportTemplate = {
+    id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    name,
+    description,
+    category,
+    sections,
+    defaultIncluded: sectionIds,
+  };
+
+  customTemplates.push(template);
+
+  // Persist to DB
+  if (process.env.DATABASE_URL) {
+    try {
+      const { query: dbQuery } = await import("@/lib/db");
+      await dbQuery(
+        `INSERT INTO apex_documents (id, title, doc_type, content, format, generated_from, generated_by)
+         VALUES ($1, $2, 'template', $3, 'json', 'custom', $4)`,
+        [template.id, name, JSON.stringify({ description, category, sectionIds }), userId],
+      );
+    } catch (err) {
+      console.warn("[reports] Failed to persist template:", (err as Error).message);
+    }
+  }
+
+  trackEvent("client.doc_generated", userId, userRole, {
+    action: "save_as_template",
+    template_name: name,
+    sections: sectionIds.join(","),
+  });
+
+  return template;
+}
+
+/**
+ * Load custom templates from DB on startup.
+ */
+export async function loadCustomTemplates(): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+  try {
+    const { query: dbQuery } = await import("@/lib/db");
+    const result = await dbQuery(
+      `SELECT id, title, content FROM apex_documents WHERE doc_type = 'template' ORDER BY created_at DESC`,
+    );
+    for (const row of result.rows) {
+      const meta = typeof row.content === "string" ? JSON.parse(row.content as string) : row.content;
+      const sections = CREATE_YOUR_OWN.sections.filter((s) => (meta as Record<string, unknown>).sectionIds && ((meta as Record<string, unknown>).sectionIds as string[]).includes(s.id));
+      customTemplates.push({
+        id: row.id as string,
+        name: row.title as string,
+        description: (meta as Record<string, string>).description || "",
+        category: ((meta as Record<string, string>).category as "client" | "internal" | "technical") || "client",
+        sections,
+        defaultIncluded: ((meta as Record<string, unknown>).sectionIds as string[]) || [],
+      });
+    }
+  } catch {
+    // Table may not exist yet
+  }
 }
 
 /**
@@ -1063,7 +1217,8 @@ export async function generateReport(
   includedSections: string[],
   context: ReportContext,
 ): Promise<GeneratedReport> {
-  const template = TEMPLATES.find((t) => t.id === templateId);
+  const allTemplates = [...TEMPLATES, CREATE_YOUR_OWN, ...customTemplates];
+  const template = allTemplates.find((t) => t.id === templateId);
   if (!template) {
     throw new Error(`Unknown template: ${templateId}`);
   }

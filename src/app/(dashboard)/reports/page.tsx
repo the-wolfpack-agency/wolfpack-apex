@@ -410,7 +410,7 @@ export default function ReportsPage() {
                   type="text"
                   value={clientName}
                   onChange={(e) => setClientName(e.target.value)}
-                  placeholder="e.g. Hoxsie Auto Group"
+                  placeholder="e.g. Acme Motors"
                   className="w-full px-3 py-2 rounded-lg text-sm"
                   style={{
                     background: "var(--wp-dark-surface2)",
@@ -427,7 +427,7 @@ export default function ReportsPage() {
                   type="text"
                   value={dealerName}
                   onChange={(e) => setDealerName(e.target.value)}
-                  placeholder="e.g. Hoxsie Ford"
+                  placeholder="e.g. Acme Ford"
                   className="w-full px-3 py-2 rounded-lg text-sm"
                   style={{
                     background: "var(--wp-dark-surface2)",

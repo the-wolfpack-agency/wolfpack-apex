@@ -5,6 +5,7 @@ import {
   getTemplates,
   generateReport,
   getReportHistory,
+  saveAsTemplate,
 } from "@/lib/report-templates";
 
 /**
@@ -70,12 +71,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "sections array is required" }, { status: 400 });
     }
 
+    // Save as template action
+    if (body.action === "save_as_template") {
+      const template = await saveAsTemplate(
+        body.name || "Custom Template",
+        body.description || "",
+        body.category || "client",
+        sections,
+        user.id,
+        user.role,
+      );
+      return NextResponse.json({ template: { id: template.id, name: template.name } }, { status: 201 });
+    }
+
     const reportContext = {
       clientName: (context?.clientName as string) || "",
       dealerName: (context?.dealerName as string) || undefined,
       productName: (context?.productName as string) || undefined,
       dateRange: context?.dateRange as { start: string; end: string } | undefined,
       customNotes: (context?.customNotes as string) || undefined,
+      reportDescription: (context?.reportDescription as string) || undefined,
       repoPath: (context?.repoPath as string) || undefined,
       userId: user.id,
       userRole: user.role,

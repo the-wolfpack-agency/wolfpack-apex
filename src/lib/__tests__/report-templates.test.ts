@@ -112,9 +112,10 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("getTemplates", () => {
-  test("returns all 6 templates", () => {
+  test("returns all 7 templates (6 built-in + Create Your Own)", () => {
     const templates = getTemplates();
-    expect(templates).toHaveLength(6);
+    expect(templates).toHaveLength(7);
+    expect(templates.find((t) => t.id === "custom")).toBeTruthy();
   });
 
   test("all templates have required fields", () => {
@@ -489,7 +490,7 @@ describe("getReportHistory", () => {
 // ---------------------------------------------------------------------------
 
 describe("full report generation flow", () => {
-  test("generates all 6 template types successfully", async () => {
+  test("generates all 7 template types successfully", async () => {
     const templates = getTemplates();
     for (const t of templates) {
       const report = await generateReport(

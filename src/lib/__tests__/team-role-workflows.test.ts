@@ -205,10 +205,10 @@ const FAKE_DOC_ROW = {
 
 const FAKE_CLIENT_ROW = {
   id: "client-1",
-  name: "Hoxsie Auto",
+  name: "Sample Dealer",
   industry: "automotive",
-  contact_email: "john@hoxsie.com",
-  contact_name: "John Hoxsie",
+  contact_email: "contact@sampledealer.com",
+  contact_name: "Jane Smith",
   notes: "Key account",
   docs: [],
   created_at: "2026-04-01T00:00:00Z",
@@ -494,7 +494,7 @@ describe("CTO Workflow", () => {
     const clients = await getClients();
 
     expect(clients).toHaveLength(2);
-    expect(clients[0].name).toBe("Hoxsie Auto");
+    expect(clients[0].name).toBe("Sample Dealer");
   });
 });
 
@@ -728,16 +728,16 @@ describe("Sales Workflow", () => {
       ...FAKE_DOC_ROW,
       id: "doc-proposal",
       doc_type: "client_proposal",
-      title: "Proposal for Hoxsie Auto",
+      title: "Proposal for Sample Dealer",
       generated_by: sales.id,
     };
     mockQuery.mockResolvedValueOnce({ rows: [proposalDoc] });
 
     const saved = await saveDocument(
       {
-        title: "Proposal for Hoxsie Auto",
+        title: "Proposal for Sample Dealer",
         doc_type: "client_proposal",
-        content: "# Proposal\n\nCustom platform for Hoxsie Auto.",
+        content: "# Proposal\n\nCustom platform for Sample Dealer.",
         format: "markdown",
         generated_from: null,
         generated_by: sales.id,
@@ -763,15 +763,15 @@ describe("Sales Workflow", () => {
     });
 
     const client = await createClient(
-      "Hoxsie Auto",
+      "Sample Dealer",
       "automotive",
-      "john@hoxsie.com",
-      "John Hoxsie",
+      "contact@sampledealer.com",
+      "Jane Smith",
       "Key account",
     );
 
     expect(client).not.toBeNull();
-    expect(client!.name).toBe("Hoxsie Auto");
+    expect(client!.name).toBe("Sample Dealer");
     expect(client!.industry).toBe("automotive");
   });
 
@@ -1061,7 +1061,7 @@ describe("Ops Workflow", () => {
     const clients = await getClients();
 
     expect(clients).toHaveLength(1);
-    expect(clients[0].name).toBe("Hoxsie Auto");
+    expect(clients[0].name).toBe("Sample Dealer");
   });
 
   test("search knowledge base — works for ops role", async () => {
