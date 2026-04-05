@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { title, description, target_product, priority } = body;
+  const { title, description, target_product, priority, category } = body;
 
   if (!title || !description) {
     return NextResponse.json({ error: "title and description are required" }, { status: 400 });
@@ -36,6 +36,15 @@ export async function POST(req: NextRequest) {
     target_product,
     priority as FeaturePriority,
   );
+
+  // Track category for automation suggestions
+  if (category === "automation" && feature) {
+    trackEvent("feature.request_submitted", user.id, user.role, {
+      feature_id: feature.id,
+      category: "automation",
+      title,
+    });
+  }
 
   return NextResponse.json({ feature }, { status: 201 });
 }
