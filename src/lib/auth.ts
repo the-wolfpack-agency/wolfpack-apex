@@ -31,12 +31,14 @@ export interface AuthResult {
   token: string;
 }
 
-const JWT_SECRET = process.env.APEX_JWT_SECRET || (() => {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("[auth] APEX_JWT_SECRET must be set in production");
+function getJwtSecret(): string {
+  const secret = process.env.APEX_JWT_SECRET;
+  if (secret) return secret;
+  if (process.env.NODE_ENV === "production" && typeof window === "undefined") {
+    console.error("[auth] APEX_JWT_SECRET must be set in production — auth will fail");
   }
   return "apex-dev-secret-do-not-use-in-production";
-})();
+}
 
 const JWT_EXPIRY = "8h";
 
@@ -51,13 +53,13 @@ export function verifyPassword(password: string, hash: string): boolean {
 export function createToken(user: TeamMember): string {
   return sign(
     { userId: user.id, email: user.email, role: user.role, name: user.name },
-    JWT_SECRET as string,
+    getJwtSecret(),
     { expiresIn: JWT_EXPIRY },
   );
 }
 
 export function verifyToken(token: string): JwtPayload & { userId: string; email: string; role: TeamRole; name: string } {
-  return verify(token, JWT_SECRET as string) as JwtPayload & { userId: string; email: string; role: TeamRole; name: string };
+  return verify(token, getJwtSecret()) as JwtPayload & { userId: string; email: string; role: TeamRole; name: string };
 }
 
 /**
