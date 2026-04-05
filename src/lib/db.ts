@@ -38,7 +38,7 @@ export async function query<T extends Record<string, unknown> = Record<string, u
   return pool.query<T>(text, params);
 }
 
-export async function safeQuery<T extends Record<string, unknown> = Record<string, unknown>>(
+export async function safeQuery<T = Record<string, unknown>>(
   text: string,
   params?: unknown[],
 ): Promise<{ rows: T[]; fromCache: boolean }> {
@@ -46,7 +46,7 @@ export async function safeQuery<T extends Record<string, unknown> = Record<strin
     return { rows: [], fromCache: true };
   }
   try {
-    const result = await query<T>(text, params);
+    const result = await query<T & Record<string, unknown>>(text, params);
     return { rows: result.rows, fromCache: false };
   } catch (err) {
     console.warn("[db] Query failed:", (err as Error).message);
