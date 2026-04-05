@@ -151,6 +151,37 @@ User action
 | Report templates | 36 | All 7 templates, sections, HTML rendering |
 | Claude reports | 8 | Cache, fallback, tracking |
 | Assistant | 16 | Priority chain, conversation, rating |
+| Assistant data flow | 52 | Full pipeline: prompt → PG → Qdrant → Neo4j → response → analytics |
+
+---
+
+## Persistent Assistant Memory
+
+The assistant maintains 4 layers of persistent memory so team members never come back to a clueless agent:
+
+| Layer | Store | What It Remembers |
+|---|---|---|
+| **User Memory** | apex_user_memory (PG) | Role, preferences, expertise topics, past instructions |
+| **Conversation Memory** | apex_conversations + apex_messages (PG) | Full chat history, auto-resume, summaries |
+| **Organizational Memory** | apex_knowledge (PG) + Qdrant vectors | Cached Q&A, docs, codebase context |
+| **Analytics Memory** | apex_events (PG) + learning views | Response quality, gaps, efficiency trends |
+
+### Modular Chat Component
+
+`<ApexChat />` is standalone and embeddable on any page:
+- Self-contained auth (reads JWT from localStorage)
+- Page context injected automatically (assistant knows WHERE the user is asking)
+- Inline mode (full page) or floating mode (bottom-right bubble)
+- Source badges, rating, conversation history sidebar
+- Triple-write on every interaction (PG + Qdrant + Neo4j)
+
+### AI Integration
+
+- Uses Wolfpack Agency organization Claude API key
+- Zero-token priority: knowledge cache → codebase → analytics → AI (last resort)
+- Every AI response cached in knowledge base for free future retrieval
+- All output cleaned of AI artifacts (em dashes, AI-tell words)
+- No AI provider branding in UI ("Apex Assistant" only)
 
 ---
 
@@ -160,14 +191,15 @@ User action
 |---|---|
 | Total pages | 13 |
 | API routes | 15+ |
-| Database tables | 10 |
-| Learning views | 10 |
-| Tests | 304 |
-| Test suites | 14 |
+| Database tables | 13 |
+| Learning views | 13 |
+| Tests | 390 |
+| Test suites | 15 |
 | TypeScript errors | 0 |
 | Report templates | 7 (6 built-in + Create Your Own) |
 | Email templates | 4 |
 | Team roles | 4 (cto, dev, sales, ops) |
+| Data flow tests | 52 (verify data lands in all 3 stores) |
 
 ---
 
