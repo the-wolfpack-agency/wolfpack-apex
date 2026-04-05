@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🐺 Wolfpack Apex
 
-## Getting Started
+**Team intelligence platform for Wolfpack Agency.**
 
-First, run the development server:
+Apex is the central brain connecting the Wolfpack team, AI, and codebase. It compounds knowledge from every team interaction — questions, documents, discussions, feature requests — making the platform smarter the longer the team uses it.
+
+## What It Does
+
+- **Knowledge Base** — Ask questions about the codebase or products. Answers are cached so the same question is never asked twice (zero AI cost on repeat queries).
+- **Team Journals** — Daily context auto-generated from your actions, questions, and calendar. Never lose track of what happened.
+- **Doc Generation** — Generate API docs, release notes, and client proposals directly from the codebase. Zero AI tokens — pure code analysis.
+- **Feature Requests** — Submit ideas with automated complexity analysis, cost estimates, and competitive comparisons.
+- **Discussions** — Collaborative threads organized by product, client, engineering, or process.
+- **Client Context** — Centralized client profiles with linked documents, proposals, and communication history.
+- **Prototype Sandbox** — Spin up isolated prototypes that auto-deploy to test URLs.
+
+## Architecture
+
+- **Zero-token-first** — AI is only used when code analysis can't answer the question. Every answer is cached for next time.
+- **Compounding knowledge** — Every interaction is tracked, indexed, and rated. The 50th time someone asks about a feature, the answer is instant.
+- **Role-based views** — CTO, Dev, Sales, Ops each see what's useful for their role. Same data, different perspectives.
+- **Learning loop** — Popular unanswered questions surface as documentation gaps. AI efficiency is tracked daily.
+
+## Access
+
+Wolfpack Apex is a hosted web application. Team members access it via browser — no local setup required.
+
+**Production:** Deployed on Vercel (URL provided by admin)
+
+**Demo credentials (development only):**
+- CTO: `cto@wolfpack.dev` / `apex`
+- Dev: `dev@wolfpack.dev` / `apex`
+- Sales: `sales@wolfpack.dev` / `apex`
+- Ops: `ops@wolfpack.dev` / `apex`
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 15 (App Router) |
+| Hosting | Vercel |
+| Database | PostgreSQL (Neon) |
+| Vector Store | Qdrant (knowledge embeddings) |
+| Auth | JWT + bcrypt (role-based) |
+| Styling | Tailwind CSS + Wolfpack Agency branding |
+| Fonts | Lexend Peta + Ubuntu Mono |
+| Testing | Jest + ts-jest |
+
+## For Developers
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# Run tests
+npx jest --no-coverage
+
+# Apply database migrations
+npx tsx src/db/migrate.ts
+
+# Deploy to Vercel
+npx vercel deploy --prod --yes
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Environment Variables
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Set these in the Vercel dashboard (Settings → Environment Variables):
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+DATABASE_URL=           # Neon PostgreSQL connection string
+APEX_JWT_SECRET=        # Generate with: openssl rand -base64 32
+QDRANT_URL=             # Qdrant Cloud endpoint (optional)
+QDRANT_API_KEY=         # Qdrant API key (optional)
+```
