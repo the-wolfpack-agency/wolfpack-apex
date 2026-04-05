@@ -8,6 +8,8 @@
 
 import { query, safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
+import { tripleWriteKnowledge } from "@/lib/triple-write";
+import { recordKnowledgeInteraction } from "@/lib/neo4j";
 
 export interface KnowledgeEntry {
   id: string;
@@ -124,6 +126,9 @@ export async function askQuestion(
         tokens_used: 0,
       });
 
+      // Fire-and-forget: record cache hit in Neo4j
+      recordKnowledgeInteraction(userId, row.id as string, "ASKED", question).catch(() => {});
+
       return rowToKnowledge(row);
     }
 
@@ -187,6 +192,12 @@ export async function saveAnswer(
       source,
       tokens_used: tokensUsed ?? 0,
     });
+
+    // Fire-and-forget: triple-write to Qdrant + Neo4j
+    tripleWriteKnowledge(
+      entry.id, question, answer, source, userId, entry.tags, repo,
+    ).catch(() => {});
+
     return entry;
   } catch (err) {
     console.error("[knowledge] saveAnswer error:", (err as Error).message);

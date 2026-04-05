@@ -10,6 +10,7 @@
  */
 
 import { query } from "@/lib/db";
+import { tripleWriteEvent } from "@/lib/triple-write";
 
 export type ApexEventType =
   // Knowledge
@@ -50,7 +51,8 @@ export type ApexEventType =
   | "system.page_viewed"
   | "system.ai_call_made"
   | "system.ai_call_skipped"
-  | "system.search_performed";
+  | "system.search_performed"
+  | "system.analytics_queried";
 
 export interface ApexEvent {
   event_type: ApexEventType;
@@ -79,6 +81,14 @@ export function trackEvent(
   ).catch((err) => {
     console.warn("[analytics] Failed to track:", (err as Error).message);
   });
+
+  // Fire-and-forget: secondary writes to Qdrant + Neo4j
+  tripleWriteEvent({
+    event_type: event,
+    user_id: userId,
+    user_role: userRole,
+    metadata,
+  }).catch(() => {});
 }
 
 /**
