@@ -110,9 +110,9 @@ export default async function Home() {
       {/* Header */}
       <header className="border-b px-6 py-4 flex items-center justify-between" style={{ borderColor: "var(--wp-dark-border)" }}>
         <div className="flex items-center gap-3">
-          <span className="text-3xl">{"\uD83D\uDC3A"}</span>
+          <img src="/wolfpack-logo.png" alt="Wolfpack" className="h-10 w-auto" />
           <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)", fontFamily: "'Lexend Peta', sans-serif" }}>
-            Wolfpack Apex
+            Apex
           </h1>
         </div>
         <span className="text-sm" style={{ color: "var(--wp-text-dim)" }}>
