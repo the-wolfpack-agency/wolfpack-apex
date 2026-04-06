@@ -294,15 +294,15 @@ async function fetchClientAttention(): Promise<ClientAttention[]> {
 // ---------------------------------------------------------------------------
 
 function generateActionItems(
-  financial: Awaited<ReturnType<typeof fetchFinancialData>>,
+  financial: Awaited<ReturnType<typeof fetchFinancialData>> | null,
   calendar: CalendarEvent[],
   emails: ImportantEmail[],
   clients: ClientAttention[],
 ): ActionItem[] {
   const items: ActionItem[] = [];
 
-  // High priority: overdue invoices
-  for (const inv of financial._overdueInvoices.slice(0, 3)) {
+  // High priority: overdue invoices (CEO only, when financial data available)
+  for (const inv of (financial?._overdueInvoices ?? []).slice(0, 3)) {
     const daysPast = Math.floor(
       (Date.now() - new Date(inv.dueDate).getTime()) / (1000 * 60 * 60 * 24),
     );
@@ -314,7 +314,7 @@ function generateActionItems(
   }
 
   // High priority: aged receivables over 60 days
-  if (financial._agedReceivables) {
+  if (financial?._agedReceivables) {
     const over60 = financial._agedReceivables.days61to90 + (financial._agedReceivables.over90 || 0);
     if (over60 > 0) {
       items.push({
@@ -635,16 +635,7 @@ export async function generateBriefing(
   const team = teamActivity || { activeMembers: 0, recentHighlights: [] };
 
   const actionItems = generateActionItems(
-    financialData || {
-      cashPosition: 0,
-      revenueThisMonth: 0,
-      netProfit: 0,
-      unpaidInvoiceCount: 0,
-      overdueCount: 0,
-      recentPayments: [],
-      _overdueInvoices: [],
-      _agedReceivables: null,
-    },
+    financialData,
     calendar,
     emails,
     clients.needingAttention,
