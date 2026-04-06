@@ -52,7 +52,9 @@ export type ApexEventType =
   | "system.ai_call_made"
   | "system.ai_call_skipped"
   | "system.search_performed"
-  | "system.analytics_queried";
+  | "system.analytics_queried"
+  // Assistant
+  | "assistant.file_attached";
 
 export interface ApexEvent {
   event_type: ApexEventType;
