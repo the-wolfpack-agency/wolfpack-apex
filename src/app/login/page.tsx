@@ -72,7 +72,7 @@ export default function LoginPage() {
             className="text-3xl font-bold"
             style={{ color: "var(--wp-gold)" }}
           >
-            Apex
+            Instinct
           </h1>
           <p className="text-sm mt-1" style={{ color: "var(--wp-text-dim)" }}>
             Team Intelligence Platform
