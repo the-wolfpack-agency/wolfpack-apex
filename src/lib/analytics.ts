@@ -57,7 +57,13 @@ export type ApexEventType =
   | "assistant.file_attached"
   | "assistant.doc_quality_checked"
   | "assistant.doc_rejected"
-  | "assistant.doc_ingested";
+  | "assistant.doc_ingested"
+  // QuickBooks
+  | "quickbooks.api_called"
+  | "quickbooks.connected"
+  | "quickbooks.disconnected"
+  | "quickbooks.token_refreshed"
+  | "quickbooks.sync_completed";
 
 export interface ApexEvent {
   event_type: ApexEventType;
