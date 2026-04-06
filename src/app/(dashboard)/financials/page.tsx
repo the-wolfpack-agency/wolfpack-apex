@@ -72,8 +72,7 @@ interface CompanyInfo {
 }
 
 interface FinancialData {
-  connected: boolean;
-  mode: "live" | "shadow";
+  connection: { connected: boolean; mode: "live" | "shadow"; companyName: string | null };
   companyInfo: CompanyInfo | null;
   profitAndLoss: ProfitAndLoss | null;
   balanceSheet: BalanceSheet | null;
@@ -221,7 +220,7 @@ export default function FinancialsPage() {
     );
   }
 
-  if (!data.connected && data.mode !== "shadow") {
+  if (!data.connection?.connected && data.connection?.mode !== "shadow") {
     return (
       <div className="max-w-7xl mx-auto">
         <h1 className="text-2xl font-bold mb-4" style={{ color: "var(--wp-gold)" }}>Financials</h1>
@@ -229,13 +228,21 @@ export default function FinancialsPage() {
           <p className="text-sm mb-4" style={{ color: "var(--wp-text-dim)" }}>
             Connect your QuickBooks Online account to see P&L, balance sheet, cash flow, invoices, and more.
           </p>
-          <a
-            href="/api/quickbooks?action=auth-url"
+          <button
+            onClick={async () => {
+              const res = await fetch("/api/quickbooks?action=auth-url", {
+                headers: { Authorization: `Bearer ${getToken()}` },
+              });
+              const data = await res.json();
+              if (data.authUrl) {
+                window.location.href = data.authUrl;
+              }
+            }}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
             style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
           >
             Connect QuickBooks
-          </a>
+          </button>
         </SectionCard>
       </div>
     );
@@ -256,7 +263,7 @@ export default function FinancialsPage() {
           {data.companyInfo && (
             <p className="text-sm mt-1" style={{ color: "var(--wp-text-dim)" }}>
               {data.companyInfo.companyName}
-              {data.mode === "shadow" && (
+              {data.connection?.mode === "shadow" && (
                 <span className="ml-2 text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--wp-dark-surface2)", color: "var(--wp-text-muted)" }}>
                   Demo Data
                 </span>

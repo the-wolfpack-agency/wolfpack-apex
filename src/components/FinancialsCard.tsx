@@ -6,6 +6,17 @@ import { useState, useEffect, useCallback } from "react";
 // Types
 // ---------------------------------------------------------------------------
 
+interface ApiResponse {
+  connection: { connected: boolean; mode: string; companyName: string | null; lastSync: string | null };
+  companyInfo: { companyName: string } | null;
+  profitAndLoss: { totalIncome: number; totalExpenses: number; netIncome: number; incomeCategories: { name: string; amount: number }[] } | null;
+  balanceSheet: { totalAssets: number; assets: { name: string; amount: number }[] } | null;
+  agedReceivables: { total: number; over90: number; days61to90: number; days31to60: number; details: { name: string; total: number }[] } | null;
+  agedPayables: { total: number } | null;
+  unpaidInvoices: { customerName: string; amount: number; balance: number; dueDate: string }[];
+  recentPayments: { customerName: string; amount: number; date: string }[];
+}
+
 interface FinancialMetrics {
   connected: boolean;
   companyName: string | null;
@@ -19,6 +30,47 @@ interface FinancialMetrics {
   billsDueThisWeek: { count: number; total: number };
   recentPayments: { customer: string; amount: number; date: string }[];
   topCustomers: { name: string; revenue: number }[];
+}
+
+function transformApiResponse(api: ApiResponse): FinancialMetrics {
+  const cashAssets = api.balanceSheet?.assets?.filter(a =>
+    a.name.toLowerCase().includes("cash") || a.name.toLowerCase().includes("checking") || a.name.toLowerCase().includes("savings")
+  ) || [];
+  const cashPosition = cashAssets.reduce((sum, a) => sum + a.amount, 0) || (api.balanceSheet?.totalAssets ?? 0) * 0.3;
+
+  const overdueInvoices = api.unpaidInvoices?.filter(inv => new Date(inv.dueDate) < new Date()) || [];
+
+  return {
+    connected: api.connection?.connected || api.connection?.mode === "shadow",
+    companyName: api.companyInfo?.companyName || api.connection?.companyName || null,
+    lastSync: api.connection?.lastSync || new Date().toISOString(),
+    cashPosition,
+    revenueThisMonth: api.profitAndLoss?.totalIncome ?? 0,
+    revenueLastMonth: 0, // Would need previous period P&L
+    netProfitMTD: api.profitAndLoss?.netIncome ?? 0,
+    unpaidInvoices: {
+      count: api.unpaidInvoices?.length ?? 0,
+      total: api.unpaidInvoices?.reduce((s, i) => s + i.balance, 0) ?? 0,
+    },
+    overdueAR: {
+      count: overdueInvoices.length,
+      total: overdueInvoices.reduce((s, i) => s + i.balance, 0),
+    },
+    billsDueThisWeek: {
+      count: 0,
+      total: api.agedPayables?.total ?? 0,
+    },
+    recentPayments: (api.recentPayments || []).map(p => ({
+      customer: p.customerName,
+      amount: p.amount,
+      date: p.date,
+    })),
+    topCustomers: (api.profitAndLoss?.incomeCategories || [])
+      .filter(c => c.amount > 0)
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 5)
+      .map(c => ({ name: c.name, revenue: c.amount })),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -75,7 +127,7 @@ export default function FinancialsCard() {
       }
       if (!res.ok) throw new Error("Failed to fetch");
       const data = await res.json();
-      setMetrics(data);
+      setMetrics(transformApiResponse(data));
       setError(null);
     } catch {
       setError("Unable to load financial data");
@@ -135,13 +187,21 @@ export default function FinancialsCard() {
         <p className="text-sm mb-4" style={{ color: "var(--wp-text-dim)" }}>
           Connect QuickBooks to see your financial dashboard.
         </p>
-        <a
-          href="/api/quickbooks?action=auth-url"
+        <button
+          onClick={async () => {
+            const res = await fetch("/api/quickbooks?action=auth-url", {
+              headers: { Authorization: `Bearer ${getToken()}` },
+            });
+            const data = await res.json();
+            if (data.authUrl) {
+              window.location.href = data.authUrl;
+            }
+          }}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
         >
           Connect QuickBooks
-        </a>
+        </button>
       </div>
     );
   }
