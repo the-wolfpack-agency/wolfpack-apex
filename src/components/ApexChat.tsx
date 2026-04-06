@@ -49,7 +49,7 @@ export interface ApexChatProps {
 
 const SOURCE_BADGE: Record<string, { label: string; color: string }> = {
   knowledge_cache: { label: "From knowledge base", color: "var(--wp-success, #22c55e)" },
-  codebase: { label: "From codebase", color: "var(--wp-info, #3b82f6)" },
+
   analytics: { label: "From analytics", color: "#a855f7" },
   ai: { label: "AI generated", color: "var(--wp-gold, #eab308)" },
   fallback: { label: "No match found", color: "var(--wp-text-muted, #6b7280)" },
@@ -604,7 +604,7 @@ export default function ApexChat({
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask about the codebase, features, analytics..."
+                placeholder="Ask me anything..."
                 rows={1}
                 className="flex-1 resize-none rounded-xl px-4 py-3 text-sm outline-none"
                 style={{

@@ -2,7 +2,7 @@
  * Assistant Tests -- Persistent memory, priority chain, analytics.
  *
  * Tests cover:
- *   - Priority chain: knowledge -> codebase -> analytics -> AI -> fallback
+ *   - Priority chain: knowledge -> analytics -> AI -> fallback
  *   - Persistent conversations (DB-backed, not in-memory)
  *   - User memory storage and retrieval
  *   - Topic auto-detection
@@ -19,7 +19,7 @@
 
 const mockSearchKnowledge = jest.fn();
 const mockSaveAnswer = jest.fn();
-const mockSearchCodebase = jest.fn();
+
 const mockTrackEvent = jest.fn();
 const mockSafeQuery = jest.fn();
 
@@ -28,9 +28,6 @@ jest.mock("@/lib/knowledge", () => ({
   saveAnswer: (...args: any[]) => mockSaveAnswer(...args),
 }));
 
-jest.mock("@/lib/codebase-connector", () => ({
-  searchCodebase: (...args: any[]) => mockSearchCodebase(...args),
-}));
 
 jest.mock("@/lib/analytics", () => ({
   trackEvent: (...args: any[]) => mockTrackEvent(...args),
@@ -96,7 +93,7 @@ function setupQueryMock() {
 beforeEach(() => {
   jest.clearAllMocks();
   mockSearchKnowledge.mockResolvedValue([]);
-  mockSearchCodebase.mockReturnValue([]);
+
   mockSaveAnswer.mockResolvedValue(null);
   setupQueryMock();
 
@@ -152,41 +149,6 @@ describe("knowledge cache hit", () => {
       "u1",
       "dev",
       expect.objectContaining({ reason: "knowledge_cache_hit" }),
-    );
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Codebase search hit
-// ---------------------------------------------------------------------------
-
-describe("codebase search hit", () => {
-  test("returns source=codebase with tokensUsed=0 for code questions", async () => {
-    process.env.WOLFPACK_AUTO_REPO = "/tmp/test-repo";
-    mockSearchCodebase.mockReturnValue([
-      { file: "src/auth.ts", line: 10, content: "export function verifyToken()" },
-    ]);
-
-    const result = await chat("Where is the auth function?", "u1", "dev");
-
-    expect(result.source).toBe("codebase");
-    expect(result.tokensUsed).toBe(0);
-    expect(result.response).toContain("src/auth.ts");
-  });
-
-  test("tracks system.ai_call_skipped on codebase hit", async () => {
-    process.env.WOLFPACK_AUTO_REPO = "/tmp/test-repo";
-    mockSearchCodebase.mockReturnValue([
-      { file: "src/test.ts", line: 1, content: "const x = 1" },
-    ]);
-
-    await chat("Where is the test file?", "u1", "dev");
-
-    expect(mockTrackEvent).toHaveBeenCalledWith(
-      "system.ai_call_skipped",
-      "u1",
-      "dev",
-      expect.objectContaining({ reason: "codebase_hit" }),
     );
   });
 });
@@ -848,17 +810,6 @@ describe("zero-token tracking", () => {
     const result = await chat("Test", "u1", "dev");
     expect(result.tokensUsed).toBe(0);
     expect(result.source).toBe("knowledge_cache");
-  });
-
-  test("codebase hit uses 0 tokens", async () => {
-    process.env.WOLFPACK_AUTO_REPO = "/tmp/test-repo";
-    mockSearchCodebase.mockReturnValue([
-      { file: "src/x.ts", line: 1, content: "code" },
-    ]);
-
-    const result = await chat("Where is the file src/x.ts?", "u1", "dev");
-    expect(result.tokensUsed).toBe(0);
-    expect(result.source).toBe("codebase");
   });
 
   test("fallback uses 0 tokens", async () => {

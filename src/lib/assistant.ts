@@ -3,16 +3,15 @@
  *
  * Priority:
  *   1. Search knowledge base (zero tokens)
- *   2. Search codebase (zero tokens)
- *   3. Check analytics data (zero tokens)
- *   4. Call AI only as last resort
+ *   2. Check analytics data (zero tokens)
+ *   3. Call AI only as last resort
  *
  * Conversations, messages, and user memory are persisted to PostgreSQL.
  * AI responses are cached in apex_knowledge for future zero-token retrieval.
  */
 
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
-import { searchCodebase, type SearchResult } from "@/lib/codebase-connector";
+
 import { trackEvent } from "@/lib/analytics";
 import { safeQuery } from "@/lib/db";
 
@@ -22,7 +21,6 @@ import { safeQuery } from "@/lib/db";
 
 export type AssistantSource =
   | "knowledge_cache"
-  | "codebase"
   | "analytics"
   | "ai"
   | "fallback";
@@ -294,32 +292,7 @@ export async function chat(
     };
   }
 
-  // --- Priority 2: Codebase search ---
-  const codebaseResult = await tryCodebaseSearch(message, userId, userRole);
-  if (codebaseResult) {
-    trackEvent("knowledge.answer_found", userId, userRole, {
-      source: "codebase",
-      tokens_used: 0,
-      module: "assistant",
-    });
-    trackEvent("system.ai_call_skipped", userId, userRole, {
-      reason: "codebase_hit",
-      module: "assistant",
-    });
-
-    const msgId = await dbSaveMessage(convId, "assistant", codebaseResult, "codebase", 0);
-    await dbUpdateConversationStats(convId, 0);
-
-    return {
-      response: codebaseResult,
-      source: "codebase",
-      tokensUsed: 0,
-      conversationId: convId,
-      messageId: msgId,
-    };
-  }
-
-  // --- Priority 3: Analytics data ---
+  // --- Priority 2: Analytics data ---
   const analyticsResult = await tryAnalyticsQuery(message, userId, userRole);
   if (analyticsResult) {
     trackEvent("knowledge.answer_found", userId, userRole, {
@@ -382,7 +355,7 @@ export async function chat(
 
   // --- Fallback ---
   const fallbackMsg =
-    "I could not find an answer to that question. Try rephrasing or ask a more specific question about the codebase, features, or platform.";
+    "I could not find an answer to that question. Try rephrasing or ask a more specific question about features, analytics, or the platform.";
 
   const msgId = await dbSaveMessage(convId, "assistant", fallbackMsg, "fallback", 0);
   await dbUpdateConversationStats(convId, 0);
@@ -632,62 +605,7 @@ async function tryKnowledgeBase(message: string): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
-// Priority 2: Codebase search
-// ---------------------------------------------------------------------------
-
-const CODE_KEYWORDS = [
-  "function", "file", "route", "api", "component", "import", "export",
-  "code", "module", "class", "interface", "type", "migration", "test",
-  "endpoint", "handler", "middleware", "hook", "page", "layout",
-  "src/", ".ts", ".tsx", ".js", "how does", "where is", "what does",
-];
-
-async function tryCodebaseSearch(
-  message: string,
-  userId: string,
-  userRole: string,
-): Promise<string | null> {
-  const msgLower = message.toLowerCase();
-  const isCodeQuestion = CODE_KEYWORDS.some((kw) => msgLower.includes(kw));
-  if (!isCodeQuestion) return null;
-
-  try {
-    const searchTerm = extractSearchTerm(message);
-    if (!searchTerm) return null;
-
-    const repoPath = process.env.WOLFPACK_AUTO_REPO || "";
-    if (!repoPath) return null;
-
-    const results: SearchResult[] = searchCodebase(repoPath, searchTerm, userId, userRole);
-    if (results.length === 0) return null;
-
-    const top = results.slice(0, 5);
-    const lines = top.map(
-      (r) => `- **${r.file}** (line ${r.line}): \`${r.content.trim()}\``,
-    );
-
-    return `Found ${results.length} result(s) in the codebase for "${searchTerm}":\n\n${lines.join("\n")}`;
-  } catch {
-    return null;
-  }
-}
-
-function extractSearchTerm(message: string): string {
-  const cleaned = message
-    .replace(
-      /\b(where|what|how|does|is|the|a|an|in|for|to|do|can|you|find|show|me|tell|about)\b/gi,
-      "",
-    )
-    .replace(/[?!.]/g, "")
-    .trim();
-
-  const words = cleaned.split(/\s+/).filter((w) => w.length > 2);
-  if (words.length === 0) return "";
-  return words.slice(0, 3).join(" ");
-}
-
-// ---------------------------------------------------------------------------
-// Priority 3: Analytics query
+// Priority 2: Analytics query
 // ---------------------------------------------------------------------------
 
 const ANALYTICS_KEYWORDS = [

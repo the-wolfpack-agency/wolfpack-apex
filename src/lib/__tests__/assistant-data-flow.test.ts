@@ -378,16 +378,6 @@ jest.mock("@/lib/knowledge", () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Codebase connector mock
-// ---------------------------------------------------------------------------
-
-const mockSearchCodebase = jest.fn();
-
-jest.mock("@/lib/codebase-connector", () => ({
-  searchCodebase: (...args: any[]) => mockSearchCodebase(...args),
-}));
-
-// ---------------------------------------------------------------------------
 // Triple-write mock -- captures calls for verification
 // ---------------------------------------------------------------------------
 
@@ -430,7 +420,7 @@ beforeEach(() => {
   delete process.env.WOLFPACK_AUTO_REPO;
 
   mockSearchKnowledge.mockResolvedValue([]);
-  mockSearchCodebase.mockReturnValue([]);
+
   mockSaveAnswer.mockResolvedValue(null);
 });
 
@@ -1111,18 +1101,6 @@ describe("Analytics Pipeline Integrity", () => {
     expect(questionEvents[0].metadata.topics).toContain("pricing");
   });
 
-  test("codebase hit fires system.ai_call_skipped with reason=codebase_hit", async () => {
-    process.env.WOLFPACK_AUTO_REPO = "/tmp/test-repo";
-    mockSearchCodebase.mockReturnValue([
-      { file: "src/auth.ts", line: 10, content: "export function verify()" },
-    ]);
-
-    await chat("Where is the auth function?", "u1", "dev");
-
-    const skippedEvents = analyticsStore.filter((e) => e.event === "system.ai_call_skipped");
-    expect(skippedEvents.length).toBe(1);
-    expect(skippedEvents[0].metadata.reason).toBe("codebase_hit");
-  });
 });
 
 // ===========================================================================
