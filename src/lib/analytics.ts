@@ -63,7 +63,17 @@ export type ApexEventType =
   | "quickbooks.connected"
   | "quickbooks.disconnected"
   | "quickbooks.token_refreshed"
-  | "quickbooks.sync_completed";
+  | "quickbooks.sync_completed"
+  // Microsoft Graph
+  | "microsoft.api_called"
+  | "microsoft.connected"
+  | "microsoft.disconnected"
+  | "microsoft.token_refreshed"
+  | "microsoft.sync_completed"
+  // Briefing
+  | "briefing.generated"
+  | "briefing.viewed"
+  | "briefing.refreshed";
 
 export interface ApexEvent {
   event_type: ApexEventType;

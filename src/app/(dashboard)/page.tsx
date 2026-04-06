@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import FinancialsCard from "@/components/FinancialsCard";
+import MorningBriefing from "@/components/MorningBriefing";
 
 interface DashboardData {
   shadow_mode: boolean;
@@ -47,10 +48,29 @@ interface RecentEvent {
   timestamp: string;
 }
 
+function getUserRole(): string | null {
+  try {
+    const token = localStorage.getItem("apex_token");
+    if (!token) return null;
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.role || null;
+  } catch {
+    return null;
+  }
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardData | null>(null);
   const [events, setEvents] = useState<RecentEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showBriefing, setShowBriefing] = useState(false);
+
+  useEffect(() => {
+    const role = getUserRole();
+    if (role === "ceo" || role === "cto") {
+      setShowBriefing(true);
+    }
+  }, []);
 
   useEffect(() => {
     const token = localStorage.getItem("apex_token");
@@ -111,6 +131,9 @@ export default function DashboardPage() {
       <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>
         Dashboard
       </h1>
+
+      {/* Morning Briefing (CEO/CTO only) */}
+      {showBriefing && <MorningBriefing />}
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
