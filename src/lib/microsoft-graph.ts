@@ -379,10 +379,10 @@ export async function graphFetch<T = unknown>(
 export async function getConnectionStatus(): Promise<MsConnectionStatus> {
   if (isShadowMode()) {
     return {
-      connected: true,
-      userEmail: "ceo@wolfpack.dev",
-      displayName: "Nick Homyk",
-      lastSync: new Date().toISOString(),
+      connected: false,
+      userEmail: null,
+      displayName: null,
+      lastSync: null,
       mode: "shadow",
     };
   }

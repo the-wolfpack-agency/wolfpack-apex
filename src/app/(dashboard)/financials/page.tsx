@@ -220,7 +220,7 @@ export default function FinancialsPage() {
     );
   }
 
-  if (!data.connection?.connected && data.connection?.mode !== "shadow") {
+  if (!data.connection?.connected) {
     return (
       <div className="max-w-7xl mx-auto">
         <h1 className="text-2xl font-bold mb-4" style={{ color: "var(--wp-gold)" }}>Financials</h1>
@@ -263,11 +263,7 @@ export default function FinancialsPage() {
           {data.companyInfo && (
             <p className="text-sm mt-1" style={{ color: "var(--wp-text-dim)" }}>
               {data.companyInfo.companyName}
-              {data.connection?.mode === "shadow" && (
-                <span className="ml-2 text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--wp-dark-surface2)", color: "var(--wp-text-muted)" }}>
-                  Demo Data
-                </span>
-              )}
+              {/* Connected indicator shown when live */}
             </p>
           )}
         </div>

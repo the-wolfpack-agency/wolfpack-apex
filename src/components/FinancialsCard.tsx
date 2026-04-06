@@ -127,7 +127,12 @@ export default function FinancialsCard() {
       }
       if (!res.ok) throw new Error("Failed to fetch");
       const data = await res.json();
-      setMetrics(transformApiResponse(data));
+      // Don't show demo/shadow data as if it's real
+      if (data.connection?.mode === "shadow" && !data.connection?.connected) {
+        setMetrics({ ...transformApiResponse(data), connected: false });
+      } else {
+        setMetrics(transformApiResponse(data));
+      }
       setError(null);
     } catch {
       setError("Unable to load financial data");

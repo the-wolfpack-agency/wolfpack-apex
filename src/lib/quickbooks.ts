@@ -398,10 +398,10 @@ export async function qboFetch<T = unknown>(
 export async function getConnectionStatus(): Promise<ConnectionStatus> {
   if (isShadowMode()) {
     return {
-      connected: true,
-      companyName: "Wolfpack Agency LLC",
-      realmId: "demo-realm-123",
-      lastSync: new Date().toISOString(),
+      connected: false,
+      companyName: null,
+      realmId: null,
+      lastSync: null,
       mode: "shadow",
     };
   }
