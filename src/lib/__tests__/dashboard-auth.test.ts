@@ -113,20 +113,17 @@ describe("Auth Library", () => {
   });
 
   describe("hasRole", () => {
-    it("cto has all roles (highest)", () => {
-      expect(hasRole("cto", "cto")).toBe(true);
-      expect(hasRole("cto", "ceo")).toBe(true);
-      expect(hasRole("cto", "dev")).toBe(true);
-      expect(hasRole("cto", "ops")).toBe(true);
-      expect(hasRole("cto", "sales")).toBe(true);
-    });
-
-    it("ceo has ceo, dev, ops, sales but not cto", () => {
-      expect(hasRole("ceo", "cto")).toBe(false);
+    it("ceo and cto have equal top-level access", () => {
+      expect(hasRole("ceo", "cto")).toBe(true);
       expect(hasRole("ceo", "ceo")).toBe(true);
       expect(hasRole("ceo", "dev")).toBe(true);
       expect(hasRole("ceo", "ops")).toBe(true);
       expect(hasRole("ceo", "sales")).toBe(true);
+      expect(hasRole("cto", "ceo")).toBe(true);
+      expect(hasRole("cto", "cto")).toBe(true);
+      expect(hasRole("cto", "dev")).toBe(true);
+      expect(hasRole("cto", "ops")).toBe(true);
+      expect(hasRole("cto", "sales")).toBe(true);
     });
 
     it("dev has dev, ops, sales but not cto or ceo", () => {

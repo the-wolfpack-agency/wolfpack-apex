@@ -255,16 +255,10 @@ describe("CTO Workflow", () => {
     expect(payload.name).toBe("Alex CTO");
   });
 
-  test("CTO has the highest role level", () => {
+  test("CEO and CTO have equal top-level access", () => {
     expect(hasRole("cto", "cto")).toBe(true);
     expect(hasRole("cto", "ceo")).toBe(true);
-    expect(hasRole("cto", "dev")).toBe(true);
-    expect(hasRole("cto", "ops")).toBe(true);
-    expect(hasRole("cto", "sales")).toBe(true);
-  });
-
-  test("CEO has all roles except CTO", () => {
-    expect(hasRole("ceo", "cto")).toBe(false);
+    expect(hasRole("ceo", "cto")).toBe(true);
     expect(hasRole("ceo", "ceo")).toBe(true);
     expect(hasRole("ceo", "dev")).toBe(true);
     expect(hasRole("ceo", "ops")).toBe(true);
