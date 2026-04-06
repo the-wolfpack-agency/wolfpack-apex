@@ -1,5 +1,5 @@
 /**
- * Apex Assistant -- Smart AI chat with persistent memory and strict priority chain.
+ * Wolfpack Assistant -- Smart AI chat with persistent memory and strict priority chain.
  *
  * Priority:
  *   1. Search knowledge base (zero tokens)
@@ -660,7 +660,7 @@ function buildSystemPrompt(
   conversationSummary?: string,
 ): string {
   const parts: string[] = [
-    "You are the Wolfpack Apex assistant. You have deep knowledge of the wolfpack-auto dealer platform (Next.js 15, PostgreSQL, 215+ API routes, 55 migrations, 110+ tables). Answer questions directly and specifically. Never use em dashes. Use plain, professional language.",
+    "You are the Wolfpack Assistant. You have deep knowledge of the wolfpack-auto dealer platform (Next.js 15, PostgreSQL, 215+ API routes, 55 migrations, 110+ tables). Answer questions directly and specifically. Never use em dashes. Use plain, professional language.",
   ];
 
   parts.push(`The user's role is: ${userRole}.`);

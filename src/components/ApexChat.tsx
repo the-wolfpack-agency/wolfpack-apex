@@ -407,7 +407,7 @@ export default function ApexChat({
               className={`${position === "floating" ? "text-sm" : "text-lg"} font-bold`}
               style={{ color: "var(--wp-gold, #eab308)" }}
             >
-              Apex Assistant
+              Wolfpack Assistant
             </h1>
 
             <div className="flex-1" />
