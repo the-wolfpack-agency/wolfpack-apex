@@ -407,7 +407,8 @@ export default function MorningBriefing() {
         </Section>
       </div>
 
-      {/* Financial Pulse */}
+      {/* Financial Pulse (only when financial data exists) */}
+      {(briefing.financial.revenueThisMonth > 0 || briefing.financial.cashPosition > 0 || briefing.financial.unpaidInvoiceCount > 0) && (
       <Section title="Financial Pulse">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
           {[
@@ -472,6 +473,7 @@ export default function MorningBriefing() {
           </div>
         )}
       </Section>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Client Attention */}
