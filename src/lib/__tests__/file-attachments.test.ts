@@ -510,3 +510,163 @@ describe("Security Edge Cases", () => {
     expect(sanitized).toBe(content);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests -- API Route Quality Gate Integration
+// ---------------------------------------------------------------------------
+
+describe("API Route -- Quality Gate Integration", () => {
+  let POST: (req: any) => Promise<any>;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    mockChat.mockResolvedValue({
+      response: "test response",
+      source: "fallback",
+      tokensUsed: 0,
+      conversationId: "test-conv",
+      messageId: "test-msg",
+    });
+    const routeModule = await import("@/app/api/assistant/route");
+    POST = routeModule.POST;
+  });
+
+  function makeRequest(body: Record<string, unknown>, authHeader = "Bearer valid-token") {
+    return {
+      json: async () => body,
+      url: "https://wolfpack-instinct.vercel.app/api/assistant",
+      headers: {
+        get: (name: string) => (name === "authorization" ? authHeader : null),
+      },
+    };
+  }
+
+  test("rejects file with SSN and returns gate results", async () => {
+    const req = makeRequest({
+      message: "Check this doc",
+      fileContents: [
+        { name: "employees.csv", content: "Name,SSN\nJohn,123-45-6789\nJane,987-65-4321" },
+      ],
+    });
+
+    const res = await POST(req as any);
+    const data = await res.json();
+
+    expect(data.source).toBe("quality_gate");
+    expect(data.response).toBeNull();
+    expect(data.gateResults).toBeDefined();
+    expect(data.gateResults[0].verdict).toBe("reject");
+    expect(data.gateResults[0].flags.some((f: any) => f.message.includes("SSN"))).toBe(true);
+
+    // Should NOT have called chat
+    expect(mockChat).not.toHaveBeenCalled();
+  });
+
+  test("rejects file with connection string", async () => {
+    const req = makeRequest({
+      message: "Review config",
+      fileContents: [
+        { name: ".env", content: "DATABASE_URL=postgres://admin:password@db.host.com:5432/production" },
+      ],
+    });
+
+    const res = await POST(req as any);
+    const data = await res.json();
+    expect(data.source).toBe("quality_gate");
+    expect(data.gateResults[0].verdict).toBe("reject");
+    expect(mockChat).not.toHaveBeenCalled();
+  });
+
+  test("passes clean file and includes gate results", async () => {
+    const req = makeRequest({
+      message: "Analyze this report",
+      fileContents: [
+        { name: "report.md", content: "# Q3 Revenue Report\n\nRevenue increased 15% compared to Q2. Customer retention is at 94%." },
+      ],
+    });
+
+    const res = await POST(req as any);
+    const data = await res.json();
+
+    expect(data.response).toBe("test response");
+    expect(data.gateResults).toBeDefined();
+    expect(data.gateResults[0].verdict).toBe("pass");
+    expect(mockChat).toHaveBeenCalled();
+  });
+
+  test("warns on file with email but still processes", async () => {
+    const req = makeRequest({
+      message: "Check contacts",
+      fileContents: [
+        { name: "contacts.txt", content: "Reach out to support@company.com about the Q3 deliverables and timeline for the project." },
+      ],
+    });
+
+    const res = await POST(req as any);
+    const data = await res.json();
+
+    expect(data.response).toBe("test response");
+    expect(data.gateResults[0].verdict).toBe("warn");
+    expect(mockChat).toHaveBeenCalled();
+  });
+
+  test("tracks doc_quality_checked for every file", async () => {
+    const req = makeRequest({
+      message: "Review",
+      fileContents: [
+        { name: "a.md", content: "This is a clean document about our business strategy and roadmap for next quarter." },
+        { name: "b.md", content: "Another perfectly normal document about team processes and workflow optimization." },
+      ],
+    });
+
+    await POST(req as any);
+
+    const qualityCalls = mockTrackEvent.mock.calls.filter(
+      (c: any[]) => c[0] === "assistant.doc_quality_checked",
+    );
+    expect(qualityCalls).toHaveLength(2);
+  });
+
+  test("tracks doc_ingested for passing files", async () => {
+    const req = makeRequest({
+      message: "Add this",
+      fileContents: [
+        { name: "guide.md", content: "Step by step guide for onboarding new team members to the Wolfpack platform." },
+      ],
+    });
+
+    await POST(req as any);
+
+    const ingestCalls = mockTrackEvent.mock.calls.filter(
+      (c: any[]) => c[0] === "assistant.doc_ingested",
+    );
+    expect(ingestCalls).toHaveLength(1);
+    expect(ingestCalls[0][3].file_name).toBe("guide.md");
+  });
+
+  test("tracks doc_rejected for failing files", async () => {
+    const req = makeRequest({
+      message: "Check",
+      fileContents: [
+        { name: "secrets.txt", content: "AWS key: AKIAIOSFODNN7EXAMPLE used for production access." },
+      ],
+    });
+
+    await POST(req as any);
+
+    const rejectCalls = mockTrackEvent.mock.calls.filter(
+      (c: any[]) => c[0] === "assistant.doc_rejected",
+    );
+    expect(rejectCalls).toHaveLength(1);
+  });
+
+  test("processes message without fileContents normally", async () => {
+    const req = makeRequest({ message: "Hello there" });
+    const res = await POST(req as any);
+    const data = await res.json();
+
+    expect(data.response).toBe("test response");
+    expect(data.gateResults).toBeUndefined();
+    expect(mockChat).toHaveBeenCalled();
+  });
+});

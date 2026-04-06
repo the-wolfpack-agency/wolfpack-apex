@@ -8,6 +8,7 @@ import {
   rateMessage,
   archiveConversation,
 } from "@/lib/assistant";
+import { checkDocQuality, trackGateResult, type GateResult } from "@/lib/doc-quality-gate";
 
 /**
  * POST /api/assistant -- Send a message, rate, or archive.
@@ -60,18 +61,20 @@ export async function POST(req: NextRequest) {
     }
 
     // --- Chat message ---
-    const { message, conversationId, pageContext, attachments } = body as {
+    const { message, conversationId, pageContext, attachments, fileContents } = body as {
       message?: string;
       conversationId?: string;
       pageContext?: string;
       attachments?: { name: string; type: string; size: number }[];
+      fileContents?: { name: string; content: string }[];
     };
 
     if (!message || typeof message !== "string") {
       return NextResponse.json({ error: "message is required" }, { status: 400 });
     }
 
-    // Track file attachments in analytics for learning
+    // Run quality gate on file contents and track all attachments
+    const gateResults: { name: string; gate: GateResult }[] = [];
     if (attachments && attachments.length > 0) {
       for (const att of attachments) {
         trackEvent("assistant.file_attached", user.id, user.role, {
@@ -83,9 +86,51 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    if (fileContents && fileContents.length > 0) {
+      for (const fc of fileContents) {
+        const gate = checkDocQuality(fc.content);
+        trackGateResult(gate, user.id, user.role, fc.name);
+        gateResults.push({ name: fc.name, gate });
+
+        if (gate.verdict === "pass") {
+          trackEvent("assistant.doc_ingested", user.id, user.role, {
+            file_name: fc.name,
+            verdict: "pass",
+            module: "assistant",
+          });
+        }
+      }
+    }
+
+    // If any file was rejected, return gate results without processing
+    const rejected = gateResults.filter((r) => r.gate.verdict === "reject");
+    if (rejected.length > 0) {
+      return NextResponse.json({
+        response: null,
+        source: "quality_gate",
+        tokensUsed: 0,
+        conversationId: conversationId || null,
+        gateResults: gateResults.map((r) => ({
+          name: r.name,
+          verdict: r.gate.verdict,
+          flags: r.gate.flags,
+        })),
+      });
+    }
+
     const result = await chat(message, user.id, user.role, conversationId, pageContext);
 
-    return NextResponse.json(result);
+    // Include gate results (warnings) alongside the response
+    const response: Record<string, unknown> = { ...result };
+    if (gateResults.length > 0) {
+      response.gateResults = gateResults.map((r) => ({
+        name: r.name,
+        verdict: r.gate.verdict,
+        flags: r.gate.flags,
+      }));
+    }
+
+    return NextResponse.json(response);
   } catch (err) {
     return NextResponse.json(
       { error: "Failed to process message", detail: (err as Error).message },

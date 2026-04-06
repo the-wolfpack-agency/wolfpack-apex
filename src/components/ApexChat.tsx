@@ -319,13 +319,13 @@ export default function ApexChat({
     setLoading(true);
 
     // Build the message with file context prepended
+    const isBinaryType = (t: string) =>
+      t.startsWith("image/") || t === "application/pdf"
+      || t.includes("msword") || t.includes("officedocument")
+      || t.includes("ms-excel") || t.includes("ms-powerpoint")
+      || t.includes("opendocument") || t === "application/rtf";
     let fullMessage = trimmed;
     if (currentAttachments.length > 0) {
-      const isBinaryType = (t: string) =>
-        t.startsWith("image/") || t === "application/pdf"
-        || t.includes("msword") || t.includes("officedocument")
-        || t.includes("ms-excel") || t.includes("ms-powerpoint")
-        || t.includes("opendocument") || t === "application/rtf";
       const fileContext = currentAttachments
         .filter((f) => !isBinaryType(f.type))
         .map((f) => `--- File: ${f.name} ---\n${f.content}`)
@@ -348,6 +348,14 @@ export default function ApexChat({
           type: f.type,
           size: f.content.length,
         }));
+        // Send text file contents for quality gate checking
+        const textFiles = currentAttachments.filter((f) => !isBinaryType(f.type));
+        if (textFiles.length > 0) {
+          body.fileContents = textFiles.map((f) => ({
+            name: f.name,
+            content: f.content,
+          }));
+        }
       }
 
       const res = await fetch("/api/assistant", {
@@ -367,16 +375,63 @@ export default function ApexChat({
 
       const data = await res.json();
 
+      // Handle quality gate rejection
+      if (data.source === "quality_gate" && !data.response) {
+        const gateFlags = (data.gateResults || []).flatMap(
+          (r: { name: string; verdict: string; flags: { message: string; category: string; severity: string }[] }) =>
+            r.flags.filter((f: { severity: string }) => f.severity === "reject").map(
+              (f: { message: string; category: string }) => `${r.name}: ${f.message}`
+            ),
+        );
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content:
+              "I couldn't accept one or more of your files:\n\n" +
+              gateFlags.map((f: string) => `- ${f}`).join("\n") +
+              "\n\nPlease remove sensitive data (PII, passwords, API keys) and try again.",
+            source: "fallback",
+            tokensUsed: 0,
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+        return;
+      }
+
       if (!conversationId && data.conversationId) {
         setConversationId(data.conversationId);
         // Refresh conversations list
         loadConversations();
       }
 
+      // Build response message with gate warnings if any
+      let responseContent = data.response;
+      const gateWarnings = (data.gateResults || []).flatMap(
+        (r: { name: string; verdict: string; flags: { message: string; severity: string }[] }) =>
+          r.flags.filter((f: { severity: string }) => f.severity === "warn").map(
+            (f: { message: string }) => `${r.name}: ${f.message}`
+          ),
+      );
+      if (gateWarnings.length > 0) {
+        responseContent +=
+          "\n\n---\nNote: some content was flagged:\n" +
+          gateWarnings.map((w: string) => `- ${w}`).join("\n");
+      }
+
+      // Show ingestion confirmation for attached files that passed
+      const passedFiles = (data.gateResults || [])
+        .filter((r: { verdict: string }) => r.verdict === "pass" || r.verdict === "warn")
+        .map((r: { name: string }) => r.name);
+      if (passedFiles.length > 0) {
+        responseContent +=
+          "\n\n" + passedFiles.map((n: string) => `Added to knowledge base: ${n}`).join("\n");
+      }
+
       const assistantMsg: Message = {
         id: data.messageId,
         role: "assistant",
-        content: data.response,
+        content: responseContent,
         source: data.source,
         tokensUsed: data.tokensUsed,
         timestamp: new Date().toISOString(),

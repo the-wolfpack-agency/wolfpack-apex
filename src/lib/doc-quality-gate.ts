@@ -76,7 +76,7 @@ const PII_PATTERNS: { name: string; pattern: RegExp; severity: GateVerdict }[] =
 const SECURITY_PATTERNS: { name: string; pattern: RegExp; severity: GateVerdict }[] = [
   {
     name: "API key",
-    pattern: /\b(?:sk|pk|api[_-]?key|apikey|secret[_-]?key)[_-]?[a-zA-Z0-9]{20,}\b/gi,
+    pattern: /\b(?:sk|pk|api[_-]?key|apikey|secret[_-]?key)[_-]?[a-zA-Z0-9_-]{20,}\b/gi,
     severity: "reject",
   },
   {
