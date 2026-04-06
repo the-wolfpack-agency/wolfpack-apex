@@ -355,7 +355,13 @@ export async function chat(
 
   // --- Fallback ---
   const fallbackMsg =
-    "I could not find an answer to that question. Try rephrasing or ask a more specific question about features, analytics, or the platform.";
+    "I don't have information on that yet. You can help me learn by adding it to the Knowledge Base, or try asking about:\n\n" +
+    "- Our platforms (Apex, Auto, Learn)\n" +
+    "- Team members and roles\n" +
+    "- Tech stack and infrastructure\n" +
+    "- Costs and pricing\n" +
+    "- Features and capabilities\n\n" +
+    "The more the team adds to the knowledge base, the more I can answer without AI.";
 
   const msgId = await dbSaveMessage(convId, "assistant", fallbackMsg, "fallback", 0);
   await dbUpdateConversationStats(convId, 0);
