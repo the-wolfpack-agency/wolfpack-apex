@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import FinancialsCard from "@/components/FinancialsCard";
 
 interface DashboardData {
   shadow_mode: boolean;
@@ -167,6 +168,9 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* Financials (CEO/CTO only) */}
+      <FinancialsCard />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Quick Actions */}
