@@ -34,18 +34,39 @@ function formatTime(ts: string): string {
   }
 }
 
+// Events that should be visible to users (everything else is hidden)
 const EVENT_DESCRIPTIONS: Record<string, (meta: Record<string, unknown>) => string> = {
-  "knowledge.question_asked": (m) => `Asked: ${m.question || "a question"}`,
-  "knowledge.answer_found": () => "Found a knowledge answer",
-  "knowledge.doc_generated": (m) => `Generated ${m.doc_type || "a document"}`,
-  "feature.request_submitted": (m) => `Submitted feature request: ${m.title || ""}`,
-  "discussion.thread_created": (m) => `Created discussion: ${m.title || ""}`,
+  "knowledge.question_asked": (m) => `Asked: ${(m.question as string) || "a question"}`,
+  "knowledge.answer_found": () => "Got an answer from the knowledge base",
+  "knowledge.answer_rated": (m) => `Rated an answer ${m.rating === 5 ? "helpful" : "not helpful"}`,
+  "knowledge.doc_generated": (m) => `Generated ${(m.doc_type as string) || "a document"}`,
+  "knowledge.doc_downloaded": () => "Downloaded a document",
+  "feature.request_submitted": (m) => `Submitted feature request: ${(m.title as string) || ""}`,
+  "feature.request_analyzed": () => "Feature request analyzed",
+  "discussion.thread_created": (m) => `Started discussion: ${(m.title as string) || ""}`,
   "discussion.reply_posted": () => "Replied to a discussion",
+  "discussion.resolved": () => "Resolved a discussion",
   "system.login": () => "Logged in",
-  "system.page_viewed": (m) => `Viewed ${m.page || "a page"}`,
-  "system.search_performed": (m) => `Searched ${m.module || "the platform"}`,
-  "journal.entry_updated": () => "Updated journal entry",
+  "system.page_viewed": (m) => `Viewed ${(m.page as string) || "a page"}`,
+  "system.search_performed": (m) => `Searched ${(m.module as string) || "the platform"}`,
+  "journal.entry_created": () => "Journal auto-saved",
+  "journal.entry_updated": () => "Updated journal",
+  "client.doc_generated": () => "Generated a client document",
+  "client.email_drafted": () => "Drafted a client email",
+  "client.proposal_created": () => "Created a client proposal",
+  "assistant.file_attached": (m) => `Attached file: ${(m.file_name as string) || "a file"}`,
+  "assistant.doc_ingested": (m) => `Added to knowledge base: ${(m.file_name as string) || "a document"}`,
 };
+
+// Internal events hidden from the timeline (system noise)
+const HIDDEN_EVENTS = new Set([
+  "knowledge.answer_not_found",
+  "system.ai_call_made",
+  "system.ai_call_skipped",
+  "system.analytics_queried",
+  "assistant.doc_quality_checked",
+  "assistant.doc_rejected",
+]);
 
 export default function JournalPage() {
   const [journal, setJournal] = useState<JournalData | null>(null);
@@ -96,15 +117,29 @@ export default function JournalPage() {
         timestamp: string;
         metadata?: Record<string, unknown>;
       }>;
-      const timeline: TimelineEvent[] = autoEvents.map((ev) => {
-        const descFn = EVENT_DESCRIPTIONS[ev.event_type];
-        const meta = ev.metadata || {};
-        return {
-          time: formatTime(ev.timestamp),
-          description: descFn ? descFn(meta) : ev.event_type.replace(/[._]/g, " "),
-          type: ev.event_type,
-        };
-      });
+      // Filter hidden events, map to descriptions, and deduplicate
+      const mapped = autoEvents
+        .filter((ev) => !HIDDEN_EVENTS.has(ev.event_type))
+        .filter((ev) => EVENT_DESCRIPTIONS[ev.event_type]) // only show events we have descriptions for
+        .map((ev) => {
+          const descFn = EVENT_DESCRIPTIONS[ev.event_type];
+          const meta = ev.metadata || {};
+          return {
+            time: formatTime(ev.timestamp),
+            description: descFn(meta),
+            type: ev.event_type,
+          };
+        });
+
+      // Deduplicate consecutive identical events (e.g. multiple logins)
+      const timeline: TimelineEvent[] = [];
+      for (const ev of mapped) {
+        const prev = timeline[timeline.length - 1];
+        if (prev && prev.description === ev.description && prev.time === ev.time) {
+          continue; // skip duplicate
+        }
+        timeline.push(ev);
+      }
 
       // If no auto events, show demo timeline in shadow mode
       if (timeline.length === 0 && data.journal) {
@@ -112,7 +147,7 @@ export default function JournalPage() {
         timeline.push(
           {
             time: new Date(now.getTime() - 3600_000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-            description: "Logged in to Apex",
+            description: "Logged in",
             type: "system.login",
           },
           {
@@ -168,11 +203,25 @@ export default function JournalPage() {
 
   const TYPE_COLORS: Record<string, string> = {
     "knowledge.question_asked": "var(--wp-info)",
+    "knowledge.answer_found": "var(--wp-success)",
+    "knowledge.answer_rated": "var(--wp-gold)",
     "knowledge.doc_generated": "var(--wp-success)",
+    "knowledge.doc_downloaded": "var(--wp-success)",
     "feature.request_submitted": "var(--wp-warning)",
+    "feature.request_analyzed": "var(--wp-warning)",
     "discussion.thread_created": "var(--wp-gold)",
+    "discussion.reply_posted": "var(--wp-gold)",
+    "discussion.resolved": "var(--wp-success)",
+    "client.doc_generated": "var(--wp-success)",
+    "client.email_drafted": "var(--wp-info)",
+    "client.proposal_created": "var(--wp-info)",
+    "assistant.file_attached": "var(--wp-info)",
+    "assistant.doc_ingested": "var(--wp-success)",
+    "journal.entry_created": "var(--wp-text-muted)",
+    "journal.entry_updated": "var(--wp-text-muted)",
     "system.login": "var(--wp-text-dim)",
     "system.page_viewed": "var(--wp-text-muted)",
+    "system.search_performed": "var(--wp-info)",
   };
 
   return (
