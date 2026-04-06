@@ -86,7 +86,52 @@ export default function ApexChat({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+
+  // --- File attachment constants ---
+  const MAX_FILE_SIZE = 512_000; // 512KB per file
+  const MAX_FILES = 5;
+  const MAX_TEXT_LENGTH = 50_000; // chars of text content per file
+  const ALLOWED_EXTENSIONS = new Set([
+    ".txt", ".md", ".csv", ".json", ".xml", ".html", ".css",
+    ".js", ".ts", ".tsx", ".jsx", ".py", ".yml", ".yaml", ".log",
+    ".env.example", ".sql", ".sh", ".toml", ".ini", ".cfg",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
+  ]);
+  const ALLOWED_MIME_PREFIXES = [
+    "text/", "application/json", "application/xml",
+    "application/x-yaml", "application/yaml",
+    "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
+  ];
+
+  function isAllowedFile(file: File): string | null {
+    // Check extension
+    const ext = "." + file.name.split(".").pop()?.toLowerCase();
+    if (!ALLOWED_EXTENSIONS.has(ext)) {
+      return `"${file.name}" has an unsupported file type`;
+    }
+    // Check MIME type
+    if (file.type && !ALLOWED_MIME_PREFIXES.some((p) => file.type.startsWith(p))) {
+      return `"${file.name}" has an unexpected content type`;
+    }
+    // Check size
+    if (file.size > MAX_FILE_SIZE) {
+      return `"${file.name}" exceeds the 512KB limit`;
+    }
+    if (file.size === 0) {
+      return `"${file.name}" is empty`;
+    }
+    return null;
+  }
+
+  function sanitizeTextContent(text: string): string {
+    // Truncate to max length
+    let sanitized = text.length > MAX_TEXT_LENGTH ? text.slice(0, MAX_TEXT_LENGTH) + "\n\n[Truncated]" : text;
+    // Strip null bytes
+    sanitized = sanitized.replace(/\0/g, "");
+    return sanitized;
+  }
 
   // Read a File object into an AttachedFile
   function readFile(file: File): Promise<AttachedFile> {
@@ -94,12 +139,11 @@ export default function ApexChat({
       const reader = new FileReader();
       const isImage = file.type.startsWith("image/");
       reader.onload = () => {
+        const raw = reader.result as string;
         resolve({
           name: file.name,
-          type: file.type,
-          content: isImage
-            ? (reader.result as string)
-            : (reader.result as string),
+          type: file.type || "text/plain",
+          content: isImage ? raw : sanitizeTextContent(raw),
         });
       };
       reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
@@ -112,15 +156,38 @@ export default function ApexChat({
   }
 
   async function handleFiles(files: FileList | File[]) {
+    setFileError(null);
+    const incoming = Array.from(files);
+
+    // Check total file count
+    if (attachedFiles.length + incoming.length > MAX_FILES) {
+      setFileError(`Maximum ${MAX_FILES} files allowed`);
+      return;
+    }
+
     const newFiles: AttachedFile[] = [];
-    for (const file of Array.from(files)) {
-      // Limit to 1MB per file for context
-      if (file.size > 1_048_576) continue;
+    const errors: string[] = [];
+
+    for (const file of incoming) {
+      const err = isAllowedFile(file);
+      if (err) {
+        errors.push(err);
+        continue;
+      }
+      // Reject duplicates
+      if (attachedFiles.some((af) => af.name === file.name)) {
+        errors.push(`"${file.name}" is already attached`);
+        continue;
+      }
       try {
         newFiles.push(await readFile(file));
       } catch {
-        // Skip unreadable files
+        errors.push(`Could not read "${file.name}"`);
       }
+    }
+
+    if (errors.length > 0) {
+      setFileError(errors.join(". "));
     }
     if (newFiles.length > 0) {
       setAttachedFiles((prev) => [...prev, ...newFiles]);
@@ -222,6 +289,7 @@ export default function ApexChat({
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setAttachedFiles([]);
+    setFileError(null);
     setLoading(true);
 
     // Build the message with file context prepended
@@ -243,12 +311,26 @@ export default function ApexChat({
       };
       if (pageContext) body.pageContext = pageContext;
       if (contextData) body.contextData = contextData;
+      if (currentAttachments.length > 0) {
+        body.attachments = currentAttachments.map((f) => ({
+          name: f.name,
+          type: f.type,
+          size: f.content.length,
+        }));
+      }
 
       const res = await fetch("/api/assistant", {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify(body),
       });
+
+      if (res.status === 401) {
+        // Session expired — redirect to login
+        localStorage.removeItem("apex_token");
+        window.location.href = "/login";
+        return;
+      }
 
       if (!res.ok) throw new Error("Request failed");
 
@@ -745,6 +827,25 @@ export default function ApexChat({
             className="shrink-0 border-t px-4 py-3"
             style={{ borderColor: "var(--wp-dark-border, #333)" }}
           >
+            {/* File error message */}
+            {fileError && (
+              <div
+                className="flex items-center gap-2 mb-2 max-w-4xl mx-auto px-3 py-2 rounded-lg text-xs"
+                style={{
+                  background: "rgba(239, 68, 68, 0.1)",
+                  border: "1px solid rgba(239, 68, 68, 0.3)",
+                  color: "var(--wp-error, #ef4444)",
+                }}
+              >
+                <span className="flex-1">{fileError}</span>
+                <button onClick={() => setFileError(null)} className="shrink-0 hover:opacity-70">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            )}
+
             {/* Attached files chips */}
             {attachedFiles.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2 max-w-4xl mx-auto">

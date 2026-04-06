@@ -60,14 +60,27 @@ export async function POST(req: NextRequest) {
     }
 
     // --- Chat message ---
-    const { message, conversationId, pageContext } = body as {
+    const { message, conversationId, pageContext, attachments } = body as {
       message?: string;
       conversationId?: string;
       pageContext?: string;
+      attachments?: { name: string; type: string; size: number }[];
     };
 
     if (!message || typeof message !== "string") {
       return NextResponse.json({ error: "message is required" }, { status: 400 });
+    }
+
+    // Track file attachments in analytics for learning
+    if (attachments && attachments.length > 0) {
+      for (const att of attachments) {
+        trackEvent("assistant.file_attached", user.id, user.role, {
+          file_name: att.name,
+          file_type: att.type,
+          file_size: att.size,
+          module: "assistant",
+        });
+      }
     }
 
     const result = await chat(message, user.id, user.role, conversationId, pageContext);
