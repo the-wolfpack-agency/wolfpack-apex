@@ -31,19 +31,19 @@ const KNOWLEDGE: KnowledgeEntry[] = [
   // --- Wolfpack Apex ---
   {
     question: "What is Wolfpack Apex?",
-    answer: "Wolfpack Apex is our team intelligence platform. It provides AI-powered assistance, knowledge management, reporting, analytics, and internal collaboration for the entire Wolfpack Agency team. Key features include:\n- Wolfpack Assistant (AI Q&A that learns from every interaction)\n- Knowledge Base (searchable, grows over time)\n- Reports (branded client reports and proposals)\n- Discussions (threaded conversations with resolution tracking)\n- Feature Requests (submit, vote, track development)\n- Journal (team activity log)\n- Client Management (profiles and communication tracking)\n- Email Templates (professional client emails)\n- Analytics (usage insights and AI efficiency metrics)",
+    answer: "Wolfpack Apex is our team intelligence platform. It provides AI-powered assistance, knowledge management, reporting, analytics, and internal collaboration for the entire Wolfpack Agency team. Key features include:\n- Wolfpack Instinct (AI Q&A that learns from every interaction)\n- Knowledge Base (searchable, grows over time)\n- Reports (branded client reports and proposals)\n- Discussions (threaded conversations with resolution tracking)\n- Feature Requests (submit, vote, track development)\n- Journal (team activity log)\n- Client Management (profiles and communication tracking)\n- Email Templates (professional client emails)\n- Analytics (usage insights and AI efficiency metrics)",
     source: "docs",
     tags: ["apex", "platform", "features"],
   },
   {
-    question: "How does the Wolfpack Assistant work?",
-    answer: "The Wolfpack Assistant uses a priority chain to answer questions:\n\n1. Knowledge Base (zero tokens): Searches cached Q&A from previous interactions and team-contributed knowledge. If a high-rated answer exists, it returns instantly at zero cost.\n2. Analytics Data (zero tokens): Checks platform analytics and usage data for data-driven answers.\n3. AI Generation (uses tokens): Only calls Claude AI as a last resort for novel questions.\n\nEvery AI-generated answer is cached back into the knowledge base, so the same question never costs tokens twice. The system gets smarter over time as the team uses it.",
+    question: "How does the Wolfpack Instinct work?",
+    answer: "The Wolfpack Instinct uses a priority chain to answer questions:\n\n1. Knowledge Base (zero tokens): Searches cached Q&A from previous interactions and team-contributed knowledge. If a high-rated answer exists, it returns instantly at zero cost.\n2. Analytics Data (zero tokens): Checks platform analytics and usage data for data-driven answers.\n3. AI Generation (uses tokens): Only calls Claude AI as a last resort for novel questions.\n\nEvery AI-generated answer is cached back into the knowledge base, so the same question never costs tokens twice. The system gets smarter over time as the team uses it.",
     source: "docs",
     tags: ["assistant", "ai", "knowledge"],
   },
   {
     question: "What does zero tokens mean?",
-    answer: "Zero tokens means the answer was retrieved from the knowledge base or analytics data without calling an AI model. This is free and instant. The Wolfpack Assistant prioritizes zero-token answers first. Only novel questions that have never been asked before require AI generation (which uses tokens and costs money). Once an AI answer is generated, it's cached so future similar questions are also zero tokens.",
+    answer: "Zero tokens means the answer was retrieved from the knowledge base or analytics data without calling an AI model. This is free and instant. The Wolfpack Instinct prioritizes zero-token answers first. Only novel questions that have never been asked before require AI generation (which uses tokens and costs money). Once an AI answer is generated, it's cached so future similar questions are also zero tokens.",
     source: "docs",
     tags: ["tokens", "cost", "ai"],
   },
@@ -124,19 +124,19 @@ const KNOWLEDGE: KnowledgeEntry[] = [
   // --- Greetings ---
   {
     question: "hello",
-    answer: "Hey! I'm the Wolfpack Assistant. I can help with anything about our platforms, team processes, clients, or technical questions. What can I help you with?",
+    answer: "Hey! I'm the Wolfpack Instinct. I can help with anything about our platforms, team processes, clients, or technical questions. What can I help you with?",
     source: "human",
     tags: ["greeting"],
   },
   {
     question: "hi",
-    answer: "Hey! I'm the Wolfpack Assistant. Ask me about Wolfpack Apex, Auto, Learn, our tech stack, team, infrastructure, or anything else. What do you need?",
+    answer: "Hey! I'm the Wolfpack Instinct. Ask me about Wolfpack Apex, Auto, Learn, our tech stack, team, infrastructure, or anything else. What do you need?",
     source: "human",
     tags: ["greeting"],
   },
   {
     question: "hey",
-    answer: "Hey! I'm the Wolfpack Assistant, here to help with anything about Wolfpack Agency. I can answer questions about our platforms, team, processes, clients, or technical details. What's on your mind?",
+    answer: "Hey! I'm the Wolfpack Instinct, here to help with anything about Wolfpack Agency. I can answer questions about our platforms, team, processes, clients, or technical details. What's on your mind?",
     source: "human",
     tags: ["greeting"],
   },

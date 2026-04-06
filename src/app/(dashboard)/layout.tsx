@@ -99,7 +99,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         >
           <img src="/wolfpack-logo.png" alt="Wolfpack" className="h-8 w-auto" />
           <span className="text-xl font-bold" style={{ color: "var(--wp-gold)" }}>
-            Apex
+            Instinct
           </span>
         </div>
 
@@ -194,7 +194,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             </svg>
           </button>
           <img src="/wolfpack-logo.png" alt="Wolfpack" className="h-6 w-auto" />
-          <span className="text-lg font-bold" style={{ color: "var(--wp-gold)" }}>Apex</span>
+          <span className="text-lg font-bold" style={{ color: "var(--wp-gold)" }}>Instinct</span>
         </header>
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 lg:p-8">
