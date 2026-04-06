@@ -29,9 +29,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (!hasRole(user.role, "cto")) {
+  if (user.role !== "ceo") {
     return NextResponse.json(
-      { error: "Forbidden — CEO/CTO access required for financial data" },
+      { error: "Forbidden — CEO access required for financial data" },
       { status: 403 },
     );
   }
@@ -114,9 +114,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (!hasRole(user.role, "cto")) {
+  if (user.role !== "ceo") {
     return NextResponse.json(
-      { error: "Forbidden — CEO/CTO access required" },
+      { error: "Forbidden — CEO access required" },
       { status: 403 },
     );
   }

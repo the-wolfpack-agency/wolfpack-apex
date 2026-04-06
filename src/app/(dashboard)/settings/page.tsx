@@ -154,7 +154,10 @@ export default function SettingsPage() {
     fetchQuickbooksStatus();
   }, [fetchMicrosoftStatus, fetchQuickbooksStatus]);
 
+  const [connectError, setConnectError] = useState<string | null>(null);
+
   async function connectMicrosoft() {
+    setConnectError(null);
     try {
       const res = await fetch("/api/microsoft?action=auth-url", {
         headers: { Authorization: `Bearer ${getToken()}` },
@@ -162,9 +165,11 @@ export default function SettingsPage() {
       const data = await res.json();
       if (data.authUrl) {
         window.location.href = data.authUrl;
+      } else {
+        setConnectError("Microsoft 365 integration is not configured yet. Contact the CTO to set up the connection.");
       }
     } catch {
-      // Non-fatal
+      setConnectError("Unable to start connection. Please try again.");
     }
   }
 
@@ -234,7 +239,7 @@ export default function SettingsPage() {
     }
   }
 
-  const isExecutive = user?.role === "ceo" || user?.role === "cto";
+  const isCeo = user?.role === "ceo";
 
   if (!user) {
     return (
@@ -331,12 +336,15 @@ export default function SettingsPage() {
             >
               Connect Microsoft 365
             </button>
+            {connectError && (
+              <p className="text-xs mt-2" style={{ color: "var(--wp-warning)" }}>{connectError}</p>
+            )}
           </div>
         )}
       </SectionCard>
 
-      {/* QuickBooks Integration (CEO/CTO only) */}
-      {isExecutive && (
+      {/* QuickBooks Integration (CEO only) */}
+      {isCeo && (
         <SectionCard title="QuickBooks">
           {loadingQuickbooks ? (
             <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>Checking connection...</p>
