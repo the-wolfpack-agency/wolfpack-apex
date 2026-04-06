@@ -947,14 +947,15 @@ export default function ApexChat({
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask me anything..."
+                placeholder="Ask anything..."
                 rows={1}
-                className="flex-1 resize-none rounded-xl px-4 py-3 text-sm outline-none"
+                className="flex-1 min-w-0 resize-none rounded-xl px-3 py-3 text-sm outline-none"
                 style={{
                   background: "var(--wp-dark-surface2, #222)",
                   color: "var(--wp-text, #eee)",
                   border: "1px solid var(--wp-dark-border, #333)",
                   maxHeight: "120px",
+                  fontFamily: "system-ui, -apple-system, sans-serif",
                 }}
                 disabled={loading}
               />
