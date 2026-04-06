@@ -234,7 +234,7 @@ export default function ReportsPage() {
 
   return (
     <div className="max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>
             Reports
@@ -323,11 +323,11 @@ export default function ReportsPage() {
                 {history.map((h) => (
                   <div
                     key={h.id}
-                    className="flex items-center justify-between px-4 py-3 border-b last:border-b-0"
+                    className="flex items-center justify-between px-4 py-3 border-b last:border-b-0 gap-2"
                     style={{ borderColor: "var(--wp-dark-border)" }}
                   >
-                    <div>
-                      <p className="text-sm font-medium">{h.title}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{h.title}</p>
                       <p className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
                         {h.generated_from || "report"} | {new Date(h.created_at).toLocaleDateString()}
                       </p>

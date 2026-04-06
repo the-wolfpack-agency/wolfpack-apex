@@ -277,7 +277,7 @@ export default function ApexChat({
 
   const wrapperClass =
     position === "floating"
-      ? "fixed bottom-6 right-6 z-50 w-96 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+      ? "fixed bottom-4 right-4 left-4 sm:left-auto z-50 sm:w-96 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
       : "flex flex-col";
 
   const wrapperStyle: React.CSSProperties =
@@ -487,7 +487,7 @@ export default function ApexChat({
                         : "var(--wp-text, #eee)",
                   }}
                 >
-                  <div className="text-sm whitespace-pre-wrap leading-relaxed">
+                  <div className="text-sm whitespace-pre-wrap leading-relaxed break-words overflow-hidden">
                     {msg.content}
                   </div>
 

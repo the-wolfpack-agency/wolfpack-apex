@@ -139,7 +139,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
         {/* User */}
         <div
-          className="px-4 py-4 border-t"
+          className="px-4 py-4 border-t pb-[max(1rem,env(safe-area-inset-bottom))]"
           style={{ borderColor: "var(--wp-dark-border)" }}
         >
           <div className="flex items-center gap-3">
@@ -197,7 +197,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           <span className="text-lg font-bold" style={{ color: "var(--wp-gold)" }}>Apex</span>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 lg:p-8">
           {children}
         </main>
       </div>

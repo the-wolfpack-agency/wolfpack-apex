@@ -139,7 +139,7 @@ export default function DashboardPage() {
             AI Efficiency
           </h2>
           <div className="flex items-center gap-6 flex-wrap">
-            <div className="flex-1 min-w-[200px]">
+            <div className="flex-1 min-w-0">
               <div className="flex justify-between text-sm mb-1">
                 <span style={{ color: "var(--wp-text-dim)" }}>Zero-Token Rate</span>
                 <span style={{ color: "var(--wp-gold)" }}>{stats.ai_efficiency.zero_token_pct}%</span>
@@ -208,11 +208,11 @@ export default function DashboardPage() {
               events.slice(0, 8).map((event) => (
                 <div
                   key={event.id}
-                  className="flex items-center justify-between py-2 border-b last:border-b-0"
+                  className="flex items-center justify-between py-2 border-b last:border-b-0 gap-3"
                   style={{ borderColor: "var(--wp-dark-border)" }}
                 >
-                  <div>
-                    <p className="text-sm font-medium">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">
                       {EVENT_LABELS[event.event_type] || event.event_type.replace(/[._]/g, " ")}
                     </p>
                     <p className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
