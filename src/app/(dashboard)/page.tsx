@@ -66,8 +66,9 @@ export default function DashboardPage() {
   const [showBriefing, setShowBriefing] = useState(false);
 
   useEffect(() => {
-    const role = getUserRole();
-    if (role === "ceo" || role === "cto") {
+    // Briefing available to all users; respects localStorage preference
+    const disabled = localStorage.getItem("apex_briefing_enabled") === "false";
+    if (!disabled) {
       setShowBriefing(true);
     }
   }, []);

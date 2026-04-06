@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromRequest, hasRole } from "@/lib/auth";
+import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import { generateBriefing } from "@/lib/morning-briefing";
 
 /**
  * GET /api/briefing
  *
- * Returns the morning briefing for the authenticated CEO/CTO.
+ * Returns a personalized morning briefing for any authenticated user.
+ * Content adapts based on the user's role and connected integrations.
  *
  * Query params:
  *   ?refresh=true — Force regenerate (bypass 30-minute cache)
@@ -15,13 +16,6 @@ export async function GET(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!hasRole(user.role, "cto")) {
-    return NextResponse.json(
-      { error: "Forbidden — CEO/CTO access required" },
-      { status: 403 },
-    );
   }
 
   const url = new URL(req.url);

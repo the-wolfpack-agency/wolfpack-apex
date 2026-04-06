@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromRequest, hasRole } from "@/lib/auth";
+import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import {
   getAuthUrl,
@@ -15,6 +15,9 @@ import {
 /**
  * GET /api/microsoft
  *
+ * Available to all authenticated users. Each user connects their own
+ * Microsoft 365 account via Settings > Integrations.
+ *
  * Query params:
  *   ?action=auth-url            — Return the OAuth2 authorization URL
  *   ?action=status              — Return connection status
@@ -25,13 +28,6 @@ export async function GET(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!hasRole(user.role, "cto")) {
-    return NextResponse.json(
-      { error: "Forbidden — CEO/CTO access required for Microsoft data" },
-      { status: 403 },
-    );
   }
 
   const url = new URL(req.url);
@@ -107,13 +103,6 @@ export async function POST(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!hasRole(user.role, "cto")) {
-    return NextResponse.json(
-      { error: "Forbidden — CEO/CTO access required" },
-      { status: 403 },
-    );
   }
 
   try {
