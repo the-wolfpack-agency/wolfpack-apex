@@ -458,11 +458,11 @@ export default function ApexChat({
                   />
                 </svg>
                 <h2 className="text-lg font-medium mb-2" style={{ color: "var(--wp-text-dim, #aaa)" }}>
-                  Ask anything about Wolfpack
+                  Your AI-powered team assistant
                 </h2>
                 <p className="text-sm max-w-md" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
-                  Questions about the codebase, features, analytics, or platform.
-                  Answers from the knowledge base and codebase cost zero tokens.
+                  Ask about projects, clients, processes, or anything work-related.
+                  Get instant answers — no digging through files or emails.
                 </p>
               </div>
             )}
