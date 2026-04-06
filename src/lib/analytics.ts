@@ -54,7 +54,10 @@ export type ApexEventType =
   | "system.search_performed"
   | "system.analytics_queried"
   // Assistant
-  | "assistant.file_attached";
+  | "assistant.file_attached"
+  | "assistant.doc_quality_checked"
+  | "assistant.doc_rejected"
+  | "assistant.doc_ingested";
 
 export interface ApexEvent {
   event_type: ApexEventType;
