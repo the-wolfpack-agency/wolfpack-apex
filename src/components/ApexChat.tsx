@@ -1,10 +1,16 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, KeyboardEvent } from "react";
+import { useState, useEffect, useRef, useCallback, KeyboardEvent, DragEvent, ChangeEvent } from "react";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+interface AttachedFile {
+  name: string;
+  type: string;
+  content: string; // text content or base64 for images
+}
 
 interface Message {
   id?: string;
@@ -14,6 +20,7 @@ interface Message {
   tokensUsed: number;
   timestamp: string;
   rating?: number;
+  attachments?: AttachedFile[];
 }
 
 interface Conversation {
@@ -77,6 +84,80 @@ export default function ApexChat({
   const [floatingOpen, setFloatingOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [dragging, setDragging] = useState(false);
+
+  // Read a File object into an AttachedFile
+  function readFile(file: File): Promise<AttachedFile> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      const isImage = file.type.startsWith("image/");
+      reader.onload = () => {
+        resolve({
+          name: file.name,
+          type: file.type,
+          content: isImage
+            ? (reader.result as string)
+            : (reader.result as string),
+        });
+      };
+      reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+      if (isImage) {
+        reader.readAsDataURL(file);
+      } else {
+        reader.readAsText(file);
+      }
+    });
+  }
+
+  async function handleFiles(files: FileList | File[]) {
+    const newFiles: AttachedFile[] = [];
+    for (const file of Array.from(files)) {
+      // Limit to 1MB per file for context
+      if (file.size > 1_048_576) continue;
+      try {
+        newFiles.push(await readFile(file));
+      } catch {
+        // Skip unreadable files
+      }
+    }
+    if (newFiles.length > 0) {
+      setAttachedFiles((prev) => [...prev, ...newFiles]);
+    }
+  }
+
+  function handleDragOver(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragging(true);
+  }
+
+  function handleDragLeave(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragging(false);
+  }
+
+  function handleDrop(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragging(false);
+    if (e.dataTransfer.files.length > 0) {
+      handleFiles(e.dataTransfer.files);
+    }
+  }
+
+  function handleFileInput(e: ChangeEvent<HTMLInputElement>) {
+    if (e.target.files && e.target.files.length > 0) {
+      handleFiles(e.target.files);
+      e.target.value = "";
+    }
+  }
+
+  function removeFile(index: number) {
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
+  }
 
   function getToken(): string {
     if (typeof window === "undefined") return "";
@@ -128,20 +209,36 @@ export default function ApexChat({
     const trimmed = input.trim();
     if (!trimmed || loading) return;
 
+    const currentAttachments = [...attachedFiles];
+
     const userMsg: Message = {
       role: "user",
       content: trimmed,
       tokensUsed: 0,
       timestamp: new Date().toISOString(),
+      attachments: currentAttachments.length > 0 ? currentAttachments : undefined,
     };
 
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
+    setAttachedFiles([]);
     setLoading(true);
+
+    // Build the message with file context prepended
+    let fullMessage = trimmed;
+    if (currentAttachments.length > 0) {
+      const fileContext = currentAttachments
+        .filter((f) => !f.type.startsWith("image/"))
+        .map((f) => `--- File: ${f.name} ---\n${f.content}`)
+        .join("\n\n");
+      if (fileContext) {
+        fullMessage = `${fileContext}\n\n---\n\n${trimmed}`;
+      }
+    }
 
     try {
       const body: Record<string, unknown> = {
-        message: trimmed,
+        message: fullMessage,
         conversationId,
       };
       if (pageContext) body.pageContext = pageContext;
@@ -223,6 +320,7 @@ export default function ApexChat({
     setMessages([]);
     setConversationId(null);
     setInput("");
+    setAttachedFiles([]);
     inputRef.current?.focus();
   }
 
@@ -369,7 +467,29 @@ export default function ApexChat({
         )}
 
         {/* Main chat area */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div
+          className="flex-1 flex flex-col min-w-0 relative"
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {/* Drag overlay */}
+          {dragging && (
+            <div
+              className="absolute inset-0 z-40 flex items-center justify-center rounded-xl"
+              style={{
+                background: "rgba(241, 194, 51, 0.08)",
+                border: "2px dashed var(--wp-gold, #eab308)",
+              }}
+            >
+              <div className="text-center">
+                <svg className="w-12 h-12 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--wp-gold, #eab308)" }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m6.75 12l-3-3m0 0l-3 3m3-3v6m-1.5-15H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                </svg>
+                <p className="text-sm font-medium" style={{ color: "var(--wp-gold, #eab308)" }}>Drop files here for context</p>
+              </div>
+            </div>
+          )}
           {/* Header */}
           <div
             className="flex items-center gap-3 px-4 py-3 border-b shrink-0"
@@ -487,6 +607,33 @@ export default function ApexChat({
                         : "var(--wp-text, #eee)",
                   }}
                 >
+                  {/* Attachment badges on user messages */}
+                  {msg.role === "user" && msg.attachments && msg.attachments.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {msg.attachments.map((att, aidx) => (
+                        <span
+                          key={aidx}
+                          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
+                          style={{
+                            background: "rgba(0,0,0,0.2)",
+                            color: "var(--wp-dark, #111)",
+                          }}
+                        >
+                          {att.type.startsWith("image/") ? (
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
+                            </svg>
+                          ) : (
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+                            </svg>
+                          )}
+                          {att.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
                   <div className="text-sm whitespace-pre-wrap leading-relaxed break-words overflow-hidden">
                     {msg.content}
                   </div>
@@ -598,7 +745,71 @@ export default function ApexChat({
             className="shrink-0 border-t px-4 py-3"
             style={{ borderColor: "var(--wp-dark-border, #333)" }}
           >
+            {/* Attached files chips */}
+            {attachedFiles.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2 max-w-4xl mx-auto">
+                {attachedFiles.map((file, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs"
+                    style={{
+                      background: "var(--wp-dark-surface2, #222)",
+                      border: "1px solid var(--wp-dark-border, #333)",
+                      color: "var(--wp-text-dim, #aaa)",
+                    }}
+                  >
+                    {file.type.startsWith("image/") ? (
+                      <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--wp-gold, #eab308)" }}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--wp-gold, #eab308)" }}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                      </svg>
+                    )}
+                    <span className="truncate max-w-[120px]">{file.name}</span>
+                    <button
+                      onClick={() => removeFile(idx)}
+                      className="ml-0.5 p-0.5 rounded hover:opacity-70"
+                      style={{ color: "var(--wp-text-muted, #6b7280)" }}
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="flex items-end gap-2 max-w-4xl mx-auto">
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".txt,.md,.csv,.json,.xml,.html,.css,.js,.ts,.tsx,.jsx,.py,.yml,.yaml,.log,.pdf,.png,.jpg,.jpeg,.gif,.webp,.svg"
+                onChange={handleFileInput}
+                className="hidden"
+              />
+
+              {/* Attach button */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="shrink-0 rounded-xl px-3 py-3 transition-opacity hover:opacity-80"
+                style={{
+                  background: "var(--wp-dark-surface2, #222)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  color: "var(--wp-text-dim, #aaa)",
+                }}
+                title="Attach files for context"
+                disabled={loading}
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+                </svg>
+              </button>
+
               <textarea
                 ref={inputRef}
                 value={input}
@@ -630,7 +841,7 @@ export default function ApexChat({
               </button>
             </div>
             <p className="text-center text-xs mt-2" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
-              Cmd+Enter to send
+              Cmd+Enter to send | Drop files for context
             </p>
           </div>
         </div>
