@@ -78,6 +78,7 @@ export interface MorningBriefing {
     recentHighlights: string[];
   };
   actionItems: ActionItem[];
+  notConnected?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -571,17 +572,32 @@ export async function generateBriefing(
     hasDb ? fetchClientAttention().catch(() => []) : Promise.resolve([]),
   ]);
 
-  // If all sources returned empty/null, use full shadow demo
+  // If no integrations are connected, return a minimal briefing prompting connection
   const isFullShadow = !financialData && !msGraphData && !teamActivity;
   if (isFullShadow) {
-    const demo = getDemoBriefing(userName);
-    setCache(userId, demo);
+    const emptyBriefing: MorningBriefing = {
+      generatedAt: new Date().toISOString(),
+      greeting: getGreeting(userName),
+      summary: "Connect your accounts in Settings to unlock your personalized daily briefing.",
+      calendar: { eventCount: 0, nextEvent: null, events: [] },
+      email: { unreadCount: 0, importantEmails: [] },
+      financial: { cashPosition: 0, revenueThisMonth: 0, netProfit: 0, unpaidInvoiceCount: 0, overdueCount: 0, recentPayments: [] },
+      clients: { needingAttention: [] },
+      team: { activeMembers: 0, recentHighlights: [] },
+      actionItems: [{
+        priority: "medium",
+        text: "Connect Microsoft 365 to get started",
+        context: "Go to Settings > Integrations to link your Outlook calendar and email",
+      }],
+      notConnected: true,
+    };
+    setCache(userId, emptyBriefing);
     trackEvent("briefing.generated", userId, userRole, {
       source_count: 0,
-      action_item_count: demo.actionItems.length,
-      mode: "shadow",
+      action_item_count: 1,
+      mode: "not_connected",
     });
-    return demo;
+    return emptyBriefing;
   }
 
   // Build from live data with fallbacks

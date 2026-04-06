@@ -62,6 +62,7 @@ interface BriefingData {
     recentHighlights: string[];
   };
   actionItems: ActionItem[];
+  notConnected?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +228,33 @@ export default function MorningBriefing() {
         <p className="text-sm" style={{ color: "var(--wp-text-muted)" }}>
           {error || "Unable to load briefing"}
         </p>
+      </div>
+    );
+  }
+
+  // Not connected: show connect prompt instead of demo data
+  if (briefing.notConnected) {
+    return (
+      <div
+        className="rounded-lg p-5 border"
+        style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+      >
+        <h2 className="text-xl font-bold mb-2" style={{ color: "var(--wp-gold)" }}>
+          {briefing.greeting}
+        </h2>
+        <p className="text-sm mb-4" style={{ color: "var(--wp-text-dim)" }}>
+          Connect your accounts to unlock your personalized daily briefing with calendar events, email highlights, financial snapshot, and smart action items.
+        </p>
+        <a
+          href="/settings"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.07a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.343 8.07" />
+          </svg>
+          Connect in Settings
+        </a>
       </div>
     );
   }
