@@ -57,6 +57,13 @@ body {
 /* Selection */
 ::selection { background: rgba(241, 194, 51, 0.3); color: #fff; }
 
+/* Prevent iOS Safari auto-zoom on input focus */
+@supports (-webkit-touch-callout: none) {
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+}
+
 /* Focus ring */
 *:focus-visible {
   outline: 2px solid var(--wp-gold);
