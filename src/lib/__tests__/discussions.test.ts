@@ -16,7 +16,7 @@ jest.mock("@/lib/analytics", () => ({
 
 jest.mock("@/lib/auth", () => ({
   hasRole: (userRole: string, requiredRole: string) => {
-    const levels: Record<string, number> = { cto: 4, dev: 3, ops: 2, sales: 1 };
+    const levels: Record<string, number> = { cto: 5, ceo: 4, dev: 3, ops: 2, sales: 1 };
     return (levels[userRole] || 0) >= (levels[requiredRole] || 0);
   },
 }));

@@ -2,8 +2,9 @@
  * Apex Auth — Role-based authentication for team members.
  *
  * Roles:
- *   - cto: Full access, architecture decisions, codebase editing
- *   - dev: Codebase Q&A, prototypes, branch creation, docs
+ *   - cto: Full access, architecture decisions, code editing (highest)
+ *   - ceo: Full access — same as CTO but read-only on code
+ *   - dev: Code Q&A, prototypes, branch creation, docs
  *   - sales: Client docs, proposals, feature requests
  *   - ops: Journals, processes, client comms
  *
@@ -15,7 +16,7 @@ import { hashSync, compareSync } from "bcryptjs";
 import { query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 
-export type TeamRole = "cto" | "dev" | "sales" | "ops";
+export type TeamRole = "ceo" | "cto" | "dev" | "sales" | "ops";
 
 export interface TeamMember {
   id: string;
@@ -69,6 +70,7 @@ export async function authenticate(email: string, password: string): Promise<Aut
   if (!process.env.DATABASE_URL) {
     // Shadow mode: demo users
     const demoUsers: Record<string, TeamMember & { password: string }> = {
+      "ceo@wolfpack.dev": { id: "demo-ceo", email: "ceo@wolfpack.dev", name: "Demo CEO", role: "ceo", password: "apex", created_at: new Date().toISOString() },
       "cto@wolfpack.dev": { id: "demo-cto", email: "cto@wolfpack.dev", name: "Demo CTO", role: "cto", password: "apex", created_at: new Date().toISOString() },
       "dev@wolfpack.dev": { id: "demo-dev", email: "dev@wolfpack.dev", name: "Demo Dev", role: "dev", password: "apex", created_at: new Date().toISOString() },
       "sales@wolfpack.dev": { id: "demo-sales", email: "sales@wolfpack.dev", name: "Demo Sales", role: "sales", password: "apex", created_at: new Date().toISOString() },
@@ -137,7 +139,7 @@ export function getUserFromRequest(authHeader: string | null): TeamMember | null
 /**
  * Role hierarchy check.
  */
-const ROLE_LEVEL: Record<TeamRole, number> = { cto: 4, dev: 3, ops: 2, sales: 1 };
+const ROLE_LEVEL: Record<TeamRole, number> = { cto: 5, ceo: 4, dev: 3, ops: 2, sales: 1 };
 
 export function hasRole(userRole: TeamRole, requiredRole: TeamRole): boolean {
   return ROLE_LEVEL[userRole] >= ROLE_LEVEL[requiredRole];

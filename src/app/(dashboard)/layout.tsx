@@ -26,6 +26,7 @@ const NAV_ITEMS = [
 ];
 
 const ROLE_COLORS: Record<string, string> = {
+  ceo: "var(--wp-gold)",
   cto: "var(--wp-gold)",
   dev: "var(--wp-info)",
   sales: "var(--wp-success)",

@@ -257,9 +257,18 @@ describe("CTO Workflow", () => {
 
   test("CTO has the highest role level", () => {
     expect(hasRole("cto", "cto")).toBe(true);
+    expect(hasRole("cto", "ceo")).toBe(true);
     expect(hasRole("cto", "dev")).toBe(true);
     expect(hasRole("cto", "ops")).toBe(true);
     expect(hasRole("cto", "sales")).toBe(true);
+  });
+
+  test("CEO has all roles except CTO", () => {
+    expect(hasRole("ceo", "cto")).toBe(false);
+    expect(hasRole("ceo", "ceo")).toBe(true);
+    expect(hasRole("ceo", "dev")).toBe(true);
+    expect(hasRole("ceo", "ops")).toBe(true);
+    expect(hasRole("ceo", "sales")).toBe(true);
   });
 
   test("view dashboard stats — all 4 stat card queries return data", async () => {

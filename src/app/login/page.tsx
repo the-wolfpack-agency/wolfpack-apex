@@ -160,6 +160,7 @@ export default function LoginPage() {
           <p className="font-medium mb-1" style={{ color: "var(--wp-text-dim)" }}>
             Demo Credentials
           </p>
+          <p>ceo@wolfpack.dev / apex</p>
           <p>cto@wolfpack.dev / apex</p>
           <p>dev@wolfpack.dev / apex</p>
           <p>sales@wolfpack.dev / apex</p>
