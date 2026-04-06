@@ -94,15 +94,34 @@ export default function ApexChat({
   const MAX_FILES = 5;
   const MAX_TEXT_LENGTH = 50_000; // chars of text content per file
   const ALLOWED_EXTENSIONS = new Set([
-    ".txt", ".md", ".csv", ".json", ".xml", ".html", ".css",
-    ".js", ".ts", ".tsx", ".jsx", ".py", ".yml", ".yaml", ".log",
-    ".env.example", ".sql", ".sh", ".toml", ".ini", ".cfg",
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
+    // Documents
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".rtf", ".odt", ".ods", ".odp",
+    // Text & data
+    ".txt", ".md", ".csv", ".tsv", ".json", ".xml", ".html", ".htm",
+    ".css", ".log", ".yml", ".yaml", ".toml", ".ini", ".cfg",
+    ".env.example",
+    // Code
+    ".js", ".ts", ".tsx", ".jsx", ".py", ".rb", ".go", ".rs",
+    ".java", ".php", ".swift", ".kt", ".sql", ".sh", ".bash",
+    ".zsh", ".r", ".m", ".h", ".c", ".cpp", ".cs",
+    // Images
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico",
+    // Design & media
+    ".sketch", ".fig",
   ]);
   const ALLOWED_MIME_PREFIXES = [
-    "text/", "application/json", "application/xml",
+    "text/",
+    "application/json", "application/xml",
     "application/x-yaml", "application/yaml",
-    "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.oasis.opendocument",
+    "application/rtf",
+    "image/",
   ];
 
   function isAllowedFile(file: File): string | null {
@@ -137,17 +156,24 @@ export default function ApexChat({
   function readFile(file: File): Promise<AttachedFile> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      const isImage = file.type.startsWith("image/");
+      const isBinary = file.type.startsWith("image/")
+        || file.type === "application/pdf"
+        || file.type.includes("msword")
+        || file.type.includes("officedocument")
+        || file.type.includes("ms-excel")
+        || file.type.includes("ms-powerpoint")
+        || file.type.includes("opendocument")
+        || file.type === "application/rtf";
       reader.onload = () => {
         const raw = reader.result as string;
         resolve({
           name: file.name,
           type: file.type || "text/plain",
-          content: isImage ? raw : sanitizeTextContent(raw),
+          content: isBinary ? raw : sanitizeTextContent(raw),
         });
       };
       reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
-      if (isImage) {
+      if (isBinary) {
         reader.readAsDataURL(file);
       } else {
         reader.readAsText(file);
@@ -295,8 +321,13 @@ export default function ApexChat({
     // Build the message with file context prepended
     let fullMessage = trimmed;
     if (currentAttachments.length > 0) {
+      const isBinaryType = (t: string) =>
+        t.startsWith("image/") || t === "application/pdf"
+        || t.includes("msword") || t.includes("officedocument")
+        || t.includes("ms-excel") || t.includes("ms-powerpoint")
+        || t.includes("opendocument") || t === "application/rtf";
       const fileContext = currentAttachments
-        .filter((f) => !f.type.startsWith("image/"))
+        .filter((f) => !isBinaryType(f.type))
         .map((f) => `--- File: ${f.name} ---\n${f.content}`)
         .join("\n\n");
       if (fileContext) {
@@ -889,7 +920,7 @@ export default function ApexChat({
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".txt,.md,.csv,.json,.xml,.html,.css,.js,.ts,.tsx,.jsx,.py,.yml,.yaml,.log,.pdf,.png,.jpg,.jpeg,.gif,.webp,.svg"
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.rtf,.odt,.ods,.odp,.txt,.md,.csv,.tsv,.json,.xml,.html,.htm,.css,.log,.yml,.yaml,.toml,.ini,.cfg,.js,.ts,.tsx,.jsx,.py,.rb,.go,.rs,.java,.php,.swift,.kt,.sql,.sh,.bash,.zsh,.r,.m,.h,.c,.cpp,.cs,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.ico"
                 onChange={handleFileInput}
                 className="hidden"
               />

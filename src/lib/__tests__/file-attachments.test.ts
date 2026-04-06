@@ -58,15 +58,34 @@ const MAX_FILE_SIZE = 512_000;
 const MAX_FILES = 5;
 const MAX_TEXT_LENGTH = 50_000;
 const ALLOWED_EXTENSIONS = new Set([
-  ".txt", ".md", ".csv", ".json", ".xml", ".html", ".css",
-  ".js", ".ts", ".tsx", ".jsx", ".py", ".yml", ".yaml", ".log",
-  ".env.example", ".sql", ".sh", ".toml", ".ini", ".cfg",
-  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
+  // Documents
+  ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+  ".rtf", ".odt", ".ods", ".odp",
+  // Text & data
+  ".txt", ".md", ".csv", ".tsv", ".json", ".xml", ".html", ".htm",
+  ".css", ".log", ".yml", ".yaml", ".toml", ".ini", ".cfg",
+  ".env.example",
+  // Code
+  ".js", ".ts", ".tsx", ".jsx", ".py", ".rb", ".go", ".rs",
+  ".java", ".php", ".swift", ".kt", ".sql", ".sh", ".bash",
+  ".zsh", ".r", ".m", ".h", ".c", ".cpp", ".cs",
+  // Images
+  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico",
+  // Design & media
+  ".sketch", ".fig",
 ]);
 const ALLOWED_MIME_PREFIXES = [
-  "text/", "application/json", "application/xml",
+  "text/",
+  "application/json", "application/xml",
   "application/x-yaml", "application/yaml",
-  "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument",
+  "application/vnd.ms-excel",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.oasis.opendocument",
+  "application/rtf",
+  "image/",
 ];
 
 function isAllowedFile(file: { name: string; type: string; size: number }): string | null {
@@ -190,9 +209,40 @@ describe("File Attachment Validation", () => {
       expect(err).toContain("unsupported file type");
     });
 
-    test("rejects .pdf files", () => {
-      const err = isAllowedFile({ name: "document.pdf", type: "application/pdf", size: 100 });
-      expect(err).toContain("unsupported file type");
+    test("allows .pdf files", () => {
+      expect(isAllowedFile({ name: "document.pdf", type: "application/pdf", size: 100 })).toBeNull();
+    });
+
+    test("allows .docx files", () => {
+      expect(isAllowedFile({ name: "report.docx", type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", size: 100 })).toBeNull();
+    });
+
+    test("allows .xlsx files", () => {
+      expect(isAllowedFile({ name: "data.xlsx", type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", size: 100 })).toBeNull();
+    });
+
+    test("allows .pptx files", () => {
+      expect(isAllowedFile({ name: "deck.pptx", type: "application/vnd.openxmlformats-officedocument.presentationml.presentation", size: 100 })).toBeNull();
+    });
+
+    test("allows .doc files", () => {
+      expect(isAllowedFile({ name: "old.doc", type: "application/msword", size: 100 })).toBeNull();
+    });
+
+    test("allows .go files", () => {
+      expect(isAllowedFile({ name: "main.go", type: "text/plain", size: 100 })).toBeNull();
+    });
+
+    test("allows .rs files", () => {
+      expect(isAllowedFile({ name: "lib.rs", type: "text/plain", size: 100 })).toBeNull();
+    });
+
+    test("allows .java files", () => {
+      expect(isAllowedFile({ name: "App.java", type: "text/plain", size: 100 })).toBeNull();
+    });
+
+    test("allows .php files", () => {
+      expect(isAllowedFile({ name: "index.php", type: "text/plain", size: 100 })).toBeNull();
     });
   });
 
