@@ -29,7 +29,7 @@ jest.mock("@/lib/db", () => ({
   pool: { query: jest.fn() },
 }));
 
-// Mock quickbooks to return demo data
+// Mock quickbooks to return demo data (with connected status for CEO tests)
 jest.mock("@/lib/quickbooks", () => ({
   fetchProfitAndLoss: jest.fn().mockResolvedValue({
     totalIncome: 52000,
@@ -54,7 +54,7 @@ jest.mock("@/lib/quickbooks", () => ({
     over90: 0,
     details: [],
   }),
-  getConnectionStatus: jest.fn().mockResolvedValue({ connected: false, mode: "shadow" }),
+  getConnectionStatus: jest.fn().mockResolvedValue({ connected: true, mode: "live" }),
 }));
 
 // Mock microsoft-graph to return demo data
@@ -69,7 +69,7 @@ jest.mock("@/lib/microsoft-graph", () => ({
   ]),
   fetchUnreadCount: jest.fn().mockResolvedValue(7),
   fetchUserProfile: jest.fn().mockResolvedValue({ displayName: "Hoxsie", mail: "ceo@wolfpack.dev" }),
-  getConnectionStatus: jest.fn().mockResolvedValue({ connected: false, mode: "shadow" }),
+  getConnectionStatus: jest.fn().mockResolvedValue({ connected: true, mode: "live" }),
 }));
 
 beforeEach(() => {

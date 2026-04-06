@@ -16,6 +16,7 @@ import {
   fetchUnpaidInvoices,
   fetchRecentPayments,
   fetchAgedReceivables,
+  getConnectionStatus as getQboConnectionStatus,
 } from "@/lib/quickbooks";
 
 // ---------------------------------------------------------------------------
@@ -131,6 +132,10 @@ async function fetchMsGraphData(): Promise<{
   try {
     // Dynamic import — microsoft-graph.ts may not exist yet
     const msGraph = await import("@/lib/microsoft-graph");
+    // Only fetch if actually connected (not shadow/demo)
+    const msStatus = await msGraph.getConnectionStatus();
+    if (!msStatus.connected) return null;
+
     const today = new Date().toISOString().split("T")[0];
     const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0];
     const [calendarEvents, emails, unreadCount] = await Promise.all([
@@ -166,6 +171,10 @@ async function fetchMsGraphData(): Promise<{
 // ---------------------------------------------------------------------------
 
 async function fetchFinancialData() {
+  // Only fetch if QuickBooks is actually connected (not shadow/demo)
+  const qboStatus = await getQboConnectionStatus();
+  if (!qboStatus.connected) return null;
+
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
   const today = now.toISOString().split("T")[0];
@@ -564,9 +573,10 @@ export async function generateBriefing(
   // Determine if we can reach any live data
   const hasDb = !!process.env.DATABASE_URL;
 
-  // Attempt to fetch all data in parallel
+  // Attempt to fetch all data in parallel (financials CEO only)
+  const isCeo = userRole === "ceo";
   const [financialData, msGraphData, teamActivity, clientAttention] = await Promise.all([
-    fetchFinancialData().catch(() => null),
+    isCeo ? fetchFinancialData().catch(() => null) : Promise.resolve(null),
     fetchMsGraphData().catch(() => null),
     hasDb ? fetchTeamActivity().catch(() => ({ activeMembers: 0, recentHighlights: [] })) : Promise.resolve(null),
     hasDb ? fetchClientAttention().catch(() => []) : Promise.resolve([]),
