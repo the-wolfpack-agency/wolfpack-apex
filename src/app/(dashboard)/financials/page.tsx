@@ -215,7 +215,7 @@ export default function FinancialsPage() {
     return (
       <div className="max-w-7xl mx-auto">
         <h1 className="text-2xl font-bold mb-4" style={{ color: "var(--wp-gold)" }}>Financials</h1>
-        <p className="text-sm" style={{ color: "var(--wp-text-muted)" }}>Financial data is restricted to CEO and CTO roles.</p>
+        <p className="text-sm" style={{ color: "var(--wp-text-muted)" }}>Financial data is restricted to the CEO role.</p>
       </div>
     );
   }
