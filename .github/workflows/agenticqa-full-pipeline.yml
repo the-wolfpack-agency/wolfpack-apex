@@ -233,17 +233,23 @@ jobs:
         id: submit
         if: steps.boot.outputs.ready == 'true'
         run: |
-          # Build the request body
+          # Build the request body. Pass the LOCAL filesystem path of
+          # the Instinct checkout (already cloned by the first
+          # actions/checkout step) — the AgenticQA worker resolves
+          # `repo` as a local path, not a git URL. Using GITHUB_WORKSPACE
+          # is the canonical "where this repo lives on the runner".
+          INSTINCT_PATH="${GITHUB_WORKSPACE}"
           python3 -c "
           import json
           body = {
               'prompt': 'Run full pipeline against this repository — SDET, Fullstack, SRE, Compliance, Security',
-              'repo': 'https://github.com/the-wolfpack-agency/wolfpack-apex',
+              'repo': '${INSTINCT_PATH}',
               'requester': 'instinct-ci',
               'metadata': {
                   'commit_sha': '${{ github.sha }}',
                   'run_id': '${{ github.run_id }}',
                   'branch': '${{ github.ref_name }}',
+                  'github_url': 'https://github.com/the-wolfpack-agency/wolfpack-apex',
               },
           }
           with open('/tmp/submit-body.json', 'w') as f:
