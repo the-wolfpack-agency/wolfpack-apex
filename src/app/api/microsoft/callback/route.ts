@@ -6,6 +6,7 @@ import {
   storeTokens,
   fetchUserProfile,
   clearCache,
+  verifyState,
 } from "@/lib/microsoft-graph";
 
 /**
@@ -39,6 +40,27 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
+  // Recover the apex user from the signed state parameter. We do NOT
+  // trust the session cookie alone — cross-site OAuth redirects often
+  // drop SameSite cookies. The signed state is the authoritative source.
+  // If state is missing, forged, or doesn't match the (optional) session
+  // user, refuse to write anything.
+  const stateUserId = verifyState(state);
+  if (!stateUserId) {
+    const redirectUrl = new URL("/dashboard", req.url);
+    redirectUrl.searchParams.set("ms", "error");
+    redirectUrl.searchParams.set("detail", "Invalid OAuth state");
+    return NextResponse.redirect(redirectUrl);
+  }
+  if (user && user.id !== stateUserId) {
+    // Session user disagrees with state — possible CSRF / link sharing.
+    const redirectUrl = new URL("/dashboard", req.url);
+    redirectUrl.searchParams.set("ms", "error");
+    redirectUrl.searchParams.set("detail", "OAuth state mismatch");
+    return NextResponse.redirect(redirectUrl);
+  }
+  const userId = stateUserId;
+
   // Exchange code for tokens
   const tokens = await exchangeCode(code);
   if (!tokens) {
@@ -48,19 +70,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // Store tokens — use authenticated user ID if available, fallback to state
-  const userId = user?.id || state || "oauth-callback";
-
   // Fetch user profile to get email and display name
   let userEmail: string | undefined;
   let displayName: string | undefined;
   try {
-    // Store tokens first so getValidToken() works for the profile fetch
+    // Store tokens first so getValidToken(userId) works for the profile fetch
     tokens.user_email = "pending";
     await storeTokens(tokens, userId, "pending");
-    clearCache();
+    clearCache(userId);
 
-    const profile = await fetchUserProfile();
+    const profile = await fetchUserProfile(userId);
     userEmail = profile?.email;
     displayName = profile?.displayName;
 

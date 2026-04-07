@@ -35,13 +35,13 @@ export async function GET(req: NextRequest) {
 
   // --- Auth URL ---
   if (action === "auth-url") {
-    const authUrl = getAuthUrl();
+    const authUrl = getAuthUrl(user.id);
     return NextResponse.json({ authUrl });
   }
 
   // --- Connection status ---
   if (action === "status") {
-    const status = await getConnectionStatus();
+    const status = await getConnectionStatus(user.id);
     return NextResponse.json(status);
   }
 
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Missing email parameter" }, { status: 400 });
     }
 
-    const emails = await fetchEmailsFromContact(email);
+    const emails = await fetchEmailsFromContact(user.id, email);
     return NextResponse.json({ emails });
   }
 
@@ -73,11 +73,11 @@ export async function GET(req: NextRequest) {
     userProfile,
     connectionStatus,
   ] = await Promise.all([
-    fetchCalendarEvents(todayStart, todayEnd),
-    fetchRecentEmails(18),
-    fetchUnreadCount(),
-    fetchUserProfile(),
-    getConnectionStatus(),
+    fetchCalendarEvents(user.id, todayStart, todayEnd),
+    fetchRecentEmails(user.id, 18),
+    fetchUnreadCount(user.id),
+    fetchUserProfile(user.id),
+    getConnectionStatus(user.id),
   ]);
 
   trackEvent("microsoft.sync_completed", user.id, user.role, {
@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
 
     if (body.action === "disconnect") {
-      await deleteTokens();
+      await deleteTokens(user.id);
 
       trackEvent("microsoft.disconnected", user.id, user.role, {
         module: "microsoft-graph",

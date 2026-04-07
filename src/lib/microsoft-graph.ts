@@ -8,6 +8,7 @@
  * All API calls are tracked via analytics and cached with 5-minute TTL.
  */
 
+import { createHmac, timingSafeEqual } from "crypto";
 import { safeQuery, query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 
@@ -110,9 +111,20 @@ function setCache<T>(key: string, data: T): void {
   cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
 }
 
-/** Clear all cached Microsoft Graph data. */
-export function clearCache(): void {
-  cache.clear();
+/**
+ * Clear cached Microsoft Graph data.
+ * - clearCache()        — clears all entries (used by disconnect-all + tests)
+ * - clearCache(userId)  — clears only the calling user's entries
+ */
+export function clearCache(userId?: string): void {
+  if (!userId) {
+    cache.clear();
+    return;
+  }
+  const prefix = `${userId}:`;
+  for (const key of cache.keys()) {
+    if (key.startsWith(prefix)) cache.delete(key);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -128,10 +140,49 @@ function isShadowMode(): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Generate the Microsoft OAuth2 authorization URL.
- * The user should be redirected here to initiate the connection.
+ * HMAC-sign a userId so it can safely round-trip through the OAuth state
+ * parameter. Format: `${userId}.${sigBase64url}` — verified in the callback
+ * to prevent attackers from associating their MS account with someone
+ * else's apex user record by guessing IDs.
  */
-export function getAuthUrl(state?: string): string {
+function getStateSecret(): string {
+  return process.env.APEX_JWT_SECRET || "apex-dev-secret-do-not-use-in-production";
+}
+
+export function signState(userId: string): string {
+  const sig = createHmac("sha256", getStateSecret())
+    .update(userId)
+    .digest("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+  return `${userId}.${sig}`;
+}
+
+export function verifyState(state: string | null): string | null {
+  if (!state) return null;
+  const dot = state.lastIndexOf(".");
+  if (dot < 1) return null;
+  const userId = state.slice(0, dot);
+  const provided = state.slice(dot + 1);
+  const expected = signState(userId).slice(userId.length + 1);
+  try {
+    const a = Buffer.from(provided);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length) return null;
+    return timingSafeEqual(a, b) ? userId : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Generate the Microsoft OAuth2 authorization URL for a specific user.
+ * The userId is signed into the state parameter so the callback can
+ * recover identity even when the session cookie is dropped on cross-site
+ * redirect.
+ */
+export function getAuthUrl(userId: string): string {
   const clientId = process.env.MS_CLIENT_ID;
   const redirectUri = process.env.MS_REDIRECT_URI;
   if (!clientId || !redirectUri) {
@@ -144,7 +195,7 @@ export function getAuthUrl(state?: string): string {
     redirect_uri: redirectUri,
     scope: MS_SCOPES,
     response_mode: "query",
-    state: state || "apex-ms",
+    state: signState(userId),
   });
 
   return `${getAuthBaseUrl()}/authorize?${params.toString()}`;
@@ -259,7 +310,8 @@ export async function storeTokens(
     await query(
       `INSERT INTO apex_ms_tokens (user_email, display_name, access_token, refresh_token, expires_at, connected_by)
        VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (user_email) DO UPDATE SET
+       ON CONFLICT (connected_by) DO UPDATE SET
+         user_email = EXCLUDED.user_email,
          display_name = COALESCE(EXCLUDED.display_name, apex_ms_tokens.display_name),
          access_token = EXCLUDED.access_token,
          refresh_token = EXCLUDED.refresh_token,
@@ -273,11 +325,15 @@ export async function storeTokens(
 }
 
 /**
- * Get a valid (non-expired) access token, auto-refreshing if needed.
- * Returns null if no tokens are stored or refresh fails.
+ * Get a valid (non-expired) access token for a SPECIFIC apex user,
+ * auto-refreshing if needed. Returns null if that user has no token
+ * stored or refresh fails. Never returns another user's token.
  */
-export async function getValidToken(): Promise<{ accessToken: string; userEmail: string } | null> {
+export async function getValidToken(
+  userId: string,
+): Promise<{ accessToken: string; userEmail: string } | null> {
   if (isShadowMode()) return null;
+  if (!userId) return null;
 
   const { rows } = await safeQuery<{
     access_token: string;
@@ -288,8 +344,9 @@ export async function getValidToken(): Promise<{ accessToken: string; userEmail:
   }>(
     `SELECT access_token, refresh_token, user_email, expires_at, connected_by
      FROM apex_ms_tokens
-     ORDER BY updated_at DESC
+     WHERE connected_by = $1
      LIMIT 1`,
+    [userId],
   );
 
   if (rows.length === 0) return null;
@@ -304,12 +361,17 @@ export async function getValidToken(): Promise<{ accessToken: string; userEmail:
 
   // Token expired or expiring soon — refresh
   const refreshed = await refreshAccessToken(row.refresh_token);
-  if (!refreshed) return null;
+  if (!refreshed) {
+    trackEvent("microsoft.token_refresh_failed", userId, "system", {
+      user_email: row.user_email,
+    });
+    return null;
+  }
 
   refreshed.user_email = row.user_email;
-  await storeTokens(refreshed, row.connected_by, row.user_email);
+  await storeTokens(refreshed, userId, row.user_email);
 
-  trackEvent("microsoft.token_refreshed", row.connected_by, "system", {
+  trackEvent("microsoft.token_refreshed", userId, "system", {
     user_email: row.user_email,
   });
 
@@ -317,14 +379,16 @@ export async function getValidToken(): Promise<{ accessToken: string; userEmail:
 }
 
 /**
- * Delete stored Microsoft tokens (disconnect).
+ * Delete stored Microsoft tokens for a specific apex user (disconnect).
+ * Only clears that user's row and that user's cache namespace.
  */
-export async function deleteTokens(): Promise<void> {
+export async function deleteTokens(userId: string): Promise<void> {
   if (!process.env.DATABASE_URL) return;
+  if (!userId) return;
 
   try {
-    await query(`DELETE FROM apex_ms_tokens`);
-    clearCache();
+    await query(`DELETE FROM apex_ms_tokens WHERE connected_by = $1`, [userId]);
+    clearCache(userId);
   } catch (err) {
     console.error("[microsoft-graph] Failed to delete tokens:", (err as Error).message);
   }
@@ -341,6 +405,7 @@ export async function deleteTokens(): Promise<void> {
 export async function graphFetch<T = unknown>(
   endpoint: string,
   accessToken: string,
+  userId: string,
 ): Promise<T | null> {
   const url = `${GRAPH_BASE_URL}/${endpoint}`;
 
@@ -352,19 +417,27 @@ export async function graphFetch<T = unknown>(
       },
     });
 
-    trackEvent("microsoft.api_called", "system", "system", {
+    trackEvent("microsoft.api_called", userId, "system", {
       endpoint,
       status: res.status,
     });
 
     if (!res.ok) {
       console.error(`[microsoft-graph] API error ${res.status} for ${endpoint}:`, await res.text());
+      trackEvent("microsoft.fetch_failed", userId, "system", {
+        endpoint,
+        status: res.status,
+      });
       return null;
     }
 
     return (await res.json()) as T;
   } catch (err) {
     console.error(`[microsoft-graph] API fetch error for ${endpoint}:`, (err as Error).message);
+    trackEvent("microsoft.fetch_failed", userId, "system", {
+      endpoint,
+      status: 0,
+    });
     return null;
   }
 }
@@ -374,9 +447,10 @@ export async function graphFetch<T = unknown>(
 // ---------------------------------------------------------------------------
 
 /**
- * Get the current Microsoft Graph connection status.
+ * Get the Microsoft Graph connection status for a SPECIFIC apex user.
+ * Never returns another user's connection.
  */
-export async function getConnectionStatus(): Promise<MsConnectionStatus> {
+export async function getConnectionStatus(userId: string): Promise<MsConnectionStatus> {
   if (isShadowMode()) {
     return {
       connected: false,
@@ -386,6 +460,9 @@ export async function getConnectionStatus(): Promise<MsConnectionStatus> {
       mode: "shadow",
     };
   }
+  if (!userId) {
+    return { connected: false, userEmail: null, displayName: null, lastSync: null, mode: "live" };
+  }
 
   const { rows } = await safeQuery<{
     user_email: string;
@@ -394,8 +471,9 @@ export async function getConnectionStatus(): Promise<MsConnectionStatus> {
   }>(
     `SELECT user_email, display_name, updated_at
      FROM apex_ms_tokens
-     ORDER BY updated_at DESC
+     WHERE connected_by = $1
      LIMIT 1`,
+    [userId],
   );
 
   if (rows.length === 0) {
@@ -415,8 +493,8 @@ export async function getConnectionStatus(): Promise<MsConnectionStatus> {
 // Data Fetchers — Live Mode
 // ---------------------------------------------------------------------------
 
-async function fetchLiveCalendarEvents(startDate: string, endDate: string): Promise<CalendarEvent[]> {
-  const token = await getValidToken();
+async function fetchLiveCalendarEvents(userId: string, startDate: string, endDate: string): Promise<CalendarEvent[]> {
+  const token = await getValidToken(userId);
   if (!token) return [];
 
   const start = new Date(startDate).toISOString();
@@ -435,6 +513,7 @@ async function fetchLiveCalendarEvents(startDate: string, endDate: string): Prom
   }>(
     `me/calendarview?startDateTime=${encodeURIComponent(start)}&endDateTime=${encodeURIComponent(end)}&$orderby=start/dateTime&$top=50&$select=id,subject,start,end,location,attendees,isOnlineMeeting`,
     token.accessToken,
+    userId,
   );
 
   if (!data?.value) return [];
@@ -450,8 +529,8 @@ async function fetchLiveCalendarEvents(startDate: string, endDate: string): Prom
   }));
 }
 
-async function fetchLiveRecentEmails(count: number, folderId?: string): Promise<Email[]> {
-  const token = await getValidToken();
+async function fetchLiveRecentEmails(userId: string, count: number, folderId?: string): Promise<Email[]> {
+  const token = await getValidToken(userId);
   if (!token) return [];
 
   const folder = folderId || "inbox";
@@ -468,6 +547,7 @@ async function fetchLiveRecentEmails(count: number, folderId?: string): Promise<
   }>(
     `me/mailFolders/${folder}/messages?$top=${count}&$orderby=receivedDateTime desc&$select=id,subject,from,receivedDateTime,bodyPreview,isRead,importance`,
     token.accessToken,
+    userId,
   );
 
   if (!data?.value) return [];
@@ -484,8 +564,8 @@ async function fetchLiveRecentEmails(count: number, folderId?: string): Promise<
   }));
 }
 
-async function fetchLiveEmailsFromContact(email: string, count: number): Promise<Email[]> {
-  const token = await getValidToken();
+async function fetchLiveEmailsFromContact(userId: string, email: string, count: number): Promise<Email[]> {
+  const token = await getValidToken(userId);
   if (!token) return [];
 
   const filter = encodeURIComponent(`from/emailAddress/address eq '${email}'`);
@@ -502,6 +582,7 @@ async function fetchLiveEmailsFromContact(email: string, count: number): Promise
   }>(
     `me/messages?$filter=${filter}&$top=${count}&$orderby=receivedDateTime desc&$select=id,subject,from,receivedDateTime,bodyPreview,isRead,importance`,
     token.accessToken,
+    userId,
   );
 
   if (!data?.value) return [];
@@ -518,8 +599,8 @@ async function fetchLiveEmailsFromContact(email: string, count: number): Promise
   }));
 }
 
-async function fetchLiveContacts(count: number): Promise<Contact[]> {
-  const token = await getValidToken();
+async function fetchLiveContacts(userId: string, count: number): Promise<Contact[]> {
+  const token = await getValidToken(userId);
   if (!token) return [];
 
   const data = await graphFetch<{
@@ -535,6 +616,7 @@ async function fetchLiveContacts(count: number): Promise<Contact[]> {
   }>(
     `me/contacts?$top=${count}&$orderby=displayName&$select=id,displayName,emailAddresses,companyName,jobTitle,mobilePhone,businessPhones`,
     token.accessToken,
+    userId,
   );
 
   if (!data?.value) return [];
@@ -549,8 +631,8 @@ async function fetchLiveContacts(count: number): Promise<Contact[]> {
   }));
 }
 
-async function fetchLiveUnreadCount(): Promise<number> {
-  const token = await getValidToken();
+async function fetchLiveUnreadCount(userId: string): Promise<number> {
+  const token = await getValidToken(userId);
   if (!token) return 0;
 
   const data = await graphFetch<{
@@ -558,13 +640,14 @@ async function fetchLiveUnreadCount(): Promise<number> {
   }>(
     "me/mailFolders/inbox?$select=unreadItemCount",
     token.accessToken,
+    userId,
   );
 
   return data?.unreadItemCount || 0;
 }
 
-async function fetchLiveUserProfile(): Promise<UserProfile | null> {
-  const token = await getValidToken();
+async function fetchLiveUserProfile(userId: string): Promise<UserProfile | null> {
+  const token = await getValidToken(userId);
   if (!token) return null;
 
   const data = await graphFetch<{
@@ -575,6 +658,7 @@ async function fetchLiveUserProfile(): Promise<UserProfile | null> {
   }>(
     "me?$select=displayName,mail,userPrincipalName,jobTitle",
     token.accessToken,
+    userId,
   );
 
   if (!data) return null;
@@ -994,14 +1078,14 @@ function demoUserProfile(): UserProfile {
  * Fetch calendar events for the given date range.
  * Returns today's and upcoming meetings with subjects, times, and attendees.
  */
-export async function fetchCalendarEvents(startDate: string, endDate: string): Promise<CalendarEvent[]> {
-  const cacheKey = `ms-calendar:${startDate}:${endDate}`;
+export async function fetchCalendarEvents(userId: string, startDate: string, endDate: string): Promise<CalendarEvent[]> {
+  const cacheKey = `${userId}:ms-calendar:${startDate}:${endDate}`;
   const cached = getCached<CalendarEvent[]>(cacheKey);
   if (cached) return cached;
 
   const result = isShadowMode()
     ? demoCalendarEvents()
-    : await fetchLiveCalendarEvents(startDate, endDate);
+    : await fetchLiveCalendarEvents(userId, startDate, endDate);
 
   setCache(cacheKey, result);
   return result;
@@ -1011,14 +1095,14 @@ export async function fetchCalendarEvents(startDate: string, endDate: string): P
  * Fetch recent emails from the inbox (or a specific folder).
  * Returns subject, sender, preview, read status, and importance.
  */
-export async function fetchRecentEmails(count: number = 15, folderId?: string): Promise<Email[]> {
-  const cacheKey = `ms-emails:${count}:${folderId || "inbox"}`;
+export async function fetchRecentEmails(userId: string, count: number = 15, folderId?: string): Promise<Email[]> {
+  const cacheKey = `${userId}:ms-emails:${count}:${folderId || "inbox"}`;
   const cached = getCached<Email[]>(cacheKey);
   if (cached) return cached;
 
   const result = isShadowMode()
     ? demoRecentEmails().slice(0, count)
-    : await fetchLiveRecentEmails(count, folderId);
+    : await fetchLiveRecentEmails(userId, count, folderId);
 
   setCache(cacheKey, result);
   return result;
@@ -1027,14 +1111,14 @@ export async function fetchRecentEmails(count: number = 15, folderId?: string): 
 /**
  * Fetch emails exchanged with a specific contact by email address.
  */
-export async function fetchEmailsFromContact(email: string, count: number = 10): Promise<Email[]> {
-  const cacheKey = `ms-emails-from:${email}:${count}`;
+export async function fetchEmailsFromContact(userId: string, email: string, count: number = 10): Promise<Email[]> {
+  const cacheKey = `${userId}:ms-emails-from:${email}:${count}`;
   const cached = getCached<Email[]>(cacheKey);
   if (cached) return cached;
 
   const result = isShadowMode()
     ? demoEmailsFromContact(email, count)
-    : await fetchLiveEmailsFromContact(email, count);
+    : await fetchLiveEmailsFromContact(userId, email, count);
 
   setCache(cacheKey, result);
   return result;
@@ -1043,14 +1127,14 @@ export async function fetchEmailsFromContact(email: string, count: number = 10):
 /**
  * Fetch Outlook contacts with name, email, company, title, and phone.
  */
-export async function fetchContacts(count: number = 15): Promise<Contact[]> {
-  const cacheKey = `ms-contacts:${count}`;
+export async function fetchContacts(userId: string, count: number = 15): Promise<Contact[]> {
+  const cacheKey = `${userId}:ms-contacts:${count}`;
   const cached = getCached<Contact[]>(cacheKey);
   if (cached) return cached;
 
   const result = isShadowMode()
     ? demoContacts().slice(0, count)
-    : await fetchLiveContacts(count);
+    : await fetchLiveContacts(userId, count);
 
   setCache(cacheKey, result);
   return result;
@@ -1059,12 +1143,12 @@ export async function fetchContacts(count: number = 15): Promise<Contact[]> {
 /**
  * Fetch the number of unread emails in the inbox.
  */
-export async function fetchUnreadCount(): Promise<number> {
-  const cacheKey = "ms-unread-count";
+export async function fetchUnreadCount(userId: string): Promise<number> {
+  const cacheKey = `${userId}:ms-unread-count`;
   const cached = getCached<number>(cacheKey);
   if (cached !== null) return cached;
 
-  const result = isShadowMode() ? 7 : await fetchLiveUnreadCount();
+  const result = isShadowMode() ? 7 : await fetchLiveUnreadCount(userId);
 
   setCache(cacheKey, result);
   return result;
@@ -1073,12 +1157,12 @@ export async function fetchUnreadCount(): Promise<number> {
 /**
  * Fetch the current user's profile (name, email, job title, photo).
  */
-export async function fetchUserProfile(): Promise<UserProfile | null> {
-  const cacheKey = "ms-user-profile";
+export async function fetchUserProfile(userId: string): Promise<UserProfile | null> {
+  const cacheKey = `${userId}:ms-user-profile`;
   const cached = getCached<UserProfile>(cacheKey);
   if (cached) return cached;
 
-  const result = isShadowMode() ? demoUserProfile() : await fetchLiveUserProfile();
+  const result = isShadowMode() ? demoUserProfile() : await fetchLiveUserProfile(userId);
   if (result) setCache(cacheKey, result);
   return result;
 }

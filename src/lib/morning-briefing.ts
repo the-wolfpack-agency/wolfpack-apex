@@ -124,7 +124,7 @@ function getGreeting(name: string): string {
 // Microsoft Graph — graceful import
 // ---------------------------------------------------------------------------
 
-async function fetchMsGraphData(): Promise<{
+async function fetchMsGraphData(userId: string): Promise<{
   calendar: CalendarEvent[];
   emails: { from: string; subject: string; receivedDateTime: string; bodyPreview: string }[];
   unreadCount: number;
@@ -132,16 +132,16 @@ async function fetchMsGraphData(): Promise<{
   try {
     // Dynamic import — microsoft-graph.ts may not exist yet
     const msGraph = await import("@/lib/microsoft-graph");
-    // Only fetch if actually connected (not shadow/demo)
-    const msStatus = await msGraph.getConnectionStatus();
+    // Only fetch if THIS user is actually connected (not shadow/demo)
+    const msStatus = await msGraph.getConnectionStatus(userId);
     if (!msStatus.connected) return null;
 
     const today = new Date().toISOString().split("T")[0];
     const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0];
     const [calendarEvents, emails, unreadCount] = await Promise.all([
-      msGraph.fetchCalendarEvents(today, tomorrow),
-      msGraph.fetchRecentEmails(10),
-      msGraph.fetchUnreadCount(),
+      msGraph.fetchCalendarEvents(userId, today, tomorrow),
+      msGraph.fetchRecentEmails(userId, 10),
+      msGraph.fetchUnreadCount(userId),
     ]);
 
     return {
@@ -577,7 +577,7 @@ export async function generateBriefing(
   const isCeo = userRole === "ceo";
   const [financialData, msGraphData, teamActivity, clientAttention] = await Promise.all([
     isCeo ? fetchFinancialData().catch(() => null) : Promise.resolve(null),
-    fetchMsGraphData().catch(() => null),
+    fetchMsGraphData(userId).catch(() => null),
     hasDb ? fetchTeamActivity().catch(() => ({ activeMembers: 0, recentHighlights: [] })) : Promise.resolve(null),
     hasDb ? fetchClientAttention().catch(() => []) : Promise.resolve([]),
   ]);

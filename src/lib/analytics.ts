@@ -69,6 +69,8 @@ export type ApexEventType =
   | "microsoft.connected"
   | "microsoft.disconnected"
   | "microsoft.token_refreshed"
+  | "microsoft.token_refresh_failed"
+  | "microsoft.fetch_failed"
   | "microsoft.sync_completed"
   // Briefing
   | "briefing.generated"
