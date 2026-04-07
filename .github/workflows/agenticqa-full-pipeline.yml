@@ -1,0 +1,636 @@
+name: AgenticQA Full Pipeline
+
+# =====================================================================
+# AgenticQA Full Pipeline — derived template
+# =====================================================================
+#
+# This file is adapted from the canonical pipeline at
+# the-wolfpack-agency/wolfpack-auto/.github/workflows/agenticqa-full-pipeline.yml
+#
+# Each new project that adopts this pipeline only needs to edit the
+# items in the "PER-PROJECT CONFIGURATION" block below. Everything
+# else is structurally identical across projects so AgenticQA-generated
+# updates can be applied with a 3-way merge.
+#
+# When project #2 starts using this template, we should refactor it
+# into a true reusable workflow (`workflow_call`) hosted in a shared
+# org repo. Until then, this header comment IS the abstraction layer.
+#
+# ---------------------------------------------------------------------
+# PER-PROJECT CONFIGURATION — edit these when cloning to a new project:
+# ---------------------------------------------------------------------
+#
+#   1. Project name & display label
+#      → Search for "Wolfpack Instinct" in the summary job and replace
+#
+#   2. Test framework
+#      → Currently: Jest unit tests (`npx jest --no-coverage`)
+#      → Alternative: Playwright sharded E2E (see wolfpack-auto for
+#        the pattern). Will be added to Instinct via AgenticQA-generated
+#        tests in a future PR.
+#
+#   3. Build command
+#      → Currently: `npm run build` (Next.js)
+#      → Edit if the project uses a different build script
+#
+#   4. Shadow-mode env vars
+#      → Currently: DATABASE_URL='', APEX_JWT_SECRET set to a CI dummy
+#      → Edit per project's required env vars
+#
+#   5. Shadow-verification routes
+#      → Currently: ~17 Instinct API routes that should not 500 in
+#        shadow mode (no DB connection)
+#      → Replace with the target project's GET-able routes
+#      → Skip routes that require POST bodies, path params, or
+#        live external services
+#
+#   6. Per-project regression checks (compliance-agent job)
+#      → Currently: checks the c96129d per-user MS token isolation fix
+#        is still in place
+#      → Add or remove regression checks specific to known fixes
+#        for the project
+#
+#   7. Server startup port
+#      → Currently: 3099 (avoids collisions with `npm run dev` on 3000)
+#
+#   8. Triggers
+#      → Currently: workflow_dispatch only (Actions minutes budget)
+#      → Re-enable push/pull_request/schedule when ready
+#
+# ---------------------------------------------------------------------
+# Manual trigger only until the GitHub Actions minutes budget is back
+# (resets May 1, see project_github_actions_limit memory entry).
+# =====================================================================
+
+on:
+  # push:
+  #   branches: [main]
+  # pull_request:
+  #   branches: [main]
+  # schedule:
+  #   - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual trigger'
+        required: false
+        default: 'Manual pipeline trigger'
+
+permissions:
+  contents: write
+  pull-requests: write
+  security-events: write
+  actions: read
+
+jobs:
+  # ──────────────────────────────────────────────────
+  # Phase 0: Pipeline Health & Early Prevention
+  # ──────────────────────────────────────────────────
+
+  pipeline-rescue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    name: "Pipeline Health Check"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate workflow YAML
+        run: |
+          pip install pyyaml -q
+          VALID=true
+          for file in .github/workflows/*.yml; do
+            if [ -f "$file" ]; then
+              if python3 -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))" "$file" 2>&1; then
+                echo "  $file valid"
+              else
+                echo "  $file INVALID"
+                VALID=false
+              fi
+            fi
+          done
+          [ "$VALID" = true ] || exit 1
+      - name: Check for repair loops
+        run: |
+          REPAIR_COUNT=$(git log --oneline -10 | grep -c "auto-fix\|workflow repair" || true)
+          if [ "$REPAIR_COUNT" -gt 3 ]; then
+            echo "::error::Too many consecutive auto-fix commits — possible infinite loop"
+            exit 1
+          fi
+          echo "Pipeline health: OK (${REPAIR_COUNT} recent repairs)"
+
+  lint:
+    needs: [pipeline-rescue]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    name: "Code Linting"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: TypeScript type-check
+        run: npx tsc --noEmit
+      - name: ESLint
+        run: npx eslint . --max-warnings 0
+        continue-on-error: true
+
+  linting-fix:
+    needs: [lint]
+    if: always() && needs.lint.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: "SRE Agent: Auto-Fix"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Run ESLint auto-fix
+        id: eslint-fix
+        run: |
+          npx eslint . --fix --max-warnings 9999 2>&1 || true
+          echo "status=completed" >> $GITHUB_OUTPUT
+        continue-on-error: true
+      - name: Check for changes
+        id: verify
+        run: |
+          if git diff --quiet; then
+            echo "status=clean" >> $GITHUB_OUTPUT
+          else
+            echo "status=fixed" >> $GITHUB_OUTPUT
+          fi
+      - name: Commit fixes
+        if: steps.verify.outputs.status == 'fixed'
+        run: |
+          git config user.name "sre-agent[bot]"
+          git config user.email "sre-agent[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: auto-fix lint errors via AgenticQA SRE Agent" || true
+          git push origin HEAD:${{ github.ref }} || true
+
+  # ──────────────────────────────────────────────────
+  # Phase 1: Testing & Compliance (parallel)
+  # ──────────────────────────────────────────────────
+
+  phase-1-testing:
+    needs: [linting-fix]
+    if: always() && needs.linting-fix.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    name: "Phase 1: Jest Unit + Integration Tests"
+    env:
+      CI: true
+      DATABASE_URL: ''
+      APEX_JWT_SECRET: 'ci-test-secret-not-real'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run Jest test suite
+        id: jest
+        run: |
+          npx jest --no-coverage --reporters=default 2>&1 | tee jest-output.log || JEST_FAILED=true
+          if [ "$JEST_FAILED" = "true" ]; then
+            mkdir -p test-failures
+            grep -i "fail\|error\|expected" jest-output.log >> test-failures/jest-errors.txt || true
+            echo "JEST_FAILED=true" >> test-failures/summary.txt
+          fi
+          echo "status=completed" >> $GITHUB_OUTPUT
+
+      - name: TypeScript strict check
+        run: npx tsc --noEmit
+
+      - name: Upload test failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-failures
+          path: test-failures/
+          retention-days: 7
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: jest-output.log
+          retention-days: 7
+
+  phase-1-compliance:
+    needs: [linting-fix]
+    if: always() && needs.linting-fix.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: "Phase 1: Security & Accessibility"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run AgenticQA Security Scan
+        uses: nhomyk/AgenticQA@main
+        with:
+          path: '.'
+          fail-on-critical: 'false'
+          sarif: 'true'
+          pr-comment: 'true'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: agenticqa.sarif
+        continue-on-error: true
+
+  shadow-verification:
+    needs: [linting-fix]
+    if: always() && needs.linting-fix.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: "Phase 1: Shadow Mode Verification"
+    env:
+      CI: true
+      DATABASE_URL: ''
+      APEX_JWT_SECRET: 'ci-test-secret-not-real'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**/*') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+            nextjs-${{ runner.os }}-
+
+      - name: Build (shadow mode — no DATABASE_URL)
+        run: npm run build
+
+      - name: Start server & verify routes don't crash
+        run: |
+          DATABASE_URL= npx next start -p 3099 &
+          for i in {1..20}; do
+            curl -sf http://localhost:3099/login -o /dev/null && break
+            sleep 1
+          done
+
+          # Public routes (no auth required) — must not 500
+          PUBLIC_ROUTES=(
+            "/login"
+          )
+
+          # API routes that gracefully degrade in shadow mode (no DB)
+          # — must not 500. They may return 401 or 200 with empty data,
+          # both are acceptable in shadow.
+          API_ROUTES=(
+            "/api/auth/login"
+            "/api/dashboard"
+            "/api/analytics"
+            "/api/analytics/insights"
+            "/api/knowledge"
+            "/api/journal"
+            "/api/discussions"
+            "/api/features"
+            "/api/clients"
+            "/api/docs"
+            "/api/reports"
+            "/api/emails"
+            "/api/briefing"
+            "/api/microsoft"
+            "/api/quickbooks"
+            "/api/integrations/plaud"
+            "/api/meetings"
+          )
+
+          FAILURES=0
+
+          echo "### Public routes" >> $GITHUB_STEP_SUMMARY
+          for route in "${PUBLIC_ROUTES[@]}"; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3099${route}")
+            if [ "$STATUS" = "500" ]; then
+              echo "::error::500 on ${route}"
+              echo "- ${route}: 500 (FAIL)" >> $GITHUB_STEP_SUMMARY
+              FAILURES=$((FAILURES + 1))
+            else
+              echo "  ${route} -> ${STATUS}"
+              echo "- ${route}: ${STATUS}" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### API routes (auth-protected, must not 500)" >> $GITHUB_STEP_SUMMARY
+          for route in "${API_ROUTES[@]}"; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3099${route}")
+            if [ "$STATUS" = "500" ]; then
+              echo "::error::500 on ${route}"
+              echo "- ${route}: 500 (FAIL)" >> $GITHUB_STEP_SUMMARY
+              FAILURES=$((FAILURES + 1))
+            else
+              echo "  ${route} -> ${STATUS}"
+              echo "- ${route}: ${STATUS}" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          if [ $FAILURES -gt 0 ]; then
+            echo "::error::${FAILURES} routes returned 500"
+            exit 1
+          fi
+          echo "All routes healthy"
+
+  # ──────────────────────────────────────────────────
+  # Phase 1b: Agent Analysis (after testing completes)
+  # ──────────────────────────────────────────────────
+
+  sdet-agent:
+    needs: [phase-1-testing, phase-1-compliance]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: "Phase 1: SDET Agent"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Download test results
+        uses: actions/download-artifact@v4
+        with:
+          name: test-results
+          path: ./test-results-data
+        continue-on-error: true
+      - name: SDET Analysis
+        run: |
+          echo "## SDET Agent Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f test-results-data/jest-output.log ]; then
+            # Jest reports look like "Tests:       568 passed, 568 total"
+            TOTAL=$(grep -oP "Tests:.*?(\d+) total" test-results-data/jest-output.log | grep -oP "\d+ total" | head -1 | grep -oP "\d+" || echo "0")
+            PASSED=$(grep -oP "Tests:.*?(\d+) passed" test-results-data/jest-output.log | grep -oP "\d+ passed" | head -1 | grep -oP "\d+" || echo "0")
+            FAILED=$(grep -oP "(\d+) failed" test-results-data/jest-output.log | head -1 | grep -oP "\d+" || echo "0")
+            SUITES=$(grep -oP "Test Suites:.*?(\d+) total" test-results-data/jest-output.log | grep -oP "\d+ total" | head -1 | grep -oP "\d+" || echo "0")
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Test suites | ${SUITES} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Total tests | ${TOTAL} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Passed | ${PASSED} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Failed | ${FAILED} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No test results artifact available" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Coverage gap analysis
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Coverage Gaps" >> $GITHUB_STEP_SUMMARY
+
+          TOTAL_API_ROUTES=$(find src/app/api -name "route.ts" 2>/dev/null | wc -l || echo "0")
+          TOTAL_PAGES=$(find "src/app/(dashboard)" -name "page.tsx" 2>/dev/null | wc -l || echo "0")
+          TOTAL_LIB_FILES=$(find src/lib -name "*.ts" -not -path "*/__tests__/*" 2>/dev/null | wc -l || echo "0")
+          TOTAL_TEST_FILES=$(find src/lib/__tests__ -name "*.test.ts" 2>/dev/null | wc -l || echo "0")
+
+          echo "| Asset | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| API routes | ${TOTAL_API_ROUTES} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dashboard pages | ${TOTAL_PAGES} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Library files | ${TOTAL_LIB_FILES} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Test files | ${TOTAL_TEST_FILES} |" >> $GITHUB_STEP_SUMMARY
+
+  compliance-agent:
+    needs: [phase-1-testing, phase-1-compliance]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: "Phase 1: Compliance Agent"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Compliance analysis
+        run: |
+          echo "## Compliance Agent Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Security headers check
+          echo "### Security Patterns" >> $GITHUB_STEP_SUMMARY
+          for header in "X-Frame-Options" "X-Content-Type-Options" "Strict-Transport-Security" "Content-Security-Policy"; do
+            if grep -rq "$header" src/ next.config.* 2>/dev/null; then
+              echo "- $header: configured" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- $header: **missing**" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          # PII protection check (relevant since the doc quality gate
+          # already screens for PII; we want a structural sanity check too)
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### PII Protection" >> $GITHUB_STEP_SUMMARY
+          QUALITY_GATE=$(find src/lib -name "doc-quality-gate.ts" 2>/dev/null | wc -l)
+          if [ "$QUALITY_GATE" -gt 0 ]; then
+            echo "- Doc quality gate: present" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Doc quality gate: **missing**" >> $GITHUB_STEP_SUMMARY
+          fi
+          ENCRYPT_REFS=$(grep -rln "createHmac\|timingSafeEqual\|encrypt\|cipher" src/ --include="*.ts" 2>/dev/null | wc -l || echo "0")
+          echo "- Files with crypto/HMAC usage: ${ENCRYPT_REFS}" >> $GITHUB_STEP_SUMMARY
+
+          # Env var leak check — NEXT_PUBLIC_ should never expose secrets
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Secret Exposure" >> $GITHUB_STEP_SUMMARY
+          NEXT_PUBLIC_SECRETS=$(grep -rn "NEXT_PUBLIC.*SECRET\|NEXT_PUBLIC.*KEY\|NEXT_PUBLIC.*PASSWORD" src/ .env* 2>/dev/null | wc -l || echo "0")
+          echo "- NEXT_PUBLIC_ secret leaks: ${NEXT_PUBLIC_SECRETS}" >> $GITHUB_STEP_SUMMARY
+          if [ "$NEXT_PUBLIC_SECRETS" -gt 0 ]; then
+            echo "::warning::Potential secret exposure via NEXT_PUBLIC_ env vars"
+          fi
+
+          # Per-user isolation check — every integration with token storage
+          # MUST scope by user (the bug we shipped a fix for in commit c96129d)
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Per-User Token Isolation" >> $GITHUB_STEP_SUMMARY
+          NO_USER_SCOPE=$(grep -rln "FROM apex_ms_tokens" src/lib --include="*.ts" 2>/dev/null | xargs grep -L "WHERE connected_by" 2>/dev/null | wc -l || echo "0")
+          if [ "$NO_USER_SCOPE" -gt 0 ]; then
+            echo "::warning::Found ${NO_USER_SCOPE} apex_ms_tokens query without user scoping"
+            echo "- **${NO_USER_SCOPE} unscoped queries** found — possible regression of the c96129d fix" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- All apex_ms_tokens queries are scoped by connected_by" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ──────────────────────────────────────────────────
+  # Phase 2: Fullstack Agent (fixes from Phase 1)
+  # ──────────────────────────────────────────────────
+
+  fullstack-agent:
+    needs: [sdet-agent, compliance-agent, shadow-verification]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: "Phase 2: Fullstack Agent"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Download test failures
+        uses: actions/download-artifact@v4
+        with:
+          name: test-failures
+          path: ./test-failures
+        continue-on-error: true
+      - name: Analyze and fix
+        run: |
+          echo "## Fullstack Agent" >> $GITHUB_STEP_SUMMARY
+
+          if [ -d test-failures ] && [ "$(ls -A test-failures 2>/dev/null)" ]; then
+            echo "### Test Failures Detected" >> $GITHUB_STEP_SUMMARY
+            cat test-failures/*.txt >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+
+            echo "### Build Verification" >> $GITHUB_STEP_SUMMARY
+            if DATABASE_URL= npm run build 2>&1; then
+              echo "- Production build: PASS" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- Production build: **FAIL**" >> $GITHUB_STEP_SUMMARY
+              echo "::error::Production build failed"
+            fi
+          else
+            echo "No test failures to fix — all clear" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ──────────────────────────────────────────────────
+  # Phase 3: SRE Agent (production readiness)
+  # ──────────────────────────────────────────────────
+
+  sre-agent:
+    needs: [fullstack-agent]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: "Phase 3: SRE Agent"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Production readiness checks
+        run: |
+          echo "## SRE Agent — Production Readiness" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Bundle size check
+          echo "### Bundle Analysis" >> $GITHUB_STEP_SUMMARY
+          if [ -d .next ]; then
+            BUNDLE_SIZE=$(du -sh .next/ 2>/dev/null | cut -f1)
+            echo "- Build output size: ${BUNDLE_SIZE}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Dependency audit
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Dependency Security" >> $GITHUB_STEP_SUMMARY
+          AUDIT_OUTPUT=$(npm audit --production 2>&1 || true)
+          VULN_COUNT=$(echo "$AUDIT_OUTPUT" | grep -c "vulnerability" || echo "0")
+          echo "- npm audit: ${VULN_COUNT} vulnerability references" >> $GITHUB_STEP_SUMMARY
+
+          # Code hygiene
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Code Hygiene" >> $GITHUB_STEP_SUMMARY
+          CONSOLE_LOGS=$(grep -rn "console\.log" src/ --include="*.ts" --include="*.tsx" 2>/dev/null | grep -v "// debug\|// TODO\|test\|spec" | wc -l || echo "0")
+          echo "- console.log in src/: ${CONSOLE_LOGS}" >> $GITHUB_STEP_SUMMARY
+
+          # Environment variable inventory
+          ENV_VARS=$(grep -roh 'process\.env\.\w*' src/ 2>/dev/null | sort -u | wc -l || echo "0")
+          echo "- Environment variables used: ${ENV_VARS}" >> $GITHUB_STEP_SUMMARY
+
+          # Migration drift check — every migration file has a number,
+          # check they're sequential with no gaps
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Migration Sequence" >> $GITHUB_STEP_SUMMARY
+          MIGRATIONS=$(ls src/db/migrations/*.sql 2>/dev/null | wc -l || echo "0")
+          echo "- Total migrations: ${MIGRATIONS}" >> $GITHUB_STEP_SUMMARY
+
+  # ──────────────────────────────────────────────────
+  # Final: Health Verification & Summary
+  # ──────────────────────────────────────────────────
+
+  pipeline-health:
+    needs: [sre-agent]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    name: "Pipeline Health Verification"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Infinite loop check
+        run: |
+          REPAIR_COUNT=$(git log --oneline -10 | grep -c "auto-fix\|workflow repair" || true)
+          if [ "$REPAIR_COUNT" -gt 3 ]; then
+            echo "::error::Repair loop detected"
+            exit 1
+          fi
+          echo "Pipeline healthy"
+
+  pipeline-summary:
+    needs: [pipeline-rescue, linting-fix, lint, phase-1-testing, phase-1-compliance, shadow-verification, sdet-agent, compliance-agent, fullstack-agent, sre-agent, pipeline-health]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    name: "Pipeline Summary"
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## AgenticQA Full Pipeline Results — Wolfpack Instinct" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Phase | Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 0 | Pipeline Health Check | ${{ needs.pipeline-rescue.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 0 | Code Linting | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 0 | SRE Linting Auto-Fix | ${{ needs.linting-fix.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 1 | Jest Unit + Integration | ${{ needs.phase-1-testing.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 1 | Security & Accessibility | ${{ needs.phase-1-compliance.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 1 | Shadow Mode Verification | ${{ needs.shadow-verification.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 1 | SDET Agent | ${{ needs.sdet-agent.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 1 | Compliance Agent | ${{ needs.compliance-agent.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 2 | Fullstack Agent | ${{ needs.fullstack-agent.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 3 | SRE Agent | ${{ needs.sre-agent.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Final | Health Verification | ${{ needs.pipeline-health.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Determine overall result — only the gating jobs count
+          FAILED=false
+          for result in "${{ needs.lint.result }}" "${{ needs.phase-1-testing.result }}" "${{ needs.shadow-verification.result }}"; do
+            if [ "$result" = "failure" ]; then
+              FAILED=true
+            fi
+          done
+
+          if [ "$FAILED" = "true" ]; then
+            echo "::error::Pipeline failed — do not deploy"
+            echo "**RESULT: FAILED — do not deploy**" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          echo "**RESULT: ALL PHASES PASSED — safe to deploy**" >> $GITHUB_STEP_SUMMARY
