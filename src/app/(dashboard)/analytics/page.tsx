@@ -2,12 +2,22 @@
 
 import { useState, useEffect } from "react";
 
+interface ActivityBucket {
+  label: string;
+  description: string;
+  count: number;
+  events: string[];
+}
+
 interface AnalyticsData {
   shadow_mode: boolean;
+  live_mode_empty: boolean;
+  database_unreachable: boolean;
+  activity_summary: ActivityBucket[];
   event_counts: Record<string, number>;
   top_questions: Array<{ question: string; view_count: number }>;
   feature_pipeline: Array<{ status: string; count: number }>;
-  team_activity: Array<{ user_id: string; event_count: number }>;
+  team_activity: Array<{ user_id: string; user_name?: string | null; event_count: number }>;
   doc_stats: Array<{ doc_type: string; count: number; total_downloads: number }>;
   search_terms: Array<{ term: string; count: number }>;
   ai_efficiency: {
@@ -15,14 +25,31 @@ interface AnalyticsData {
     zero_token_answers: number;
     ai_calls: number;
     trend: number[];
+    meeting_savings: number;
+    knowledge_savings: number;
   } | null;
-  automation_suggestions: Array<{
-    title: string;
-    frequency: string;
-    duration_minutes: number;
-    time_saved_yearly: number;
-    category: string;
+  gate_activity: {
+    total_checked: number;
+    passed: number;
+    warned: number;
+    rejected: number;
+    recent_rejections: Array<{ file_name: string; reasons: string; when: string }>;
+  } | null;
+  integration_health: Array<{
+    name: string;
+    label: string;
+    status: "active" | "configured" | "inactive";
+    last_event_at: string | null;
+    events_7d: number;
   }>;
+  meeting_stats: {
+    total_transcripts: number;
+    passed: number;
+    warned: number;
+    rejected: number;
+    per_owner: Array<{ owner_user_id: string; total: number; passed: number; warned: number; rejected: number }>;
+    last_ingest_at: string | null;
+  } | null;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -81,7 +108,50 @@ export default function AnalyticsPage() {
     );
   }
 
-  const totalEvents = Object.values(data.event_counts).reduce((a, b) => a + b, 0);
+  if (data.database_unreachable) {
+    return (
+      <div className="max-w-5xl mx-auto space-y-4">
+        <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>Analytics</h1>
+        <div
+          className="rounded-lg border p-6"
+          style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-warning)" }}
+        >
+          <p className="text-sm font-semibold" style={{ color: "var(--wp-warning)" }}>
+            Database not reachable
+          </p>
+          <p className="text-sm mt-2" style={{ color: "var(--wp-text-dim)" }}>
+            Analytics depend on a live PostgreSQL connection. Once <code>DATABASE_URL</code> is set in production and the team starts using the system, this page will fill in automatically.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (data.live_mode_empty) {
+    return (
+      <div className="max-w-5xl mx-auto space-y-4">
+        <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>Analytics</h1>
+        <div
+          className="rounded-lg border p-6"
+          style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+        >
+          <p className="text-sm font-semibold" style={{ color: "var(--wp-text)" }}>
+            No activity yet
+          </p>
+          <p className="text-sm mt-2" style={{ color: "var(--wp-text-dim)" }}>
+            The system is connected but the team hasn&apos;t generated any tracked activity in the last 7 days. Ask the Wolfpack Assistant a question, generate a doc, or connect an integration on the Settings page to start filling this in.
+          </p>
+          <a
+            href="/settings"
+            className="inline-block mt-3 text-sm font-medium"
+            style={{ color: "var(--wp-gold)" }}
+          >
+            Go to Settings →
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   // Build trend bars for AI efficiency
   const trendValues = data.ai_efficiency?.trend || [];
@@ -96,24 +166,67 @@ export default function AnalyticsPage() {
         Analytics
       </h1>
 
-      {/* Top stats */}
+      {/* Top stats — pulled from plain-language activity buckets so the
+          team sees what's happening without needing to know dev jargon */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total Events (7d)" value={totalEvents} color="var(--wp-gold)" />
         <StatCard
           label="Zero-Token Rate"
-          value={data.ai_efficiency ? `${data.ai_efficiency.zero_token_pct}%` : "N/A"}
+          value={data.ai_efficiency ? `${data.ai_efficiency.zero_token_pct}%` : "—"}
           color="var(--wp-success)"
+          hint="% of answers we served without paying for AI"
         />
         <StatCard
           label="Questions Asked"
-          value={data.event_counts["knowledge.question_asked"] || 0}
+          value={(data.activity_summary.find((a) => a.label === "Questions asked")?.count) || 0}
           color="var(--wp-info)"
+          hint="Last 7 days"
         />
         <StatCard
-          label="Docs Generated"
-          value={data.event_counts["knowledge.doc_generated"] || 0}
+          label="Documents Generated"
+          value={(data.activity_summary.find((a) => a.label === "Documents generated")?.count) || 0}
           color="var(--wp-warning)"
+          hint="Reports, proposals, client docs"
         />
+        <StatCard
+          label="Meetings Ingested"
+          value={data.meeting_stats?.total_transcripts || 0}
+          color="var(--wp-gold)"
+          hint="Plaud transcripts in the team knowledge base"
+        />
+      </div>
+
+      {/* Activity summary — plain language, no dev jargon */}
+      <div
+        className="rounded-lg border p-5"
+        style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+      >
+        <h2 className="text-lg font-semibold mb-1" style={{ color: "var(--wp-gold)" }}>
+          What the team did this week
+        </h2>
+        <p className="text-xs mb-4" style={{ color: "var(--wp-text-muted)" }}>
+          Last 7 days of activity, in plain language.
+        </p>
+        {data.activity_summary.length === 0 ? (
+          <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>No activity yet.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {data.activity_summary.map((b, i) => (
+              <div
+                key={i}
+                className="p-3 rounded-lg"
+                style={{ background: "var(--wp-dark-surface2)" }}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium" style={{ color: "var(--wp-text)" }}>{b.label}</span>
+                  <span className="text-base font-bold" style={{ color: "var(--wp-gold)" }}>{b.count}</span>
+                </div>
+                <p className="text-xs mt-1" style={{ color: "var(--wp-text-muted)" }}>
+                  {b.description}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* AI Efficiency Trend */}
@@ -145,13 +258,135 @@ export default function AnalyticsPage() {
               </div>
             ))}
           </div>
-          <div className="flex items-center gap-4 mt-3 text-xs" style={{ color: "var(--wp-text-dim)" }}>
+          <div className="flex items-center gap-4 mt-3 text-xs flex-wrap" style={{ color: "var(--wp-text-dim)" }}>
             <span>
-              <span style={{ color: "var(--wp-success)" }}>{data.ai_efficiency.zero_token_answers}</span> cached answers
+              <span style={{ color: "var(--wp-success)" }}>{data.ai_efficiency.zero_token_answers}</span> answers from memory
+            </span>
+            <span>
+              <span style={{ color: "var(--wp-info)" }}>{data.ai_efficiency.knowledge_savings}</span> from knowledge cache
+            </span>
+            <span>
+              <span style={{ color: "var(--wp-gold)" }}>{data.ai_efficiency.meeting_savings}</span> from meetings
             </span>
             <span>
               <span style={{ color: "var(--wp-warning)" }}>{data.ai_efficiency.ai_calls}</span> AI calls
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* Integration health */}
+      {data.integration_health.length > 0 && (
+        <div
+          className="rounded-lg border p-5"
+          style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+        >
+          <h2 className="text-lg font-semibold mb-1" style={{ color: "var(--wp-gold)" }}>
+            Integration health
+          </h2>
+          <p className="text-xs mb-4" style={{ color: "var(--wp-text-muted)" }}>
+            Which connected tools have actually delivered data this week. Configured but inactive means it&apos;s set up but no events have arrived.
+          </p>
+          <div className="space-y-2">
+            {data.integration_health.map((i) => (
+              <div
+                key={i.name}
+                className="flex items-center justify-between p-3 rounded-lg"
+                style={{ background: "var(--wp-dark-surface2)" }}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{
+                      background: i.status === "active" ? "var(--wp-success)" : "var(--wp-text-muted)",
+                    }}
+                  />
+                  <span className="text-sm font-medium" style={{ color: "var(--wp-text)" }}>{i.label}</span>
+                </div>
+                <div className="text-xs flex items-center gap-3" style={{ color: "var(--wp-text-dim)" }}>
+                  <span>{i.events_7d} events</span>
+                  {i.last_event_at && (
+                    <span>last {new Date(i.last_event_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Doc quality gate activity */}
+      {data.gate_activity && data.gate_activity.total_checked > 0 && (
+        <div
+          className="rounded-lg border p-5"
+          style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+        >
+          <h2 className="text-lg font-semibold mb-1" style={{ color: "var(--wp-gold)" }}>
+            Doc quality gate
+          </h2>
+          <p className="text-xs mb-4" style={{ color: "var(--wp-text-muted)" }}>
+            Documents checked for PII, security risks, and compliance issues before they enter the knowledge base.
+          </p>
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="p-3 rounded-lg text-center" style={{ background: "var(--wp-dark-surface2)" }}>
+              <p className="text-2xl font-bold" style={{ color: "var(--wp-success)" }}>{data.gate_activity.passed}</p>
+              <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>Passed</p>
+            </div>
+            <div className="p-3 rounded-lg text-center" style={{ background: "var(--wp-dark-surface2)" }}>
+              <p className="text-2xl font-bold" style={{ color: "var(--wp-warning)" }}>{data.gate_activity.warned}</p>
+              <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>Warned (PII redacted)</p>
+            </div>
+            <div className="p-3 rounded-lg text-center" style={{ background: "var(--wp-dark-surface2)" }}>
+              <p className="text-2xl font-bold" style={{ color: "var(--wp-error)" }}>{data.gate_activity.rejected}</p>
+              <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>Blocked</p>
+            </div>
+          </div>
+          {data.gate_activity.recent_rejections.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold mb-2" style={{ color: "var(--wp-text-dim)" }}>Recent blocks</p>
+              <div className="space-y-2">
+                {data.gate_activity.recent_rejections.map((r, i) => (
+                  <div key={i} className="p-2 rounded text-xs" style={{ background: "var(--wp-dark-surface2)" }}>
+                    <div className="flex justify-between gap-2">
+                      <span className="font-medium truncate" style={{ color: "var(--wp-text)" }}>{r.file_name}</span>
+                      <span style={{ color: "var(--wp-text-muted)" }}>
+                        {new Date(r.when).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </span>
+                    </div>
+                    <p className="mt-1" style={{ color: "var(--wp-text-muted)" }}>{r.reasons}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Meeting ingestion stats */}
+      {data.meeting_stats && data.meeting_stats.total_transcripts > 0 && (
+        <div
+          className="rounded-lg border p-5"
+          style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+        >
+          <h2 className="text-lg font-semibold mb-1" style={{ color: "var(--wp-gold)" }}>
+            Meeting transcripts
+          </h2>
+          <p className="text-xs mb-4" style={{ color: "var(--wp-text-muted)" }}>
+            Plaud recordings ingested into the team knowledge base.
+          </p>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="p-3 rounded-lg text-center" style={{ background: "var(--wp-dark-surface2)" }}>
+              <p className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>{data.meeting_stats.total_transcripts}</p>
+              <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>Total</p>
+            </div>
+            <div className="p-3 rounded-lg text-center" style={{ background: "var(--wp-dark-surface2)" }}>
+              <p className="text-2xl font-bold" style={{ color: "var(--wp-success)" }}>{data.meeting_stats.passed}</p>
+              <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>Clean</p>
+            </div>
+            <div className="p-3 rounded-lg text-center" style={{ background: "var(--wp-dark-surface2)" }}>
+              <p className="text-2xl font-bold" style={{ color: "var(--wp-warning)" }}>{data.meeting_stats.warned}</p>
+              <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>PII redacted</p>
+            </div>
           </div>
         </div>
       )}
@@ -201,7 +436,7 @@ export default function AnalyticsPage() {
                 return (
                   <div key={i}>
                     <div className="flex items-center justify-between text-sm mb-1">
-                      <span>{member.user_id}</span>
+                      <span>{member.user_name || member.user_id}</span>
                       <span style={{ color: "var(--wp-text-dim)" }}>{member.event_count} events</span>
                     </div>
                     <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--wp-dark-surface2)" }}>
@@ -315,39 +550,6 @@ export default function AnalyticsPage() {
           )}
         </div>
 
-        {/* Automation Potential */}
-        <div
-          className="rounded-lg border p-5"
-          style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
-        >
-          <h2 className="text-lg font-semibold mb-4" style={{ color: "var(--wp-gold)" }}>
-            Automation Potential
-          </h2>
-          {data.automation_suggestions.length === 0 ? (
-            <p className="text-sm" style={{ color: "var(--wp-text-muted)" }}>
-              No automation suggestions yet. Team members can submit manual tasks on the Features page.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {data.automation_suggestions.map((s, i) => (
-                <div
-                  key={i}
-                  className="p-3 rounded-lg"
-                  style={{ background: "var(--wp-dark-surface2)" }}
-                >
-                  <p className="text-sm font-medium">{s.title}</p>
-                  <div className="flex items-center gap-3 mt-1.5 text-xs" style={{ color: "var(--wp-text-dim)" }}>
-                    <span>{s.frequency}</span>
-                    <span>{s.duration_minutes}min each</span>
-                    <span style={{ color: "var(--wp-success)" }}>
-                      ~{Math.round(s.time_saved_yearly / 60)}h/yr saved
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
@@ -357,10 +559,12 @@ function StatCard({
   label,
   value,
   color,
+  hint,
 }: {
   label: string;
   value: string | number;
   color: string;
+  hint?: string;
 }) {
   return (
     <div
@@ -373,6 +577,11 @@ function StatCard({
       <p className="text-sm mt-1" style={{ color: "var(--wp-text-dim)" }}>
         {label}
       </p>
+      {hint && (
+        <p className="text-xs mt-1" style={{ color: "var(--wp-text-muted)" }}>
+          {hint}
+        </p>
+      )}
     </div>
   );
 }

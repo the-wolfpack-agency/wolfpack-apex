@@ -97,7 +97,7 @@ function parseUpsert(text: string, params: unknown[]): { table: string; row: Moc
 
 function parseUpdate(text: string, params: unknown[]): { table: string; updates: MockRow; whereCol?: string; whereVal?: unknown } | null {
   const normalized = text.replace(/\s+/g, " ").trim();
-  const updateMatch = normalized.match(/UPDATE\s+(\w+)\s+SET\s+(.+?)\s+WHERE\s+(.+)/is);
+  const updateMatch = normalized.match(/UPDATE\s+(\w+)\s+SET\s+([\s\S]+?)\s+WHERE\s+([\s\S]+)/i);
   if (!updateMatch) return null;
 
   const table = updateMatch[1];
@@ -291,9 +291,9 @@ const mockSearchSimilarQuestions = jest.fn().mockResolvedValue([]);
 const mockGetQdrantHealth = jest.fn().mockResolvedValue(true);
 
 jest.mock("@/lib/qdrant", () => ({
-  upsertKnowledgePoint: (...args: any[]) => mockUpsertKnowledgePoint(...args),
-  searchSimilarQuestions: (...args: any[]) => mockSearchSimilarQuestions(...args),
-  getQdrantHealth: (...args: any[]) => mockGetQdrantHealth(...args),
+  upsertKnowledgePoint: (...args: any[]) => (mockUpsertKnowledgePoint as any)(...args),
+  searchSimilarQuestions: (...args: any[]) => (mockSearchSimilarQuestions as any)(...args),
+  getQdrantHealth: (...args: any[]) => (mockGetQdrantHealth as any)(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -326,10 +326,10 @@ const mockGetKnowledgeGraph = jest.fn().mockResolvedValue({ nodes: [], edges: []
 const mockGetNeo4jHealth = jest.fn().mockResolvedValue(true);
 
 jest.mock("@/lib/neo4j", () => ({
-  recordKnowledgeInteraction: (...args: any[]) => mockRecordKnowledgeInteraction(...args),
-  recordCollaboration: (...args: any[]) => mockRecordCollaboration(...args),
-  recordDocGeneration: (...args: any[]) => mockRecordDocGeneration(...args),
-  getKnowledgeGraph: (...args: any[]) => mockGetKnowledgeGraph(...args),
+  recordKnowledgeInteraction: (...args: any[]) => (mockRecordKnowledgeInteraction as any)(...args),
+  recordCollaboration: (...args: any[]) => (mockRecordCollaboration as any)(...args),
+  recordDocGeneration: (...args: any[]) => (mockRecordDocGeneration as any)(...args),
+  getKnowledgeGraph: (...args: any[]) => (mockGetKnowledgeGraph as any)(...args),
   getNeo4jHealth: (...args: any[]) => mockGetNeo4jHealth(...args),
 }));
 
@@ -353,7 +353,7 @@ const mockTrackEvent = jest.fn(
 );
 
 jest.mock("@/lib/analytics", () => ({
-  trackEvent: (...args: any[]) => mockTrackEvent(...args),
+  trackEvent: (...args: any[]) => (mockTrackEvent as any)(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -362,7 +362,7 @@ jest.mock("@/lib/analytics", () => ({
 
 jest.mock("@/lib/db", () => ({
   query: jest.fn(),
-  safeQuery: (...args: any[]) => mockSafeQueryHandler(...args),
+  safeQuery: (...args: any[]) => (mockSafeQueryHandler as any)(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -373,8 +373,8 @@ const mockSearchKnowledge = jest.fn();
 const mockSaveAnswer = jest.fn();
 
 jest.mock("@/lib/knowledge", () => ({
-  searchKnowledge: (...args: any[]) => mockSearchKnowledge(...args),
-  saveAnswer: (...args: any[]) => mockSaveAnswer(...args),
+  searchKnowledge: (...args: any[]) => (mockSearchKnowledge as any)(...args),
+  saveAnswer: (...args: any[]) => (mockSaveAnswer as any)(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -385,8 +385,8 @@ const mockTripleWriteKnowledge = jest.fn().mockResolvedValue(undefined);
 const mockTripleWriteEvent = jest.fn().mockResolvedValue(undefined);
 
 jest.mock("@/lib/triple-write", () => ({
-  tripleWriteKnowledge: (...args: any[]) => mockTripleWriteKnowledge(...args),
-  tripleWriteEvent: (...args: any[]) => mockTripleWriteEvent(...args),
+  tripleWriteKnowledge: (...args: any[]) => (mockTripleWriteKnowledge as any)(...args),
+  tripleWriteEvent: (...args: any[]) => (mockTripleWriteEvent as any)(...args),
 }));
 
 // ---------------------------------------------------------------------------

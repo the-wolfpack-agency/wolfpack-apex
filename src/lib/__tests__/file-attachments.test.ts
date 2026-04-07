@@ -670,3 +670,4 @@ describe("API Route -- Quality Gate Integration", () => {
     expect(mockChat).toHaveBeenCalled();
   });
 });
+export {};

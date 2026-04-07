@@ -487,3 +487,4 @@ describe("Compound Insights API route", () => {
     expect(typeof route.GET).toBe("function");
   });
 });
+export {};

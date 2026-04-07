@@ -337,3 +337,4 @@ describe("Analytics Event Types", () => {
     expect(analytics).toContain("quickbooks.sync_completed");
   });
 });
+export {};
