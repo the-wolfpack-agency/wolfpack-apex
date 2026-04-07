@@ -186,7 +186,11 @@ jobs:
 
       - name: Install AgenticQA dependencies
         if: steps.pat-check.outputs.configured == 'true'
-        working-directory: agenticqa-src
+        # The Python project lives in the AgenticQA/ subdirectory of the
+        # nhomyk/AgenticQA repo, not at the repo root. The repo root has
+        # the Dockerfile and the JS agents (sdet-agent.js etc.); the
+        # FastAPI app and pyproject.toml are nested.
+        working-directory: agenticqa-src/AgenticQA
         run: |
           python -m pip install --upgrade pip
           # Install the package itself (pulls in agents, RAG, etc.)
@@ -197,7 +201,7 @@ jobs:
       - name: Boot AgenticQA orchestrator (sidecar)
         id: boot
         if: steps.pat-check.outputs.configured == 'true'
-        working-directory: agenticqa-src
+        working-directory: agenticqa-src/AgenticQA
         env:
           AGENTICQA_AUTH_DISABLE: '1'
           PYTHONPATH: src:.
