@@ -75,7 +75,17 @@ export type ApexEventType =
   // Briefing
   | "briefing.generated"
   | "briefing.viewed"
-  | "briefing.refreshed";
+  | "briefing.refreshed"
+  // Plaud (meeting transcripts)
+  | "plaud.connected"
+  | "plaud.disconnected"
+  | "plaud.webhook_received"
+  | "plaud.signature_invalid"
+  | "plaud.transcript_ingested"
+  | "plaud.transcript_rejected"
+  | "plaud.transcript_duplicate"
+  | "plaud.fetch_failed"
+  | "plaud.no_owner";
 
 export interface ApexEvent {
   event_type: ApexEventType;
