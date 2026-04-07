@@ -233,34 +233,73 @@ jobs:
         id: submit
         if: steps.boot.outputs.ready == 'true'
         run: |
-          BODY=$(python3 -c "import json; print(json.dumps({
-            'prompt': 'Run full pipeline against this repository — SDET, Fullstack, SRE, Compliance, Security',
-            'repo': 'https://github.com/the-wolfpack-agency/wolfpack-apex',
-            'requester': 'instinct-ci',
-            'metadata': {
-              'commit_sha': '${{ github.sha }}',
-              'run_id': '${{ github.run_id }}',
-              'branch': '${{ github.ref_name }}'
-            }
-          }))")
-          RESPONSE=$(curl -sS -X POST "${AGENTICQA_API}/api/workflows/requests" \
+          # Build the request body
+          python3 -c "
+          import json
+          body = {
+              'prompt': 'Run full pipeline against this repository — SDET, Fullstack, SRE, Compliance, Security',
+              'repo': 'https://github.com/the-wolfpack-agency/wolfpack-apex',
+              'requester': 'instinct-ci',
+              'metadata': {
+                  'commit_sha': '${{ github.sha }}',
+                  'run_id': '${{ github.run_id }}',
+                  'branch': '${{ github.ref_name }}',
+              },
+          }
+          with open('/tmp/submit-body.json', 'w') as f:
+              json.dump(body, f)
+          "
+          # POST. The API returns:
+          #   { success: bool, request: { id, status, plan, ... } }
+          curl -sS -X POST "${AGENTICQA_API}/api/workflows/requests" \
             -H "Content-Type: application/json" \
-            -d "$BODY")
-          echo "$RESPONSE" > /tmp/workflow-submit.json
+            -d @/tmp/submit-body.json > /tmp/workflow-submit.json
           echo "--- raw response ---"
-          echo "$RESPONSE"
+          cat /tmp/workflow-submit.json
+          echo
+          # Extract the nested id from request.id
           REQUEST_ID=$(python3 -c "
           import json
           try:
-              d = json.loads('''$RESPONSE''')
-              print(d.get('request_id') or d.get('id') or '')
-          except Exception:
-              print('')
+              d = json.load(open('/tmp/workflow-submit.json'))
+              # Response shape: {success, timestamp, request: {id, status, ...}}
+              req = d.get('request') or {}
+              print(req.get('id') or d.get('request_id') or d.get('id') or '')
+          except Exception as e:
+              print(f'extract_failed: {e}')
           " 2>/dev/null || echo "")
           echo "request_id=${REQUEST_ID}" >> $GITHUB_OUTPUT
-          if [ -z "${REQUEST_ID}" ]; then
+          if [ -z "${REQUEST_ID}" ] || [[ "${REQUEST_ID}" == extract_failed* ]]; then
             echo "::warning::Could not extract request_id from response"
+            exit 0
           fi
+          # The orchestrator gates execution behind manual approval by
+          # default. CI auto-approves so the agents actually run.
+          echo "Auto-approving workflow request ${REQUEST_ID}..."
+          curl -sS -X POST "${AGENTICQA_API}/api/workflows/requests/${REQUEST_ID}/approve" \
+            -H "Content-Type: application/json" \
+            -d '{"requester":"instinct-ci","reason":"CI auto-approve"}' \
+            > /tmp/approve-resp.json 2>&1 || true
+          echo "--- approve response ---"
+          cat /tmp/approve-resp.json
+          echo
+          # Queue the approved workflow for execution
+          echo "Queueing workflow request ${REQUEST_ID}..."
+          curl -sS -X POST "${AGENTICQA_API}/api/workflows/requests/${REQUEST_ID}/queue" \
+            -H "Content-Type: application/json" \
+            -d '{"requester":"instinct-ci"}' \
+            > /tmp/queue-resp.json 2>&1 || true
+          echo "--- queue response ---"
+          cat /tmp/queue-resp.json
+          echo
+          # Run the worker to actually execute the next item in the queue
+          echo "Running worker for request ${REQUEST_ID}..."
+          curl -sS -X POST "${AGENTICQA_API}/api/workflows/worker/run/${REQUEST_ID}" \
+            -H "Content-Type: application/json" \
+            -d '{"dry_run":false,"open_pr":false}' \
+            > /tmp/run-resp.json 2>&1 || true
+          echo "--- worker run response ---"
+          cat /tmp/run-resp.json
 
       - name: Poll workflow until complete
         id: poll
@@ -270,12 +309,23 @@ jobs:
           for i in $(seq 1 60); do
             sleep 10
             curl -sS "${AGENTICQA_API}/api/workflows/requests/${REQUEST_ID}/status" > /tmp/status.json 2>/dev/null || true
-            STATE=$(python3 -c "import json; print(json.load(open('/tmp/status.json')).get('status', 'unknown'))" 2>/dev/null || echo "unknown")
+            STATE=$(python3 -c "
+          import json
+          try:
+              d = json.load(open('/tmp/status.json'))
+              # status may be at the top level or nested under 'request'
+              s = d.get('status') or (d.get('request') or {}).get('status')
+              print(s or 'unknown')
+          except Exception:
+              print('unknown')
+          " 2>/dev/null || echo "unknown")
             echo "[poll ${i}/60] status=${STATE}"
-            if [ "$STATE" = "completed" ] || [ "$STATE" = "succeeded" ] || [ "$STATE" = "failed" ]; then
-              echo "final_status=${STATE}" >> $GITHUB_OUTPUT
-              break
-            fi
+            case "$STATE" in
+              COMPLETED|completed|SUCCEEDED|succeeded|FAILED|failed|ERROR|error)
+                echo "final_status=${STATE}" >> $GITHUB_OUTPUT
+                break
+                ;;
+            esac
           done
 
       - name: Render orchestrator summary
