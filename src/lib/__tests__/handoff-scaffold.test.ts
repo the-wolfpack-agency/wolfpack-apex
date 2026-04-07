@@ -10,7 +10,7 @@
  * pick up context, and a malformed handoff is worse than no handoff.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";

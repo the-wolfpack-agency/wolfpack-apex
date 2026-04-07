@@ -10,7 +10,7 @@
  * helper logic that's easy to unit test directly.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 describe("analytics route — plain-language bucketing", () => {
   test("bucketEvents groups raw event names into human labels", () => {

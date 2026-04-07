@@ -5,7 +5,7 @@
  * template listing, customization, and analytics tracking.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { trackEvent } from "@/lib/analytics";
 
