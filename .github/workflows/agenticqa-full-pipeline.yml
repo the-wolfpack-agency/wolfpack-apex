@@ -123,97 +123,149 @@ jobs:
     needs: [linting-fix]
     if: always() && needs.linting-fix.result != 'cancelled'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     name: "Phase 1: AgenticQA Orchestrator (full agent pipeline)"
     # ───────────────────────────────────────────────────────────────────
-    # NOTE on architecture:
+    # ARCHITECTURE
     #
-    # The original approach (uses: nhomyk/AgenticQA@main composite action)
-    # is blocked by GitHub: nhomyk/AgenticQA is a USER-OWNED private repo,
-    # and a different organization's repo (the-wolfpack-agency/wolfpack-apex)
-    # cannot consume actions from a private user-owned repo. The Actions
-    # access API explicitly forbids granting org-level access to user
-    # repos — confirmed via REST API.
+    # AgenticQA is a private user-owned repo (nhomyk/AgenticQA), so we
+    # cannot consume it as a GitHub composite action from this org's
+    # workflow (GitHub forbids cross-owner private action access).
     #
-    # The right pattern (and the one AgenticQA was actually built for)
-    # is the FastAPI orchestrator at agenticqa-production.up.railway.app,
-    # which exposes 50+ endpoints including /api/agents/execute and
-    # /api/workflows/requests for running the full agent pipeline against
-    # an external repo. That gives us SDET, Fullstack, SRE, Compliance,
-    # RedTeam, Pentest agents — not just the security scanner.
+    # Instead this job runs AgenticQA's FastAPI orchestrator AS A
+    # SIDECAR for the duration of the run:
+    #   1. Clones nhomyk/AgenticQA into ./agenticqa-src using a PAT secret
+    #   2. Installs the package + uvicorn
+    #   3. Boots `agent_api:app` on localhost:8765 in the background
+    #   4. Waits for /health to return 200
+    #   5. POSTs the Instinct repo URL to /api/workflows/requests
+    #   6. Polls /api/workflows/requests/{id}/status until complete
+    #   7. Renders results as a step summary
     #
-    # This job calls that API. It is currently `continue-on-error: true`
-    # because the Railway deploy is returning 502 (the application isn't
-    # booting — possibly missing env vars like ANTHROPIC_API_KEY or an
-    # import-time error). The moment Railway is healthy, this job will
-    # start producing real agent results with zero further changes here.
+    # No external infrastructure (no Railway, no Vercel hosting, no
+    # GHCR image) — just a fresh boot every run. Slower per-run but
+    # zero ops surface. Always uses the latest AgenticQA main.
     #
-    # The other Phase 1 jobs (jest, shadow-verification, sdet-analysis,
-    # compliance-analysis) are pure-shell and run without depending on
-    # the AgenticQA orchestrator at all, so the pipeline stays useful
-    # while Railway is offline.
+    # Required secret: AGENTICQA_REPO_PAT — a Personal Access Token
+    # (classic, with `repo` scope) belonging to a user who has read
+    # access to nhomyk/AgenticQA. If the secret is missing the job
+    # gracefully skips with a warning so the pipeline stays green.
     # ───────────────────────────────────────────────────────────────────
     env:
-      AGENTICQA_API: ${{ secrets.AGENTICQA_API_URL || 'https://agenticqa-production.up.railway.app' }}
-      AGENTICQA_TOKEN: ${{ secrets.AGENTICQA_AUTH_TOKEN }}
+      AGENTICQA_API: http://127.0.0.1:8765
     steps:
       - uses: actions/checkout@v4
 
-      - name: Health check AgenticQA orchestrator
-        id: health
+      - name: Check if PAT is configured
+        id: pat-check
+        env:
+          PAT: ${{ secrets.AGENTICQA_REPO_PAT }}
         run: |
-          STATUS=$(curl -sS -o /tmp/health.json -w "%{http_code}" --max-time 10 "${AGENTICQA_API}/health" || echo "000")
-          echo "status=${STATUS}" >> $GITHUB_OUTPUT
-          if [ "$STATUS" = "200" ]; then
-            echo "AgenticQA orchestrator is healthy"
+          if [ -z "${PAT}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "::warning::AGENTICQA_REPO_PAT secret is not set — the orchestrator job will skip. Set this in repo Settings → Secrets → Actions to enable the full AgenticQA agent pipeline."
           else
-            echo "AgenticQA orchestrator returned ${STATUS} (skipping orchestrated agent run)"
-            echo "::warning::AgenticQA orchestrator unavailable (${STATUS}) — full agent pipeline skipped this run"
+            echo "configured=true" >> $GITHUB_OUTPUT
           fi
+
+      - name: Clone AgenticQA source
+        if: steps.pat-check.outputs.configured == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: nhomyk/AgenticQA
+          token: ${{ secrets.AGENTICQA_REPO_PAT }}
+          path: agenticqa-src
+          ref: main
+          fetch-depth: 1
+
+      - name: Set up Python
+        if: steps.pat-check.outputs.configured == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install AgenticQA dependencies
+        if: steps.pat-check.outputs.configured == 'true'
+        working-directory: agenticqa-src
+        run: |
+          python -m pip install --upgrade pip
+          # Install the package itself (pulls in agents, RAG, etc.)
+          pip install -e .
+          # uvicorn for the FastAPI server
+          pip install 'uvicorn[standard]'
+
+      - name: Boot AgenticQA orchestrator (sidecar)
+        id: boot
+        if: steps.pat-check.outputs.configured == 'true'
+        working-directory: agenticqa-src
+        env:
+          AGENTICQA_AUTH_DISABLE: '1'
+          PYTHONPATH: src:.
+        run: |
+          # Run uvicorn in background; logs go to /tmp for the summary step
+          nohup python -m uvicorn agent_api:app \
+            --host 127.0.0.1 \
+            --port 8765 \
+            --workers 1 \
+            > /tmp/agenticqa-server.log 2>&1 &
+          echo $! > /tmp/agenticqa-server.pid
+          # Wait for /health to come up (up to 60s — large module set, slow boot)
+          for i in $(seq 1 60); do
+            STATUS=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 2 "${AGENTICQA_API}/health" 2>/dev/null || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "Sidecar healthy after ${i}s"
+              echo "ready=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::AgenticQA sidecar failed to come up within 60s"
+          echo "ready=false" >> $GITHUB_OUTPUT
+          echo "--- last 60 lines of server log ---"
+          tail -60 /tmp/agenticqa-server.log || true
+          exit 1
 
       - name: Submit full pipeline workflow request
         id: submit
-        if: steps.health.outputs.status == '200'
+        if: steps.boot.outputs.ready == 'true'
         run: |
-          AUTH_HEADER=""
-          if [ -n "${AGENTICQA_TOKEN}" ]; then
-            AUTH_HEADER="Authorization: Bearer ${AGENTICQA_TOKEN}"
-          fi
-          BODY=$(cat <<'JSON'
-          {
-            "prompt": "Run full pipeline against this repository — SDET, Fullstack, SRE, Compliance, Security",
-            "repo": "https://github.com/the-wolfpack-agency/wolfpack-apex",
-            "requester": "instinct-ci",
-            "metadata": {
-              "commit_sha": "${{ github.sha }}",
-              "run_id": "${{ github.run_id }}",
-              "branch": "${{ github.ref_name }}"
+          BODY=$(python3 -c "import json; print(json.dumps({
+            'prompt': 'Run full pipeline against this repository — SDET, Fullstack, SRE, Compliance, Security',
+            'repo': 'https://github.com/the-wolfpack-agency/wolfpack-apex',
+            'requester': 'instinct-ci',
+            'metadata': {
+              'commit_sha': '${{ github.sha }}',
+              'run_id': '${{ github.run_id }}',
+              'branch': '${{ github.ref_name }}'
             }
-          }
-          JSON
-          )
+          }))")
           RESPONSE=$(curl -sS -X POST "${AGENTICQA_API}/api/workflows/requests" \
             -H "Content-Type: application/json" \
-            ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
             -d "$BODY")
           echo "$RESPONSE" > /tmp/workflow-submit.json
-          REQUEST_ID=$(echo "$RESPONSE" | python3 -c "import json,sys; print(json.load(sys.stdin).get('request_id', json.load(sys.stdin).get('id', '')))" 2>/dev/null || echo "")
+          echo "--- raw response ---"
+          echo "$RESPONSE"
+          REQUEST_ID=$(python3 -c "
+          import json
+          try:
+              d = json.loads('''$RESPONSE''')
+              print(d.get('request_id') or d.get('id') or '')
+          except Exception:
+              print('')
+          " 2>/dev/null || echo "")
           echo "request_id=${REQUEST_ID}" >> $GITHUB_OUTPUT
-          echo "Submitted workflow request: ${REQUEST_ID}"
+          if [ -z "${REQUEST_ID}" ]; then
+            echo "::warning::Could not extract request_id from response"
+          fi
 
       - name: Poll workflow until complete
         id: poll
-        if: steps.health.outputs.status == '200' && steps.submit.outputs.request_id != ''
+        if: steps.boot.outputs.ready == 'true' && steps.submit.outputs.request_id != ''
         run: |
-          AUTH_HEADER=""
-          if [ -n "${AGENTICQA_TOKEN}" ]; then
-            AUTH_HEADER="Authorization: Bearer ${AGENTICQA_TOKEN}"
-          fi
           REQUEST_ID="${{ steps.submit.outputs.request_id }}"
           for i in $(seq 1 60); do
             sleep 10
-            curl -sS ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
-              "${AGENTICQA_API}/api/workflows/requests/${REQUEST_ID}/status" > /tmp/status.json
+            curl -sS "${AGENTICQA_API}/api/workflows/requests/${REQUEST_ID}/status" > /tmp/status.json 2>/dev/null || true
             STATE=$(python3 -c "import json; print(json.load(open('/tmp/status.json')).get('status', 'unknown'))" 2>/dev/null || echo "unknown")
             echo "[poll ${i}/60] status=${STATE}"
             if [ "$STATE" = "completed" ] || [ "$STATE" = "succeeded" ] || [ "$STATE" = "failed" ]; then
@@ -227,19 +279,29 @@ jobs:
         run: |
           echo "## AgenticQA Orchestrator" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Endpoint:** ${AGENTICQA_API}" >> $GITHUB_STEP_SUMMARY
-          echo "**Health:** ${{ steps.health.outputs.status }}" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ steps.health.outputs.status }}" != "200" ]; then
+          if [ "${{ steps.pat-check.outputs.configured }}" != "true" ]; then
+            echo "**Status:** Skipped — AGENTICQA_REPO_PAT secret not configured" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "AgenticQA orchestrator is offline — full agent pipeline skipped." >> $GITHUB_STEP_SUMMARY
+            echo "To enable the full AgenticQA agent pipeline:" >> $GITHUB_STEP_SUMMARY
+            echo "1. Create a Personal Access Token (classic) with \`repo\` scope at https://github.com/settings/tokens" >> $GITHUB_STEP_SUMMARY
+            echo "2. Add it as the secret \`AGENTICQA_REPO_PAT\` in this repo's Settings → Secrets and variables → Actions" >> $GITHUB_STEP_SUMMARY
+            echo "3. Re-run this workflow" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.boot.outputs.ready }}" != "true" ]; then
+            echo "**Status:** Sidecar failed to boot" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**To enable full agent capabilities:** ensure the Railway deploy at \`agenticqa-production.up.railway.app\` is healthy. Current 502 likely means missing env vars (\`ANTHROPIC_API_KEY\`, \`NEO4J_PASSWORD\`) or an import-time error in \`agent_api.py\`." >> $GITHUB_STEP_SUMMARY
+            echo "<details><summary>Server log (last 60 lines)</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -60 /tmp/agenticqa-server.log 2>/dev/null || echo "(no log)" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
           else
-            echo "**Workflow request:** ${{ steps.submit.outputs.request_id }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Status:** Sidecar healthy, workflow submitted" >> $GITHUB_STEP_SUMMARY
+            echo "**Request ID:** ${{ steps.submit.outputs.request_id }}" >> $GITHUB_STEP_SUMMARY
             echo "**Final status:** ${{ steps.poll.outputs.final_status }}" >> $GITHUB_STEP_SUMMARY
             if [ -f /tmp/status.json ]; then
               echo "" >> $GITHUB_STEP_SUMMARY
-              echo "<details><summary>Full response</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "<details><summary>Full agent response</summary>" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
               echo '```json' >> $GITHUB_STEP_SUMMARY
               cat /tmp/status.json >> $GITHUB_STEP_SUMMARY
@@ -248,6 +310,13 @@ jobs:
             fi
           fi
         continue-on-error: true
+
+      - name: Stop sidecar
+        if: always()
+        run: |
+          if [ -f /tmp/agenticqa-server.pid ]; then
+            kill $(cat /tmp/agenticqa-server.pid) 2>/dev/null || true
+          fi
 
   shadow-verification:
     needs: [linting-fix]
@@ -501,7 +570,7 @@ jobs:
           echo "| 0 | Code Linting | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 0 | SRE Auto-Fix | ${{ needs.linting-fix.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 1 | Jest Test Suite | ${{ needs.phase-1-testing.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 1 | AgenticQA Security Scan | ${{ needs.agenticqa-orchestrator.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 1 | AgenticQA Orchestrator | ${{ needs.agenticqa-orchestrator.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 1 | Shadow Mode Verification | ${{ needs.shadow-verification.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 1 | SDET Analysis | ${{ needs.sdet-analysis.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 1 | Compliance Analysis | ${{ needs.compliance-analysis.result }} |" >> $GITHUB_STEP_SUMMARY
