@@ -11,6 +11,7 @@
  */
 
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
+import { searchMeetingTranscripts } from "@/lib/plaud";
 
 import { trackEvent } from "@/lib/analytics";
 import { safeQuery } from "@/lib/db";
@@ -22,6 +23,7 @@ import { safeQuery } from "@/lib/db";
 export type AssistantSource =
   | "knowledge_cache"
   | "analytics"
+  | "meeting_transcripts"
   | "ai"
   | "fallback";
 
@@ -311,6 +313,31 @@ export async function chat(
     return {
       response: analyticsResult,
       source: "analytics",
+      tokensUsed: 0,
+      conversationId: convId,
+      messageId: msgId,
+    };
+  }
+
+  // --- Priority 3: Meeting transcripts (zero-token, from Plaud ingestion) ---
+  const meetingResult = await tryMeetingTranscripts(message);
+  if (meetingResult) {
+    trackEvent("knowledge.answer_found", userId, userRole, {
+      source: "meeting_transcripts",
+      tokens_used: 0,
+      module: "assistant",
+    });
+    trackEvent("system.ai_call_skipped", userId, userRole, {
+      reason: "meeting_transcripts_hit",
+      module: "assistant",
+    });
+
+    const msgId = await dbSaveMessage(convId, "assistant", meetingResult, "meeting_transcripts", 0);
+    await dbUpdateConversationStats(convId, 0);
+
+    return {
+      response: meetingResult,
+      source: "meeting_transcripts",
       tokensUsed: 0,
       conversationId: convId,
       messageId: msgId,
@@ -651,6 +678,55 @@ async function tryAnalyticsQuery(
     );
 
     return `Here are the top events from the last 7 days:\n\n${lines.join("\n")}`;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Priority 3: Meeting transcripts (zero-token search over Plaud ingestion)
+// ---------------------------------------------------------------------------
+
+const MEETING_KEYWORDS = [
+  "meeting", "call", "discussed", "talked about", "said", "agreed",
+  "decided", "action item", "follow up", "follow-up", "huddle",
+  "standup", "review", "sync", "1:1", "1on1", "client call", "kickoff",
+];
+
+function looksLikeMeetingQuestion(message: string): boolean {
+  const lower = message.toLowerCase();
+  return MEETING_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+async function tryMeetingTranscripts(message: string): Promise<string | null> {
+  // Cheap gate first — only search transcripts if the question
+  // looks like it's about a meeting / discussion / decision.
+  if (!looksLikeMeetingQuestion(message)) return null;
+
+  try {
+    const matches = await searchMeetingTranscripts(message, 3);
+    if (matches.length === 0 || matches[0].score === 0) return null;
+
+    const fmtDate = (d: string | null) => {
+      if (!d) return "unknown date";
+      try {
+        return new Date(d).toLocaleDateString("en-US", {
+          month: "short", day: "numeric", year: "numeric",
+        });
+      } catch { return d; }
+    };
+
+    const lines: string[] = ["Here is what I found in recent meeting transcripts:"];
+    for (const m of matches) {
+      const title = m.title || "Untitled meeting";
+      const owner = m.ownerName ? ` (${m.ownerName})` : "";
+      const when = fmtDate(m.recordedAt || m.ingestedAt);
+      lines.push("");
+      lines.push(`**${title}**${owner} — ${when}`);
+      if (m.summary) lines.push(m.summary);
+      lines.push(`> ${m.snippet}`);
+    }
+    return lines.join("\n");
   } catch {
     return null;
   }

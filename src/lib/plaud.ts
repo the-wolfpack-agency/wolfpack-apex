@@ -365,6 +365,229 @@ export async function deleteConnection(): Promise<void> {
   await query(`DELETE FROM apex_plaud_connections WHERE scope = 'org'`);
 }
 
+// ---------------------------------------------------------------------------
+// Read API for the UI + Assistant
+// ---------------------------------------------------------------------------
+
+export interface MeetingTranscriptRow {
+  id: string;
+  fileId: string;
+  ownerUserId: string;
+  ownerName?: string;
+  title: string | null;
+  summary: string | null;
+  recordedAt: string | null;
+  durationSeconds: number | null;
+  qualityStatus: "pass" | "warn" | "reject";
+  ingestedAt: string;
+  // Only included on detail fetches, never on list views (avoids huge payloads)
+  transcriptText?: string;
+}
+
+/**
+ * List recently-ingested meeting transcripts. Org-shared: every team
+ * member sees every meeting. owner_user_id is still recorded so we can
+ * switch to per-user filtering later without re-ingesting.
+ */
+export async function listMeetingTranscripts(limit = 50): Promise<MeetingTranscriptRow[]> {
+  if (!process.env.DATABASE_URL) return [];
+  const { rows } = await safeQuery<{
+    id: string;
+    file_id: string;
+    owner_user_id: string;
+    owner_name: string | null;
+    title: string | null;
+    summary: string | null;
+    recorded_at: string | null;
+    duration_seconds: number | null;
+    quality_status: "pass" | "warn" | "reject";
+    ingested_at: string;
+  }>(
+    `SELECT t.id, t.file_id, t.owner_user_id,
+            m.name AS owner_name,
+            t.title, t.summary, t.recorded_at, t.duration_seconds,
+            t.quality_status, t.ingested_at
+     FROM apex_meeting_transcripts t
+     LEFT JOIN apex_team_members m ON m.id = t.owner_user_id
+     WHERE t.quality_status <> 'reject'
+     ORDER BY COALESCE(t.recorded_at, t.ingested_at) DESC
+     LIMIT $1`,
+    [limit],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    fileId: r.file_id,
+    ownerUserId: r.owner_user_id,
+    ownerName: r.owner_name || undefined,
+    title: r.title,
+    summary: r.summary,
+    recordedAt: r.recorded_at,
+    durationSeconds: r.duration_seconds,
+    qualityStatus: r.quality_status,
+    ingestedAt: r.ingested_at,
+  }));
+}
+
+/**
+ * Fetch one transcript including the full text. Used by the meeting
+ * detail view. Returns null if not found or if the row was rejected
+ * (rejected rows have no real content to display).
+ */
+export async function getMeetingTranscript(id: string): Promise<MeetingTranscriptRow | null> {
+  if (!process.env.DATABASE_URL) return null;
+  const { rows } = await safeQuery<{
+    id: string;
+    file_id: string;
+    owner_user_id: string;
+    owner_name: string | null;
+    title: string | null;
+    summary: string | null;
+    transcript_text: string;
+    recorded_at: string | null;
+    duration_seconds: number | null;
+    quality_status: "pass" | "warn" | "reject";
+    ingested_at: string;
+  }>(
+    `SELECT t.id, t.file_id, t.owner_user_id,
+            m.name AS owner_name,
+            t.title, t.summary, t.transcript_text,
+            t.recorded_at, t.duration_seconds, t.quality_status, t.ingested_at
+     FROM apex_meeting_transcripts t
+     LEFT JOIN apex_team_members m ON m.id = t.owner_user_id
+     WHERE t.id = $1 AND t.quality_status <> 'reject'
+     LIMIT 1`,
+    [id],
+  );
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  return {
+    id: r.id,
+    fileId: r.file_id,
+    ownerUserId: r.owner_user_id,
+    ownerName: r.owner_name || undefined,
+    title: r.title,
+    summary: r.summary,
+    transcriptText: r.transcript_text,
+    recordedAt: r.recorded_at,
+    durationSeconds: r.duration_seconds,
+    qualityStatus: r.quality_status,
+    ingestedAt: r.ingested_at,
+  };
+}
+
+/**
+ * Zero-token full-text search over ingested meeting transcripts.
+ * Used by the Assistant's "Priority 3" lookup before any LLM call.
+ *
+ * Strategy: tokenize the query into 3+ char terms, score by overlap
+ * with title/summary/transcript. Returns top N matches with a short
+ * snippet around the highest-density term.
+ *
+ * Why not Postgres full-text search? Two reasons:
+ *   1. The corpus is tiny (5-person team's meetings) so naive ILIKE
+ *      scoring is plenty fast and avoids needing tsvector indexes.
+ *   2. Keeps the dependency surface zero — no migration needed for
+ *      ranking config or language dictionaries.
+ * If the corpus grows past ~10k transcripts we'd revisit.
+ */
+export async function searchMeetingTranscripts(
+  query: string,
+  limit = 3,
+): Promise<Array<MeetingTranscriptRow & { snippet: string; score: number }>> {
+  if (!process.env.DATABASE_URL) return [];
+  const terms = query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 3);
+  if (terms.length === 0) return [];
+
+  // Build ILIKE OR clause: any term in title/summary/text
+  const conditions: string[] = [];
+  const params: string[] = [];
+  for (const term of terms) {
+    params.push(`%${term}%`);
+    const idx = params.length;
+    conditions.push(`(t.title ILIKE $${idx} OR t.summary ILIKE $${idx} OR t.transcript_text ILIKE $${idx})`);
+  }
+
+  const { rows } = await safeQuery<{
+    id: string;
+    file_id: string;
+    owner_user_id: string;
+    owner_name: string | null;
+    title: string | null;
+    summary: string | null;
+    transcript_text: string;
+    recorded_at: string | null;
+    duration_seconds: number | null;
+    quality_status: "pass" | "warn" | "reject";
+    ingested_at: string;
+  }>(
+    `SELECT t.id, t.file_id, t.owner_user_id,
+            m.name AS owner_name,
+            t.title, t.summary, t.transcript_text,
+            t.recorded_at, t.duration_seconds, t.quality_status, t.ingested_at
+     FROM apex_meeting_transcripts t
+     LEFT JOIN apex_team_members m ON m.id = t.owner_user_id
+     WHERE t.quality_status <> 'reject' AND (${conditions.join(" OR ")})
+     ORDER BY COALESCE(t.recorded_at, t.ingested_at) DESC
+     LIMIT 50`,
+    params,
+  );
+
+  // In-memory scoring: count term occurrences in each row, prefer recent.
+  const scored = rows.map((r) => {
+    const haystack = `${r.title || ""}\n${r.summary || ""}\n${r.transcript_text}`.toLowerCase();
+    let score = 0;
+    for (const term of terms) {
+      let idx = 0;
+      while ((idx = haystack.indexOf(term, idx)) !== -1) {
+        // Title hits weighted 3x, summary 2x, body 1x
+        if (idx < (r.title || "").length) score += 3;
+        else if (idx < (r.title || "").length + 1 + (r.summary || "").length) score += 2;
+        else score += 1;
+        idx += term.length;
+      }
+    }
+    // Pull a snippet around the first term match in the body
+    const bodyLower = r.transcript_text.toLowerCase();
+    let snippet = "";
+    for (const term of terms) {
+      const at = bodyLower.indexOf(term);
+      if (at !== -1) {
+        const start = Math.max(0, at - 80);
+        const end = Math.min(r.transcript_text.length, at + 200);
+        snippet = (start > 0 ? "..." : "") + r.transcript_text.slice(start, end).trim() + (end < r.transcript_text.length ? "..." : "");
+        break;
+      }
+    }
+    if (!snippet) snippet = r.transcript_text.slice(0, 240).trim() + (r.transcript_text.length > 240 ? "..." : "");
+
+    return {
+      row: r,
+      score,
+      snippet,
+    };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map(({ row, score, snippet }) => ({
+    id: row.id,
+    fileId: row.file_id,
+    ownerUserId: row.owner_user_id,
+    ownerName: row.owner_name || undefined,
+    title: row.title,
+    summary: row.summary,
+    transcriptText: row.transcript_text,
+    recordedAt: row.recorded_at,
+    durationSeconds: row.duration_seconds,
+    qualityStatus: row.quality_status,
+    ingestedAt: row.ingested_at,
+    snippet,
+    score,
+  }));
+}
+
 export async function getConnectionStatus(): Promise<{
   connected: boolean;
   connectedBy: string | null;

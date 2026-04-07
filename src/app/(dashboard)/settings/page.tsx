@@ -24,6 +24,14 @@ interface QuickBooksStatus {
   connectedAt?: string;
 }
 
+interface PlaudStatus {
+  connected: boolean;
+  configured: boolean;
+  connectedBy?: string;
+  connectedByName?: string;
+  connectedAt?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -50,8 +58,10 @@ export default function SettingsPage() {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [microsoftStatus, setMicrosoftStatus] = useState<MicrosoftStatus>({ connected: false });
   const [quickbooksStatus, setQuickbooksStatus] = useState<QuickBooksStatus>({ connected: false });
+  const [plaudStatus, setPlaudStatus] = useState<PlaudStatus>({ connected: false, configured: false });
   const [loadingMicrosoft, setLoadingMicrosoft] = useState(true);
   const [loadingQuickbooks, setLoadingQuickbooks] = useState(true);
+  const [loadingPlaud, setLoadingPlaud] = useState(true);
   const [briefingEnabled, setBriefingEnabled] = useState(true);
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
@@ -103,6 +113,31 @@ export default function SettingsPage() {
     setLoadingMicrosoft(false);
   }, []);
 
+  const fetchPlaudStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/integrations/plaud?action=status", {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      if (res.ok) {
+        const data = await res.json();
+        setPlaudStatus({
+          connected: data.connected || false,
+          configured: data.configured || false,
+          connectedBy: data.connectedBy,
+          connectedByName: data.displayName,
+          connectedAt: data.connectedAt,
+        });
+      }
+    } catch {
+      // Non-fatal
+    }
+    setLoadingPlaud(false);
+  }, []);
+
   const fetchQuickbooksStatus = useCallback(async () => {
     try {
       const res = await fetch("/api/quickbooks?action=status", {
@@ -152,7 +187,8 @@ export default function SettingsPage() {
     // Fetch integration statuses
     fetchMicrosoftStatus();
     fetchQuickbooksStatus();
-  }, [fetchMicrosoftStatus, fetchQuickbooksStatus]);
+    fetchPlaudStatus();
+  }, [fetchMicrosoftStatus, fetchQuickbooksStatus, fetchPlaudStatus]);
 
   const [connectError, setConnectError] = useState<string | null>(null);
 
@@ -212,6 +248,54 @@ export default function SettingsPage() {
       });
       if (res.ok) {
         setQuickbooksStatus({ connected: false });
+      }
+    } catch {
+      // Non-fatal
+    }
+    setDisconnecting(null);
+  }
+
+  async function connectPlaud() {
+    setConnectError(null);
+    if (!plaudStatus.configured) {
+      setConnectError(
+        "Plaud is not configured yet. The CTO needs to add PLAUD_API_KEY and PLAUD_WEBHOOK_SECRET to the production environment first.",
+      );
+      return;
+    }
+    try {
+      const res = await fetch("/api/integrations/plaud", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({ action: "connect" }),
+      });
+      if (res.ok) {
+        await fetchPlaudStatus();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setConnectError(data.error || "Unable to connect Plaud.");
+      }
+    } catch {
+      setConnectError("Unable to connect Plaud. Please try again.");
+    }
+  }
+
+  async function disconnectPlaud() {
+    setDisconnecting("plaud");
+    try {
+      const res = await fetch("/api/integrations/plaud", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({ action: "disconnect" }),
+      });
+      if (res.ok) {
+        setPlaudStatus({ connected: false, configured: plaudStatus.configured });
       }
     } catch {
       // Non-fatal
@@ -398,6 +482,69 @@ export default function SettingsPage() {
           )}
         </SectionCard>
       )}
+
+      {/* Plaud (meeting transcripts, org-shared) */}
+      <SectionCard title="Plaud — Meeting Transcripts">
+        {loadingPlaud ? (
+          <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>Checking connection...</p>
+        ) : plaudStatus.connected ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <div
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ background: "var(--wp-success)" }}
+              />
+              <span className="text-sm font-medium" style={{ color: "var(--wp-success)" }}>Connected</span>
+            </div>
+            {plaudStatus.connectedByName && (
+              <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>
+                Connected by: <span style={{ color: "var(--wp-text)" }}>{plaudStatus.connectedByName}</span>
+              </p>
+            )}
+            {plaudStatus.connectedAt && (
+              <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>
+                Connected: {fmtDate(plaudStatus.connectedAt)}
+              </p>
+            )}
+            <p className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
+              Meeting recordings from Plaud are ingested into the team knowledge base. Every team member can browse them on the Meetings page, and the Wolfpack Assistant can answer questions about meeting content with zero AI tokens.
+            </p>
+            <button
+              onClick={disconnectPlaud}
+              disabled={disconnecting === "plaud"}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors border"
+              style={{ borderColor: "var(--wp-error)", color: "var(--wp-error)" }}
+            >
+              {disconnecting === "plaud" ? "Disconnecting..." : "Disconnect"}
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>
+              Connect Plaud so meeting recordings flow into the team knowledge base. This is an organization-shared connection — only one person on the team needs to connect it.
+            </p>
+            <p className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
+              Setup: register the webhook URL <code>{`/api/integrations/plaud/webhook`}</code> in the Plaud Developer Portal, then click Connect.
+            </p>
+            {!plaudStatus.configured && (
+              <p className="text-xs" style={{ color: "var(--wp-warning)" }}>
+                Not configured: PLAUD_API_KEY and PLAUD_WEBHOOK_SECRET must be set in the production environment first.
+              </p>
+            )}
+            <button
+              onClick={connectPlaud}
+              disabled={!plaudStatus.configured}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+              style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+            >
+              Connect Plaud
+            </button>
+            {connectError && (
+              <p className="text-xs mt-2" style={{ color: "var(--wp-warning)" }}>{connectError}</p>
+            )}
+          </div>
+        )}
+      </SectionCard>
 
       {/* Preferences */}
       <SectionCard title="Preferences">

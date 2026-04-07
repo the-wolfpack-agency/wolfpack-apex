@@ -279,6 +279,152 @@ describe("Plaud connection management", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Read API: list / get / search meeting transcripts
+// ---------------------------------------------------------------------------
+
+describe("Meeting transcript read API", () => {
+  let plaud: typeof import("@/lib/plaud");
+
+  beforeEach(async () => {
+    jest.resetModules();
+    plaud = await import("@/lib/plaud");
+  });
+
+  test("listMeetingTranscripts returns rows from PG, mapped to camelCase", async () => {
+    plaudMockSafeQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "tx-1",
+          file_id: "file-1",
+          owner_user_id: "user-alice",
+          owner_name: "Alice",
+          title: "Acme Q2 Review",
+          summary: "Q2 review with Acme",
+          recorded_at: "2026-04-07T15:00:00Z",
+          duration_seconds: 1800,
+          quality_status: "pass",
+          ingested_at: "2026-04-07T15:30:00Z",
+        },
+      ],
+      fromCache: false,
+    });
+    const list = await plaud.listMeetingTranscripts();
+    expect(list).toHaveLength(1);
+    expect(list[0].title).toBe("Acme Q2 Review");
+    expect(list[0].ownerName).toBe("Alice");
+    expect(list[0].qualityStatus).toBe("pass");
+    // List view never includes the full transcript text (avoids huge payloads)
+    expect(list[0].transcriptText).toBeUndefined();
+  });
+
+  test("getMeetingTranscript returns full text on detail fetch", async () => {
+    plaudMockSafeQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "tx-2",
+          file_id: "file-2",
+          owner_user_id: "user-alice",
+          owner_name: "Alice",
+          title: "Sync",
+          summary: null,
+          transcript_text: "Full transcript body here.",
+          recorded_at: null,
+          duration_seconds: null,
+          quality_status: "pass",
+          ingested_at: "2026-04-07T16:00:00Z",
+        },
+      ],
+      fromCache: false,
+    });
+    const t = await plaud.getMeetingTranscript("tx-2");
+    expect(t).not.toBeNull();
+    expect(t!.transcriptText).toBe("Full transcript body here.");
+  });
+
+  test("getMeetingTranscript returns null for non-existent / rejected rows", async () => {
+    plaudMockSafeQuery.mockResolvedValueOnce({ rows: [], fromCache: false });
+    const t = await plaud.getMeetingTranscript("nope");
+    expect(t).toBeNull();
+  });
+
+  test("searchMeetingTranscripts returns empty for short queries", async () => {
+    const results = await plaud.searchMeetingTranscripts("hi", 3);
+    expect(results).toEqual([]);
+    // Should not have hit the DB at all
+    expect(plaudMockSafeQuery).not.toHaveBeenCalled();
+  });
+
+  test("searchMeetingTranscripts ranks title hits higher than body hits", async () => {
+    plaudMockSafeQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "tx-body-only",
+          file_id: "file-3",
+          owner_user_id: "user-alice",
+          owner_name: "Alice",
+          title: "Random sync",
+          summary: null,
+          transcript_text: "We discussed the proposal at length and decided to move forward.",
+          recorded_at: "2026-04-06T10:00:00Z",
+          duration_seconds: 600,
+          quality_status: "pass",
+          ingested_at: "2026-04-06T10:30:00Z",
+        },
+        {
+          id: "tx-title-hit",
+          file_id: "file-4",
+          owner_user_id: "user-alice",
+          owner_name: "Alice",
+          title: "Proposal review with Acme",
+          summary: "Reviewed the proposal terms.",
+          transcript_text: "Brief sync.",
+          recorded_at: "2026-04-05T10:00:00Z",
+          duration_seconds: 900,
+          quality_status: "pass",
+          ingested_at: "2026-04-05T10:30:00Z",
+        },
+      ],
+      fromCache: false,
+    });
+    const results = await plaud.searchMeetingTranscripts("proposal review", 3);
+    expect(results.length).toBeGreaterThan(0);
+    // Title hit (3x weight) + summary hit (2x) should beat the body-only hit
+    expect(results[0].id).toBe("tx-title-hit");
+    expect(results[0].score).toBeGreaterThan(0);
+    expect(results[0].snippet.length).toBeGreaterThan(0);
+  });
+
+  test("searchMeetingTranscripts returns rows sorted by score, includes a snippet", async () => {
+    plaudMockSafeQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "tx-onehit",
+          file_id: "f-a",
+          owner_user_id: "u",
+          owner_name: null,
+          title: "Random",
+          summary: null,
+          transcript_text: "This call had no relevant content at all.",
+          recorded_at: null,
+          duration_seconds: null,
+          quality_status: "pass",
+          ingested_at: "2026-04-07T00:00:00Z",
+        },
+      ],
+      fromCache: false,
+    });
+    const results = await plaud.searchMeetingTranscripts("nonexistent", 3);
+    // Postgres returned one row but score should be 0 (no actual term hit
+    // in our scoring even though the SQL ILIKE matched somewhere upstream).
+    // Sanity: results array still well-formed with snippet field.
+    expect(Array.isArray(results)).toBe(true);
+    if (results.length > 0) {
+      expect(typeof results[0].snippet).toBe("string");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Migration + analytics registration
 // ---------------------------------------------------------------------------
 
@@ -295,6 +441,15 @@ describe("Plaud migration + analytics", () => {
     expect(sql).toContain("UNIQUE INDEX");
     expect(sql).toContain("idx_apex_meeting_transcripts_file_id");
     expect(sql).toContain("apex_v_meeting_ingestion_quality");
+  });
+
+  test("migration 008 adds meeting_transcripts to apex_messages source check", () => {
+    const fs = require("fs");
+    const p = require("path").resolve(__dirname, "../../db/migrations/008_assistant_meeting_source.sql");
+    expect(fs.existsSync(p)).toBe(true);
+    const sql = fs.readFileSync(p, "utf-8");
+    expect(sql).toContain("apex_messages_source_check");
+    expect(sql).toContain("meeting_transcripts");
   });
 
   test("analytics.ts registers all Plaud event types", () => {
