@@ -112,33 +112,45 @@ export default function SitesPage() {
     }
     setParsing(true);
     setError(null);
-    const fd = new FormData();
-    fd.append("file", file);
-    fd.append("clientSlug", slug);
-    const r = await fetch("/api/sites/parse-brief", {
-      method: "POST",
-      headers: authHeaders(),
-      body: fd,
-    });
-    const data = await r.json();
-    if (!r.ok) {
-      setError(data.error ?? "parse failed");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("clientSlug", slug);
+      const r = await fetch("/api/sites/parse-brief", {
+        method: "POST",
+        headers: authHeaders(),
+        body: fd,
+      });
+      const text = await r.text();
+      let data: { error?: string; brief?: unknown } = {};
+      try { data = JSON.parse(text); } catch { /* keep raw text */ }
+      if (!r.ok) {
+        setError(`Parse failed (${r.status}): ${data.error ?? text.slice(0, 200)}`);
+        setParsing(false);
+        return;
+      }
+      const create = await fetch("/api/sites", {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ brief: data.brief }),
+      });
+      const createdText = await create.text();
+      let created: { error?: string; project?: { id: string } } = {};
+      try { created = JSON.parse(createdText); } catch { /* keep raw */ }
       setParsing(false);
-      return;
+      if (!create.ok) {
+        setError(`Create failed (${create.status}): ${created.error ?? createdText.slice(0, 200)}`);
+        return;
+      }
+      if (created.project?.id) {
+        router.push(`/sites/${created.project.id}`);
+      } else {
+        setError("Created but no project id returned — please refresh.");
+      }
+    } catch (err) {
+      setParsing(false);
+      setError(`Network error: ${(err as Error).message}`);
     }
-    // Create the project with the parsed brief, then jump to detail page.
-    const create = await fetch("/api/sites", {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ brief: data.brief }),
-    });
-    const created = await create.json();
-    setParsing(false);
-    if (!create.ok) {
-      setError(created.error ?? "create failed");
-      return;
-    }
-    router.push(`/sites/${created.project.id}`);
   }
 
   return (
@@ -182,28 +194,41 @@ export default function SitesPage() {
           }}
         >
           <div>
-            <label style={{ display: "block", fontSize: "0.85rem", color: "var(--wp-text-dim)", marginBottom: "0.3rem" }}>
+            <label htmlFor="site-slug" style={{ display: "block", fontSize: "0.85rem", color: "var(--wp-text-dim)", marginBottom: "0.3rem" }}>
               Slug <span style={{ color: "var(--wp-text-dim)", opacity: 0.7 }}>— lowercase, no spaces. Becomes <code>wolfpack-{"{slug}"}</code> on GitHub.</span>
             </label>
             <input
+              id="site-slug"
               value={slug}
-              onChange={(e) => { setSlug(e.target.value); if (error) setError(null); }}
+              onChange={(e) => {
+                // Sanitize as the user types: lowercase, only a-z 0-9 -,
+                // strip leading non-letter, collapse repeats. Makes it
+                // impossible to enter an invalid slug.
+                const cleaned = e.target.value
+                  .toLowerCase()
+                  .replace(/[^a-z0-9-]/g, "-")
+                  .replace(/-+/g, "-")
+                  .replace(/^-+/, "")
+                  .slice(0, 39);
+                setSlug(cleaned);
+                if (error) setError(null);
+              }}
               placeholder="e.g. acme-co"
               required
               style={inputStyle}
             />
           </div>
           <div>
-            <label style={{ display: "block", fontSize: "0.85rem", color: "var(--wp-text-dim)", marginBottom: "0.3rem" }}>Display name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Acme Inc." required style={inputStyle} />
+            <label htmlFor="site-name" style={{ display: "block", fontSize: "0.85rem", color: "var(--wp-text-dim)", marginBottom: "0.3rem" }}>Display name</label>
+            <input id="site-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Acme Inc." required style={inputStyle} />
           </div>
           <div>
-            <label style={{ display: "block", fontSize: "0.85rem", color: "var(--wp-text-dim)", marginBottom: "0.3rem" }}>Tagline</label>
-            <input value={tagline} onChange={(e) => setTagline(e.target.value)} placeholder="One line that describes the client" style={inputStyle} />
+            <label htmlFor="site-tagline" style={{ display: "block", fontSize: "0.85rem", color: "var(--wp-text-dim)", marginBottom: "0.3rem" }}>Tagline</label>
+            <input id="site-tagline" value={tagline} onChange={(e) => setTagline(e.target.value)} placeholder="One line that describes the client" style={inputStyle} />
           </div>
           <div>
-            <label style={{ display: "block", fontSize: "0.85rem", color: "var(--wp-text-dim)", marginBottom: "0.3rem" }}>Support email</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="hello@example.com" style={inputStyle} />
+            <label htmlFor="site-email" style={{ display: "block", fontSize: "0.85rem", color: "var(--wp-text-dim)", marginBottom: "0.3rem" }}>Support email</label>
+            <input id="site-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="hello@example.com" style={inputStyle} />
           </div>
 
           <div

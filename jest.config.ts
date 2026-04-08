@@ -3,7 +3,7 @@ import type { Config } from "jest";
 const config: Config = {
   testEnvironment: "node",
   preset: "ts-jest",
-  testMatch: ["<rootDir>/src/**/__tests__/**/*.test.ts"],
+  testMatch: ["<rootDir>/src/**/__tests__/**/*.test.{ts,tsx}"],
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/src/$1",
   },
@@ -14,7 +14,7 @@ const config: Config = {
         tsconfig: {
           module: "commonjs",
           moduleResolution: "node",
-          jsx: "react",
+          jsx: "react-jsx",
         },
       },
     ],
