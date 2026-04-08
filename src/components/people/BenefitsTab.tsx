@@ -135,10 +135,19 @@ export function BenefitsTab() {
           disabled={uploading}
           onClick={(e) => {
             e.stopPropagation();
+            // Append to DOM before click — some browsers (Safari in
+            // particular) drop the change event from a detached input,
+            // which is why uploads required two attempts.
             const i = document.createElement("input");
             i.type = "file";
             i.accept = "application/pdf,.pdf";
-            i.onchange = () => i.files?.[0] && handleFile(i.files[0]);
+            i.style.display = "none";
+            i.addEventListener("change", () => {
+              const f = i.files?.[0];
+              if (f) handleFile(f);
+              i.remove();
+            });
+            document.body.appendChild(i);
             i.click();
           }}
           style={{
