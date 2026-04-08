@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
-import { getBenefitDocument } from "@/lib/benefits";
+import { getBenefitDocument, deleteBenefitDocument } from "@/lib/benefits";
 
 export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const user = getUserFromRequest(req.headers.get("authorization"));
@@ -18,4 +18,13 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     ...result,
     raw_text_excerpt: (result.document as { raw_text_excerpt?: string }).raw_text_excerpt ?? "",
   });
+}
+
+export async function DELETE(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const user = getUserFromRequest(req.headers.get("authorization"));
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { id } = await context.params;
+  const ok = await deleteBenefitDocument(id, user.id, user.role);
+  if (!ok) return NextResponse.json({ error: "not found" }, { status: 404 });
+  return NextResponse.json({ ok: true });
 }

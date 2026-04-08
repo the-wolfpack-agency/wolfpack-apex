@@ -358,11 +358,43 @@ export function BenefitsTab() {
       ) : (
         <ul style={{ listStyle: "none", padding: 0, fontSize: "0.85rem" }}>
           {docs.map((d) => (
-            <li key={d.id} style={{ padding: "0.5rem 0", borderBottom: "1px solid var(--wp-border)" }}>
-              <strong>{d.filename}</strong>{" "}
-              <span style={{ color: "var(--wp-text-dim)" }}>
-                — {d.carrier ?? "unknown carrier"}, {d.page_count} pages, uploaded {new Date(d.uploaded_at).toLocaleString()}
-              </span>
+            <li key={d.id} style={{ padding: "0.5rem 0", borderBottom: "1px solid var(--wp-border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem" }}>
+              <div>
+                <strong>{d.filename}</strong>{" "}
+                <span style={{ color: "var(--wp-text-dim)" }}>
+                  — {d.carrier ?? "unknown carrier"}, {d.page_count} pages, uploaded {new Date(d.uploaded_at).toLocaleString()}
+                </span>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!confirm(`Delete "${d.filename}" and all its parsed plans + recommendations?`)) return;
+                  const r = await fetch(`/api/people/benefits/${d.id}`, {
+                    method: "DELETE",
+                    headers: authHeaders(),
+                  });
+                  if (r.ok) {
+                    setDocs((prev) => prev.filter((x) => x.id !== d.id));
+                    if (result?.documentId === d.id) {
+                      setResult(null);
+                      setParsedPlans([]);
+                      setRawText("");
+                    }
+                  } else {
+                    setError(`Delete failed: ${r.status}`);
+                  }
+                }}
+                style={{
+                  padding: "0.35rem 0.7rem",
+                  background: "transparent",
+                  color: "#c44",
+                  border: "1px solid #c44",
+                  borderRadius: "4px",
+                  fontSize: "0.75rem",
+                  cursor: "pointer",
+                }}
+              >
+                Delete
+              </button>
             </li>
           ))}
         </ul>

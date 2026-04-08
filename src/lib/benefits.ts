@@ -570,6 +570,24 @@ export async function decideRecommendation(
   );
 }
 
+export async function deleteBenefitDocument(
+  id: string,
+  deletedBy: string,
+  userRole: string,
+): Promise<boolean> {
+  const r = await safeQuery(
+    `DELETE FROM apex_benefit_documents WHERE id = $1 RETURNING id`,
+    [id],
+  );
+  if (r.rows.length === 0) return false;
+  // Cascade in the schema removes plans + recommendations automatically.
+  trackEvent("hr.benefit_document_uploaded", deletedBy, userRole, {
+    action: "deleted",
+    document_id: id,
+  });
+  return true;
+}
+
 export async function listBenefitDocuments(): Promise<Array<Record<string, unknown>>> {
   const r = await safeQuery(
     `SELECT * FROM apex_benefit_documents ORDER BY uploaded_at DESC`,
