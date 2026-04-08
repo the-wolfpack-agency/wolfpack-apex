@@ -85,7 +85,24 @@ export type ApexEventType =
   | "plaud.transcript_rejected"
   | "plaud.transcript_duplicate"
   | "plaud.fetch_failed"
-  | "plaud.no_owner";
+  | "plaud.no_owner"
+  // Sites (Instinct → wolfpack-site-template)
+  | "site.created"
+  | "site.brief_updated"
+  | "site.asset_uploaded"
+  | "site.repo_provisioned"
+  | "site.deploy_triggered"
+  | "site.deploy_succeeded"
+  | "site.deploy_failed"
+  | "site.canary_passed"
+  | "site.canary_failed"
+  | "site.preview_viewed"
+  | "site.link_shared"
+  | "site.deleted"
+  | "site.brief_auto_parsed"
+  | "site.brief_parse_failed"
+  | "site.brief_form_edited"
+  | "site.dropzone_used";
 
 export interface ApexEvent {
   event_type: ApexEventType;
