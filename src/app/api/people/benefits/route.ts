@@ -8,6 +8,11 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
+
+// pdf2json uses Node Buffer + filesystem APIs not present on the Edge
+// runtime. Force Node.js runtime so the parser can run.
+export const runtime = "nodejs";
+export const maxDuration = 60;
 import {
   parseBenefitDocument,
   saveBenefitDocument,

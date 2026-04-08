@@ -46,6 +46,8 @@ export function BenefitsTab() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<UploadResult | null>(null);
   const [decided, setDecided] = useState<Set<string>>(new Set());
+  const [dragOver, setDragOver] = useState(false);
+  const [progressMsg, setProgressMsg] = useState<string | null>(null);
 
   async function loadDocs() {
     const r = await fetch("/api/people/benefits", { headers: authHeaders() });
@@ -61,9 +63,11 @@ export function BenefitsTab() {
     setUploading(true);
     setError(null);
     setResult(null);
+    setProgressMsg(`Uploading ${file.name} (${(file.size / 1024).toFixed(0)} KB)…`);
     try {
       const fd = new FormData();
       fd.append("file", file);
+      setProgressMsg(`Parsing ${file.name}…`);
       const r = await fetch("/api/people/benefits", {
         method: "POST",
         headers: authHeaders(),
@@ -73,13 +77,16 @@ export function BenefitsTab() {
       let data: UploadResult & { error?: string } = {} as UploadResult & { error?: string };
       try { data = JSON.parse(text); } catch { /* keep raw */ }
       if (!r.ok) {
-        setError(`Parse failed (${r.status}): ${data.error ?? text.slice(0, 200)}`);
+        setError(`Parse failed (${r.status}): ${data.error ?? text.slice(0, 300)}`);
+        setProgressMsg(null);
       } else {
         setResult(data);
+        setProgressMsg(`Parsed ${data.planCount} plans from ${data.carrier ?? "the document"}.`);
         await loadDocs();
       }
     } catch (e) {
       setError(`Network error: ${(e as Error).message}`);
+      setProgressMsg(null);
     }
     setUploading(false);
   }
@@ -96,34 +103,66 @@ export function BenefitsTab() {
   return (
     <div data-tab="benefits">
       <div
-        onDragOver={(e) => e.preventDefault()}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
         onDrop={(e) => {
           e.preventDefault();
+          setDragOver(false);
           const f = e.dataTransfer.files[0];
           if (f) handleFile(f);
         }}
-        onClick={() => {
-          const i = document.createElement("input");
-          i.type = "file";
-          i.accept = "application/pdf,.pdf";
-          i.onchange = () => i.files?.[0] && handleFile(i.files[0]);
-          i.click();
-        }}
         style={{
-          padding: "1.5rem",
-          border: "2px dashed var(--wp-border)",
-          borderRadius: "8px",
+          padding: "2.5rem 1.5rem",
+          border: `3px dashed ${dragOver ? "var(--wp-gold)" : "var(--wp-border)"}`,
+          borderRadius: "12px",
           textAlign: "center",
-          cursor: "pointer",
-          color: "var(--wp-text-dim)",
-          fontSize: "0.9rem",
+          background: dragOver ? "rgba(255, 215, 0, 0.08)" : "var(--wp-card)",
+          transition: "all 0.15s ease",
           marginBottom: "1.5rem",
         }}
       >
-        {uploading ? "Parsing PDF…" : "Drop a benefits renewal PDF here, or click to upload"}
+        <div style={{ fontSize: "2rem", marginBottom: "0.5rem", lineHeight: 1 }} aria-hidden>
+          📄
+        </div>
+        <div style={{ fontSize: "1.05rem", fontWeight: 600, color: "var(--wp-text)", marginBottom: "0.4rem" }}>
+          {uploading ? "Parsing PDF…" : "Drop a benefits renewal PDF here"}
+        </div>
+        <div style={{ fontSize: "0.85rem", color: "var(--wp-text-dim)", marginBottom: "1rem" }}>
+          We'll extract every plan, score them, and recommend the best one — under 5 seconds.
+        </div>
+        <button
+          type="button"
+          disabled={uploading}
+          onClick={(e) => {
+            e.stopPropagation();
+            const i = document.createElement("input");
+            i.type = "file";
+            i.accept = "application/pdf,.pdf";
+            i.onchange = () => i.files?.[0] && handleFile(i.files[0]);
+            i.click();
+          }}
+          style={{
+            padding: "0.6rem 1.4rem",
+            background: "var(--wp-gold)",
+            color: "var(--wp-dark)",
+            border: "none",
+            borderRadius: "6px",
+            fontWeight: 600,
+            fontSize: "0.9rem",
+            cursor: uploading ? "wait" : "pointer",
+            opacity: uploading ? 0.6 : 1,
+          }}
+        >
+          {uploading ? "Working…" : "Choose a PDF"}
+        </button>
       </div>
 
-      {error && <div style={{ color: "#c44", marginBottom: "1rem", fontSize: "0.85rem" }}>{error}</div>}
+      {progressMsg && !error && (
+        <div style={{ color: "var(--wp-text-dim)", marginBottom: "1rem", fontSize: "0.85rem" }}>
+          {progressMsg}
+        </div>
+      )}
+      {error && <div style={{ color: "#c44", marginBottom: "1rem", fontSize: "0.85rem", padding: "0.75rem", background: "rgba(204, 68, 68, 0.1)", borderRadius: "6px", border: "1px solid #c44" }}>{error}</div>}
 
       {result?.recommendation && (
         <div
