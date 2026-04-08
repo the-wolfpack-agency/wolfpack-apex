@@ -51,6 +51,52 @@ List A   List B    List C`;
     expect(r.confidence).toBeGreaterThanOrEqual(0.4);
   });
 
+  it("classifies a BCBS group enrollment / change form (per-employee)", () => {
+    const text = `Group Enrollment Application | Change Form
+Blue Cross and Blue Shield of Texas
+ENROLLMENT APPLICATION/CHANGE FORM
+SECTION 1 — ENROLLMENT EVENTS
+New Enrollee   Add Dependent   Open Enrollment
+Special Enrollment Event
+SECTION 4 — COVERAGE OPTIONS
+PCP Selection is required for Blue Advantage, Blue Premier and Blue Essentials plans
+Primary Care Physician
+SECTION 8 — DECLINATION OF COVERAGE
+SECTION 5 — DISABLED DEPENDENT
+Cancel Enrollee   Add Dependent`;
+    const r = classifyDocument(text);
+    expect(r.category).toBe("benefits_enrollment");
+    expect(r.confidence).toBeGreaterThanOrEqual(0.4);
+  });
+
+  it("classifies the Spanish BCBS enrollment form via the Solicitud de cobertura phrase", () => {
+    const text = `Solicitud de cobertura | Solicitud de cambios
+Blue Cross and Blue Shield of Texas
+SECCIÓN 1: MOTIVOS DE SOLICITUD
+Nuevo asegurado   Agregar derechohabiente
+SECCIÓN 8: RENUNCIA A LA COBERTURA`;
+    const r = classifyDocument(text);
+    expect(r.category).toBe("benefits_enrollment");
+  });
+
+  it("benefits renewal exhibit and benefits enrollment do NOT collide", () => {
+    // The renewal exhibit has plan IDs + Total Monthly Medical Cost,
+    // the enrollment form has Group Enrollment Application + Section 8.
+    // Both contain "Blue Cross" — confidence routing must distinguish.
+    const renewalText = `Medical Plans
+Renewal Effective Date: Dec 1, 2025
+Total Monthly Medical Cost - Age Rates
+Blue Choice PPO Network
+P9M1CHC $1050 Deductible Out-of-Pocket Max`;
+    const enrollmentText = `Group Enrollment Application | Change Form
+Blue Cross and Blue Shield of Texas
+SECTION 1 — ENROLLMENT EVENTS
+New Enrollee   Open Enrollment
+SECTION 8 — DECLINATION OF COVERAGE`;
+    expect(classifyDocument(renewalText).category).toBe("benefits_renewal");
+    expect(classifyDocument(enrollmentText).category).toBe("benefits_enrollment");
+  });
+
   it("classifies a BCBS benefits renewal", () => {
     const text = `THE WOLFPACK AGENCY LLC
 Renewal Effective Date: Dec 1, 2025

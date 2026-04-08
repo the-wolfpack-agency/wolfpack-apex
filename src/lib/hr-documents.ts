@@ -30,6 +30,7 @@ export const HR_CATEGORIES = [
   "w4",
   "i9",
   "benefits_renewal",
+  "benefits_enrollment",
   "offer_letter",
   "handbook",
   "unclassified",
@@ -88,12 +89,19 @@ const RULES: Rule[] = [
   { category: "i9", signature: /USCIS|U\.S\. Citizenship and Immigration Services/i, weight: 0.3, reason: "USCIS reference" },
   { category: "i9", signature: /List A\b[\s\S]{0,200}List B\b[\s\S]{0,200}List C\b/i, weight: 0.3, reason: "I-9 List A/B/C structure" },
 
-  // Benefits renewal: BCBS-style exhibit or generic
+  // Benefits renewal: BCBS-style exhibit (employer-wide plan list + prices)
   { category: "benefits_renewal", signature: /Medical Plans|Plan ID/i, weight: 0.3, reason: "Medical plans header" },
   { category: "benefits_renewal", signature: /Renewal Effective Date|Renewal Generation/i, weight: 0.4, reason: "Renewal date phrase" },
-  { category: "benefits_renewal", signature: /Blue (?:Choice|Advantage|Cross)|HMO Network|PPO Network/i, weight: 0.3, reason: "Carrier network header" },
+  { category: "benefits_renewal", signature: /Total Monthly Medical Cost|Composite Rates|Age Rates/i, weight: 0.3, reason: "Renewal exhibit pricing column" },
   { category: "benefits_renewal", signature: /Deductible[\s\S]{0,50}Out-of-Pocket Max/i, weight: 0.2, reason: "Deductible/OOP table" },
   { category: "benefits_renewal", signature: /\b[A-Z][A-Z0-9]{5,7}\b[\s\S]{0,40}\$\d/i, weight: 0.2, reason: "Plan ID + price pattern" },
+
+  // Benefits enrollment: per-employee BCBS enrollment/change form
+  { category: "benefits_enrollment", signature: /Group Enrollment Application|Enrollment Application\/Change Form|Solicitud de cobertura/i, weight: 0.6, reason: "Enrollment application title" },
+  { category: "benefits_enrollment", signature: /Declination of Coverage|Special Enrollment Event|Open Enrollment/i, weight: 0.3, reason: "Enrollment events section" },
+  { category: "benefits_enrollment", signature: /Primary Care Physician|PCP Selection|Coverage Options/i, weight: 0.2, reason: "Coverage options section" },
+  { category: "benefits_enrollment", signature: /Disabled Dependent|Add Dependent|Cancel Enrollee/i, weight: 0.2, reason: "Dependent enrollment phrases" },
+  { category: "benefits_enrollment", signature: /Blue Cross and Blue Shield of Texas|BCBSTX|BlueCross BlueShield/i, weight: 0.2, reason: "BCBS carrier identifier" },
 
   // Offer letter
   { category: "offer_letter", signature: /(?:Offer of Employment|Employment Agreement|Offer Letter)/i, weight: 0.5, reason: "Offer letter title" },

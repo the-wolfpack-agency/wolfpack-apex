@@ -17,6 +17,7 @@ type HrCategory =
   | "w4"
   | "i9"
   | "benefits_renewal"
+  | "benefits_enrollment"
   | "offer_letter"
   | "handbook"
   | "unclassified";
@@ -25,6 +26,7 @@ const CATEGORY_LABELS: Record<HrCategory, string> = {
   w4: "W-4",
   i9: "I-9",
   benefits_renewal: "Benefits renewal",
+  benefits_enrollment: "Benefits enrollment",
   offer_letter: "Offer letter",
   handbook: "Handbook",
   unclassified: "Unclassified",
@@ -34,6 +36,7 @@ const CATEGORIES: HrCategory[] = [
   "w4",
   "i9",
   "benefits_renewal",
+  "benefits_enrollment",
   "offer_letter",
   "handbook",
   "unclassified",
