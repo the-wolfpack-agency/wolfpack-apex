@@ -102,7 +102,22 @@ export type ApexEventType =
   | "site.brief_auto_parsed"
   | "site.brief_parse_failed"
   | "site.brief_form_edited"
-  | "site.dropzone_used";
+  | "site.dropzone_used"
+  // People (HR) — benefits, employees, onboarding, insights
+  | "hr.employee_added"
+  | "hr.employee_updated"
+  | "hr.employee_removed"
+  | "hr.benefit_document_uploaded"
+  | "hr.benefit_document_parsed"
+  | "hr.benefit_document_parse_failed"
+  | "hr.benefit_recommendation_generated"
+  | "hr.benefit_recommendation_viewed"
+  | "hr.benefit_recommendation_accepted"
+  | "hr.benefit_recommendation_rejected"
+  | "hr.benefit_plan_compared"
+  | "hr.insight_generated"
+  | "hr.insight_viewed"
+  | "hr.insight_dismissed";
 
 export interface ApexEvent {
   event_type: ApexEventType;
