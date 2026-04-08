@@ -92,17 +92,29 @@ export function BenefitsTab() {
     setResult(null);
     setProgressMsg(`Uploading ${file.name} (${(file.size / 1024).toFixed(0)} KB)…`);
     try {
+      // Route through the smart-router endpoint so non-benefits files
+      // (W-4s, I-9s, offer letters) get filed under Documents instead
+      // of failing with "could not extract any plan rows".
       const fd = new FormData();
       fd.append("file", file);
-      setProgressMsg(`Parsing ${file.name}…`);
-      const r = await fetch("/api/people/benefits", {
+      fd.append("source", "benefits_tab");
+      setProgressMsg(`Classifying ${file.name}…`);
+      const r = await fetch("/api/people/documents", {
         method: "POST",
         headers: authHeaders(),
         body: fd,
       });
       const text = await r.text();
-      let data: UploadResult & { error?: string } = {} as UploadResult & { error?: string };
-      try { data = JSON.parse(text); } catch { /* keep raw */ }
+      let routed: {
+        documentId?: string;
+        category?: string;
+        confidence?: number;
+        benefitDocumentId?: string;
+        benefitPlanCount?: number;
+        benefitRecommendation?: { id: string; plan_id: string; reasoning: string } | null;
+        error?: string;
+      } = {};
+      try { routed = JSON.parse(text); } catch { /* keep raw */ }
       if (r.status === 401) {
         setError("Your session has expired. Please log in again — top-right user menu → Log out, then sign back in.");
         setProgressMsg(null);
@@ -110,14 +122,42 @@ export function BenefitsTab() {
         return;
       }
       if (!r.ok) {
-        const excerpt = data.textExcerpt ? `\n\nExtracted text preview:\n${data.textExcerpt.slice(0, 600)}…` : "";
-        setError(`Parse failed (${r.status}): ${data.error ?? text.slice(0, 300)}${excerpt}`);
+        setError(`Upload failed (${r.status}): ${routed.error ?? text.slice(0, 300)}`);
         setProgressMsg(null);
-      } else {
-        setResult(data);
-        setProgressMsg(`Parsed ${data.planCount} plans from ${data.carrier ?? "the document"}.`);
+        setUploading(false);
+        return;
+      }
+
+      if (routed.category === "benefits_renewal" && routed.benefitDocumentId) {
+        // Real benefits renewal — populate the recommendation card +
+        // parsed plans table the way the old endpoint did
+        setProgressMsg(`Parsed ${routed.benefitPlanCount ?? 0} plans.`);
+        setResult({
+          documentId: routed.benefitDocumentId,
+          planCount: routed.benefitPlanCount ?? 0,
+          carrier: null,
+          effectiveDate: null,
+          recommendation: routed.benefitRecommendation
+            ? {
+                id: routed.benefitRecommendation.id,
+                rule: "cheapest_practical",
+                plan_id: routed.benefitRecommendation.plan_id,
+                plan_name: null,
+                reasoning: routed.benefitRecommendation.reasoning,
+                runners_up: [],
+              }
+            : null,
+          insights: [],
+        });
         await loadDocs();
-        await loadDetail(data.documentId);
+        await loadDetail(routed.benefitDocumentId);
+      } else {
+        // Non-benefits doc — file it and tell the user where it landed
+        const niceCategory = (routed.category ?? "unclassified").replace(/_/g, " ");
+        setProgressMsg(
+          `Filed as ${niceCategory}. This doesn't look like a benefits renewal — view it in the Documents tab.`,
+        );
+        setResult(null);
       }
     } catch (e) {
       setError(`Network error: ${(e as Error).message}`);

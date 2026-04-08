@@ -121,7 +121,7 @@ const PAGES = [
   "reports",
   "settings",
   "sites",
-  "people",
+  "hr",
 ];
 
 describe("Dashboard pages render without throwing", () => {

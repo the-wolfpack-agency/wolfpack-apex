@@ -117,7 +117,17 @@ export type ApexEventType =
   | "hr.benefit_plan_compared"
   | "hr.insight_generated"
   | "hr.insight_viewed"
-  | "hr.insight_dismissed";
+  | "hr.insight_dismissed"
+  // HR documents (smart router across all uploaded forms)
+  | "hr.document_uploaded"
+  | "hr.document_classified"
+  | "hr.document_recategorized"
+  | "hr.document_linked_to_employee"
+  | "hr.document_unlinked_from_employee"
+  | "hr.document_deleted"
+  | "hr.document_expired"
+  | "hr.document_filed_via_benefits_tab"
+  | "hr.document_filed_via_documents_tab";
 
 export interface ApexEvent {
   event_type: ApexEventType;
