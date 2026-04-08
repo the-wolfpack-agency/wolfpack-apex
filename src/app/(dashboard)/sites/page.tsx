@@ -150,50 +150,22 @@ export default function SitesPage() {
             Spin up a hosted client site in under a minute. No terminal, no GitHub.
           </p>
         </div>
-        <button
-          onClick={() => setShowForm((s) => !s)}
-          style={{
-            background: "var(--wp-gold)",
-            color: "var(--wp-dark)",
-            border: "none",
-            padding: "0.6rem 1.2rem",
-            borderRadius: "6px",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          {showForm ? "Cancel" : "+ New Site"}
-        </button>
-      </div>
-
-      <div
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          const f = e.dataTransfer.files[0];
-          if (f) handleDropFile(f);
-        }}
-        onClick={() => {
-          const i = document.createElement("input");
-          i.type = "file";
-          i.accept = ".html,.htm,.txt,.md";
-          i.onchange = () => i.files?.[0] && handleDropFile(i.files[0]);
-          i.click();
-        }}
-        style={{
-          padding: "1.5rem",
-          border: "2px dashed var(--wp-border)",
-          borderRadius: "8px",
-          textAlign: "center",
-          marginBottom: "1rem",
-          cursor: "pointer",
-          color: "var(--wp-text-dim)",
-          fontSize: "0.85rem",
-        }}
-      >
-        {parsing
-          ? "Parsing brief…"
-          : "Drop a design brief here (HTML / text / Markdown) — we'll auto-fill the site. (Set a slug below first.)"}
+        {!showForm && (
+          <button
+            onClick={() => { setShowForm(true); setError(null); }}
+            style={{
+              background: "var(--wp-gold)",
+              color: "var(--wp-dark)",
+              border: "none",
+              padding: "0.6rem 1.2rem",
+              borderRadius: "6px",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            + New Site
+          </button>
+        )}
       </div>
 
       {showForm && (
@@ -210,25 +182,79 @@ export default function SitesPage() {
           }}
         >
           <div>
-            <label style={{ display: "block", fontSize: "0.85rem", color: "var(--wp-text-dim)", marginBottom: "0.3rem" }}>Slug (lowercase, becomes wolfpack-{"{slug}"} repo)</label>
-            <input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="cftr" required style={inputStyle} />
+            <label style={{ display: "block", fontSize: "0.85rem", color: "var(--wp-text-dim)", marginBottom: "0.3rem" }}>
+              Slug <span style={{ color: "var(--wp-text-dim)", opacity: 0.7 }}>— lowercase, no spaces. Becomes <code>wolfpack-{"{slug}"}</code> on GitHub.</span>
+            </label>
+            <input
+              value={slug}
+              onChange={(e) => { setSlug(e.target.value); if (error) setError(null); }}
+              placeholder="e.g. acme-co"
+              required
+              style={inputStyle}
+            />
           </div>
           <div>
             <label style={{ display: "block", fontSize: "0.85rem", color: "var(--wp-text-dim)", marginBottom: "0.3rem" }}>Display name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Cleared for Takeoff Racing" required style={inputStyle} />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Acme Inc." required style={inputStyle} />
           </div>
           <div>
             <label style={{ display: "block", fontSize: "0.85rem", color: "var(--wp-text-dim)", marginBottom: "0.3rem" }}>Tagline</label>
-            <input value={tagline} onChange={(e) => setTagline(e.target.value)} placeholder="Irish racing on the world's biggest stage" style={inputStyle} />
+            <input value={tagline} onChange={(e) => setTagline(e.target.value)} placeholder="One line that describes the client" style={inputStyle} />
           </div>
           <div>
             <label style={{ display: "block", fontSize: "0.85rem", color: "var(--wp-text-dim)", marginBottom: "0.3rem" }}>Support email</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="hello@aidanmulready.com" style={inputStyle} />
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="hello@example.com" style={inputStyle} />
           </div>
+
+          <div
+            onDragOver={(e) => { e.preventDefault(); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              const f = e.dataTransfer.files[0];
+              if (f) handleDropFile(f);
+            }}
+            onClick={() => {
+              const i = document.createElement("input");
+              i.type = "file";
+              i.accept = ".html,.htm,.txt,.md";
+              i.onchange = () => i.files?.[0] && handleDropFile(i.files[0]);
+              i.click();
+            }}
+            style={{
+              padding: "1.25rem",
+              border: "2px dashed var(--wp-border)",
+              borderRadius: "8px",
+              textAlign: "center",
+              cursor: slug ? "pointer" : "not-allowed",
+              opacity: slug ? 1 : 0.55,
+              color: "var(--wp-text-dim)",
+              fontSize: "0.85rem",
+            }}
+          >
+            {parsing
+              ? "Parsing brief…"
+              : slug
+              ? "Optional: drop a design brief (HTML / text / Markdown) to auto-fill the rest"
+              : "Set a slug above first, then drop a brief here to auto-fill"}
+          </div>
+
           {error && <div style={{ color: "#c44", fontSize: "0.85rem" }}>{error}</div>}
-          <button type="submit" style={{ background: "var(--wp-gold)", color: "var(--wp-dark)", border: "none", padding: "0.6rem", borderRadius: "6px", fontWeight: 600, cursor: "pointer" }}>
-            Create draft
-          </button>
+
+          <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={() => { setShowForm(false); setError(null); }}
+              style={{ background: "transparent", color: "var(--wp-text-dim)", border: "1px solid var(--wp-border)", padding: "0.6rem 1.2rem", borderRadius: "6px", fontWeight: 600, cursor: "pointer" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              style={{ background: "var(--wp-gold)", color: "var(--wp-dark)", border: "none", padding: "0.6rem 1.2rem", borderRadius: "6px", fontWeight: 600, cursor: "pointer" }}
+            >
+              Create draft
+            </button>
+          </div>
         </form>
       )}
 
