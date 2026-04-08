@@ -23,6 +23,18 @@ interface RecommendationPayload {
   reasoning: string;
   runners_up: Array<{ plan_id: string; plan_name: string | null; score: number; reasons: string[] }>;
 }
+interface ParsedPlan {
+  plan_id: string;
+  plan_name: string | null;
+  network: string | null;
+  metal_tier: string | null;
+  is_hsa: boolean;
+  individual_deductible_in_network: number | null;
+  individual_oop_max_in_network: number | null;
+  primary_care_copay: string;
+  primary_care_copay_in_network: number | null;
+  monthly_premium_age_employee_only: number | null;
+}
 interface UploadResult {
   documentId: string;
   planCount: number;
@@ -50,6 +62,19 @@ export function BenefitsTab() {
   const [decided, setDecided] = useState<Set<string>>(new Set());
   const [dragOver, setDragOver] = useState(false);
   const [progressMsg, setProgressMsg] = useState<string | null>(null);
+  const [parsedPlans, setParsedPlans] = useState<ParsedPlan[]>([]);
+  const [rawText, setRawText] = useState<string>("");
+  const [showRaw, setShowRaw] = useState(false);
+
+  async function loadDetail(documentId: string) {
+    try {
+      const r = await fetch(`/api/people/benefits/${documentId}`, { headers: authHeaders() });
+      if (!r.ok) return;
+      const data = await r.json();
+      setParsedPlans(data.plans ?? []);
+      setRawText(data.raw_text_excerpt ?? "");
+    } catch { /* ignore */ }
+  }
 
   async function loadDocs() {
     const r = await fetch("/api/people/benefits", { headers: authHeaders() });
@@ -86,6 +111,7 @@ export function BenefitsTab() {
         setResult(data);
         setProgressMsg(`Parsed ${data.planCount} plans from ${data.carrier ?? "the document"}.`);
         await loadDocs();
+        await loadDetail(data.documentId);
       }
     } catch (e) {
       setError(`Network error: ${(e as Error).message}`);
@@ -265,6 +291,65 @@ export function BenefitsTab() {
             </div>
           ))}
         </div>
+      )}
+
+      {parsedPlans.length > 0 && (
+        <div style={{ marginBottom: "1.5rem" }}>
+          <h3 style={{ fontSize: "1rem", margin: "0 0 0.5rem" }}>Parsed plans ({parsedPlans.length})</h3>
+          <div style={{ overflow: "auto", border: "1px solid var(--wp-border)", borderRadius: "6px" }}>
+            <table style={{ width: "100%", fontSize: "0.78rem", borderCollapse: "collapse" }}>
+              <thead style={{ background: "var(--wp-card)" }}>
+                <tr>
+                  {["Plan", "Network", "Tier", "HSA", "Deductible", "OOP max", "PCP", "Premium"].map((h) => (
+                    <th key={h} style={{ textAlign: "left", padding: "0.4rem 0.6rem", borderBottom: "1px solid var(--wp-border)" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {parsedPlans.map((p) => (
+                  <tr key={p.plan_id} style={{ borderBottom: "1px solid var(--wp-border)" }}>
+                    <td style={{ padding: "0.35rem 0.6rem", fontFamily: "monospace" }}>{p.plan_id}</td>
+                    <td style={{ padding: "0.35rem 0.6rem" }}>{p.network ?? "—"}</td>
+                    <td style={{ padding: "0.35rem 0.6rem" }}>{p.metal_tier ?? "—"}</td>
+                    <td style={{ padding: "0.35rem 0.6rem" }}>{p.is_hsa ? "✓" : ""}</td>
+                    <td style={{ padding: "0.35rem 0.6rem" }}>{p.individual_deductible_in_network != null ? `$${p.individual_deductible_in_network}` : "—"}</td>
+                    <td style={{ padding: "0.35rem 0.6rem" }}>{p.individual_oop_max_in_network != null ? `$${p.individual_oop_max_in_network}` : "—"}</td>
+                    <td style={{ padding: "0.35rem 0.6rem" }}>{p.primary_care_copay || "—"}</td>
+                    <td style={{ padding: "0.35rem 0.6rem", fontWeight: 600 }}>{p.monthly_premium_age_employee_only != null ? `$${p.monthly_premium_age_employee_only.toFixed(2)}` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {rawText && (
+        <details style={{ marginBottom: "1.5rem" }}>
+          <summary
+            onClick={() => setShowRaw(!showRaw)}
+            style={{ cursor: "pointer", fontSize: "0.85rem", color: "var(--wp-text-dim)" }}
+          >
+            Show raw extracted text (debug)
+          </summary>
+          <pre
+            style={{
+              marginTop: "0.5rem",
+              padding: "0.75rem",
+              background: "var(--wp-card)",
+              border: "1px solid var(--wp-border)",
+              borderRadius: "6px",
+              fontSize: "0.7rem",
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              maxHeight: "400px",
+              overflow: "auto",
+            }}
+          >
+            {rawText}
+          </pre>
+        </details>
       )}
 
       <h3 style={{ fontSize: "1rem", margin: "1rem 0 0.5rem" }}>Uploaded documents ({docs.length})</h3>

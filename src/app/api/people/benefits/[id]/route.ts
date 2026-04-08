@@ -12,5 +12,10 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const { id } = await context.params;
   const result = await getBenefitDocument(id);
   if (!result.document) return NextResponse.json({ error: "not found" }, { status: 404 });
-  return NextResponse.json(result);
+  // Include the raw text excerpt at the top level so the UI can render
+  // it for debugging when the parser produces wrong values.
+  return NextResponse.json({
+    ...result,
+    raw_text_excerpt: (result.document as { raw_text_excerpt?: string }).raw_text_excerpt ?? "",
+  });
 }
