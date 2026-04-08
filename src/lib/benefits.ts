@@ -91,36 +91,17 @@ export interface Recommendation {
 export type PdfTextExtractor = (buffer: Buffer) => Promise<{ text: string; numpages: number }>;
 
 export const defaultPdfExtractor: PdfTextExtractor = async (buffer) => {
-  // pdf2json is pure-JS, no DOMMatrix dependency, runs cleanly in Node
-  // serverless. Returns a JSON tree of pages → texts; we flatten to a
-  // text string that mirrors the PDF's reading order so the row parser
-  // sees plan IDs followed by their cells on the same line.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const PDFParser = require("pdf2json");
-  return new Promise((resolve, reject) => {
-    const parser = new PDFParser(null, true);
-    parser.on("pdfParser_dataError", (err: { parserError: Error }) => reject(err.parserError));
-    parser.on("pdfParser_dataReady", (data: { Pages: Array<{ Texts: Array<{ R: Array<{ T: string }>; y: number; x: number }> }> }) => {
-      const lines: string[] = [];
-      for (const page of data.Pages ?? []) {
-        // Group runs by y-coordinate so cells on the same row stay together
-        const rows = new Map<number, Array<{ x: number; t: string }>>();
-        for (const run of page.Texts ?? []) {
-          const y = Math.round((run.y ?? 0) * 10) / 10;
-          const t = decodeURIComponent((run.R?.[0]?.T ?? "").replace(/\+/g, "%20"));
-          if (!rows.has(y)) rows.set(y, []);
-          rows.get(y)!.push({ x: run.x ?? 0, t });
-        }
-        const sortedYs = [...rows.keys()].sort((a, b) => a - b);
-        for (const y of sortedYs) {
-          const row = rows.get(y)!.sort((a, b) => a.x - b.x);
-          lines.push(row.map((r) => r.t).join(" "));
-        }
-      }
-      resolve({ text: lines.join("\n"), numpages: data.Pages?.length ?? 0 });
-    });
-    parser.parseBuffer(buffer);
-  });
+  // unpdf is a modern serverless-friendly PDF text extractor. No DOM
+  // APIs, no Node-specific filesystem hacks, runs cleanly on Vercel.
+  // Returns one merged page text per page; we join with newlines and
+  // also do per-line position-aware reconstruction so the BCBS-style
+  // row parser sees plan IDs followed by their cells on the same line.
+  const { extractText, getDocumentProxy } = await import("unpdf");
+  const uint8 = new Uint8Array(buffer);
+  const pdf = await getDocumentProxy(uint8);
+  const { text, totalPages } = await extractText(pdf, { mergePages: false });
+  const pages = Array.isArray(text) ? text : [text];
+  return { text: pages.join("\n"), numpages: totalPages };
 };
 
 const NUMBER_RE = /\$?([\d,]+(?:\.\d+)?)/;
