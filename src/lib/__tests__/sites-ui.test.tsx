@@ -232,5 +232,37 @@ describe("SitesPage — list & form", () => {
     expect(parseCall).toBeDefined();
     const fd = parseCall![1].body as FormData;
     expect(fd.get("clientSlug")).toBe("acme");
+
+    // CRITICAL regression: parse-brief upload must NOT include
+    // Content-Type: application/json (it would override the multipart
+    // boundary the browser auto-sets, and the server would 400 with
+    // 'invalid body'). The exact bug user hit on Apr 8.
+    const headers = (parseCall![1].headers ?? {}) as Record<string, string>;
+    const ct = headers["Content-Type"] ?? headers["content-type"];
+    expect(ct).toBeUndefined();
+  });
+
+  it("FormData uploads must NEVER carry an explicit Content-Type header", async () => {
+    // Belt-and-braces: this test fails the moment any multipart upload
+    // path on this page sets Content-Type, regardless of which call site.
+    render(<SitesPage />);
+    await openForm();
+    await userEvent.type(screen.getByLabelText(/slug/i, { selector: "input" }), "acme");
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ brief: { client: "acme", product: { name: "Acme" }, pages: [] }, source: "heuristic", tokensUsed: 0, confidence: "high" }),
+    });
+    const dropzone = screen.getByText(/auto-fill the rest|design brief/i).closest("div")!;
+    fireEvent.drop(dropzone, { dataTransfer: { files: [new File(["x"], "a.html", { type: "text/html" })] } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    for (const call of fetchMock.mock.calls) {
+      const [, init] = call as [string, RequestInit | undefined];
+      if (init?.body instanceof FormData) {
+        const headers = (init.headers ?? {}) as Record<string, string>;
+        const ct = headers["Content-Type"] ?? headers["content-type"];
+        expect(ct).toBeUndefined();
+      }
+    }
   });
 });

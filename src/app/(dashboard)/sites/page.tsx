@@ -32,9 +32,15 @@ const STATUS_COLORS: Record<string, string> = {
   failed: "var(--wp-error, #c44)",
 };
 
+// IMPORTANT: do NOT include Content-Type here. Multipart uploads (FormData)
+// rely on the browser to auto-set Content-Type with the correct boundary.
+// JSON requests must call jsonHeaders() instead, which adds the json header.
 function authHeaders(): HeadersInit {
   const token = typeof window !== "undefined" ? localStorage.getItem("apex_token") : null;
-  return token ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } : { "Content-Type": "application/json" };
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+function jsonHeaders(): HeadersInit {
+  return { ...authHeaders(), "Content-Type": "application/json" };
 }
 
 export default function SitesPage() {
@@ -88,7 +94,7 @@ export default function SitesPage() {
     };
     const r = await fetch("/api/sites", {
       method: "POST",
-      headers: authHeaders(),
+      headers: jsonHeaders(),
       body: JSON.stringify({ brief }),
     });
     const data = await r.json();
