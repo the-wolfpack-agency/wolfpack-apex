@@ -613,9 +613,37 @@ export async function getBenefitDocument(id: string): Promise<{
     `SELECT * FROM apex_benefit_recommendations WHERE document_id = $1 ORDER BY created_at DESC`,
     [id],
   );
+  // Postgres NUMERIC columns come back as strings via node-postgres by
+  // default. Coerce them to real JS numbers so the client doesn't have
+  // to defend against `.toFixed is not a function` crashes.
+  const numericFields = [
+    "individual_deductible_in_network",
+    "individual_deductible_out_of_network",
+    "individual_oop_max_in_network",
+    "individual_oop_max_out_of_network",
+    "primary_care_copay_in_network",
+    "specialist_copay_in_network",
+    "monthly_premium_age_employee_only",
+    "monthly_premium_composite_employee_only",
+    "monthly_premium_age_employee_spouse",
+    "monthly_premium_age_employee_child",
+    "monthly_premium_age_employee_family",
+  ];
+  const coercedPlans = plansR.rows.map((row) => {
+    const out = { ...row } as Record<string, unknown>;
+    for (const f of numericFields) {
+      const v = out[f];
+      if (v === null || v === undefined) continue;
+      if (typeof v === "string") {
+        const n = parseFloat(v);
+        out[f] = Number.isFinite(n) ? n : null;
+      }
+    }
+    return out;
+  });
   return {
     document: docR.rows[0],
-    plans: plansR.rows as unknown as BenefitPlan[],
+    plans: coercedPlans as unknown as BenefitPlan[],
     recommendations: recsR.rows,
   };
 }

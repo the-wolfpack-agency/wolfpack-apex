@@ -248,6 +248,62 @@ describe("BenefitsTab — upload flow", () => {
     await waitFor(() => expect(screen.getByText(/Parse failed \(500\)/i)).toBeInTheDocument());
   });
 
+  it("parsed plans table renders when premium values are STRINGS (PG NUMERIC regression — toFixed crash)", async () => {
+    // node-postgres returns NUMERIC columns as strings by default. The
+    // bug: client called .toFixed() on a string and crashed the entire
+    // page render. This test asserts string values are coerced safely.
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/people/benefits" && init?.method === "POST") {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              documentId: "bd_pg",
+              planCount: 1,
+              carrier: "BCBS",
+              effectiveDate: null,
+              recommendation: { id: "r", rule: "cheapest_practical", plan_id: "S9N1ADT", plan_name: null, reasoning: "—", runners_up: [] },
+              insights: [],
+            }),
+        });
+      }
+      if (url === "/api/people/benefits/bd_pg" && (init?.method ?? "GET") === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            document: { id: "bd_pg" },
+            // Every numeric is a STRING — exactly what raw PG returns
+            plans: [
+              {
+                plan_id: "S9N1ADT",
+                network: "HMO",
+                metal_tier: "Silver",
+                is_hsa: false,
+                individual_deductible_in_network: "4100",
+                individual_oop_max_in_network: "9200",
+                primary_care_copay: "$0/$0",
+                primary_care_copay_in_network: "0",
+                monthly_premium_age_employee_only: "515.43",
+              },
+            ],
+            recommendations: [],
+            raw_text_excerpt: "",
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ documents: [], employees: [], insights: [] }) });
+    });
+    render(<PeoplePage />);
+    await userEvent.click(await screen.findByRole("tab", { name: /benefits/i }));
+    const dropzone = (await screen.findByText(/Drop a benefits renewal PDF/i)).closest("div")!;
+    fireEvent.drop(dropzone, { dataTransfer: { files: [new File(["%PDF"], "x.pdf", { type: "application/pdf" })] } });
+    // The render must NOT crash and must show the formatted premium
+    await waitFor(() => expect(screen.getByText("$515.43")).toBeInTheDocument());
+    expect(screen.getByText("$4100")).toBeInTheDocument();
+    expect(screen.getByText("$9200")).toBeInTheDocument();
+  });
+
   it("recommendation with NO runners_up does not crash (regression — previously threw on .length of undefined)", async () => {
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
       if (url === "/api/people/benefits" && init?.method === "POST") {

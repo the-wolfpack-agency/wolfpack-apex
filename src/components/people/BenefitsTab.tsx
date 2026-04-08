@@ -312,18 +312,32 @@ export function BenefitsTab() {
                 </tr>
               </thead>
               <tbody>
-                {parsedPlans.map((p) => (
-                  <tr key={p.plan_id} style={{ borderBottom: "1px solid var(--wp-border)" }}>
-                    <td style={{ padding: "0.35rem 0.6rem", fontFamily: "monospace" }}>{p.plan_id}</td>
-                    <td style={{ padding: "0.35rem 0.6rem" }}>{p.network ?? "—"}</td>
-                    <td style={{ padding: "0.35rem 0.6rem" }}>{p.metal_tier ?? "—"}</td>
-                    <td style={{ padding: "0.35rem 0.6rem" }}>{p.is_hsa ? "✓" : ""}</td>
-                    <td style={{ padding: "0.35rem 0.6rem" }}>{p.individual_deductible_in_network != null ? `$${p.individual_deductible_in_network}` : "—"}</td>
-                    <td style={{ padding: "0.35rem 0.6rem" }}>{p.individual_oop_max_in_network != null ? `$${p.individual_oop_max_in_network}` : "—"}</td>
-                    <td style={{ padding: "0.35rem 0.6rem" }}>{p.primary_care_copay || "—"}</td>
-                    <td style={{ padding: "0.35rem 0.6rem", fontWeight: 600 }}>{p.monthly_premium_age_employee_only != null ? `$${p.monthly_premium_age_employee_only.toFixed(2)}` : "—"}</td>
-                  </tr>
-                ))}
+                {parsedPlans.map((p, idx) => {
+                  // Postgres NUMERIC columns come back as strings, not numbers.
+                  // Coerce defensively so the render never throws on .toFixed().
+                  const fmtMoney = (v: unknown): string => {
+                    if (v === null || v === undefined || v === "") return "—";
+                    const n = typeof v === "number" ? v : parseFloat(String(v));
+                    return Number.isFinite(n) ? `$${n.toFixed(2)}` : "—";
+                  };
+                  const fmtInt = (v: unknown): string => {
+                    if (v === null || v === undefined || v === "") return "—";
+                    const n = typeof v === "number" ? v : parseFloat(String(v));
+                    return Number.isFinite(n) ? `$${Math.round(n)}` : "—";
+                  };
+                  return (
+                    <tr key={p.plan_id ?? idx} style={{ borderBottom: "1px solid var(--wp-border)" }}>
+                      <td style={{ padding: "0.35rem 0.6rem", fontFamily: "monospace" }}>{p.plan_id ?? "—"}</td>
+                      <td style={{ padding: "0.35rem 0.6rem" }}>{p.network ?? "—"}</td>
+                      <td style={{ padding: "0.35rem 0.6rem" }}>{p.metal_tier ?? "—"}</td>
+                      <td style={{ padding: "0.35rem 0.6rem" }}>{p.is_hsa ? "✓" : ""}</td>
+                      <td style={{ padding: "0.35rem 0.6rem" }}>{fmtInt(p.individual_deductible_in_network)}</td>
+                      <td style={{ padding: "0.35rem 0.6rem" }}>{fmtInt(p.individual_oop_max_in_network)}</td>
+                      <td style={{ padding: "0.35rem 0.6rem" }}>{p.primary_care_copay || "—"}</td>
+                      <td style={{ padding: "0.35rem 0.6rem", fontWeight: 600 }}>{fmtMoney(p.monthly_premium_age_employee_only)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
