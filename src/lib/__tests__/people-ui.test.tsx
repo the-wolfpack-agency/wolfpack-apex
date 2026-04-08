@@ -146,6 +146,146 @@ describe("BenefitsTab — upload flow", () => {
     });
   });
 
+  it("upload completion path: parsed plans table renders + raw text panel + delete works", async () => {
+    let docDeleted = false;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (url === "/api/people/benefits" && method === "POST") {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              documentId: "bd_99",
+              planCount: 2,
+              carrier: "BCBS",
+              effectiveDate: "Dec 1, 2025",
+              recommendation: {
+                id: "rec_99",
+                rule: "cheapest_practical",
+                plan_id: "S9N1ADT",
+                plan_name: "HMO Silver",
+                reasoning: "...",
+                runners_up: [],
+              },
+              insights: [],
+            }),
+        });
+      }
+      if (url === "/api/people/benefits/bd_99" && method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            document: { id: "bd_99", filename: "renewal.pdf" },
+            plans: [
+              { plan_id: "S9N1ADT", network: "HMO", metal_tier: "Silver", is_hsa: false, individual_deductible_in_network: 4100, individual_oop_max_in_network: 9200, primary_care_copay: "$0/$0", primary_care_copay_in_network: 0, monthly_premium_age_employee_only: 515.43 },
+              { plan_id: "G9K8CHC", network: "PPO", metal_tier: "Gold", is_hsa: false, individual_deductible_in_network: 1050, individual_oop_max_in_network: 6300, primary_care_copay: "$55/$55", primary_care_copay_in_network: 55, monthly_premium_age_employee_only: 974.99 },
+            ],
+            recommendations: [],
+            raw_text_excerpt: "S9N1ADT $4100// $9200//\n$515.43",
+          }),
+        });
+      }
+      if (url === "/api/people/benefits" && method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            documents: docDeleted
+              ? []
+              : [{ id: "bd_99", filename: "renewal.pdf", carrier: "BCBS", effective_date: null, page_count: 7, uploaded_at: new Date().toISOString() }],
+          }),
+        });
+      }
+      if (url === "/api/people/benefits/bd_99" && method === "DELETE") {
+        docDeleted = true;
+        return Promise.resolve({ ok: true, json: async () => ({ ok: true }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ documents: [], employees: [], insights: [] }) });
+    });
+
+    render(<PeoplePage />);
+    await userEvent.click(await screen.findByRole("tab", { name: /benefits/i }));
+    const dropzone = (await screen.findByText(/Drop a benefits renewal PDF/i)).closest("div")!;
+    fireEvent.drop(dropzone, { dataTransfer: { files: [new File(["%PDF"], "renewal.pdf", { type: "application/pdf" })] } });
+
+    // Recommendation card
+    await waitFor(() => expect(screen.getAllByText(/S9N1ADT/i).length).toBeGreaterThan(0));
+
+    // Parsed plans table appears with both rows + non-null premiums
+    await waitFor(() => expect(screen.getByText("Parsed plans (2)")).toBeInTheDocument());
+    expect(screen.getByText("$515.43")).toBeInTheDocument();
+    expect(screen.getByText("$974.99")).toBeInTheDocument();
+
+    // Raw text excerpt panel exists (collapsed details element)
+    expect(screen.getByText(/Show raw extracted text/i)).toBeInTheDocument();
+
+    // Confirm dialog stub for delete
+    const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+    const deleteBtn = screen.getByRole("button", { name: /^Delete$/i });
+    await userEvent.click(deleteBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /^Delete$/i })).not.toBeInTheDocument();
+    });
+    confirmSpy.mockRestore();
+  });
+
+  it("upload error path: 500 server error is shown to the user (the production crash regression)", async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/people/benefits" && init?.method === "POST") {
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          text: async () => JSON.stringify({ error: "parse failed: DOMMatrix is not defined" }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ documents: [], employees: [], insights: [] }) });
+    });
+    render(<PeoplePage />);
+    await userEvent.click(await screen.findByRole("tab", { name: /benefits/i }));
+    const dropzone = (await screen.findByText(/Drop a benefits renewal PDF/i)).closest("div")!;
+    fireEvent.drop(dropzone, { dataTransfer: { files: [new File(["%PDF"], "x.pdf", { type: "application/pdf" })] } });
+    await waitFor(() => expect(screen.getByText(/Parse failed \(500\)/i)).toBeInTheDocument());
+  });
+
+  it("recommendation with NO runners_up does not crash (regression — previously threw on .length of undefined)", async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/people/benefits" && init?.method === "POST") {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          // recommendation.runners_up missing entirely
+          text: async () =>
+            JSON.stringify({
+              documentId: "bd_x",
+              planCount: 1,
+              carrier: null,
+              effectiveDate: null,
+              recommendation: {
+                id: "rec_x",
+                rule: "cheapest_practical",
+                plan_id: "X1",
+                plan_name: null,
+                reasoning: "—",
+                // runners_up intentionally absent
+              },
+              insights: [],
+            }),
+        });
+      }
+      if (url.startsWith("/api/people/benefits/bd_x")) {
+        return Promise.resolve({ ok: true, json: async () => ({ document: { id: "bd_x" }, plans: [], recommendations: [], raw_text_excerpt: "" }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ documents: [], employees: [], insights: [] }) });
+    });
+    render(<PeoplePage />);
+    await userEvent.click(await screen.findByRole("tab", { name: /benefits/i }));
+    const dropzone = (await screen.findByText(/Drop a benefits renewal PDF/i)).closest("div")!;
+    fireEvent.drop(dropzone, { dataTransfer: { files: [new File(["%PDF"], "x.pdf", { type: "application/pdf" })] } });
+    // Page must NOT crash; recommendation card should render
+    await waitFor(() => expect(screen.getAllByText(/X1/).length).toBeGreaterThan(0));
+  });
+
   it("Accept button on the recommendation calls the recommendations PATCH endpoint", async () => {
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
       if (url === "/api/people/benefits" && init?.method === "POST") {

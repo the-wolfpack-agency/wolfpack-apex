@@ -254,13 +254,13 @@ export function BenefitsTab() {
             <div style={{ fontSize: "0.85rem", color: "var(--wp-success)" }}>Decision recorded — the brain is learning.</div>
           )}
 
-          {result.recommendation.runners_up.length > 0 && (
+          {(result.recommendation.runners_up?.length ?? 0) > 0 && (
             <details style={{ marginTop: "1rem" }}>
               <summary style={{ cursor: "pointer", fontSize: "0.85rem", color: "var(--wp-text-dim)" }}>
                 Runners-up ({result.recommendation.runners_up.length})
               </summary>
               <ul style={{ marginTop: "0.5rem", paddingLeft: "1rem", fontSize: "0.85rem" }}>
-                {result.recommendation.runners_up.map((r) => (
+                {(result.recommendation.runners_up ?? []).map((r) => (
                   <li key={r.plan_id}>
                     <strong>{r.plan_id}</strong> — {r.reasons.join(" · ")}
                   </li>
