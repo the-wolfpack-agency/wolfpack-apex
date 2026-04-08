@@ -30,35 +30,99 @@ import {
   type BenefitPlan,
 } from "@/lib/benefits";
 
-// Synthetic fixture: a tiny BCBS-format renewal sample with 4 plans
-// across HMO Silver and PPO Gold tiers, including one HSA. The parser
-// should pull all 4 with correct deductibles, copays, and premiums.
+// Multi-line BCBS exhibit fixture matching how unpdf actually
+// extracts the production renewal PDF — each cell on its own line,
+// continuation cells joined by "//", deductibles split across two
+// lines like "$1050//\n$2100".
 const FIXTURE_TEXT = `
-THE WOLFPACK AGENCY LLC
 Account Number: 355195
-Effective Date: Dec 1, 2025
+Renewal Effective Date: Dec 1, 2025
+THE WOLFPACK AGENCY LLC
 Blue Cross Blue Shield
-
 Blue Choice PPO Network
 PPO Plans
 Gold
-G9K8CHC $1050// $6300// 80%// $55/$55 $100 $600// $100 $150// $10/$20/$70/ $8,774.95 $974.99 $1,949.98 $1,949.98 $2,924.97 $8,774.91
-$2100 Unlimited 60% 80% $250 $120/$150/$250
-G9L1CHC $2250// $6750// 80%// $35/$35 $70 $500// $75 $300// $10/$20/$70/ $8,639.39 $959.93 $1,919.86 $1,919.86 $2,879.79 $8,639.37
-$4500 Unlimited 70% 80% $250 $120/$150/$250
+G9K8CHC $1050//
+$2100
+$6300//
+Unlimited
+80%//
+60%
+$55/$55 $100 $600//
+80%
+$100 $150//
+$250
+$10/$20/$70/
+$120/$150/$250
+$8,774.95 $974.99 $1,949.98 $1,949.98 $2,924.97 $8,774.91
+G9L1CHC $2250//
+$4500
+$6750//
+Unlimited
+80%//
+60%
+$35/$35 $70 $500//
+80%
+$75 $300//
+$400
+$10/$20/$70/
+$120/$150/$250
+$8,639.39 $959.93 $1,919.86 $1,919.86 $2,879.79 $8,639.37
 Blue Advantage HMO Network
 HMO Plans
 Silver
-S9N1ADT $4100// $9200// 60%// $0/$0 $90 $400// $150 DC// 80%/80%/70%/ $4,638.83 $515.43 $1,030.86 $1,030.86 $1,546.29 $4,638.87
-Not Covered Not Covered Not Covered 60% DC 60%/60%/50%
-S9N3ADT $4100// $8200// 80%// $0/$0 $110 $500// $150 $350// 80%/80%/70%/ $4,717.57 $524.11 $1,048.34 $1,048.34 $1,572.51 $4,717.53
-Not Covered Not Covered Not Covered 80% DC 60%/60%/50%
+S9N1ADT $4100//
+Not Covered
+$9200//
+Not Covered
+60%//
+Not Covered
+$0/$0 $90 $400//
+60%
+$150 DC//
+DC
+$10/$20/$70/
+$120/$150/$250
+$4,638.83 $515.43 $1,030.86 $1,030.86 $1,546.29 $4,638.87
+S9N3ADT $4100//
+Not Covered
+$8200//
+Not Covered
+80%//
+Not Covered
+$0/$0 $110 $500//
+80%
+$150 $350//
+DC
+$10/$20/$70/
+$120/$150/$250
+$4,717.57 $524.11 $1,048.34 $1,048.34 $1,572.51 $4,717.53
 HSA Plans*
 Gold
-G9E1ADT $3500// $3500// 100%// DC/DC DC DC// DC DC// 100% $5,361.63 $595.74 $1,191.48 $1,191.48 $1,787.22 $5,361.66
-Not Covered Not Covered Not Covered 100% Not Covered
-S9J3ADT $4100// $7200// 80%// DC/DC DC DC// DC DC// 80%/80%/70% $4,703.72 $522.64 $1,045.28 $1,045.28 $1,567.92 $4,703.76
-Not Covered Not Covered Not Covered 80% Not Covered
+G9E1ADT $3500//
+Not Covered
+$3500//
+Not Covered
+100%//
+Not Covered
+DC/DC DC DC//
+100%
+DC DC//
+Not Covered
+100%
+$5,361.63 $595.74 $1,191.48 $1,191.48 $1,787.22 $5,361.66
+S9J3ADT $4100//
+Not Covered
+$7200//
+Not Covered
+80%//
+Not Covered
+DC/DC DC DC//
+80%
+DC DC//
+Not Covered
+80%/80%/70%
+$4,703.72 $522.64 $1,045.28 $1,045.28 $1,567.92 $4,703.76
 `;
 
 describe("extractPlanRows", () => {

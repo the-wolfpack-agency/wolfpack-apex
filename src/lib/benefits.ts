@@ -184,11 +184,11 @@ export function extractPlanRows(rawText: string): {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     // Section headers
-    if (/Network/i.test(line) && detectNetwork(line)) {
+    if (/Network$/i.test(line) && detectNetwork(line)) {
       currentNetwork = detectNetwork(line);
       continue;
     }
-    if (/HSA Plans?/i.test(line)) {
+    if (/^HSA Plans?\*?$/i.test(line)) {
       currentIsHsa = true;
       continue;
     }
@@ -204,26 +204,43 @@ export function extractPlanRows(rawText: string): {
       continue;
     }
 
-    // A plan row contains a plan id token (commonly at position 0,
-    // but unpdf may join cells differently — accept anywhere in line).
-    const tokens = line.split(/\s+/).filter(Boolean);
-    let planIdIdx = tokens.findIndex((t) => PLAN_ID_RE.test(t));
-    if (planIdIdx < 0) {
-      // Fallback: scan the whole line for an inline plan id token
-      const m = line.match(PLAN_ID_INLINE_RE);
-      if (!m) continue;
-      planIdIdx = tokens.indexOf(m[0]);
-      if (planIdIdx < 0) continue;
+    // unpdf produces one cell per line for the BCBS exhibit format.
+    // A plan row begins when we see a plan-id token alone on a line
+    // (e.g. "P9M1CHC"). We then glue forward every line until the
+    // next plan-id line, the next section header, or 30 lines
+    // (whichever comes first) to reconstruct the full row.
+    const trimmed = line.trim();
+    if (!PLAN_ID_RE.test(trimmed) && !PLAN_ID_INLINE_RE.test(trimmed)) continue;
+    const idMatch = trimmed.match(PLAN_ID_INLINE_RE);
+    if (!idMatch) continue;
+    const planId = idMatch[0];
+    if (planId.length < 6) continue;
+
+    // Include the plan-id line itself (it usually contains the first
+    // deductible cell on the same line as the plan id)
+    const bufferParts: string[] = [trimmed.replace(planId, "")];
+    for (let j = 1; j <= 30; j++) {
+      const next = lines[i + j];
+      if (next === undefined) break;
+      const nextTrimmed = next.trim();
+      // Stop if we hit the next plan id (check the first token, since
+      // the BCBS exhibit puts the first deductible cell on the same
+      // line as the plan id, e.g. "S9N3ADT $4100//")
+      const firstToken = nextTrimmed.split(/\s+/)[0] ?? "";
+      if (PLAN_ID_RE.test(firstToken) && firstToken !== planId) break;
+      // Stop on section headers
+      if (/^(Platinum|Gold|Silver|Bronze)$/i.test(nextTrimmed)) break;
+      if (/^(PPO|HMO|EPO|POS) Plans?$/i.test(nextTrimmed)) break;
+      if (/^HSA Plans?\*?$/i.test(nextTrimmed)) break;
+      if (/Network$/i.test(nextTrimmed) && detectNetwork(nextTrimmed)) break;
+      bufferParts.push(nextTrimmed);
     }
-    const planId = tokens[planIdIdx];
-    if (tokens.length - planIdIdx < 4) continue; // need at least a few cells after the id
-    // The plan-id line itself contains every premium value we need
-    // (the BCBS exhibit format renders the full row on one line). We
-    // do NOT glue forward continuation lines, because the next line is
-    // either a deductible/OOP overflow (e.g. "$2100 Unlimited 60% ...")
-    // or a "Not Covered" row, both of which would inject bogus dollar
-    // amounts into the premium tail and corrupt the result.
-    const buffer = line;
+    const buffer = bufferParts.join(" ");
+    // Pull out every $-prefixed number from the buffer in order. The
+    // BCBS exhibit always emits these in the same column order:
+    //   ded_in, ded_out, oop_in, oop_out, [pcp $X/$X], [spec $X], er,
+    //   urgent, in_ded_in, in_ded_out, [rx tier $X/$X/...], total_age,
+    //   ee_only, ee_spouse, ee_child, ee_family, total_composite
     const numbers = buffer.match(/\$[\d,]+(?:\.\d+)?/g) ?? [];
 
     // Heuristics: typical row has [ded_in, ded_out, oop_in, oop_out, pcp,
@@ -231,15 +248,36 @@ export function extractPlanRows(rawText: string): {
     //   ee_child, ee_family, total_composite]
     const cleanedNumbers = numbers.map((n) => parseFloat(n.replace(/[$,]/g, "")));
 
-    // BCBS exhibit format: deductible_in_network and oop_max_in_network
-    // are the first two $-tokens on the row. Out-of-network values live
-    // on a continuation line that we deliberately don't glue, because
-    // their dollar values would corrupt the premium tail. We only
-    // capture in-network deductible + OOP for v1 (the only fields the
-    // scoring engine needs).
+    // BCBS exhibit column order (from front of buffer):
+    //   [0] individual deductible in-network
+    //   [1] individual deductible out-of-network (may be missing if "Unlimited")
+    //   [2] individual OOP max in-network
+    //   [3] individual OOP max out-of-network (may be missing)
+    // Then PCP, specialist, ER, urgent care, in-patient deductible,
+    // 6 Rx copays, then the premium tail.
+    //
+    // To find OOP max reliably we look for the LARGEST four-or-five
+    // figure number in the first 6 positions — deductibles are usually
+    // 4 figures, OOP is usually 4-5 figures.
     const ded_in = cleanedNumbers[0] ?? null;
-    const oop_in = cleanedNumbers[1] ?? null;
-    const ded_out = null;
+    // ded_out and oop_in are by definition both greater than ded_in.
+    // Scan positions [1..5] for values strictly greater than ded_in
+    // and below the premium cutoff (50K). The first such value is
+    // ded_out; the second is oop_in. If only one is found (ded_out =
+    // "Not Covered" was filtered), it's oop_in.
+    let ded_out: number | null = null;
+    let oop_in: number | null = null;
+    if (ded_in !== null) {
+      const candidates = cleanedNumbers
+        .slice(1, 6)
+        .filter((n) => n > ded_in && n < 50000);
+      if (candidates.length >= 2) {
+        ded_out = candidates[0];
+        oop_in = candidates[1];
+      } else if (candidates.length === 1) {
+        oop_in = candidates[0];
+      }
+    }
     const oop_out = null;
 
     // Premiums: the LAST 5-6 numbers in the row are total_age + 4 splits
