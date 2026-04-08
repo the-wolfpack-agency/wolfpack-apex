@@ -428,7 +428,7 @@ export async function recordDeployResult(
     trackEvent("site.deploy_succeeded", triggered_by, "system", {
       project_id,
       deploy_id: deployId,
-      preview_url: result.previewUrl,
+      preview_url: result.previewUrl ?? "",
     });
     if (result.canaryPassed === true) {
       trackEvent("site.canary_passed", triggered_by, "system", { project_id, deploy_id: deployId });
