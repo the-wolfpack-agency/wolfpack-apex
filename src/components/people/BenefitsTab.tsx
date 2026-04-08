@@ -103,6 +103,12 @@ export function BenefitsTab() {
       const text = await r.text();
       let data: UploadResult & { error?: string } = {} as UploadResult & { error?: string };
       try { data = JSON.parse(text); } catch { /* keep raw */ }
+      if (r.status === 401) {
+        setError("Your session has expired. Please log in again — top-right user menu → Log out, then sign back in.");
+        setProgressMsg(null);
+        setUploading(false);
+        return;
+      }
       if (!r.ok) {
         const excerpt = data.textExcerpt ? `\n\nExtracted text preview:\n${data.textExcerpt.slice(0, 600)}…` : "";
         setError(`Parse failed (${r.status}): ${data.error ?? text.slice(0, 300)}${excerpt}`);

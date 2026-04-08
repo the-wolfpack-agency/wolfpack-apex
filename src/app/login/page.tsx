@@ -30,6 +30,10 @@ export default function LoginPage() {
         return;
       }
 
+      // Write both legacy (apex_*) and canonical (instinct_*) keys so
+      // existing code paths and new ones both find the session.
+      localStorage.setItem("instinct_token", data.token);
+      localStorage.setItem("instinct_user", JSON.stringify(data.user));
       localStorage.setItem("apex_token", data.token);
       localStorage.setItem("apex_user", JSON.stringify(data.user));
 

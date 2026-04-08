@@ -1,10 +1,8 @@
 "use client";
 
-export function authHeaders(): HeadersInit {
-  const token = typeof window !== "undefined" ? localStorage.getItem("apex_token") : null;
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-export function jsonHeaders(): HeadersInit {
-  return { ...authHeaders(), "Content-Type": "application/json" };
-}
+/**
+ * Re-exports the canonical client-auth helpers. Kept as a separate file
+ * so existing imports from "./auth" inside components/people don't
+ * break, but new code should import from "@/lib/client-auth" directly.
+ */
+export { authHeaders, jsonHeaders } from "@/lib/client-auth";

@@ -33,12 +33,14 @@ export interface AuthResult {
 }
 
 function getJwtSecret(): string {
-  const secret = process.env.APEX_JWT_SECRET;
+  // Renamed from Apex → Instinct. Read the new var first, fall back to
+  // the legacy var so existing Vercel environments don't break.
+  const secret = process.env.INSTINCT_JWT_SECRET ?? process.env.APEX_JWT_SECRET;
   if (secret) return secret;
   if (process.env.NODE_ENV === "production" && typeof window === "undefined") {
-    console.error("[auth] APEX_JWT_SECRET must be set in production — auth will fail");
+    console.error("[auth] INSTINCT_JWT_SECRET (or legacy APEX_JWT_SECRET) must be set in production — auth will fail");
   }
-  return "apex-dev-secret-do-not-use-in-production";
+  return "instinct-dev-secret-do-not-use-in-production";
 }
 
 const JWT_EXPIRY = "8h";

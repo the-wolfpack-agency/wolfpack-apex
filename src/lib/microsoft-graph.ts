@@ -146,7 +146,7 @@ function isShadowMode(): boolean {
  * else's apex user record by guessing IDs.
  */
 function getStateSecret(): string {
-  return process.env.APEX_JWT_SECRET || "apex-dev-secret-do-not-use-in-production";
+  return process.env.INSTINCT_JWT_SECRET || process.env.APEX_JWT_SECRET || "instinct-dev-secret-do-not-use-in-production";
 }
 
 export function signState(userId: string): string {
