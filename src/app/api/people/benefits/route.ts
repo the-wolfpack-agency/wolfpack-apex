@@ -67,9 +67,17 @@ export async function POST(req: NextRequest) {
       trackEvent("hr.benefit_document_parse_failed", user.id, user.role, {
         filename: file.name,
         reason: "no_plans_extracted",
+        excerpt_len: doc.raw_text_excerpt.length,
       });
       return NextResponse.json(
-        { error: "Could not extract any plan rows from this PDF. The format may not match the parser's expectations." },
+        {
+          error:
+            "Could not extract any plan rows from this PDF. The format may not match the parser's expectations.",
+          // Echo a snippet of the extracted text so we can iterate the parser
+          // against real input without needing a redeploy cycle for each guess.
+          textExcerpt: doc.raw_text_excerpt.slice(0, 4000),
+          pageCount: doc.page_count,
+        },
         { status: 422 },
       );
     }

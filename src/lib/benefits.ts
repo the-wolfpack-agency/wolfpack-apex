@@ -105,7 +105,12 @@ export const defaultPdfExtractor: PdfTextExtractor = async (buffer) => {
 };
 
 const NUMBER_RE = /\$?([\d,]+(?:\.\d+)?)/;
-const PLAN_ID_RE = /^[A-Z][A-Z0-9]{4,7}$/;
+// Plan IDs in BCBS exhibits are 6-8 char codes like P9M1CHC, S9N1ADT,
+// G9K8CHC. Pattern: starts with a letter, 5-7 alphanumerics following.
+// We accept the token anywhere on a line (not just position 0) so the
+// parser is robust to layout variations from different PDF extractors.
+const PLAN_ID_RE = /^[A-Z][A-Z0-9]{5,7}$/;
+const PLAN_ID_INLINE_RE = /\b[A-Z][A-Z0-9]{5,7}\b/;
 
 function parseNumber(cell: string | undefined): number | null {
   if (!cell) return null;
@@ -199,12 +204,19 @@ export function extractPlanRows(rawText: string): {
       continue;
     }
 
-    // A plan row starts with a plan id token
+    // A plan row contains a plan id token (commonly at position 0,
+    // but unpdf may join cells differently — accept anywhere in line).
     const tokens = line.split(/\s+/).filter(Boolean);
-    if (tokens.length < 6) continue;
-    if (!PLAN_ID_RE.test(tokens[0])) continue;
-
-    const planId = tokens[0];
+    let planIdIdx = tokens.findIndex((t) => PLAN_ID_RE.test(t));
+    if (planIdIdx < 0) {
+      // Fallback: scan the whole line for an inline plan id token
+      const m = line.match(PLAN_ID_INLINE_RE);
+      if (!m) continue;
+      planIdIdx = tokens.indexOf(m[0]);
+      if (planIdIdx < 0) continue;
+    }
+    const planId = tokens[planIdIdx];
+    if (tokens.length - planIdIdx < 4) continue; // need at least a few cells after the id
     // The plan-id line itself contains every premium value we need
     // (the BCBS exhibit format renders the full row on one line). We
     // do NOT glue forward continuation lines, because the next line is

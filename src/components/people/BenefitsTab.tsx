@@ -30,6 +30,8 @@ interface UploadResult {
   effectiveDate: string | null;
   recommendation: RecommendationPayload | null;
   insights: Array<{ title: string; body: string; severity: string; category: string }>;
+  textExcerpt?: string;
+  pageCount?: number;
 }
 interface DocSummary {
   id: string;
@@ -77,7 +79,8 @@ export function BenefitsTab() {
       let data: UploadResult & { error?: string } = {} as UploadResult & { error?: string };
       try { data = JSON.parse(text); } catch { /* keep raw */ }
       if (!r.ok) {
-        setError(`Parse failed (${r.status}): ${data.error ?? text.slice(0, 300)}`);
+        const excerpt = data.textExcerpt ? `\n\nExtracted text preview:\n${data.textExcerpt.slice(0, 600)}…` : "";
+        setError(`Parse failed (${r.status}): ${data.error ?? text.slice(0, 300)}${excerpt}`);
         setProgressMsg(null);
       } else {
         setResult(data);
@@ -171,7 +174,26 @@ export function BenefitsTab() {
           {progressMsg}
         </div>
       )}
-      {error && <div style={{ color: "#c44", marginBottom: "1rem", fontSize: "0.85rem", padding: "0.75rem", background: "rgba(204, 68, 68, 0.1)", borderRadius: "6px", border: "1px solid #c44" }}>{error}</div>}
+      {error && (
+        <pre
+          style={{
+            color: "#c44",
+            marginBottom: "1rem",
+            fontSize: "0.8rem",
+            padding: "0.75rem",
+            background: "rgba(204, 68, 68, 0.08)",
+            borderRadius: "6px",
+            border: "1px solid #c44",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            maxHeight: "300px",
+            overflow: "auto",
+          }}
+        >
+          {error}
+        </pre>
+      )}
 
       {result?.recommendation && (
         <div
