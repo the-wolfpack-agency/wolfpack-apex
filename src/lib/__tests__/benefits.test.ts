@@ -277,6 +277,254 @@ describe("parseBenefitDocument with stub extractor", () => {
   });
 });
 
+/* ------------------- Carrier-specific parser tests -------------------- */
+
+const AETNA_FIXTURE = `
+Account Number: 88210
+Renewal Effective Date: Jan 1, 2026
+ACME CORP
+Aetna
+PPO Plans
+Gold
+AVN $1500//
+$3000
+$6000//
+$12000
+80%//
+60%
+$20/$20 $40 $350//
+80%
+$75 $150//
+$250
+$10/$25/$50
+$7,200.00 $800.00 $1,600.00 $1,600.00 $2,400.00 $7,200.00
+OAP $2000//
+$4000
+$8000//
+$16000
+80%//
+60%
+$25/$25 $50 $400//
+80%
+$100 $200//
+$300
+$10/$25/$50
+$6,300.00 $700.00 $1,400.00 $1,400.00 $2,100.00 $6,300.00
+HMO Plans
+Silver
+QPOS $3000//
+Not Covered
+$7500//
+Not Covered
+70%//
+Not Covered
+$0/$0 $60 $300//
+70%
+$100 DC//
+DC
+$10/$20/$50
+$4,500.00 $500.00 $1,000.00 $1,000.00 $1,500.00 $4,500.00
+`;
+
+const CIGNA_FIXTURE = `
+Account Number: 44321
+Renewal Effective Date: Mar 1, 2026
+WIDGETS INC
+Cigna
+PPO Plans
+Gold
+OAP-500 $500//
+$1000
+$3000//
+$6000
+90%//
+70%
+$20/$20 $40 $250//
+90%
+$50 $100//
+$200
+$15/$30/$60
+$9,000.00 $1,000.00 $2,000.00 $2,000.00 $3,000.00 $9,000.00
+Silver
+LPPO-1500 $1500//
+$3000
+$6000//
+$12000
+80%//
+60%
+$30/$30 $60 $350//
+80%
+$75 $150//
+$300
+$10/$25/$50
+$6,600.00 $733.33 $1,466.66 $1,466.66 $2,200.00 $6,600.00
+`;
+
+const UHC_FIXTURE = `
+Account Number: 77001
+Renewal Effective Date: Jun 1, 2026
+GADGETS LLC
+UnitedHealthcare
+PPO Plans
+Gold
+TX-CHOICE-500 $500//
+$1000
+$4000//
+$8000
+80%//
+60%
+$25/$25 $50 $300//
+80%
+$75 $150//
+$250
+$10/$20/$50
+$8,400.00 $933.33 $1,866.66 $1,866.66 $2,800.00 $8,400.00
+Silver
+TX-NAV-1500 $1500//
+$3000
+$7000//
+$14000
+70%//
+50%
+$30/$30 $60 $400//
+70%
+$100 $200//
+$300
+$10/$25/$50
+$6,000.00 $666.67 $1,333.34 $1,333.34 $2,000.00 $6,000.00
+NY-NAV-1000 $1000//
+$2000
+$5000//
+$10000
+80%//
+60%
+$20/$20 $40 $350//
+80%
+$80 $160//
+$280
+$10/$20/$50
+$7,200.00 $800.00 $1,600.00 $1,600.00 $2,400.00 $7,200.00
+`;
+
+describe("Aetna carrier parser", () => {
+  const result = extractPlanRows(AETNA_FIXTURE);
+
+  it("detects Aetna carrier", () => {
+    expect(result.carrier).toBe("Aetna");
+  });
+
+  it("extracts all Aetna plan rows", () => {
+    const ids = result.plans.map((p) => p.plan_id);
+    expect(ids).toContain("AVN");
+    expect(ids).toContain("OAP");
+    expect(ids).toContain("QPOS");
+    expect(result.plans.length).toBe(3);
+  });
+
+  it("parses Aetna premiums correctly", () => {
+    const avn = result.plans.find((p) => p.plan_id === "AVN");
+    expect(avn?.monthly_premium_age_employee_only).toBe(800);
+  });
+
+  it("parses Aetna deductible correctly", () => {
+    const oap = result.plans.find((p) => p.plan_id === "OAP");
+    expect(oap?.individual_deductible_in_network).toBe(2000);
+  });
+
+  it("detects network from section headers", () => {
+    const qpos = result.plans.find((p) => p.plan_id === "QPOS");
+    expect(qpos?.network).toBe("HMO");
+    const avn = result.plans.find((p) => p.plan_id === "AVN");
+    expect(avn?.network).toBe("PPO");
+  });
+});
+
+describe("Cigna carrier parser", () => {
+  const result = extractPlanRows(CIGNA_FIXTURE);
+
+  it("detects Cigna carrier", () => {
+    expect(result.carrier).toBe("Cigna");
+  });
+
+  it("extracts all Cigna plan rows", () => {
+    const ids = result.plans.map((p) => p.plan_id);
+    expect(ids).toContain("OAP-500");
+    expect(ids).toContain("LPPO-1500");
+    expect(result.plans.length).toBe(2);
+  });
+
+  it("parses Cigna premiums correctly", () => {
+    const oap = result.plans.find((p) => p.plan_id === "OAP-500");
+    expect(oap?.monthly_premium_age_employee_only).toBe(1000);
+  });
+
+  it("assigns correct metal tiers", () => {
+    const oap = result.plans.find((p) => p.plan_id === "OAP-500");
+    expect(oap?.metal_tier).toBe("Gold");
+    const lppo = result.plans.find((p) => p.plan_id === "LPPO-1500");
+    expect(lppo?.metal_tier).toBe("Silver");
+  });
+});
+
+describe("UHC carrier parser", () => {
+  const result = extractPlanRows(UHC_FIXTURE);
+
+  it("detects UnitedHealthcare carrier", () => {
+    expect(result.carrier).toBe("UnitedHealthcare");
+  });
+
+  it("extracts all UHC plan rows", () => {
+    const ids = result.plans.map((p) => p.plan_id);
+    expect(ids).toContain("TX-CHOICE-500");
+    expect(ids).toContain("TX-NAV-1500");
+    expect(ids).toContain("NY-NAV-1000");
+    expect(result.plans.length).toBe(3);
+  });
+
+  it("parses UHC premiums correctly", () => {
+    const choice = result.plans.find((p) => p.plan_id === "TX-CHOICE-500");
+    expect(choice?.monthly_premium_age_employee_only).toBe(933.33);
+  });
+
+  it("parses UHC deductible correctly", () => {
+    const nav = result.plans.find((p) => p.plan_id === "TX-NAV-1500");
+    expect(nav?.individual_deductible_in_network).toBe(1500);
+  });
+});
+
+describe("carrier fallback behavior", () => {
+  it("unknown carrier falls back to BCBS parser", () => {
+    // Use the BCBS fixture text but with no carrier header
+    const noCarrierText = `
+PPO Plans
+Gold
+G9K8CHC $1050//
+$2100
+$6300//
+Unlimited
+80%//
+60%
+$55/$55 $100 $600//
+80%
+$100 $150//
+$250
+$10/$20/$70
+$8,774.95 $974.99 $1,949.98 $1,949.98 $2,924.97 $8,774.91
+`;
+    const result = extractPlanRows(noCarrierText);
+    expect(result.carrier).toBeNull();
+    expect(result.plans.length).toBeGreaterThanOrEqual(1);
+    expect(result.plans[0].plan_id).toBe("G9K8CHC");
+  });
+
+  it("carrier detection from header text works for all carriers", () => {
+    expect(extractPlanRows("Aetna Health Plans\n").carrier).toBe("Aetna");
+    expect(extractPlanRows("Cigna Group Insurance\n").carrier).toBe("Cigna");
+    expect(extractPlanRows("UnitedHealthcare Choice\n").carrier).toBe("UnitedHealthcare");
+    expect(extractPlanRows("Blue Cross Blue Shield of TX\n").carrier).toBe("Blue Cross Blue Shield");
+  });
+});
+
 describe("persistence (saveBenefitDocument / saveRecommendation / decideRecommendation)", () => {
   beforeEach(() => {
     jest.clearAllMocks();

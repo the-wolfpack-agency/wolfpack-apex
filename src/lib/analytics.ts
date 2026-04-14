@@ -118,6 +118,9 @@ export type ApexEventType =
   | "hr.insight_generated"
   | "hr.insight_viewed"
   | "hr.insight_dismissed"
+  // HR benefits carrier detection
+  | "hr.benefit_carrier_detected"
+  | "hr.benefit_carrier_fallback"
   // HR documents (smart router across all uploaded forms)
   | "hr.document_uploaded"
   | "hr.document_classified"

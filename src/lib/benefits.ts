@@ -112,6 +112,21 @@ const NUMBER_RE = /\$?([\d,]+(?:\.\d+)?)/;
 const PLAN_ID_RE = /^[A-Z][A-Z0-9]{5,7}$/;
 const PLAN_ID_INLINE_RE = /\b[A-Z][A-Z0-9]{5,7}\b/;
 
+// Aetna plan IDs are short 3-4 char codes: AVN, OAP, QPOS, etc.
+// Must NOT match section headers (PPO, HMO, EPO, POS, HSA) or metal
+// tiers (Gold, etc.). We require 3+ uppercase letters only.
+const AETNA_SECTION_BLACKLIST = /^(PPO|HMO|EPO|POS|HSA|NOT|THE|AND|FOR|INC|LLC|LLP|DBA|CORP|ACME)$/;
+const AETNA_PLAN_ID_RE = /^[A-Z]{3,4}(?:-\d+)?$/;
+const AETNA_PLAN_ID_INLINE_RE = /\b[A-Z]{3,4}(?:-\d+)?\b/;
+
+// Cigna plan IDs are alphanumeric with dash: OAP-500, LPPO-1500, etc.
+const CIGNA_PLAN_ID_RE = /^[A-Z]{2,4}-\d{3,4}$/;
+const CIGNA_PLAN_ID_INLINE_RE = /\b[A-Z]{2,4}-\d{3,4}\b/;
+
+// UHC plan IDs have state prefix: TX-CHOICE-500, NY-NAV-1000, etc.
+const UHC_PLAN_ID_RE = /^[A-Z]{2}-[A-Z]+-\d{3,4}$/;
+const UHC_PLAN_ID_INLINE_RE = /\b[A-Z]{2}-[A-Z]+-\d{3,4}\b/;
+
 function parseNumber(cell: string | undefined): number | null {
   if (!cell) return null;
   const trimmed = cell.trim();
@@ -137,6 +152,189 @@ function detectNetwork(text: string): Network {
   return null;
 }
 
+/* ------------------- Carrier-specific plan extractors ----------------- */
+
+/**
+ * Generic helper shared by carrier-specific extractors. Given lines of
+ * text and a plan-id regex pair, extracts plan rows using the same
+ * column-position heuristic as the BCBS parser but with carrier-tuned
+ * plan-id patterns.
+ */
+function extractPlansGeneric(
+  lines: string[],
+  planIdRe: RegExp,
+  planIdInlineRe: RegExp,
+  minIdLen: number,
+  currentNetwork: Network,
+  currentTier: MetalTier,
+  currentIsHsa: boolean,
+): BenefitPlan[] {
+  const plans: BenefitPlan[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Section headers
+    if (/Network$/i.test(line) && detectNetwork(line)) {
+      currentNetwork = detectNetwork(line);
+      continue;
+    }
+    if (/^HSA Plans?\*?$/i.test(line)) { currentIsHsa = true; continue; }
+    if (/^(PPO|HMO|EPO|POS) Plans?$/i.test(line)) {
+      const net = detectNetwork(line);
+      if (net) currentNetwork = net;
+      currentIsHsa = false;
+      continue;
+    }
+    const tier = detectMetalTier(line);
+    if (tier && line.length < 30) { currentTier = tier; continue; }
+
+    const trimmed = line.trim();
+    if (!planIdRe.test(trimmed) && !planIdInlineRe.test(trimmed)) continue;
+    const idMatch = trimmed.match(planIdInlineRe);
+    if (!idMatch) continue;
+    const planId = idMatch[0];
+    if (planId.length < minIdLen) continue;
+
+    const bufferParts: string[] = [trimmed.replace(planId, "")];
+    for (let j = 1; j <= 30; j++) {
+      const next = lines[i + j];
+      if (next === undefined) break;
+      const nextTrimmed = next.trim();
+      const firstToken = nextTrimmed.split(/\s+/)[0] ?? "";
+      if (planIdRe.test(firstToken) && firstToken !== planId) break;
+      if (/^(Platinum|Gold|Silver|Bronze)$/i.test(nextTrimmed)) break;
+      if (/^(PPO|HMO|EPO|POS) Plans?$/i.test(nextTrimmed)) break;
+      if (/^HSA Plans?\*?$/i.test(nextTrimmed)) break;
+      if (/Network$/i.test(nextTrimmed) && detectNetwork(nextTrimmed)) break;
+      bufferParts.push(nextTrimmed);
+    }
+    const buffer = bufferParts.join(" ");
+    const numbers = buffer.match(/\$[\d,]+(?:\.\d+)?/g) ?? [];
+    const cleanedNumbers = numbers.map((n) => parseFloat(n.replace(/[$,]/g, "")));
+
+    const ded_in = cleanedNumbers[0] ?? null;
+    let ded_out: number | null = null;
+    let oop_in: number | null = null;
+    if (ded_in !== null) {
+      const candidates = cleanedNumbers.slice(1, 6).filter((n) => n > ded_in && n < 50000);
+      if (candidates.length >= 2) { ded_out = candidates[0]; oop_in = candidates[1]; }
+      else if (candidates.length === 1) { oop_in = candidates[0]; }
+    }
+
+    const tail = cleanedNumbers.slice(-6);
+    const ee_only = tail[1] ?? null;
+    const ee_spouse = tail[2] ?? null;
+    const ee_child = tail[3] ?? null;
+    const ee_family = tail[4] ?? null;
+    const monthly_total_age = tail[0] ?? null;
+    const monthly_total_composite = tail[5] ?? null;
+
+    const cellRe = /(\$[\d,.]+|\bDC\b|\bNot Covered\b)\s*\/\s*(\$[\d,.]+|\bDC\b|\bNot Covered\b)/g;
+    const cellMatches = [...buffer.matchAll(cellRe)];
+    const pcp = cellMatches[0]?.[0] ?? "";
+    const spec = cellMatches[1]?.[0] ?? "";
+    const er = cellMatches[2]?.[0] ?? "";
+
+    plans.push({
+      plan_id: planId,
+      plan_name: `${currentNetwork ?? ""} ${currentTier ?? ""}${currentIsHsa ? " HSA" : ""}`.trim() || undefined,
+      network: currentNetwork,
+      metal_tier: currentTier,
+      is_hsa: currentIsHsa,
+      individual_deductible_in_network: ded_in,
+      individual_deductible_out_of_network: ded_out,
+      individual_oop_max_in_network: oop_in,
+      individual_oop_max_out_of_network: null,
+      primary_care_copay: pcp,
+      primary_care_copay_in_network: parseNumber(pcp.split("/")[0]),
+      specialist_copay: spec,
+      specialist_copay_in_network: parseNumber(spec.split("/")[0]),
+      er_copay: er,
+      rx_copays: "",
+      monthly_premium_age_employee_only: ee_only ?? monthly_total_age,
+      monthly_premium_composite_employee_only: monthly_total_composite,
+      monthly_premium_age_employee_spouse: ee_spouse,
+      monthly_premium_age_employee_child: ee_child,
+      monthly_premium_age_employee_family: ee_family,
+      raw: { source_line: line },
+    });
+  }
+  return plans;
+}
+
+/**
+ * Aetna plan row extractor. Aetna renewals use short plan IDs like
+ * "AVN", "OAP", "QPOS" and plan names like "Aetna Choice POS II".
+ */
+function extractAetnaPlans(rawText: string): BenefitPlan[] {
+  const lines = rawText.split(/\r?\n/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const plans = extractPlansGeneric(lines, AETNA_PLAN_ID_RE, AETNA_PLAN_ID_INLINE_RE, 3, null, null, false);
+  // Post-filter: remove false positives from section headers and common words
+  return plans.filter((p) => !AETNA_SECTION_BLACKLIST.test(p.plan_id));
+}
+
+/**
+ * Cigna plan row extractor. Cigna renewals use dash-separated IDs
+ * like "OAP-500", "LPPO-1500".
+ */
+function extractCignaPlans(rawText: string): BenefitPlan[] {
+  const lines = rawText.split(/\r?\n/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+  return extractPlansGeneric(lines, CIGNA_PLAN_ID_RE, CIGNA_PLAN_ID_INLINE_RE, 5, null, null, false);
+}
+
+/**
+ * UHC plan row extractor. UHC renewals use state-prefixed IDs
+ * like "TX-CHOICE-500", "NY-NAV-1000".
+ */
+function extractUHCPlans(rawText: string): BenefitPlan[] {
+  const lines = rawText.split(/\r?\n/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+  return extractPlansGeneric(lines, UHC_PLAN_ID_RE, UHC_PLAN_ID_INLINE_RE, 8, null, null, false);
+}
+
+/**
+ * BCBS plan row extractor — the original parsing logic, factored out
+ * so it can be called as one variant among many.
+ */
+function extractBCBSPlans(rawText: string): BenefitPlan[] {
+  const lines = rawText.split(/\r?\n/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+  return extractPlansGeneric(lines, PLAN_ID_RE, PLAN_ID_INLINE_RE, 6, null, null, false);
+}
+
+/**
+ * Dispatch to carrier-specific parser, falling back to the generic
+ * BCBS parser if the carrier-specific one finds 0 plans.
+ */
+function extractPlanRowsForCarrier(rawText: string, carrier: string | null): {
+  plans: BenefitPlan[];
+  usedFallback: boolean;
+} {
+  let plans: BenefitPlan[] = [];
+  let usedFallback = false;
+
+  switch (carrier) {
+    case "Aetna":
+      plans = extractAetnaPlans(rawText);
+      break;
+    case "Cigna":
+      plans = extractCignaPlans(rawText);
+      break;
+    case "UnitedHealthcare":
+      plans = extractUHCPlans(rawText);
+      break;
+    default:
+      plans = extractBCBSPlans(rawText);
+      break;
+  }
+
+  // Fall back to BCBS (generic) parser if carrier-specific found nothing
+  if (plans.length === 0 && carrier && carrier !== "Blue Cross Blue Shield") {
+    plans = extractBCBSPlans(rawText);
+    usedFallback = plans.length > 0;
+  }
+
+  return { plans, usedFallback };
+}
+
 /**
  * Extract plan rows from raw PDF text. The carrier renewal exhibit
  * (BCBS in this case) renders each plan as a row of cells separated by
@@ -146,6 +344,9 @@ function detectNetwork(text: string): Network {
  * Robust to partial cells (deductible can be "$1000// $2000" split
  * across two lines). The parser glues continuation lines back to the
  * row they belong to.
+ *
+ * Now supports Aetna, Cigna, and UHC carrier-specific plan ID formats
+ * in addition to the original BCBS format.
  */
 export function extractPlanRows(rawText: string): {
   plans: BenefitPlan[];
@@ -174,153 +375,26 @@ export function extractPlanRows(rawText: string): {
     if (dateMatch) effective_date = dateMatch[1];
   }
 
-  // Track current network + metal tier from section headers
-  let currentNetwork: Network = null;
-  let currentTier: MetalTier = null;
-  let currentIsHsa = false;
+  // Dispatch to carrier-specific parser (falls back to BCBS generic
+  // if the carrier-specific parser finds 0 plans)
+  const { plans, usedFallback } = extractPlanRowsForCarrier(rawText, carrier);
 
-  const plans: BenefitPlan[] = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    // Section headers
-    if (/Network$/i.test(line) && detectNetwork(line)) {
-      currentNetwork = detectNetwork(line);
-      continue;
-    }
-    if (/^HSA Plans?\*?$/i.test(line)) {
-      currentIsHsa = true;
-      continue;
-    }
-    if (/^(PPO|HMO|EPO|POS) Plans?$/i.test(line)) {
-      const net = detectNetwork(line);
-      if (net) currentNetwork = net;
-      currentIsHsa = false;
-      continue;
-    }
-    const tier = detectMetalTier(line);
-    if (tier && line.length < 30) {
-      currentTier = tier;
-      continue;
-    }
-
-    // unpdf produces one cell per line for the BCBS exhibit format.
-    // A plan row begins when we see a plan-id token alone on a line
-    // (e.g. "P9M1CHC"). We then glue forward every line until the
-    // next plan-id line, the next section header, or 30 lines
-    // (whichever comes first) to reconstruct the full row.
-    const trimmed = line.trim();
-    if (!PLAN_ID_RE.test(trimmed) && !PLAN_ID_INLINE_RE.test(trimmed)) continue;
-    const idMatch = trimmed.match(PLAN_ID_INLINE_RE);
-    if (!idMatch) continue;
-    const planId = idMatch[0];
-    if (planId.length < 6) continue;
-
-    // Include the plan-id line itself (it usually contains the first
-    // deductible cell on the same line as the plan id)
-    const bufferParts: string[] = [trimmed.replace(planId, "")];
-    for (let j = 1; j <= 30; j++) {
-      const next = lines[i + j];
-      if (next === undefined) break;
-      const nextTrimmed = next.trim();
-      // Stop if we hit the next plan id (check the first token, since
-      // the BCBS exhibit puts the first deductible cell on the same
-      // line as the plan id, e.g. "S9N3ADT $4100//")
-      const firstToken = nextTrimmed.split(/\s+/)[0] ?? "";
-      if (PLAN_ID_RE.test(firstToken) && firstToken !== planId) break;
-      // Stop on section headers
-      if (/^(Platinum|Gold|Silver|Bronze)$/i.test(nextTrimmed)) break;
-      if (/^(PPO|HMO|EPO|POS) Plans?$/i.test(nextTrimmed)) break;
-      if (/^HSA Plans?\*?$/i.test(nextTrimmed)) break;
-      if (/Network$/i.test(nextTrimmed) && detectNetwork(nextTrimmed)) break;
-      bufferParts.push(nextTrimmed);
-    }
-    const buffer = bufferParts.join(" ");
-    // Pull out every $-prefixed number from the buffer in order. The
-    // BCBS exhibit always emits these in the same column order:
-    //   ded_in, ded_out, oop_in, oop_out, [pcp $X/$X], [spec $X], er,
-    //   urgent, in_ded_in, in_ded_out, [rx tier $X/$X/...], total_age,
-    //   ee_only, ee_spouse, ee_child, ee_family, total_composite
-    const numbers = buffer.match(/\$[\d,]+(?:\.\d+)?/g) ?? [];
-
-    // Heuristics: typical row has [ded_in, ded_out, oop_in, oop_out, pcp,
-    //   spec, er, urgent, in_ded, rx, total_age, ee_only, ee_spouse,
-    //   ee_child, ee_family, total_composite]
-    const cleanedNumbers = numbers.map((n) => parseFloat(n.replace(/[$,]/g, "")));
-
-    // BCBS exhibit column order (from front of buffer):
-    //   [0] individual deductible in-network
-    //   [1] individual deductible out-of-network (may be missing if "Unlimited")
-    //   [2] individual OOP max in-network
-    //   [3] individual OOP max out-of-network (may be missing)
-    // Then PCP, specialist, ER, urgent care, in-patient deductible,
-    // 6 Rx copays, then the premium tail.
-    //
-    // To find OOP max reliably we look for the LARGEST four-or-five
-    // figure number in the first 6 positions — deductibles are usually
-    // 4 figures, OOP is usually 4-5 figures.
-    const ded_in = cleanedNumbers[0] ?? null;
-    // ded_out and oop_in are by definition both greater than ded_in.
-    // Scan positions [1..5] for values strictly greater than ded_in
-    // and below the premium cutoff (50K). The first such value is
-    // ded_out; the second is oop_in. If only one is found (ded_out =
-    // "Not Covered" was filtered), it's oop_in.
-    let ded_out: number | null = null;
-    let oop_in: number | null = null;
-    if (ded_in !== null) {
-      const candidates = cleanedNumbers
-        .slice(1, 6)
-        .filter((n) => n > ded_in && n < 50000);
-      if (candidates.length >= 2) {
-        ded_out = candidates[0];
-        oop_in = candidates[1];
-      } else if (candidates.length === 1) {
-        oop_in = candidates[0];
-      }
-    }
-    const oop_out = null;
-
-    // Premiums: the LAST 5-6 numbers in the row are total_age + 4 splits
-    // + total_composite. Total monthly premiums are typically the
-    // largest values in the row (4-figure numbers).
-    const tail = cleanedNumbers.slice(-6);
-    const monthly_total_age = tail[0] ?? null;
-    const ee_only = tail[1] ?? null;
-    const ee_spouse = tail[2] ?? null;
-    const ee_child = tail[3] ?? null;
-    const ee_family = tail[4] ?? null;
-    const monthly_total_composite = tail[5] ?? null;
-
-    // PCP / specialist copays: parse cell-style "$0/$0" or "DC/DC"
-    const cellRe = /(\$[\d,.]+|\bDC\b|\bNot Covered\b)\s*\/\s*(\$[\d,.]+|\bDC\b|\bNot Covered\b)/g;
-    const cellMatches = [...buffer.matchAll(cellRe)];
-    const pcp = cellMatches[0]?.[0] ?? "";
-    const spec = cellMatches[1]?.[0] ?? "";
-    const er = cellMatches[2]?.[0] ?? "";
-
-    plans.push({
-      plan_id: planId,
-      plan_name: `${currentNetwork ?? ""} ${currentTier ?? ""}${currentIsHsa ? " HSA" : ""}`.trim() || undefined,
-      network: currentNetwork,
-      metal_tier: currentTier,
-      is_hsa: currentIsHsa,
-      individual_deductible_in_network: ded_in,
-      individual_deductible_out_of_network: ded_out,
-      individual_oop_max_in_network: oop_in,
-      individual_oop_max_out_of_network: oop_out,
-      primary_care_copay: pcp,
-      primary_care_copay_in_network: parseNumber(pcp.split("/")[0]),
-      specialist_copay: spec,
-      specialist_copay_in_network: parseNumber(spec.split("/")[0]),
-      er_copay: er,
-      rx_copays: "",
-      monthly_premium_age_employee_only: ee_only ?? monthly_total_age,
-      monthly_premium_composite_employee_only: monthly_total_composite,
-      monthly_premium_age_employee_spouse: ee_spouse,
-      monthly_premium_age_employee_child: ee_child,
-      monthly_premium_age_employee_family: ee_family,
-      raw: { source_line: line },
-    });
+  // Emit carrier detection analytics (fire-and-forget, same pattern as
+  // trackEvent — never blocks, never throws)
+  if (carrier) {
+    try {
+      trackEvent(
+        usedFallback ? "hr.benefit_carrier_fallback" : "hr.benefit_carrier_detected",
+        "system",
+        "system",
+        {
+          carrier,
+          plan_count: plans.length,
+          used_fallback: usedFallback,
+          carrier_specific_parser: !usedFallback,
+        },
+      );
+    } catch { /* analytics must never break parsing */ }
   }
 
   return { plans, carrier, effective_date, account_number };

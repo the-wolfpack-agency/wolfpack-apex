@@ -106,6 +106,21 @@ const RULES: Rule[] = [
   { category: "benefits_enrollment", signature: /Disabled Dependent|Add Dependent|Cancel Enrollee/i, weight: 0.2, reason: "Dependent enrollment phrases" },
   { category: "benefits_enrollment", signature: /Blue Cross and Blue Shield of Texas|BCBSTX|BlueCross BlueShield/i, weight: 0.2, reason: "BCBS carrier identifier" },
 
+  // Aetna benefits
+  { category: "benefits_enrollment", signature: /Aetna.*(?:Enrollment|Application)/i, weight: 0.5, reason: "Aetna enrollment form" },
+  { category: "benefits_renewal", signature: /Aetna.*(?:Renewal|Rate Sheet)/i, weight: 0.4, reason: "Aetna renewal document" },
+  { category: "benefits_renewal", signature: /Aetna Choice POS|Open Access Managed Choice/i, weight: 0.3, reason: "Aetna plan name" },
+
+  // Cigna benefits
+  { category: "benefits_enrollment", signature: /Cigna.*(?:Enrollment|Application)/i, weight: 0.5, reason: "Cigna enrollment form" },
+  { category: "benefits_renewal", signature: /Cigna.*(?:Renewal|Rate Sheet)/i, weight: 0.4, reason: "Cigna renewal document" },
+  { category: "benefits_renewal", signature: /Cigna Connect|Open Access Plus/i, weight: 0.3, reason: "Cigna plan name" },
+
+  // UnitedHealthcare benefits
+  { category: "benefits_enrollment", signature: /UnitedHealth(?:care)?.*(?:Enrollment|Application)/i, weight: 0.5, reason: "UHC enrollment form" },
+  { category: "benefits_renewal", signature: /UnitedHealth(?:care)?.*(?:Renewal|Rate Sheet)/i, weight: 0.4, reason: "UHC renewal document" },
+  { category: "benefits_renewal", signature: /Choice Plus|Navigate(?:\s+Plus)?/i, weight: 0.3, reason: "UHC plan name" },
+
   // Offer letter
   { category: "offer_letter", signature: /(?:Offer of Employment|Employment Agreement|Offer Letter)/i, weight: 0.5, reason: "Offer letter title" },
   { category: "offer_letter", signature: /annual (?:base )?(?:salary|compensation)/i, weight: 0.3, reason: "Salary clause" },
