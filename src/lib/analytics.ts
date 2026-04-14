@@ -127,7 +127,17 @@ export type ApexEventType =
   | "hr.document_deleted"
   | "hr.document_expired"
   | "hr.document_filed_via_benefits_tab"
-  | "hr.document_filed_via_documents_tab";
+  | "hr.document_filed_via_documents_tab"
+  // HR document field extraction
+  | "hr.document_fields_extracted"
+  | "hr.document_extraction_empty"
+  // HR onboarding
+  | "hr.onboarding_started"
+  | "hr.onboarding_step_completed"
+  | "hr.onboarding_step_uncompleted"
+  | "hr.onboarding_completed"
+  | "hr.onboarding_cancelled"
+  | "hr.onboarding_template_created";
 
 export interface ApexEvent {
   event_type: ApexEventType;

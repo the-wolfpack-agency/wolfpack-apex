@@ -16,15 +16,17 @@
 import { useEffect, useState } from "react";
 import { OverviewTab } from "@/components/people/OverviewTab";
 import { EmployeesTab } from "@/components/people/EmployeesTab";
+import { OnboardingTab } from "@/components/people/OnboardingTab";
 import { BenefitsTab } from "@/components/people/BenefitsTab";
 import { DocumentsTab } from "@/components/people/DocumentsTab";
 import { InsightsTab } from "@/components/people/InsightsTab";
 
-type Tab = "overview" | "employees" | "benefits" | "documents" | "insights";
+type Tab = "overview" | "employees" | "onboarding" | "benefits" | "documents" | "insights";
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "overview", label: "Overview" },
   { id: "employees", label: "Employees" },
+  { id: "onboarding", label: "Onboarding" },
   { id: "benefits", label: "Benefits" },
   { id: "documents", label: "Documents" },
   { id: "insights", label: "Insights" },
@@ -77,6 +79,7 @@ export default function HrPage() {
 
       {tab === "overview" && <OverviewTab />}
       {tab === "employees" && <EmployeesTab />}
+      {tab === "onboarding" && <OnboardingTab />}
       {tab === "benefits" && <BenefitsTab />}
       {tab === "documents" && <DocumentsTab />}
       {tab === "insights" && <InsightsTab />}

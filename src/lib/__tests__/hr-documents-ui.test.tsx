@@ -32,7 +32,6 @@ import HrPage from "@/app/(dashboard)/hr/page";
 
 const fetchMock = jest.fn();
 beforeAll(() => {
-  // @ts-expect-error global override
   global.fetch = fetchMock;
   Object.defineProperty(window, "localStorage", {
     value: {
@@ -49,9 +48,9 @@ beforeEach(() => {
   fetchMock.mockReset();
 });
 
-interface DocRow { id: string; filename: string; category: string; size_bytes: number; page_count: number; uploaded_at: string }
+interface DocRow { id: string; filename: string; category: string; size_bytes: number; page_count: number; uploaded_at: string; employee_id?: string | null }
 
-function setupServer(initialDocs: DocRow[] = []) {
+function setupServer(initialDocs: DocRow[] = [], initialEmployees: { id: string; name: string }[] = []) {
   const docs = [...initialDocs];
   fetchMock.mockImplementation((url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
@@ -93,13 +92,16 @@ function setupServer(initialDocs: DocRow[] = []) {
           }),
       });
     }
-    // PATCH recategorize
+    // PATCH recategorize / link employee
     const patchMatch = url.match(/^\/api\/people\/documents\/(hd_\w+)$/);
     if (patchMatch && method === "PATCH") {
       const id = patchMatch[1];
       const body = init?.body ? JSON.parse(init.body as string) : {};
       const target = docs.find((d) => d.id === id);
-      if (target) target.category = body.category;
+      if (target) {
+        if (body.category) target.category = body.category;
+        if ("employee_id" in body) target.employee_id = body.employee_id;
+      }
       return Promise.resolve({ ok: true, json: async () => ({ document: target }) });
     }
     // DELETE
@@ -110,7 +112,7 @@ function setupServer(initialDocs: DocRow[] = []) {
       return Promise.resolve({ ok: true, json: async () => ({ ok: true }) });
     }
     // Stub the rest of HR page reads
-    if (url === "/api/people/employees") return Promise.resolve({ ok: true, json: async () => ({ employees: [] }) });
+    if (url === "/api/people/employees") return Promise.resolve({ ok: true, json: async () => ({ employees: initialEmployees }) });
     if (url === "/api/people/insights") return Promise.resolve({ ok: true, json: async () => ({ insights: [] }) });
     if (url === "/api/people/benefits") return Promise.resolve({ ok: true, json: async () => ({ documents: [] }) });
     return Promise.resolve({ ok: true, json: async () => ({}) });
@@ -238,6 +240,84 @@ describe("HR Documents UI — full flow with smart routing", () => {
       const headers = (postCall![1].headers ?? {}) as Record<string, string>;
       const ct = headers["Content-Type"] ?? headers["content-type"];
       expect(ct).toBeUndefined();
+    });
+  });
+
+  it("employee dropdown renders with employee options", async () => {
+    const employees = [
+      { id: "emp_1", name: "Jane Smith" },
+      { id: "emp_2", name: "Bob Jones" },
+    ];
+    setupServer(
+      [{ id: "hd_1", filename: "form.pdf", category: "w4", size_bytes: 1000, page_count: 1, uploaded_at: "2026-04-08", employee_id: null }],
+      employees,
+    );
+    render(<HrPage />);
+    await userEvent.click(await screen.findByRole("tab", { name: /^documents$/i }));
+    await waitFor(() => expect(screen.getByText("form.pdf")).toBeInTheDocument());
+    const empSelect = screen.getByRole("combobox", { name: /Employee for form\.pdf/i });
+    expect(empSelect).toBeInTheDocument();
+    expect(empSelect).toHaveValue("");
+    // Verify employee options are present
+    const options = empSelect.querySelectorAll("option");
+    expect(options.length).toBe(3); // "No employee" + 2 employees
+    expect(options[1].textContent).toBe("Jane Smith");
+    expect(options[2].textContent).toBe("Bob Jones");
+  });
+
+  it("selecting an employee sends PATCH with employee_id", async () => {
+    const employees = [{ id: "emp_1", name: "Jane Smith" }];
+    setupServer(
+      [{ id: "hd_1", filename: "form.pdf", category: "w4", size_bytes: 1000, page_count: 1, uploaded_at: "2026-04-08", employee_id: null }],
+      employees,
+    );
+    render(<HrPage />);
+    await userEvent.click(await screen.findByRole("tab", { name: /^documents$/i }));
+    await waitFor(() => expect(screen.getByText("form.pdf")).toBeInTheDocument());
+    const empSelect = screen.getByRole("combobox", { name: /Employee for form\.pdf/i });
+    await userEvent.selectOptions(empSelect, "emp_1");
+    await waitFor(() => {
+      const patch = fetchMock.mock.calls.find(
+        (c) => c[0] === "/api/people/documents/hd_1" && c[1]?.method === "PATCH" && (c[1]?.body as string).includes("employee_id"),
+      );
+      expect(patch).toBeDefined();
+      expect(JSON.parse(patch![1].body as string)).toEqual({ employee_id: "emp_1" });
+    });
+  });
+
+  it("selecting 'No employee' sends PATCH with employee_id: null to unlink", async () => {
+    const employees = [{ id: "emp_1", name: "Jane Smith" }];
+    setupServer(
+      [{ id: "hd_1", filename: "form.pdf", category: "w4", size_bytes: 1000, page_count: 1, uploaded_at: "2026-04-08", employee_id: "emp_1" }],
+      employees,
+    );
+    render(<HrPage />);
+    await userEvent.click(await screen.findByRole("tab", { name: /^documents$/i }));
+    await waitFor(() => expect(screen.getByText("form.pdf")).toBeInTheDocument());
+    const empSelect = screen.getByRole("combobox", { name: /Employee for form\.pdf/i });
+    await userEvent.selectOptions(empSelect, "");
+    await waitFor(() => {
+      const patch = fetchMock.mock.calls.find(
+        (c) => c[0] === "/api/people/documents/hd_1" && c[1]?.method === "PATCH" && (c[1]?.body as string).includes("employee_id"),
+      );
+      expect(patch).toBeDefined();
+      expect(JSON.parse(patch![1].body as string)).toEqual({ employee_id: null });
+    });
+  });
+
+  it("shows the employee name in the document row when linked", async () => {
+    const employees = [{ id: "emp_1", name: "Jane Smith" }];
+    setupServer(
+      [{ id: "hd_1", filename: "form.pdf", category: "w4", size_bytes: 1000, page_count: 1, uploaded_at: "2026-04-08", employee_id: "emp_1" }],
+      employees,
+    );
+    render(<HrPage />);
+    await userEvent.click(await screen.findByRole("tab", { name: /^documents$/i }));
+    await waitFor(() => expect(screen.getByText("form.pdf")).toBeInTheDocument());
+    // Employee name should appear in the document details line AND in the dropdown option
+    await waitFor(() => {
+      const matches = screen.getAllByText(/Jane Smith/);
+      expect(matches.length).toBeGreaterThanOrEqual(2); // detail text + dropdown option
     });
   });
 });

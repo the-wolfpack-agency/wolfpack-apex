@@ -27,10 +27,14 @@ export async function GET(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const categoryParam = req.nextUrl.searchParams.get("category");
+  const employeeIdParam = req.nextUrl.searchParams.get("employee_id");
   const category = (HR_CATEGORIES as readonly string[]).includes(categoryParam ?? "")
     ? (categoryParam as HrCategory)
     : undefined;
-  const documents = await listHrDocuments(category ? { category } : undefined);
+  const filter: { category?: HrCategory; employee_id?: string } = {};
+  if (category) filter.category = category;
+  if (employeeIdParam) filter.employee_id = employeeIdParam;
+  const documents = await listHrDocuments(Object.keys(filter).length > 0 ? filter : undefined);
   return NextResponse.json({ documents });
 }
 

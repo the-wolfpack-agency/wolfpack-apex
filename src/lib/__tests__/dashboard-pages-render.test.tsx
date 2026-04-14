@@ -42,7 +42,6 @@ jest.mock("next/link", () => {
 
 const fetchMock = jest.fn();
 beforeAll(() => {
-  // @ts-expect-error global override
   global.fetch = fetchMock;
   Object.defineProperty(window, "localStorage", {
     value: {

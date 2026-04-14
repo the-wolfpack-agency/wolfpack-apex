@@ -30,7 +30,6 @@ import HrPage from "@/app/(dashboard)/hr/page";
 
 const fetchMock = jest.fn();
 beforeAll(() => {
-  // @ts-expect-error global override
   global.fetch = fetchMock;
   Object.defineProperty(window, "localStorage", {
     value: {

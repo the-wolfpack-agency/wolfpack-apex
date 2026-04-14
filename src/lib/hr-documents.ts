@@ -16,6 +16,7 @@
  *   - getHrDocument(id)
  *   - recategorizeDocument(id, category, ...)
  *   - linkDocumentToEmployee(id, employeeId, ...)
+ *   - unlinkDocumentFromEmployee(id, ...)
  *   - deleteHrDocument(id, ...)
  */
 
@@ -23,6 +24,7 @@ import { randomUUID } from "node:crypto";
 import { safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { parseBenefitDocument, saveBenefitDocument, generateRecommendation, saveRecommendation, generateBenefitInsights, saveInsights } from "@/lib/benefits";
+import { extractFields, generateFieldInsights } from "@/lib/hr-field-extractor";
 
 /* ---------------------------- Types ---------------------------------- */
 
@@ -58,6 +60,7 @@ export interface HrDocument {
   signed_at: string | null;
   expires_at: string | null;
   status: "active" | "archived" | "expired";
+  metadata: Record<string, unknown>;
   uploaded_by: string;
   uploaded_at: string;
   updated_at: string;
@@ -229,14 +232,24 @@ export async function routeUpload(
     if (insights.length > 0) await saveInsights(insights, uploadedBy, userRole);
   }
 
+  // Run field extraction for W-4 and I-9 documents
+  const extraction = extractFields(fullText, classification.category);
+  const metadata = extraction ? {
+    fields: extraction.fields,
+    field_count: extraction.field_count,
+    total_fields: extraction.total_fields,
+    completeness: extraction.completeness,
+    extraction_notes: extraction.extraction_notes,
+  } : {};
+
   // Always store an apex_hr_documents row as the system of record
   const documentId = `hd_${randomUUID()}`;
   await safeQuery(
     `INSERT INTO apex_hr_documents
        (id, filename, mime_type, size_bytes, page_count, category,
         classification_confidence, classification_reasons,
-        benefit_document_id, raw_text_excerpt, uploaded_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        benefit_document_id, raw_text_excerpt, uploaded_by, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
     [
       documentId,
       filename,
@@ -249,6 +262,7 @@ export async function routeUpload(
       benefitDocumentId ?? null,
       parsed.raw_text_excerpt,
       uploadedBy,
+      JSON.stringify(metadata),
     ],
   );
 
@@ -258,6 +272,34 @@ export async function routeUpload(
     confidence: classification.confidence,
     reasons: classification.reasons.join("; "),
   });
+
+  // Track extraction events and generate insights for W-4 / I-9
+  if (extraction) {
+    if (extraction.field_count > 0) {
+      trackEvent("hr.document_fields_extracted", uploadedBy, userRole, {
+        document_id: documentId,
+        category: classification.category,
+        field_count: extraction.field_count,
+        total_fields: extraction.total_fields,
+        completeness: extraction.completeness,
+      });
+
+      // Generate and save compliance/onboarding insights
+      const fieldInsights = generateFieldInsights(
+        extraction.fields,
+        classification.category as "w4" | "i9",
+        documentId,
+      );
+      if (fieldInsights.length > 0) {
+        await saveInsights(fieldInsights, uploadedBy, userRole);
+      }
+    } else {
+      trackEvent("hr.document_extraction_empty", uploadedBy, userRole, {
+        document_id: documentId,
+        category: classification.category,
+      });
+    }
+  }
 
   return {
     documentId,
@@ -292,6 +334,11 @@ function rowToHrDocument(row: Record<string, unknown>): HrDocument {
     raw_text_excerpt: (row.raw_text_excerpt as string) ?? "",
     signed_at: (row.signed_at as string) ?? null,
     expires_at: (row.expires_at as string) ?? null,
+    metadata: (typeof row.metadata === "object" && row.metadata !== null
+      ? row.metadata
+      : typeof row.metadata === "string"
+        ? JSON.parse(row.metadata)
+        : {}) as Record<string, unknown>,
     status: (row.status as HrDocument["status"]) ?? "active",
     uploaded_by: row.uploaded_by as string,
     uploaded_at: row.uploaded_at as string,
@@ -299,16 +346,21 @@ function rowToHrDocument(row: Record<string, unknown>): HrDocument {
   };
 }
 
-export async function listHrDocuments(filter?: { category?: HrCategory }): Promise<HrDocument[]> {
+export async function listHrDocuments(filter?: { category?: HrCategory; employee_id?: string }): Promise<HrDocument[]> {
+  const conditions: string[] = ["status = 'active'"];
+  const params: unknown[] = [];
   if (filter?.category) {
-    const r = await safeQuery(
-      `SELECT * FROM apex_hr_documents WHERE category = $1 AND status = 'active' ORDER BY uploaded_at DESC`,
-      [filter.category],
-    );
-    return r.rows.map(rowToHrDocument);
+    params.push(filter.category);
+    conditions.push(`category = $${params.length}`);
   }
+  if (filter?.employee_id) {
+    params.push(filter.employee_id);
+    conditions.push(`employee_id = $${params.length}`);
+  }
+  const where = conditions.join(" AND ");
   const r = await safeQuery(
-    `SELECT * FROM apex_hr_documents WHERE status = 'active' ORDER BY uploaded_at DESC`,
+    `SELECT * FROM apex_hr_documents WHERE ${where} ORDER BY uploaded_at DESC`,
+    params,
   );
   return r.rows.map(rowToHrDocument);
 }
@@ -357,6 +409,25 @@ export async function linkDocumentToEmployee(
   trackEvent("hr.document_linked_to_employee", changedBy, userRole, {
     document_id: id,
     employee_id: employeeId,
+  });
+  return rowToHrDocument(r.rows[0]);
+}
+
+export async function unlinkDocumentFromEmployee(
+  id: string,
+  changedBy: string,
+  userRole: string,
+): Promise<HrDocument | null> {
+  const r = await safeQuery(
+    `UPDATE apex_hr_documents
+        SET employee_id = NULL, updated_at = NOW()
+      WHERE id = $1
+  RETURNING *`,
+    [id],
+  );
+  if (r.rows.length === 0) return null;
+  trackEvent("hr.document_unlinked_from_employee", changedBy, userRole, {
+    document_id: id,
   });
   return rowToHrDocument(r.rows[0]);
 }

@@ -30,21 +30,30 @@ function fakeDb(sql: string, params: unknown[] = []) {
     hrDocs.set(id, { id, filename, category, size_bytes, status: "active", uploaded_at: new Date().toISOString() });
     return { rows: [] };
   }
-  if (s.startsWith("SELECT * FROM apex_hr_documents WHERE category")) {
-    return { rows: [...hrDocs.values()].filter((r) => r.category === params[0]) };
-  }
   if (s.startsWith("SELECT * FROM apex_hr_documents WHERE id =")) {
     const r = hrDocs.get(params[0] as string);
     return { rows: r ? [r] : [] };
   }
   if (s.startsWith("SELECT * FROM apex_hr_documents WHERE status")) {
-    return { rows: [...hrDocs.values()] };
+    let results = [...hrDocs.values()];
+    // Handle combined filters: category and/or employee_id after status = 'active'
+    if (s.includes("category =")) {
+      const catIdx = params.findIndex((p) => typeof p === "string" && !p.startsWith("emp_"));
+      if (catIdx >= 0) results = results.filter((r) => r.category === params[catIdx]);
+    }
+    return { rows: results };
   }
   if (s.startsWith("UPDATE apex_hr_documents SET category")) {
     const [id, category] = params as [string, string];
     const r = hrDocs.get(id);
     if (!r) return { rows: [] };
     r.category = category;
+    return { rows: [r] };
+  }
+  if (s.startsWith("UPDATE apex_hr_documents SET employee_id")) {
+    const id = params[0] as string;
+    const r = hrDocs.get(id);
+    if (!r) return { rows: [] };
     return { rows: [r] };
   }
   if (s.startsWith("DELETE FROM apex_hr_documents")) {

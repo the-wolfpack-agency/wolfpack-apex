@@ -38,7 +38,6 @@ import SitesPage from "@/app/(dashboard)/sites/page";
 
 const fetchMock = jest.fn();
 beforeAll(() => {
-  // @ts-expect-error override global
   global.fetch = fetchMock;
   Object.defineProperty(window, "localStorage", {
     value: {

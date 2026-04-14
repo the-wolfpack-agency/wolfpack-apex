@@ -20,6 +20,7 @@ import {
   HR_CATEGORIES,
   recategorizeDocument,
   linkDocumentToEmployee,
+  unlinkDocumentFromEmployee,
   deleteHrDocument,
   listHrDocuments,
 } from "@/lib/hr-documents";
@@ -227,6 +228,53 @@ describe("hr-documents persistence", () => {
     mockSafeQuery.mockResolvedValueOnce({ rows: [] });
     await listHrDocuments();
     const callSql = mockSafeQuery.mock.calls[0][0] as string;
-    expect(callSql).not.toContain("category = $1");
+    expect(callSql).not.toContain("category = $");
+    expect(callSql).not.toContain("employee_id = $");
+  });
+
+  it("unlinkDocumentFromEmployee sets employee_id to NULL and fires unlink event", async () => {
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [{
+        id: "hd_1", filename: "x.pdf", category: "w4", classification_confidence: 0.8,
+        classification_reasons: [], size_bytes: 1, page_count: 1, employee_id: null,
+        benefit_document_id: null, raw_text_excerpt: "", uploaded_by: "u",
+        uploaded_at: "x", updated_at: "x", status: "active", mime_type: null,
+      }],
+    });
+    const r = await unlinkDocumentFromEmployee("hd_1", "u_alicia", "hr");
+    expect(r).not.toBeNull();
+    expect(r!.employee_id).toBeNull();
+    const callSql = mockSafeQuery.mock.calls[0][0] as string;
+    expect(callSql).toContain("employee_id = NULL");
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "hr.document_unlinked_from_employee",
+      "u_alicia",
+      "hr",
+      expect.objectContaining({ document_id: "hd_1" }),
+    );
+  });
+
+  it("unlinkDocumentFromEmployee returns null on missing doc and emits no event", async () => {
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] });
+    const r = await unlinkDocumentFromEmployee("hd_x", "u", "hr");
+    expect(r).toBeNull();
+    expect(mockTrackEvent).not.toHaveBeenCalled();
+  });
+
+  it("listHrDocuments with employee_id filter passes the right WHERE clause", async () => {
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] });
+    await listHrDocuments({ employee_id: "emp_1" });
+    const callSql = mockSafeQuery.mock.calls[0][0] as string;
+    expect(callSql).toContain("employee_id = $");
+    expect(mockSafeQuery.mock.calls[0][1]).toEqual(["emp_1"]);
+  });
+
+  it("listHrDocuments with both category and employee_id filters passes both", async () => {
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] });
+    await listHrDocuments({ category: "w4", employee_id: "emp_1" });
+    const callSql = mockSafeQuery.mock.calls[0][0] as string;
+    expect(callSql).toContain("category = $1");
+    expect(callSql).toContain("employee_id = $2");
+    expect(mockSafeQuery.mock.calls[0][1]).toEqual(["w4", "emp_1"]);
   });
 });

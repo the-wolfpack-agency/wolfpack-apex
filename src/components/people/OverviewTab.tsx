@@ -7,12 +7,19 @@ export function OverviewTab() {
   const [employeeCount, setEmployeeCount] = useState<number | null>(null);
   const [docCount, setDocCount] = useState<number | null>(null);
   const [insightCount, setInsightCount] = useState<number | null>(null);
+  const [linkedDocCount, setLinkedDocCount] = useState<number | null>(null);
+  const [onboardingCount, setOnboardingCount] = useState<number | null>(null);
 
   useEffect(() => {
     Promise.all([
       fetch("/api/people/employees", { headers: authHeaders() }).then((r) => r.json()).then((d) => setEmployeeCount(d.employees?.length ?? 0)).catch(() => setEmployeeCount(0)),
       fetch("/api/people/benefits", { headers: authHeaders() }).then((r) => r.json()).then((d) => setDocCount(d.documents?.length ?? 0)).catch(() => setDocCount(0)),
       fetch("/api/people/insights", { headers: authHeaders() }).then((r) => r.json()).then((d) => setInsightCount(d.insights?.length ?? 0)).catch(() => setInsightCount(0)),
+      fetch("/api/people/documents", { headers: authHeaders() }).then((r) => r.json()).then((d) => {
+        const docs = d.documents ?? [];
+        setLinkedDocCount(docs.filter((doc: { employee_id: string | null }) => doc.employee_id != null).length);
+      }).catch(() => setLinkedDocCount(0)),
+      fetch("/api/people/onboarding", { headers: authHeaders() }).then((r) => r.json()).then((d) => setOnboardingCount(d.instances?.length ?? 0)).catch(() => setOnboardingCount(0)),
     ]);
   }, []);
 
@@ -20,7 +27,9 @@ export function OverviewTab() {
     <div data-tab="overview">
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem" }}>
         <Card label="Employees" value={employeeCount} />
+        <Card label="Active onboardings" value={onboardingCount} />
         <Card label="Benefits documents" value={docCount} />
+        <Card label="Linked documents" value={linkedDocCount} />
         <Card label="Open insights" value={insightCount} />
       </div>
       <p style={{ color: "var(--wp-text-dim)", fontSize: "0.85rem", marginTop: "1.5rem" }}>
