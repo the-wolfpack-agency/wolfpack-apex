@@ -65,6 +65,7 @@ export default function DashboardPage() {
   const [events, setEvents] = useState<RecentEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [showBriefing, setShowBriefing] = useState(false);
+  const [setupComplete, setSetupComplete] = useState(true); // default true to avoid flash
 
   useEffect(() => {
     // Briefing available to all users; respects localStorage preference
@@ -84,6 +85,22 @@ export default function DashboardPage() {
       headers: jsonHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "dashboard" } }),
     }).catch(() => {});
+
+    // Check workspace setup status
+    fetch("/api/workspace/status", { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((data) => {
+        setSetupComplete(data.complete ?? true);
+        if (!data.complete) {
+          // Track banner shown
+          fetch("/api/analytics", {
+            method: "POST",
+            headers: jsonHeaders(),
+            body: JSON.stringify({ event: "system.setup_banner_shown", metadata: {} }),
+          }).catch(() => {});
+        }
+      })
+      .catch(() => {});
 
     fetch("/api/dashboard")
       .then((r) => r.json())
@@ -133,6 +150,32 @@ export default function DashboardPage() {
       <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>
         Dashboard
       </h1>
+
+      {/* First-run setup banner */}
+      {!setupComplete && (
+        <div
+          style={{
+            padding: "1.5rem",
+            background: "var(--wp-card, var(--wp-dark-surface))",
+            border: "2px solid var(--wp-gold)",
+            borderRadius: "12px",
+          }}
+        >
+          <h3 className="text-lg font-semibold" style={{ color: "var(--wp-gold)" }}>
+            Welcome to Instinct
+          </h3>
+          <p className="text-sm mt-1" style={{ color: "var(--wp-text-dim)" }}>
+            Complete your workspace setup to get the most out of the platform.
+          </p>
+          <a
+            href="/setup"
+            className="inline-block mt-3 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+          >
+            Complete Setup
+          </a>
+        </div>
+      )}
 
       {/* Morning Briefing (CEO/CTO only) */}
       {showBriefing && <MorningBriefing />}

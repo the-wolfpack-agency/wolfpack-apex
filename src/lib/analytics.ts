@@ -141,6 +141,13 @@ export type ApexEventType =
   | "hr.onboarding_completed"
   | "hr.onboarding_cancelled"
   | "hr.onboarding_template_created"
+  // Workspace setup
+  | "system.setup_started"
+  | "system.setup_step_completed"
+  | "system.setup_completed"
+  | "system.team_member_invited"
+  | "system.team_invite_accepted"
+  | "system.setup_banner_shown"
   // Security
   | "system.login_rate_limited"
   | "system.upload_rate_limited"
