@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { jsonHeaders } from "@/lib/client-auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -91,15 +92,8 @@ export default function ReportsPage() {
 
   const previewRef = useRef<HTMLIFrameElement>(null);
 
-  function getToken() {
-    return localStorage.getItem("apex_token") || "";
-  }
-
-  function authHeaders(): Record<string, string> {
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken()}`,
-    };
+  function authHeaders(): HeadersInit {
+    return jsonHeaders();
   }
 
   // Load templates and history

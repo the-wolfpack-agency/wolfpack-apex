@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { jsonHeaders } from "@/lib/client-auth";
 
 interface EmailTemplate {
   id: string;
@@ -42,15 +43,8 @@ export default function EmailsPage() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function getToken() {
-    return localStorage.getItem("apex_token") || "";
-  }
-
-  function authHeaders(): Record<string, string> {
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken()}`,
-    };
+  function authHeaders(): HeadersInit {
+    return jsonHeaders();
   }
 
   useEffect(() => {

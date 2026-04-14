@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { authHeaders as canonicalAuthHeaders, jsonHeaders as canonicalJsonHeaders } from "@/lib/client-auth";
 
 interface SiteProject {
   id: string;
@@ -36,11 +37,10 @@ const STATUS_COLORS: Record<string, string> = {
 // rely on the browser to auto-set Content-Type with the correct boundary.
 // JSON requests must call jsonHeaders() instead, which adds the json header.
 function authHeaders(): HeadersInit {
-  const token = typeof window !== "undefined" ? localStorage.getItem("apex_token") : null;
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return canonicalAuthHeaders();
 }
 function jsonHeaders(): HeadersInit {
-  return { ...authHeaders(), "Content-Type": "application/json" };
+  return canonicalJsonHeaders();
 }
 
 export default function SitesPage() {

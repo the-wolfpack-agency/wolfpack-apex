@@ -20,6 +20,7 @@
 import { useEffect, useState, useRef, use } from "react";
 import Link from "next/link";
 import { BriefForm, type Brief } from "@/components/sites/BriefForm";
+import { authHeaders as canonicalAuthHeaders, jsonHeaders as canonicalJsonHeaders } from "@/lib/client-auth";
 
 interface SiteProject {
   id: string;
@@ -40,12 +41,11 @@ interface UploadedAsset {
 }
 
 function authHeaders(): HeadersInit {
-  const token = typeof window !== "undefined" ? localStorage.getItem("apex_token") : null;
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return canonicalAuthHeaders();
 }
 
 function jsonHeaders(): HeadersInit {
-  return { ...authHeaders(), "Content-Type": "application/json" };
+  return canonicalJsonHeaders();
 }
 
 export default function SiteDetailPage({ params }: { params: Promise<{ id: string }> }) {

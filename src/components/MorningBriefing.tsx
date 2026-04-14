@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { getInstinctToken, authHeaders } from "@/lib/client-auth";
 
 // ---------------------------------------------------------------------------
 // Types (mirrors MorningBriefing from lib/morning-briefing.ts)
@@ -70,7 +71,7 @@ interface BriefingData {
 // ---------------------------------------------------------------------------
 
 function getToken(): string {
-  return localStorage.getItem("apex_token") || "";
+  return getInstinctToken() || "";
 }
 
 function formatCurrency(amount: number): string {
@@ -167,7 +168,7 @@ export default function MorningBriefing() {
       if (refresh) setRefreshing(true);
       const url = refresh ? "/api/briefing?refresh=true" : "/api/briefing";
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${getToken()}` },
+        headers: authHeaders(),
       });
       if (res.status === 401 || res.status === 403) {
         setError("restricted");

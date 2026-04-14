@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import FinancialsCard from "@/components/FinancialsCard";
 import MorningBriefing from "@/components/MorningBriefing";
+import { getInstinctToken, authHeaders, jsonHeaders } from "@/lib/client-auth";
 
 interface DashboardData {
   shadow_mode: boolean;
@@ -50,7 +51,7 @@ interface RecentEvent {
 
 function getUserRole(): string | null {
   try {
-    const token = localStorage.getItem("apex_token");
+    const token = getInstinctToken();
     if (!token) return null;
     const payload = JSON.parse(atob(token.split(".")[1]));
     return payload.role || null;
@@ -74,13 +75,13 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem("apex_token");
+    const token = getInstinctToken();
     if (!token) return;
 
     // Track page view
     fetch("/api/analytics", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      headers: jsonHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "dashboard" } }),
     }).catch(() => {});
 
@@ -94,7 +95,7 @@ export default function DashboardPage() {
 
     // Fetch recent events from journal
     fetch("/api/journal", {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(),
     })
       .then((r) => r.json())
       .then((data) => {

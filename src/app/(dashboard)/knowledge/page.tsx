@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, FormEvent } from "react";
+import { jsonHeaders } from "@/lib/client-auth";
 
 interface KnowledgeEntry {
   id: string;
@@ -34,15 +35,8 @@ export default function KnowledgePage() {
   const [asking, setAsking] = useState(false);
   const [askResult, setAskResult] = useState<{ answer: KnowledgeEntry | null; source: string } | null>(null);
 
-  function getToken() {
-    return localStorage.getItem("apex_token") || "";
-  }
-
-  function authHeaders() {
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken()}`,
-    };
+  function authHeaders(): HeadersInit {
+    return jsonHeaders();
   }
 
   useEffect(() => {

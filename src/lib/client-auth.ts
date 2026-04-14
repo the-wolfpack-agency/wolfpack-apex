@@ -38,8 +38,11 @@ export function getInstinctUser<T = unknown>(): T | null {
 export function setInstinctSession(token: string, user: unknown): void {
   if (typeof window === "undefined") return;
   // Write BOTH the new and legacy keys so any code that hasn't been
-  // migrated yet still finds the token. Safe to remove the apex_*
-  // writes once nothing reads them anymore.
+  // migrated yet still finds the token.
+  // TODO: All client-side reads now use the canonical helpers which
+  // check instinct_* first. The legacy apex_* writes below can be
+  // removed in a future cleanup pass once we confirm no third-party
+  // integrations or bookmarked deep-links depend on them.
   localStorage.setItem("instinct_token", token);
   localStorage.setItem("instinct_user", JSON.stringify(user));
   localStorage.setItem("apex_token", token);

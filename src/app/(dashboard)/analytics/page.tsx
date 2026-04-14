@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { jsonHeaders } from "@/lib/client-auth";
 
 interface ActivityBucket {
   label: string;
@@ -64,15 +65,8 @@ export default function AnalyticsPage() {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  function getToken() {
-    return localStorage.getItem("apex_token") || "";
-  }
-
-  function authHeaders() {
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken()}`,
-    };
+  function authHeaders(): HeadersInit {
+    return jsonHeaders();
   }
 
   useEffect(() => {

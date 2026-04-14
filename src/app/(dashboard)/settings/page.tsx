@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { getInstinctToken, getInstinctUser, authHeaders } from "@/lib/client-auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,18 +68,13 @@ export default function SettingsPage() {
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
 
   function getToken() {
-    return localStorage.getItem("apex_token") || "";
+    return getInstinctToken() || "";
   }
 
   function decodeUser(): UserInfo | null {
-    const stored = localStorage.getItem("apex_user");
+    const stored = getInstinctUser<{ name?: string; email?: string; role?: string }>();
     if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        return { name: parsed.name || "", email: parsed.email || "", role: parsed.role || "" };
-      } catch {
-        // fall through to JWT decode
-      }
+      return { name: stored.name || "", email: stored.email || "", role: stored.role || "" };
     }
     const token = getToken();
     if (!token) return null;
@@ -93,7 +89,7 @@ export default function SettingsPage() {
   const fetchMicrosoftStatus = useCallback(async () => {
     try {
       const res = await fetch("/api/microsoft?action=status", {
-        headers: { Authorization: `Bearer ${getToken()}` },
+        headers: authHeaders(),
       });
       if (res.status === 401) {
         window.location.href = "/login";
@@ -116,7 +112,7 @@ export default function SettingsPage() {
   const fetchPlaudStatus = useCallback(async () => {
     try {
       const res = await fetch("/api/integrations/plaud?action=status", {
-        headers: { Authorization: `Bearer ${getToken()}` },
+        headers: authHeaders(),
       });
       if (res.status === 401) {
         window.location.href = "/login";
@@ -141,7 +137,7 @@ export default function SettingsPage() {
   const fetchQuickbooksStatus = useCallback(async () => {
     try {
       const res = await fetch("/api/quickbooks?action=status", {
-        headers: { Authorization: `Bearer ${getToken()}` },
+        headers: authHeaders(),
       });
       if (res.status === 401) {
         window.location.href = "/login";
@@ -180,7 +176,7 @@ export default function SettingsPage() {
     // Track page view
     fetch("/api/analytics", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "settings" } }),
     }).catch(() => {});
 
@@ -196,7 +192,7 @@ export default function SettingsPage() {
     setConnectError(null);
     try {
       const res = await fetch("/api/microsoft?action=auth-url", {
-        headers: { Authorization: `Bearer ${getToken()}` },
+        headers: authHeaders(),
       });
       const data = await res.json();
       if (data.authUrl) {
@@ -214,7 +210,7 @@ export default function SettingsPage() {
     try {
       const res = await fetch("/api/microsoft?action=disconnect", {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken()}` },
+        headers: authHeaders(),
       });
       if (res.ok) {
         setMicrosoftStatus({ connected: false });
@@ -228,7 +224,7 @@ export default function SettingsPage() {
   async function connectQuickbooks() {
     try {
       const res = await fetch("/api/quickbooks?action=auth-url", {
-        headers: { Authorization: `Bearer ${getToken()}` },
+        headers: authHeaders(),
       });
       const data = await res.json();
       if (data.authUrl) {
@@ -244,7 +240,7 @@ export default function SettingsPage() {
     try {
       const res = await fetch("/api/quickbooks?action=disconnect", {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken()}` },
+        headers: authHeaders(),
       });
       if (res.ok) {
         setQuickbooksStatus({ connected: false });
@@ -266,10 +262,7 @@ export default function SettingsPage() {
     try {
       const res = await fetch("/api/integrations/plaud", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken()}`,
-        },
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ action: "connect" }),
       });
       if (res.ok) {
@@ -288,10 +281,7 @@ export default function SettingsPage() {
     try {
       const res = await fetch("/api/integrations/plaud", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken()}`,
-        },
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ action: "disconnect" }),
       });
       if (res.ok) {

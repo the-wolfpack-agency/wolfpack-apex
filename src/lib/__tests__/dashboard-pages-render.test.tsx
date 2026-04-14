@@ -46,7 +46,7 @@ beforeAll(() => {
   global.fetch = fetchMock;
   Object.defineProperty(window, "localStorage", {
     value: {
-      _store: { apex_token: "t", apex_user: JSON.stringify({ id: "u", name: "Test", email: "t@t", role: "ceo" }) } as Record<string, string>,
+      _store: { instinct_token: "t", instinct_user: JSON.stringify({ id: "u", name: "Test", email: "t@t", role: "ceo" }), apex_token: "t", apex_user: JSON.stringify({ id: "u", name: "Test", email: "t@t", role: "ceo" }) } as Record<string, string>,
       getItem(this: { _store: Record<string, string> }, k: string) { return this._store[k] ?? null; },
       setItem(this: { _store: Record<string, string> }, k: string, v: string) { this._store[k] = v; },
       removeItem(this: { _store: Record<string, string> }, k: string) { delete this._store[k]; },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { authHeaders, jsonHeaders } from "@/lib/client-auth";
 
 // ---------------------------------------------------------------------------
 // Types (match quickbooks.ts exports)
@@ -166,21 +167,17 @@ export default function FinancialsPage() {
   const [data, setData] = useState<FinancialData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  function getToken() {
-    return localStorage.getItem("apex_token") || "";
-  }
-
   const fetchData = useCallback(async () => {
     try {
       // Track page view
       fetch("/api/analytics", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+        headers: jsonHeaders(),
         body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "financials" } }),
       }).catch(() => {});
 
       const res = await fetch("/api/quickbooks", {
-        headers: { Authorization: `Bearer ${getToken()}` },
+        headers: authHeaders(),
       });
       if (res.status === 401) {
         window.location.href = "/login";
@@ -231,7 +228,7 @@ export default function FinancialsPage() {
           <button
             onClick={async () => {
               const res = await fetch("/api/quickbooks?action=auth-url", {
-                headers: { Authorization: `Bearer ${getToken()}` },
+                headers: authHeaders(),
               });
               const data = await res.json();
               if (data.authUrl) {

@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useState, useCallback } from "react";
+import { authHeaders as canonicalAuthHeaders } from "@/lib/client-auth";
 
 interface Meeting {
   id: string;
@@ -26,9 +27,7 @@ interface Meeting {
   transcriptText?: string;
 }
 
-function getToken(): string {
-  return localStorage.getItem("apex_token") || "";
-}
+// Auth headers from canonical client-auth helper
 
 function fmtDate(d: string | null): string {
   if (!d) return "—";
@@ -59,7 +58,7 @@ export default function MeetingsPage() {
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/meetings", {
-        headers: { Authorization: `Bearer ${getToken()}` },
+        headers: canonicalAuthHeaders(),
       });
       if (res.status === 401) {
         window.location.href = "/login";
@@ -89,7 +88,7 @@ export default function MeetingsPage() {
     if (detailCache[id]) return;
     try {
       const res = await fetch(`/api/meetings?id=${encodeURIComponent(id)}`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
+        headers: canonicalAuthHeaders(),
       });
       if (!res.ok) return;
       const data = await res.json();

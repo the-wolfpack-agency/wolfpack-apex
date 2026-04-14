@@ -2,6 +2,7 @@
 
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { setInstinctSession, authHeaders } from "@/lib/client-auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -30,20 +31,12 @@ export default function LoginPage() {
         return;
       }
 
-      // Write both legacy (apex_*) and canonical (instinct_*) keys so
-      // existing code paths and new ones both find the session.
-      localStorage.setItem("instinct_token", data.token);
-      localStorage.setItem("instinct_user", JSON.stringify(data.user));
-      localStorage.setItem("apex_token", data.token);
-      localStorage.setItem("apex_user", JSON.stringify(data.user));
+      setInstinctSession(data.token, data.user);
 
       // Track page view
       fetch("/api/analytics", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${data.token}`,
-        },
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ event: "system.login", metadata: { page: "login" } }),
       }).catch(() => {});
 

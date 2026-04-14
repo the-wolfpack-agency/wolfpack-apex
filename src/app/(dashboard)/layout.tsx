@@ -2,6 +2,7 @@
 
 import { useState, useEffect, ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import { getInstinctToken, getInstinctUser, clearInstinctSession } from "@/lib/client-auth";
 
 interface User {
   id: string;
@@ -45,22 +46,17 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem("apex_token");
-    const stored = localStorage.getItem("apex_user");
-    if (!token || !stored) {
+    const token = getInstinctToken();
+    const parsed = getInstinctUser<User>();
+    if (!token || !parsed) {
       router.push("/login");
       return;
     }
-    try {
-      setUser(JSON.parse(stored));
-    } catch {
-      router.push("/login");
-    }
+    setUser(parsed);
   }, [router]);
 
   function handleLogout() {
-    localStorage.removeItem("apex_token");
-    localStorage.removeItem("apex_user");
+    clearInstinctSession();
     router.push("/login");
   }
 

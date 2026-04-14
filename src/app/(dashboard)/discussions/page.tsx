@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, FormEvent } from "react";
+import { jsonHeaders } from "@/lib/client-auth";
 
 interface Discussion {
   id: string;
@@ -58,15 +59,8 @@ export default function DiscussionsPage() {
   const [replyContent, setReplyContent] = useState("");
   const [replying, setReplying] = useState(false);
 
-  function getToken() {
-    return localStorage.getItem("apex_token") || "";
-  }
-
-  function authHeaders() {
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken()}`,
-    };
+  function authHeaders(): HeadersInit {
+    return jsonHeaders();
   }
 
   useEffect(() => {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, KeyboardEvent, DragEvent, ChangeEvent } from "react";
+import { getInstinctToken, clearInstinctSession, jsonHeaders as canonicalJsonHeaders } from "@/lib/client-auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -252,16 +253,8 @@ export default function ApexChat({
     setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
-  function getToken(): string {
-    if (typeof window === "undefined") return "";
-    return localStorage.getItem("apex_token") || "";
-  }
-
-  function authHeaders(): Record<string, string> {
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken()}`,
-    };
+  function authHeaders(): HeadersInit {
+    return canonicalJsonHeaders();
   }
 
   // Load conversations list
@@ -366,7 +359,7 @@ export default function ApexChat({
 
       if (res.status === 401) {
         // Session expired — redirect to login
-        localStorage.removeItem("apex_token");
+        clearInstinctSession();
         window.location.href = "/login";
         return;
       }

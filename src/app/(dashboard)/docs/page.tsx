@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, FormEvent } from "react";
+import { jsonHeaders } from "@/lib/client-auth";
 
 interface Document {
   id: string;
@@ -45,15 +46,8 @@ export default function DocsPage() {
   const [generating, setGenerating] = useState(false);
   const [genMsg, setGenMsg] = useState("");
 
-  function getToken() {
-    return localStorage.getItem("apex_token") || "";
-  }
-
-  function authHeaders() {
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken()}`,
-    };
+  function authHeaders(): HeadersInit {
+    return jsonHeaders();
   }
 
   useEffect(() => {

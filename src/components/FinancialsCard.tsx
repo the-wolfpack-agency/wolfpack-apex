@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { authHeaders } from "@/lib/client-auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -110,14 +111,10 @@ export default function FinancialsCard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  function getToken() {
-    return localStorage.getItem("apex_token") || "";
-  }
-
   const fetchMetrics = useCallback(async () => {
     try {
       const res = await fetch("/api/quickbooks", {
-        headers: { Authorization: `Bearer ${getToken()}` },
+        headers: authHeaders(),
       });
       if (res.status === 401) return;
       if (res.status === 403) {
@@ -195,7 +192,7 @@ export default function FinancialsCard() {
         <button
           onClick={async () => {
             const res = await fetch("/api/quickbooks?action=auth-url", {
-              headers: { Authorization: `Bearer ${getToken()}` },
+              headers: authHeaders(),
             });
             const data = await res.json();
             if (data.authUrl) {
