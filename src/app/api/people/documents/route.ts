@@ -23,6 +23,11 @@ export const maxDuration = 60;
 
 const MAX_BYTES = 15 * 1024 * 1024; // 15 MB
 
+// Rate limit: 20 uploads per user per hour
+const uploadAttempts = new Map<string, { count: number; resetAt: number }>();
+const MAX_UPLOADS = 20;
+const UPLOAD_WINDOW_MS = 60 * 60 * 1000;
+
 export async function GET(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -41,6 +46,23 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Upload rate limiting
+  const now = Date.now();
+  const entry = uploadAttempts.get(user.id);
+  if (entry && now < entry.resetAt) {
+    entry.count++;
+    if (entry.count > MAX_UPLOADS) {
+      trackEvent("system.upload_rate_limited", user.id, user.role, { endpoint: "people/documents" });
+      const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+      return NextResponse.json(
+        { error: "Too many uploads. Please try again later." },
+        { status: 429, headers: { "Retry-After": String(retryAfter) } },
+      );
+    }
+  } else {
+    uploadAttempts.set(user.id, { count: 1, resetAt: now + UPLOAD_WINDOW_MS });
+  }
 
   let file: File;
   let source: "documents_tab" | "benefits_tab" = "documents_tab";
@@ -72,6 +94,7 @@ export async function POST(req: NextRequest) {
       filename: file.name,
       error: (err as Error).message.slice(0, 200),
     });
-    return NextResponse.json({ error: `upload failed: ${(err as Error).message}` }, { status: 500 });
+    console.error("[people/documents]", (err as Error).message);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

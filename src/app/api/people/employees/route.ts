@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
     const employee = await createEmployee(body, user.id, user.role);
     return NextResponse.json({ employee }, { status: 201 });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    console.error("[people/employees]", (err as Error).message);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

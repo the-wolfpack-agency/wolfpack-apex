@@ -36,10 +36,16 @@ function getJwtSecret(): string {
   // Renamed from Apex → Instinct. Read the new var first, fall back to
   // the legacy var so existing Vercel environments don't break.
   const secret = process.env.INSTINCT_JWT_SECRET ?? process.env.APEX_JWT_SECRET;
-  if (secret) return secret;
-  if (process.env.NODE_ENV === "production" && typeof window === "undefined") {
-    console.error("[auth] INSTINCT_JWT_SECRET (or legacy APEX_JWT_SECRET) must be set in production — auth will fail");
+  if (secret) {
+    if (process.env.NODE_ENV === "production" && secret.length < 32) {
+      throw new Error("[auth] JWT secret must be at least 32 characters in production");
+    }
+    return secret;
   }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("[auth] INSTINCT_JWT_SECRET (or legacy APEX_JWT_SECRET) must be set in production");
+  }
+  console.warn("[auth] Using development fallback JWT secret — do not use in production");
   return "instinct-dev-secret-do-not-use-in-production";
 }
 

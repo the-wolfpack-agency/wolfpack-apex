@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { getOrCreateJournal, updateJournal } from "@/lib/journal";
 import { safeQuery } from "@/lib/db";
+import { trackEvent } from "@/lib/analytics";
 
 /**
  * GET /api/journal — Get today's journal for the authenticated user.
@@ -58,8 +59,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ journal: mergedJournal });
   } catch (err) {
+    console.error("[journal]", (err as Error).message);
     return NextResponse.json(
-      { error: "Failed to get journal", detail: (err as Error).message },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }
@@ -103,8 +105,9 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({ journal: updated });
   } catch (err) {
+    console.error("[journal]", (err as Error).message);
     return NextResponse.json(
-      { error: "Failed to update journal", detail: (err as Error).message },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }

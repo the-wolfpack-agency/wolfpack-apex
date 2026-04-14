@@ -29,7 +29,7 @@ export async function POST(
     return NextResponse.json({ success, knowledge_id: id, rating });
   } catch (err) {
     return NextResponse.json(
-      { error: "Failed to rate answer", detail: (err as Error).message },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }

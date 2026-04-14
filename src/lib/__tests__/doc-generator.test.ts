@@ -23,15 +23,18 @@ jest.mock("@/lib/analytics", () => ({
 
 // Mock fs and child_process for file reading and git log
 const mockReadFileSync = jest.fn();
-const mockExecSync = jest.fn();
+const mockExecFileSync = jest.fn();
 
 jest.mock("fs", () => ({
   readFileSync: (...args: any[]) => mockReadFileSync(...args),
 }));
 
 jest.mock("child_process", () => ({
-  execSync: (...args: any[]) => mockExecSync(...args),
+  execFileSync: (...args: any[]) => mockExecFileSync(...args),
 }));
+
+// Keep backward-compatible alias for existing tests
+const mockExecSync = mockExecFileSync;
 
 import {
   generateApiDoc,

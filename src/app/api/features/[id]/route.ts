@@ -4,9 +4,12 @@ import { getFeatureRequests, updateFeatureStatus, type FeatureStatus } from "@/l
 import { safeQuery } from "@/lib/db";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = getUserFromRequest(req.headers.get("authorization"));
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { id } = await params;
   const { rows } = await safeQuery(
     "SELECT * FROM apex_feature_requests WHERE id = $1",

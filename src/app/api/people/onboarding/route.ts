@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
     const instance = await startOnboarding(body.employee_id, body.template_id, user.id, user.role);
     return NextResponse.json({ instance }, { status: 201 });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    console.error("[people/onboarding]", (err as Error).message);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -7,7 +7,7 @@
  */
 
 import { readFileSync } from "fs";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { query, safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 
@@ -193,11 +193,22 @@ export async function generateFeatureDoc(
 // generateReleaseNotes — Parse git log (zero tokens)
 // ---------------------------------------------------------------------------
 export function generateReleaseNotes(repoPath: string, sinceDate: string): GeneratedDocument {
+  // Input validation to prevent command injection (CWE-78)
+  if (!/^[a-zA-Z0-9\/_.-]+$/.test(repoPath) || !/^\d{4}-\d{2}-\d{2}$/.test(sinceDate)) {
+    return makeDoc({
+      title: `Release Notes since ${sinceDate}`,
+      doc_type: "release_notes",
+      content: `# Release Notes\n\nInvalid repository path or date format.`,
+      generated_from: repoPath,
+    });
+  }
+
   let gitLog: string;
 
   try {
-    gitLog = execSync(
-      `git -C "${repoPath}" log --since="${sinceDate}" --pretty=format:"%h|%s|%an|%ai" --no-merges`,
+    gitLog = execFileSync(
+      "git",
+      ["-C", repoPath, "log", "--since=" + sinceDate, "--pretty=format:%h|%s|%an|%ai", "--no-merges"],
       { encoding: "utf-8", timeout: 10000 },
     );
   } catch {

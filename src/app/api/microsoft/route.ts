@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   } catch (err) {
     return NextResponse.json(
-      { error: "Failed to process request", detail: (err as Error).message },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }

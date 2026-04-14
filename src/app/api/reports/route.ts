@@ -41,8 +41,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ templates, history });
   } catch (err) {
+    console.error("[reports]", (err as Error).message);
     return NextResponse.json(
-      { error: "Failed to list reports", detail: (err as Error).message },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }
@@ -150,8 +151,9 @@ export async function POST(req: NextRequest) {
       sectionsIncluded: report.sectionsIncluded,
     });
   } catch (err) {
+    console.error("[reports/generate]", (err as Error).message);
     return NextResponse.json(
-      { error: "Failed to generate report", detail: (err as Error).message },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }

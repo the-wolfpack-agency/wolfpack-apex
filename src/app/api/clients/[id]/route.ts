@@ -3,9 +3,11 @@ import { getUserFromRequest } from "@/lib/auth";
 import { getClient, updateClient } from "@/lib/clients";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = getUserFromRequest(req.headers.get("authorization"));
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
   const client = await getClient(id);
 

@@ -64,6 +64,7 @@ export async function POST(req: NextRequest) {
     const result = await parseBrief(rawInput, clientSlug, user.id, user.role);
     return NextResponse.json(result);
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 422 });
+    console.error("[sites/parse-brief]", (err as Error).message);
+    return NextResponse.json({ error: "Failed to parse brief" }, { status: 422 });
   }
 }

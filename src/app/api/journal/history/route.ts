@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ journals, view: "personal" });
   } catch (err) {
     return NextResponse.json(
-      { error: "Failed to get journal history", detail: (err as Error).message },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }

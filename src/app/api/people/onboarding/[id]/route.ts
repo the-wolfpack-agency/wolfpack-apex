@@ -50,7 +50,8 @@ export async function PATCH(
     }
     return NextResponse.json({ instance });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    console.error("[people/onboarding/id]", (err as Error).message);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
@@ -66,6 +67,7 @@ export async function DELETE(
     const instance = await cancelOnboarding(id, user.id, user.role);
     return NextResponse.json({ instance });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    console.error("[people/onboarding/id]", (err as Error).message);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

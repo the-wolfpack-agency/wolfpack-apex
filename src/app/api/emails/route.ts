@@ -130,7 +130,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ draft, tokens_used: 0 });
   } catch (err) {
     return NextResponse.json(
-      { error: "Failed to generate email", detail: (err as Error).message },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }

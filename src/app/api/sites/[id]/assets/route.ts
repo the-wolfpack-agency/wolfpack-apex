@@ -21,8 +21,14 @@ import {
   recordAssetUpload,
 } from "@/lib/sites";
 import { putFile, defaultGithubClient } from "@/lib/github-client";
+import { trackEvent } from "@/lib/analytics";
 
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB cap per asset
+
+// Rate limit: 20 uploads per user per hour
+const uploadAttempts = new Map<string, { count: number; resetAt: number }>();
+const MAX_UPLOADS = 20;
+const UPLOAD_WINDOW_MS = 60 * 60 * 1000;
 const ALLOWED_TYPES = new Set([
   "image/jpeg",
   "image/png",
@@ -34,6 +40,23 @@ const ALLOWED_TYPES = new Set([
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Upload rate limiting
+  const now = Date.now();
+  const entry = uploadAttempts.get(user.id);
+  if (entry && now < entry.resetAt) {
+    entry.count++;
+    if (entry.count > MAX_UPLOADS) {
+      trackEvent("system.upload_rate_limited", user.id, user.role, { endpoint: "sites/assets" });
+      const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+      return NextResponse.json(
+        { error: "Too many uploads. Please try again later." },
+        { status: 429, headers: { "Retry-After": String(retryAfter) } },
+      );
+    }
+  } else {
+    uploadAttempts.set(user.id, { count: 1, resetAt: now + UPLOAD_WINDOW_MS });
+  }
 
   const { id } = await context.params;
   const project = await getSiteProject(id);

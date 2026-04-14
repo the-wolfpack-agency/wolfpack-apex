@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
     const template = await createTemplate(body.name, body.steps, user.id, user.role, body.department);
     return NextResponse.json({ template }, { status: 201 });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    console.error("[people/onboarding/templates]", (err as Error).message);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

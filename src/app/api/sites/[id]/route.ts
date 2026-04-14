@@ -35,7 +35,8 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       const result = await triggerDeploy(id, user.id, user.role);
       return NextResponse.json({ ok: true, ...result });
     } catch (err) {
-      return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+      console.error("[sites/id/deploy]", (err as Error).message);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
   }
 
@@ -55,6 +56,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     if (err instanceof BriefValidationError) {
       return NextResponse.json({ error: err.message, errors: err.errors }, { status: 422 });
     }
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    console.error("[sites/id/brief]", (err as Error).message);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { safeQuery } from "@/lib/db";
 import { renderReportHtml } from "@/lib/report-templates";
+import { trackEvent } from "@/lib/analytics";
 
 /**
  * GET /api/reports/[id] — Get a specific generated report.
@@ -27,11 +28,13 @@ export async function GET(
     created_at: string;
   }>(
     `SELECT id, title, content, doc_type, generated_from, generated_by, created_at
-     FROM apex_documents WHERE id = $1 AND doc_type = 'report'`,
-    [id],
+     FROM apex_documents WHERE id = $1 AND doc_type = 'report'
+     AND (generated_by = $2 OR $3 IN ('cto', 'ceo'))`,
+    [id, user.id, user.role],
   );
 
   if (rows.length === 0) {
+    trackEvent("system.unauthorized_access_attempt", user.id, user.role, { resource: "report", resource_id: id });
     return NextResponse.json({ error: "Report not found" }, { status: 404 });
   }
 

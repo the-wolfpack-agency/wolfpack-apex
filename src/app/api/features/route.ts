@@ -4,6 +4,9 @@ import { getFeatureRequests, submitFeatureRequest, type FeaturePriority } from "
 import { trackEvent } from "@/lib/analytics";
 
 export async function GET(req: NextRequest) {
+  const user = getUserFromRequest(req.headers.get("authorization"));
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const status = req.nextUrl.searchParams.get("status") || undefined;
   const product = req.nextUrl.searchParams.get("target_product") || undefined;
 
@@ -12,7 +15,7 @@ export async function GET(req: NextRequest) {
     product,
   );
 
-  trackEvent("system.page_viewed", "anonymous", "unknown", { page: "features_list" });
+  trackEvent("system.page_viewed", user.id, user.role, { page: "features_list" });
   return NextResponse.json({ features });
 }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { downloadDocument, getDocuments } from "@/lib/doc-generator";
+import { trackEvent } from "@/lib/analytics";
 
 /**
  * GET /api/docs/[id] — Get a single document.
@@ -23,10 +24,17 @@ export async function GET(
       return NextResponse.json({ error: "Document not found" }, { status: 404 });
     }
 
+    // IDOR check: only the document owner or cto/ceo can access
+    if (doc.generated_by !== user.id && user.role !== "cto" && user.role !== "ceo") {
+      trackEvent("system.unauthorized_access_attempt", user.id, user.role, { resource: "doc", resource_id: id });
+      return NextResponse.json({ error: "Document not found" }, { status: 404 });
+    }
+
     return NextResponse.json({ document: doc });
   } catch (err) {
+    console.error("[docs/id]", (err as Error).message);
     return NextResponse.json(
-      { error: "Failed to get document", detail: (err as Error).message },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }
@@ -54,8 +62,9 @@ export async function POST(
 
     return NextResponse.json({ document: doc });
   } catch (err) {
+    console.error("[docs/id/download]", (err as Error).message);
     return NextResponse.json(
-      { error: "Failed to download document", detail: (err as Error).message },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }

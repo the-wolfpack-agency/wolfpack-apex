@@ -137,7 +137,11 @@ export type ApexEventType =
   | "hr.onboarding_step_uncompleted"
   | "hr.onboarding_completed"
   | "hr.onboarding_cancelled"
-  | "hr.onboarding_template_created";
+  | "hr.onboarding_template_created"
+  // Security
+  | "system.login_rate_limited"
+  | "system.upload_rate_limited"
+  | "system.unauthorized_access_attempt";
 
 export interface ApexEvent {
   event_type: ApexEventType;

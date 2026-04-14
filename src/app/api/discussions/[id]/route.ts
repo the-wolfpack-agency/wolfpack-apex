@@ -3,9 +3,11 @@ import { getUserFromRequest } from "@/lib/auth";
 import { getThread, replyToThread } from "@/lib/discussions";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = getUserFromRequest(req.headers.get("authorization"));
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
   const thread = await getThread(id);
 

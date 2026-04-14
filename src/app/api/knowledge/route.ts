@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   const q = url.searchParams.get("q");
   const popular = url.searchParams.get("popular");
   const gaps = url.searchParams.get("gaps");
-  const limit = Number(url.searchParams.get("limit") ?? 10);
+  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 10), 1), 100);
 
   trackEvent("system.search_performed", user.id, user.role, { module: "knowledge" });
 
@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ entries: data });
   } catch (err) {
     return NextResponse.json(
-      { error: "Failed to search knowledge base", detail: (err as Error).message },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ answer: null, source: "none", tokens_used: 0 });
   } catch (err) {
     return NextResponse.json(
-      { error: "Failed to process question", detail: (err as Error).message },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }

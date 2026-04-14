@@ -1,8 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { getUserFromRequest } from "@/lib/auth";
 import { safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const user = getUserFromRequest(req.headers.get("authorization"));
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const [knowledge, discussions, features, team, efficiency] = await Promise.all([
     safeQuery<{ count: number }>("SELECT COUNT(*)::int AS count FROM apex_knowledge"),
     safeQuery<{ count: number }>("SELECT COUNT(*)::int AS count FROM apex_discussions WHERE status = 'open'"),

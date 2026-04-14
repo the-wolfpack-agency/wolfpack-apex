@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ documents: docs });
   } catch (err) {
     return NextResponse.json(
-      { error: "Failed to list documents", detail: (err as Error).message },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }
@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ document: doc, tokens_used: 0 });
   } catch (err) {
     return NextResponse.json(
-      { error: "Failed to generate document", detail: (err as Error).message },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }

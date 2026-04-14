@@ -133,7 +133,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(response);
   } catch (err) {
     return NextResponse.json(
-      { error: "Failed to process message", detail: (err as Error).message },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }

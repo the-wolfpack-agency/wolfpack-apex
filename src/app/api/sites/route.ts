@@ -42,6 +42,7 @@ export async function POST(req: NextRequest) {
     if (err instanceof BriefValidationError) {
       return NextResponse.json({ error: err.message, errors: err.errors }, { status: 422 });
     }
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    console.error("[sites]", (err as Error).message);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

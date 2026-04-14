@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
   }
 
   const limitParam = url.searchParams.get("limit");
-  const limit = Math.min(Math.max(parseInt(limitParam || "50", 10) || 50, 1), 200);
+  const limit = Math.min(Math.max(parseInt(limitParam || "50", 10) || 50, 1), 100);
 
   const transcripts = await listMeetingTranscripts(limit);
   trackEvent("system.page_viewed", user.id, user.role, {

@@ -4,6 +4,9 @@ import { getThreads, createThread, type DiscussionCategory } from "@/lib/discuss
 import { trackEvent } from "@/lib/analytics";
 
 export async function GET(req: NextRequest) {
+  const user = getUserFromRequest(req.headers.get("authorization"));
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const category = req.nextUrl.searchParams.get("category") || undefined;
   const status = req.nextUrl.searchParams.get("status") || undefined;
 
@@ -12,7 +15,7 @@ export async function GET(req: NextRequest) {
     status as Parameters<typeof getThreads>[1],
   );
 
-  trackEvent("system.page_viewed", "anonymous", "unknown", { page: "discussions_list" });
+  trackEvent("system.page_viewed", user.id, user.role, { page: "discussions_list" });
   return NextResponse.json({ threads });
 }
 
