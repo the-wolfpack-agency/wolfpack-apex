@@ -279,9 +279,28 @@ describe("Security Headers Middleware", () => {
     expect(source).toContain("strict-origin-when-cross-origin");
     expect(source).toContain("Permissions-Policy");
     expect(source).toContain("camera=(), microphone=(), geolocation=()");
-    // Should NOT have CSP or HSTS
-    expect(source).not.toContain("Content-Security-Policy");
+    // Should NOT have HSTS (Vercel handles it)
     expect(source).not.toContain("Strict-Transport-Security");
+  });
+
+  it("CSP header is present in the middleware response", () => {
+    const source = readSource("../../middleware.ts");
+    expect(source).toContain("Content-Security-Policy");
+  });
+
+  it("CSP includes default-src 'self'", () => {
+    const source = readSource("../../middleware.ts");
+    expect(source).toContain("default-src 'self'");
+  });
+
+  it("CSP includes object-src 'none'", () => {
+    const source = readSource("../../middleware.ts");
+    expect(source).toContain("object-src 'none'");
+  });
+
+  it("CSP includes base-uri 'self'", () => {
+    const source = readSource("../../middleware.ts");
+    expect(source).toContain("base-uri 'self'");
   });
 });
 
