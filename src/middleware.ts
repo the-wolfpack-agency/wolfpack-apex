@@ -49,14 +49,8 @@ export function middleware(_req: NextRequest) {
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
 
-  // HSTS — 2 years + includeSubDomains + preload eligibility.
-  // Production only: localhost/dev must not receive HSTS headers.
-  if (IS_PROD) {
-    response.headers.set(
-      "Strict-Transport-Security",
-      "max-age=63072000; includeSubDomains; preload",
-    );
-  }
+  // HSTS is injected by Vercel edge on production domains — do not duplicate here.
+  // See docs/security-posture.md for the full TLS / PQ posture.
 
   return response;
 }

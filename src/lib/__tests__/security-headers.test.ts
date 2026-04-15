@@ -72,22 +72,12 @@ describe("middleware security headers", () => {
     expect(pp).toContain("geolocation=()");
   });
 
-  it("does NOT set HSTS in non-production", async () => {
-    const headers = await getHeaders("test");
-    expect(headers.get("Strict-Transport-Security")).toBeNull();
-  });
-
-  it("sets HSTS in production with max-age >= 31536000, includeSubDomains, preload", async () => {
-    const headers = await getHeaders("production");
-    const hsts = headers.get("Strict-Transport-Security") ?? "";
-    expect(hsts).toBeTruthy();
-
-    const maxAgeMatch = hsts.match(/max-age=(\d+)/);
-    expect(maxAgeMatch).not.toBeNull();
-    const maxAge = parseInt(maxAgeMatch![1], 10);
-    expect(maxAge).toBeGreaterThanOrEqual(31536000);
-
-    expect(hsts).toContain("includeSubDomains");
-    expect(hsts).toContain("preload");
+  // HSTS is injected by Vercel edge on production domains, not by middleware.
+  // See docs/security-posture.md. Middleware must not duplicate.
+  it("does NOT set HSTS in middleware (Vercel edge handles it)", async () => {
+    const prodHeaders = await getHeaders("production");
+    const testHeaders = await getHeaders("test");
+    expect(prodHeaders.get("Strict-Transport-Security")).toBeNull();
+    expect(testHeaders.get("Strict-Transport-Security")).toBeNull();
   });
 });
