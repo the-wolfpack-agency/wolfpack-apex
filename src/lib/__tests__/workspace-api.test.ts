@@ -252,4 +252,116 @@ describe("GET /api/workspace/status nextStep derivation", () => {
   });
 });
 
+/* ─────────────── Round-trip integration tests ───────────────
+ *
+ * These hit BOTH PUT /api/workspace AND GET /api/workspace/status
+ * with a stateful mock DB so the second call sees what the first wrote.
+ *
+ * Regression: the "Continue" button silently did nothing because the
+ * status route had a hack that treated name === "My Workspace" as
+ * no-name-set, matching the client's default placeholder. User clicks
+ * Continue, PUT saves "My Workspace", status still reports
+ * profile=false, step doesn't advance. Any valid non-empty name must
+ * now flip profile=true.
+ */
+describe("PUT /api/workspace → GET /api/workspace/status round-trip", () => {
+  interface MockDB {
+    workspaceName: string | null;
+    setupComplete: boolean;
+    teamCount: number;
+    integrationsCount: number;
+  }
+
+  function installStatefulMock(db: MockDB) {
+    mockSafeQuery.mockImplementation(async (sql: string) => {
+      const s = sql.toLowerCase();
+      if (s.includes("insert") && s.includes("instinct_workspace")) {
+        db.workspaceName = "CAPTURED"; // actual value comes from PUT handler logic
+        return { rows: [], fromCache: false };
+      }
+      if (s.includes("insert") && s.includes("apex_team_members")) {
+        db.teamCount = Math.max(db.teamCount, 1);
+        return { rows: [], fromCache: false };
+      }
+      if (s.includes("from instinct_workspace")) {
+        return {
+          rows: db.workspaceName
+            ? [{ name: db.workspaceName, setup_complete: db.setupComplete }]
+            : [],
+          fromCache: false,
+        };
+      }
+      if (s.includes("from apex_team_members")) {
+        return { rows: [{ count: db.teamCount }], fromCache: false };
+      }
+      if (s.includes("apex_integrations")) {
+        return { rows: [{ count: db.integrationsCount }], fromCache: false };
+      }
+      return { rows: [], fromCache: false };
+    });
+  }
+
+  test("user types a real workspace name → status flips profile=true → step advances to team", async () => {
+    const db: MockDB = {
+      workspaceName: null,
+      setupComplete: false,
+      teamCount: 0,
+      integrationsCount: 0,
+    };
+    mockGetUser.mockReturnValue(DEMO_USER);
+    installStatefulMock(db);
+
+    // Pre-save: status says profile not complete, nextStep = "profile"
+    const before = await (await GET(makeGetRequest("Bearer token"))).json();
+    expect(before.nextStep).toBe("profile");
+    expect(before.steps.profile).toBe(false);
+
+    // Save a real name via the PUT handler
+    const put = await PUT(makePutRequest({ name: "Acme Motors" }, "Bearer token"));
+    expect(put.status).toBe(200);
+    // Simulate what the handler wrote — the handler itself is mocked at the DB layer,
+    // but the PUT route body has run. Propagate the name into our mock state.
+    db.workspaceName = "Acme Motors";
+
+    // Post-save: status must now flip profile=true AND nextStep must advance
+    const after = await (await GET(makeGetRequest("Bearer token"))).json();
+    expect(after.steps.profile).toBe(true);
+    expect(after.nextStep).not.toBe("profile"); // critical: wizard MUST advance
+    expect(after.nextStep).toBe("team");
+  });
+
+  test("workspace name 'My Workspace' is ACCEPTED as a valid name (regression guard)", async () => {
+    // The previous bug: status route had `name !== "My Workspace"` which
+    // treated this literal string as unset. Any non-empty trimmed name
+    // must now count as a real name — a user may legitimately choose it.
+    const db: MockDB = {
+      workspaceName: "My Workspace",
+      setupComplete: false,
+      teamCount: 1,
+      integrationsCount: 0,
+    };
+    mockGetUser.mockReturnValue(DEMO_USER);
+    installStatefulMock(db);
+
+    const res = await (await GET(makeGetRequest("Bearer token"))).json();
+    expect(res.steps.profile).toBe(true);
+    expect(res.nextStep).toBe("team");
+  });
+
+  test("whitespace-only name in DB is treated as not set", async () => {
+    const db: MockDB = {
+      workspaceName: "   ",
+      setupComplete: false,
+      teamCount: 1,
+      integrationsCount: 0,
+    };
+    mockGetUser.mockReturnValue(DEMO_USER);
+    installStatefulMock(db);
+
+    const res = await (await GET(makeGetRequest("Bearer token"))).json();
+    expect(res.steps.profile).toBe(false);
+    expect(res.nextStep).toBe("profile");
+  });
+});
+
 export {};

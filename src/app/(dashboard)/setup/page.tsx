@@ -144,8 +144,6 @@ export default function SetupPage() {
     const draft = loadDraft();
     if (draft.workspaceName) {
       setWorkspaceName(draft.workspaceName);
-    } else {
-      setWorkspaceName("My Workspace");
     }
     if (draft.invites && draft.invites.length > 0) {
       setInvites(draft.invites);
@@ -172,7 +170,7 @@ export default function SetupPage() {
 
   // Persist workspace name draft as user types
   useEffect(() => {
-    if (workspaceName && workspaceName !== "My Workspace") {
+    if (workspaceName.trim()) {
       const draft = loadDraft();
       saveDraft({ ...draft, workspaceName });
     }

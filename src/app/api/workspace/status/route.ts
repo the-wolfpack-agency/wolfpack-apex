@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
     ) sub`,
   );
 
-  const hasWorkspaceName = !!workspace.rows[0]?.name && workspace.rows[0].name !== "My Workspace";
+  const hasWorkspaceName = !!workspace.rows[0]?.name?.trim();
   const teamCount = team.rows[0]?.count ?? 0;
   const profileComplete = hasWorkspaceName && teamCount >= 1;
   const teamComplete = teamCount >= 2;
