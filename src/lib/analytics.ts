@@ -143,8 +143,13 @@ export type ApexEventType =
   | "hr.onboarding_template_created"
   // Workspace setup
   | "system.setup_started"
+  | "system.setup_step_viewed"
   | "system.setup_step_completed"
+  | "system.setup_step_abandoned"
   | "system.setup_completed"
+  | "system.setup_integration_connect_started"
+  | "system.setup_integration_connect_succeeded"
+  | "system.setup_integration_connect_failed"
   | "system.team_member_invited"
   | "system.team_invite_accepted"
   | "system.setup_banner_shown"

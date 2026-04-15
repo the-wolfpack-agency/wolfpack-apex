@@ -3,6 +3,46 @@ import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent, getEventCounts, type ApexEventType } from "@/lib/analytics";
 import { safeQuery } from "@/lib/db";
 
+// Valid values for instinct_setup_events columns (must match migration 016 CHECK constraints)
+const VALID_SETUP_STEPS = new Set(["profile", "team", "integrations", "complete"]);
+const VALID_INTEGRATIONS = new Set(["microsoft", "quickbooks", "plaud"]);
+
+const SETUP_EVENT_MAP: Record<string, string> = {
+  "system.setup_step_viewed": "setup_step_viewed",
+  "system.setup_step_completed": "setup_step_completed",
+  "system.setup_step_abandoned": "setup_step_abandoned",
+  "system.setup_integration_connect_started": "setup_integration_connect_started",
+  "system.setup_integration_connect_succeeded": "setup_integration_connect_succeeded",
+  "system.setup_integration_connect_failed": "setup_integration_connect_failed",
+};
+
+async function writeSetupEvent(
+  userId: string,
+  event: string,
+  metadata: Record<string, string | number | boolean>,
+): Promise<void> {
+  const eventType = SETUP_EVENT_MAP[event];
+  if (!eventType) return;
+
+  const step = typeof metadata.step === "string" ? metadata.step : "";
+  if (!VALID_SETUP_STEPS.has(step)) {
+    console.warn("[analytics] setup event missing valid step, skipping structured write");
+    return;
+  }
+
+  const integrationRaw = typeof metadata.integration === "string" ? metadata.integration : null;
+  const integration = integrationRaw && VALID_INTEGRATIONS.has(integrationRaw) ? integrationRaw : null;
+  const duration_ms = typeof metadata.duration_ms === "number" ? metadata.duration_ms : null;
+  const attempt_number = typeof metadata.attempt_number === "number" ? metadata.attempt_number : 1;
+
+  await safeQuery(
+    `INSERT INTO instinct_setup_events
+       (user_id, event_type, step, integration, duration_ms, attempt_number, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [userId, eventType, step, integration, duration_ms, attempt_number, JSON.stringify(metadata)],
+  );
+}
+
 /**
  * POST /api/analytics — Track a page view or event from the client.
  */
@@ -23,7 +63,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "event is required" }, { status: 400 });
     }
 
-    trackEvent(event as ApexEventType, user.id, user.role, metadata || {});
+    const meta = metadata || {};
+    trackEvent(event as ApexEventType, user.id, user.role, meta);
+
+    if (event.startsWith("system.setup_") && event in SETUP_EVENT_MAP) {
+      await writeSetupEvent(user.id, event, meta);
+    }
+
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "Failed to track event" }, { status: 500 });
