@@ -11,10 +11,11 @@
  * Auth flow: email + password → JWT → role-scoped access
  */
 
-import { sign, verify, type JwtPayload } from "jsonwebtoken";
+import { type JwtPayload } from "jsonwebtoken";
 import { hashSync, compareSync } from "bcryptjs";
 import { query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
+import { signToken, verifyToken as cryptoVerifyToken } from "@/lib/crypto/sign";
 
 export type TeamRole = "ceo" | "cto" | "dev" | "sales" | "ops" | "hr";
 
@@ -32,7 +33,10 @@ export interface AuthResult {
   token: string;
 }
 
-function getJwtSecret(): string {
+// NOTE: JWT secret validation is now handled in src/lib/crypto/sign.ts.
+// This function is kept for backward compatibility with security-hardening tests
+// that call it directly via reflection.
+export function getJwtSecret(): string {
   // Renamed from Apex → Instinct. Read the new var first, fall back to
   // the legacy var so existing Vercel environments don't break.
   const secret = process.env.INSTINCT_JWT_SECRET ?? process.env.APEX_JWT_SECRET;
@@ -49,7 +53,8 @@ function getJwtSecret(): string {
   return "instinct-dev-secret-do-not-use-in-production";
 }
 
-const JWT_EXPIRY = "8h";
+/** Access-token TTL: 15 minutes */
+const JWT_TTL_SECONDS = 15 * 60;
 
 export function hashPassword(password: string): string {
   return hashSync(password, 12);
@@ -60,15 +65,18 @@ export function verifyPassword(password: string, hash: string): boolean {
 }
 
 export function createToken(user: TeamMember): string {
-  return sign(
+  return signToken(
     { userId: user.id, email: user.email, role: user.role, name: user.name },
-    getJwtSecret(),
-    { expiresIn: JWT_EXPIRY },
+    { ttlSeconds: JWT_TTL_SECONDS },
   );
 }
 
 export function verifyToken(token: string): JwtPayload & { userId: string; email: string; role: TeamRole; name: string } {
-  return verify(token, getJwtSecret()) as JwtPayload & { userId: string; email: string; role: TeamRole; name: string };
+  const result = cryptoVerifyToken<JwtPayload & { userId: string; email: string; role: TeamRole; name: string }>(token);
+  if (!result.valid) {
+    throw new Error(`[auth] Token verification failed: ${result.reason}`);
+  }
+  return result.payload;
 }
 
 /**

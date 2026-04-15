@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticate } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
+import { issueRefreshToken } from "@/lib/crypto/refresh-tokens";
+import {
+  setAuthCookie,
+  ACCESS_TOKEN_COOKIE,
+  REFRESH_TOKEN_COOKIE,
+  ACCESS_TOKEN_TTL,
+  REFRESH_TOKEN_TTL_SECONDS,
+} from "@/lib/crypto/cookies";
 
 // Rate limit: 5 attempts per IP per 5 minutes
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
@@ -45,10 +53,37 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
 
-  return NextResponse.json({
+  // Issue refresh token (requires DB; silently skipped in shadow/dev mode without DATABASE_URL)
+  let refreshTokenId: string | undefined;
+  if (process.env.DATABASE_URL) {
+    try {
+      const rt = await issueRefreshToken(result.user.id);
+      refreshTokenId = rt.tokenId;
+    } catch (err) {
+      console.warn("[auth/login] Could not issue refresh token:", (err as Error).message);
+    }
+  }
+
+  const res = NextResponse.json({
     user: result.user,
+    // Keep token in body for backward-compat with existing clients using
+    // localStorage (client-auth.ts). Will be removed once all clients migrate to cookies.
     token: result.token,
   });
+
+  // Set access token as HttpOnly cookie (15 min)
+  setAuthCookie(res, ACCESS_TOKEN_COOKIE, result.token, ACCESS_TOKEN_TTL, {
+    sameSite: "Lax",
+  });
+
+  // Set refresh token as HttpOnly cookie with Strict SameSite (7 days)
+  if (refreshTokenId) {
+    setAuthCookie(res, REFRESH_TOKEN_COOKIE, refreshTokenId, REFRESH_TOKEN_TTL_SECONDS, {
+      sameSite: "Strict",
+    });
+  }
+
+  return res;
 }
 
 // Exported for testing
