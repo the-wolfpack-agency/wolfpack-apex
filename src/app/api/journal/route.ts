@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromRequest } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth/require-capability";
 import { getOrCreateJournal, updateJournal } from "@/lib/journal";
 import { safeQuery } from "@/lib/db";
-import { trackEvent } from "@/lib/analytics";
 
 /**
  * GET /api/journal — Get today's journal for the authenticated user.
@@ -12,10 +11,9 @@ import { trackEvent } from "@/lib/analytics";
  *   ?date=YYYY-MM-DD — specific date (defaults to today)
  */
 export async function GET(req: NextRequest) {
-  const user = getUserFromRequest(req.headers.get("authorization"));
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCapability(req, "journal.write");
+  if (!auth.ok) return auth.response;
+  const user = auth.user;
 
   const url = new URL(req.url);
   const date = url.searchParams.get("date") || undefined;
@@ -73,10 +71,9 @@ export async function GET(req: NextRequest) {
  * Body: { journal_id: string, content?: string, mood?: string, highlights?: string[], blockers?: string[] }
  */
 export async function PUT(req: NextRequest) {
-  const user = getUserFromRequest(req.headers.get("authorization"));
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCapability(req, "journal.write");
+  if (!auth.ok) return auth.response;
+  const user = auth.user;
 
   try {
     const body = await req.json();

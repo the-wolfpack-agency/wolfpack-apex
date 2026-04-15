@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromRequest } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
 import { askQuestion, searchKnowledge, getPopularQuestions, getKnowledgeGaps } from "@/lib/knowledge";
 
@@ -12,10 +12,9 @@ import { askQuestion, searchKnowledge, getPopularQuestions, getKnowledgeGaps } f
  *   ?gaps=true        — knowledge gaps view
  */
 export async function GET(req: NextRequest) {
-  const user = getUserFromRequest(req.headers.get("authorization"));
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCapability(req, "knowledge.search");
+  if (!auth.ok) return auth.response;
+  const user = auth.user;
 
   const url = new URL(req.url);
   const q = url.searchParams.get("q");
@@ -57,10 +56,9 @@ export async function GET(req: NextRequest) {
  * Body: { question: string, repo?: string }
  */
 export async function POST(req: NextRequest) {
-  const user = getUserFromRequest(req.headers.get("authorization"));
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCapability(req, "knowledge.search");
+  if (!auth.ok) return auth.response;
+  const user = auth.user;
 
   try {
     const body = await req.json();

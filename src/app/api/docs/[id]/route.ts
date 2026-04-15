@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromRequest } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth/require-capability";
 import { downloadDocument, getDocuments } from "@/lib/doc-generator";
 import { trackEvent } from "@/lib/analytics";
 
@@ -10,10 +10,9 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const user = getUserFromRequest(req.headers.get("authorization"));
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCapability(req, "docs.view");
+  if (!auth.ok) return auth.response;
+  const user = auth.user;
 
   try {
     const { id } = await params;
@@ -24,8 +23,9 @@ export async function GET(
       return NextResponse.json({ error: "Document not found" }, { status: 404 });
     }
 
-    // IDOR check: only the document owner or cto/ceo can access
-    if (doc.generated_by !== user.id && user.role !== "cto" && user.role !== "ceo") {
+    // IDOR check: only the document owner or a user with docs.edit
+    // (workspace-level editing rights) can access someone else's doc.
+    if (doc.generated_by !== user.id && !auth.capabilities.has("docs.edit")) {
       trackEvent("system.unauthorized_access_attempt", user.id, user.role, { resource: "doc", resource_id: id });
       return NextResponse.json({ error: "Document not found" }, { status: 404 });
     }
@@ -47,10 +47,9 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const user = getUserFromRequest(req.headers.get("authorization"));
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCapability(req, "docs.view");
+  if (!auth.ok) return auth.response;
+  const user = auth.user;
 
   try {
     const { id } = await params;

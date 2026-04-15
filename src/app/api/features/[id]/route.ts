@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromRequest, hasRole } from "@/lib/auth";
-import { getFeatureRequests, updateFeatureStatus, type FeatureStatus } from "@/lib/feature-requests";
+import { getUserFromRequest } from "@/lib/auth";
+import { effectiveCapabilitiesFor } from "@/lib/auth/require-capability";
+import { updateFeatureStatus, type FeatureStatus } from "@/lib/feature-requests";
 import { safeQuery } from "@/lib/db";
 
 export async function GET(
@@ -40,9 +41,15 @@ export async function PATCH(
     return NextResponse.json({ error: "status is required" }, { status: 400 });
   }
 
-  // Only cto/dev can approve/reject
-  if ((status === "approved" || status === "rejected") && !hasRole(user.role, "dev")) {
-    return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+  // Approve/reject requires features.approve capability.
+  if (status === "approved" || status === "rejected") {
+    const { capabilities } = await effectiveCapabilitiesFor(user);
+    if (!capabilities.has("features.approve")) {
+      return NextResponse.json(
+        { error: "forbidden", capability: "features.approve" },
+        { status: 403 },
+      );
+    }
   }
 
   const feature = await updateFeatureStatus(id, status as FeatureStatus, user.id);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromRequest } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
 import {
   generateApiDoc,
@@ -17,10 +17,9 @@ import {
  *   ?mine=true          — only my docs
  */
 export async function GET(req: NextRequest) {
-  const user = getUserFromRequest(req.headers.get("authorization"));
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCapability(req, "docs.view");
+  if (!auth.ok) return auth.response;
+  const user = auth.user;
 
   const url = new URL(req.url);
   const docType = url.searchParams.get("doc_type") ?? undefined;
@@ -47,10 +46,9 @@ export async function GET(req: NextRequest) {
  * For release_notes: { repo_path, since_date }
  */
 export async function POST(req: NextRequest) {
-  const user = getUserFromRequest(req.headers.get("authorization"));
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCapability(req, "docs.generate");
+  if (!auth.ok) return auth.response;
+  const user = auth.user;
 
   try {
     const body = await req.json();

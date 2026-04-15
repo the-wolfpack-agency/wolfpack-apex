@@ -8,15 +8,14 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromRequest } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
 import { listMeetingTranscripts, getMeetingTranscript } from "@/lib/plaud";
 
 export async function GET(req: NextRequest) {
-  const user = getUserFromRequest(req.headers.get("authorization"));
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireCapability(req, "meetings.view");
+  if (!auth.ok) return auth.response;
+  const user = auth.user;
 
   const url = new URL(req.url);
   const id = url.searchParams.get("id");

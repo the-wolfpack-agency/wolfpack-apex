@@ -257,8 +257,8 @@ describe("Auth on Previously-Unauthenticated Endpoints", () => {
   it("clients GET requires auth", () => {
     const source = readSource("../../app/api/clients/route.ts");
     const getSection = source.split("export async function GET")[1]?.split("export async function")[0] || "";
-    expect(getSection).toContain("getUserFromRequest");
-    expect(getSection).toContain("status: 401");
+    // Now gated via the capability registry (requireCapability → 401/403).
+    expect(getSection).toMatch(/getUserFromRequest|requireCapability/);
   });
 });
 
