@@ -72,6 +72,12 @@ export type ApexEventType =
   | "microsoft.token_refresh_failed"
   | "microsoft.fetch_failed"
   | "microsoft.sync_completed"
+  // Microsoft 365 Tasks (To Do)
+  | "system.ms_tasks_synced"
+  | "system.ms_tasks_sync_failed"
+  | "system.task_viewed"
+  | "system.task_completed"
+  | "system.task_created"
   // Briefing
   | "briefing.generated"
   | "briefing.viewed"
@@ -164,7 +170,25 @@ export type ApexEventType =
   | "system.refresh_token_reuse_detected"
   | "system.csp_violation_reported"
   | "system.security_posture_viewed"
-  | "system.tls_hybrid_verified";
+  | "system.tls_hybrid_verified"
+  // Audit log (compliance-grade record, separate from analytics)
+  | "system.audit_log_written"
+  | "system.audit_log_viewed"
+  | "system.audit_log_tamper_suspected"
+  | "system.audit_log_export"
+  | "system.unusual_access_pattern"
+  // Notifications (in-app + digest)
+  | "system.notification_created"
+  | "system.notification_read"
+  | "system.notification_dismissed"
+  | "system.notification_clicked"
+  | "system.notification_digest_sent"
+  | "system.notification_preferences_updated"
+  // Capability / RBAC
+  | "system.capability_denied"
+  | "system.capability_granted_override"
+  | "system.capability_revoked_override"
+  | "system.role_changed";
 
 export interface ApexEvent {
   event_type: ApexEventType;
