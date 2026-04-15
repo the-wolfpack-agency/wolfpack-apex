@@ -1,33 +1,62 @@
 /**
  * Next.js Middleware — Security headers on every response.
  *
- * Adds standard browser-side security headers. Does NOT add:
- *   - HSTS (Vercel handles this at the edge)
+ * CSP is enforced (not report-only). All inline scripts in this codebase
+ * are server-rendered JSON-LD structured data, which is acceptable under
+ * 'unsafe-inline' in script-src until nonce support is standardised in
+ * Next.js App Router (tracked: https://nextjs.org/docs/app/building-your-application/configuring/content-security-policy).
+ *
+ * HSTS: enabled in production only. Once the domain has been live for >1 week
+ * with HSTS, submit to https://hstspreload.org (follow-up action).
  */
 
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+const IS_PROD = process.env.NODE_ENV === "production";
+
+/**
+ * CSP directives — enforced mode.
+ *
+ * 'unsafe-eval' has been removed (was never required; poses XSS escalation risk).
+ * 'unsafe-inline' in script-src covers Next.js hydration + server-rendered JSON-LD.
+ * frame-ancestors 'none' takes precedence over X-Frame-Options; both are set for
+ * legacy browser compatibility.
+ */
+const CSP_DIRECTIVES = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data:",
+  "connect-src 'self' https:",
+  "frame-src 'none'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "report-uri /api/csp-report",
+].join("; ");
+
 export function middleware(_req: NextRequest) {
   const response = NextResponse.next();
 
+  response.headers.set("Content-Security-Policy", CSP_DIRECTIVES);
   response.headers.set("X-Content-Type-Options", "nosniff");
+  // X-Frame-Options for legacy browsers; CSP frame-ancestors takes precedence in modern browsers
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set("X-XSS-Protection", "1; mode=block");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-  response.headers.set("Content-Security-Policy", [
-    "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https:",
-    "font-src 'self' data:",
-    "connect-src 'self' https:",
-    "frame-src 'self' https:",
-    "object-src 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-  ].join("; "));
+
+  // HSTS — 2 years + includeSubDomains + preload eligibility.
+  // Production only: localhost/dev must not receive HSTS headers.
+  if (IS_PROD) {
+    response.headers.set(
+      "Strict-Transport-Security",
+      "max-age=63072000; includeSubDomains; preload",
+    );
+  }
 
   return response;
 }

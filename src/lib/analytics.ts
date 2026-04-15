@@ -156,7 +156,15 @@ export type ApexEventType =
   // Security
   | "system.login_rate_limited"
   | "system.upload_rate_limited"
-  | "system.unauthorized_access_attempt";
+  | "system.unauthorized_access_attempt"
+  | "system.token_signed"
+  | "system.token_verified"
+  | "system.token_verify_failed"
+  | "system.refresh_token_rotated"
+  | "system.refresh_token_reuse_detected"
+  | "system.csp_violation_reported"
+  | "system.security_posture_viewed"
+  | "system.tls_hybrid_verified";
 
 export interface ApexEvent {
   event_type: ApexEventType;
