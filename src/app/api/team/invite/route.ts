@@ -6,10 +6,11 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromRequest, hasRole, hashPassword } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth/require-capability";
 import { safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { randomUUID } from "crypto";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 interface InvitePayload {
   email: string;
@@ -19,13 +20,9 @@ interface InvitePayload {
 const VALID_ROLES = ["ceo", "cto", "dev", "sales", "ops", "hr"];
 
 export async function POST(req: NextRequest) {
-  const user = getUserFromRequest(req.headers.get("authorization"));
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  // Only CTO/CEO can invite
-  if (!hasRole(user.role, "cto")) {
-    return NextResponse.json({ error: "Forbidden — CTO or CEO role required" }, { status: 403 });
-  }
+  const auth = await requireCapability(req, "settings.manage_team");
+  if (!auth.ok) return auth.response;
+  const user = auth.user;
 
   const body = await req.json().catch(() => null);
   if (!body || !Array.isArray(body.invites) || body.invites.length === 0) {
@@ -64,6 +61,20 @@ export async function POST(req: NextRequest) {
     });
 
     results.push({ id, email: inv.email, role: inv.role, token });
+  }
+
+  const meta = extractRequestMetadata(req);
+  for (const inv of results) {
+    await recordAudit({
+      actor: { user_id: user.id, role: user.role },
+      action: "team.invite.sent",
+      resourceType: "team_invite",
+      resourceId: inv.id,
+      afterState: { email: inv.email, role: inv.role },
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+      requestId: meta.requestId,
+    }).catch((e) => console.warn("[audit]", (e as Error).message));
   }
 
   return NextResponse.json({ invites: results }, { status: 201 });

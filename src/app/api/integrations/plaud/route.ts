@@ -16,6 +16,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import {
   isPlaudConfigured,
   recordConnection,
@@ -65,12 +66,32 @@ export async function POST(req: NextRequest) {
     }
     await recordConnection(user.id, user.name);
     trackEvent("plaud.connected", user.id, user.role, { module: "plaud" });
+    const meta = extractRequestMetadata(req);
+    await recordAudit({
+      actor: { user_id: user.id, role: user.role },
+      action: "integration.plaud.connected",
+      resourceType: "integration",
+      resourceId: "plaud",
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+      requestId: meta.requestId,
+    }).catch((e) => console.warn("[audit]", (e as Error).message));
     return NextResponse.json({ ok: true });
   }
 
   if (body.action === "disconnect") {
     await deleteConnection();
     trackEvent("plaud.disconnected", user.id, user.role, { module: "plaud" });
+    const meta = extractRequestMetadata(req);
+    await recordAudit({
+      actor: { user_id: user.id, role: user.role },
+      action: "integration.plaud.disconnected",
+      resourceType: "integration",
+      resourceId: "plaud",
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+      requestId: meta.requestId,
+    }).catch((e) => console.warn("[audit]", (e as Error).message));
     return NextResponse.json({ ok: true });
   }
 

@@ -10,6 +10,7 @@ import {
   uncompleteStep,
   cancelOnboarding,
 } from "@/lib/onboarding";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 export async function GET(
   req: NextRequest,
@@ -40,6 +41,7 @@ export async function PATCH(
   }
 
   try {
+    const before = await getInstance(id);
     let instance;
     if (body.action === "complete") {
       instance = await completeStep(id, body.step_id, user.id, user.role);
@@ -48,6 +50,18 @@ export async function PATCH(
     } else {
       return NextResponse.json({ error: "action must be 'complete' or 'uncomplete'" }, { status: 400 });
     }
+    const meta = extractRequestMetadata(req);
+    await recordAudit({
+      actor: { user_id: user.id, role: user.role },
+      action: body.action === "complete" ? "hr.onboarding.step_completed" : "hr.onboarding.step_uncompleted",
+      resourceType: "onboarding_instance",
+      resourceId: id,
+      beforeState: before,
+      afterState: instance,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+      requestId: meta.requestId,
+    }).catch((e) => console.warn("[audit]", (e as Error).message));
     return NextResponse.json({ instance });
   } catch (err) {
     console.error("[people/onboarding/id]", (err as Error).message);
@@ -64,7 +78,20 @@ export async function DELETE(
 
   const { id } = await params;
   try {
+    const before = await getInstance(id);
     const instance = await cancelOnboarding(id, user.id, user.role);
+    const meta = extractRequestMetadata(req);
+    await recordAudit({
+      actor: { user_id: user.id, role: user.role },
+      action: "hr.onboarding.cancelled",
+      resourceType: "onboarding_instance",
+      resourceId: id,
+      beforeState: before,
+      afterState: instance,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+      requestId: meta.requestId,
+    }).catch((e) => console.warn("[audit]", (e as Error).message));
     return NextResponse.json({ instance });
   } catch (err) {
     console.error("[people/onboarding/id]", (err as Error).message);

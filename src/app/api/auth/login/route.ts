@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticate } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import { issueRefreshToken } from "@/lib/crypto/refresh-tokens";
 import {
   setAuthCookie,
@@ -47,11 +48,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "email and password are required" }, { status: 400 });
   }
 
+  const meta = extractRequestMetadata(req);
   const result = await authenticate(email, password);
 
   if (!result) {
+    // Audit failed login (no user id — use email identifier instead)
+    await recordAudit({
+      actor: { user_id: `email:${email}`, role: "anonymous" },
+      action: "auth.login.failed",
+      resourceType: "auth_session",
+      resourceId: email,
+      afterState: { email },
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+      requestId: meta.requestId,
+    }).catch((err) => console.warn("[audit]", (err as Error).message));
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
+
+  await recordAudit({
+    actor: { user_id: result.user.id, role: result.user.role },
+    action: "auth.login.succeeded",
+    resourceType: "auth_session",
+    resourceId: result.user.id,
+    afterState: { email: result.user.email, role: result.user.role },
+    ipAddress: meta.ipAddress,
+    userAgent: meta.userAgent,
+    requestId: meta.requestId,
+  }).catch((err) => console.warn("[audit]", (err as Error).message));
 
   // Issue refresh token (requires DB; silently skipped in shadow/dev mode without DATABASE_URL)
   let refreshTokenId: string | undefined;

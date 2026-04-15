@@ -9,6 +9,7 @@ import { safeQuery } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import { randomUUID } from "crypto";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -69,6 +70,23 @@ export async function POST(req: NextRequest) {
     invite_id: inv.id,
     invited_by: inv.invited_by,
   });
+
+  const meta = extractRequestMetadata(req);
+  await recordAudit({
+    actor: { user_id: memberId, role: inv.role },
+    action: "team.invite.accepted",
+    resourceType: "team_invite",
+    resourceId: inv.id,
+    afterState: {
+      member_id: memberId,
+      email: inv.email,
+      role: inv.role,
+      invited_by: inv.invited_by,
+    },
+    ipAddress: meta.ipAddress,
+    userAgent: meta.userAgent,
+    requestId: meta.requestId,
+  }).catch((e) => console.warn("[audit]", (e as Error).message));
 
   return NextResponse.json({ member_id: memberId });
 }

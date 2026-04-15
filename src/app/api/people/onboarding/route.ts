@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { listActiveOnboardings, startOnboarding, listAllOnboardings } from "@/lib/onboarding";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 export async function GET(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
@@ -26,6 +27,20 @@ export async function POST(req: NextRequest) {
 
   try {
     const instance = await startOnboarding(body.employee_id, body.template_id, user.id, user.role);
+    const meta = extractRequestMetadata(req);
+    await recordAudit({
+      actor: { user_id: user.id, role: user.role },
+      action: "hr.onboarding.started",
+      resourceType: "onboarding_instance",
+      resourceId: (instance as { id?: string } | null)?.id,
+      afterState: {
+        employee_id: body.employee_id,
+        template_id: body.template_id,
+      },
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+      requestId: meta.requestId,
+    }).catch((e) => console.warn("[audit]", (e as Error).message));
     return NextResponse.json({ instance }, { status: 201 });
   } catch (err) {
     console.error("[people/onboarding]", (err as Error).message);

@@ -29,6 +29,7 @@ import {
   listBenefitDocuments,
 } from "@/lib/benefits";
 import { trackEvent } from "@/lib/analytics";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 const MAX_BYTES = 15 * 1024 * 1024; // 15 MB
 
@@ -106,6 +107,22 @@ export async function POST(req: NextRequest) {
     }
 
     const { documentId } = await saveBenefitDocument(doc, user.id, user.role);
+    const meta = extractRequestMetadata(req);
+    await recordAudit({
+      actor: { user_id: user.id, role: user.role },
+      action: "hr.benefit_document.uploaded",
+      resourceType: "benefit_document",
+      resourceId: documentId,
+      afterState: {
+        filename: file.name,
+        size_bytes: file.size,
+        plan_count: doc.plans.length,
+        carrier: doc.carrier,
+      },
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+      requestId: meta.requestId,
+    }).catch((e) => console.warn("[audit]", (e as Error).message));
     const recommendation = generateRecommendation(doc.plans, "cheapest_practical");
     let recommendationId: string | null = null;
     if (recommendation) {

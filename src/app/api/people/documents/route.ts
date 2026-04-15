@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { listHrDocuments, routeUpload, type HrCategory, HR_CATEGORIES } from "@/lib/hr-documents";
 import { trackEvent } from "@/lib/analytics";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -88,6 +89,22 @@ export async function POST(req: NextRequest) {
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
     const result = await routeUpload(file.name, buffer, user.id, user.role, source);
+    const meta = extractRequestMetadata(req);
+    await recordAudit({
+      actor: { user_id: user.id, role: user.role },
+      action: "hr.document.uploaded",
+      resourceType: "hr_document",
+      resourceId: (result as { document_id?: string; id?: string }).document_id ?? (result as { id?: string }).id,
+      afterState: {
+        filename: file.name,
+        size_bytes: file.size,
+        source,
+        result,
+      },
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+      requestId: meta.requestId,
+    }).catch((e) => console.warn("[audit]", (e as Error).message));
     return NextResponse.json(result);
   } catch (err) {
     trackEvent("hr.document_uploaded", user.id, user.role, {

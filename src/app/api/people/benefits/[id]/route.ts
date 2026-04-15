@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { getBenefitDocument, deleteBenefitDocument } from "@/lib/benefits";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const user = getUserFromRequest(req.headers.get("authorization"));
@@ -24,7 +25,19 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await context.params;
+  const before = await getBenefitDocument(id).catch(() => null);
+  const meta = extractRequestMetadata(req);
   const ok = await deleteBenefitDocument(id, user.id, user.role);
   if (!ok) return NextResponse.json({ error: "not found" }, { status: 404 });
+  await recordAudit({
+    actor: { user_id: user.id, role: user.role },
+    action: "hr.benefit_document.deleted",
+    resourceType: "benefit_document",
+    resourceId: id,
+    beforeState: before?.document ?? null,
+    ipAddress: meta.ipAddress,
+    userAgent: meta.userAgent,
+    requestId: meta.requestId,
+  }).catch((e) => console.warn("[audit]", (e as Error).message));
   return NextResponse.json({ ok: true });
 }

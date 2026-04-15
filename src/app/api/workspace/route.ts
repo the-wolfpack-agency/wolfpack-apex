@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { safeQuery } from "@/lib/db";
 import { randomUUID } from "crypto";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 export async function PUT(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
@@ -27,6 +28,12 @@ export async function PUT(req: NextRequest) {
   if (name.length > 120) {
     return NextResponse.json({ error: "name must be 120 characters or fewer" }, { status: 400 });
   }
+
+  // Capture previous workspace name for audit
+  const prior = await safeQuery<{ name: string }>(
+    `SELECT name FROM instinct_workspace WHERE id = 'default' LIMIT 1`,
+  );
+  const priorName = prior.rows[0]?.name ?? null;
 
   // Upsert workspace name
   const workspaceResult = await safeQuery(
@@ -50,6 +57,19 @@ export async function PUT(req: NextRequest) {
      ON CONFLICT (email) DO UPDATE SET is_active = true`,
     [memberId, user.email, user.name, user.role],
   );
+
+  const meta = extractRequestMetadata(req);
+  await recordAudit({
+    actor: { user_id: user.id, role: user.role },
+    action: "workspace.renamed",
+    resourceType: "workspace",
+    resourceId: "default",
+    beforeState: { name: priorName },
+    afterState: { name },
+    ipAddress: meta.ipAddress,
+    userAgent: meta.userAgent,
+    requestId: meta.requestId,
+  }).catch((e) => console.warn("[audit]", (e as Error).message));
 
   return NextResponse.json({ ok: true, name });
 }

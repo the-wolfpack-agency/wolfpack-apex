@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import {
   getAuthUrl,
   getConnectionStatus,
@@ -114,6 +115,17 @@ export async function POST(req: NextRequest) {
       trackEvent("microsoft.disconnected", user.id, user.role, {
         module: "microsoft-graph",
       });
+
+      const meta = extractRequestMetadata(req);
+      await recordAudit({
+        actor: { user_id: user.id, role: user.role },
+        action: "integration.microsoft.disconnected",
+        resourceType: "integration",
+        resourceId: "microsoft-graph",
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+        requestId: meta.requestId,
+      }).catch((e) => console.warn("[audit]", (e as Error).message));
 
       return NextResponse.json({ success: true, message: "Microsoft account disconnected" });
     }

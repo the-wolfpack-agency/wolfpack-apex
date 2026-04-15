@@ -22,6 +22,7 @@ import {
   REFRESH_TOKEN_TTL_SECONDS,
 } from "@/lib/crypto/cookies";
 import { trackEvent } from "@/lib/analytics";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import type { TeamMember, TeamRole } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
@@ -96,9 +97,33 @@ export async function POST(req: NextRequest) {
       ttl_seconds: ACCESS_TOKEN_TTL,
     });
 
+    const meta = extractRequestMetadata(req);
+    await recordAudit({
+      actor: { user_id: user.id, role: user.role },
+      action: "auth.token.refreshed",
+      resourceType: "auth_session",
+      resourceId: user.id,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+      requestId: meta.requestId,
+    }).catch((e) => console.warn("[audit]", (e as Error).message));
+
     return res;
   } catch (err) {
     const reason = (err as Error).message;
+    const meta = extractRequestMetadata(req);
+    if (reason === "refresh_token_reused" || reason === "refresh_token_revoked") {
+      await recordAudit({
+        actor: { user_id: "unknown", role: "anonymous" },
+        action: "auth.token.reuse_detected",
+        resourceType: "auth_session",
+        resourceId: tokenId,
+        afterState: { reason },
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+        requestId: meta.requestId,
+      }).catch(() => {});
+    }
 
     if (reason === "refresh_token_reused") {
       return NextResponse.json({ error: "Token reuse detected — session revoked" }, { status: 401 });

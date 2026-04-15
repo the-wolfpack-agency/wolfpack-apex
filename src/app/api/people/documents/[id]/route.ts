@@ -13,6 +13,7 @@ import {
   HR_CATEGORIES,
   type HrCategory,
 } from "@/lib/hr-documents";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const user = getUserFromRequest(req.headers.get("authorization"));
@@ -31,6 +32,8 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
   const newCategory = body.category as HrCategory | undefined;
   const hasEmployeeId = "employee_id" in body;
   const employeeId = body.employee_id as string | null | undefined;
+  const before = await getHrDocument(id);
+  const meta = extractRequestMetadata(req);
 
   // At least one field must be provided
   if (!newCategory && !hasEmployeeId) {
@@ -60,6 +63,18 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
+  await recordAudit({
+    actor: { user_id: user.id, role: user.role },
+    action: "hr.document.updated",
+    resourceType: "hr_document",
+    resourceId: id,
+    beforeState: before,
+    afterState: doc,
+    ipAddress: meta.ipAddress,
+    userAgent: meta.userAgent,
+    requestId: meta.requestId,
+  }).catch((e) => console.warn("[audit]", (e as Error).message));
+
   return NextResponse.json({ document: doc });
 }
 
@@ -67,7 +82,19 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await context.params;
+  const before = await getHrDocument(id);
+  const meta = extractRequestMetadata(req);
   const ok = await deleteHrDocument(id, user.id, user.role);
   if (!ok) return NextResponse.json({ error: "not found" }, { status: 404 });
+  await recordAudit({
+    actor: { user_id: user.id, role: user.role },
+    action: "hr.document.deleted",
+    resourceType: "hr_document",
+    resourceId: id,
+    beforeState: before,
+    ipAddress: meta.ipAddress,
+    userAgent: meta.userAgent,
+    requestId: meta.requestId,
+  }).catch((e) => console.warn("[audit]", (e as Error).message));
   return NextResponse.json({ ok: true });
 }

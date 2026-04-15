@@ -124,17 +124,20 @@ describe("PUT /api/workspace", () => {
     expect(data.name).toBe("Acme Corp");
   });
 
-  test("upserts workspace then team member (two safeQuery calls)", async () => {
+  test("reads prior name, upserts workspace, then team member (three safeQuery calls)", async () => {
     mockGetUser.mockReturnValue(DEMO_USER);
     mockSafeQuery.mockResolvedValue({ rows: [], fromCache: false });
     await PUT(makePutRequest({ name: "Wolfpack" }, "Bearer token"));
-    expect(mockSafeQuery).toHaveBeenCalledTimes(2);
-    // First call: workspace upsert
-    const [wsql, wparams] = mockSafeQuery.mock.calls[0] as [string, string[]];
+    expect(mockSafeQuery).toHaveBeenCalledTimes(3);
+    // First call: SELECT prior workspace name for audit before/after diff
+    const [psql] = mockSafeQuery.mock.calls[0] as [string, string[]];
+    expect(psql).toMatch(/SELECT\s+name\s+FROM\s+instinct_workspace/i);
+    // Second call: workspace upsert
+    const [wsql, wparams] = mockSafeQuery.mock.calls[1] as [string, string[]];
     expect(wsql).toContain("instinct_workspace");
     expect(wparams).toContain("Wolfpack");
-    // Second call: team member upsert
-    const [tsql, tparams] = mockSafeQuery.mock.calls[1] as [string, string[]];
+    // Third call: team member upsert
+    const [tsql, tparams] = mockSafeQuery.mock.calls[2] as [string, string[]];
     expect(tsql).toContain("apex_team_members");
     expect(tparams).toContain(DEMO_USER.email);
   });

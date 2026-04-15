@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromRequest, hasRole } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import {
   getAuthUrl,
   getConnectionStatus,
@@ -24,17 +25,9 @@ import {
  *   (no action)        — Return full financial dashboard data
  */
 export async function GET(req: NextRequest) {
-  const user = getUserFromRequest(req.headers.get("authorization"));
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (user.role !== "ceo") {
-    return NextResponse.json(
-      { error: "Forbidden — CEO access required for financial data" },
-      { status: 403 },
-    );
-  }
+  const auth = await requireCapability(req, "finance.reports.view");
+  if (!auth.ok) return auth.response;
+  const user = auth.user;
 
   const url = new URL(req.url);
   const action = url.searchParams.get("action");
@@ -109,17 +102,9 @@ export async function GET(req: NextRequest) {
  *   { action: "disconnect" }  — Clear stored QBO tokens
  */
 export async function POST(req: NextRequest) {
-  const user = getUserFromRequest(req.headers.get("authorization"));
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (user.role !== "ceo") {
-    return NextResponse.json(
-      { error: "Forbidden — CEO access required" },
-      { status: 403 },
-    );
-  }
+  const auth = await requireCapability(req, "finance.connect");
+  if (!auth.ok) return auth.response;
+  const user = auth.user;
 
   try {
     const body = await req.json();
@@ -130,6 +115,17 @@ export async function POST(req: NextRequest) {
       trackEvent("quickbooks.disconnected", user.id, user.role, {
         module: "quickbooks",
       });
+
+      const meta = extractRequestMetadata(req);
+      await recordAudit({
+        actor: { user_id: user.id, role: user.role },
+        action: "integration.quickbooks.disconnected",
+        resourceType: "integration",
+        resourceId: "quickbooks",
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+        requestId: meta.requestId,
+      }).catch((e) => console.warn("[audit]", (e as Error).message));
 
       return NextResponse.json({ success: true, message: "QuickBooks disconnected" });
     }
