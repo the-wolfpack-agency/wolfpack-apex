@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       complete: true,
       steps: { profile: true, team: true, integrations: true },
+      nextStep: "complete",
     });
   }
 
@@ -50,10 +51,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       complete: false,
       steps: { profile: false, team: false, integrations: false },
+      nextStep: "profile",
     });
   }
 
   const complete = profileComplete && teamComplete && integrationsComplete;
+
+  let nextStep: "profile" | "team" | "integrations" | "complete";
+  if (!profileComplete) {
+    nextStep = "profile";
+  } else if (!teamComplete) {
+    nextStep = "team";
+  } else if (!integrationsComplete) {
+    nextStep = "integrations";
+  } else {
+    nextStep = "complete";
+  }
 
   return NextResponse.json({
     complete,
@@ -62,5 +75,6 @@ export async function GET(req: NextRequest) {
       team: teamComplete,
       integrations: integrationsComplete,
     },
+    nextStep,
   });
 }

@@ -1,8 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { getInstinctToken, getInstinctUser, jsonHeaders, authHeaders } from "@/lib/client-auth";
+import { getInstinctToken, getInstinctUser, jsonHeaders } from "@/lib/client-auth";
+import {
+  startMicrosoftConnect,
+  startQuickbooksConnect,
+  connectPlaud as connectPlaudHelper,
+} from "@/lib/integrations/connect";
+import { loadDraft, saveDraft, clearDraft } from "@/lib/setup-draft";
 
 interface UserInfo {
   id: string;
@@ -11,22 +17,47 @@ interface UserInfo {
   role: string;
 }
 
+interface WorkspaceStatus {
+  complete: boolean;
+  steps: {
+    profile: boolean;
+    team: boolean;
+    integrations: boolean;
+  };
+  nextStep: "profile" | "team" | "integrations" | "complete";
+}
+
 interface InviteRow {
   email: string;
   role: string;
 }
 
 const STEPS = ["Workspace Info", "Invite Team", "Connect Integrations", "You're Ready"];
+const STEP_KEYS = ["profile", "team", "integrations", "complete"] as const;
+
+function nextStepToIndex(nextStep: WorkspaceStatus["nextStep"]): number {
+  switch (nextStep) {
+    case "profile": return 0;
+    case "team": return 1;
+    case "integrations": return 2;
+    case "complete": return 3;
+    default: return 0;
+  }
+}
 
 export default function SetupPage() {
   const router = useRouter();
-  const [step, setStep] = useState(0);
+  const routerRef = useRef(router);
+  useEffect(() => { routerRef.current = router; });
   const [user, setUser] = useState<UserInfo | null>(null);
+  const [status, setStatus] = useState<WorkspaceStatus | null>(null);
+  const [step, setStep] = useState(0);
+  const [statusLoading, setStatusLoading] = useState(true);
 
   // Step 1 state
   const [workspaceName, setWorkspaceName] = useState("");
-  const [userName, setUserName] = useState("");
-  const [userEmail, setUserEmail] = useState("");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   // Step 2 state
   const [invites, setInvites] = useState<InviteRow[]>([{ email: "", role: "dev" }]);
@@ -35,18 +66,92 @@ export default function SetupPage() {
 
   // Step 3 state — tracked for summary
   const [integrationsSkipped, setIntegrationsSkipped] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+
+  const stepViewedAtRef = useRef<number>(Date.now());
+  const prevIntegrationsRef = useRef<boolean | null>(null);
+
+  const emitSetupEvent = useCallback(
+    (event: string, extra: Record<string, string | number | boolean> = {}) => {
+      const role = user?.role ?? "unknown";
+      fetch("/api/analytics", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          event,
+          metadata: {
+            step: STEP_KEYS[step] ?? "profile",
+            step_name: STEPS[step] ?? STEPS[0],
+            duration_ms: Date.now() - stepViewedAtRef.current,
+            attempt_number: 1,
+            user_role: role,
+            ...extra,
+          },
+        }),
+      }).catch(() => {});
+    },
+    [step, user],
+  );
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/workspace/status", {
+        headers: jsonHeaders(),
+      });
+      if (res.status === 401) {
+        routerRef.current.push("/login");
+        return;
+      }
+      if (res.ok) {
+        const data: WorkspaceStatus = await res.json();
+        const wasIntegrationsComplete = prevIntegrationsRef.current;
+        if (wasIntegrationsComplete === false && data.steps.integrations === true) {
+          fetch("/api/analytics", {
+            method: "POST",
+            headers: jsonHeaders(),
+            body: JSON.stringify({
+              event: "system.setup_integration_connect_succeeded",
+              metadata: {
+                step: "integrations",
+                step_name: STEPS[2],
+                duration_ms: Date.now() - stepViewedAtRef.current,
+                attempt_number: 1,
+                user_role: "unknown",
+              },
+            }),
+          }).catch(() => {});
+        }
+        prevIntegrationsRef.current = data.steps.integrations;
+        setStatus(data);
+        setStep(nextStepToIndex(data.nextStep));
+      }
+    } catch {
+      // Non-fatal — keep current step
+    }
+    setStatusLoading(false);
+  }, []);
 
   useEffect(() => {
     const token = getInstinctToken();
     const parsed = getInstinctUser<UserInfo>();
     if (!token || !parsed) {
-      router.push("/login");
+      routerRef.current.push("/login");
       return;
     }
     setUser(parsed);
-    setUserName(parsed.name || "");
-    setUserEmail(parsed.email || "");
-    setWorkspaceName("My Workspace");
+
+    // Load draft state
+    const draft = loadDraft();
+    if (draft.workspaceName) {
+      setWorkspaceName(draft.workspaceName);
+    } else {
+      setWorkspaceName("My Workspace");
+    }
+    if (draft.invites && draft.invites.length > 0) {
+      setInvites(draft.invites);
+    }
+
+    fetchStatus();
 
     // Track setup started
     fetch("/api/analytics", {
@@ -54,20 +159,92 @@ export default function SetupPage() {
       headers: jsonHeaders(),
       body: JSON.stringify({ event: "system.setup_started", metadata: { step: 0 } }),
     }).catch(() => {});
-  }, [router]);
+  }, [fetchStatus]);
 
-  function goNext() {
-    const nextStep = step + 1;
-    setStep(nextStep);
-    // Track step completion
+  // Refetch on window focus so OAuth round-trips re-sync status
+  useEffect(() => {
+    function onFocus() {
+      fetchStatus();
+    }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [fetchStatus]);
+
+  // Persist workspace name draft as user types
+  useEffect(() => {
+    if (workspaceName && workspaceName !== "My Workspace") {
+      const draft = loadDraft();
+      saveDraft({ ...draft, workspaceName });
+    }
+  }, [workspaceName]);
+
+  // Persist invite draft as user types
+  useEffect(() => {
+    const draft = loadDraft();
+    saveDraft({ ...draft, invites });
+  }, [invites]);
+
+  function emitStepCompleted(stepIndex: number) {
+    const role = user?.role ?? "unknown";
     fetch("/api/analytics", {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({
         event: "system.setup_step_completed",
-        metadata: { step: step, step_name: STEPS[step] },
+        metadata: {
+          step: STEP_KEYS[stepIndex] ?? "profile",
+          step_name: STEPS[stepIndex] ?? STEPS[0],
+          duration_ms: Date.now() - stepViewedAtRef.current,
+          attempt_number: 1,
+          user_role: role,
+        },
       }),
     }).catch(() => {});
+  }
+
+  // Emit step_viewed whenever the step changes (and reset the step timer)
+  useEffect(() => {
+    if (statusLoading) return;
+    stepViewedAtRef.current = Date.now();
+    emitSetupEvent("system.setup_step_viewed");
+  }, [step, statusLoading, emitSetupEvent]);
+
+  // Fire step_abandoned on tab hide / unload
+  useEffect(() => {
+    function onHide() {
+      if (document.visibilityState === "hidden" && step < 3) {
+        emitSetupEvent("system.setup_step_abandoned");
+      }
+    }
+    document.addEventListener("visibilitychange", onHide);
+    return () => document.removeEventListener("visibilitychange", onHide);
+  }, [step, emitSetupEvent]);
+
+  async function saveWorkspace() {
+    setSaveError(null);
+    setSaving(true);
+    try {
+      const res = await fetch("/api/workspace", {
+        method: "PUT",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ name: workspaceName.trim() }),
+      });
+      if (res.ok) {
+        clearDraft();
+        emitStepCompleted(0);
+        await fetchStatus();
+      } else if (res.status === 400) {
+        const data = await res.json().catch(() => ({}));
+        setSaveError((data as { error?: string }).error || "Invalid workspace name.");
+      } else if (res.status === 503) {
+        setSaveError("Service temporarily unavailable. Please try again.");
+      } else {
+        setSaveError("Failed to save workspace. Please try again.");
+      }
+    } catch {
+      setSaveError("Network error. Please try again.");
+    }
+    setSaving(false);
   }
 
   function goBack() {
@@ -93,7 +270,8 @@ export default function SetupPage() {
     setInviteError(null);
     const validInvites = invites.filter((i) => i.email.includes("@"));
     if (validInvites.length === 0) {
-      goNext();
+      emitStepCompleted(1);
+      await fetchStatus();
       return;
     }
     try {
@@ -104,27 +282,54 @@ export default function SetupPage() {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setInviteError(data.error || "Failed to send invites");
+        setInviteError((data as { error?: string }).error || "Failed to send invites");
         return;
       }
       setInviteSent(true);
-      goNext();
+      emitStepCompleted(1);
+      await fetchStatus();
     } catch {
       setInviteError("Network error. Please try again.");
     }
   }
 
-  async function completeSetup() {
-    // Track completion
-    fetch("/api/analytics", {
-      method: "POST",
-      headers: jsonHeaders(),
-      body: JSON.stringify({ event: "system.setup_completed", metadata: {} }),
-    }).catch(() => {});
-    router.push("/");
+  async function skipInvites() {
+    emitStepCompleted(1);
+    await fetchStatus();
+    // If server hasn't advanced (team may still show incomplete), nudge client view
+    setStep((prev) => (prev < 2 ? 2 : prev));
   }
 
-  if (!user) {
+  async function handleConnect(integration: "microsoft" | "quickbooks" | "plaud") {
+    setConnectError(null);
+    emitSetupEvent("system.setup_integration_connect_started", { integration });
+    let result: { ok: true } | { ok: false; error: string };
+    if (integration === "microsoft") {
+      result = await startMicrosoftConnect({ returnTo: "/setup" });
+    } else if (integration === "quickbooks") {
+      result = await startQuickbooksConnect({ returnTo: "/setup" });
+    } else {
+      result = await connectPlaudHelper(true);
+      if (result.ok) {
+        emitSetupEvent("system.setup_integration_connect_succeeded", { integration });
+        await fetchStatus();
+      }
+    }
+    if (!result.ok) {
+      emitSetupEvent("system.setup_integration_connect_failed", {
+        integration,
+        error: result.error,
+      });
+      setConnectError(result.error);
+    }
+  }
+
+  async function completeSetup() {
+    emitSetupEvent("system.setup_completed");
+    routerRef.current.push("/");
+  }
+
+  if (statusLoading || !user) {
     return (
       <div className="flex items-center justify-center h-64">
         <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>Loading...</p>
@@ -188,13 +393,13 @@ export default function SetupPage() {
               </label>
               <input
                 type="text"
-                value={userName}
-                onChange={(e) => setUserName(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border text-sm outline-none transition-colors focus:border-[var(--wp-gold)]"
+                value={user.name}
+                disabled
+                className="w-full px-3 py-2 rounded-lg border text-sm outline-none opacity-60"
                 style={{
                   background: "var(--wp-dark-surface2, var(--wp-dark))",
                   borderColor: "var(--wp-border, var(--wp-dark-border))",
-                  color: "var(--wp-text)",
+                  color: "var(--wp-text-dim)",
                 }}
               />
             </div>
@@ -204,7 +409,7 @@ export default function SetupPage() {
               </label>
               <input
                 type="email"
-                value={userEmail}
+                value={user.email}
                 disabled
                 className="w-full px-3 py-2 rounded-lg border text-sm outline-none opacity-60"
                 style={{
@@ -217,14 +422,17 @@ export default function SetupPage() {
                 Email comes from your login and cannot be changed here.
               </p>
             </div>
+            {saveError && (
+              <p className="text-sm" style={{ color: "var(--wp-error, #ef4444)" }}>{saveError}</p>
+            )}
             <div className="flex justify-end">
               <button
-                onClick={goNext}
-                disabled={!workspaceName.trim()}
+                onClick={saveWorkspace}
+                disabled={!workspaceName.trim() || saving}
                 className="px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
                 style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
               >
-                Continue
+                {saving ? "Saving..." : "Continue"}
               </button>
             </div>
           </div>
@@ -299,7 +507,7 @@ export default function SetupPage() {
               </button>
               <div className="flex gap-3">
                 <button
-                  onClick={goNext}
+                  onClick={skipInvites}
                   className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                   style={{ color: "var(--wp-text-dim)" }}
                 >
@@ -324,13 +532,15 @@ export default function SetupPage() {
               Connect your tools to get the most out of Instinct. You can always do this later in Settings.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {[
-                { name: "Microsoft 365", desc: "Calendar, emails, and meeting prep" },
-                { name: "QuickBooks", desc: "Financial reports and dashboards" },
-                { name: "Plaud", desc: "Meeting recordings and transcripts" },
-              ].map((integration) => (
+              {(
+                [
+                  { key: "microsoft", name: "Microsoft 365", desc: "Calendar, emails, and meeting prep" },
+                  { key: "quickbooks", name: "QuickBooks", desc: "Financial reports and dashboards" },
+                  { key: "plaud", name: "Plaud", desc: "Meeting recordings and transcripts" },
+                ] as const
+              ).map((integration) => (
                 <div
-                  key={integration.name}
+                  key={integration.key}
                   className="rounded-lg border p-4 flex flex-col items-center text-center gap-3"
                   style={{
                     background: "var(--wp-dark-surface2, var(--wp-dark))",
@@ -344,7 +554,7 @@ export default function SetupPage() {
                     {integration.desc}
                   </p>
                   <button
-                    onClick={() => router.push("/settings")}
+                    onClick={() => handleConnect(integration.key)}
                     className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border"
                     style={{ borderColor: "var(--wp-gold)", color: "var(--wp-gold)" }}
                   >
@@ -353,6 +563,9 @@ export default function SetupPage() {
                 </div>
               ))}
             </div>
+            {connectError && (
+              <p className="text-sm" style={{ color: "var(--wp-warning, #f59e0b)" }}>{connectError}</p>
+            )}
             <div className="flex justify-between pt-2">
               <button
                 onClick={goBack}
@@ -364,7 +577,8 @@ export default function SetupPage() {
               <button
                 onClick={() => {
                   setIntegrationsSkipped(true);
-                  goNext();
+                  emitStepCompleted(2);
+                  setStep(3);
                 }}
                 className="px-5 py-2 rounded-lg text-sm font-medium transition-colors"
                 style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
@@ -405,6 +619,9 @@ export default function SetupPage() {
                   Integrations skipped — you can connect them anytime in{" "}
                   <a href="/settings" style={{ color: "var(--wp-gold)" }}>Settings</a>.
                 </p>
+              )}
+              {status?.steps.integrations && (
+                <p>Integrations connected.</p>
               )}
             </div>
             <button

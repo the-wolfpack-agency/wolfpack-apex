@@ -2,6 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getInstinctToken, getInstinctUser, authHeaders } from "@/lib/client-auth";
+import {
+  startMicrosoftConnect,
+  startQuickbooksConnect,
+  connectPlaud as connectPlaudHelper,
+} from "@/lib/integrations/connect";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -190,18 +195,9 @@ export default function SettingsPage() {
 
   async function connectMicrosoft() {
     setConnectError(null);
-    try {
-      const res = await fetch("/api/microsoft?action=auth-url", {
-        headers: authHeaders(),
-      });
-      const data = await res.json();
-      if (data.authUrl) {
-        window.location.href = data.authUrl;
-      } else {
-        setConnectError("Microsoft 365 integration is not configured yet. Contact the CTO to set up the connection.");
-      }
-    } catch {
-      setConnectError("Unable to start connection. Please try again.");
+    const result = await startMicrosoftConnect();
+    if (!result.ok) {
+      setConnectError(result.error);
     }
   }
 
@@ -222,17 +218,7 @@ export default function SettingsPage() {
   }
 
   async function connectQuickbooks() {
-    try {
-      const res = await fetch("/api/quickbooks?action=auth-url", {
-        headers: authHeaders(),
-      });
-      const data = await res.json();
-      if (data.authUrl) {
-        window.location.href = data.authUrl;
-      }
-    } catch {
-      // Non-fatal
-    }
+    await startQuickbooksConnect();
   }
 
   async function disconnectQuickbooks() {
@@ -253,26 +239,11 @@ export default function SettingsPage() {
 
   async function connectPlaud() {
     setConnectError(null);
-    if (!plaudStatus.configured) {
-      setConnectError(
-        "Plaud is not configured yet. The CTO needs to add PLAUD_API_KEY and PLAUD_WEBHOOK_SECRET to the production environment first.",
-      );
-      return;
-    }
-    try {
-      const res = await fetch("/api/integrations/plaud", {
-        method: "POST",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "connect" }),
-      });
-      if (res.ok) {
-        await fetchPlaudStatus();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setConnectError(data.error || "Unable to connect Plaud.");
-      }
-    } catch {
-      setConnectError("Unable to connect Plaud. Please try again.");
+    const result = await connectPlaudHelper(plaudStatus.configured);
+    if (result.ok) {
+      await fetchPlaudStatus();
+    } else {
+      setConnectError(result.error);
     }
   }
 

@@ -70,7 +70,16 @@ export async function GET(req: NextRequest) {
     module: "quickbooks",
   });
 
-  const redirectUrl = new URL("/dashboard", req.url);
+  // Honor returnTo if it's a safe same-origin path
+  const rawReturnTo = url.searchParams.get("returnTo");
+  const safePath =
+    rawReturnTo &&
+    rawReturnTo.startsWith("/") &&
+    !rawReturnTo.startsWith("//")
+      ? rawReturnTo
+      : "/dashboard";
+
+  const redirectUrl = new URL(safePath, req.url);
   redirectUrl.searchParams.set("qbo", "connected");
   if (companyName) {
     redirectUrl.searchParams.set("company", companyName);
