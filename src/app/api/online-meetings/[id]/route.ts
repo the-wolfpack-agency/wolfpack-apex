@@ -58,11 +58,12 @@ function mapError(
   }
 }
 
-export async function GET(req: NextRequest, ctx: { params: { id: string } }) {
+export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const params = await ctx.params;
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const id = ctx.params?.id;
+  const id = params.id;
   if (!id) {
     return NextResponse.json(
       { error: "invalid_input", detail: "missing_id" },
@@ -75,11 +76,12 @@ export async function GET(req: NextRequest, ctx: { params: { id: string } }) {
   return NextResponse.json({ meeting });
 }
 
-export async function PATCH(req: NextRequest, ctx: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const params = await ctx.params;
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const id = ctx.params?.id;
+  const id = params.id;
   if (!id) {
     return NextResponse.json(
       { error: "invalid_input", detail: "missing_id" },

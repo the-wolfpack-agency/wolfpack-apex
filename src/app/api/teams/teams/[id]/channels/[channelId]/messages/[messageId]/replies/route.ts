@@ -13,18 +13,19 @@ import { trackEvent } from "@/lib/analytics";
 
 export async function POST(
   req: NextRequest,
-  ctx: { params: { id: string; channelId: string; messageId: string } },
+  ctx: { params: Promise<{ id: string; channelId: string; messageId: string }> },
 ) {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const params = await ctx.params;
   trackEvent("system.capability_denied", user.id, user.role, {
     endpoint: "teams.channel.reply",
     reason: "scope_not_granted",
     required_scope: "ChannelMessage.Send",
-    team_id: ctx.params?.id ?? "",
-    channel_id: ctx.params?.channelId ?? "",
-    message_id: ctx.params?.messageId ?? "",
+    team_id: params.id ?? "",
+    channel_id: params.channelId ?? "",
+    message_id: params.messageId ?? "",
   });
 
   return NextResponse.json(

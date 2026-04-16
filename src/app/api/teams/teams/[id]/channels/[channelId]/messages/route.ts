@@ -16,13 +16,14 @@ import {
 
 export async function GET(
   req: NextRequest,
-  ctx: { params: { id: string; channelId: string } },
+  ctx: { params: Promise<{ id: string; channelId: string }> },
 ) {
+  const params = await ctx.params;
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const teamId = ctx.params?.id;
-  const channelId = ctx.params?.channelId;
+  const teamId = params.id;
+  const channelId = params.channelId;
   if (!teamId || !channelId) {
     return NextResponse.json(
       { error: "invalid_input", detail: "missing_id" },

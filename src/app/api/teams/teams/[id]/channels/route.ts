@@ -13,11 +13,12 @@ import {
   listCachedChannels,
 } from "@/lib/integrations/microsoft-channel-messages";
 
-export async function GET(req: NextRequest, ctx: { params: { id: string } }) {
+export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const params = await ctx.params;
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const teamId = ctx.params?.id;
+  const teamId = params.id;
   if (!teamId) {
     return NextResponse.json(
       { error: "invalid_input", detail: "missing_id" },
