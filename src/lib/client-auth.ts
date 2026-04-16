@@ -15,11 +15,29 @@
 const TOKEN_KEYS = ["instinct_token", "apex_token"] as const;
 const USER_KEYS = ["instinct_user", "apex_user"] as const;
 
+function isJwtExpired(token: string): boolean {
+  try {
+    const [, payload] = token.split(".");
+    if (!payload) return true;
+    const decoded = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+    if (typeof decoded.exp !== "number") return false;
+    return decoded.exp * 1000 < Date.now();
+  } catch {
+    return true;
+  }
+}
+
 export function getInstinctToken(): string | null {
   if (typeof window === "undefined") return null;
   for (const k of TOKEN_KEYS) {
     const v = localStorage.getItem(k);
-    if (v) return v;
+    if (v) {
+      if (isJwtExpired(v)) {
+        clearInstinctSession();
+        return null;
+      }
+      return v;
+    }
   }
   return null;
 }
