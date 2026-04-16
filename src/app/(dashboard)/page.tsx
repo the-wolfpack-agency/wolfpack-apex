@@ -102,7 +102,7 @@ export default function DashboardPage() {
       })
       .catch(() => {});
 
-    fetch("/api/dashboard")
+    fetch("/api/dashboard", { headers: authHeaders() })
       .then((r) => r.json())
       .then((data) => {
         setStats(data);
