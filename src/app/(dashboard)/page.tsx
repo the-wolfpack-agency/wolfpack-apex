@@ -77,7 +77,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const token = getInstinctToken();
-    if (!token) return;
+    if (!token) {
+      window.location.href = "/login?next=/";
+      return;
+    }
 
     // Track page view
     fetch("/api/analytics", {
