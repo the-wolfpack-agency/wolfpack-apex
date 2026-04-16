@@ -3,41 +3,32 @@
 /**
  * Client-side auth helpers for Instinct.
  *
- * The platform was renamed from Apex → Instinct. This module provides
- * the canonical names (instinct_token / instinct_user) and reads either
- * the new or the legacy localStorage key so existing logged-in sessions
- * keep working without forcing every user to log in again.
+ * Canonical pattern for every authenticated API call:
  *
- * EVERY new client component should use these helpers instead of
- * touching localStorage directly.
+ *   const res = await fetchWithRefresh("/api/whatever", { ... });
+ *
+ * fetchWithRefresh:
+ *   - Adds Authorization: Bearer <access_token> from localStorage.
+ *   - On 401, transparently calls POST /api/auth/refresh (HttpOnly refresh
+ *     cookie is sent automatically), stores the new access token, retries
+ *     the original request exactly once.
+ *   - On refresh failure, clears the local session and redirects to /login
+ *     with a ?next= back to the current route.
+ *   - Dedupes concurrent refreshes: N parallel 401s only fire ONE refresh.
+ *
+ * Never call plain fetch() for authenticated endpoints. Plain fetch()
+ * with authHeaders() is only safe for routes the client has already
+ * pre-validated (login, public routes).
  */
 
 const TOKEN_KEYS = ["instinct_token", "apex_token"] as const;
 const USER_KEYS = ["instinct_user", "apex_user"] as const;
 
-function isJwtExpired(token: string): boolean {
-  try {
-    const [, payload] = token.split(".");
-    if (!payload) return true;
-    const decoded = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
-    if (typeof decoded.exp !== "number") return false;
-    return decoded.exp * 1000 < Date.now();
-  } catch {
-    return true;
-  }
-}
-
 export function getInstinctToken(): string | null {
   if (typeof window === "undefined") return null;
   for (const k of TOKEN_KEYS) {
     const v = localStorage.getItem(k);
-    if (v) {
-      if (isJwtExpired(v)) {
-        clearInstinctSession();
-        return null;
-      }
-      return v;
-    }
+    if (v) return v;
   }
   return null;
 }
@@ -55,14 +46,9 @@ export function getInstinctUser<T = unknown>(): T | null {
 
 export function setInstinctSession(token: string, user: unknown): void {
   if (typeof window === "undefined") return;
-  // Write BOTH the new and legacy keys so any code that hasn't been
-  // migrated yet still finds the token.
-  // TODO: All client-side reads now use the canonical helpers which
-  // check instinct_* first. The legacy apex_* writes below can be
-  // removed in a future cleanup pass once we confirm no third-party
-  // integrations or bookmarked deep-links depend on them.
   localStorage.setItem("instinct_token", token);
   localStorage.setItem("instinct_user", JSON.stringify(user));
+  // Legacy apex_* mirrors kept until external consumers migrate.
   localStorage.setItem("apex_token", token);
   localStorage.setItem("apex_user", JSON.stringify(user));
 }
@@ -80,4 +66,98 @@ export function authHeaders(): HeadersInit {
 
 export function jsonHeaders(): HeadersInit {
   return { ...authHeaders(), "Content-Type": "application/json" };
+}
+
+// ---------------------------------------------------------------------------
+// Refresh-aware fetch
+// ---------------------------------------------------------------------------
+
+let refreshInFlight: Promise<string | null> | null = null;
+
+/**
+ * Call POST /api/auth/refresh. The HttpOnly refresh cookie is sent
+ * automatically by the browser. On success, updates localStorage with
+ * the new access token and returns it. On failure, clears the session
+ * and returns null.
+ *
+ * Concurrent callers share a single in-flight refresh promise.
+ */
+async function refreshAccessToken(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch("/api/auth/refresh", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { token?: string; user?: unknown };
+      if (!data.token) return null;
+      if (data.user !== undefined) {
+        setInstinctSession(data.token, data.user);
+      } else {
+        // Token-only refresh — preserve existing user, just rotate access token.
+        const user = getInstinctUser();
+        setInstinctSession(data.token, user);
+      }
+      return data.token;
+    } catch {
+      return null;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
+}
+
+function redirectToLogin(): void {
+  if (typeof window === "undefined") return;
+  const next = encodeURIComponent(window.location.pathname + window.location.search);
+  window.location.href = `/login?next=${next}`;
+}
+
+/**
+ * Primary authenticated fetch. Use this instead of raw fetch() for any
+ * call that hits an endpoint requiring auth.
+ */
+export async function fetchWithRefresh(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
+  const initialToken = getInstinctToken();
+  const headers = new Headers(init.headers ?? {});
+  if (initialToken) headers.set("Authorization", `Bearer ${initialToken}`);
+
+  const opts: RequestInit = { ...init, headers, credentials: "include" };
+
+  const res = await fetch(input, opts);
+  if (res.status !== 401) return res;
+
+  // Access token rejected — try to refresh.
+  const newToken = await refreshAccessToken();
+  if (!newToken) {
+    clearInstinctSession();
+    redirectToLogin();
+    return res;
+  }
+
+  const retryHeaders = new Headers(init.headers ?? {});
+  retryHeaders.set("Authorization", `Bearer ${newToken}`);
+  return fetch(input, { ...init, headers: retryHeaders, credentials: "include" });
+}
+
+/**
+ * Convenience wrapper for JSON POST/PUT/PATCH requests with auth + refresh.
+ */
+export async function fetchJsonWithRefresh<T = unknown>(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<T> {
+  const headers = new Headers(init.headers ?? {});
+  headers.set("Content-Type", "application/json");
+  const res = await fetchWithRefresh(input, { ...init, headers });
+  return res.json() as Promise<T>;
 }

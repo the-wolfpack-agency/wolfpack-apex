@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
 
     const accessToken = createToken(user);
 
-    const res = NextResponse.json({ ok: true });
+    const res = NextResponse.json({ ok: true, token: accessToken, user });
 
     setAuthCookie(res, ACCESS_TOKEN_COOKIE, accessToken, ACCESS_TOKEN_TTL, {
       sameSite: "Lax",

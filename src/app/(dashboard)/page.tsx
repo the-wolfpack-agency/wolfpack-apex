@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import FinancialsCard from "@/components/FinancialsCard";
 import MorningBriefing from "@/components/MorningBriefing";
-import { getInstinctToken, authHeaders, jsonHeaders } from "@/lib/client-auth";
+import { getInstinctToken, authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface DashboardData {
   shadow_mode: boolean;
@@ -83,20 +83,20 @@ export default function DashboardPage() {
     }
 
     // Track page view
-    fetch("/api/analytics", {
+    fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "dashboard" } }),
     }).catch(() => {});
 
     // Check workspace setup status
-    fetch("/api/workspace/status", { headers: authHeaders() })
+    fetchWithRefresh("/api/workspace/status", { headers: authHeaders() })
       .then((r) => r.json())
       .then((data) => {
         setSetupComplete(data.complete ?? true);
         if (!data.complete) {
           // Track banner shown
-          fetch("/api/analytics", {
+          fetchWithRefresh("/api/analytics", {
             method: "POST",
             headers: jsonHeaders(),
             body: JSON.stringify({ event: "system.setup_banner_shown", metadata: {} }),
@@ -105,7 +105,7 @@ export default function DashboardPage() {
       })
       .catch(() => {});
 
-    fetch("/api/dashboard", { headers: authHeaders() })
+    fetchWithRefresh("/api/dashboard", { headers: authHeaders() })
       .then((r) => r.json())
       .then((data) => {
         setStats(data);
@@ -114,7 +114,7 @@ export default function DashboardPage() {
       .catch(() => setLoading(false));
 
     // Fetch recent events from journal
-    fetch("/api/journal", {
+    fetchWithRefresh("/api/journal", {
       headers: authHeaders(),
     })
       .then((r) => r.json())

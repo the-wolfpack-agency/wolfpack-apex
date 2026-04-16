@@ -69,3 +69,36 @@ Every signing / verifying operation goes through `src/lib/crypto/algorithms.ts`.
 
 - Canonical pre-push command: `scripts/verify.sh` (runs lint + tsc + jest; add E2E when the repo grows one).
 - Handoff at session end: `npm run handoff` scaffolds `demo/handoff-<date>.md`.
+
+## Client-side authenticated fetches
+
+Every fetch to an authenticated endpoint from a `"use client"` component goes through `fetchWithRefresh` (in `src/lib/client-auth.ts`). Raw `fetch("/api/...")` is forbidden for authenticated routes and enforced by `src/__tests__/no-raw-api-fetch.test.ts`.
+
+### Why
+JWT access tokens have a 15-minute TTL (crypto hardening Apr 15). Refresh tokens are HttpOnly cookies with 7-day TTL + family-based theft detection. `fetchWithRefresh`:
+1. Attaches `Authorization: Bearer <access_token>` from localStorage.
+2. On 401, calls `POST /api/auth/refresh` (the HttpOnly refresh cookie is sent automatically), stores the rotated access token, retries the original request once.
+3. On refresh failure, clears the session and redirects to `/login?next=<current>`.
+4. Dedupes concurrent refreshes via a single in-flight promise.
+
+### Pattern
+```ts
+import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+
+// GET
+const res = await fetchWithRefresh("/api/dashboard");
+const data = await res.json();
+
+// POST with JSON body
+await fetchWithRefresh("/api/analytics", {
+  method: "POST",
+  headers: jsonHeaders(),
+  body: JSON.stringify({ event: "..." }),
+});
+```
+
+### The one exception
+`src/app/login/...` — no token exists pre-login. Use raw fetch there.
+
+### Regression history
+April 16 2026: the dashboard used raw `fetch("/api/dashboard")` without auth headers, other fetches used stale localStorage tokens after the 15-min TTL shortening. Every API call 401'd, the page rendered with zeros. The fix: `fetchWithRefresh` + the guardrail test above.
