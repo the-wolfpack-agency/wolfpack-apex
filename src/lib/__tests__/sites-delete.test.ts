@@ -1,7 +1,6 @@
 /**
  * DELETE /api/sites/[id] — soft-delete (archive) a site project.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 jest.mock("@/lib/auth", () => ({
   getUserFromRequest: jest.fn(),

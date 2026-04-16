@@ -54,7 +54,7 @@ function jsonHeaders(): HeadersInit {
   return canonicalJsonHeaders();
 }
 
-function statusCopy(s: string, hasPreview: boolean): { tone: "info" | "warning" | "success" | "error"; title: string; hint: string } {
+export function statusCopy(s: string, hasPreview: boolean): { tone: "info" | "warning" | "success" | "error"; title: string; hint: string } {
   switch (s) {
     case "draft":
       return {
