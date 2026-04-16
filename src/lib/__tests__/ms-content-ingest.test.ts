@@ -6,6 +6,10 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+// Make this file a module (not a script) so top-level `const` declarations
+// stay file-scoped and don't collide with sibling test files.
+export {};
+
 const mockSaveAnswer = jest.fn();
 
 jest.mock("@/lib/knowledge", () => ({

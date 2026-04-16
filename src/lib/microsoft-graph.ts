@@ -74,7 +74,36 @@ export interface MsConnectionStatus {
 // ---------------------------------------------------------------------------
 
 const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
-const MS_SCOPES = "User.Read Mail.Read Mail.Send Calendars.ReadWrite Contacts.ReadWrite Tasks.ReadWrite Files.ReadWrite Chat.Read ChatMessage.Read Presence.Read People.Read Notes.ReadWrite offline_access";
+// Tier 1 + Tier 2 Graph delegated scopes.
+// Array form so parallel Tier 2 streams can append their scopes without
+// touching the same token — `offline_access` stays last so the
+// refresh_token scope remains at the tail of the space-joined string.
+// One scope per line + trailing commas keeps future diffs minimal.
+const MS_SCOPES: string[] = [
+  "User.Read",
+  "Mail.Read",
+  "Mail.Send",
+  "Calendars.ReadWrite",
+  "Contacts.ReadWrite",
+  "Tasks.ReadWrite",
+  "Files.ReadWrite",
+  "Chat.Read",
+  "ChatMessage.Read",
+  "Presence.Read",
+  "People.Read",
+  "Notes.ReadWrite",
+  // Tier 2 · Stream D (Planner + Groups)
+  "Tasks.ReadWrite.Shared",
+  "Group.Read.All",
+  // Tier 2 · Stream E (Teams channels + online meetings)
+  "ChannelMessage.Read.All",
+  "OnlineMeetings.ReadWrite.All",
+  // Tier 2 · Stream F (tenant directory + mailbox settings)
+  "User.Read.All",
+  "MailboxSettings.Read",
+  "offline_access",
+];
+const MS_SCOPES_STRING = MS_SCOPES.join(" ");
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /** Get the Azure AD tenant ID, defaulting to "common" for multi-tenant. */
@@ -193,7 +222,7 @@ export function getAuthUrl(userId: string): string {
     client_id: clientId,
     response_type: "code",
     redirect_uri: redirectUri,
-    scope: MS_SCOPES,
+    scope: MS_SCOPES_STRING,
     response_mode: "query",
     state: signState(userId),
   });
@@ -223,7 +252,7 @@ export async function exchangeCode(code: string): Promise<MsTokens | null> {
         code,
         redirect_uri: redirectUri,
         grant_type: "authorization_code",
-        scope: MS_SCOPES,
+        scope: MS_SCOPES_STRING,
       }).toString(),
     });
 
@@ -267,7 +296,7 @@ export async function refreshAccessToken(currentRefreshToken: string): Promise<M
         client_secret: clientSecret,
         refresh_token: currentRefreshToken,
         grant_type: "refresh_token",
-        scope: MS_SCOPES,
+        scope: MS_SCOPES_STRING,
       }).toString(),
     });
 

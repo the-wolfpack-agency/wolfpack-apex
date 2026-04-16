@@ -220,7 +220,33 @@ export type ApexEventType =
   | "system.ms_calendar_event_created"
   | "system.ms_calendar_event_updated"
   | "system.ms_calendar_event_deleted"
-  | "system.ms_calendar_operation_failed";
+  | "system.ms_calendar_operation_failed"
+  // Microsoft 365 Planner (shared team tasks — Tier 2 · Stream D)
+  | "system.ms_planner_synced"
+  | "system.ms_planner_task_created"
+  | "system.ms_planner_task_updated"
+  | "system.ms_planner_task_completed"
+  | "system.ms_planner_sync_failed"
+  // Microsoft 365 Groups (Tier 2 · Stream D)
+  | "system.ms_groups_synced"
+  | "system.ms_groups_sync_failed"
+  // Microsoft Teams channels (ChannelMessage.Read.All — Tier 2 · Stream E)
+  | "system.ms_teams_channels_synced"
+  | "system.ms_teams_channel_messages_synced"
+  | "system.ms_teams_channel_sync_failed"
+  | "system.ms_teams_channel_sync_indexing_failed"
+  // Microsoft online meetings (OnlineMeetings.ReadWrite.All — Tier 2 · Stream E)
+  | "system.ms_online_meeting_created"
+  | "system.ms_online_meeting_updated"
+  | "system.ms_online_meeting_failed"
+  // Microsoft 365 Directory (Tier 2 · Stream B — tenant user cache)
+  | "system.ms_directory_synced"
+  | "system.ms_directory_sync_failed"
+  | "system.ms_directory_user_fetched"
+  // Microsoft 365 Mailbox settings (Tier 2 · Stream B — OOO / auto-reply)
+  | "system.ms_mailbox_settings_fetched"
+  | "system.ms_mailbox_ooo_detected"
+  | "system.ms_mailbox_settings_failed";
 
 export interface ApexEvent {
   event_type: ApexEventType;

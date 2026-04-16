@@ -146,7 +146,16 @@ export default function TasksPage() {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>Tasks</h1>
+        <div className="flex items-baseline gap-3">
+          <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>Tasks</h1>
+          <a
+            href="/planner"
+            className="text-xs underline"
+            style={{ color: "var(--wp-text-dim)" }}
+          >
+            View team tasks →
+          </a>
+        </div>
         <div className="flex items-center gap-2">
           <input
             type="text"
