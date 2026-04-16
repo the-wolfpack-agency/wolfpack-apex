@@ -1,5 +1,6 @@
-import { fetchWithRefresh } from "@/lib/client-auth";
 "use client";
+
+import { fetchWithRefresh } from "@/lib/client-auth";
 
 /**
  * NotebookPicker — drill-down notebook → section → create-page drawer.

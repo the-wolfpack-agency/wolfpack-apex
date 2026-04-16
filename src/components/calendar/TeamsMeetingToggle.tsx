@@ -1,5 +1,6 @@
-import { fetchWithRefresh } from "@/lib/client-auth";
 "use client";
+
+import { fetchWithRefresh } from "@/lib/client-auth";
 
 /**
  * TeamsMeetingToggle — wraps the "Online meeting (Teams)" control.

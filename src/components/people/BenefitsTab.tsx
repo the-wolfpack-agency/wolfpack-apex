@@ -1,5 +1,6 @@
-import { fetchWithRefresh } from "@/lib/client-auth";
 "use client";
+
+import { fetchWithRefresh } from "@/lib/client-auth";
 
 /**
  * BenefitsTab — upload renewal PDF, see parsed plans + AI recommendation.

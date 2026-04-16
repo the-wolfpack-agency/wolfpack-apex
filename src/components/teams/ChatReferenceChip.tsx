@@ -1,5 +1,6 @@
-import { fetchWithRefresh } from "@/lib/client-auth";
 "use client";
+
+import { fetchWithRefresh } from "@/lib/client-auth";
 
 /**
  * ChatReferenceChip — compact visual reference to a Teams chat.

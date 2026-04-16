@@ -1,5 +1,6 @@
-import { fetchWithRefresh } from "@/lib/client-auth";
 "use client";
+
+import { fetchWithRefresh } from "@/lib/client-auth";
 
 /**
  * DocumentsTab — system of record for every HR document Alicia uploads.
