@@ -1,0 +1,64 @@
+name: Verify
+
+# Local `npm run verify` gate, hoisted into CI.
+#
+# Required secrets (set in repo → Settings → Secrets):
+#   PROD_URL              — deployed Instinct URL for the E2E smoke
+#   SMOKE_TEST_EMAIL      — sign-in email for the smoke account
+#   SMOKE_TEST_PASSWORD   — sign-in password for the smoke account
+#
+# If any are missing, the e2e-smoke stage inside verify.sh auto-skips
+# (resolveSmokeTarget + test.skip), so CI stays green for forks/PRs
+# without secret access.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    # TODO(nhomyk): flip to required = true once every pre-existing lint/tsc
+    # finding is resolved. Tracked in handoff 2026-04-15.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run verify
+        env:
+          CI: "true"
+          PROD_URL: ${{ secrets.PROD_URL }}
+          SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: npm run verify
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-apex
+          path: playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore

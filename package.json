@@ -9,7 +9,9 @@
     "migrate": "node scripts/migrate.mjs",
     "start": "next start",
     "lint": "eslint",
-    "handoff": "node scripts/handoff-scaffold.mjs"
+    "handoff": "node scripts/handoff-scaffold.mjs",
+    "verify": "bash scripts/verify.sh",
+    "test:e2e:smoke": "playwright test tests/e2e/smoke.spec.ts --config=playwright.config.ts"
   },
   "dependencies": {
     "@types/bcryptjs": "^3.0.0",
@@ -26,6 +28,7 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
