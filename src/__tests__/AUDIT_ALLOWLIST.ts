@@ -220,6 +220,77 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/people/recommendations/[id]/route.ts",
     reason: "acknowledgement of AI recommendation — low-sensitivity signal",
   },
+
+  // Teams + OneNote (personal chat + notes) — Teams/OneNote stream.
+  // createPage audits inside @/lib/integrations/microsoft-onenote; sync
+  // routes only refresh local caches and never mutate user-visible state.
+  {
+    route: "src/app/api/teams/sync/route.ts",
+    reason: "Teams/OneNote stream — cache-refresh sync, no user-visible mutation",
+  },
+  {
+    route: "src/app/api/onenote/sync/route.ts",
+    reason: "Teams/OneNote stream — cache-refresh sync, no user-visible mutation",
+  },
+  {
+    route: "src/app/api/onenote/pages/route.ts",
+    reason: "Teams/OneNote stream — createPage audits inside src/lib/integrations/microsoft-onenote.ts via onenote.page_created",
+  },
+
+  // Mail (Mail.Send) + Calendar (Calendars.ReadWrite) — Stream A.
+  // Every mutation audits inside @/lib/integrations/microsoft-mail (mail.sent /
+  // mail.replied) and @/lib/integrations/microsoft-calendar
+  // (calendar.event.created/updated/deleted). The HTTP routes are thin
+  // adapters that delegate to those libs.
+  {
+    route: "src/app/api/mail/send/route.ts",
+    reason: "sendMail in src/lib/integrations/microsoft-mail.ts audits via mail.sent",
+  },
+  {
+    route: "src/app/api/mail/reply/route.ts",
+    reason: "replyToMessage in src/lib/integrations/microsoft-mail.ts audits via mail.replied",
+  },
+  {
+    route: "src/app/api/calendar/events/route.ts",
+    reason: "createEvent in src/lib/integrations/microsoft-calendar.ts audits via calendar.event.created",
+  },
+  {
+    route: "src/app/api/calendar/events/[id]/route.ts",
+    reason: "updateEvent/deleteEvent in src/lib/integrations/microsoft-calendar.ts audit via calendar.event.updated/deleted",
+  },
+
+  // Files (OneDrive) + Contacts stream — audit happens inside
+  // src/lib/integrations/microsoft-files.ts and microsoft-contacts.ts
+  // (actions: files.uploaded, files.share_created, files.deleted,
+  // contacts.created, contacts.updated, contacts.deleted).
+  {
+    route: "src/app/api/files/upload/route.ts",
+    reason: "uploadSmallFile in src/lib/integrations/microsoft-files.ts audits via files.uploaded",
+  },
+  {
+    route: "src/app/api/files/upload-session/route.ts",
+    reason: "upload-session endpoint only returns a Graph URL; audit happens on the subsequent upload write-through",
+  },
+  {
+    route: "src/app/api/files/[id]/route.ts",
+    reason: "deleteItem in src/lib/integrations/microsoft-files.ts audits via files.deleted",
+  },
+  {
+    route: "src/app/api/files/[id]/share/route.ts",
+    reason: "createShareLink in src/lib/integrations/microsoft-files.ts audits via files.share_created",
+  },
+  {
+    route: "src/app/api/contacts/route.ts",
+    reason: "createContact in src/lib/integrations/microsoft-contacts.ts audits via contacts.created",
+  },
+  {
+    route: "src/app/api/contacts/[id]/route.ts",
+    reason: "update/deleteContact in src/lib/integrations/microsoft-contacts.ts audit via contacts.updated/deleted",
+  },
+  {
+    route: "src/app/api/contacts/sync/route.ts",
+    reason: "Contacts stream — cache-refresh sync; no user-visible mutation audit-worthy at the route level",
+  },
 ];
 
 export const AUDIT_ALLOWLIST_ROUTES: ReadonlySet<string> = new Set(

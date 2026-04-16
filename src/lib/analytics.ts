@@ -78,6 +78,29 @@ export type ApexEventType =
   | "system.task_viewed"
   | "system.task_completed"
   | "system.task_created"
+  // Microsoft Teams (personal chat) + OneNote
+  | "system.ms_teams_chats_synced"
+  | "system.ms_teams_messages_synced"
+  | "system.ms_teams_sync_failed"
+  | "system.ms_teams_sync_indexing_failed"
+  | "system.ms_onenote_notebook_listed"
+  | "system.ms_onenote_page_viewed"
+  | "system.ms_onenote_page_created"
+  | "system.ms_onenote_failed"
+  // Microsoft 365 OneDrive Files
+  | "system.ms_file_uploaded"
+  | "system.ms_file_downloaded"
+  | "system.ms_file_list_fetched"
+  | "system.ms_file_operation_failed"
+  // Microsoft 365 People suggestions
+  | "system.ms_people_suggestions_fetched"
+  // Microsoft 365 Presence
+  | "system.ms_presence_fetched"
+  // Microsoft 365 Contacts (write path)
+  | "system.ms_contact_created"
+  | "system.ms_contact_updated"
+  | "system.ms_contact_deleted"
+  | "system.ms_contacts_sync"
   // Briefing
   | "briefing.generated"
   | "briefing.viewed"
@@ -188,7 +211,16 @@ export type ApexEventType =
   | "system.capability_denied"
   | "system.capability_granted_override"
   | "system.capability_revoked_override"
-  | "system.role_changed";
+  | "system.role_changed"
+  // Microsoft 365 Mail (Mail.Send)
+  | "system.ms_mail_sent"
+  | "system.ms_mail_reply_sent"
+  | "system.ms_mail_send_failed"
+  // Microsoft 365 Calendar (Calendars.ReadWrite)
+  | "system.ms_calendar_event_created"
+  | "system.ms_calendar_event_updated"
+  | "system.ms_calendar_event_deleted"
+  | "system.ms_calendar_operation_failed";
 
 export interface ApexEvent {
   event_type: ApexEventType;
