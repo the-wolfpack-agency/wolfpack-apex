@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { useRouter } from "next/navigation";
-import { getInstinctUser, authHeaders } from "@/lib/client-auth";
+import { getInstinctUser, authHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface AuditEntry {
   id: string;
@@ -95,7 +95,7 @@ export default function AuditLogPage() {
       if (untilFilter) params.set("until", untilFilter);
       if (cursor) params.set("cursor", cursor);
       try {
-        const res = await fetch(`/api/admin/audit-log?${params.toString()}`, {
+        const res = await fetchWithRefresh(`/api/admin/audit-log?${params.toString()}`, {
           headers: authHeaders(),
         });
         if (!res.ok) {
@@ -127,7 +127,7 @@ export default function AuditLogPage() {
     setVerifying(true);
     setVerifyResult(null);
     try {
-      const res = await fetch("/api/admin/audit-log/verify", {
+      const res = await fetchWithRefresh("/api/admin/audit-log/verify", {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: "{}",
@@ -142,7 +142,7 @@ export default function AuditLogPage() {
   }
 
   async function onExport() {
-    const res = await fetch("/api/admin/audit-log/export", { headers: authHeaders() });
+    const res = await fetchWithRefresh("/api/admin/audit-log/export", { headers: authHeaders() });
     if (!res.ok) {
       setError(`Export failed: ${res.status}`);
       return;

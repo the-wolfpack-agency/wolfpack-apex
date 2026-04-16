@@ -1,3 +1,4 @@
+import { fetchWithRefresh } from "@/lib/client-auth";
 "use client";
 
 import { useEffect, useState } from "react";
@@ -18,7 +19,7 @@ export function InsightsTab() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/people/insights", { headers: authHeaders() })
+    fetchWithRefresh("/api/people/insights", { headers: authHeaders() })
       .then((r) => r.json())
       .then((d) => setInsights(d.insights ?? []))
       .finally(() => setLoading(false));

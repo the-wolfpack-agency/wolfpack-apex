@@ -1,3 +1,4 @@
+import { fetchWithRefresh } from "@/lib/client-auth";
 "use client";
 
 /**
@@ -68,7 +69,7 @@ export function BenefitsTab() {
 
   async function loadDetail(documentId: string) {
     try {
-      const r = await fetch(`/api/people/benefits/${documentId}`, { headers: authHeaders() });
+      const r = await fetchWithRefresh(`/api/people/benefits/${documentId}`, { headers: authHeaders() });
       if (!r.ok) return;
       const data = await r.json();
       setParsedPlans(data.plans ?? []);
@@ -77,7 +78,7 @@ export function BenefitsTab() {
   }
 
   async function loadDocs() {
-    const r = await fetch("/api/people/benefits", { headers: authHeaders() });
+    const r = await fetchWithRefresh("/api/people/benefits", { headers: authHeaders() });
     if (!r.ok) return;
     const data = await r.json();
     setDocs(data.documents ?? []);
@@ -99,7 +100,7 @@ export function BenefitsTab() {
       fd.append("file", file);
       fd.append("source", "benefits_tab");
       setProgressMsg(`Classifying ${file.name}…`);
-      const r = await fetch("/api/people/documents", {
+      const r = await fetchWithRefresh("/api/people/documents", {
         method: "POST",
         headers: authHeaders(),
         body: fd,
@@ -167,7 +168,7 @@ export function BenefitsTab() {
   }
 
   async function decide(recId: string, outcome: "accepted" | "rejected") {
-    await fetch(`/api/people/recommendations/${recId}`, {
+    await fetchWithRefresh(`/api/people/recommendations/${recId}`, {
       method: "PATCH",
       headers: { ...authHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify({ outcome }),
@@ -428,7 +429,7 @@ export function BenefitsTab() {
               <button
                 onClick={async () => {
                   if (!confirm(`Delete "${d.filename}" and all its parsed plans + recommendations?`)) return;
-                  const r = await fetch(`/api/people/benefits/${d.id}`, {
+                  const r = await fetchWithRefresh(`/api/people/benefits/${d.id}`, {
                     method: "DELETE",
                     headers: authHeaders(),
                   });

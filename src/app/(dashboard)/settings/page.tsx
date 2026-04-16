@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getInstinctToken, getInstinctUser, authHeaders } from "@/lib/client-auth";
+import { getInstinctToken, getInstinctUser, authHeaders, fetchWithRefresh } from "@/lib/client-auth";
 import {
   startMicrosoftConnect,
   startQuickbooksConnect,
@@ -93,7 +93,7 @@ export default function SettingsPage() {
 
   const fetchMicrosoftStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/microsoft?action=status", {
+      const res = await fetchWithRefresh("/api/microsoft?action=status", {
         headers: authHeaders(),
       });
       if (res.status === 401) {
@@ -116,7 +116,7 @@ export default function SettingsPage() {
 
   const fetchPlaudStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/integrations/plaud?action=status", {
+      const res = await fetchWithRefresh("/api/integrations/plaud?action=status", {
         headers: authHeaders(),
       });
       if (res.status === 401) {
@@ -141,7 +141,7 @@ export default function SettingsPage() {
 
   const fetchQuickbooksStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/quickbooks?action=status", {
+      const res = await fetchWithRefresh("/api/quickbooks?action=status", {
         headers: authHeaders(),
       });
       if (res.status === 401) {
@@ -179,7 +179,7 @@ export default function SettingsPage() {
     if (notifs !== null) setEmailNotifications(notifs === "true");
 
     // Track page view
-    fetch("/api/analytics", {
+    fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: { ...authHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "settings" } }),
@@ -204,7 +204,7 @@ export default function SettingsPage() {
   async function disconnectMicrosoft() {
     setDisconnecting("microsoft");
     try {
-      const res = await fetch("/api/microsoft?action=disconnect", {
+      const res = await fetchWithRefresh("/api/microsoft?action=disconnect", {
         method: "POST",
         headers: authHeaders(),
       });
@@ -224,7 +224,7 @@ export default function SettingsPage() {
   async function disconnectQuickbooks() {
     setDisconnecting("quickbooks");
     try {
-      const res = await fetch("/api/quickbooks?action=disconnect", {
+      const res = await fetchWithRefresh("/api/quickbooks?action=disconnect", {
         method: "POST",
         headers: authHeaders(),
       });
@@ -250,7 +250,7 @@ export default function SettingsPage() {
   async function disconnectPlaud() {
     setDisconnecting("plaud");
     try {
-      const res = await fetch("/api/integrations/plaud", {
+      const res = await fetchWithRefresh("/api/integrations/plaud", {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ action: "disconnect" }),

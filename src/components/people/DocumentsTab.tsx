@@ -1,3 +1,4 @@
+import { fetchWithRefresh } from "@/lib/client-auth";
 "use client";
 
 /**
@@ -87,7 +88,7 @@ export function DocumentsTab() {
 
   async function load() {
     setLoading(true);
-    const r = await fetch("/api/people/documents", { headers: authHeaders() });
+    const r = await fetchWithRefresh("/api/people/documents", { headers: authHeaders() });
     if (r.ok) {
       const data = await r.json();
       setDocs(data.documents ?? []);
@@ -96,7 +97,7 @@ export function DocumentsTab() {
   }
 
   async function loadEmployees() {
-    const r = await fetch("/api/people/employees", { headers: authHeaders() });
+    const r = await fetchWithRefresh("/api/people/employees", { headers: authHeaders() });
     if (r.ok) {
       const data = await r.json();
       setEmployees(data.employees ?? []);
@@ -116,7 +117,7 @@ export function DocumentsTab() {
       const fd = new FormData();
       fd.append("file", file);
       fd.append("source", "documents_tab");
-      const r = await fetch("/api/people/documents", {
+      const r = await fetchWithRefresh("/api/people/documents", {
         method: "POST",
         headers: authHeaders(),
         body: fd,
@@ -137,7 +138,7 @@ export function DocumentsTab() {
   }
 
   async function handleRecategorize(id: string, newCategory: HrCategory) {
-    const r = await fetch(`/api/people/documents/${id}`, {
+    const r = await fetchWithRefresh(`/api/people/documents/${id}`, {
       method: "PATCH",
       headers: { ...authHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify({ category: newCategory }),
@@ -146,7 +147,7 @@ export function DocumentsTab() {
   }
 
   async function handleLinkEmployee(id: string, employeeId: string | null) {
-    const r = await fetch(`/api/people/documents/${id}`, {
+    const r = await fetchWithRefresh(`/api/people/documents/${id}`, {
       method: "PATCH",
       headers: { ...authHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify({ employee_id: employeeId }),
@@ -156,7 +157,7 @@ export function DocumentsTab() {
 
   async function handleDelete(id: string, name: string) {
     if (!confirm(`Delete "${name}"?`)) return;
-    const r = await fetch(`/api/people/documents/${id}`, {
+    const r = await fetchWithRefresh(`/api/people/documents/${id}`, {
       method: "DELETE",
       headers: authHeaders(),
     });

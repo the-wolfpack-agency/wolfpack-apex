@@ -1,10 +1,10 @@
-import { authHeaders } from "@/lib/client-auth";
+import { authHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 export async function startMicrosoftConnect(
   opts?: { returnTo?: string },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const res = await fetch("/api/microsoft?action=auth-url", {
+    const res = await fetchWithRefresh("/api/microsoft?action=auth-url", {
       headers: authHeaders(),
     });
     const data = await res.json();
@@ -29,7 +29,7 @@ export async function startQuickbooksConnect(
   opts?: { returnTo?: string },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const res = await fetch("/api/quickbooks?action=auth-url", {
+    const res = await fetchWithRefresh("/api/quickbooks?action=auth-url", {
       headers: authHeaders(),
     });
     const data = await res.json();
@@ -57,7 +57,7 @@ export async function connectPlaud(
     };
   }
   try {
-    const res = await fetch("/api/integrations/plaud", {
+    const res = await fetchWithRefresh("/api/integrations/plaud", {
       method: "POST",
       headers: { ...authHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify({ action: "connect" }),

@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { authHeaders, jsonHeaders } from "@/lib/client-auth";
+import { authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 export interface PickerDriveItem {
   id: string;
@@ -67,7 +67,7 @@ export default function FilePickerModal({ open, onClose, onPick, allowUpload = t
       if (parentId) params.set("parentId", parentId);
       if (searchTerm) params.set("search", searchTerm);
       params.set("limit", "100");
-      const res = await fetch(`/api/files?${params.toString()}`, { headers: authHeaders() });
+      const res = await fetchWithRefresh(`/api/files?${params.toString()}`, { headers: authHeaders() });
       if (res.status === 403) {
         const data = await res.json().catch(() => ({}));
         setError(data.scope ? `Missing Microsoft permission: ${data.scope}` : "Permission denied");
@@ -127,7 +127,7 @@ export default function FilePickerModal({ open, onClose, onPick, allowUpload = t
         form.append("file", file);
         form.append("parentId", currentFolderId ?? "root");
         form.append("filename", file.name);
-        const res = await fetch("/api/files/upload", {
+        const res = await fetchWithRefresh("/api/files/upload", {
           method: "POST",
           headers: authHeaders(),
           body: form,
@@ -139,7 +139,7 @@ export default function FilePickerModal({ open, onClose, onPick, allowUpload = t
         }
       } else {
         // Large file — upload session path (client PUTs chunks directly to Graph)
-        const sessionRes = await fetch("/api/files/upload-session", {
+        const sessionRes = await fetchWithRefresh("/api/files/upload-session", {
           method: "POST",
           headers: jsonHeaders(),
           body: JSON.stringify({ parentId: currentFolderId ?? "root", filename: file.name }),

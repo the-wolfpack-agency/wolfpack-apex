@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { authHeaders, jsonHeaders } from "@/lib/client-auth";
+import { authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 // ---------------------------------------------------------------------------
 // Types (match quickbooks.ts exports)
@@ -170,13 +170,13 @@ export default function FinancialsPage() {
   const fetchData = useCallback(async () => {
     try {
       // Track page view
-      fetch("/api/analytics", {
+      fetchWithRefresh("/api/analytics", {
         method: "POST",
         headers: jsonHeaders(),
         body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "financials" } }),
       }).catch(() => {});
 
-      const res = await fetch("/api/quickbooks", {
+      const res = await fetchWithRefresh("/api/quickbooks", {
         headers: authHeaders(),
       });
       if (res.status === 401) {
@@ -227,7 +227,7 @@ export default function FinancialsPage() {
           </p>
           <button
             onClick={async () => {
-              const res = await fetch("/api/quickbooks?action=auth-url", {
+              const res = await fetchWithRefresh("/api/quickbooks?action=auth-url", {
                 headers: authHeaders(),
               });
               const data = await res.json();

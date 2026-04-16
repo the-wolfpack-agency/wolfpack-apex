@@ -128,6 +128,7 @@ export type ApexEventType =
   | "site.preview_viewed"
   | "site.link_shared"
   | "site.deleted"
+  | "site.archived"
   | "site.brief_auto_parsed"
   | "site.brief_parse_failed"
   | "site.brief_form_edited"

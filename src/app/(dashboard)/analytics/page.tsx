@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { jsonHeaders } from "@/lib/client-auth";
+import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface ActivityBucket {
   label: string;
@@ -70,13 +70,13 @@ export default function AnalyticsPage() {
   }
 
   useEffect(() => {
-    fetch("/api/analytics", {
+    fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "analytics" } }),
     }).catch(() => {});
 
-    fetch("/api/analytics", { headers: authHeaders() })
+    fetchWithRefresh("/api/analytics", { headers: authHeaders() })
       .then((r) => r.json())
       .then((d) => {
         setData(d);

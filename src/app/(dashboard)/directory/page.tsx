@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useState, useCallback } from "react";
-import { authHeaders, jsonHeaders } from "@/lib/client-auth";
+import { authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 import UserCard, { type DirectoryUserView } from "@/components/directory/UserCard";
 
 interface ListResponse {
@@ -34,7 +34,7 @@ export default function DirectoryPage() {
       if (department) qp.set("department", department);
       if (cursor) qp.set("cursor", cursor);
       try {
-        const res = await fetch(`/api/directory/users?${qp.toString()}`, {
+        const res = await fetchWithRefresh(`/api/directory/users?${qp.toString()}`, {
           headers: authHeaders(),
         });
         if (!res.ok) {
@@ -61,7 +61,7 @@ export default function DirectoryPage() {
     setSyncing(true);
     setError(null);
     try {
-      const res = await fetch("/api/directory/sync", {
+      const res = await fetchWithRefresh("/api/directory/sync", {
         method: "POST",
         headers: jsonHeaders(),
       });

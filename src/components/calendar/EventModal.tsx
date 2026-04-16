@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { jsonHeaders } from "@/lib/client-auth";
+import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 export interface EventModalProps {
   open: boolean;
@@ -100,7 +100,7 @@ export function EventModal({ open, onClose, onCreated, initialStart, initialEnd 
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/calendar/events", {
+      const res = await fetchWithRefresh("/api/calendar/events", {
         method: "POST",
         headers: jsonHeaders(),
         body: JSON.stringify({

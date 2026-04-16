@@ -1,3 +1,4 @@
+import { fetchWithRefresh } from "@/lib/client-auth";
 "use client";
 
 /**
@@ -53,7 +54,7 @@ export default function ChatReferenceChip({
     async function load() {
       try {
         const auth = (getAuthHeader ?? defaultAuth)();
-        const res = await fetch(`/api/teams/chats/${encodeURIComponent(chatId)}/messages?limit=1`, {
+        const res = await fetchWithRefresh(`/api/teams/chats/${encodeURIComponent(chatId)}/messages?limit=1`, {
           headers: auth ? { authorization: auth } : undefined,
         });
         if (cancelled) return;

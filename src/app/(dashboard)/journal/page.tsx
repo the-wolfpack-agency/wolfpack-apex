@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { jsonHeaders } from "@/lib/client-auth";
+import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface TimelineEvent {
   time: string;
@@ -85,7 +85,7 @@ export default function JournalPage() {
 
   useEffect(() => {
     fetchJournal();
-    fetch("/api/analytics", {
+    fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "journal" } }),
@@ -96,7 +96,7 @@ export default function JournalPage() {
   async function fetchJournal() {
     setLoading(true);
     try {
-      const res = await fetch(`/api/journal?date=${selectedDate}`, {
+      const res = await fetchWithRefresh(`/api/journal?date=${selectedDate}`, {
         headers: authHeaders(),
       });
       const data = await res.json();
@@ -174,7 +174,7 @@ export default function JournalPage() {
     setSaving(true);
     setSaveMsg("");
     try {
-      const res = await fetch("/api/journal", {
+      const res = await fetchWithRefresh("/api/journal", {
         method: "PUT",
         headers: authHeaders(),
         body: JSON.stringify({

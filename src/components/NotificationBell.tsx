@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { authHeaders } from "@/lib/client-auth";
+import { authHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface BellNotification {
   id: string;
@@ -67,7 +67,7 @@ export default function NotificationBell() {
 
   const fetchCount = useCallback(async () => {
     try {
-      const res = await fetch("/api/notifications/unread-count", {
+      const res = await fetchWithRefresh("/api/notifications/unread-count", {
         headers: authHeaders(),
       });
       if (!res.ok) return;
@@ -81,7 +81,7 @@ export default function NotificationBell() {
   const fetchItems = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/notifications?read=unread&limit=10", {
+      const res = await fetchWithRefresh("/api/notifications?read=unread&limit=10", {
         headers: authHeaders(),
       });
       if (!res.ok) {
@@ -119,7 +119,7 @@ export default function NotificationBell() {
 
   async function handleClick(n: BellNotification) {
     try {
-      const res = await fetch(`/api/notifications/${n.id}/click`, {
+      const res = await fetchWithRefresh(`/api/notifications/${n.id}/click`, {
         method: "POST",
         headers: authHeaders(),
       });
@@ -138,7 +138,7 @@ export default function NotificationBell() {
   async function handleDismiss(id: string, ev: React.MouseEvent) {
     ev.stopPropagation();
     try {
-      await fetch(`/api/notifications/${id}/dismiss`, {
+      await fetchWithRefresh(`/api/notifications/${id}/dismiss`, {
         method: "POST",
         headers: authHeaders(),
       });
@@ -151,7 +151,7 @@ export default function NotificationBell() {
 
   async function handleMarkAllRead() {
     try {
-      await fetch("/api/notifications/mark-all-read", {
+      await fetchWithRefresh("/api/notifications/mark-all-read", {
         method: "POST",
         headers: authHeaders(),
       });

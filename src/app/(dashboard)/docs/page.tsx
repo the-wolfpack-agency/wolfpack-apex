@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, FormEvent } from "react";
-import { jsonHeaders } from "@/lib/client-auth";
+import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface Document {
   id: string;
@@ -52,7 +52,7 @@ export default function DocsPage() {
 
   useEffect(() => {
     fetchDocs();
-    fetch("/api/analytics", {
+    fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "docs" } }),
@@ -63,7 +63,7 @@ export default function DocsPage() {
   async function fetchDocs() {
     setLoading(true);
     try {
-      const res = await fetch("/api/docs", { headers: authHeaders() });
+      const res = await fetchWithRefresh("/api/docs", { headers: authHeaders() });
       const data = await res.json();
       setDocs(data.documents || []);
     } catch {
@@ -88,7 +88,7 @@ export default function DocsPage() {
         body.feature_request_id = featureId;
       }
 
-      const res = await fetch("/api/docs", {
+      const res = await fetchWithRefresh("/api/docs", {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify(body),
@@ -111,7 +111,7 @@ export default function DocsPage() {
   }
 
   async function handleDownload(doc: Document) {
-    fetch(`/api/docs/${doc.id}`, {
+    fetchWithRefresh(`/api/docs/${doc.id}`, {
       method: "POST",
       headers: authHeaders(),
     }).catch(() => {});

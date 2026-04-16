@@ -13,7 +13,7 @@
 
 jest.mock("@/lib/client-auth", () => ({
   authHeaders: () => ({ Authorization: "Bearer tok" }),
-}));
+  fetchWithRefresh: jest.fn((url, opts) => fetch(url, opts)), fetchJsonWithRefresh: jest.fn(async (url, opts) => (await fetch(url, opts)).json()) }));
 
 const fetchMock = jest.fn();
 beforeAll(() => {

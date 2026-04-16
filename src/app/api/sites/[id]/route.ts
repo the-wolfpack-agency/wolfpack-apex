@@ -11,9 +11,11 @@ import {
   getSiteProject,
   updateBrief,
   triggerDeploy,
+  deleteSiteProject,
   BriefValidationError,
   type SiteBrief,
 } from "@/lib/sites";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const user = getUserFromRequest(req.headers.get("authorization"));
@@ -59,4 +61,27 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     console.error("[sites/id/brief]", (err as Error).message);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
+}
+
+export async function DELETE(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const user = getUserFromRequest(req.headers.get("authorization"));
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { id } = await context.params;
+
+  const archived = await deleteSiteProject(id, user.id, user.role);
+  if (!archived) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  const meta = extractRequestMetadata(req);
+  await recordAudit({
+    actor: { user_id: user.id, role: user.role },
+    action: "site.archived",
+    resourceType: "site_project",
+    resourceId: id,
+    afterState: { status: "archived", display_name: archived.display_name },
+    ipAddress: meta.ipAddress,
+    userAgent: meta.userAgent,
+    requestId: meta.requestId,
+  }).catch((e) => console.warn("[audit]", (e as Error).message));
+
+  return NextResponse.json({ ok: true });
 }

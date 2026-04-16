@@ -12,7 +12,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { authHeaders as canonicalAuthHeaders, jsonHeaders as canonicalJsonHeaders } from "@/lib/client-auth";
+import { authHeaders as canonicalAuthHeaders, jsonHeaders as canonicalJsonHeaders, fetchWithRefresh, getInstinctToken } from "@/lib/client-auth";
 
 interface SiteProject {
   id: string;
@@ -58,7 +58,7 @@ export default function SitesPage() {
   async function load() {
     setLoading(true);
     try {
-      const r = await fetch("/api/sites", { headers: authHeaders() });
+      const r = await fetchWithRefresh("/api/sites", { headers: authHeaders() });
       const data = await r.json();
       setProjects(data.projects ?? []);
     } finally {
@@ -92,7 +92,7 @@ export default function SitesPage() {
       ],
       contactForm: { fields: ["name", "email", "message"] },
     };
-    const r = await fetch("/api/sites", {
+    const r = await fetchWithRefresh("/api/sites", {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ brief }),
@@ -122,7 +122,7 @@ export default function SitesPage() {
       const fd = new FormData();
       fd.append("file", file);
       fd.append("clientSlug", slug);
-      const r = await fetch("/api/sites/parse-brief", {
+      const r = await fetchWithRefresh("/api/sites/parse-brief", {
         method: "POST",
         headers: authHeaders(),
         body: fd,
@@ -135,7 +135,7 @@ export default function SitesPage() {
         setParsing(false);
         return;
       }
-      const create = await fetch("/api/sites", {
+      const create = await fetchWithRefresh("/api/sites", {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ brief: data.brief }),
@@ -325,6 +325,20 @@ export default function SitesPage() {
                       Preview ↗
                     </a>
                   )}
+                  <button
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!confirm(`Archive "${p.display_name}"? This removes it from the list but keeps history.`)) return;
+                      const res = await fetchWithRefresh(`/api/sites/${p.id}`, { method: "DELETE" });
+                      if (res.ok) setProjects((prev) => prev.filter((x) => x.id !== p.id));
+                      else alert("Failed to archive site.");
+                    }}
+                    style={{ fontSize: "0.75rem", color: "var(--wp-text-dim)", background: "transparent", border: "none", cursor: "pointer", padding: "0.2rem 0.4rem" }}
+                    aria-label={`Archive ${p.display_name}`}
+                  >
+                    🗑 Delete
+                  </button>
                 </div>
               </div>
             </Link>

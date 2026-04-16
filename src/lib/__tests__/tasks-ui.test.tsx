@@ -13,7 +13,7 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 jest.mock("@/lib/client-auth", () => ({
   authHeaders: () => ({ Authorization: "Bearer test-token" }),
   jsonHeaders: () => ({ Authorization: "Bearer test-token", "Content-Type": "application/json" }),
-}));
+  fetchWithRefresh: jest.fn((url, opts) => fetch(url, opts)), fetchJsonWithRefresh: jest.fn(async (url, opts) => (await fetch(url, opts)).json()) }));
 
 const fetchMock = jest.fn();
 

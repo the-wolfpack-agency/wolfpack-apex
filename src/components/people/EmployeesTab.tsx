@@ -1,3 +1,4 @@
+import { fetchWithRefresh } from "@/lib/client-auth";
 "use client";
 
 import { useEffect, useState } from "react";
@@ -23,7 +24,7 @@ export function EmployeesTab() {
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
-    const r = await fetch("/api/people/employees", { headers: authHeaders() });
+    const r = await fetchWithRefresh("/api/people/employees", { headers: authHeaders() });
     if (!r.ok) return;
     const data = await r.json();
     setEmployees(data.employees ?? []);
@@ -35,7 +36,7 @@ export function EmployeesTab() {
   async function create(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const r = await fetch("/api/people/employees", {
+    const r = await fetchWithRefresh("/api/people/employees", {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ full_name: name, email, role_title: title, department: dept }),

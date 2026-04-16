@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, FormEvent } from "react";
-import { jsonHeaders } from "@/lib/client-auth";
+import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface Discussion {
   id: string;
@@ -65,7 +65,7 @@ export default function DiscussionsPage() {
 
   useEffect(() => {
     fetchThreads();
-    fetch("/api/analytics", {
+    fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "discussions" } }),
@@ -76,7 +76,7 @@ export default function DiscussionsPage() {
   async function fetchThreads() {
     setLoading(true);
     try {
-      const res = await fetch("/api/discussions");
+      const res = await fetchWithRefresh("/api/discussions");
       const data = await res.json();
       setThreads(data.threads || []);
     } catch {
@@ -88,7 +88,7 @@ export default function DiscussionsPage() {
   async function openThread(threadId: string) {
     setLoadingThread(true);
     try {
-      const res = await fetch(`/api/discussions/${threadId}`);
+      const res = await fetchWithRefresh(`/api/discussions/${threadId}`);
       const data = await res.json();
       setSelectedThread(data);
     } catch {
@@ -102,7 +102,7 @@ export default function DiscussionsPage() {
     setCreating(true);
     setCreateMsg("");
     try {
-      const res = await fetch("/api/discussions", {
+      const res = await fetchWithRefresh("/api/discussions", {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({
@@ -133,7 +133,7 @@ export default function DiscussionsPage() {
     if (!selectedThread || !replyContent.trim()) return;
     setReplying(true);
     try {
-      const res = await fetch(`/api/discussions/${selectedThread.discussion.id}`, {
+      const res = await fetchWithRefresh(`/api/discussions/${selectedThread.discussion.id}`, {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({ content: replyContent }),

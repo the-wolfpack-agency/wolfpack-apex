@@ -1,3 +1,4 @@
+import { fetchWithRefresh } from "@/lib/client-auth";
 "use client";
 
 /**
@@ -70,9 +71,9 @@ export function OnboardingTab() {
   const load = useCallback(async () => {
     try {
       const [instR, tmplR, empR] = await Promise.all([
-        fetch("/api/people/onboarding?all=true", { headers: authHeaders() }),
-        fetch("/api/people/onboarding/templates", { headers: authHeaders() }),
-        fetch("/api/people/employees", { headers: authHeaders() }),
+        fetchWithRefresh("/api/people/onboarding?all=true", { headers: authHeaders() }),
+        fetchWithRefresh("/api/people/onboarding/templates", { headers: authHeaders() }),
+        fetchWithRefresh("/api/people/employees", { headers: authHeaders() }),
       ]);
       if (instR.ok) {
         const d = await instR.json();
@@ -100,7 +101,7 @@ export function OnboardingTab() {
   async function handleStart() {
     if (!selectedEmployee || !selectedTemplate) return;
     setError(null);
-    const r = await fetch("/api/people/onboarding", {
+    const r = await fetchWithRefresh("/api/people/onboarding", {
       method: "POST",
       headers: { ...authHeaders(), ...jsonHeaders() },
       body: JSON.stringify({ employee_id: selectedEmployee, template_id: selectedTemplate }),
@@ -118,7 +119,7 @@ export function OnboardingTab() {
 
   async function handleStepToggle(instanceId: string, stepId: string, currentlyCompleted: boolean) {
     const action = currentlyCompleted ? "uncomplete" : "complete";
-    const r = await fetch(`/api/people/onboarding/${instanceId}`, {
+    const r = await fetchWithRefresh(`/api/people/onboarding/${instanceId}`, {
       method: "PATCH",
       headers: { ...authHeaders(), ...jsonHeaders() },
       body: JSON.stringify({ step_id: stepId, action }),
@@ -132,7 +133,7 @@ export function OnboardingTab() {
   }
 
   async function handleCancel(instanceId: string) {
-    const r = await fetch(`/api/people/onboarding/${instanceId}`, {
+    const r = await fetchWithRefresh(`/api/people/onboarding/${instanceId}`, {
       method: "DELETE",
       headers: authHeaders(),
     });

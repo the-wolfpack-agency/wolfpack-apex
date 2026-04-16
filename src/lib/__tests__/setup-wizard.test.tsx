@@ -38,7 +38,7 @@ jest.mock("@/lib/client-auth", () => ({
   getInstinctUser: () => ({ id: "u1", name: "Test User", email: "test@example.com", role: "cto" }),
   jsonHeaders: () => ({ Authorization: "Bearer test-token", "Content-Type": "application/json" }),
   authHeaders: () => ({ Authorization: "Bearer test-token" }),
-}));
+  fetchWithRefresh: jest.fn((url, opts) => fetch(url, opts)), fetchJsonWithRefresh: jest.fn(async (url, opts) => (await fetch(url, opts)).json()) }));
 
 // URL-aware fetch dispatcher
 const fetchMock = jest.fn();

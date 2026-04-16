@@ -72,8 +72,10 @@ function fakeDb(sql: string, params: unknown[] = []) {
     const row = projects.get(params[0] as string);
     return { rows: row ? [row] : [] };
   }
-  if (s.startsWith("SELECT * FROM apex_site_projects ORDER BY")) {
-    return { rows: [...projects.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at)) };
+  if (s.startsWith("SELECT * FROM apex_site_projects ORDER BY") ||
+      s.startsWith("SELECT * FROM apex_site_projects WHERE status != 'archived' ORDER BY")) {
+    const rows = [...projects.values()].filter((r) => r.status !== "archived");
+    return { rows: rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at)) };
   }
   if (s.startsWith("UPDATE apex_site_projects SET brief =")) {
     const [id, brief, display_name] = params as [string, string, string];

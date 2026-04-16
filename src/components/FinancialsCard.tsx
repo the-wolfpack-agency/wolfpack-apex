@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { authHeaders } from "@/lib/client-auth";
+import { authHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -113,7 +113,7 @@ export default function FinancialsCard() {
 
   const fetchMetrics = useCallback(async () => {
     try {
-      const res = await fetch("/api/quickbooks", {
+      const res = await fetchWithRefresh("/api/quickbooks", {
         headers: authHeaders(),
       });
       if (res.status === 401) return;
@@ -191,7 +191,7 @@ export default function FinancialsCard() {
         </p>
         <button
           onClick={async () => {
-            const res = await fetch("/api/quickbooks?action=auth-url", {
+            const res = await fetchWithRefresh("/api/quickbooks?action=auth-url", {
               headers: authHeaders(),
             });
             const data = await res.json();

@@ -203,9 +203,40 @@ export async function createSiteProject(
 
 export async function listSiteProjects(): Promise<SiteProject[]> {
   const result = await safeQuery<Record<string, unknown>>(
-    `SELECT * FROM apex_site_projects ORDER BY updated_at DESC`,
+    `SELECT * FROM apex_site_projects
+       WHERE status != 'archived'
+       ORDER BY updated_at DESC`,
   );
   return result.rows.map(rowToProject);
+}
+
+/**
+ * Soft-delete a site project. Flips status to 'archived' rather than
+ * hard-deleting so audit log, triple-write records, and deployment
+ * history remain intact. Returns the archived project (for the caller
+ * to confirm + emit audit with before-state).
+ */
+export async function deleteSiteProject(
+  id: string,
+  deletedBy: string,
+  userRole: string,
+): Promise<SiteProject | null> {
+  const before = await getSiteProject(id);
+  if (!before) return null;
+  const result = await safeQuery<Record<string, unknown>>(
+    `UPDATE apex_site_projects
+       SET status = 'archived', updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+    [id],
+  );
+  const after = result.rows.length > 0 ? rowToProject(result.rows[0]) : before;
+  trackEvent("site.archived", deletedBy, userRole, {
+    project_id: id,
+    client_slug: before.client_slug,
+    prior_status: before.status,
+  });
+  return after;
 }
 
 export async function getSiteProject(id: string): Promise<SiteProject | null> {

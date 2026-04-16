@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState, useCallback } from "react";
-import { authHeaders as canonicalAuthHeaders } from "@/lib/client-auth";
+import { authHeaders as canonicalAuthHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface Meeting {
   id: string;
@@ -57,7 +57,7 @@ export default function MeetingsPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/meetings", {
+      const res = await fetchWithRefresh("/api/meetings", {
         headers: canonicalAuthHeaders(),
       });
       if (res.status === 401) {
@@ -87,7 +87,7 @@ export default function MeetingsPage() {
     setExpandedId(id);
     if (detailCache[id]) return;
     try {
-      const res = await fetch(`/api/meetings?id=${encodeURIComponent(id)}`, {
+      const res = await fetchWithRefresh(`/api/meetings?id=${encodeURIComponent(id)}`, {
         headers: canonicalAuthHeaders(),
       });
       if (!res.ok) return;

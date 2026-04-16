@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { authHeaders } from "@/lib/client-auth";
+import { authHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 export interface PickedPerson {
   personId: string;
@@ -54,7 +54,7 @@ export default function PeopleAutocomplete({
       const params = new URLSearchParams();
       if (q) params.set("q", q);
       params.set("top", "8");
-      const res = await fetch(`/api/people/suggest?${params.toString()}`, {
+      const res = await fetchWithRefresh(`/api/people/suggest?${params.toString()}`, {
         headers: authHeaders(),
         signal: ctrl.signal,
       });

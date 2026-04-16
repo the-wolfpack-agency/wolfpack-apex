@@ -1,3 +1,4 @@
+import { fetchWithRefresh } from "@/lib/client-auth";
 "use client";
 
 /**
@@ -63,7 +64,7 @@ export default function NotebookPicker({
     setStatus("loading");
     setErrorMsg(null);
     const a = auth();
-    fetch("/api/onenote/notebooks", { headers: a ? { authorization: a } : undefined })
+    fetchWithRefresh("/api/onenote/notebooks", { headers: a ? { authorization: a } : undefined })
       .then(async (res) => {
         if (!res.ok) throw new Error(`notebooks ${res.status}`);
         const data = (await res.json()) as { notebooks?: Notebook[] };
@@ -82,7 +83,7 @@ export default function NotebookPicker({
       return;
     }
     const a = auth();
-    fetch(`/api/onenote/sections?notebookId=${encodeURIComponent(selectedNotebook)}`, {
+    fetchWithRefresh(`/api/onenote/sections?notebookId=${encodeURIComponent(selectedNotebook)}`, {
       headers: a ? { authorization: a } : undefined,
     })
       .then(async (res) => {
@@ -101,7 +102,7 @@ export default function NotebookPicker({
     setErrorMsg(null);
     try {
       const a = auth();
-      const res = await fetch("/api/onenote/pages", {
+      const res = await fetchWithRefresh("/api/onenote/pages", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { jsonHeaders } from "@/lib/client-auth";
+import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -101,7 +101,7 @@ export default function ReportsPage() {
     async function load() {
       setLoading(true);
       try {
-        const res = await fetch("/api/reports", { headers: authHeaders() });
+        const res = await fetchWithRefresh("/api/reports", { headers: authHeaders() });
         const data = await res.json();
         setTemplates(data.templates || []);
         setHistory(data.history || []);
@@ -113,7 +113,7 @@ export default function ReportsPage() {
     }
     load();
 
-    fetch("/api/analytics", {
+    fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "reports" } }),
@@ -147,7 +147,7 @@ export default function ReportsPage() {
     setGeneratedReport(null);
 
     try {
-      const res = await fetch("/api/reports", {
+      const res = await fetchWithRefresh("/api/reports", {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({
@@ -174,7 +174,7 @@ export default function ReportsPage() {
       setGeneratedReport(data);
 
       // Refresh history
-      const histRes = await fetch("/api/reports", { headers: authHeaders() });
+      const histRes = await fetchWithRefresh("/api/reports", { headers: authHeaders() });
       const histData = await histRes.json();
       setHistory(histData.history || []);
     } catch (err) {

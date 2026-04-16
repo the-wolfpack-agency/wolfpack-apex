@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { authHeaders } from "@/lib/client-auth";
+import { authHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface Presence {
   availability: string;
@@ -52,7 +52,7 @@ export default function PresenceIndicator() {
     let active = true;
     async function fetchPresence() {
       try {
-        const res = await fetch("/api/presence/me", { headers: authHeaders() });
+        const res = await fetchWithRefresh("/api/presence/me", { headers: authHeaders() });
         if (!res.ok) {
           if (active) { setPresence(null); setLoaded(true); }
           return;

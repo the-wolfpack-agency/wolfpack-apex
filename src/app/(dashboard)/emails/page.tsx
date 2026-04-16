@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { jsonHeaders } from "@/lib/client-auth";
+import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 import { ComposeDrawer } from "@/components/mail/ComposeDrawer";
 
 interface EmailTemplate {
@@ -51,7 +51,7 @@ export default function EmailsPage() {
 
   useEffect(() => {
     loadTemplates();
-    fetch("/api/analytics", {
+    fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "emails" } }),
@@ -62,7 +62,7 @@ export default function EmailsPage() {
   async function loadTemplates() {
     setLoading(true);
     try {
-      const res = await fetch("/api/emails", { headers: authHeaders() });
+      const res = await fetchWithRefresh("/api/emails", { headers: authHeaders() });
       if (!res.ok) {
         setError("Failed to load templates");
         setLoading(false);
@@ -114,7 +114,7 @@ export default function EmailsPage() {
         }
       }
 
-      const res = await fetch("/api/emails", {
+      const res = await fetchWithRefresh("/api/emails", {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify(body),

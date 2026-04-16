@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, KeyboardEvent, DragEvent, ChangeEvent } from "react";
-import { getInstinctToken, clearInstinctSession, jsonHeaders as canonicalJsonHeaders } from "@/lib/client-auth";
+import { getInstinctToken, clearInstinctSession, jsonHeaders as canonicalJsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -260,7 +260,7 @@ export default function ApexChat({
   // Load conversations list
   const loadConversations = useCallback(async () => {
     try {
-      const res = await fetch("/api/assistant?conversations=true", {
+      const res = await fetchWithRefresh("/api/assistant?conversations=true", {
         headers: authHeaders(),
       });
       if (!res.ok) return;
@@ -351,7 +351,7 @@ export default function ApexChat({
         }
       }
 
-      const res = await fetch("/api/assistant", {
+      const res = await fetchWithRefresh("/api/assistant", {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify(body),
@@ -463,7 +463,7 @@ export default function ApexChat({
     );
 
     try {
-      await fetch("/api/assistant", {
+      await fetchWithRefresh("/api/assistant", {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({
@@ -487,7 +487,7 @@ export default function ApexChat({
 
   async function loadConversation(convId: string) {
     try {
-      const res = await fetch(`/api/assistant?conversationId=${convId}`, {
+      const res = await fetchWithRefresh(`/api/assistant?conversationId=${convId}`, {
         headers: authHeaders(),
       });
       if (!res.ok) return;

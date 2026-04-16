@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, FormEvent } from "react";
-import { jsonHeaders } from "@/lib/client-auth";
+import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface KnowledgeEntry {
   id: string;
@@ -41,7 +41,7 @@ export default function KnowledgePage() {
 
   useEffect(() => {
     fetchEntries();
-    fetch("/api/analytics", {
+    fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "knowledge" } }),
@@ -73,7 +73,7 @@ export default function KnowledgePage() {
     setAsking(true);
     setAskResult(null);
     try {
-      const res = await fetch("/api/knowledge", {
+      const res = await fetchWithRefresh("/api/knowledge", {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({ question }),
@@ -94,7 +94,7 @@ export default function KnowledgePage() {
     if (selected?.id === entryId) setSelected({ ...selected, rating });
 
     // No dedicated rate endpoint yet, so just track it
-    fetch("/api/analytics", {
+    fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({

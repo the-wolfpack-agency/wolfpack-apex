@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { getInstinctToken, getInstinctUser, jsonHeaders } from "@/lib/client-auth";
+import { getInstinctToken, getInstinctUser, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 import {
   startMicrosoftConnect,
   startQuickbooksConnect,
@@ -74,7 +74,7 @@ export default function SetupPage() {
   const emitSetupEvent = useCallback(
     (event: string, extra: Record<string, string | number | boolean> = {}) => {
       const role = user?.role ?? "unknown";
-      fetch("/api/analytics", {
+      fetchWithRefresh("/api/analytics", {
         method: "POST",
         headers: jsonHeaders(),
         body: JSON.stringify({
@@ -95,7 +95,7 @@ export default function SetupPage() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/workspace/status", {
+      const res = await fetchWithRefresh("/api/workspace/status", {
         headers: jsonHeaders(),
       });
       if (res.status === 401) {
@@ -106,7 +106,7 @@ export default function SetupPage() {
         const data: WorkspaceStatus = await res.json();
         const wasIntegrationsComplete = prevIntegrationsRef.current;
         if (wasIntegrationsComplete === false && data.steps.integrations === true) {
-          fetch("/api/analytics", {
+          fetchWithRefresh("/api/analytics", {
             method: "POST",
             headers: jsonHeaders(),
             body: JSON.stringify({
@@ -152,7 +152,7 @@ export default function SetupPage() {
     fetchStatus();
 
     // Track setup started
-    fetch("/api/analytics", {
+    fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ event: "system.setup_started", metadata: { step: 0 } }),
@@ -184,7 +184,7 @@ export default function SetupPage() {
 
   function emitStepCompleted(stepIndex: number) {
     const role = user?.role ?? "unknown";
-    fetch("/api/analytics", {
+    fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({
@@ -222,7 +222,7 @@ export default function SetupPage() {
     setSaveError(null);
     setSaving(true);
     try {
-      const res = await fetch("/api/workspace", {
+      const res = await fetchWithRefresh("/api/workspace", {
         method: "PUT",
         headers: jsonHeaders(),
         body: JSON.stringify({ name: workspaceName.trim() }),
@@ -273,7 +273,7 @@ export default function SetupPage() {
       return;
     }
     try {
-      const res = await fetch("/api/team/invite", {
+      const res = await fetchWithRefresh("/api/team/invite", {
         method: "POST",
         headers: jsonHeaders(),
         body: JSON.stringify({ invites: validInvites }),

@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { authHeaders, jsonHeaders } from "@/lib/client-auth";
+import { authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 type TaskStatus = "notStarted" | "inProgress" | "completed" | "waitingOnOthers" | "deferred";
 type TaskImportance = "low" | "normal" | "high";
@@ -59,7 +59,7 @@ export default function TasksPage() {
     const params = new URLSearchParams();
     if (listFilter) params.set("listId", listFilter);
     if (search) params.set("search", search);
-    const res = await fetch(`/api/tasks${params.toString() ? "?" + params : ""}`, {
+    const res = await fetchWithRefresh(`/api/tasks${params.toString() ? "?" + params : ""}`, {
       headers: authHeaders(),
     });
     if (res.status === 401) { window.location.href = "/login"; return; }
@@ -69,7 +69,7 @@ export default function TasksPage() {
   }, [search, listFilter]);
 
   const loadLists = useCallback(async () => {
-    const res = await fetch("/api/tasks/lists", { headers: authHeaders() });
+    const res = await fetchWithRefresh("/api/tasks/lists", { headers: authHeaders() });
     if (!res.ok) return;
     const data = await res.json();
     setLists(data.lists || []);
@@ -77,7 +77,7 @@ export default function TasksPage() {
 
   const loadMsStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/integrations/status", { headers: authHeaders() });
+      const res = await fetchWithRefresh("/api/integrations/status", { headers: authHeaders() });
       if (!res.ok) { setMsConnected(false); return; }
       const data = await res.json();
       setMsConnected(!!(data?.microsoft?.connected ?? data?.microsoft));
@@ -106,7 +106,7 @@ export default function TasksPage() {
   async function handleSync() {
     setSyncing(true);
     try {
-      const res = await fetch("/api/tasks/sync", { method: "POST", headers: authHeaders() });
+      const res = await fetchWithRefresh("/api/tasks/sync", { method: "POST", headers: authHeaders() });
       if (res.ok) await loadTasks();
     } finally {
       setSyncing(false);
@@ -116,7 +116,7 @@ export default function TasksPage() {
   async function handleComplete(task: Task) {
     // Optimistic update
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: "completed" } : t)));
-    const res = await fetch(`/api/tasks/${task.id}/complete`, {
+    const res = await fetchWithRefresh(`/api/tasks/${task.id}/complete`, {
       method: "POST",
       headers: authHeaders(),
     });
@@ -287,7 +287,7 @@ function TaskDrawer({
 
   async function handleSave() {
     setSaving(true);
-    const res = await fetch(`/api/tasks/${task.id}`, {
+    const res = await fetchWithRefresh(`/api/tasks/${task.id}`, {
       method: "PATCH",
       headers: jsonHeaders(),
       body: JSON.stringify({
@@ -372,7 +372,7 @@ function NewTaskModal({
   async function handleCreate() {
     if (!title.trim() || !listId) return;
     setCreating(true);
-    const res = await fetch("/api/tasks", {
+    const res = await fetchWithRefresh("/api/tasks", {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ title, listId }),

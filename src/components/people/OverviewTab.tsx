@@ -1,3 +1,4 @@
+import { fetchWithRefresh } from "@/lib/client-auth";
 "use client";
 
 import { useEffect, useState } from "react";
@@ -12,14 +13,14 @@ export function OverviewTab() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/people/employees", { headers: authHeaders() }).then((r) => r.json()).then((d) => setEmployeeCount(d.employees?.length ?? 0)).catch(() => setEmployeeCount(0)),
-      fetch("/api/people/benefits", { headers: authHeaders() }).then((r) => r.json()).then((d) => setDocCount(d.documents?.length ?? 0)).catch(() => setDocCount(0)),
-      fetch("/api/people/insights", { headers: authHeaders() }).then((r) => r.json()).then((d) => setInsightCount(d.insights?.length ?? 0)).catch(() => setInsightCount(0)),
-      fetch("/api/people/documents", { headers: authHeaders() }).then((r) => r.json()).then((d) => {
+      fetchWithRefresh("/api/people/employees", { headers: authHeaders() }).then((r) => r.json()).then((d) => setEmployeeCount(d.employees?.length ?? 0)).catch(() => setEmployeeCount(0)),
+      fetchWithRefresh("/api/people/benefits", { headers: authHeaders() }).then((r) => r.json()).then((d) => setDocCount(d.documents?.length ?? 0)).catch(() => setDocCount(0)),
+      fetchWithRefresh("/api/people/insights", { headers: authHeaders() }).then((r) => r.json()).then((d) => setInsightCount(d.insights?.length ?? 0)).catch(() => setInsightCount(0)),
+      fetchWithRefresh("/api/people/documents", { headers: authHeaders() }).then((r) => r.json()).then((d) => {
         const docs = d.documents ?? [];
         setLinkedDocCount(docs.filter((doc: { employee_id: string | null }) => doc.employee_id != null).length);
       }).catch(() => setLinkedDocCount(0)),
-      fetch("/api/people/onboarding", { headers: authHeaders() }).then((r) => r.json()).then((d) => setOnboardingCount(d.instances?.length ?? 0)).catch(() => setOnboardingCount(0)),
+      fetchWithRefresh("/api/people/onboarding", { headers: authHeaders() }).then((r) => r.json()).then((d) => setOnboardingCount(d.instances?.length ?? 0)).catch(() => setOnboardingCount(0)),
     ]);
   }, []);
 

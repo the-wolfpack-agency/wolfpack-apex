@@ -12,7 +12,7 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 jest.mock("@/lib/client-auth", () => ({
   jsonHeaders: () => ({ Authorization: "Bearer t", "Content-Type": "application/json" }),
   authHeaders: () => ({ Authorization: "Bearer t" }),
-}));
+  fetchWithRefresh: jest.fn((url, opts) => fetch(url, opts)), fetchJsonWithRefresh: jest.fn(async (url, opts) => (await fetch(url, opts)).json()) }));
 
 import { ComposeDrawer } from "@/components/mail/ComposeDrawer";
 

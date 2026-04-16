@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, FormEvent } from "react";
-import { jsonHeaders } from "@/lib/client-auth";
+import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface FeatureRequest {
   id: string;
@@ -60,7 +60,7 @@ export default function FeaturesPage() {
 
   useEffect(() => {
     fetchFeatures();
-    fetch("/api/analytics", {
+    fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "features" } }),
@@ -71,7 +71,7 @@ export default function FeaturesPage() {
   async function fetchFeatures() {
     setLoading(true);
     try {
-      const res = await fetch("/api/features");
+      const res = await fetchWithRefresh("/api/features");
       const data = await res.json();
       setFeatures(data.features || []);
     } catch {
@@ -114,7 +114,7 @@ export default function FeaturesPage() {
     }
 
     try {
-      const res = await fetch("/api/features", {
+      const res = await fetchWithRefresh("/api/features", {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify(body),
@@ -145,7 +145,7 @@ export default function FeaturesPage() {
     setFeatures((prev) =>
       prev.map((f) => (f.id === featureId ? { ...f, votes: f.votes + 1 } : f))
     );
-    fetch("/api/analytics", {
+    fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({

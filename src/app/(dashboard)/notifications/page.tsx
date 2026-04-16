@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { authHeaders, jsonHeaders } from "@/lib/client-auth";
+import { authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface Notification {
   id: string;
@@ -71,7 +71,7 @@ export default function NotificationsPage() {
         }
         if (search) params.set("search", search);
         if (append && cursor) params.set("cursor", cursor);
-        const res = await fetch(`/api/notifications?${params.toString()}`, {
+        const res = await fetchWithRefresh(`/api/notifications?${params.toString()}`, {
           headers: authHeaders(),
         });
         if (!res.ok) return;
@@ -100,7 +100,7 @@ export default function NotificationsPage() {
 
   const loadPrefs = useCallback(async () => {
     try {
-      const res = await fetch("/api/notifications/preferences", {
+      const res = await fetchWithRefresh("/api/notifications/preferences", {
         headers: authHeaders(),
       });
       if (!res.ok) return;
@@ -117,7 +117,7 @@ export default function NotificationsPage() {
 
   async function handleClickItem(n: Notification) {
     try {
-      const res = await fetch(`/api/notifications/${n.id}/click`, {
+      const res = await fetchWithRefresh(`/api/notifications/${n.id}/click`, {
         method: "POST",
         headers: authHeaders(),
       });
@@ -131,7 +131,7 @@ export default function NotificationsPage() {
   }
 
   async function handleDismiss(id: string) {
-    await fetch(`/api/notifications/${id}/dismiss`, {
+    await fetchWithRefresh(`/api/notifications/${id}/dismiss`, {
       method: "POST",
       headers: authHeaders(),
     });
@@ -139,7 +139,7 @@ export default function NotificationsPage() {
   }
 
   async function markAll() {
-    await fetch("/api/notifications/mark-all-read", {
+    await fetchWithRefresh("/api/notifications/mark-all-read", {
       method: "POST",
       headers: authHeaders(),
     });
@@ -149,7 +149,7 @@ export default function NotificationsPage() {
   async function dismissRead() {
     const readItems = items.filter((x) => x.read_at);
     for (const it of readItems) {
-      await fetch(`/api/notifications/${it.id}/dismiss`, {
+      await fetchWithRefresh(`/api/notifications/${it.id}/dismiss`, {
         method: "POST",
         headers: authHeaders(),
       });
@@ -158,7 +158,7 @@ export default function NotificationsPage() {
   }
 
   async function savePrefs(next: Preferences) {
-    const res = await fetch("/api/notifications/preferences", {
+    const res = await fetchWithRefresh("/api/notifications/preferences", {
       method: "PUT",
       headers: jsonHeaders(),
       body: JSON.stringify(next),

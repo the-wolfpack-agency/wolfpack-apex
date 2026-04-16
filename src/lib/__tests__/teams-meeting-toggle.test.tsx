@@ -89,6 +89,7 @@ describe("TeamsMeetingToggle", () => {
     );
     await waitFor(() => expect(fetchMockTMT).toHaveBeenCalled());
     const [, init] = fetchMockTMT.mock.calls[0];
-    expect((init?.headers as any)?.authorization).toBe("Bearer custom");
+    const headers = new Headers(init?.headers ?? {});
+    expect(headers.get("authorization")).toBe("Bearer custom");
   });
 });

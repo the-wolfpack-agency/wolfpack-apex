@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, FormEvent } from "react";
-import { jsonHeaders } from "@/lib/client-auth";
+import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface Client {
   id: string;
@@ -35,7 +35,7 @@ export default function ClientsPage() {
 
   useEffect(() => {
     fetchClients();
-    fetch("/api/analytics", {
+    fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "clients" } }),
@@ -46,7 +46,7 @@ export default function ClientsPage() {
   async function fetchClients() {
     setLoading(true);
     try {
-      const res = await fetch("/api/clients");
+      const res = await fetchWithRefresh("/api/clients");
       const data = await res.json();
       setClients(data.clients || []);
     } catch {
@@ -60,7 +60,7 @@ export default function ClientsPage() {
     setSubmitting(true);
     setSubmitMsg("");
     try {
-      const res = await fetch("/api/clients", {
+      const res = await fetchWithRefresh("/api/clients", {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({

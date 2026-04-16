@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { authHeaders, jsonHeaders } from "@/lib/client-auth";
+import { authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface Group { id: string; msGroupId: string; displayName: string }
 interface Plan { id: string; msPlanId: string; title: string; groupId: string | null; msContainerType: "group" | "roster" }
@@ -56,7 +56,7 @@ export default function PlannerPage() {
   const [drawerTask, setDrawerTask] = useState<Task | null>(null);
 
   const loadGroups = useCallback(async () => {
-    const res = await fetch("/api/groups", { headers: authHeaders() });
+    const res = await fetchWithRefresh("/api/groups", { headers: authHeaders() });
     if (res.status === 401) { window.location.href = "/login"; return; }
     if (!res.ok) return;
     const data = await res.json();
@@ -65,7 +65,7 @@ export default function PlannerPage() {
 
   const loadPlans = useCallback(async () => {
     const qs = groupId ? `?groupId=${encodeURIComponent(groupId)}` : "";
-    const res = await fetch(`/api/planner/plans${qs}`, { headers: authHeaders() });
+    const res = await fetchWithRefresh(`/api/planner/plans${qs}`, { headers: authHeaders() });
     if (!res.ok) return;
     const data = await res.json();
     setPlans(data.plans || []);
@@ -73,7 +73,7 @@ export default function PlannerPage() {
 
   const loadBuckets = useCallback(async () => {
     if (!planId) { setBuckets([]); return; }
-    const res = await fetch(`/api/planner/plans/${encodeURIComponent(planId)}/buckets`, { headers: authHeaders() });
+    const res = await fetchWithRefresh(`/api/planner/plans/${encodeURIComponent(planId)}/buckets`, { headers: authHeaders() });
     if (!res.ok) { setBuckets([]); return; }
     const data = await res.json();
     setBuckets(data.buckets || []);
@@ -81,7 +81,7 @@ export default function PlannerPage() {
 
   const loadTasks = useCallback(async () => {
     if (!planId) { setTasks([]); return; }
-    const res = await fetch(`/api/planner/plans/${encodeURIComponent(planId)}/tasks`, { headers: authHeaders() });
+    const res = await fetchWithRefresh(`/api/planner/plans/${encodeURIComponent(planId)}/tasks`, { headers: authHeaders() });
     if (!res.ok) { setTasks([]); return; }
     const data = await res.json();
     setTasks(data.tasks || []);
@@ -89,7 +89,7 @@ export default function PlannerPage() {
 
   const loadStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/integrations/status", { headers: authHeaders() });
+      const res = await fetchWithRefresh("/api/integrations/status", { headers: authHeaders() });
       if (!res.ok) { setMsConnected(false); return; }
       const data = await res.json();
       setMsConnected(!!(data?.microsoft?.connected ?? data?.microsoft));
@@ -104,8 +104,8 @@ export default function PlannerPage() {
     setSyncing(true);
     try {
       // Groups first so Planner sync has groups to walk.
-      await fetch("/api/groups/sync", { method: "POST", headers: authHeaders() });
-      await fetch("/api/planner/sync", { method: "POST", headers: authHeaders() });
+      await fetchWithRefresh("/api/groups/sync", { method: "POST", headers: authHeaders() });
+      await fetchWithRefresh("/api/planner/sync", { method: "POST", headers: authHeaders() });
       await loadGroups();
       await loadPlans();
       await loadBuckets();
@@ -304,7 +304,7 @@ function TaskDrawer({
     if (!task.etag) { setErr("Missing etag — refresh the page and retry."); return; }
     setSaving(true);
     setErr(null);
-    const res = await fetch(`/api/planner/tasks/${task.id}`, {
+    const res = await fetchWithRefresh(`/api/planner/tasks/${task.id}`, {
       method: "PATCH",
       headers: jsonHeaders(),
       body: JSON.stringify({
@@ -324,7 +324,7 @@ function TaskDrawer({
   async function handleComplete() {
     if (!task.etag) { setErr("Missing etag — refresh the page and retry."); return; }
     setSaving(true);
-    const res = await fetch(`/api/planner/tasks/${task.id}/complete`, {
+    const res = await fetchWithRefresh(`/api/planner/tasks/${task.id}/complete`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ etag: task.etag }),
@@ -417,7 +417,7 @@ function NewTaskModal({
     if (!title.trim()) return;
     setCreating(true);
     setErr(null);
-    const res = await fetch("/api/planner/tasks", {
+    const res = await fetchWithRefresh("/api/planner/tasks", {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ planId, bucketId: bucketId || undefined, title }),

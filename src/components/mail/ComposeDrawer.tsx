@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { authHeaders, jsonHeaders } from "@/lib/client-auth";
+import { authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 const DRAFT_KEY = "instinct.mail.compose.draft.v1";
 
@@ -151,7 +151,7 @@ export function ComposeDrawer({ open, onClose, onSent, initialTo, initialSubject
     const bodyText = bodyRef.current?.innerText ?? "";
 
     try {
-      const res = await fetch("/api/mail/send", {
+      const res = await fetchWithRefresh("/api/mail/send", {
         method: "POST",
         headers: jsonHeaders(),
         body: JSON.stringify({

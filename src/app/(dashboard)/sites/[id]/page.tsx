@@ -1,33 +1,40 @@
 "use client";
 
 /**
- * Site detail — guided brief editor + dropzones for files & assets +
- * embedded preview iframe.
+ * Site detail — guided editor for non-technical users (Max, Meghan).
  *
- * Three drop targets:
- *   1. Brief dropzone — drag an HTML/PDF/docx → calls /api/sites/parse-brief
- *      → replaces the current brief with the parsed result. The user
- *      reviews/edits in the form before saving.
- *   2. Asset dropzone — drag image files → calls /api/sites/[id]/assets
- *      → records the upload, commits to the client repo, returns a URL
- *      that gets surfaced as a copy-paste reference.
+ * Vertical, single-column flow with a status banner that tells the user
+ * exactly what to do next. Mobile-first: collapses cleanly, no horizontal
+ * scroll. Preview shows up below the brief once a deploy has succeeded;
+ * before that, the deploy CTA is the visual anchor.
+ *
+ * Drop targets:
+ *   1. Brief dropzone — drop HTML/PDF/docx → /api/sites/parse-brief →
+ *      replaces the brief, the user reviews/saves.
+ *   2. Asset dropzone — drop images → /api/sites/[id]/assets → uploads
+ *      and commits to the client repo, returns a copy-pasteable URL.
  *   3. Generate preview button → triggers a deploy.
  *
- * UI poll loop refreshes status every 4s while a deploy is in flight so
- * the iframe appears as soon as the webhook reports back.
+ * Polls every 4s while a deploy is in flight so the iframe + Open button
+ * appear automatically when the webhook reports back.
  */
 
-import { useEffect, useState, useRef, use } from "react";
+import { useEffect, useState, useRef, use, forwardRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { BriefForm, type Brief } from "@/components/sites/BriefForm";
-import { authHeaders as canonicalAuthHeaders, jsonHeaders as canonicalJsonHeaders } from "@/lib/client-auth";
+import {
+  authHeaders as canonicalAuthHeaders,
+  jsonHeaders as canonicalJsonHeaders,
+  fetchWithRefresh,
+} from "@/lib/client-auth";
 
 interface SiteProject {
   id: string;
   client_slug: string;
   display_name: string;
   brief: Brief;
-  status: string;
+  status: "draft" | "provisioning" | "deploying" | "ready" | "failed" | string;
   preview_url: string | null;
   github_repo_url: string | null;
   last_canary_passed: boolean | null;
@@ -43,19 +50,66 @@ interface UploadedAsset {
 function authHeaders(): HeadersInit {
   return canonicalAuthHeaders();
 }
-
 function jsonHeaders(): HeadersInit {
   return canonicalJsonHeaders();
 }
 
+function statusCopy(s: string, hasPreview: boolean): { tone: "info" | "warning" | "success" | "error"; title: string; hint: string } {
+  switch (s) {
+    case "draft":
+      return {
+        tone: "info",
+        title: "Draft — not yet deployed",
+        hint: "Edit the brief below, drop in any logos or hero images, then click Generate preview.",
+      };
+    case "provisioning":
+      return {
+        tone: "warning",
+        title: "Provisioning… (~30s)",
+        hint: "Setting up the GitHub repo and Vercel project. This page refreshes automatically.",
+      };
+    case "deploying":
+      return {
+        tone: "warning",
+        title: "Deploying… (~1 min)",
+        hint: "Building the preview. The Open button will appear here when it's ready.",
+      };
+    case "ready":
+      return {
+        tone: "success",
+        title: hasPreview ? "Live — preview is ready" : "Ready",
+        hint: hasPreview
+          ? "Click Open to view the preview, or copy the link to share with the client."
+          : "Click Generate preview to publish your latest changes.",
+      };
+    case "failed":
+      return {
+        tone: "error",
+        title: "Last deploy failed",
+        hint: "Check the GitHub Actions logs from the GitHub link above, fix the brief, then try again.",
+      };
+    default:
+      return { tone: "info", title: s, hint: "" };
+  }
+}
+
+const TONE_COLORS: Record<string, { bg: string; border: string; text: string }> = {
+  info: { bg: "rgba(80, 140, 220, 0.08)", border: "rgba(80, 140, 220, 0.4)", text: "var(--wp-info, #6aa6e6)" },
+  warning: { bg: "rgba(255, 200, 80, 0.08)", border: "rgba(255, 200, 80, 0.4)", text: "var(--wp-warning, #e6b84d)" },
+  success: { bg: "rgba(80, 200, 120, 0.08)", border: "rgba(80, 200, 120, 0.4)", text: "var(--wp-success, #6dcf85)" },
+  error: { bg: "rgba(220, 80, 80, 0.08)", border: "rgba(220, 80, 80, 0.4)", text: "var(--wp-error, #e07070)" },
+};
+
 export default function SiteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const [project, setProject] = useState<SiteProject | null>(null);
   const [brief, setBrief] = useState<Brief | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deploying, setDeploying] = useState(false);
   const [parsing, setParsing] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [uploads, setUploads] = useState<UploadedAsset[]>([]);
@@ -64,13 +118,18 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
 
   async function load() {
     setLoading(true);
-    const r = await fetch(`/api/sites/${id}`, { headers: authHeaders() });
+    const r = await fetchWithRefresh(`/api/sites/${id}`, { headers: authHeaders() });
+    if (r.status === 404) {
+      setError("Site not found. It may have been archived.");
+      setLoading(false);
+      return;
+    }
     const data = await r.json();
     if (r.ok) {
       setProject(data.project);
       setBrief(data.project.brief as Brief);
     } else {
-      setError(data.error ?? "failed to load");
+      setError(data.error ?? "Failed to load this site.");
     }
     setLoading(false);
   }
@@ -91,15 +150,15 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
     setSaving(true);
     setError(null);
     setMessage(null);
-    const r = await fetch(`/api/sites/${id}`, {
+    const r = await fetchWithRefresh(`/api/sites/${id}`, {
       method: "PATCH",
       headers: jsonHeaders(),
       body: JSON.stringify({ brief }),
     });
     const data = await r.json();
-    if (!r.ok) setError(data.error ?? "save failed");
+    if (!r.ok) setError(data.error ?? "Save failed.");
     else {
-      setMessage("Saved.");
+      setMessage("Brief saved.");
       setProject(data.project);
     }
     setSaving(false);
@@ -109,14 +168,14 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
     setDeploying(true);
     setError(null);
     setMessage(null);
-    const r = await fetch(`/api/sites/${id}?action=deploy`, {
+    const r = await fetchWithRefresh(`/api/sites/${id}?action=deploy`, {
       method: "PATCH",
       headers: authHeaders(),
     });
     const data = await r.json();
-    if (!r.ok) setError(data.error ?? "deploy failed");
+    if (!r.ok) setError(data.error ?? "Deploy failed.");
     else {
-      setMessage("Deploy started — preview URL will appear when ready.");
+      setMessage("Deploy started — preview will appear when ready.");
       await load();
     }
     setDeploying(false);
@@ -129,17 +188,17 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
     const fd = new FormData();
     fd.append("file", file);
     fd.append("clientSlug", project.client_slug);
-    const r = await fetch("/api/sites/parse-brief", {
+    const r = await fetchWithRefresh("/api/sites/parse-brief", {
       method: "POST",
       headers: authHeaders(),
       body: fd,
     });
     const data = await r.json();
     if (!r.ok) {
-      setError(data.error ?? "parse failed");
+      setError(data.error ?? "Couldn't parse that file.");
     } else {
       setBrief(data.brief);
-      setMessage(`Brief parsed (${data.source}, ${data.tokensUsed} tokens). Review and Save.`);
+      setMessage(`Brief parsed (${data.source}). Review the form below and click Save.`);
     }
     setParsing(false);
   }
@@ -148,150 +207,294 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
     if (!project) return;
     const fd = new FormData();
     fd.append("file", file);
-    const r = await fetch(`/api/sites/${id}/assets`, {
+    const r = await fetchWithRefresh(`/api/sites/${id}/assets`, {
       method: "POST",
       headers: authHeaders(),
       body: fd,
     });
     const data = await r.json();
     if (!r.ok) {
-      setError(data.error ?? "upload failed");
+      setError(data.error ?? "Upload failed.");
       return;
     }
     setUploads((u) => [...u, data.asset]);
-    setMessage(`Uploaded ${data.asset.filename}${data.asset.committed ? " and committed to repo" : ""}.`);
+    setMessage(`Uploaded ${data.asset.filename}${data.asset.committed ? " — committed to repo." : "."}`);
+  }
+
+  async function handleArchive() {
+    if (!project) return;
+    if (!confirm(`Archive "${project.display_name}"? It'll disappear from the list but history stays intact.`)) return;
+    setArchiving(true);
+    const r = await fetchWithRefresh(`/api/sites/${id}`, { method: "DELETE" });
+    if (r.ok) {
+      router.push("/sites");
+    } else {
+      setError("Archive failed.");
+      setArchiving(false);
+    }
   }
 
   function copyPreview() {
     if (project?.preview_url) {
       navigator.clipboard.writeText(project.preview_url);
-      setMessage("Link copied.");
+      setMessage("Preview link copied to clipboard.");
     }
   }
 
   if (loading) return <div style={{ padding: "2rem", color: "var(--wp-text-dim)" }}>Loading…</div>;
-  if (!project || !brief) return <div style={{ padding: "2rem", color: "#c44" }}>{error ?? "Not found"}</div>;
+  if (!project || !brief) {
+    return (
+      <div style={{ padding: "2rem", color: "var(--wp-text)" }}>
+        <Link href="/sites" style={{ color: "var(--wp-text-dim)", fontSize: "0.85rem", textDecoration: "none" }}>
+          ← All sites
+        </Link>
+        <div style={{ marginTop: "1rem", color: "#c44" }}>{error ?? "Site not found."}</div>
+      </div>
+    );
+  }
+
+  const status = statusCopy(project.status, !!project.preview_url);
+  const tone = TONE_COLORS[status.tone];
+  const isDeployInFlight = project.status === "provisioning" || project.status === "deploying" || deploying;
+  const hasPreview = !!project.preview_url;
 
   return (
-    <div style={{ padding: "2rem", color: "var(--wp-text)" }}>
-      <Link href="/sites" style={{ color: "var(--wp-text-dim)", fontSize: "0.85rem", textDecoration: "none" }}>
-        ← All sites
-      </Link>
-      <h1 style={{ fontSize: "1.8rem", margin: "0.5rem 0" }}>{project.display_name}</h1>
-      <div style={{ display: "flex", gap: "1rem", alignItems: "center", color: "var(--wp-text-dim)", fontSize: "0.85rem", marginBottom: "1.5rem" }}>
+    <div style={{ maxWidth: "880px", margin: "0 auto", padding: "1.25rem 1rem 3rem", color: "var(--wp-text)" }}>
+      {/* Breadcrumb + archive */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+        <Link href="/sites" style={{ color: "var(--wp-text-dim)", fontSize: "0.85rem", textDecoration: "none" }}>
+          ← All sites
+        </Link>
+        <button
+          onClick={handleArchive}
+          disabled={archiving}
+          style={{
+            background: "transparent",
+            color: "var(--wp-text-dim)",
+            border: "1px solid var(--wp-border)",
+            padding: "0.35rem 0.75rem",
+            borderRadius: "6px",
+            fontSize: "0.75rem",
+            cursor: archiving ? "wait" : "pointer",
+          }}
+          aria-label="Archive site"
+        >
+          {archiving ? "Archiving…" : "Archive site"}
+        </button>
+      </div>
+
+      {/* Header */}
+      <h1 style={{ fontSize: "1.6rem", margin: "0.25rem 0", lineHeight: 1.2 }}>{project.display_name}</h1>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", color: "var(--wp-text-dim)", fontSize: "0.85rem", marginBottom: "1.25rem" }}>
         <span>{project.client_slug}</span>
-        <span style={{ textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--wp-gold)" }}>{project.status}</span>
         {project.github_repo_url && (
-          <a href={project.github_repo_url} target="_blank" rel="noreferrer" style={{ color: "var(--wp-gold)" }}>
-            GitHub ↗
-          </a>
+          <>
+            <span aria-hidden>·</span>
+            <a href={project.github_repo_url} target="_blank" rel="noreferrer" style={{ color: "var(--wp-gold)" }}>
+              GitHub repo ↗
+            </a>
+          </>
         )}
       </div>
 
-      <Dropzone
-        ref={briefDropRef}
-        label={parsing ? "Parsing…" : "Drop a design brief (HTML / text / Markdown) to auto-fill this site"}
-        accept=".html,.htm,.txt,.md"
-        onFile={handleParseFile}
-      />
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem", marginTop: "1.25rem" }}>
-        <div>
-          <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Brief</h2>
-          <BriefForm value={brief} onChange={setBrief} />
-          <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem" }}>
-            <button onClick={handleSave} disabled={saving} style={btnStyle()}>
-              {saving ? "Saving…" : "Save brief"}
-            </button>
-            <button onClick={handleDeploy} disabled={deploying} style={btnStyle("var(--wp-gold)")}>
-              {deploying ? "Deploying…" : "Generate preview"}
-            </button>
-          </div>
-          {error && <div style={{ color: "#c44", marginTop: "0.75rem", fontSize: "0.85rem" }}>{error}</div>}
-          {message && <div style={{ color: "var(--wp-success)", marginTop: "0.75rem", fontSize: "0.85rem" }}>{message}</div>}
-
-          <h3 style={{ fontSize: "1rem", marginTop: "1.5rem" }}>Assets</h3>
-          <Dropzone
-            ref={assetDropRef}
-            label="Drop images here to upload to this site"
-            accept="image/*"
-            onFile={handleUploadAsset}
-          />
-          {uploads.length > 0 && (
-            <ul style={{ listStyle: "none", padding: 0, marginTop: "0.5rem", fontSize: "0.8rem" }}>
-              {uploads.map((u) => (
-                <li key={u.url} style={{ padding: "0.4rem 0", borderBottom: "1px solid var(--wp-border)" }}>
-                  <code>{u.url}</code> {u.committed ? "✓ committed" : "(local only)"}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div>
-          <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Preview</h2>
-          {project.preview_url ? (
-            <>
-              <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
-                <a href={project.preview_url} target="_blank" rel="noreferrer" style={{ ...btnStyle("var(--wp-gold)"), display: "inline-block", textDecoration: "none", textAlign: "center" }}>
-                  Open ↗
-                </a>
-                <button onClick={copyPreview} style={btnStyle()}>Copy link</button>
-              </div>
-              <iframe
-                src={project.preview_url}
-                style={{ width: "100%", height: "600px", border: "1px solid var(--wp-border)", borderRadius: "6px", background: "#fff" }}
-                title={`${project.display_name} preview`}
-              />
-            </>
-          ) : (
-            <div style={{ padding: "2rem", border: "1px dashed var(--wp-border)", borderRadius: "6px", textAlign: "center", color: "var(--wp-text-dim)", minHeight: "600px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              No preview yet. Click <strong>Generate preview</strong> to deploy.
-            </div>
-          )}
-        </div>
+      {/* Status banner — tells the user what to do next */}
+      <div
+        role="status"
+        style={{
+          padding: "0.85rem 1rem",
+          background: tone.bg,
+          border: `1px solid ${tone.border}`,
+          borderRadius: "8px",
+          marginBottom: "1.5rem",
+        }}
+      >
+        <div style={{ fontWeight: 600, color: tone.text, fontSize: "0.95rem" }}>{status.title}</div>
+        {status.hint && (
+          <div style={{ fontSize: "0.85rem", color: "var(--wp-text-dim)", marginTop: "0.25rem" }}>{status.hint}</div>
+        )}
       </div>
+
+      {/* Live preview — only when there's actually a preview */}
+      {hasPreview && (
+        <section style={{ marginBottom: "2rem" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", justifyContent: "space-between", alignItems: "center", marginBottom: "0.6rem" }}>
+            <h2 style={{ fontSize: "1.05rem", margin: 0 }}>Preview</h2>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <a
+                href={project.preview_url!}
+                target="_blank"
+                rel="noreferrer"
+                style={{ ...btnStyle("var(--wp-gold)"), display: "inline-block", textDecoration: "none", textAlign: "center" }}
+              >
+                Open ↗
+              </a>
+              <button onClick={copyPreview} style={btnStyle()}>Copy link</button>
+            </div>
+          </div>
+          <iframe
+            src={project.preview_url!}
+            style={{ width: "100%", height: "min(70vh, 560px)", border: "1px solid var(--wp-border)", borderRadius: "8px", background: "#fff" }}
+            title={`${project.display_name} preview`}
+          />
+        </section>
+      )}
+
+      {/* Step 1 — Brief */}
+      <section style={{ marginBottom: "2rem" }}>
+        <SectionHeading step="1" title="Edit the brief" />
+        <p style={{ fontSize: "0.85rem", color: "var(--wp-text-dim)", marginTop: "-0.25rem", marginBottom: "0.75rem" }}>
+          Update the content for the site. Save when you&apos;re happy — that doesn&apos;t deploy yet.
+        </p>
+        <Dropzone
+          ref={briefDropRef}
+          label={parsing ? "Parsing your file…" : "Have a design brief? Drop HTML, text, or Markdown here to auto-fill"}
+          accept=".html,.htm,.txt,.md"
+          onFile={handleParseFile}
+          compact
+        />
+        <div style={{ marginTop: "1rem" }}>
+          <BriefForm value={brief} onChange={setBrief} />
+        </div>
+        <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem" }}>
+          <button onClick={handleSave} disabled={saving} style={btnStyle()}>
+            {saving ? "Saving…" : "Save brief"}
+          </button>
+        </div>
+      </section>
+
+      {/* Step 2 — Assets */}
+      <section style={{ marginBottom: "2rem" }}>
+        <SectionHeading step="2" title="Upload images (optional)" />
+        <p style={{ fontSize: "0.85rem", color: "var(--wp-text-dim)", marginTop: "-0.25rem", marginBottom: "0.75rem" }}>
+          Logos, hero photos, anything you want on the site. Drop them in and copy the URL into the brief above.
+        </p>
+        <Dropzone
+          ref={assetDropRef}
+          label="Drop image files here, or click to choose"
+          accept="image/*"
+          onFile={handleUploadAsset}
+          compact
+        />
+        {uploads.length > 0 && (
+          <ul style={{ listStyle: "none", padding: 0, marginTop: "0.75rem", fontSize: "0.8rem" }}>
+            {uploads.map((u) => (
+              <li
+                key={u.url}
+                style={{ padding: "0.5rem 0.75rem", marginBottom: "0.4rem", background: "var(--wp-card)", border: "1px solid var(--wp-border)", borderRadius: "6px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}
+              >
+                <code style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.url}</code>
+                <span style={{ color: u.committed ? "var(--wp-success)" : "var(--wp-text-dim)", flexShrink: 0 }}>
+                  {u.committed ? "✓ committed" : "(local only)"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Step 3 — Deploy */}
+      <section style={{ marginBottom: "2rem" }}>
+        <SectionHeading step="3" title={hasPreview ? "Re-deploy with your latest changes" : "Generate the preview"} />
+        <p style={{ fontSize: "0.85rem", color: "var(--wp-text-dim)", marginTop: "-0.25rem", marginBottom: "0.75rem" }}>
+          {hasPreview
+            ? "Push the saved brief and assets to a fresh build. The preview iframe above will refresh."
+            : "Build the site and publish a shareable preview URL. Takes about a minute."}
+        </p>
+        <button
+          onClick={handleDeploy}
+          disabled={isDeployInFlight}
+          style={{ ...btnStyle("var(--wp-gold)"), padding: "0.75rem 1.5rem", fontSize: "0.95rem" }}
+        >
+          {isDeployInFlight
+            ? project.status === "provisioning"
+              ? "Provisioning…"
+              : project.status === "deploying"
+              ? "Deploying…"
+              : "Starting deploy…"
+            : hasPreview
+            ? "Re-deploy"
+            : "Generate preview"}
+        </button>
+      </section>
+
+      {/* Inline status messages */}
+      {error && (
+        <div style={{ padding: "0.75rem 1rem", background: "rgba(220, 80, 80, 0.08)", border: "1px solid rgba(220, 80, 80, 0.4)", borderRadius: "6px", color: "#e07070", fontSize: "0.85rem", marginBottom: "0.75rem" }}>
+          {error}
+        </div>
+      )}
+      {message && (
+        <div style={{ padding: "0.75rem 1rem", background: "rgba(80, 200, 120, 0.08)", border: "1px solid rgba(80, 200, 120, 0.4)", borderRadius: "6px", color: "var(--wp-success, #6dcf85)", fontSize: "0.85rem" }}>
+          {message}
+        </div>
+      )}
     </div>
   );
 }
 
-import { forwardRef } from "react";
-const Dropzone = forwardRef<HTMLDivElement, { label: string; accept: string; onFile: (f: File) => void }>(
-  function Dropzone({ label, accept, onFile }, ref) {
-    const [over, setOver] = useState(false);
-    return (
-      <div
-        ref={ref}
-        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
-        onDragLeave={() => setOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setOver(false);
-          const f = e.dataTransfer.files[0];
-          if (f) onFile(f);
-        }}
+function SectionHeading({ step, title }: { step: string; title: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.4rem" }}>
+      <span
+        aria-hidden
         style={{
-          padding: "1.25rem",
-          border: `2px dashed ${over ? "var(--wp-gold)" : "var(--wp-border)"}`,
-          borderRadius: "8px",
-          textAlign: "center",
-          background: over ? "rgba(255, 215, 0, 0.05)" : "transparent",
-          transition: "all 0.15s ease",
-          cursor: "pointer",
-        }}
-        onClick={() => {
-          const input = document.createElement("input");
-          input.type = "file";
-          input.accept = accept;
-          input.onchange = () => input.files?.[0] && onFile(input.files[0]);
-          input.click();
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "1.6rem",
+          height: "1.6rem",
+          borderRadius: "50%",
+          background: "var(--wp-card)",
+          border: "1px solid var(--wp-border)",
+          color: "var(--wp-gold)",
+          fontWeight: 700,
+          fontSize: "0.8rem",
         }}
       >
-        <span style={{ color: "var(--wp-text-dim)", fontSize: "0.85rem" }}>{label}</span>
-      </div>
-    );
-  },
-);
+        {step}
+      </span>
+      <h2 style={{ fontSize: "1.05rem", margin: 0 }}>{title}</h2>
+    </div>
+  );
+}
+
+const Dropzone = forwardRef<
+  HTMLDivElement,
+  { label: string; accept: string; onFile: (f: File) => void; compact?: boolean }
+>(function Dropzone({ label, accept, onFile, compact }, ref) {
+  const [over, setOver] = useState(false);
+  return (
+    <div
+      ref={ref}
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        const f = e.dataTransfer.files[0];
+        if (f) onFile(f);
+      }}
+      style={{
+        padding: compact ? "0.85rem 1rem" : "1.25rem",
+        border: `2px dashed ${over ? "var(--wp-gold)" : "var(--wp-border)"}`,
+        borderRadius: "8px",
+        textAlign: "center",
+        background: over ? "rgba(255, 215, 0, 0.05)" : "transparent",
+        transition: "all 0.15s ease",
+        cursor: "pointer",
+      }}
+      onClick={() => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = accept;
+        input.onchange = () => input.files?.[0] && onFile(input.files[0]);
+        input.click();
+      }}
+    >
+      <span style={{ color: "var(--wp-text-dim)", fontSize: "0.85rem" }}>{label}</span>
+    </div>
+  );
+});
 
 function btnStyle(bg = "var(--wp-card)"): React.CSSProperties {
   return {

@@ -1,3 +1,4 @@
+import { fetchWithRefresh } from "@/lib/client-auth";
 "use client";
 
 /**
@@ -55,7 +56,7 @@ export default function TeamsMeetingToggle({
     async function probe() {
       try {
         const auth = (getAuthHeader ?? defaultAuth)();
-        const res = await fetch("/api/config/ms-capabilities", {
+        const res = await fetchWithRefresh("/api/config/ms-capabilities", {
           headers: auth ? { authorization: auth } : undefined,
         });
         if (cancelled) return;

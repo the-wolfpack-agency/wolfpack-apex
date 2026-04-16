@@ -2,7 +2,7 @@
 
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { setInstinctSession, authHeaders } from "@/lib/client-auth";
+import { setInstinctSession, authHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -17,7 +17,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetchWithRefresh("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -34,7 +34,7 @@ export default function LoginPage() {
       setInstinctSession(data.token, data.user);
 
       // Track page view
-      fetch("/api/analytics", {
+      fetchWithRefresh("/api/analytics", {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ event: "system.login", metadata: { page: "login" } }),
