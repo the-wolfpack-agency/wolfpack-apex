@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { jsonHeaders } from "@/lib/client-auth";
+import { ComposeDrawer } from "@/components/mail/ComposeDrawer";
 
 interface EmailTemplate {
   id: string;
@@ -42,6 +43,7 @@ export default function EmailsPage() {
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [composeOpen, setComposeOpen] = useState(false);
 
   function authHeaders(): HeadersInit {
     return jsonHeaders();
@@ -155,12 +157,34 @@ export default function EmailsPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>
-        Email Templates
-      </h1>
-      <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>
-        Generate professional client emails instantly — zero tokens, pure templates.
-      </p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>
+            Email Templates
+          </h1>
+          <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>
+            Generate professional client emails instantly — zero tokens, pure templates.
+          </p>
+        </div>
+        <button
+          type="button"
+          data-testid="compose-open"
+          onClick={() => setComposeOpen(true)}
+          style={{
+            padding: "0.55rem 1rem",
+            background: "var(--wp-gold)",
+            color: "var(--wp-dark)",
+            border: "1px solid var(--wp-border)",
+            borderRadius: "6px",
+            fontWeight: 600,
+            cursor: "pointer",
+            fontSize: "0.9rem",
+          }}
+        >
+          + New email
+        </button>
+      </div>
+      <ComposeDrawer open={composeOpen} onClose={() => setComposeOpen(false)} />
 
       {loading ? (
         <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>Loading templates...</p>

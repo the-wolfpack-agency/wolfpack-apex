@@ -1,0 +1,562 @@
+/**
+ * Microsoft 365 Mail integration (Mail.Send scope).
+ *
+ * Builds on the OAuth + token storage in `@/lib/microsoft-graph`. Handles
+ * Mail.Send sendMail + reply. On success, writes a redacted history row
+ * to instinct_sent_mail (see migration 022), records an audit entry, and
+ * emits analytics so the learning loop can track reply rates + optimal
+ * send hours.
+ *
+ * Never throws on an expected Graph failure: returns Result<T> so the API
+ * route can surface scope_missing (403), rate_limited (429), or not
+ * connected (401) distinctly. Unexpected failures are logged and returned
+ * as a generic "internal" result code — callers can 500 them.
+ *
+ * Graph surface:
+ *   POST /me/sendMail
+ *   POST /me/messages/{id}/reply
+ *
+ * Rate limits: Graph returns 429 with Retry-After — honor it exactly once
+ * (same pattern as microsoft-tasks), then surface as rate_limited.
+ */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+import { getValidToken } from "@/lib/microsoft-graph";
+import { query } from "@/lib/db";
+import { trackEvent } from "@/lib/analytics";
+import { recordAudit } from "@/lib/audit-log";
+
+// ---------------------------------------------------------------------------
+// Result type
+// ---------------------------------------------------------------------------
+
+export type MailErrorCode =
+  | "not_connected"
+  | "scope_missing"
+  | "rate_limited"
+  | "invalid_input"
+  | "graph_error"
+  | "internal";
+
+export interface MailErrorResult {
+  ok: false;
+  code: MailErrorCode;
+  /** Graph scope that is missing (scope_missing only) */
+  scope?: string;
+  /** Retry-After seconds (rate_limited only) */
+  retryAfter?: number;
+  /** Underlying Graph status, if any */
+  status?: number;
+  /** Human message (developer-facing — UI uses `code` for copy) */
+  message?: string;
+}
+
+export interface MailOkResult<T> {
+  ok: true;
+  value: T;
+}
+
+export type Result<T> = MailOkResult<T> | MailErrorResult;
+
+// ---------------------------------------------------------------------------
+// Input / output types
+// ---------------------------------------------------------------------------
+
+export interface SendMailInput {
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  bodyHtml?: string;
+  bodyText?: string;
+  saveToSentItems?: boolean;
+}
+
+export interface ReplyInput {
+  bodyHtml?: string;
+  bodyText?: string;
+}
+
+export interface SentMailSummary {
+  id: string;
+  savedToSent: boolean;
+}
+
+export interface ReplySummary {
+  id: string;
+}
+
+// ---------------------------------------------------------------------------
+// Graph helpers
+// ---------------------------------------------------------------------------
+
+const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
+const BODY_PREVIEW_MAX = 512;
+
+interface GraphCallSuccess<T> {
+  ok: true;
+  status: number;
+  headers: Headers;
+  data: T | null;
+  messageId: string | null;
+}
+
+interface GraphCallError {
+  ok: false;
+  status: number;
+  code: MailErrorCode;
+  scope?: string;
+  retryAfter?: number;
+  message: string;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function safeJson(res: Response): Promise<any | null> {
+  try { return await res.json(); } catch { return null; }
+}
+
+async function safeText(res: Response): Promise<string> {
+  try { return await res.text(); } catch { return ""; }
+}
+
+/**
+ * Normalize a Graph failure body into a scope_missing when the returned
+ * error.code is one of the standard Graph authorization codes. Graph
+ * surfaces missing-scope as 403 with code ErrorAccessDenied /
+ * Authorization_RequestDenied / ErrorAccessDeniedMissingScope.
+ */
+function classify403(body: any, fallbackScope: string): { code: MailErrorCode; scope?: string; message: string } {
+  const errCode =
+    body?.error?.code ||
+    body?.error?.innerError?.code ||
+    "";
+  const errMsg = body?.error?.message || "forbidden";
+  const isScope =
+    /AccessDenied/i.test(String(errCode)) ||
+    /Authorization_RequestDenied/i.test(String(errCode)) ||
+    /scope/i.test(errMsg) ||
+    /permission/i.test(errMsg);
+  if (isScope) {
+    return { code: "scope_missing", scope: fallbackScope, message: errMsg };
+  }
+  return { code: "graph_error", message: errMsg };
+}
+
+async function graphPost<T = unknown>(
+  endpoint: string,
+  accessToken: string,
+  body: unknown,
+  expectedScope: string,
+): Promise<GraphCallSuccess<T> | GraphCallError> {
+  const url = endpoint.startsWith("http") ? endpoint : `${GRAPH_BASE_URL}/${endpoint}`;
+
+  const doCall = () =>
+    fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+  let res: Response;
+  try {
+    res = await doCall();
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      code: "internal",
+      message: `network_error: ${(err as Error).message}`,
+    };
+  }
+
+  if (res.status === 429) {
+    const ra = parseInt(res.headers.get("Retry-After") || "0", 10);
+    const retryAfter = Number.isFinite(ra) && ra > 0 ? ra : 1;
+    await sleep(retryAfter * 1000);
+    let retry: Response;
+    try {
+      retry = await doCall();
+    } catch (err) {
+      return {
+        ok: false,
+        status: 0,
+        code: "internal",
+        retryAfter,
+        message: `network_error_after_retry: ${(err as Error).message}`,
+      };
+    }
+    if (retry.status === 429) {
+      return {
+        ok: false,
+        status: 429,
+        code: "rate_limited",
+        retryAfter,
+        message: "rate_limited_after_retry",
+      };
+    }
+    res = retry;
+  }
+
+  if (res.status === 403) {
+    const body = await safeJson(res);
+    const c = classify403(body, expectedScope);
+    return { ok: false, status: 403, code: c.code, scope: c.scope, message: c.message };
+  }
+
+  if (res.status === 401) {
+    return { ok: false, status: 401, code: "not_connected", message: "microsoft_not_connected" };
+  }
+
+  if (!res.ok) {
+    const text = await safeText(res);
+    return {
+      ok: false,
+      status: res.status,
+      code: "graph_error",
+      message: `graph_${res.status}: ${text.slice(0, 200)}`,
+    };
+  }
+
+  let data: T | null = null;
+  let messageId: string | null = res.headers.get("x-ms-message-id") || null;
+  if (res.status !== 202 && res.status !== 204) {
+    data = (await safeJson(res)) as T;
+    if (!messageId && data && typeof data === "object" && "id" in (data as any)) {
+      messageId = String((data as any).id);
+    }
+  }
+  return { ok: true, status: res.status, headers: res.headers, data, messageId };
+}
+
+// ---------------------------------------------------------------------------
+// Normalization + helpers
+// ---------------------------------------------------------------------------
+
+function normalizeRecipients(list: string[] | undefined): { emailAddress: { address: string } }[] {
+  return (list ?? [])
+    .map((e) => (typeof e === "string" ? e.trim() : ""))
+    .filter((e) => e.length > 0)
+    .map((address) => ({ emailAddress: { address } }));
+}
+
+function buildMessageBody(input: { bodyHtml?: string; bodyText?: string }): {
+  contentType: "HTML" | "Text";
+  content: string;
+} {
+  if (input.bodyHtml && input.bodyHtml.length > 0) {
+    return { contentType: "HTML", content: input.bodyHtml };
+  }
+  return { contentType: "Text", content: input.bodyText ?? "" };
+}
+
+/** Strip HTML tags, collapse whitespace, truncate to 512 chars. */
+export function truncateBodyPreview(
+  input: { bodyHtml?: string; bodyText?: string },
+  max = BODY_PREVIEW_MAX,
+): string {
+  const raw = input.bodyText ?? input.bodyHtml ?? "";
+  const stripped = raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  return stripped.length > max ? stripped.slice(0, max) : stripped;
+}
+
+function validateSendInput(input: SendMailInput): MailErrorResult | null {
+  if (!input || typeof input !== "object") {
+    return { ok: false, code: "invalid_input", message: "missing_body" };
+  }
+  const to = normalizeRecipients(input.to);
+  if (to.length === 0) {
+    return { ok: false, code: "invalid_input", message: "to_required" };
+  }
+  if (!input.subject || typeof input.subject !== "string" || input.subject.trim().length === 0) {
+    return { ok: false, code: "invalid_input", message: "subject_required" };
+  }
+  if (!input.bodyHtml && !input.bodyText) {
+    return { ok: false, code: "invalid_input", message: "body_required" };
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Cache + audit + analytics
+// ---------------------------------------------------------------------------
+
+async function recordSendHistory(params: {
+  userId: string;
+  msMessageId: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  bodyPreview: string;
+  inReplyTo: string | null;
+}): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+  try {
+    await query(
+      `INSERT INTO instinct_sent_mail
+         (user_id, ms_message_id, to_recipients, cc_recipients, bcc_recipients,
+          subject, body_preview, in_reply_to, sent_at, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), 'instinct')`,
+      [
+        params.userId,
+        params.msMessageId,
+        JSON.stringify(params.to),
+        JSON.stringify(params.cc),
+        JSON.stringify(params.bcc),
+        params.subject,
+        params.bodyPreview,
+        params.inReplyTo,
+      ],
+    );
+  } catch (err) {
+    // Never throw — history is best-effort. Log and move on.
+    console.warn("[microsoft-mail] Failed to write send history:", (err as Error).message);
+  }
+}
+
+async function auditMailSent(params: {
+  userId: string;
+  role: string;
+  action: "mail.sent" | "mail.replied";
+  msMessageId: string;
+  subject: string;
+  to: string[];
+  inReplyTo?: string | null;
+}): Promise<void> {
+  try {
+    await recordAudit({
+      actor: { user_id: params.userId, role: params.role },
+      action: params.action,
+      resourceType: "mail",
+      resourceId: params.msMessageId,
+      afterState: {
+        subject: params.subject,
+        to: params.to,
+        in_reply_to: params.inReplyTo ?? null,
+      },
+    });
+  } catch (err) {
+    console.warn("[microsoft-mail] audit record failed:", (err as Error).message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Send a new mail via Graph `POST /me/sendMail`.
+ *
+ * On success: writes instinct_sent_mail, emits system.ms_mail_sent,
+ * records audit "mail.sent". Returns { ok:true, value:{ id, savedToSent } }.
+ * The `id` is Graph's message id when exposed (x-ms-message-id header);
+ * Graph's sendMail often returns 202 with no body — in that case `id` is
+ * a synthetic `sent:<timestamp>` placeholder so caller + cache have a stable
+ * reference. Callers should treat `id` as opaque.
+ *
+ * On 403 (missing scope): returns { ok:false, code:"scope_missing",
+ * scope:"Mail.Send" } — never throws.
+ * On 429: honors Retry-After once, then returns rate_limited.
+ * On 401: returns not_connected.
+ */
+export async function sendMail(
+  userId: string,
+  input: SendMailInput,
+  role = "system",
+): Promise<Result<SentMailSummary>> {
+  const invalid = validateSendInput(input);
+  if (invalid) return invalid;
+
+  const token = await getValidToken(userId);
+  if (!token) {
+    trackEvent("system.ms_mail_send_failed", userId, role, {
+      reason: "not_connected",
+    });
+    return { ok: false, code: "not_connected", message: "microsoft_not_connected" };
+  }
+
+  const saveToSentItems = input.saveToSentItems !== false;
+
+  const message = {
+    subject: input.subject,
+    body: buildMessageBody(input),
+    toRecipients: normalizeRecipients(input.to),
+    ccRecipients: normalizeRecipients(input.cc),
+    bccRecipients: normalizeRecipients(input.bcc),
+  };
+
+  const res = await graphPost<unknown>(
+    "me/sendMail",
+    token.accessToken,
+    { message, saveToSentItems },
+    "Mail.Send",
+  );
+
+  if (!res.ok) {
+    trackEvent("system.ms_mail_send_failed", userId, role, {
+      reason: res.code,
+      status: res.status ?? 0,
+      scope: res.scope ?? "",
+    });
+    return {
+      ok: false,
+      code: res.code,
+      scope: res.scope,
+      retryAfter: res.retryAfter,
+      status: res.status,
+      message: res.message,
+    };
+  }
+
+  const msMessageId = res.messageId ?? `sent:${Date.now()}`;
+  const toList = input.to ?? [];
+  const ccList = input.cc ?? [];
+  const bccList = input.bcc ?? [];
+  const bodyPreview = truncateBodyPreview(input);
+
+  await recordSendHistory({
+    userId,
+    msMessageId,
+    to: toList,
+    cc: ccList,
+    bcc: bccList,
+    subject: input.subject,
+    bodyPreview,
+    inReplyTo: null,
+  });
+
+  await auditMailSent({
+    userId,
+    role,
+    action: "mail.sent",
+    msMessageId,
+    subject: input.subject,
+    to: toList,
+  });
+
+  trackEvent("system.ms_mail_sent", userId, role, {
+    to_count: toList.length,
+    cc_count: ccList.length,
+    bcc_count: bccList.length,
+    saved_to_sent: saveToSentItems,
+    subject_len: input.subject.length,
+    body_len: bodyPreview.length,
+  });
+
+  return { ok: true, value: { id: msMessageId, savedToSent: saveToSentItems } };
+}
+
+/**
+ * Reply to an existing thread via Graph `POST /me/messages/{id}/reply`.
+ * The reply is created + sent by Graph; we do not create a draft first.
+ *
+ * On success: writes instinct_sent_mail with in_reply_to = originalMessageId.
+ * Emits system.ms_mail_reply_sent. Audit action is "mail.replied".
+ *
+ * Same error-handling contract as sendMail.
+ */
+export async function replyToMessage(
+  userId: string,
+  originalMessageId: string,
+  input: ReplyInput,
+  role = "system",
+): Promise<Result<ReplySummary>> {
+  if (!originalMessageId || typeof originalMessageId !== "string") {
+    return { ok: false, code: "invalid_input", message: "original_message_id_required" };
+  }
+  if (!input || (!input.bodyHtml && !input.bodyText)) {
+    return { ok: false, code: "invalid_input", message: "body_required" };
+  }
+
+  const token = await getValidToken(userId);
+  if (!token) {
+    trackEvent("system.ms_mail_send_failed", userId, role, {
+      reason: "not_connected",
+      in_reply_to: originalMessageId,
+    });
+    return { ok: false, code: "not_connected", message: "microsoft_not_connected" };
+  }
+
+  // Graph's /reply endpoint takes { comment: string } OR a full message
+  // override. Prefer comment for text-only, message.body for HTML so the
+  // caller can send rich content.
+  const body: Record<string, unknown> = {};
+  if (input.bodyHtml && input.bodyHtml.length > 0) {
+    body.message = { body: { contentType: "HTML", content: input.bodyHtml } };
+  } else {
+    body.comment = input.bodyText ?? "";
+  }
+
+  const res = await graphPost<unknown>(
+    `me/messages/${encodeURIComponent(originalMessageId)}/reply`,
+    token.accessToken,
+    body,
+    "Mail.Send",
+  );
+
+  if (!res.ok) {
+    trackEvent("system.ms_mail_send_failed", userId, role, {
+      reason: res.code,
+      status: res.status ?? 0,
+      in_reply_to: originalMessageId,
+      scope: res.scope ?? "",
+    });
+    return {
+      ok: false,
+      code: res.code,
+      scope: res.scope,
+      retryAfter: res.retryAfter,
+      status: res.status,
+      message: res.message,
+    };
+  }
+
+  const msMessageId = res.messageId ?? `reply:${Date.now()}`;
+  const bodyPreview = truncateBodyPreview(input);
+
+  await recordSendHistory({
+    userId,
+    msMessageId,
+    to: [],
+    cc: [],
+    bcc: [],
+    subject: `(reply to ${originalMessageId})`,
+    bodyPreview,
+    inReplyTo: originalMessageId,
+  });
+
+  await auditMailSent({
+    userId,
+    role,
+    action: "mail.replied",
+    msMessageId,
+    subject: `(reply to ${originalMessageId})`,
+    to: [],
+    inReplyTo: originalMessageId,
+  });
+
+  trackEvent("system.ms_mail_reply_sent", userId, role, {
+    in_reply_to: originalMessageId,
+    body_len: bodyPreview.length,
+  });
+
+  return { ok: true, value: { id: msMessageId } };
+}
+
+// ---------------------------------------------------------------------------
+// Test-only helpers
+// ---------------------------------------------------------------------------
+
+export const __internal = {
+  truncateBodyPreview,
+  validateSendInput,
+  normalizeRecipients,
+  BODY_PREVIEW_MAX,
+};

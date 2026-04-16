@@ -74,7 +74,7 @@ export interface MsConnectionStatus {
 // ---------------------------------------------------------------------------
 
 const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
-const MS_SCOPES = "Calendars.Read Mail.Read Contacts.Read User.Read offline_access";
+const MS_SCOPES = "User.Read Mail.Read Mail.Send Calendars.ReadWrite Contacts.ReadWrite Tasks.ReadWrite Files.ReadWrite Chat.Read ChatMessage.Read Presence.Read People.Read Notes.ReadWrite offline_access";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /** Get the Azure AD tenant ID, defaulting to "common" for multi-tenant. */
