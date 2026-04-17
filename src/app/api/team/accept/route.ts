@@ -2,6 +2,9 @@
  * /api/team/accept — accept a team invite and set a password.
  *
  * Public endpoint (no auth required — the user is accepting an invite).
+ *
+ * PUBLIC: invite-token acceptance flow — the invitee has no session yet;
+ * identity is proven by the single-use signed token in the request body.
  */
 
 import { NextRequest, NextResponse } from "next/server";

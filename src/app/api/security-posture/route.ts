@@ -7,6 +7,9 @@
  *
  * No new markdown library added — uses the same lightweight string-replace
  * renderer already used in the docs page.
+ *
+ * PUBLIC: security posture page is intentionally reachable unauthenticated
+ * so customers and vendors can review our security practices before sign-in.
  */
 
 import { NextRequest, NextResponse } from "next/server";

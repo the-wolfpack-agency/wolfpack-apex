@@ -6,6 +6,9 @@
  *
  * The route validates the report shape, writes a system.csp_violation_reported
  * analytics event, and returns 204 (no content) so the browser is satisfied.
+ *
+ * PUBLIC: CSP spec mandates unauth — browsers post violation reports without
+ * any credentials, server must accept and respond 204.
  */
 
 import { NextRequest, NextResponse } from "next/server";
