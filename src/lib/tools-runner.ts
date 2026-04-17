@@ -154,13 +154,58 @@ export async function getRunStatus(
     return { status: "running", run_id, elapsed_ms: Date.now() - created, created_at: run.created_at };
   }
 
-  // Completed
+  // Completed — try to read result from job step output
   if (run.conclusion === "success") {
+    let result: Record<string, unknown> | undefined;
+    try {
+      const jobs = await ghApi<{
+        jobs: Array<{ id: number; steps?: Array<{ name: string; conclusion: string }> }>;
+      }>(githubToken, "GET", `/repos/${REPO}/actions/runs/${run_id}/jobs`);
+
+      if (jobs.jobs.length > 0) {
+        const jobId = jobs.jobs[0].id;
+        // Read the job logs to find the result JSON output
+        const logsRes = await fetch(`${GITHUB_API}/repos/${REPO}/actions/jobs/${jobId}/logs`, {
+          headers: {
+            Authorization: `Bearer ${githubToken}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "wolfpack-instinct-tools",
+          },
+          redirect: "manual",
+        });
+
+        let logText = "";
+        if (logsRes.status === 302) {
+          const loc = logsRes.headers.get("location");
+          if (loc) {
+            const logRes = await fetch(loc);
+            logText = await logRes.text();
+          }
+        } else if (logsRes.ok) {
+          logText = await logsRes.text();
+        }
+
+        // Find result.json content in the logs (printed by cat command)
+        const jsonMatch = logText.match(/\{[^{}]*"status"\s*:\s*"complete"[^{}]*\}/);
+        if (jsonMatch) {
+          try {
+            result = JSON.parse(jsonMatch[0]);
+          } catch {
+            // malformed JSON in logs
+          }
+        }
+      }
+    } catch {
+      // non-blocking — result stays undefined
+    }
+
     return {
       status: "completed",
       run_id,
       elapsed_ms: updated - created,
       created_at: run.created_at,
+      result,
     };
   }
 

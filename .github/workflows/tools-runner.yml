@@ -57,6 +57,7 @@ jobs:
           python -m playwright install chromium --with-deps
 
       - name: Run ${{ inputs.tool }}
+        id: tool
         env:
           TOOL: ${{ inputs.tool }}
           TARGET_URL: ${{ inputs.target_url }}
@@ -66,6 +67,9 @@ jobs:
           mkdir -p /tmp/tool-results
           python3 scripts/tools-runner-exec.py
           cat /tmp/tool-results/result.json
+          # Write result to step output so status endpoint can read it
+          # without downloading artifacts (avoids auth/redirect issues)
+          echo "result=$(cat /tmp/tool-results/result.json | jq -c .)" >> "$GITHUB_OUTPUT"
 
       - name: Upload results
         uses: actions/upload-artifact@v4
