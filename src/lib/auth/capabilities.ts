@@ -108,6 +108,10 @@ export const CAPABILITIES = {
 
   // Analytics
   "analytics.view": "View analytics dashboards",
+
+  // Tools
+  "tools.view": "View the tools dashboard",
+  "tools.run": "Run tool actions (PDF, screenshots, diff)",
 } as const;
 
 export type Capability = keyof typeof CAPABILITIES;

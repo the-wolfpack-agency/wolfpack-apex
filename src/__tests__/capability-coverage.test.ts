@@ -26,6 +26,7 @@ const PROTECTED_MODULES = [
   "journal",
   "tasks",
   "knowledge",
+  "tools",
 ];
 
 const REPO_ROOT = join(__dirname, "..", "..");

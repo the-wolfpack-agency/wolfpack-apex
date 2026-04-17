@@ -76,6 +76,8 @@ const HR: readonly Capability[] = [
   // Tasks
   "tasks.view",
   "tasks.edit",
+  // Tools (read-only)
+  "tools.view",
 ];
 
 /** Sales: clients + meetings, read-only on docs/reports, no HR/finance. */
@@ -100,6 +102,7 @@ const SALES: readonly Capability[] = [
   "emails.send",            // sales writes + sends client emails
   "tasks.view",
   "tasks.edit",
+  "tools.view",
 ];
 
 /** Ops: internal process + docs. No HR, no finance, no deploys. */
@@ -124,6 +127,7 @@ const OPS: readonly Capability[] = [
   "tasks.view",
   "tasks.view_team",        // ops coordinates team tasks
   "tasks.edit",
+  "tools.view",
 ];
 
 /** Dev: full dev surface + sites. No HR sensitive, no finance. */
@@ -155,6 +159,8 @@ const DEV: readonly Capability[] = [
   "tasks.view",
   "tasks.view_team",
   "tasks.edit",
+  "tools.view",
+  "tools.run",              // dev can run all tools
 ];
 
 /** Designer: docs + knowledge + assistant; no finance, no HR, no deploys. */
@@ -175,6 +181,7 @@ const DESIGNER: readonly Capability[] = [
   "dashboard.view",
   "tasks.view",
   "tasks.edit",
+  "tools.view",
 ];
 
 const ROLE_MAP: Record<TeamRole, readonly Capability[]> = {

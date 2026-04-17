@@ -247,7 +247,13 @@ export type ApexEventType =
   // Microsoft 365 Mailbox settings (Tier 2 · Stream B — OOO / auto-reply)
   | "system.ms_mailbox_settings_fetched"
   | "system.ms_mailbox_ooo_detected"
-  | "system.ms_mailbox_settings_failed";
+  | "system.ms_mailbox_settings_failed"
+  // Tools
+  | "tools.pdf_generated"
+  | "tools.demo_deck_captured"
+  | "tools.visual_diff_run"
+  | "tools.accessibility_checked"
+  | "tools.page_viewed";
 
 export interface ApexEvent {
   event_type: ApexEventType;
