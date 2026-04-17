@@ -48,10 +48,11 @@ jobs:
             libcairo2 libasound2t64 libxshmfence1 libxkbcommon0 \
             fonts-liberation xdg-utils 2>&1 || true
 
-      - name: Install Vibium
+      - name: Install Vibium + Playwright fallback
         run: |
-          pip install vibium
-          vibium install
+          pip install vibium playwright
+          vibium install || true
+          python -m playwright install chromium --with-deps
 
       - name: Run ${{ inputs.tool }}
         env:
