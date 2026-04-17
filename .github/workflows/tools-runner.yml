@@ -17,7 +17,7 @@ on:
         required: false
         default: 'https://wolfpack-instinct.vercel.app'
       paths:
-        description: 'Comma-separated paths (for visual-diff and accessibility)'
+        description: 'Comma-separated paths'
         required: false
         default: '/,/login,/sites,/security-posture'
       requester:
@@ -39,116 +39,26 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install AgenticQA + Vibium
+      - name: Install Vibium
         run: |
           pip install vibium
-          pip install "agenticqa @ git+https://github.com/nhomyk/AgenticQA.git#subdirectory=AgenticQA" || echo "AgenticQA not available, using local modules"
           vibium install || true
 
-      - name: Run tool
+      - name: Run ${{ inputs.tool }}
         env:
           TOOL: ${{ inputs.tool }}
           TARGET_URL: ${{ inputs.target_url }}
           PATHS: ${{ inputs.paths }}
-          REQUESTER: ${{ inputs.requester }}
         run: |
           mkdir -p /tmp/tool-results
-
-          if [ "$TOOL" = "pdf-report" ]; then
-            python3 -c "
-          import sys, json
-          sys.path.insert(0, 'src')
-          try:
-              from agenticqa.client.pdf_exporter import PDFExporter
-          except ImportError:
-              print('AgenticQA not installed, generating minimal report')
-              with open('/tmp/tool-results/result.json', 'w') as f:
-                  json.dump({'status': 'complete', 'message': 'Minimal report (AgenticQA unavailable)'}, f)
-              sys.exit(0)
-          result = PDFExporter().export_security_report('/tmp/tool-results/report.pdf')
-          with open('/tmp/tool-results/result.json', 'w') as f:
-              json.dump(result.__dict__ if hasattr(result, '__dict__') else {'status': 'complete'}, f)
-          "
-
-          elif [ "$TOOL" = "demo-deck" ]; then
-            python3 -c "
-          import json, sys, os
-          sys.path.insert(0, 'src')
-          try:
-              from agenticqa.monitoring.demo_deck import DemoDeckGenerator
-          except ImportError:
-              print('Module not available')
-              with open('/tmp/tool-results/result.json', 'w') as f:
-                  json.dump({'status': 'error', 'message': 'DemoDeckGenerator not available'}, f)
-              sys.exit(0)
-          target = os.environ.get('TARGET_URL', 'https://wolfpack-instinct.vercel.app')
-          deck = DemoDeckGenerator(target, output_dir='/tmp/tool-results/deck').capture_pages(
-              ['/login', '/', '/sites', '/security-posture']
-          )
-          with open('/tmp/tool-results/result.json', 'w') as f:
-              json.dump({
-                  'status': 'complete',
-                  'total_pages': deck.total_pages,
-                  'pages': [{'path': p.path, 'title': p.title} for p in deck.pages]
-              }, f)
-          "
-
-          elif [ "$TOOL" = "visual-diff" ]; then
-            python3 -c "
-          import json, os, sys
-          sys.path.insert(0, 'src')
-          try:
-              from agenticqa.monitoring.visual_diff import VisualDiffEngine
-          except ImportError:
-              print('Module not available')
-              with open('/tmp/tool-results/result.json', 'w') as f:
-                  json.dump({'status': 'error', 'message': 'VisualDiffEngine not available'}, f)
-              sys.exit(0)
-          target = os.environ.get('TARGET_URL', 'https://wolfpack-instinct.vercel.app')
-          paths = os.environ.get('PATHS', '/,/login').split(',')
-          report = VisualDiffEngine(target, evidence_dir='/tmp/tool-results/diff').capture_and_compare(paths)
-          with open('/tmp/tool-results/result.json', 'w') as f:
-              json.dump({
-                  'status': 'complete',
-                  'pages_checked': report.pages_checked,
-                  'pages_changed': report.pages_changed,
-                  'pages_new': report.pages_new,
-                  'diffs': [{'path': d.path, 'changed': d.changed, 'diff_percentage': d.diff_percentage} for d in report.diffs]
-              }, f)
-          "
-
-          elif [ "$TOOL" = "accessibility" ]; then
-            python3 -c "
-          import json, os, sys
-          sys.path.insert(0, 'src')
-          try:
-              from agenticqa.monitoring.accessibility_auditor import AccessibilityAuditor
-          except ImportError:
-              print('Module not available')
-              with open('/tmp/tool-results/result.json', 'w') as f:
-                  json.dump({'status': 'error', 'message': 'AccessibilityAuditor not available'}, f)
-              sys.exit(0)
-          target = os.environ.get('TARGET_URL', 'https://wolfpack-instinct.vercel.app')
-          paths = os.environ.get('PATHS', '/,/login').split(',')
-          auditor = AccessibilityAuditor(target, evidence_dir='/tmp/tool-results/a11y')
-          results = auditor.audit_pages(paths)
-          out = {
-              'status': 'complete',
-              'pages': len(results),
-              'total_issues': sum(r.total_issues for r in results),
-              'critical': sum(r.critical_count for r in results),
-              'results': [{'path': r.path, 'issues': r.total_issues, 'critical': r.critical_count} for r in results]
-          }
-          if results:
-              out['report_html'] = auditor.generate_report_section(results)
-          with open('/tmp/tool-results/result.json', 'w') as f:
-              json.dump(out, f)
-          "
-          fi
+          python3 scripts/tools-runner-exec.py
+          cat /tmp/tool-results/result.json
 
       - name: Upload results
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: tool-results-${{ inputs.tool }}-${{ github.run_id }}
           path: /tmp/tool-results/
           retention-days: 7
+          compression-level: 0

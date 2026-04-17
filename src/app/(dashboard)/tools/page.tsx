@@ -320,6 +320,27 @@ export default function ToolsPage() {
             {isActive("pdf-report") ? "Running..." : "Generate Report"}
           </button>
           <ToolStatusDisplay tool="pdf-report" state={toolStates["pdf-report"]} statusLabel={statusLabel("pdf-report")} />
+          {toolStates["pdf-report"].phase === "completed" && typeof toolStates["pdf-report"].result?.message === "string" && (
+            <div style={{ fontSize: "0.85rem", color: "var(--wp-success)", display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+              <span>{toolStates["pdf-report"].result.message as string}</span>
+              {typeof toolStates["pdf-report"].result.file_size_bytes === "number" && (
+                <span style={{ color: "var(--wp-text-dim)" }}>
+                  {Math.round(toolStates["pdf-report"].result.file_size_bytes / 1024)} KB
+                  {typeof toolStates["pdf-report"].result.pages_scanned === "number" && ` · ${toolStates["pdf-report"].result.pages_scanned} pages scanned`}
+                </span>
+              )}
+              {toolStates["pdf-report"].run_id && (
+                <a
+                  href={`https://github.com/the-wolfpack-agency/wolfpack-apex/actions/runs/${toolStates["pdf-report"].run_id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "var(--wp-gold)", fontSize: "0.8rem" }}
+                >
+                  Download from GitHub Actions ↗
+                </a>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ── Card 2: Demo Deck ─────────────────────────────────── */}
