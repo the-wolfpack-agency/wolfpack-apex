@@ -57,9 +57,19 @@ export async function GET(req: NextRequest) {
 
       // If completed and we know the tool, fetch the artifact result
       if (status.status === "completed" && tool) {
-        const result = await fetchArtifactResult(run_id, tool, token);
-        if (result) {
-          status.result = result;
+        try {
+          const result = await fetchArtifactResult(run_id, tool, token);
+          if (result) {
+            status.result = result;
+          } else {
+            status.result = { status: "complete", message: "Run completed. Artifact could not be retrieved." };
+          }
+        } catch (artifactErr) {
+          status.result = {
+            status: "complete",
+            message: "Run completed. Artifact fetch error.",
+            _debug: (artifactErr as Error).message?.slice(0, 200),
+          };
         }
       }
 

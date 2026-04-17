@@ -55,6 +55,7 @@ const cardStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: "0.75rem",
+  minHeight: "220px",
 };
 
 const btnPrimary: React.CSSProperties = {
@@ -312,6 +313,8 @@ export default function ToolsPage() {
               Last run: {formatTimeAgo(toolStates["pdf-report"].lastRun!)}
             </div>
           )}
+          <div style={{ flex: 1 }} />
+          <div style={{ flex: 1 }} />
           <button
             onClick={() => triggerTool("pdf-report")}
             disabled={isActive("pdf-report")}
@@ -382,6 +385,7 @@ export default function ToolsPage() {
               Last run: {formatTimeAgo(toolStates["demo-deck"].lastRun!)}
             </div>
           )}
+          <div style={{ flex: 1 }} />
           <button
             onClick={() => triggerTool("demo-deck", { target_url: deckTarget === "instinct" ? undefined : deckTarget })}
             disabled={isActive("demo-deck")}
@@ -430,6 +434,7 @@ export default function ToolsPage() {
               Last run: {formatTimeAgo(toolStates["visual-diff"].lastRun!)}
             </div>
           )}
+          <div style={{ flex: 1 }} />
           <button
             onClick={() => triggerTool("visual-diff")}
             disabled={isActive("visual-diff")}
@@ -477,6 +482,7 @@ export default function ToolsPage() {
               Last run: {formatTimeAgo(toolStates["accessibility"].lastRun!)}
             </div>
           )}
+          <div style={{ flex: 1 }} />
           <button
             onClick={() => triggerTool("accessibility", { paths: ["/", "/sites", "/knowledge"] })}
             disabled={isActive("accessibility")}
@@ -587,17 +593,15 @@ function ToolStatusDisplay({
   }
 
   if (state.phase === "completed" && state.result) {
-    const msg = (state.result.message as string) ?? (state.result.status as string) ?? "Complete";
-    // Only show generic completion if no inline results are rendered by the parent
-    if (!state.result.pages && !state.result.diffs && !state.result.results) {
-      return (
-        <div style={{ fontSize: "0.85rem", color: "var(--wp-success)" }}>
-          {msg}
-          {state.elapsed_ms ? ` (${Math.round(state.elapsed_ms / 1000)}s)` : ""}
-        </div>
-      );
-    }
-    return null;
+    const msg = typeof state.result.message === "string" ? state.result.message : "Complete";
+    const debug = typeof state.result._debug === "string" ? state.result._debug : "";
+    return (
+      <div style={{ fontSize: "0.85rem", color: "var(--wp-success)" }}>
+        {msg}
+        {state.elapsed_ms ? ` (${Math.round(state.elapsed_ms / 1000)}s)` : ""}
+        {debug && <div style={{ color: "var(--wp-text-dim)", fontSize: "0.75rem", marginTop: "0.2rem" }}>{debug}</div>}
+      </div>
+    );
   }
 
   return null;
