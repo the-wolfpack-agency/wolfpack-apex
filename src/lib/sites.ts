@@ -474,6 +474,41 @@ export async function recordDeployResult(
   }
 }
 
+export interface SiteDeployRow {
+  id: string;
+  project_id: string;
+  triggered_by: string;
+  workflow_run: string | null;
+  status: "pending" | "building" | "success" | "failed";
+  preview_url: string | null;
+  canary_passed: boolean | null;
+  log_excerpt: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+/**
+ * List recent deploys for a project, newest first. Used by the admin
+ * diagnostic endpoint so operators can see WHY a deploy failed instead
+ * of staring at a generic "Internal server error" banner.
+ */
+export async function listSiteDeploys(
+  projectId: string,
+  limit = 20,
+): Promise<SiteDeployRow[]> {
+  const { rows } = await safeQuery<SiteDeployRow>(
+    `SELECT id, project_id, triggered_by, workflow_run, status,
+            preview_url, canary_passed, log_excerpt,
+            started_at, finished_at
+       FROM apex_site_deploys
+      WHERE project_id = $1
+      ORDER BY started_at DESC
+      LIMIT $2`,
+    [projectId, limit],
+  );
+  return rows;
+}
+
 export async function recordPreviewView(projectId: string, viewerId: string, role: string): Promise<void> {
   trackEvent("site.preview_viewed", viewerId, role, { project_id: projectId });
 }
