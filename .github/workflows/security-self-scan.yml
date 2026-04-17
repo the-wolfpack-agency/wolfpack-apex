@@ -95,7 +95,7 @@ jobs:
       - name: Run security scan
         if: steps.pat-check.outputs.configured == 'true'
         run: |
-          python AgenticQA/scripts/run_client_scan.py . \
+          python AgenticQA/AgenticQA/scripts/run_client_scan.py . \
             --json \
             --output scan-results.json
           echo "--- Scan complete ---"
@@ -316,14 +316,14 @@ jobs:
         run: |
           # self_hack.py may not exist yet — run it if available,
           # otherwise fall back to a re-scan with --fail-on-critical
-          if [ -f AgenticQA/scripts/self_hack.py ]; then
-            python AgenticQA/scripts/self_hack.py . \
+          if [ -f AgenticQA/AgenticQA/scripts/self_hack.py ]; then
+            python AgenticQA/AgenticQA/scripts/self_hack.py . \
               --phase pentest \
               --json \
               --output pentest-results.json
           else
             echo "::warning::self_hack.py not found — running scan with --fail-on-critical as fallback"
-            python AgenticQA/scripts/run_client_scan.py . \
+            python AgenticQA/AgenticQA/scripts/run_client_scan.py . \
               --json \
               --output pentest-results.json
           fi
