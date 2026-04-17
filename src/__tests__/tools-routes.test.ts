@@ -1,19 +1,25 @@
 /**
- * Tools API route tests.
+ * Tools API route tests — GitHub Actions integration.
  *
  * Validates:
  *   - 401 without auth token
- *   - Graceful "local server required" when Python is unavailable
- *   - POST-only (GET returns 405 or route-not-found)
- *   - trackEvent fires on success path
+ *   - "not_configured" when GITHUB_TOKEN_TOOLS is unset
+ *   - POST triggers workflow dispatch via tools-runner
+ *   - GET /api/tools/status returns run status
+ *   - trackEvent fires on trigger
+ *   - Error handling when GitHub API fails
  *
- * Each of the 4 routes is tested independently.
+ * 16 tests across all 4 tool routes + the status endpoint.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 const mockTrackEvent = jest.fn();
-const mockExecSync = jest.fn();
+const mockTriggerToolRun = jest.fn();
+const mockGetRunStatus = jest.fn();
+const mockFetchArtifactResult = jest.fn();
+const mockGetLatestToolRun = jest.fn();
+let mockIsConfigured = true;
 
 // Mock analytics
 jest.mock("@/lib/analytics", () => ({
@@ -30,17 +36,13 @@ jest.mock("@/lib/triple-write", () => ({
   tripleWriteEvent: jest.fn().mockResolvedValue(undefined),
 }));
 
-// Mock child_process
-jest.mock("child_process", () => ({
-  execSync: (...args: any[]) => mockExecSync(...args),
-}));
-
-// Mock fs for pdf-report
-jest.mock("fs", () => ({
-  ...jest.requireActual("fs"),
-  existsSync: jest.fn().mockReturnValue(true),
-  readFileSync: jest.fn().mockReturnValue(Buffer.from("fake-pdf")),
-  unlinkSync: jest.fn(),
+// Mock tools-runner
+jest.mock("@/lib/tools-runner", () => ({
+  triggerToolRun: (...args: any[]) => mockTriggerToolRun(...args),
+  getRunStatus: (...args: any[]) => mockGetRunStatus(...args),
+  fetchArtifactResult: (...args: any[]) => mockFetchArtifactResult(...args),
+  getLatestToolRun: (...args: any[]) => mockGetLatestToolRun(...args),
+  isConfigured: () => mockIsConfigured,
 }));
 
 import { NextRequest } from "next/server";
@@ -48,23 +50,27 @@ import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.INSTINCT_JWT_SECRET ?? process.env.APEX_JWT_SECRET ?? "test-secret-for-dev";
 
-// Ensure env is set so auth.ts picks it up
 if (!process.env.INSTINCT_JWT_SECRET && !process.env.APEX_JWT_SECRET) {
   process.env.INSTINCT_JWT_SECRET = JWT_SECRET;
 }
 
+// Set GITHUB_TOKEN_TOOLS for the test env
+process.env.GITHUB_TOKEN_TOOLS = "ghp_test_token_for_ci";
+
 function makeToken(role = "cto") {
   return jwt.sign(
-    { id: "user-1", name: "Test User", email: "test@wolf.co", role, workspace_id: "ws-1" },
+    { userId: "user-1", name: "Test User", email: "test@wolf.co", role, workspace_id: "ws-1" },
     JWT_SECRET,
     { expiresIn: "1h" },
   );
 }
 
 function authedReq(url: string, opts: { method?: string; body?: string } = {}) {
+  const method = opts.method ?? "POST";
+  const isGet = method === "GET" || method === "HEAD";
   return new NextRequest(url, {
-    method: opts.method ?? "POST",
-    body: opts.body ?? "{}",
+    method,
+    body: isGet ? undefined : (opts.body ?? "{}"),
     headers: {
       authorization: `Bearer ${makeToken()}`,
       "content-type": "application/json",
@@ -73,17 +79,17 @@ function authedReq(url: string, opts: { method?: string; body?: string } = {}) {
 }
 
 function unauthReq(url: string, opts: { method?: string; body?: string } = {}) {
+  const method = opts.method ?? "POST";
+  const isGet = method === "GET" || method === "HEAD";
   return new NextRequest(url, {
-    method: opts.method ?? "POST",
-    body: opts.body ?? "{}",
+    method,
+    body: isGet ? undefined : (opts.body ?? "{}"),
     headers: { "content-type": "application/json" },
   });
 }
 
-// Load route handlers fresh each time
 async function loadRoute(path: string) {
   jest.resetModules();
-  // Re-apply mocks after resetModules
   jest.mock("@/lib/analytics", () => ({
     trackEvent: (...args: any[]) => mockTrackEvent(...args),
   }));
@@ -93,24 +99,26 @@ async function loadRoute(path: string) {
   jest.mock("@/lib/triple-write", () => ({
     tripleWriteEvent: jest.fn().mockResolvedValue(undefined),
   }));
-  jest.mock("child_process", () => ({
-    execSync: (...args: any[]) => mockExecSync(...args),
-  }));
-  jest.mock("fs", () => ({
-    ...jest.requireActual("fs"),
-    existsSync: jest.fn().mockReturnValue(true),
-    readFileSync: jest.fn().mockReturnValue(Buffer.from("fake-pdf")),
-    unlinkSync: jest.fn(),
+  jest.mock("@/lib/tools-runner", () => ({
+    triggerToolRun: (...args: any[]) => mockTriggerToolRun(...args),
+    getRunStatus: (...args: any[]) => mockGetRunStatus(...args),
+    fetchArtifactResult: (...args: any[]) => mockFetchArtifactResult(...args),
+    getLatestToolRun: (...args: any[]) => mockGetLatestToolRun(...args),
+    isConfigured: () => mockIsConfigured,
   }));
   return await import(`@/app/api/tools/${path}/route`);
 }
 
 const ROUTES = ["pdf-report", "demo-deck", "visual-diff", "accessibility"] as const;
 
-describe("Tools API routes", () => {
+describe("Tools API routes — GitHub Actions integration", () => {
   beforeEach(() => {
     mockTrackEvent.mockClear();
-    mockExecSync.mockClear();
+    mockTriggerToolRun.mockClear();
+    mockGetRunStatus.mockClear();
+    mockFetchArtifactResult.mockClear();
+    mockGetLatestToolRun.mockClear();
+    mockIsConfigured = true;
   });
 
   /* ── Auth: 401 without token ──────────────────────────────────── */
@@ -126,84 +134,147 @@ describe("Tools API routes", () => {
     });
   }
 
-  /* ── Python unavailable (Vercel deploy) ───────────────────────── */
+  /* ── Not configured (GITHUB_TOKEN_TOOLS missing) ─────────────── */
 
   for (const route of ROUTES) {
-    it(`POST /api/tools/${route} returns graceful message when Python unavailable`, async () => {
-      mockExecSync.mockImplementation(() => {
-        const err = new Error("spawn python3 ENOENT") as any;
-        err.code = "ENOENT";
-        throw err;
-      });
-
+    it(`POST /api/tools/${route} returns not_configured when token missing`, async () => {
+      mockIsConfigured = false;
       const mod = await loadRoute(route);
       const req = authedReq(`https://localhost/api/tools/${route}`, { method: "POST", body: "{}" });
       const res = await mod.POST(req);
       const data = await res.json();
-      expect(data.available).toBe(false);
-      expect(data.message).toContain("local development server");
+      expect(data.status).toBe("not_configured");
+      expect(data.message).toContain("contact your admin");
     });
   }
 
-  /* ── PDF report success path ──────────────────────────────────── */
+  /* ── Trigger success: workflow dispatched ─────────────────────── */
 
-  it("POST /api/tools/pdf-report returns PDF on success", async () => {
-    mockExecSync.mockReturnValue("");
+  it("POST /api/tools/pdf-report triggers workflow and returns run_id", async () => {
+    mockTriggerToolRun.mockResolvedValue({ run_id: 12345 });
     const mod = await loadRoute("pdf-report");
-    const req = authedReq("https://localhost/api/tools/pdf-report", { method: "POST", body: "{}" });
+    const req = authedReq("https://localhost/api/tools/pdf-report");
     const res = await mod.POST(req);
     expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toBe("application/pdf");
-    expect(res.headers.get("content-disposition")).toContain("attachment");
+    const data = await res.json();
+    expect(data.status).toBe("queued");
+    expect(data.run_id).toBe(12345);
+    expect(mockTriggerToolRun).toHaveBeenCalledWith(
+      "pdf-report",
+      expect.objectContaining({ requester: "user-1" }),
+      expect.any(String),
+    );
   });
 
-  /* ── Demo deck success path ───────────────────────────────────── */
-
-  it("POST /api/tools/demo-deck returns screenshot list on success", async () => {
-    mockExecSync.mockReturnValue(JSON.stringify({ screenshots: ["/tmp/a.png", "/tmp/b.png"] }));
+  it("POST /api/tools/demo-deck triggers workflow and returns run_id", async () => {
+    mockTriggerToolRun.mockResolvedValue({ run_id: 12346 });
     const mod = await loadRoute("demo-deck");
     const req = authedReq("https://localhost/api/tools/demo-deck", {
-      method: "POST",
-      body: JSON.stringify({ target: "instinct" }),
+      body: JSON.stringify({ target_url: "https://example.com" }),
     });
     const res = await mod.POST(req);
-    expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.screenshots).toHaveLength(2);
+    expect(data.status).toBe("queued");
+    expect(data.run_id).toBe(12346);
   });
 
-  /* ── Visual diff success path ─────────────────────────────────── */
-
-  it("POST /api/tools/visual-diff returns diff results on success", async () => {
-    mockExecSync.mockReturnValue(
-      JSON.stringify({ results: [{ path: "/", status: "unchanged" }, { path: "/sites", status: "changed", change_pct: 12 }] }),
-    );
+  it("POST /api/tools/visual-diff triggers workflow with paths", async () => {
+    mockTriggerToolRun.mockResolvedValue({ run_id: 12347 });
     const mod = await loadRoute("visual-diff");
-    const req = authedReq("https://localhost/api/tools/visual-diff", { method: "POST", body: "{}" });
+    const req = authedReq("https://localhost/api/tools/visual-diff", {
+      body: JSON.stringify({ paths: ["/", "/login"] }),
+    });
     const res = await mod.POST(req);
-    expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.results).toHaveLength(2);
-    expect(data.results[1].status).toBe("changed");
+    expect(data.status).toBe("queued");
+    expect(data.run_id).toBe(12347);
+    expect(mockTriggerToolRun).toHaveBeenCalledWith(
+      "visual-diff",
+      expect.objectContaining({ paths: "/,/login" }),
+      expect.any(String),
+    );
   });
 
-  /* ── Accessibility success path ───────────────────────────────── */
-
-  it("POST /api/tools/accessibility returns audit results on success", async () => {
-    mockExecSync.mockReturnValue(
-      JSON.stringify({
-        audit: { score: 85, issues: [{ rule: "color-contrast", severity: "serious", description: "Low contrast text", count: 3 }] },
-      }),
-    );
+  it("POST /api/tools/accessibility triggers workflow with paths", async () => {
+    mockTriggerToolRun.mockResolvedValue({ run_id: 12348 });
     const mod = await loadRoute("accessibility");
     const req = authedReq("https://localhost/api/tools/accessibility", {
-      method: "POST",
       body: JSON.stringify({ paths: ["/", "/sites"] }),
     });
     const res = await mod.POST(req);
-    expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.audit.score).toBe(85);
-    expect(data.audit.issues).toHaveLength(1);
+    expect(data.status).toBe("queued");
+    expect(data.run_id).toBe(12348);
+  });
+
+  /* ── Trigger failure: GitHub API error ───────────────────────── */
+
+  it("POST /api/tools/pdf-report returns 500 when trigger fails", async () => {
+    mockTriggerToolRun.mockRejectedValue(new Error("GitHub API rate limited"));
+    const mod = await loadRoute("pdf-report");
+    const req = authedReq("https://localhost/api/tools/pdf-report");
+    const res = await mod.POST(req);
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.status).toBe("failed");
+    expect(data.error).toContain("Failed to trigger workflow");
+  });
+
+  /* ── trackEvent fires on trigger ─────────────────────────────── */
+
+  it("trackEvent fires with run_id on successful trigger", async () => {
+    mockTriggerToolRun.mockResolvedValue({ run_id: 99999 });
+    const mod = await loadRoute("pdf-report");
+    const req = authedReq("https://localhost/api/tools/pdf-report");
+    await mod.POST(req);
+    // Find the tools-specific trackEvent call (system.token_verified may also fire)
+    const toolCall = mockTrackEvent.mock.calls.find(
+      (c: any[]) => c[0] === "tools.pdf_generated",
+    );
+    expect(toolCall).toBeTruthy();
+    expect(toolCall![3]).toMatchObject({ success: true, run_id: 99999 });
+  });
+
+  /* ── Status endpoint ─────────────────────────────────────────── */
+
+  it("GET /api/tools/status returns run status by run_id", async () => {
+    mockGetRunStatus.mockResolvedValue({ status: "running", run_id: 12345, elapsed_ms: 30000 });
+    const mod = await loadRoute("status");
+    const req = authedReq("https://localhost/api/tools/status?run_id=12345&tool=pdf-report", { method: "GET" });
+    const res = await mod.GET(req);
+    const data = await res.json();
+    expect(data.status).toBe("running");
+    expect(data.run_id).toBe(12345);
+  });
+
+  it("GET /api/tools/status returns latest run when only tool provided", async () => {
+    mockGetLatestToolRun.mockResolvedValue({
+      status: "completed",
+      run_id: 11111,
+      created_at: "2026-04-16T10:00:00Z",
+    });
+    mockFetchArtifactResult.mockResolvedValue({ message: "Report generated" });
+    const mod = await loadRoute("status");
+    const req = authedReq("https://localhost/api/tools/status?tool=pdf-report", { method: "GET" });
+    const res = await mod.GET(req);
+    const data = await res.json();
+    expect(data.status).toBe("completed");
+    expect(data.result).toEqual({ message: "Report generated" });
+  });
+
+  it("GET /api/tools/status returns 400 for invalid tool", async () => {
+    const mod = await loadRoute("status");
+    const req = authedReq("https://localhost/api/tools/status?tool=invalid-tool", { method: "GET" });
+    const res = await mod.GET(req);
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /api/tools/status returns not_configured when token missing", async () => {
+    mockIsConfigured = false;
+    const mod = await loadRoute("status");
+    const req = authedReq("https://localhost/api/tools/status?tool=pdf-report", { method: "GET" });
+    const res = await mod.GET(req);
+    const data = await res.json();
+    expect(data.status).toBe("not_configured");
   });
 });

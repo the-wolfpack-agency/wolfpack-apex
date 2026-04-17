@@ -4,12 +4,16 @@
  * Tools — one-click utilities for the team.
  *
  * PDF reports, site previews, visual diffs, and accessibility checks.
- * All powered by AgenticQA/Vibium Python tooling that runs locally
- * (not on Vercel). The API routes gracefully degrade when Python is
- * unavailable.
+ * All powered by GitHub Actions (tools-runner.yml) so they work from
+ * the deployed Vercel URL — no local Python required.
+ *
+ * Flow:
+ *   1. User clicks button -> POST /api/tools/<tool> -> returns run_id
+ *   2. Page polls GET /api/tools/status?run_id=X&tool=Y every 5s
+ *   3. When completed: show results inline
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   authHeaders as canonicalAuthHeaders,
   jsonHeaders as canonicalJsonHeaders,
@@ -23,32 +27,25 @@ function jsonHeaders(): HeadersInit {
   return canonicalJsonHeaders();
 }
 
-/* ─── Types ─────────────────────────────────────────────────────────── */
+/* ── Types ─────────────────────────────────────────────────────────── */
+
+type ToolName = "pdf-report" | "demo-deck" | "visual-diff" | "accessibility";
+
+interface ToolState {
+  phase: "idle" | "starting" | "queued" | "running" | "completed" | "failed" | "not_configured";
+  run_id?: number;
+  result?: Record<string, unknown>;
+  error?: string;
+  elapsed_ms?: number;
+  lastRun?: string; // ISO date of last completed run
+}
 
 interface SiteOption {
   id: string;
   display_name: string;
 }
 
-interface DiffResult {
-  path: string;
-  status: "unchanged" | "changed";
-  change_pct?: number;
-}
-
-interface A11yIssue {
-  rule: string;
-  severity: "critical" | "serious" | "moderate" | "minor";
-  description: string;
-  count: number;
-}
-
-interface A11yResult {
-  score: number;
-  issues: A11yIssue[];
-}
-
-/* ─── Shared styles ─────────────────────────────────────────────────── */
+/* ── Shared styles ─────────────────────────────────────────────────── */
 
 const cardStyle: React.CSSProperties = {
   background: "var(--wp-card)",
@@ -77,16 +74,6 @@ const btnDisabled: React.CSSProperties = {
   cursor: "not-allowed",
 };
 
-const selectStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "0.5rem 0.7rem",
-  background: "var(--wp-dark)",
-  border: "1px solid var(--wp-border)",
-  borderRadius: "6px",
-  color: "var(--wp-text)",
-  fontSize: "0.9rem",
-};
-
 const severityColors: Record<string, string> = {
   critical: "var(--wp-error, #c44)",
   serious: "var(--wp-error, #c44)",
@@ -94,31 +81,34 @@ const severityColors: Record<string, string> = {
   minor: "var(--wp-text-dim)",
 };
 
-/* ─── Component ─────────────────────────────────────────────────────── */
+const spinnerStyle: React.CSSProperties = {
+  display: "inline-block",
+  width: 16,
+  height: 16,
+  border: "2px solid var(--wp-border)",
+  borderTopColor: "var(--wp-gold)",
+  borderRadius: "50%",
+  animation: "spin 0.8s linear infinite",
+  marginRight: "0.5rem",
+  verticalAlign: "middle",
+};
+
+/* ── Component ─────────────────────────────────────────────────────── */
 
 export default function ToolsPage() {
-  // Shared
   const [sites, setSites] = useState<SiteOption[]>([]);
-
-  // Card 1: PDF Report
-  const [pdfLoading, setPdfLoading] = useState(false);
-  const [pdfMsg, setPdfMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
-
-  // Card 2: Demo Deck
   const [deckTarget, setDeckTarget] = useState("instinct");
-  const [deckLoading, setDeckLoading] = useState(false);
-  const [deckMsg, setDeckMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
-  const [deckPaths, setDeckPaths] = useState<string[]>([]);
 
-  // Card 3: Visual Diff
-  const [diffLoading, setDiffLoading] = useState(false);
-  const [diffMsg, setDiffMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
-  const [diffResults, setDiffResults] = useState<DiffResult[]>([]);
+  // Each tool gets its own state
+  const [toolStates, setToolStates] = useState<Record<ToolName, ToolState>>({
+    "pdf-report": { phase: "idle" },
+    "demo-deck": { phase: "idle" },
+    "visual-diff": { phase: "idle" },
+    "accessibility": { phase: "idle" },
+  });
 
-  // Card 4: Accessibility
-  const [a11yLoading, setA11yLoading] = useState(false);
-  const [a11yMsg, setA11yMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
-  const [a11yResult, setA11yResult] = useState<A11yResult | null>(null);
+  // Polling intervals keyed by tool
+  const pollRefs = useRef<Record<string, ReturnType<typeof setInterval> | null>>({});
 
   // Load sites for the dropdown
   useEffect(() => {
@@ -128,132 +118,174 @@ export default function ToolsPage() {
       .catch(() => {});
   }, []);
 
-  /* ── Card 1: PDF Report ─────────────────────────────────────────── */
+  // On mount, check latest run for each tool
+  useEffect(() => {
+    const tools: ToolName[] = ["pdf-report", "demo-deck", "visual-diff", "accessibility"];
+    for (const tool of tools) {
+      fetchWithRefresh(`/api/tools/status?tool=${tool}`, { headers: authHeaders() })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.status === "completed" && data.created_at) {
+            setToolStates((prev) => ({
+              ...prev,
+              [tool]: { ...prev[tool], lastRun: data.created_at, result: data.result },
+            }));
+          } else if (data.status === "not_configured") {
+            setToolStates((prev) => ({
+              ...prev,
+              [tool]: { ...prev[tool], phase: "not_configured" },
+            }));
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
 
-  async function handlePdf() {
-    setPdfLoading(true);
-    setPdfMsg(null);
-    try {
-      const r = await fetchWithRefresh("/api/tools/pdf-report", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify({}),
-      });
-      if (!r.ok) {
+  // Cleanup polls on unmount
+  useEffect(() => {
+    return () => {
+      for (const key of Object.keys(pollRefs.current)) {
+        const ref = pollRefs.current[key];
+        if (ref) clearInterval(ref);
+      }
+    };
+  }, []);
+
+  const updateTool = useCallback((tool: ToolName, update: Partial<ToolState>) => {
+    setToolStates((prev) => ({ ...prev, [tool]: { ...prev[tool], ...update } }));
+  }, []);
+
+  /* ── Poll for status ───────────────────────────────────────────── */
+
+  function startPolling(tool: ToolName, run_id: number) {
+    // Clear any existing poll for this tool
+    if (pollRefs.current[tool]) {
+      clearInterval(pollRefs.current[tool]!);
+    }
+
+    pollRefs.current[tool] = setInterval(async () => {
+      try {
+        const r = await fetchWithRefresh(
+          `/api/tools/status?run_id=${run_id}&tool=${tool}`,
+          { headers: authHeaders() },
+        );
         const data = await r.json();
-        setPdfMsg({ type: "err", text: data.message ?? data.error ?? "Failed to generate report" });
-        return;
+
+        if (data.status === "completed") {
+          clearInterval(pollRefs.current[tool]!);
+          pollRefs.current[tool] = null;
+          updateTool(tool, {
+            phase: "completed",
+            result: data.result ?? {},
+            elapsed_ms: data.elapsed_ms,
+            lastRun: data.created_at ?? new Date().toISOString(),
+          });
+        } else if (data.status === "failed") {
+          clearInterval(pollRefs.current[tool]!);
+          pollRefs.current[tool] = null;
+          updateTool(tool, {
+            phase: "failed",
+            error: data.error ?? "Workflow failed",
+            elapsed_ms: data.elapsed_ms,
+          });
+        } else if (data.status === "running" || data.status === "in_progress") {
+          updateTool(tool, { phase: "running", elapsed_ms: data.elapsed_ms });
+        } else {
+          updateTool(tool, { phase: "queued", elapsed_ms: data.elapsed_ms });
+        }
+      } catch {
+        // Network error during poll — keep trying
       }
-      // If the response is a PDF, trigger download
-      const ct = r.headers.get("content-type") ?? "";
-      if (ct.includes("application/pdf")) {
-        const blob = await r.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "instinct-security-report.pdf";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        setPdfMsg({ type: "ok", text: "Report downloaded." });
-      } else {
-        const data = await r.json();
-        setPdfMsg({ type: data.available === false ? "err" : "ok", text: data.message ?? "Done" });
-      }
-    } catch (err) {
-      setPdfMsg({ type: "err", text: `Network error: ${(err as Error).message}` });
-    } finally {
-      setPdfLoading(false);
-    }
+    }, 5000);
   }
 
-  /* ── Card 2: Demo Deck ──────────────────────────────────────────── */
+  /* ── Trigger a tool ────────────────────────────────────────────── */
 
-  async function handleDeck() {
-    setDeckLoading(true);
-    setDeckMsg(null);
-    setDeckPaths([]);
+  async function triggerTool(tool: ToolName, body: Record<string, unknown> = {}) {
+    updateTool(tool, { phase: "starting", error: undefined, result: undefined });
+
     try {
-      const r = await fetchWithRefresh("/api/tools/demo-deck", {
+      const r = await fetchWithRefresh(`/api/tools/${tool}`, {
         method: "POST",
         headers: jsonHeaders(),
-        body: JSON.stringify({ target: deckTarget }),
+        body: JSON.stringify(body),
       });
       const data = await r.json();
-      if (!r.ok || data.available === false) {
-        setDeckMsg({ type: "err", text: data.message ?? data.error ?? "Failed" });
+
+      if (data.status === "not_configured") {
+        updateTool(tool, { phase: "not_configured", error: data.message });
         return;
       }
-      setDeckPaths(data.screenshots ?? []);
-      setDeckMsg({ type: "ok", text: `Captured ${(data.screenshots ?? []).length} screenshots.` });
+
+      if (data.status === "queued" && data.run_id) {
+        updateTool(tool, { phase: "queued", run_id: data.run_id });
+        startPolling(tool, data.run_id);
+        return;
+      }
+
+      if (data.status === "failed" || data.error) {
+        updateTool(tool, { phase: "failed", error: data.error ?? data.detail ?? "Something went wrong" });
+        return;
+      }
+
+      // Unexpected response
+      updateTool(tool, { phase: "failed", error: "Unexpected response from server" });
     } catch (err) {
-      setDeckMsg({ type: "err", text: `Network error: ${(err as Error).message}` });
-    } finally {
-      setDeckLoading(false);
+      updateTool(tool, {
+        phase: "failed",
+        error: `Network error: ${(err as Error).message}`,
+      });
     }
   }
 
-  /* ── Card 3: Visual Diff ────────────────────────────────────────── */
+  /* ── Helpers ───────────────────────────────────────────────────── */
 
-  async function handleDiff() {
-    setDiffLoading(true);
-    setDiffMsg(null);
-    setDiffResults([]);
-    try {
-      const r = await fetchWithRefresh("/api/tools/visual-diff", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify({}),
-      });
-      const data = await r.json();
-      if (!r.ok || data.available === false) {
-        setDiffMsg({ type: "err", text: data.message ?? data.error ?? "Failed" });
-        return;
-      }
-      setDiffResults(data.results ?? []);
-      setDiffMsg({ type: "ok", text: `Compared ${(data.results ?? []).length} pages.` });
-    } catch (err) {
-      setDiffMsg({ type: "err", text: `Network error: ${(err as Error).message}` });
-    } finally {
-      setDiffLoading(false);
+  function isActive(tool: ToolName): boolean {
+    const phase = toolStates[tool].phase;
+    return phase === "starting" || phase === "queued" || phase === "running";
+  }
+
+  function statusLabel(tool: ToolName): string | null {
+    const st = toolStates[tool];
+    switch (st.phase) {
+      case "starting":
+        return "Starting...";
+      case "queued":
+        return "Queued — waiting for runner...";
+      case "running":
+        return `Running... (usually takes ~2 minutes)`;
+      case "completed":
+        return null; // show results instead
+      case "failed":
+        return null; // show error instead
+      case "not_configured":
+        return null; // show config message
+      default:
+        return null;
     }
   }
 
-  /* ── Card 4: Accessibility ──────────────────────────────────────── */
-
-  async function handleA11y() {
-    setA11yLoading(true);
-    setA11yMsg(null);
-    setA11yResult(null);
-    try {
-      const r = await fetchWithRefresh("/api/tools/accessibility", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify({ paths: ["/", "/sites", "/knowledge"] }),
-      });
-      const data = await r.json();
-      if (!r.ok || data.available === false) {
-        setA11yMsg({ type: "err", text: data.message ?? data.error ?? "Failed" });
-        return;
-      }
-      setA11yResult(data.audit ?? null);
-      setA11yMsg({ type: "ok", text: `Accessibility check complete.` });
-    } catch (err) {
-      setA11yMsg({ type: "err", text: `Network error: ${(err as Error).message}` });
-    } finally {
-      setA11yLoading(false);
-    }
+  function formatTimeAgo(iso: string): string {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
   }
 
-  /* ── Render ─────────────────────────────────────────────────────── */
+  /* ── Render ────────────────────────────────────────────────────── */
 
   return (
     <div style={{ padding: "2rem", color: "var(--wp-text)" }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
       <div style={{ marginBottom: "1.5rem" }}>
         <h1 style={{ fontSize: "1.8rem", margin: 0 }}>Tools</h1>
         <p style={{ color: "var(--wp-text-dim)", marginTop: "0.4rem" }}>
           One-click utilities to generate reports, capture previews, and run checks.
+          Runs are powered by GitHub Actions — results appear here when ready.
         </p>
       </div>
 
@@ -275,18 +307,19 @@ export default function ToolsPage() {
           <p style={{ color: "var(--wp-text-dim)", fontSize: "0.9rem", margin: 0 }}>
             Generate a professional PDF security report for your workspace.
           </p>
-          <button
-            onClick={handlePdf}
-            disabled={pdfLoading}
-            style={pdfLoading ? btnDisabled : btnPrimary}
-          >
-            {pdfLoading ? "Generating report..." : "Generate Report"}
-          </button>
-          {pdfMsg && (
-            <div style={{ fontSize: "0.85rem", color: pdfMsg.type === "ok" ? "var(--wp-success)" : "var(--wp-error, #c44)" }}>
-              {pdfMsg.text}
+          {toolStates["pdf-report"].lastRun && toolStates["pdf-report"].phase === "idle" && (
+            <div style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>
+              Last run: {formatTimeAgo(toolStates["pdf-report"].lastRun!)}
             </div>
           )}
+          <button
+            onClick={() => triggerTool("pdf-report")}
+            disabled={isActive("pdf-report")}
+            style={isActive("pdf-report") ? btnDisabled : btnPrimary}
+          >
+            {isActive("pdf-report") ? "Running..." : "Generate Report"}
+          </button>
+          <ToolStatusDisplay tool="pdf-report" state={toolStates["pdf-report"]} statusLabel={statusLabel("pdf-report")} />
         </div>
 
         {/* ── Card 2: Demo Deck ─────────────────────────────────── */}
@@ -304,7 +337,15 @@ export default function ToolsPage() {
           <select
             value={deckTarget}
             onChange={(e) => setDeckTarget(e.target.value)}
-            style={selectStyle}
+            style={{
+              width: "100%",
+              padding: "0.5rem 0.7rem",
+              background: "var(--wp-dark)",
+              border: "1px solid var(--wp-border)",
+              borderRadius: "6px",
+              color: "var(--wp-text)",
+              fontSize: "0.9rem",
+            }}
           >
             <option value="instinct">Instinct Dashboard</option>
             {sites.map((s) => (
@@ -313,21 +354,23 @@ export default function ToolsPage() {
               </option>
             ))}
           </select>
-          <button
-            onClick={handleDeck}
-            disabled={deckLoading}
-            style={deckLoading ? btnDisabled : btnPrimary}
-          >
-            {deckLoading ? "Capturing..." : "Capture Preview"}
-          </button>
-          {deckMsg && (
-            <div style={{ fontSize: "0.85rem", color: deckMsg.type === "ok" ? "var(--wp-success)" : "var(--wp-error, #c44)" }}>
-              {deckMsg.text}
+          {toolStates["demo-deck"].lastRun && toolStates["demo-deck"].phase === "idle" && (
+            <div style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>
+              Last run: {formatTimeAgo(toolStates["demo-deck"].lastRun!)}
             </div>
           )}
-          {deckPaths.length > 0 && (
+          <button
+            onClick={() => triggerTool("demo-deck", { target_url: deckTarget === "instinct" ? undefined : deckTarget })}
+            disabled={isActive("demo-deck")}
+            style={isActive("demo-deck") ? btnDisabled : btnPrimary}
+          >
+            {isActive("demo-deck") ? "Running..." : "Capture Preview"}
+          </button>
+          <ToolStatusDisplay tool="demo-deck" state={toolStates["demo-deck"]} statusLabel={statusLabel("demo-deck")} />
+          {/* Show pages from result */}
+          {Array.isArray(toolStates["demo-deck"].result?.pages) && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: "0.5rem", marginTop: "0.5rem" }}>
-              {deckPaths.map((p, i) => (
+              {(toolStates["demo-deck"].result.pages as Array<{ path: string; title?: string }>).map((p, i) => (
                 <div
                   key={i}
                   style={{
@@ -341,7 +384,7 @@ export default function ToolsPage() {
                     wordBreak: "break-all",
                   }}
                 >
-                  {p.split("/").pop()}
+                  {p.title ?? p.path}
                 </div>
               ))}
             </div>
@@ -359,19 +402,21 @@ export default function ToolsPage() {
           <p style={{ color: "var(--wp-text-dim)", fontSize: "0.9rem", margin: 0 }}>
             Compare current pages against the last capture to spot unexpected changes.
           </p>
-          <button
-            onClick={handleDiff}
-            disabled={diffLoading}
-            style={diffLoading ? btnDisabled : btnPrimary}
-          >
-            {diffLoading ? "Running..." : "Run Check"}
-          </button>
-          {diffMsg && (
-            <div style={{ fontSize: "0.85rem", color: diffMsg.type === "ok" ? "var(--wp-success)" : "var(--wp-error, #c44)" }}>
-              {diffMsg.text}
+          {toolStates["visual-diff"].lastRun && toolStates["visual-diff"].phase === "idle" && (
+            <div style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>
+              Last run: {formatTimeAgo(toolStates["visual-diff"].lastRun!)}
             </div>
           )}
-          {diffResults.length > 0 && (
+          <button
+            onClick={() => triggerTool("visual-diff")}
+            disabled={isActive("visual-diff")}
+            style={isActive("visual-diff") ? btnDisabled : btnPrimary}
+          >
+            {isActive("visual-diff") ? "Running..." : "Run Check"}
+          </button>
+          <ToolStatusDisplay tool="visual-diff" state={toolStates["visual-diff"]} statusLabel={statusLabel("visual-diff")} />
+          {/* Show diff results table */}
+          {Array.isArray(toolStates["visual-diff"].result?.diffs) && (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem", marginTop: "0.5rem" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--wp-border)" }}>
@@ -380,11 +425,11 @@ export default function ToolsPage() {
                 </tr>
               </thead>
               <tbody>
-                {diffResults.map((d, i) => (
+                {(toolStates["visual-diff"].result.diffs as Array<{ path: string; changed: boolean; diff_percentage?: number }>).map((d, i) => (
                   <tr key={i} style={{ borderBottom: "1px solid var(--wp-border)" }}>
                     <td style={{ padding: "0.4rem 0.5rem" }}>{d.path}</td>
-                    <td style={{ padding: "0.4rem 0.5rem", textAlign: "right", color: d.status === "unchanged" ? "var(--wp-success)" : "var(--wp-error, #c44)" }}>
-                      {d.status === "unchanged" ? "No changes" : `Changed — ${d.change_pct ?? 0}%`}
+                    <td style={{ padding: "0.4rem 0.5rem", textAlign: "right", color: !d.changed ? "var(--wp-success)" : "var(--wp-error, #c44)" }}>
+                      {!d.changed ? "No changes" : `Changed — ${d.diff_percentage ?? 0}%`}
                     </td>
                   </tr>
                 ))}
@@ -404,19 +449,21 @@ export default function ToolsPage() {
           <p style={{ color: "var(--wp-text-dim)", fontSize: "0.9rem", margin: 0 }}>
             Check your pages for accessibility issues that affect screen readers and keyboard users.
           </p>
-          <button
-            onClick={handleA11y}
-            disabled={a11yLoading}
-            style={a11yLoading ? btnDisabled : btnPrimary}
-          >
-            {a11yLoading ? "Running..." : "Run Check"}
-          </button>
-          {a11yMsg && (
-            <div style={{ fontSize: "0.85rem", color: a11yMsg.type === "ok" ? "var(--wp-success)" : "var(--wp-error, #c44)" }}>
-              {a11yMsg.text}
+          {toolStates["accessibility"].lastRun && toolStates["accessibility"].phase === "idle" && (
+            <div style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>
+              Last run: {formatTimeAgo(toolStates["accessibility"].lastRun!)}
             </div>
           )}
-          {a11yResult && (
+          <button
+            onClick={() => triggerTool("accessibility", { paths: ["/", "/sites", "/knowledge"] })}
+            disabled={isActive("accessibility")}
+            style={isActive("accessibility") ? btnDisabled : btnPrimary}
+          >
+            {isActive("accessibility") ? "Running..." : "Run Check"}
+          </button>
+          <ToolStatusDisplay tool="accessibility" state={toolStates["accessibility"]} statusLabel={statusLabel("accessibility")} />
+          {/* Show accessibility results */}
+          {Array.isArray(toolStates["accessibility"].result?.results) && (
             <div style={{ marginTop: "0.5rem" }}>
               <div
                 style={{
@@ -425,46 +472,110 @@ export default function ToolsPage() {
                   borderRadius: "6px",
                   fontWeight: 700,
                   fontSize: "1.3rem",
-                  color: a11yResult.score >= 90 ? "var(--wp-success)" : a11yResult.score >= 70 ? "var(--wp-warning, #e8a838)" : "var(--wp-error, #c44)",
+                  color:
+                    (toolStates["accessibility"].result.critical as number) === 0
+                      ? "var(--wp-success)"
+                      : "var(--wp-error, #c44)",
                   background: "var(--wp-dark)",
                   border: "1px solid var(--wp-border)",
                   marginBottom: "0.75rem",
                 }}
               >
-                Score: {a11yResult.score}/100
+                {toolStates["accessibility"].result.total_issues as number} issues
+                {(toolStates["accessibility"].result.critical as number) > 0 &&
+                  ` (${toolStates["accessibility"].result.critical} critical)`}
               </div>
-              {a11yResult.issues.length === 0 ? (
-                <p style={{ color: "var(--wp-success)", fontSize: "0.85rem", margin: 0 }}>
-                  No issues found. Great job!
-                </p>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                  {a11yResult.issues.map((issue, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        padding: "0.5rem 0.7rem",
-                        background: "var(--wp-dark)",
-                        border: "1px solid var(--wp-border)",
-                        borderRadius: "4px",
-                        fontSize: "0.85rem",
-                      }}
-                    >
-                      <span style={{ fontWeight: 600, color: severityColors[issue.severity] ?? "var(--wp-text-dim)" }}>
-                        {issue.severity.toUpperCase()}
-                      </span>
-                      {" "}
-                      <span style={{ color: "var(--wp-text-dim)" }}>({issue.count}x)</span>
-                      {" — "}
-                      {issue.description}
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                {(toolStates["accessibility"].result.results as Array<{ path: string; issues: number; critical: number }>).map((r, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      padding: "0.5rem 0.7rem",
+                      background: "var(--wp-dark)",
+                      border: "1px solid var(--wp-border)",
+                      borderRadius: "4px",
+                      fontSize: "0.85rem",
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, color: r.critical > 0 ? severityColors.critical : "var(--wp-success)" }}>
+                      {r.path}
+                    </span>
+                    {" — "}
+                    <span style={{ color: "var(--wp-text-dim)" }}>
+                      {r.issues} issues{r.critical > 0 ? ` (${r.critical} critical)` : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
       </div>
     </div>
   );
+}
+
+/* ── Status display sub-component ──────────────────────────────────── */
+
+function ToolStatusDisplay({
+  tool: _tool,
+  state,
+  statusLabel,
+}: {
+  tool: ToolName;
+  state: ToolState;
+  statusLabel: string | null;
+}) {
+  if (state.phase === "not_configured") {
+    return (
+      <div style={{ fontSize: "0.85rem", color: "var(--wp-warning, #e8a838)" }}>
+        Tools are being set up — contact your admin.
+      </div>
+    );
+  }
+
+  if (statusLabel) {
+    return (
+      <div style={{ fontSize: "0.85rem", color: "var(--wp-text-dim)", display: "flex", alignItems: "center" }}>
+        <span
+          style={{
+            display: "inline-block",
+            width: 16,
+            height: 16,
+            border: "2px solid var(--wp-border)",
+            borderTopColor: "var(--wp-gold)",
+            borderRadius: "50%",
+            animation: "spin 0.8s linear infinite",
+            marginRight: "0.5rem",
+            verticalAlign: "middle",
+          }}
+        />
+        {statusLabel}
+      </div>
+    );
+  }
+
+  if (state.phase === "failed") {
+    return (
+      <div style={{ fontSize: "0.85rem", color: "var(--wp-error, #c44)" }}>
+        Something went wrong — try again. {state.error ? `(${state.error})` : ""}
+      </div>
+    );
+  }
+
+  if (state.phase === "completed" && state.result) {
+    const msg = (state.result.message as string) ?? (state.result.status as string) ?? "Complete";
+    // Only show generic completion if no inline results are rendered by the parent
+    if (!state.result.pages && !state.result.diffs && !state.result.results) {
+      return (
+        <div style={{ fontSize: "0.85rem", color: "var(--wp-success)" }}>
+          {msg}
+          {state.elapsed_ms ? ` (${Math.round(state.elapsed_ms / 1000)}s)` : ""}
+        </div>
+      );
+    }
+    return null;
+  }
+
+  return null;
 }

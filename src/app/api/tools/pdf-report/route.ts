@@ -1,72 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
-import { execSync } from "child_process";
-import { readFileSync, existsSync, unlinkSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
-
-const LOCAL_ONLY_MSG =
-  "This tool requires the local development server with Python and Vibium installed. Run 'npm run dev' on your machine.";
+import { triggerToolRun, isConfigured } from "@/lib/tools-runner";
 
 export async function POST(req: NextRequest) {
   const auth = await requireCapability(req, "tools.run");
   if (!auth.ok) return auth.response;
   const user = auth.user;
 
-  const outPath = join(tmpdir(), `instinct-report-${Date.now()}.pdf`);
+  if (!isConfigured()) {
+    return NextResponse.json({
+      status: "not_configured",
+      message: "Tools are being set up — contact your admin to configure GITHUB_TOKEN_TOOLS.",
+    });
+  }
+
+  let body: { target_url?: string } = {};
+  try {
+    body = await req.json();
+  } catch {
+    // empty body is fine
+  }
+
+  const token = process.env.GITHUB_TOKEN_TOOLS!;
 
   try {
-    execSync(
-      `python3 -c "
-from agenticqa.client.pdf_exporter import PDFExporter
-e = PDFExporter()
-e.export_security_report('${outPath}')
-"`,
-      {
-        timeout: 60_000,
-        env: {
-          ...process.env,
-          PYTHONPATH: join(process.cwd(), "..", "AgenticQA", "src"),
-        },
-      },
+    const result = await triggerToolRun(
+      "pdf-report",
+      { target_url: body.target_url, requester: user.id },
+      token,
     );
 
-    if (!existsSync(outPath)) {
-      trackEvent("tools.pdf_generated", user.id, user.role, { success: false });
-      return NextResponse.json(
-        { error: "Report generation completed but no file was produced" },
-        { status: 500 },
-      );
+    if ("error" in result) {
+      trackEvent("tools.pdf_generated", user.id, user.role, { success: false, error: result.error });
+      return NextResponse.json({ status: "failed", error: result.error }, { status: 500 });
     }
 
-    const pdf = readFileSync(outPath);
-    unlinkSync(outPath);
-
-    trackEvent("tools.pdf_generated", user.id, user.role, { success: true, bytes: pdf.length });
-
-    return new NextResponse(pdf, {
-      status: 200,
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": 'attachment; filename="instinct-security-report.pdf"',
-      },
-    });
+    trackEvent("tools.pdf_generated", user.id, user.role, { success: true, run_id: result.run_id });
+    return NextResponse.json({ status: "queued", run_id: result.run_id });
   } catch (err) {
     const msg = (err as Error).message ?? "";
-    // Python not available (Vercel) or Vibium not installed
-    if (
-      msg.includes("ENOENT") ||
-      msg.includes("python3") ||
-      msg.includes("ModuleNotFoundError") ||
-      msg.includes("No such file")
-    ) {
-      return NextResponse.json({ available: false, message: LOCAL_ONLY_MSG });
-    }
-
     trackEvent("tools.pdf_generated", user.id, user.role, { success: false, error: msg.slice(0, 200) });
     return NextResponse.json(
-      { error: "Report generation failed", detail: msg.slice(0, 300) },
+      { status: "failed", error: "Failed to trigger workflow", detail: msg.slice(0, 300) },
       { status: 500 },
     );
   }
