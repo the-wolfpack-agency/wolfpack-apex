@@ -11,6 +11,7 @@
  */
 
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
+import { queryBrain, markCited as markBrainCited } from "@/lib/brain/query";
 import { searchMeetingTranscripts } from "@/lib/plaud";
 
 import { trackEvent } from "@/lib/analytics";
@@ -24,6 +25,7 @@ export type AssistantSource =
   | "knowledge_cache"
   | "analytics"
   | "meeting_transcripts"
+  | "brain"
   | "ai"
   | "fallback";
 
@@ -344,7 +346,38 @@ export async function chat(
     };
   }
 
-  // --- Priority 4: AI call ---
+  // --- Priority 4: Central Brain (RAG over user-uploaded docs) ---
+  // Fires before AI fallback so the assistant grounds answers in real
+  // company docs when it can. If the top hit is strong enough
+  // (score >= 0.5 OR keyword+semantic match), we return a citation-
+  // linked answer at zero model tokens. Otherwise we pass the hits as
+  // context to the AI call below via pageContext.
+  const brainResult = await tryBrain(message, userId, userRole, convId);
+  if (brainResult) {
+    trackEvent("knowledge.answer_found", userId, userRole, {
+      source: "brain",
+      tokens_used: brainResult.tokensUsed,
+      module: "assistant",
+    });
+    trackEvent("system.ai_call_skipped", userId, userRole, {
+      reason: "brain_hit",
+      module: "assistant",
+    });
+    await markBrainCited(brainResult.queryLogId, userId, userRole);
+
+    const msgId = await dbSaveMessage(convId, "assistant", brainResult.answer, "brain", brainResult.tokensUsed);
+    await dbUpdateConversationStats(convId, brainResult.tokensUsed);
+
+    return {
+      response: brainResult.answer,
+      source: "brain",
+      tokensUsed: brainResult.tokensUsed,
+      conversationId: convId,
+      messageId: msgId,
+    };
+  }
+
+  // --- Priority 5: AI call ---
   trackEvent("knowledge.answer_not_found", userId, userRole, {
     question_length: message.length,
     module: "assistant",
@@ -733,7 +766,82 @@ async function tryMeetingTranscripts(message: string): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
-// Priority 4: AI call
+// Priority 4: Central Brain (user-ingested docs)
+// ---------------------------------------------------------------------------
+
+interface BrainHitAnswer {
+  answer: string;
+  tokensUsed: number;
+  queryLogId: number;
+}
+
+/**
+ * Query the Brain's keyword+semantic retrieval. Returns a formatted
+ * answer ONLY when at least one hit crosses the confidence threshold
+ * (semantic or keyword+semantic hit, OR pure keyword with score >= 0.05).
+ * Otherwise returns null so the chain falls through to the AI call.
+ *
+ * The returned string is already formatted with markdown citations so
+ * the chat UI can render source links without extra wiring.
+ */
+async function tryBrain(
+  message: string,
+  userId: string,
+  userRole: string,
+  conversationId: string,
+): Promise<BrainHitAnswer | null> {
+  try {
+    const result = await queryBrain({
+      userId,
+      userRole,
+      query: message,
+      limit: 5,
+      conversationId,
+    });
+    if (result.hits.length === 0) return null;
+
+    // Gate: require either a semantic-blended hit OR a keyword hit with
+    // reasonable tsrank score. ts_rank_cd returns values typically in
+    // [0, 1]; 0.05 is a conservative floor that filters out barely-
+    // tangential chunks without missing real signal.
+    const strong = result.hits.filter((h) => {
+      if (h.source.includes("semantic")) return true;
+      return h.score >= 0.05;
+    });
+    if (strong.length === 0) return null;
+
+    // Format zero-LLM-token response. The assistant chat UI already
+    // renders markdown citations; we include a "Sources" block so users
+    // can click through to the originating document.
+    const lines: string[] = [
+      "Here's what the brain has on this:",
+      "",
+    ];
+    for (const h of strong.slice(0, 3)) {
+      lines.push(
+        `**${h.document_filename}** (chunk ${h.chunk_idx + 1})`,
+      );
+      const clean = h.content.slice(0, 500).replace(/\s+/g, " ").trim();
+      lines.push(`> ${clean}${h.content.length > 500 ? "…" : ""}`);
+      lines.push("");
+    }
+    lines.push(
+      `*Sources: ${strong.length} brain chunk${strong.length === 1 ? "" : "s"}, ` +
+        `${result.keyword_hits} keyword · ${result.semantic_hits} semantic · ` +
+        `${result.latency_ms}ms*`,
+    );
+    return {
+      answer: lines.join("\n"),
+      tokensUsed: result.tokens_used,
+      queryLogId: result.query_log_id,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Priority 5: AI call
 // ---------------------------------------------------------------------------
 
 function buildSystemPrompt(

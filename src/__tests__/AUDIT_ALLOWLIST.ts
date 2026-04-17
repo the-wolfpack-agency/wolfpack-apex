@@ -334,6 +334,24 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/tools/accessibility/route.ts",
     reason: "triggerToolRun in src/lib/tools-runner.ts audits via tools.run_triggered",
   },
+
+  // Central Brain — upload + delete + query routes. Audit happens in
+  // src/lib/brain/repo.ts + ingest.ts which fire brain.* analytics events
+  // on every state change (upload_started, extraction_*, chunked,
+  // embedding_*, document_indexed, document_deleted, query_*). The HTTP
+  // routes are thin adapters that delegate to those libs.
+  {
+    route: "src/app/api/brain/ingest/route.ts",
+    reason: "ingest() in src/lib/brain/ingest.ts fires brain.upload_started/extraction_*/chunked/embedding_*/document_indexed events on every state change",
+  },
+  {
+    route: "src/app/api/brain/documents/[id]/route.ts",
+    reason: "deleteDocument in src/lib/brain/repo.ts fires brain.document_deleted; GET is read-only",
+  },
+  {
+    route: "src/app/api/brain/query/route.ts",
+    reason: "queryBrain in src/lib/brain/query.ts fires brain.query_hit/miss + writes brain_query_log row for every query",
+  },
 ];
 
 export const AUDIT_ALLOWLIST_ROUTES: ReadonlySet<string> = new Set(

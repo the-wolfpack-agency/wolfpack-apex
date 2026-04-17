@@ -78,6 +78,11 @@ export const CAPABILITIES = {
   "knowledge.rate": "Rate answers to train the learning loop",
   "assistant.use": "Use the Wolfpack Assistant",
 
+  // Central Brain — team-wide knowledge ingestion + RAG
+  "brain.read": "Query the central brain (RAG over ingested docs)",
+  "brain.ingest": "Upload files into the central brain",
+  "brain.manage": "Delete or re-ingest brain documents; view ingest health",
+
   // Sites
   "sites.view": "View sites dashboard",
   "sites.deploy": "Trigger site deploys",

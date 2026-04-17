@@ -66,6 +66,9 @@ const HR: readonly Capability[] = [
   "knowledge.search",
   "knowledge.rate",
   "assistant.use",
+  // Central Brain — everyone in the org can read + contribute
+  "brain.read",
+  "brain.ingest",
   "features.view",
   "features.vote",
   // Self-service
@@ -93,6 +96,9 @@ const SALES: readonly Capability[] = [
   "knowledge.search",
   "knowledge.rate",
   "assistant.use",
+  // Central Brain — everyone in the org can read + contribute
+  "brain.read",
+  "brain.ingest",
   "features.view",
   "features.vote",
   "settings.view_own",
@@ -117,6 +123,9 @@ const OPS: readonly Capability[] = [
   "knowledge.search",
   "knowledge.rate",
   "assistant.use",
+  // Central Brain — everyone in the org can read + contribute
+  "brain.read",
+  "brain.ingest",
   "features.view",
   "features.vote",
   "meetings.view",
@@ -144,6 +153,9 @@ const DEV: readonly Capability[] = [
   "knowledge.search",
   "knowledge.rate",
   "assistant.use",
+  // Central Brain — everyone in the org can read + contribute
+  "brain.read",
+  "brain.ingest",
   "features.view",
   "features.vote",
   "features.approve",       // dev leadership can approve feature requests
@@ -170,6 +182,9 @@ const DESIGNER: readonly Capability[] = [
   "knowledge.search",
   "knowledge.rate",
   "assistant.use",
+  // Central Brain — everyone in the org can read + contribute
+  "brain.read",
+  "brain.ingest",
   "journal.write",
   "discussions.post",
   "features.view",

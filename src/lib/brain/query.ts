@@ -1,0 +1,178 @@
+/**
+ * Brain retrieval — keyword + semantic fusion with citation metadata.
+ *
+ * Merge strategy:
+ *   - Run Postgres FTS `keywordSearch()` always (zero-cost, works with
+ *     no embeddings configured).
+ *   - If embeddings are available AND Qdrant is reachable, embed the
+ *     query and `searchBrain()`.
+ *   - Merge by chunk_id. Chunks hit by BOTH paths get a score boost and
+ *     source="keyword+semantic" — the strongest signal.
+ *   - Every query persists to brain_query_log so retrieval quality can
+ *     be measured (was a returned chunk later cited by the assistant?).
+ */
+
+import { embedBatch, isEmbeddingConfigured } from "./embedder";
+import { keywordSearch, logQuery, markQueryCited } from "./repo";
+import { searchBrain } from "./qdrant";
+import { trackEvent } from "@/lib/analytics";
+import type { BrainKind, BrainQueryHit, BrainQueryResult } from "./types";
+
+const DEFAULT_LIMIT = 8;
+
+export interface QueryOpts {
+  userId: string;
+  userRole: string;
+  query: string;
+  limit?: number;
+  uploadedBy?: string;
+  kind?: BrainKind;
+  conversationId?: string | null;
+}
+
+export interface QueryExecution extends BrainQueryResult {
+  /** DB id of the row inserted into brain_query_log — callers can pass
+   *  this to markCited() once the assistant's final answer quotes a hit. */
+  query_log_id: number;
+}
+
+export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
+  const limit = Math.min(Math.max(opts.limit ?? DEFAULT_LIMIT, 1), 20);
+  const t0 = Date.now();
+
+  // 1. keyword (always)
+  const keyword = await keywordSearch(opts.query, limit, {
+    uploadedBy: opts.uploadedBy,
+    kind: opts.kind,
+  });
+
+  // 2. semantic (best-effort)
+  let semantic: Awaited<ReturnType<typeof searchBrain>> = [];
+  let tokensUsed = 0;
+  if (isEmbeddingConfigured()) {
+    try {
+      const emb = await embedBatch([opts.query]);
+      if (emb && emb.vectors.length > 0) {
+        tokensUsed = emb.tokensUsed;
+        semantic = await searchBrain(emb.vectors[0], limit);
+      }
+    } catch {
+      // degrade silently — keyword results are still useful
+    }
+  }
+
+  // 3. merge by chunk_id
+  const byId = new Map<string, BrainQueryHit>();
+
+  for (const k of keyword) {
+    byId.set(k.chunk_id, {
+      chunk_id: k.chunk_id,
+      document_id: k.document_id,
+      document_filename: k.filename,
+      document_kind: k.kind,
+      chunk_idx: k.chunk_idx,
+      content: k.content,
+      score: Number(k.score) || 0.1,
+      source: "keyword",
+      snippet: k.headline || truncate(k.content, 180),
+    });
+  }
+
+  for (const s of semantic) {
+    const existing = byId.get(s.chunk_id);
+    if (existing) {
+      existing.source = "keyword+semantic";
+      // Stronger combined signal. Clamp to [0, 1.2] so combined hits
+      // still out-rank singletons without breaking downstream UI.
+      existing.score = Math.min(1.2, existing.score + 0.3 + s.score * 0.2);
+    } else {
+      byId.set(s.chunk_id, {
+        chunk_id: s.chunk_id,
+        document_id: s.document_id,
+        document_filename: s.filename,
+        document_kind: "other", // payload doesn't carry kind here; joined in repo if needed
+        chunk_idx: s.chunk_idx,
+        content: s.content,
+        score: s.score,
+        source: "semantic",
+        snippet: truncate(s.content, 180),
+      });
+    }
+  }
+
+  const hits = [...byId.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  const latency_ms = Date.now() - t0;
+
+  // 4. persist for the learning loop
+  let queryLogId = 0;
+  try {
+    queryLogId = await logQuery({
+      userId: opts.userId,
+      userRole: opts.userRole,
+      query: opts.query,
+      hitChunkIds: hits.map((h) => h.chunk_id),
+      keywordHits: keyword.length,
+      semanticHits: semantic.length,
+      latencyMs: latency_ms,
+      tokensUsed,
+      conversationId: opts.conversationId ?? null,
+    });
+  } catch {
+    // non-blocking — the user still gets their answer
+  }
+
+  if (hits.length > 0) {
+    await trackEvent("brain.query_hit", opts.userId, opts.userRole, {
+      query_len: opts.query.length,
+      hit_count: hits.length,
+      keyword_hits: keyword.length,
+      semantic_hits: semantic.length,
+      latency_ms,
+    });
+  } else {
+    await trackEvent("brain.query_miss", opts.userId, opts.userRole, {
+      query_len: opts.query.length,
+      latency_ms,
+    });
+  }
+
+  return {
+    query: opts.query,
+    hits,
+    keyword_hits: keyword.length,
+    semantic_hits: semantic.length,
+    latency_ms,
+    tokens_used: tokensUsed,
+    query_log_id: queryLogId,
+  };
+}
+
+/**
+ * Called by the assistant when its generated answer cited one of the
+ * Brain hits returned earlier in the same turn. This closes the loop:
+ * the brain_query_quality_daily view uses cited=TRUE to track real
+ * retrieval effectiveness, not just recall count.
+ */
+export async function markCited(
+  queryLogId: number,
+  userId: string,
+  userRole: string,
+): Promise<void> {
+  if (!queryLogId) return;
+  try {
+    await markQueryCited(queryLogId);
+    await trackEvent("brain.query_cited_in_answer", userId, userRole, {
+      query_log_id: queryLogId,
+    });
+  } catch {
+    // audit-loop writes are never fatal
+  }
+}
+
+function truncate(s: string, n: number): string {
+  if (s.length <= n) return s;
+  return s.slice(0, n - 1) + "…";
+}
