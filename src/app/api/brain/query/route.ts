@@ -17,6 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { queryBrain } from "@/lib/brain/query";
+import { rateLimitQuery } from "@/lib/brain/security";
 import type { BrainKind } from "@/lib/brain/types";
 
 const KINDS: BrainKind[] = ["pdf", "docx", "text", "markdown", "csv", "html", "audio", "video", "image", "email", "other"];
@@ -25,6 +26,14 @@ export async function POST(req: NextRequest) {
   const auth = await requireCapability(req, "brain.read");
   if (!auth.ok) return auth.response;
   const user = auth.user;
+
+  const rl = rateLimitQuery(user.id);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "rate_limited", retry_after_sec: rl.retryAfterSec },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfterSec ?? 60) } },
+    );
+  }
 
   let body: { query?: unknown; limit?: unknown; kind?: unknown; uploaded_by?: unknown; conversation_id?: unknown };
   try {

@@ -12,6 +12,7 @@
 
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
 import { queryBrain, markCited as markBrainCited } from "@/lib/brain/query";
+import { neutralizeInjection } from "@/lib/brain/security";
 import { searchMeetingTranscripts } from "@/lib/plaud";
 
 import { trackEvent } from "@/lib/analytics";
@@ -810,26 +811,34 @@ async function tryBrain(
     });
     if (strong.length === 0) return null;
 
-    // Format zero-LLM-token response. The assistant chat UI already
-    // renders markdown citations; we include a "Sources" block so users
-    // can click through to the originating document.
+    // Format zero-LLM-token response. Each chunk is passed through
+    // neutralizeInjection() so a hostile document containing
+    // "Ignore previous instructions" can't influence a future LLM turn
+    // that includes this message in its history. Matched patterns are
+    // replaced with [filtered:<label>] tags so the user can see what
+    // was flagged and the brain_query_log row records the labels.
     const lines: string[] = [
       "Here's what the brain has on this:",
       "",
     ];
+    const allMatchedLabels = new Set<string>();
     for (const h of strong.slice(0, 3)) {
+      const raw = h.content.slice(0, 500).replace(/\s+/g, " ").trim();
+      const { text: safe, matchedLabels } = neutralizeInjection(raw);
+      for (const l of matchedLabels) allMatchedLabels.add(l);
       lines.push(
         `**${h.document_filename}** (chunk ${h.chunk_idx + 1})`,
       );
-      const clean = h.content.slice(0, 500).replace(/\s+/g, " ").trim();
-      lines.push(`> ${clean}${h.content.length > 500 ? "…" : ""}`);
+      lines.push(`> ${safe}${h.content.length > 500 ? "…" : ""}`);
       lines.push("");
     }
-    lines.push(
+    const sourcesLine =
       `*Sources: ${strong.length} brain chunk${strong.length === 1 ? "" : "s"}, ` +
-        `${result.keyword_hits} keyword · ${result.semantic_hits} semantic · ` +
-        `${result.latency_ms}ms*`,
-    );
+      `${result.keyword_hits} keyword · ${result.semantic_hits} semantic · ` +
+      `${result.latency_ms}ms` +
+      (allMatchedLabels.size > 0 ? ` · filtered: ${[...allMatchedLabels].join(",")}` : "") +
+      "*";
+    lines.push(sourcesLine);
     return {
       answer: lines.join("\n"),
       tokensUsed: result.tokens_used,

@@ -31,6 +31,7 @@ import {
   updateDocumentStats,
   updateDocumentStatus,
 } from "./repo";
+import { capExtracted } from "./security";
 import type { IngestRequest, IngestResult } from "./types";
 
 const MAX_SIZE_BYTES = Number(process.env.BRAIN_MAX_SIZE_BYTES ?? 50 * 1024 * 1024); // 50 MB default
@@ -131,25 +132,48 @@ export async function ingest(req: IngestRequest): Promise<IngestResult> {
   }
 
   await recordJob(doc.id, "extract", "succeeded", { durationMs: Date.now() - t0 });
-  await trackEvent("brain.extraction_succeeded", req.uploadedBy, req.uploaderRole, {
-    document_id: doc.id,
-    kind,
-    chars: extracted.text.length,
-  });
+
+  // DoS guard: a 1KB "PDF bomb" can expand to GB of text. Cap the
+  // extracted plaintext before chunking so a runaway doc can never
+  // exhaust memory or blow the DB row-size limit. When truncated, we
+  // stamp status_detail so the UI shows "indexed · truncated" rather
+  // than claiming full coverage.
+  const capped = capExtracted(extracted.text);
+  if (capped.truncated) {
+    await trackEvent("brain.extraction_succeeded", req.uploadedBy, req.uploaderRole, {
+      document_id: doc.id,
+      kind,
+      chars: capped.text.length,
+      truncated: true,
+      original_chars: capped.originalLength,
+    });
+  } else {
+    await trackEvent("brain.extraction_succeeded", req.uploadedBy, req.uploaderRole, {
+      document_id: doc.id,
+      kind,
+      chars: extracted.text.length,
+    });
+  }
 
   // 5. chunk
-  await updateDocumentStatus(doc.id, "chunking");
+  await updateDocumentStatus(
+    doc.id,
+    "chunking",
+    capped.truncated
+      ? `extraction truncated at ${capped.text.length} chars (original ${capped.originalLength})`
+      : undefined,
+  );
   const tChunk = Date.now();
-  const chunks = chunkText(extracted.text);
+  const chunks = chunkText(capped.text);
   if (chunks.length === 0) {
     await recordJob(doc.id, "chunk", "skipped", { durationMs: Date.now() - tChunk });
     await updateDocumentStatus(doc.id, "indexed", "document had text but produced no chunks");
-    await updateDocumentStats(doc.id, extracted.text.length, 0, 0);
+    await updateDocumentStats(doc.id, capped.text.length, 0, 0);
     return {
       document_id: doc.id,
       status: "indexed",
       chunk_count: 0,
-      extracted_chars: extracted.text.length,
+      extracted_chars: capped.text.length,
     };
   }
 
@@ -233,13 +257,19 @@ export async function ingest(req: IngestRequest): Promise<IngestResult> {
   }
 
   // 8. finalize
-  await updateDocumentStats(doc.id, extracted.text.length, inserted.length, tokensUsed);
-  await updateDocumentStatus(doc.id, "indexed");
+  await updateDocumentStats(doc.id, capped.text.length, inserted.length, tokensUsed);
+  await updateDocumentStatus(
+    doc.id,
+    "indexed",
+    capped.truncated
+      ? `extraction truncated at ${capped.text.length} chars (original ${capped.originalLength})`
+      : null,
+  );
   await trackEvent("brain.document_indexed", req.uploadedBy, req.uploaderRole, {
     document_id: doc.id,
     kind,
     chunk_count: inserted.length,
-    extracted_chars: extracted.text.length,
+    extracted_chars: capped.text.length,
     tokens_used: tokensUsed,
   });
 
@@ -247,7 +277,7 @@ export async function ingest(req: IngestRequest): Promise<IngestResult> {
     document_id: doc.id,
     status: "indexed",
     chunk_count: inserted.length,
-    extracted_chars: extracted.text.length,
+    extracted_chars: capped.text.length,
   };
 }
 

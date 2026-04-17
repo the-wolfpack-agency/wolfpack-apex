@@ -48,6 +48,9 @@ jest.mock("@/lib/analytics", () => ({
 }));
 
 import { NextRequest, NextResponse } from "next/server";
+import { _resetRateLimitState } from "@/lib/brain/security";
+
+beforeEach(() => _resetRateLimitState());
 
 const AUTHED = { ok: true as const, user: { id: "u1", role: "cto", name: "Test", email: "t@t.co" } };
 const UNAUTH = {
@@ -106,13 +109,65 @@ describe("POST /api/brain/ingest", () => {
     expect(res.status).toBe(400);
   });
 
-  it("400 on path-injection filename", async () => {
+  it("400 on path-injection filename with structured error shape", async () => {
     mockRequireCapability.mockResolvedValue(AUTHED);
     const { POST } = await import("@/app/api/brain/ingest/route");
     const form = new FormData();
     form.set("file", new File(["data"], "../../etc/passwd", { type: "text/plain" }));
     const res = await POST(makeReq("http://x/api/brain/ingest", { method: "POST", form }));
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_filename");
+    expect(body.message).toBeTruthy();
+  });
+
+  it("400 on Windows reserved device name", async () => {
+    mockRequireCapability.mockResolvedValue(AUTHED);
+    const { POST } = await import("@/app/api/brain/ingest/route");
+    const form = new FormData();
+    form.set("file", new File(["data"], "CON.txt", { type: "text/plain" }));
+    const res = await POST(makeReq("http://x/api/brain/ingest", { method: "POST", form }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_filename");
+  });
+
+  it("415 when declared PDF doesn't match magic bytes", async () => {
+    mockRequireCapability.mockResolvedValue(AUTHED);
+    const { POST } = await import("@/app/api/brain/ingest/route");
+    const form = new FormData();
+    // ".pdf" extension + PDF content-type but body is plain text → magic mismatch
+    form.set("file", new File(["this is actually just text"], "fake.pdf", { type: "application/pdf" }));
+    const res = await POST(makeReq("http://x/api/brain/ingest", { method: "POST", form }));
+    expect(res.status).toBe(415);
+    const body = await res.json();
+    expect(body.error).toBe("content_type_mismatch");
+    expect(mockIngest).not.toHaveBeenCalled();
+  });
+
+  it("429 when a user blows the ingest rate limit", async () => {
+    mockRequireCapability.mockResolvedValue(AUTHED);
+    mockIngest.mockResolvedValue({
+      document_id: "d",
+      status: "indexed",
+      chunk_count: 1,
+      extracted_chars: 10,
+    });
+    const { POST } = await import("@/app/api/brain/ingest/route");
+    const { INGEST_LIMIT } = await import("@/lib/brain/security");
+    // Fill the bucket with acceptable uploads
+    for (let i = 0; i < INGEST_LIMIT.max; i++) {
+      const f = new FormData();
+      f.set("file", new File(["ok"], `i${i}.md`, { type: "text/markdown" }));
+      const r = await POST(makeReq("http://x/api/brain/ingest", { method: "POST", form: f }));
+      expect(r.status).toBe(201);
+    }
+    // Next call from the same user must be throttled
+    const blown = new FormData();
+    blown.set("file", new File(["ok"], "blown.md", { type: "text/markdown" }));
+    const res = await POST(makeReq("http://x/api/brain/ingest", { method: "POST", form: blown }));
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBeTruthy();
   });
 
   it("201 with ingest result on happy path", async () => {
@@ -370,5 +425,32 @@ describe("POST /api/brain/query", () => {
     const body = await res.json();
     expect(body.hits).toHaveLength(1);
     expect(body.query_log_id).toBe(99);
+  });
+
+  it("429 when a user blows the query rate limit", async () => {
+    mockRequireCapability.mockResolvedValue(AUTHED);
+    mockQueryBrain.mockResolvedValue({
+      query: "x",
+      hits: [],
+      keyword_hits: 0,
+      semantic_hits: 0,
+      latency_ms: 1,
+      tokens_used: 0,
+      query_log_id: 1,
+    });
+    const { POST } = await import("@/app/api/brain/query/route");
+    const { QUERY_LIMIT } = await import("@/lib/brain/security");
+    for (let i = 0; i < QUERY_LIMIT.max; i++) {
+      const r = await POST(makeReq("http://x/api/brain/query", {
+        method: "POST",
+        body: { query: `q${i}` },
+      }));
+      expect(r.status).toBe(200);
+    }
+    const res = await POST(makeReq("http://x/api/brain/query", {
+      method: "POST",
+      body: { query: "one too many" },
+    }));
+    expect(res.status).toBe(429);
   });
 });
