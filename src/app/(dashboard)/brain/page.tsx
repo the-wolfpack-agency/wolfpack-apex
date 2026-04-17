@@ -13,8 +13,43 @@
  * loop tracks Brain usage.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+
+/**
+ * Safely render a Postgres `ts_headline` snippet. ts_headline ONLY emits
+ * `<b>...</b>` around matched query tokens; everything else in the string
+ * is raw content from a user-uploaded document and must NOT be trusted
+ * as HTML. We parse out the `<b>` boundaries and render the inside as
+ * <strong>; the text between is React string children, which React
+ * auto-escapes. Zero deps, zero dangerouslySetInnerHTML, zero XSS.
+ *
+ * Edge cases handled:
+ *  - Malformed / unmatched `<b>` tags → fall through as literal escaped text
+ *  - Nested `<b>` → non-greedy match picks the inner pair, outer becomes text
+ *  - Content with literal "<script>" → rendered as visible, inert text
+ */
+function renderSnippet(snippet: string): ReactNode {
+  if (!snippet) return null;
+  const parts: ReactNode[] = [];
+  const re = /<b>([\s\S]*?)<\/b>/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+  while ((match = re.exec(snippet)) !== null) {
+    if (match.index > cursor) {
+      parts.push(<Fragment key={`t${key}`}>{snippet.slice(cursor, match.index)}</Fragment>);
+    }
+    parts.push(<strong key={`b${key}`}>{match[1]}</strong>);
+    cursor = match.index + match[0].length;
+    key++;
+  }
+  if (cursor < snippet.length) {
+    parts.push(<Fragment key={`tail${key}`}>{snippet.slice(cursor)}</Fragment>);
+  }
+  return parts;
+}
 
 interface BrainDocument {
   id: string;
@@ -310,10 +345,9 @@ export default function BrainPage() {
                     <div style={{ fontWeight: 600, fontSize: "0.95rem" }}>
                       {h.document_filename} <span style={{ color: "var(--wp-muted)", fontWeight: 400, fontSize: "0.8rem" }}>#{h.chunk_idx}</span>
                     </div>
-                    <div
-                      style={{ fontSize: "0.9rem", marginTop: "0.25rem" }}
-                      dangerouslySetInnerHTML={{ __html: h.snippet }}
-                    />
+                    <div style={{ fontSize: "0.9rem", marginTop: "0.25rem" }}>
+                      {renderSnippet(h.snippet)}
+                    </div>
                     <div style={{ fontSize: "0.75rem", color: "var(--wp-muted)", marginTop: "0.25rem" }}>
                       {h.source} · score {h.score.toFixed(2)}
                     </div>
