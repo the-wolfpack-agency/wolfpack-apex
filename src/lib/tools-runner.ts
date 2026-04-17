@@ -186,13 +186,25 @@ export async function getRunStatus(
           logText = await logsRes.text();
         }
 
-        // Find result.json content in the logs (printed by cat command)
-        const jsonMatch = logText.match(/\{[^{}]*"status"\s*:\s*"complete"[^{}]*\}/);
-        if (jsonMatch) {
-          try {
-            result = JSON.parse(jsonMatch[0]);
-          } catch {
-            // malformed JSON in logs
+        // The log has timestamp prefixes on each line. Strip them and find
+        // the JSON block between { and } that contains "status": "complete".
+        const lines = logText.split("\n").map((l) => {
+          // Strip GitHub Actions timestamp prefix: "2026-04-17T17:48:49.060Z "
+          const m = l.match(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s*(.*)/);
+          return m ? m[1] : l;
+        });
+        const stripped = lines.join("\n");
+
+        // Find JSON blocks — look for opening { on its own line through closing }
+        const blocks = stripped.match(/\{[\s\S]*?"status"\s*:\s*"complete"[\s\S]*?\n\}/g);
+        if (blocks) {
+          for (const block of blocks) {
+            try {
+              result = JSON.parse(block);
+              break;
+            } catch {
+              // try next block
+            }
           }
         }
       }

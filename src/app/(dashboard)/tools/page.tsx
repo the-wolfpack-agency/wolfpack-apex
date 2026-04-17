@@ -322,28 +322,7 @@ export default function ToolsPage() {
           >
             {isActive("pdf-report") ? "Running..." : "Generate Report"}
           </button>
-          <ToolStatusDisplay tool="pdf-report" state={toolStates["pdf-report"]} statusLabel={statusLabel("pdf-report")} />
-          {toolStates["pdf-report"].phase === "completed" && typeof toolStates["pdf-report"].result?.message === "string" && (
-            <div style={{ fontSize: "0.85rem", color: "var(--wp-success)", display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-              <span>{toolStates["pdf-report"].result.message as string}</span>
-              {typeof toolStates["pdf-report"].result.file_size_bytes === "number" && (
-                <span style={{ color: "var(--wp-text-dim)" }}>
-                  {Math.round(toolStates["pdf-report"].result.file_size_bytes / 1024)} KB
-                  {typeof toolStates["pdf-report"].result.pages_scanned === "number" && ` · ${toolStates["pdf-report"].result.pages_scanned} pages scanned`}
-                </span>
-              )}
-              {toolStates["pdf-report"].run_id && (
-                <a
-                  href={`https://github.com/the-wolfpack-agency/wolfpack-apex/actions/runs/${toolStates["pdf-report"].run_id}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: "var(--wp-gold)", fontSize: "0.8rem" }}
-                >
-                  Download from GitHub Actions ↗
-                </a>
-              )}
-            </div>
-          )}
+          <ToolStatusDisplay tool="pdf-report" state={toolStates["pdf-report"]} statusLabel={statusLabel("pdf-report")} runId={toolStates["pdf-report"].run_id} />
         </div>
 
         {/* ── Card 2: Demo Deck ─────────────────────────────────── */}
@@ -393,7 +372,7 @@ export default function ToolsPage() {
           >
             {isActive("demo-deck") ? "Running..." : "Capture Preview"}
           </button>
-          <ToolStatusDisplay tool="demo-deck" state={toolStates["demo-deck"]} statusLabel={statusLabel("demo-deck")} />
+          <ToolStatusDisplay tool="demo-deck" state={toolStates["demo-deck"]} statusLabel={statusLabel("demo-deck")} runId={toolStates["demo-deck"].run_id} />
           {/* Show pages from result */}
           {Array.isArray(toolStates["demo-deck"].result?.pages) && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: "0.5rem", marginTop: "0.5rem" }}>
@@ -442,7 +421,7 @@ export default function ToolsPage() {
           >
             {isActive("visual-diff") ? "Running..." : "Run Check"}
           </button>
-          <ToolStatusDisplay tool="visual-diff" state={toolStates["visual-diff"]} statusLabel={statusLabel("visual-diff")} />
+          <ToolStatusDisplay tool="visual-diff" state={toolStates["visual-diff"]} statusLabel={statusLabel("visual-diff")} runId={toolStates["visual-diff"].run_id} />
           {/* Show diff results table */}
           {Array.isArray(toolStates["visual-diff"].result?.diffs) && (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem", marginTop: "0.5rem" }}>
@@ -490,7 +469,7 @@ export default function ToolsPage() {
           >
             {isActive("accessibility") ? "Running..." : "Run Check"}
           </button>
-          <ToolStatusDisplay tool="accessibility" state={toolStates["accessibility"]} statusLabel={statusLabel("accessibility")} />
+          <ToolStatusDisplay tool="accessibility" state={toolStates["accessibility"]} statusLabel={statusLabel("accessibility")} runId={toolStates["accessibility"].run_id} />
           {/* Show accessibility results */}
           {Array.isArray(toolStates["accessibility"].result?.results) && (
             <div style={{ marginTop: "0.5rem" }}>
@@ -550,10 +529,12 @@ function ToolStatusDisplay({
   tool: _tool,
   state,
   statusLabel,
+  runId,
 }: {
   tool: ToolName;
   state: ToolState;
   statusLabel: string | null;
+  runId?: number;
 }) {
   if (state.phase === "not_configured") {
     return (
@@ -592,14 +573,26 @@ function ToolStatusDisplay({
     );
   }
 
-  if (state.phase === "completed" && state.result) {
-    const msg = typeof state.result.message === "string" ? state.result.message : "Complete";
-    const debug = typeof state.result._debug === "string" ? state.result._debug : "";
+  if (state.phase === "completed") {
+    const msg = typeof state.result?.message === "string"
+      ? state.result.message
+      : "Complete";
     return (
-      <div style={{ fontSize: "0.85rem", color: "var(--wp-success)" }}>
-        {msg}
-        {state.elapsed_ms ? ` (${Math.round(state.elapsed_ms / 1000)}s)` : ""}
-        {debug && <div style={{ color: "var(--wp-text-dim)", fontSize: "0.75rem", marginTop: "0.2rem" }}>{debug}</div>}
+      <div style={{ fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+        <span style={{ color: "var(--wp-success)" }}>
+          {msg}
+          {state.elapsed_ms ? ` (${Math.round(state.elapsed_ms / 1000)}s)` : ""}
+        </span>
+        {runId && (
+          <a
+            href={`https://github.com/the-wolfpack-agency/wolfpack-apex/actions/runs/${runId}`}
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: "var(--wp-gold)", fontSize: "0.8rem" }}
+          >
+            View run on GitHub Actions ↗
+          </a>
+        )}
       </div>
     );
   }
