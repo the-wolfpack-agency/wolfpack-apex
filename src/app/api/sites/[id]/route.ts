@@ -37,8 +37,27 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       const result = await triggerDeploy(id, user.id, user.role);
       return NextResponse.json({ ok: true, ...result });
     } catch (err) {
-      console.error("[sites/id/deploy]", (err as Error).message);
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+      const msg = (err as Error).message;
+      console.error("[sites/id/deploy]", msg);
+      // Known environment-misconfiguration cases — surface an actionable
+      // reason to the UI instead of a generic "Internal server error"
+      // banner that hides the real problem for days.
+      if (msg.includes("GITHUB_TOKEN_WOLFPACK_AGENCY not set")) {
+        return NextResponse.json(
+          {
+            error:
+              "Site deploy is disabled in this environment: the GitHub " +
+              "integration token is not configured. Ask an admin to set " +
+              "GITHUB_TOKEN_WOLFPACK_AGENCY in Vercel.",
+            reason: "github_token_missing",
+          },
+          { status: 503 },
+        );
+      }
+      return NextResponse.json(
+        { error: "Deploy failed. Check /api/sites/:id/deploys for the log excerpt.", reason: "deploy_failed" },
+        { status: 500 },
+      );
     }
   }
 

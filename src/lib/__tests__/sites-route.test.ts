@@ -134,6 +134,40 @@ describe("/api/sites/[id]", () => {
     expect(res.status).toBe(200);
     expect(mockUpdate).toHaveBeenCalled();
   });
+
+  // Regression for 2026-04-17: when GITHUB_TOKEN_WOLFPACK_AGENCY is not set
+  // the deploy PATCH used to return a generic "Internal server error" 500
+  // which hid the real cause for days. It now returns 503 with a structured
+  // reason the UI can surface as an actionable banner.
+  it("PATCH ?action=deploy returns 503 + reason when GitHub token is missing", async () => {
+    mockGetUser.mockReturnValue({ id: "u_1", role: "sales" });
+    mockDeploy.mockRejectedValueOnce(
+      new Error("GITHUB_TOKEN_WOLFPACK_AGENCY not set — refusing to call GitHub API in dev"),
+    );
+    const req = new NextRequest("http://test/api/sites/site_1?action=deploy", {
+      method: "PATCH",
+      headers: { authorization: "Bearer x" },
+    });
+    const res = await detailPATCH(req, { params: Promise.resolve({ id: "site_1" }) });
+    expect(res.status).toBe(503);
+    const data = await res.json();
+    expect(data.reason).toBe("github_token_missing");
+    expect(data.error).toMatch(/GITHUB_TOKEN_WOLFPACK_AGENCY/);
+  });
+
+  it("PATCH ?action=deploy returns 500 + reason=deploy_failed on other errors", async () => {
+    mockGetUser.mockReturnValue({ id: "u_1", role: "sales" });
+    mockDeploy.mockRejectedValueOnce(new Error("github 404: not found"));
+    const req = new NextRequest("http://test/api/sites/site_1?action=deploy", {
+      method: "PATCH",
+      headers: { authorization: "Bearer x" },
+    });
+    const res = await detailPATCH(req, { params: Promise.resolve({ id: "site_1" }) });
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.reason).toBe("deploy_failed");
+    expect(data.error).toMatch(/Check \/api\/sites\/:id\/deploys/);
+  });
 });
 
 describe("/api/sites/webhook", () => {
