@@ -365,10 +365,12 @@ export default function ToolsPage() {
               border: "1px solid var(--wp-border)",
               borderRadius: "6px",
               color: "var(--wp-text)",
-              fontSize: "0.9rem",
+              fontSize: "0.85rem",
+              maxWidth: "100%",
+              boxSizing: "border-box",
             }}
           >
-            <option value="instinct">Instinct Dashboard</option>
+            <option value="instinct">Instinct</option>
             {sites.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.display_name}

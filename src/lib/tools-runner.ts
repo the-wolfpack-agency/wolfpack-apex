@@ -86,10 +86,11 @@ export async function triggerToolRun(
   });
 
   // GitHub doesn't return the run_id from dispatch. Poll to find the new run.
-  // Wait a moment then look for runs created after our timestamp.
-  await new Promise((r) => setTimeout(r, 2000));
+  // Subtract 30s from beforeTs to handle clock drift between our server and GitHub.
+  const beforeDate = new Date(new Date(beforeTs).getTime() - 30_000);
+  await new Promise((r) => setTimeout(r, 3000));
 
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < 10; attempt++) {
     try {
       const runs = await ghApi<{ workflow_runs: Array<{ id: number; created_at: string; event: string }> }>(
         githubToken,
@@ -98,7 +99,7 @@ export async function triggerToolRun(
       );
 
       const match = runs.workflow_runs.find(
-        (r) => new Date(r.created_at) >= new Date(beforeTs),
+        (r) => new Date(r.created_at) >= beforeDate,
       );
 
       if (match) {
@@ -107,7 +108,21 @@ export async function triggerToolRun(
     } catch {
       // retry
     }
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+
+  // Last resort: return the most recent run regardless of timestamp
+  try {
+    const runs = await ghApi<{ workflow_runs: Array<{ id: number }> }>(
+      githubToken,
+      "GET",
+      `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?per_page=1&event=workflow_dispatch`,
+    );
+    if (runs.workflow_runs.length > 0) {
+      return { run_id: runs.workflow_runs[0].id };
+    }
+  } catch {
+    // give up
   }
 
   return { error: "Workflow dispatched but run ID could not be determined. Check GitHub Actions." };
