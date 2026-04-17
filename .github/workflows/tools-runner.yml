@@ -42,9 +42,11 @@ jobs:
       - name: Install Chrome dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+          sudo apt-get install -y -qq \
+            libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 \
             libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 \
-            libcairo2 libasound2 libxshmfence1 >/dev/null 2>&1
+            libcairo2 libasound2t64 libxshmfence1 libxkbcommon0 \
+            fonts-liberation xdg-utils 2>&1 || true
 
       - name: Install Vibium
         run: |
