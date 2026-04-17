@@ -67,8 +67,13 @@ jobs:
           mkdir -p /tmp/tool-results
           python3 scripts/tools-runner-exec.py
           cat /tmp/tool-results/result.json
-          # Write result to step output so status endpoint can read it
-          # without downloading artifacts (avoids auth/redirect issues)
+          # Emit the result as a single-line base64 marker so the Vercel
+          # /api/tools/status endpoint can parse it deterministically from
+          # the job log. Base64 avoids all JSON-shape edge cases (nested
+          # braces, embedded newlines, GH Actions timestamp prefixes).
+          # The "TOOL_RESULT_B64=" marker is matched by tools-runner.ts.
+          echo "TOOL_RESULT_B64=$(base64 -w0 < /tmp/tool-results/result.json)"
+          # Also write to step output for workflow consumers.
           echo "result=$(cat /tmp/tool-results/result.json | jq -c .)" >> "$GITHUB_OUTPUT"
 
       - name: Upload results

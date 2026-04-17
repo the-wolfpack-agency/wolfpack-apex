@@ -140,6 +140,54 @@ export async function triggerToolRun(
   return { error: "Workflow dispatched but run ID could not be determined. Check GitHub Actions." };
 }
 
+/**
+ * Walk `text` and for every `{` find the balanced closing `}`, then try to
+ * JSON.parse the slice. Returns the first parsed object that looks like a
+ * completed tool result (has `status === "complete"`). Skips braces inside
+ * JSON strings so `"{"` in a string doesn't confuse the counter.
+ */
+function extractCompletePayload(text: string): Record<string, unknown> | undefined {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let j = i; j < text.length; j++) {
+      const ch = text[j];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === "\\" && inString) {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          const slice = text.slice(i, j + 1);
+          try {
+            const parsed = JSON.parse(slice) as Record<string, unknown>;
+            if (parsed && parsed.status === "complete") {
+              return parsed;
+            }
+          } catch {
+            // not valid JSON — skip this block
+          }
+          break;
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
 async function auditRunTriggered(
   tool: ToolName,
   runId: number,
@@ -222,8 +270,8 @@ export async function getRunStatus(
           logText = await logsRes.text();
         }
 
-        // The log has timestamp prefixes on each line. Strip them and find
-        // the JSON block between { and } that contains "status": "complete".
+        // The log has GitHub Actions timestamp prefixes on each line. Strip
+        // them before parsing.
         const lines = logText.split("\n").map((l) => {
           // Strip GitHub Actions timestamp prefix: "2026-04-17T17:48:49.060Z "
           const m = l.match(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s*(.*)/);
@@ -231,17 +279,26 @@ export async function getRunStatus(
         });
         const stripped = lines.join("\n");
 
-        // Find JSON blocks — look for opening { on its own line through closing }
-        const blocks = stripped.match(/\{[\s\S]*?"status"\s*:\s*"complete"[\s\S]*?\n\}/g);
-        if (blocks) {
-          for (const block of blocks) {
-            try {
-              result = JSON.parse(block);
-              break;
-            } catch {
-              // try next block
-            }
+        // Primary: deterministic base64 marker emitted by tools-runner.yml.
+        // This avoids every JSON-shape edge case the regex fallback hits.
+        const b64match = stripped.match(/TOOL_RESULT_B64=([A-Za-z0-9+/=]+)/);
+        if (b64match) {
+          try {
+            const decoded = Buffer.from(b64match[1], "base64").toString("utf-8");
+            result = JSON.parse(decoded);
+          } catch {
+            // fall through to regex fallback
           }
+        }
+
+        // Fallback: brace-balanced JSON block extract. Handles the
+        // pretty-printed multi-line JSON emitted by `cat result.json` in
+        // runs that predate the base64 marker. Walks the stripped log and
+        // for every `{` scans forward counting braces (skipping strings and
+        // escaped chars) until it finds the balanced closing `}`. The first
+        // block that parses and contains `"status": "complete"` wins.
+        if (!result) {
+          result = extractCompletePayload(stripped);
         }
       }
     } catch {
