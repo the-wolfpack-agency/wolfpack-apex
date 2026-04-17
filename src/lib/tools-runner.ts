@@ -206,17 +206,17 @@ export async function fetchArtifactResult(
   });
 
   let res: Response;
-  if (redirectRes.status === 302) {
+  if (redirectRes.status === 301 || redirectRes.status === 302) {
     const location = redirectRes.headers.get("location");
-    if (!location) return null;
+    if (!location) throw new Error("Redirect without Location header");
     res = await fetch(location);
   } else if (redirectRes.ok) {
     res = redirectRes;
   } else {
-    return null;
+    throw new Error(`Artifact download failed: HTTP ${redirectRes.status}`);
   }
 
-  if (!res.ok) return null;
+  if (!res.ok) throw new Error(`Artifact blob fetch failed: HTTP ${res.status}`);
 
   try {
     const buffer = await res.arrayBuffer();

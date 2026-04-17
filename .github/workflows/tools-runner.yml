@@ -1,5 +1,7 @@
 name: Tools Runner
 
+run-name: "Tools: ${{ inputs.tool }} → ${{ inputs.target_url }}"
+
 on:
   workflow_dispatch:
     inputs:
@@ -59,6 +61,7 @@ jobs:
           TOOL: ${{ inputs.tool }}
           TARGET_URL: ${{ inputs.target_url }}
           PATHS: ${{ inputs.paths }}
+          DISPLAY: ":99"
         run: |
           mkdir -p /tmp/tool-results
           python3 scripts/tools-runner-exec.py
