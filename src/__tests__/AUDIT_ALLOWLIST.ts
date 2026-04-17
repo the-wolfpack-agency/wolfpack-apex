@@ -291,6 +291,49 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/contacts/sync/route.ts",
     reason: "Contacts stream — cache-refresh sync; no user-visible mutation audit-worthy at the route level",
   },
+
+  // Online meetings — audit happens inside
+  // src/lib/integrations/microsoft-online-meetings.ts via online_meeting.*
+  // (created/updated/cancelled). The HTTP routes are thin adapters.
+  {
+    route: "src/app/api/online-meetings/route.ts",
+    reason: "createMeeting in src/lib/integrations/microsoft-online-meetings.ts audits via online_meeting.created",
+  },
+  {
+    route: "src/app/api/online-meetings/[id]/route.ts",
+    reason: "updateMeeting/cancelMeeting in src/lib/integrations/microsoft-online-meetings.ts audit via online_meeting.updated/cancelled",
+  },
+
+  // Teams channel messages — reply route is a 501 stub (scope not granted);
+  // channels-sync is a cache refresh. Neither mutates user-visible state.
+  {
+    route: "src/app/api/teams/channels-sync/route.ts",
+    reason: "Teams stream — cache-refresh sync of channel messages; no user-visible mutation",
+  },
+  {
+    route: "src/app/api/teams/teams/[id]/channels/[channelId]/messages/[messageId]/replies/route.ts",
+    reason: "501 stub — ChannelMessage.Send scope not granted in Tier 1/2; no mutation ever occurs (analytics-tracked as capability_denied)",
+  },
+
+  // Tools — user-initiated GitHub Actions workflow dispatches. Audit happens
+  // inside src/lib/tools-runner.ts via tools.run_triggered when the route
+  // passes an actor through from requireCapability.
+  {
+    route: "src/app/api/tools/pdf-report/route.ts",
+    reason: "triggerToolRun in src/lib/tools-runner.ts audits via tools.run_triggered",
+  },
+  {
+    route: "src/app/api/tools/demo-deck/route.ts",
+    reason: "triggerToolRun in src/lib/tools-runner.ts audits via tools.run_triggered",
+  },
+  {
+    route: "src/app/api/tools/visual-diff/route.ts",
+    reason: "triggerToolRun in src/lib/tools-runner.ts audits via tools.run_triggered",
+  },
+  {
+    route: "src/app/api/tools/accessibility/route.ts",
+    reason: "triggerToolRun in src/lib/tools-runner.ts audits via tools.run_triggered",
+  },
 ];
 
 export const AUDIT_ALLOWLIST_ROUTES: ReadonlySet<string> = new Set(

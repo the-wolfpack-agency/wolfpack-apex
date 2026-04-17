@@ -27,7 +27,11 @@ export async function POST(req: NextRequest) {
   try {
     const result = await triggerToolRun(
       "pdf-report",
-      { target_url: body.target_url, requester: user.id },
+      {
+        target_url: body.target_url,
+        requester: user.id,
+        actor: { userId: user.id, role: user.role },
+      },
       token,
     );
 

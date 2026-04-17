@@ -28,7 +28,12 @@ export async function POST(req: NextRequest) {
   try {
     const result = await triggerToolRun(
       "visual-diff",
-      { target_url: body.target_url, paths, requester: user.id },
+      {
+        target_url: body.target_url,
+        paths,
+        requester: user.id,
+        actor: { userId: user.id, role: user.role },
+      },
       token,
     );
 

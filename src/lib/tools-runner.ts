@@ -12,6 +12,8 @@
  * SECURITY: This module is server-only. Never import from "use client" components.
  */
 
+import { recordAudit } from "@/lib/audit-log";
+
 const REPO = "the-wolfpack-agency/wolfpack-apex";
 const WORKFLOW_FILE = "tools-runner.yml";
 const GITHUB_API = "https://api.github.com";
@@ -32,6 +34,14 @@ interface TriggerOpts {
   target_url?: string;
   paths?: string;
   requester?: string;
+  /**
+   * Actor for audit-log entry. When supplied, triggerToolRun records a
+   * `tools.run_triggered` audit row. The route handlers pass this through
+   * from getUserFromRequest / requireCapability so the route itself can
+   * stay in the AUDIT_ALLOWLIST (audit happens in this lib, same pattern
+   * as microsoft-mail / microsoft-calendar).
+   */
+  actor?: { userId: string; role: string };
 }
 
 /* ── Internal fetch helper ─────────────────────────────────────────── */
@@ -103,6 +113,7 @@ export async function triggerToolRun(
       );
 
       if (match) {
+        await auditRunTriggered(tool, match.id, opts);
         return { run_id: match.id };
       }
     } catch {
@@ -119,6 +130,7 @@ export async function triggerToolRun(
       `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?per_page=1&event=workflow_dispatch`,
     );
     if (runs.workflow_runs.length > 0) {
+      await auditRunTriggered(tool, runs.workflow_runs[0].id, opts);
       return { run_id: runs.workflow_runs[0].id };
     }
   } catch {
@@ -126,6 +138,30 @@ export async function triggerToolRun(
   }
 
   return { error: "Workflow dispatched but run ID could not be determined. Check GitHub Actions." };
+}
+
+async function auditRunTriggered(
+  tool: ToolName,
+  runId: number,
+  opts: TriggerOpts,
+): Promise<void> {
+  if (!opts.actor) return;
+  try {
+    await recordAudit({
+      actor: { user_id: opts.actor.userId, role: opts.actor.role },
+      action: "tools.run_triggered",
+      resourceType: "tool_run",
+      resourceId: String(runId),
+      afterState: {
+        tool,
+        target_url: opts.target_url ?? null,
+        paths: opts.paths ?? null,
+        requester: opts.requester ?? null,
+      },
+    });
+  } catch (err) {
+    console.warn("[tools-runner] audit record failed:", (err as Error).message);
+  }
 }
 
 /**
