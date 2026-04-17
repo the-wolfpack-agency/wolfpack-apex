@@ -191,15 +191,30 @@ export async function fetchArtifactResult(
 
   if (!match) return null;
 
-  // Download the zip artifact
-  const res = await fetch(`${GITHUB_API}/repos/${REPO}/actions/artifacts/${match.id}/zip`, {
+  // Download the zip artifact. GitHub returns a 302 to Azure Blob Storage.
+  // We must follow the redirect manually because the Authorization header
+  // gets stripped on cross-origin redirects (Node fetch security behavior),
+  // and Azure needs the SAS token from the redirect URL, not our PAT.
+  const redirectRes = await fetch(`${GITHUB_API}/repos/${REPO}/actions/artifacts/${match.id}/zip`, {
     headers: {
       Authorization: `Bearer ${githubToken}`,
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "wolfpack-instinct-tools",
     },
+    redirect: "manual",
   });
+
+  let res: Response;
+  if (redirectRes.status === 302) {
+    const location = redirectRes.headers.get("location");
+    if (!location) return null;
+    res = await fetch(location);
+  } else if (redirectRes.ok) {
+    res = redirectRes;
+  } else {
+    return null;
+  }
 
   if (!res.ok) return null;
 
