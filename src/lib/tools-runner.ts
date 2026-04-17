@@ -188,15 +188,9 @@ export async function fetchArtifactResult(
 
   if (!res.ok) return null;
 
-  // The response is a zip file. We need to extract result.json from it.
-  // Use a lightweight approach: the zip is small, read it as arrayBuffer
-  // and find the JSON payload using a simple approach.
   try {
     const buffer = await res.arrayBuffer();
     const bytes = new Uint8Array(buffer);
-
-    // Find result.json in the zip by looking for the filename in local file headers.
-    // ZIP local file header signature: PK\x03\x04
     const resultJson = extractJsonFromZip(bytes, "result.json");
     if (resultJson) {
       return JSON.parse(resultJson);
@@ -279,11 +273,19 @@ export function isConfigured(): boolean {
  * For our use case the artifacts are small JSON files.
  */
 function extractJsonFromZip(zipBytes: Uint8Array, targetFilename: string): string | null {
+  // Use Node.js zlib for deflate decompression (works in Vercel Functions)
+  let inflateRawSync: ((buf: Uint8Array) => Buffer) | null = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    inflateRawSync = require("zlib").inflateRawSync;
+  } catch {
+    // zlib not available
+  }
+
   const decoder = new TextDecoder();
   let offset = 0;
 
   while (offset < zipBytes.length - 4) {
-    // Look for local file header signature: 0x04034b50
     if (
       zipBytes[offset] === 0x50 &&
       zipBytes[offset + 1] === 0x4b &&
@@ -301,33 +303,16 @@ function extractJsonFromZip(zipBytes: Uint8Array, targetFilename: string): strin
 
       const filenameBytes = zipBytes.slice(offset + 30, offset + 30 + filenameLen);
       const filename = decoder.decode(filenameBytes);
-
       const dataStart = offset + 30 + filenameLen + extraLen;
 
       if (filename === targetFilename || filename.endsWith(`/${targetFilename}`)) {
+        const raw = zipBytes.slice(dataStart, dataStart + compressedSize);
         if (compressionMethod === 0) {
-          // Stored — no compression
-          const raw = zipBytes.slice(dataStart, dataStart + compressedSize);
           return decoder.decode(raw);
         }
-        // For deflated content, try DecompressionStream (available in Node 18+)
-        if (compressionMethod === 8) {
-          try {
-            const compressed = zipBytes.slice(dataStart, dataStart + compressedSize);
-            // Synchronous inflate using raw deflate
-            const ds = new DecompressionStream("deflate-raw" as CompressionFormat);
-            const writer = ds.writable.getWriter();
-            const reader = ds.readable.getReader();
-
-            // We need an async approach but we're in a sync context.
-            // Fall back: return null and let the caller handle it.
-            // For small JSON payloads, GitHub usually uses stored mode.
-            void writer.write(compressed);
-            void writer.close();
-            void reader.read(); // consume
-          } catch {
-            // DecompressionStream not available
-          }
+        if (compressionMethod === 8 && inflateRawSync) {
+          const decompressed = inflateRawSync(raw);
+          return decoder.decode(decompressed);
         }
       }
 
