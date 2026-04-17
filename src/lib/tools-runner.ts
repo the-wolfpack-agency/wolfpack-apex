@@ -20,11 +20,26 @@ const GITHUB_API = "https://api.github.com";
 
 export type ToolName = "pdf-report" | "demo-deck" | "visual-diff" | "accessibility";
 
+export interface ToolArtifact {
+  name: string;
+  kind: string;
+  path: string;
+  size_bytes: number;
+  sha256: string;
+}
+
 export interface ToolRunStatus {
   status: "queued" | "running" | "completed" | "failed" | "not_configured";
   run_id?: number;
+  /** Permalink to the GitHub Actions run — always set when run_id is set,
+   *  lets the UI and the audit trail point at the same source of truth. */
+  run_url?: string;
   artifact_url?: string;
   result?: Record<string, unknown>;
+  /** Parsed copy of result.artifacts[] when the payload is well-formed.
+   *  Each entry is the tool's own claim about what it produced, with a
+   *  SHA-256 the workflow verified before marking the job green. */
+  artifacts?: ToolArtifact[];
   error?: string;
   elapsed_ms?: number;
   created_at?: string;
@@ -188,6 +203,12 @@ function extractCompletePayload(text: string): Record<string, unknown> | undefin
   return undefined;
 }
 
+/** Permalink to a workflow run — goes into the audit trail so every tool
+ *  invocation can be traced back to a specific GitHub Actions execution. */
+function runUrl(runId: number): string {
+  return `https://github.com/${REPO}/actions/runs/${runId}`;
+}
+
 async function auditRunTriggered(
   tool: ToolName,
   runId: number,
@@ -205,6 +226,7 @@ async function auditRunTriggered(
         target_url: opts.target_url ?? null,
         paths: opts.paths ?? null,
         requester: opts.requester ?? null,
+        run_url: runUrl(runId),
       },
     });
   } catch (err) {
@@ -231,11 +253,11 @@ export async function getRunStatus(
   const updated = new Date(run.updated_at).getTime();
 
   if (run.status === "queued" || run.status === "waiting" || run.status === "pending") {
-    return { status: "queued", run_id, elapsed_ms: updated - created, created_at: run.created_at };
+    return { status: "queued", run_id, run_url: runUrl(run_id), elapsed_ms: updated - created, created_at: run.created_at };
   }
 
   if (run.status === "in_progress") {
-    return { status: "running", run_id, elapsed_ms: Date.now() - created, created_at: run.created_at };
+    return { status: "running", run_id, run_url: runUrl(run_id), elapsed_ms: Date.now() - created, created_at: run.created_at };
   }
 
   // Completed — try to read result from job step output
@@ -308,19 +330,60 @@ export async function getRunStatus(
     return {
       status: "completed",
       run_id,
+      run_url: runUrl(run_id),
       elapsed_ms: updated - created,
       created_at: run.created_at,
       result,
+      artifacts: extractArtifactList(result),
     };
   }
 
   return {
     status: "failed",
     run_id,
+    run_url: runUrl(run_id),
     error: `Workflow concluded with: ${run.conclusion}`,
     elapsed_ms: updated - created,
     created_at: run.created_at,
   };
+}
+
+/**
+ * Shape-check the `artifacts` array in a parsed result payload. Returns a
+ * typed ToolArtifact[] when every entry has the four fields the Python
+ * runner is contracted to emit; returns undefined otherwise (so callers
+ * can tell "no artifacts reported" apart from "malformed manifest"). This
+ * is the last defense against a tool that fakes its result shape — we
+ * parse, we don't trust.
+ */
+function extractArtifactList(
+  result: Record<string, unknown> | undefined,
+): ToolArtifact[] | undefined {
+  if (!result) return undefined;
+  const raw = result.artifacts;
+  if (!Array.isArray(raw)) return undefined;
+  const out: ToolArtifact[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") return undefined;
+    const e = entry as Record<string, unknown>;
+    if (
+      typeof e.name !== "string" ||
+      typeof e.kind !== "string" ||
+      typeof e.path !== "string" ||
+      typeof e.size_bytes !== "number" ||
+      typeof e.sha256 !== "string"
+    ) {
+      return undefined;
+    }
+    out.push({
+      name: e.name,
+      kind: e.kind,
+      path: e.path,
+      size_bytes: e.size_bytes,
+      sha256: e.sha256,
+    });
+  }
+  return out;
 }
 
 /**

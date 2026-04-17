@@ -154,5 +154,77 @@ describe("tools-runner getRunStatus — log parsing", () => {
     const status = await getRunStatus(42, "fake-token");
     expect(status.status).toBe("failed");
     expect(status.error).toContain("failure");
+    // Even on failure, the run_url must be set so humans can click through
+    // to the GitHub Actions run and see what actually happened. An audit
+    // row without a traceable link is the "dishonest product" we're
+    // trying to prevent.
+    expect(status.run_url).toBe("https://github.com/the-wolfpack-agency/wolfpack-apex/actions/runs/42");
+  });
+});
+
+/* ── Vibium honesty matrix: artifact contract parsing ─────────────── */
+
+describe("tools-runner getRunStatus — artifact contract", () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  function runWithPayload(payload: unknown) {
+    const log = withTimestamps(`TOOL_RESULT_B64=${encodeMarker(payload)}`);
+    installFetch([
+      () => stubRunCompleted(),
+      () => stubJobs(),
+      () => textResponse(log),
+    ]);
+    return getRunStatus(42, "fake-token");
+  }
+
+  it("surfaces a well-formed artifacts manifest at the top level", async () => {
+    const payload = {
+      status: "complete",
+      artifacts: [
+        {
+          name: "report.pdf",
+          kind: "pdf",
+          path: "/tmp/tool-results/report.pdf",
+          size_bytes: 12345,
+          sha256: "a".repeat(64),
+        },
+      ],
+    };
+    const status = await runWithPayload(payload);
+    expect(status.artifacts).toHaveLength(1);
+    expect(status.artifacts?.[0]).toMatchObject({
+      name: "report.pdf",
+      kind: "pdf",
+      sha256: "a".repeat(64),
+    });
+    expect(status.run_url).toMatch(/^https:\/\/github\.com\/.+\/actions\/runs\/42$/);
+  });
+
+  it("rejects an artifacts manifest with missing required fields", async () => {
+    const payload = {
+      status: "complete",
+      artifacts: [{ name: "no-hash.pdf", kind: "pdf", path: "/tmp/x" /* size_bytes + sha256 missing */ }],
+    };
+    const status = await runWithPayload(payload);
+    expect(status.result).toBeDefined();
+    // Malformed manifest must NOT surface as a trusted artifact list —
+    // otherwise a buggy tool could claim output that was never produced.
+    expect(status.artifacts).toBeUndefined();
+  });
+
+  it("rejects an artifacts value that isn't an array", async () => {
+    const payload = { status: "complete", artifacts: "oops" };
+    const status = await runWithPayload(payload);
+    expect(status.artifacts).toBeUndefined();
+  });
+
+  it("returns undefined artifacts when the result has no artifacts field at all", async () => {
+    const payload = { status: "complete", message: "legacy result from before artifacts existed" };
+    const status = await runWithPayload(payload);
+    expect(status.artifacts).toBeUndefined();
+    expect(status.result).toBeDefined();
   });
 });

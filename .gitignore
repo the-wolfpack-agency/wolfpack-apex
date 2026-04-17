@@ -45,3 +45,7 @@ next-env.d.ts
 /test-results/
 tests/e2e/screenshots/
 /playwright-report/
+
+# python (tools-runner-exec.py caches)
+__pycache__/
+*.pyc

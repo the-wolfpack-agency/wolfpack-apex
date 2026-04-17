@@ -12,6 +12,7 @@ Env vars:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -30,9 +31,38 @@ _GENERIC_LINK_TEXT = {"click here", "read more", "here", "link", "more", "learn 
 
 
 def write_result(data: Dict[str, Any]) -> None:
+    # Every result carries an `artifacts` list: {name, path, size_bytes,
+    # sha256}. This is the single source of truth for "did the tool really
+    # produce what it claimed?" — the Next API surfaces it to the client,
+    # the audit-log pins the hash, and verify_contract() below asserts it
+    # matches the per-tool contract before the workflow exits.
+    data.setdefault("artifacts", [])
     with open(RESULTS_DIR / "result.json", "w") as f:
         json.dump(data, f, indent=2)
     print(f"result.json written ({len(json.dumps(data))} bytes)")
+
+
+def register_artifact(rel_path: str, kind: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Stat the artifact on disk, compute its SHA-256, and append a manifest
+    entry to result['artifacts']. Returns the entry (so callers can still
+    reference the filename). Raises FileNotFoundError if the artifact
+    doesn't exist — the tool has lied about what it produced, and we want
+    the job to fail hard rather than report a phantom result.
+    """
+    abs_path = RESULTS_DIR / rel_path
+    if not abs_path.exists():
+        raise FileNotFoundError(f"artifact missing on disk: {rel_path}")
+    data = abs_path.read_bytes()
+    entry = {
+        "name": rel_path,
+        "kind": kind,
+        "path": str(abs_path),
+        "size_bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+    result.setdefault("artifacts", []).append(entry)
+    return entry
 
 
 # ── Browser abstraction ─────────────────────────────────────────────
@@ -155,16 +185,17 @@ h1 {{ color: #d4a017; border-bottom: 3px solid #d4a017; padding-bottom: 12px; }}
 
         b.set_content(html)
         pdf_bytes = b.pdf()
-        pdf_path = str(RESULTS_DIR / "report.pdf")
-        Path(pdf_path).write_bytes(pdf_bytes)
+        (RESULTS_DIR / "report.pdf").write_bytes(pdf_bytes)
 
-        write_result({
+        result: Dict[str, Any] = {
             "status": "complete",
             "message": "PDF report generated",
             "file": "report.pdf",
             "file_size_bytes": len(pdf_bytes),
             "pages_scanned": len(PATHS),
-        })
+        }
+        register_artifact("report.pdf", "pdf", result)
+        write_result(result)
     except Exception as e:
         write_result({"status": "error", "message": str(e)})
     finally:
@@ -176,6 +207,7 @@ h1 {{ color: #d4a017; border-bottom: 3px solid #d4a017; padding-bottom: 12px; }}
 def run_demo_deck() -> None:
     b = BrowserSession().start()
     pages_captured: List[Dict[str, Any]] = []
+    result: Dict[str, Any] = {"artifacts": []}
     try:
         for path in PATHS:
             url = f"{TARGET_URL}{path}"
@@ -185,25 +217,28 @@ def run_demo_deck() -> None:
                 title = b.title()
                 text = b.text()[:200]
                 ss_name = path.replace("/", "_").strip("_") or "root"
+                ss_file = f"page_{ss_name}.png"
                 ss_data = b.screenshot()
                 save_screenshot(ss_data, f"page_{ss_name}")
+                register_artifact(ss_file, "screenshot", result)
                 elapsed = int((time.monotonic() - start) * 1000)
                 pages_captured.append({
                     "path": path,
                     "title": title,
                     "text_preview": text,
-                    "screenshot": f"page_{ss_name}.png",
+                    "screenshot": ss_file,
                     "load_time_ms": elapsed,
                 })
             except Exception as e:
                 pages_captured.append({"path": path, "error": str(e)[:200]})
 
-        write_result({
+        result.update({
             "status": "complete",
             "message": f"Captured {len(pages_captured)} pages",
             "total_pages": len(pages_captured),
             "pages": pages_captured,
         })
+        write_result(result)
     except Exception as e:
         write_result({"status": "error", "message": str(e)})
     finally:
@@ -220,33 +255,45 @@ def run_visual_diff() -> None:
     diffs: List[Dict[str, Any]] = []
     pages_new = 0
     pages_changed = 0
+    result: Dict[str, Any] = {"artifacts": []}
     try:
         for path in PATHS:
             safe_name = path.replace("/", "_").strip("_") or "root"
-            baseline_path = baseline_dir / f"{safe_name}.png"
+            baseline_rel = f"baselines/{safe_name}.png"
+            baseline_path = RESULTS_DIR / baseline_rel
             try:
                 b.go(f"{TARGET_URL}{path}")
                 current_bytes = b.screenshot()
 
                 if not baseline_path.exists():
                     baseline_path.write_bytes(current_bytes)
-                    diffs.append({"path": path, "changed": False, "diff_percentage": 0.0, "status": "new_baseline"})
+                    diffs.append({
+                        "path": path, "changed": False, "diff_percentage": 0.0,
+                        "status": "new_baseline", "screenshot": baseline_rel,
+                    })
                     pages_new += 1
                 else:
                     baseline_bytes = baseline_path.read_bytes()
                     if current_bytes == baseline_bytes:
-                        diffs.append({"path": path, "changed": False, "diff_percentage": 0.0, "status": "unchanged"})
+                        diffs.append({
+                            "path": path, "changed": False, "diff_percentage": 0.0,
+                            "status": "unchanged", "screenshot": baseline_rel,
+                        })
                     else:
                         diff_bytes = sum(1 for a, b_ in zip(current_bytes, baseline_bytes) if a != b_)
                         total = max(len(current_bytes), len(baseline_bytes), 1)
                         pct = round(diff_bytes / total * 100, 1)
-                        diffs.append({"path": path, "changed": True, "diff_percentage": pct, "status": "changed"})
+                        diffs.append({
+                            "path": path, "changed": True, "diff_percentage": pct,
+                            "status": "changed", "screenshot": baseline_rel,
+                        })
                         pages_changed += 1
                     baseline_path.write_bytes(current_bytes)
+                register_artifact(baseline_rel, "screenshot", result)
             except Exception as e:
                 diffs.append({"path": path, "status": f"error: {e}"})
 
-        write_result({
+        result.update({
             "status": "complete",
             "message": f"{len(diffs)} pages checked, {pages_changed} changed, {pages_new} new",
             "pages_checked": len(diffs),
@@ -254,6 +301,7 @@ def run_visual_diff() -> None:
             "pages_new": pages_new,
             "diffs": diffs,
         })
+        write_result(result)
     except Exception as e:
         write_result({"status": "error", "message": str(e)})
     finally:
@@ -267,6 +315,7 @@ def run_accessibility() -> None:
     results: List[Dict[str, Any]] = []
     total_issues = 0
     total_critical = 0
+    result: Dict[str, Any] = {"artifacts": []}
     try:
         for path in PATHS:
             issues: List[Dict[str, str]] = []
@@ -274,6 +323,15 @@ def run_accessibility() -> None:
                 b.go(f"{TARGET_URL}{path}")
                 title = b.title()
                 html_content = b.html()
+
+                # Persist the rendered HTML so we have a durable artifact
+                # proving the browser actually loaded the page. Without this
+                # a silent browser failure can produce an empty-issues result
+                # that looks like "all clean."
+                safe_name = path.replace("/", "_").strip("_") or "root"
+                html_rel = f"a11y_{safe_name}.html"
+                (RESULTS_DIR / html_rel).write_text(html_content or "", encoding="utf-8")
+                register_artifact(html_rel, "rendered_html", result)
 
                 if not title or not title.strip():
                     issues.append({"rule": "missing-page-title", "severity": "serious",
@@ -309,7 +367,7 @@ def run_accessibility() -> None:
             except Exception as e:
                 results.append({"path": path, "issues": 0, "critical": 0, "details": [], "error": str(e)[:200]})
 
-        write_result({
+        result.update({
             "status": "complete",
             "message": f"{len(results)} pages, {total_issues} issues ({total_critical} critical)",
             "pages": len(results),
@@ -317,10 +375,100 @@ def run_accessibility() -> None:
             "critical": total_critical,
             "results": results,
         })
+        write_result(result)
     except Exception as e:
         write_result({"status": "error", "message": str(e)})
     finally:
         b.stop()
+
+
+# ── Contract verification ──────────────────────────────────────────
+# Each tool promises a specific artifact shape. verify_contract() runs
+# AFTER the tool writes result.json and fails the workflow if the claim
+# doesn't match reality. This is the core of the Vibium honesty matrix
+# — a green job must mean artifacts were really produced, hashed, and
+# referenceable.
+
+TOOL_CONTRACTS: Dict[str, Dict[str, Any]] = {
+    "pdf-report": {
+        "required_keys": ["file", "file_size_bytes", "pages_scanned"],
+        "required_artifact_kinds": {"pdf": 1},
+    },
+    "demo-deck": {
+        "required_keys": ["total_pages", "pages"],
+        "required_artifact_kinds": {"screenshot": 1},
+    },
+    "visual-diff": {
+        "required_keys": ["pages_checked", "diffs"],
+        "required_artifact_kinds": {"screenshot": 1},
+    },
+    "accessibility": {
+        "required_keys": ["pages", "total_issues", "results"],
+        "required_artifact_kinds": {"rendered_html": 1},
+    },
+}
+
+
+def verify_contract(tool: str) -> None:
+    """
+    Read the tool's result.json and assert it matches TOOL_CONTRACTS[tool].
+    Exits non-zero on mismatch so GitHub Actions marks the job as failed —
+    the status API will then report status="failed" and the audit entry
+    will not claim a successful artifact. This is how we prevent "green
+    CI that quietly produced nothing."
+    """
+    contract = TOOL_CONTRACTS.get(tool)
+    if not contract:
+        print(f"[verify] no contract for {tool!r} — skipping")
+        return
+
+    result_path = RESULTS_DIR / "result.json"
+    if not result_path.exists():
+        print(f"[verify] FAIL: {result_path} does not exist")
+        sys.exit(2)
+
+    try:
+        data = json.loads(result_path.read_text())
+    except Exception as e:
+        print(f"[verify] FAIL: result.json is not valid JSON: {e}")
+        sys.exit(2)
+
+    if data.get("status") != "complete":
+        print(f"[verify] FAIL: status is {data.get('status')!r}, expected 'complete'")
+        sys.exit(2)
+
+    missing_keys = [k for k in contract["required_keys"] if k not in data]
+    if missing_keys:
+        print(f"[verify] FAIL: missing required keys: {missing_keys}")
+        sys.exit(2)
+
+    artifacts = data.get("artifacts", [])
+    kinds_seen: Dict[str, int] = {}
+    for a in artifacts:
+        if not isinstance(a, dict):
+            continue
+        if not a.get("sha256") or not a.get("path"):
+            print(f"[verify] FAIL: artifact missing sha256/path: {a}")
+            sys.exit(2)
+        # Re-stat and re-hash to make doubly sure the file still exists
+        # and the hash is truthful — defends against a tool that wrote
+        # the manifest but then deleted/corrupted the file.
+        p = Path(a["path"])
+        if not p.exists():
+            print(f"[verify] FAIL: artifact path does not exist: {p}")
+            sys.exit(2)
+        actual_sha = hashlib.sha256(p.read_bytes()).hexdigest()
+        if actual_sha != a["sha256"]:
+            print(f"[verify] FAIL: sha256 mismatch on {p}: manifest={a['sha256']} actual={actual_sha}")
+            sys.exit(2)
+        kinds_seen[a["kind"]] = kinds_seen.get(a["kind"], 0) + 1
+
+    for kind, min_count in contract["required_artifact_kinds"].items():
+        if kinds_seen.get(kind, 0) < min_count:
+            print(f"[verify] FAIL: expected >= {min_count} artifact(s) of kind={kind!r}, saw {kinds_seen.get(kind, 0)}")
+            sys.exit(2)
+
+    print(f"[verify] OK: {tool} produced {len(artifacts)} artifact(s), kinds={kinds_seen}")
 
 
 # ── Main ────────────────────────────────────────────────────────────
@@ -338,3 +486,4 @@ if __name__ == "__main__":
         sys.exit(1)
     print(f"Running {TOOL} against {TARGET_URL} (paths: {PATHS})")
     TOOLS[TOOL]()
+    verify_contract(TOOL)
