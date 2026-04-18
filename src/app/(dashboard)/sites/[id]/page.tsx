@@ -151,11 +151,16 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
   const savedBriefRef = useRef<string>("");
 
   async function load(opts: { fromPoll?: boolean } = {}) {
-    setLoading(true);
+    // On poll-refreshes we SILENTLY update state. Without this guard
+    // every 4s during a deploy the whole page returned <div>Loading…</div>
+    // then re-rendered the full UI — the user saw this as a
+    // disruptive blink. Initial + user-initiated loads still show the
+    // loading shell.
+    if (!opts.fromPoll) setLoading(true);
     const r = await fetchWithRefresh(`/api/sites/${id}`, { headers: authHeaders() });
     if (r.status === 404) {
       setError("Site not found. It may have been archived.");
-      setLoading(false);
+      if (!opts.fromPoll) setLoading(false);
       return;
     }
     const data = await r.json();
@@ -176,7 +181,7 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
     } else {
       setError(data.error ?? "Failed to load this site.");
     }
-    setLoading(false);
+    if (!opts.fromPoll) setLoading(false);
   }
 
   useEffect(() => {
