@@ -42,6 +42,22 @@ export async function POST(req: NextRequest) {
     if (err instanceof BriefValidationError) {
       return NextResponse.json({ error: err.message, errors: err.errors }, { status: 422 });
     }
+    // Translate Postgres 23505 (unique_violation on client_slug) into a
+    // 409 with an actionable message. Without this the user sees a
+    // generic "Internal server error" and has no idea the slug is taken
+    // by a prior archived row. Hard-deleted rows now free their slug
+    // (see deleteSiteProject), so this only triggers on live/soft-
+    // archived collisions.
+    const pgErr = err as { code?: string; constraint?: string };
+    if (pgErr?.code === "23505" && /client_slug/.test(pgErr?.constraint ?? "")) {
+      return NextResponse.json(
+        {
+          error: `A site with slug "${body.brief.client}" already exists. Pick a different slug, or hard-delete the existing one first.`,
+          reason: "slug_taken",
+        },
+        { status: 409 },
+      );
+    }
     console.error("[sites]", (err as Error).message);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

@@ -49,6 +49,7 @@ import {
   triggerDeploy,
   recordDeployResult,
   updateBrief,
+  deleteSiteProject,
   type SiteBrief,
 } from "@/lib/sites";
 
@@ -386,5 +387,70 @@ describe("recordDeployResult", () => {
     await expect(
       recordDeployResult("deploy_404", { status: "success" }),
     ).rejects.toThrow("unknown deploy");
+  });
+});
+
+describe("deleteSiteProject slug freeing", () => {
+  // Regression: client_slug is UNIQUE NOT NULL; hard-delete used to
+  // only flip status='archived' and leave the slug occupied forever,
+  // so the next `createSiteProject('test5', ...)` 500'd with 23505.
+  // Hard delete now suffixes the slug with `--deleted-<id-tail>` so
+  // the original short name is immediately reusable.
+
+  const BASE_PROJECT_ROW = {
+    id: "site_abc12345",
+    client_slug: "test5",
+    display_name: "Test 5",
+    brief: VALID_BRIEF,
+    status: "ready",
+    created_by: "u",
+    created_at: "x",
+    updated_at: "y",
+    agentic_findings: [],
+    github_repo: null,
+    github_repo_url: null,
+    last_deploy_id: null,
+    last_canary_passed: null,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("hard delete renames client_slug with a --deleted-<tail> suffix", async () => {
+    // getSiteProject: reaper UPDATE + SELECT
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] });
+    mockSafeQuery.mockResolvedValueOnce({ rows: [BASE_PROJECT_ROW] });
+    // UPDATE apex_site_projects SET status='archived', client_slug=$2 ...
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [{ ...BASE_PROJECT_ROW, status: "archived", client_slug: "test5--deleted-abc12345" }],
+    });
+
+    await deleteSiteProject("site_abc12345", "u_1", "hr", { hard: true });
+
+    const updateCall = mockSafeQuery.mock.calls.find(
+      (c) => typeof c[0] === "string" && (c[0] as string).includes("SET status = 'archived'"),
+    );
+    expect(updateCall).toBeDefined();
+    expect(updateCall?.[0]).toMatch(/client_slug\s*=\s*\$2/);
+    // Args: [id, freedSlug]
+    expect(updateCall?.[1][1]).toBe("test5--deleted-abc12345");
+  });
+
+  it("soft archive leaves client_slug intact", async () => {
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] });
+    mockSafeQuery.mockResolvedValueOnce({ rows: [BASE_PROJECT_ROW] });
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [{ ...BASE_PROJECT_ROW, status: "archived" }],
+    });
+
+    await deleteSiteProject("site_abc12345", "u_1", "hr"); // no hard opt
+
+    const updateCall = mockSafeQuery.mock.calls.find(
+      (c) => typeof c[0] === "string" && (c[0] as string).includes("SET status = 'archived'"),
+    );
+    expect(updateCall).toBeDefined();
+    // Soft archive: freedSlug === original, so the UPDATE sets the same value.
+    expect(updateCall?.[1][1]).toBe("test5");
   });
 });

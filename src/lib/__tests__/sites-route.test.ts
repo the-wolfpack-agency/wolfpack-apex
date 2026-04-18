@@ -96,6 +96,27 @@ describe("/api/sites GET + POST", () => {
     const res = await listPOST(mkReq({ auth: "Bearer x", body: { brief: { client: "x" } } }));
     expect(res.status).toBe(201);
   });
+
+  it("POST 409 with reason=slug_taken when client_slug already exists", async () => {
+    // Regression for the 2026-04-18 UX bug where creating a site with a
+    // slug matching an archived row surfaced as a generic 500. Now the
+    // Postgres 23505 unique_violation on client_slug translates into a
+    // 409 that names the slug and tells the user what to do.
+    mockGetUser.mockReturnValue({ id: "u", role: "sales" });
+    const pgErr = Object.assign(new Error("duplicate key value violates unique constraint"), {
+      code: "23505",
+      constraint: "apex_site_projects_client_slug_key",
+    });
+    mockCreate.mockRejectedValueOnce(pgErr);
+    const res = await listPOST(
+      mkReq({ auth: "Bearer x", body: { brief: { client: "test5" } } }),
+    );
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.reason).toBe("slug_taken");
+    expect(data.error).toMatch(/test5/);
+    expect(data.error).toMatch(/different slug|hard-delete/i);
+  });
 });
 
 describe("/api/sites/[id]", () => {

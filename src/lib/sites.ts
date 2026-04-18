@@ -146,12 +146,23 @@ export async function deleteSiteProject(
 ): Promise<{ project: SiteProject | null; cleanup: HardDeleteCleanup | null }> {
   const before = await getSiteProject(id);
   if (!before) return { project: null, cleanup: null };
+
+  // On hard delete, free up the client_slug so a future site can reuse
+  // the short name. The row stays (audit + triple-write + learning loop
+  // all reference it) but the slug gets suffixed with the project id
+  // tail so uniqueness never collides. Soft archive leaves the slug
+  // intact — reviving a soft-archived site is a future feature.
+  const freedSlug =
+    opts.hard
+      ? `${before.client_slug}--deleted-${id.slice(-8)}`
+      : before.client_slug;
+
   const result = await safeQuery<Record<string, unknown>>(
     `UPDATE apex_site_projects
-       SET status = 'archived', updated_at = NOW()
+       SET status = 'archived', client_slug = $2, updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
-    [id],
+    [id, freedSlug],
   );
   const after = result.rows.length > 0 ? rowToProject(result.rows[0]) : before;
 
