@@ -36,6 +36,26 @@ describe("mapEditError — branches the UI renders in the banner", () => {
     expect(msg).toMatch(/again/i);
   });
 
+  // 2026-04-18: introduced ai_not_configured to distinguish "set up
+  // the env var" from "retry later". Both used to show "try again".
+  it("renders an ACTIONABLE message for ai_not_configured, naming ANTHROPIC_API_KEY", () => {
+    const msg = mapEditError({
+      error:
+        "The AI brief editor is not configured in this environment. " +
+        "An admin must set ANTHROPIC_API_KEY in Vercel (Production + Preview) and redeploy.",
+      reason: "ai_not_configured",
+    });
+    expect(msg).toMatch(/ANTHROPIC_API_KEY/);
+    expect(msg).toMatch(/admin|not configured/i);
+    // Must NOT tell the user to "try again" — retrying won't help.
+    expect(msg).not.toMatch(/try again/i);
+  });
+
+  it("ai_not_configured with no server message falls back to a sensible default", () => {
+    const msg = mapEditError({ reason: "ai_not_configured" });
+    expect(msg).toMatch(/ANTHROPIC_API_KEY/);
+  });
+
   it("falls back to the server's error string for unknown reasons", () => {
     const msg = mapEditError({ error: "Quota exceeded for project", reason: "quota" });
     expect(msg).toBe("Quota exceeded for project");

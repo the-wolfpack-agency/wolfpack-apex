@@ -75,6 +75,14 @@ export function mapEditError(data: BriefEditErrorPayload): string {
   if (reason === "patch_blocked") {
     return `Edit refused — it tried to change protected fields: ${(data.blockedPaths ?? []).join(", ")}.`;
   }
+  if (reason === "ai_not_configured") {
+    // Use the server's own message — it names the env var + who to ask
+    // + what to do in the meantime. Don't replace with a vague retry.
+    return (
+      data.error ??
+      "The AI brief editor is not configured. An admin must set ANTHROPIC_API_KEY in Vercel. Until then, edit the brief via the form on the detail page."
+    );
+  }
   if (reason === "ai_unavailable") {
     return "The edit model is unavailable right now. Try again in a moment.";
   }
@@ -231,13 +239,10 @@ export default function SiteEditPage({
         blockedPaths?: string[];
       };
       if (!r.ok) {
-        const reason = data.reason ?? "unknown";
-        const msg =
-          reason === "patch_blocked"
-            ? `Edit refused — it tried to change protected fields: ${(data.blockedPaths ?? []).join(", ")}.`
-            : reason === "ai_unavailable"
-              ? "The edit model is unavailable right now. Try again in a moment."
-              : (data.error ?? "Edit failed.");
+        // Route through mapEditError so all branches (patch_blocked,
+        // ai_unavailable, ai_not_configured, fallback) stay in one
+        // place. Keeps the UI + the contract test aligned.
+        const msg = mapEditError(data);
         setMessages((m) => [
           ...m,
           {

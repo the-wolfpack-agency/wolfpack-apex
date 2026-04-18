@@ -74,10 +74,28 @@ export class BriefEditValidationError extends Error {
   }
 }
 
+/**
+ * Thrown when the AI backend is configured correctly but the call
+ * itself failed (network blip, model overloaded, transient). UI should
+ * surface a retryable "try again in a moment" banner.
+ */
 export class BriefEditAIUnavailableError extends Error {
   constructor(message = "AI caller returned no usable response") {
     super(message);
     this.name = "BriefEditAIUnavailableError";
+  }
+}
+
+/**
+ * Thrown when the AI feature is not configured at all — ANTHROPIC_API_KEY
+ * is missing from the environment. No amount of retry will fix it; an
+ * admin must add the env var. The UI should surface a DIFFERENT banner
+ * that names the env var and tells the user who to ask.
+ */
+export class BriefEditNotConfiguredError extends Error {
+  constructor(message = "ANTHROPIC_API_KEY is not set — AI editor disabled") {
+    super(message);
+    this.name = "BriefEditNotConfiguredError";
   }
 }
 
@@ -128,7 +146,10 @@ export type AICaller = (
 
 export const defaultAICaller: AICaller = async (systemPrompt, userText) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
+  // Missing env var is a DIFFERENT failure mode from a flaky API call —
+  // surface it as a distinct error so the route can give the user an
+  // actionable message instead of "try again in a moment".
+  if (!apiKey) throw new BriefEditNotConfiguredError();
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -506,7 +527,19 @@ export async function generateBriefEdit(
   let aiResult: AICallResult | null;
   try {
     aiResult = await ai(SYSTEM_PROMPT, userText);
-  } catch {
+  } catch (err) {
+    // Missing ANTHROPIC_API_KEY is a config failure, not a model
+    // failure. Re-throw it so the route surfaces an actionable
+    // error (which env var to set, who to ask) instead of the
+    // generic "try again in a moment" retry banner.
+    if (err instanceof BriefEditNotConfiguredError) {
+      trackEvent("site.brief_edit_failed", userId, userRole, {
+        project_id: projectId,
+        reason: "ai_not_configured",
+        latency_ms: Date.now() - t0,
+      });
+      throw err;
+    }
     aiResult = null;
   }
   const latencyMs = Date.now() - t0;

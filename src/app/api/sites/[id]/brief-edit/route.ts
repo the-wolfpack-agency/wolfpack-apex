@@ -28,6 +28,7 @@ import {
   generateBriefEdit,
   BriefEditValidationError,
   BriefEditAIUnavailableError,
+  BriefEditNotConfiguredError,
 } from "@/lib/brief-edit";
 
 export async function POST(
@@ -80,6 +81,21 @@ export async function POST(
       explanation: result.explanation,
     });
   } catch (err) {
+    if (err instanceof BriefEditNotConfiguredError) {
+      // Missing env var is a config problem, not a transient one.
+      // 503 Service Unavailable + explicit reason + message that names
+      // the env var so an admin knows exactly what to set.
+      return NextResponse.json(
+        {
+          error:
+            "The AI brief editor is not configured in this environment. " +
+            "An admin must set ANTHROPIC_API_KEY in Vercel (Production + Preview) " +
+            "and redeploy. Until then, edit the brief via the form on the detail page.",
+          reason: "ai_not_configured",
+        },
+        { status: 503 },
+      );
+    }
     if (err instanceof BriefEditAIUnavailableError) {
       return NextResponse.json(
         { error: "AI edit service unavailable", reason: "ai_unavailable" },

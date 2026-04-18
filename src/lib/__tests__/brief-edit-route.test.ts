@@ -45,11 +45,18 @@ class FakeAIUnavailable extends Error {
     this.name = "BriefEditAIUnavailableError";
   }
 }
+class FakeAINotConfigured extends Error {
+  constructor(msg = "ANTHROPIC_API_KEY is not set") {
+    super(msg);
+    this.name = "BriefEditNotConfiguredError";
+  }
+}
 jest.mock("@/lib/brief-edit", () => ({
   generateBriefEdit: (...args: unknown[]) => mockGenerate(...args),
   recordBriefEditDecision: (...args: unknown[]) => mockRecord(...args),
   BriefEditValidationError: FakeValidationError,
   BriefEditAIUnavailableError: FakeAIUnavailable,
+  BriefEditNotConfiguredError: FakeAINotConfigured,
 }));
 
 const mockTrack = jest.fn();
@@ -199,6 +206,28 @@ describe("POST /api/sites/[id]/brief-edit", () => {
     expect(res.status).toBe(502);
     const data = await res.json();
     expect(data.reason).toBe("ai_unavailable");
+  });
+
+  // Regression for 2026-04-18: user opened the prompt editor, saw
+  // "try again in a moment" every time, and had no way to learn that
+  // ANTHROPIC_API_KEY was missing in the Vercel env. Separate typed
+  // error + separate HTTP code + actionable message.
+  it("503 reason=ai_not_configured when ANTHROPIC_API_KEY missing", async () => {
+    mockGetUser.mockReturnValue({ id: "u_1", role: "sales" });
+    mockGetSite.mockResolvedValueOnce({ id: "site_1", brief: {} });
+    mockGenerate.mockRejectedValueOnce(new FakeAINotConfigured());
+
+    const res = await briefEditPOST(
+      req("POST", { instruction: "x" }, { auth: "Bearer x" }),
+      { params: Promise.resolve({ id: "site_1" }) },
+    );
+    expect(res.status).toBe(503);
+    const data = await res.json();
+    expect(data.reason).toBe("ai_not_configured");
+    // Message MUST name the env var so an admin knows what to set.
+    expect(data.error).toMatch(/ANTHROPIC_API_KEY/);
+    // Message MUST NOT tell the user to retry — retrying won't help.
+    expect(data.error).not.toMatch(/try again/i);
   });
 
   it("422 reason=patch_blocked with blockedPaths on guardrail rejection", async () => {
