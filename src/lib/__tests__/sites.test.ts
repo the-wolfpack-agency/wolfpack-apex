@@ -21,11 +21,25 @@ jest.mock("@/lib/analytics", () => ({
 const mockCreateRepo = jest.fn();
 const mockPutFile = jest.fn();
 const mockTriggerWorkflow = jest.fn();
+const mockEnableActions = jest.fn();
 jest.mock("@/lib/github-client", () => ({
   createRepoFromTemplate: (...args: unknown[]) => mockCreateRepo(...args),
   putFile: (...args: unknown[]) => mockPutFile(...args),
   triggerWorkflow: (...args: unknown[]) => mockTriggerWorkflow(...args),
+  enableActions: (...args: unknown[]) => mockEnableActions(...args),
   defaultGithubClient: () => ({ token: "test", fetch: jest.fn() }),
+}));
+
+// provisionClientRepoSecrets dynamically imports these. The triggerDeploy
+// path now re-runs provisioning for EXISTING repos as a self-heal step,
+// so we mock both modules hermetically — otherwise the dynamic imports
+// would try real HTTP calls to Vercel + real libsodium encryption.
+jest.mock("@/lib/vercel-client", () => ({
+  defaultVercelClient: () => ({ token: "test", teamId: "team_1" }),
+  createProject: jest.fn(async () => ({ id: "prj_test", name: "wolfpack-cftr" })),
+}));
+jest.mock("@/lib/github-secrets", () => ({
+  setRepoSecret: jest.fn(async () => undefined),
 }));
 
 import {
@@ -188,7 +202,18 @@ describe("updateBrief", () => {
 });
 
 describe("triggerDeploy", () => {
-  beforeEach(() => jest.clearAllMocks());
+  const ORIGINAL_ENV = { ...process.env };
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // Preflight requires these; set fakes so the deploy path proceeds.
+    // A dedicated test below asserts the preflight-fail branch explicitly.
+    process.env.VERCEL_TOKEN_WOLFPACK_AGENCY = "test_vercel_token";
+    process.env.VERCEL_ORG_ID = "team_test";
+    process.env.WOLFPACK_SITES_WEBHOOK_SECRET = "test_webhook_secret";
+  });
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
 
   function mockProjectFetch(extra: Partial<Record<string, unknown>> = {}) {
     // getSiteProject now calls reapStuckDeploys first (an UPDATE on
@@ -287,6 +312,39 @@ describe("triggerDeploy", () => {
 
     const eventNames = mockTrackEvent.mock.calls.map((c) => c[0]);
     expect(eventNames).toContain("site.deploy_failed");
+  });
+
+  it("fails fast with actionable message when Instinct env is not configured", async () => {
+    // Preflight is the mechanism preventing the stuck-"Deploying…" UI
+    // state (2026-04-18 bug). When Instinct's own env lacks the vars
+    // the workflow needs, we MUST mark the deploy failed immediately
+    // rather than dispatch a workflow that is guaranteed to fail at
+    // `vercel pull --token=` before the "Notify Instinct" step fires.
+    delete process.env.VERCEL_TOKEN_WOLFPACK_AGENCY;
+    mockProjectFetch();
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] }); // INSERT deploy
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] }); // UPDATE deploy fail
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] }); // UPDATE project fail
+
+    await expect(triggerDeploy("site_1", "user_1", "sales")).rejects.toThrow(
+      /VERCEL_TOKEN_WOLFPACK_AGENCY/,
+    );
+
+    // Must NOT have dispatched the workflow or committed anything.
+    expect(mockCreateRepo).not.toHaveBeenCalled();
+    expect(mockPutFile).not.toHaveBeenCalled();
+    expect(mockTriggerWorkflow).not.toHaveBeenCalled();
+
+    const deployFailedCall = mockTrackEvent.mock.calls.find(
+      (c) => c[0] === "site.deploy_failed",
+    );
+    expect(deployFailedCall).toBeDefined();
+    expect(deployFailedCall?.[3]).toEqual(
+      expect.objectContaining({
+        reason: "env_not_configured",
+        missing: expect.arrayContaining(["VERCEL_TOKEN_WOLFPACK_AGENCY"]),
+      }),
+    );
   });
 });
 

@@ -294,14 +294,30 @@ async function runHardDeleteCleanup(args: {
 
 /**
  * Window after which a deploy that never heard back from the canary
- * webhook is assumed dead. GitHub Actions runs can be cancelled by
- * subsequent dispatches or die mid-workflow before the "Notify Instinct"
- * step fires — without this the row sits at `building` forever and the
- * UI spins with no way forward (user on 2026-04-18 had to archive a
- * whole site just to escape the stuck state). 10 min is generous —
- * a healthy canary promotes in ~3 min.
+ * webhook is assumed dead. A healthy canary deploy finishes in ~1.5 min;
+ * 3 min is a comfortable upper bound that surfaces real failures fast
+ * instead of spinning on the UI. The common stuck-deploy case (workflow
+ * dies before the "Notify Instinct" step fires) previously left the UI
+ * at "Deploying…" for the full 10 min.
  */
-const DEPLOY_TIMEOUT_MS = 10 * 60 * 1000;
+const DEPLOY_TIMEOUT_MS = 3 * 60 * 1000;
+
+/**
+ * Instinct env vars that MUST be set before a deploy can possibly succeed.
+ * Missing any of these means the workflow will fail at `vercel pull`
+ * before the "Notify Instinct" step runs — leaving the UI stuck at
+ * "Deploying…". Fail fast with an actionable message instead.
+ */
+const REQUIRED_DEPLOY_ENV = [
+  "VERCEL_TOKEN_WOLFPACK_AGENCY",
+  "VERCEL_ORG_ID",
+  "WOLFPACK_SITES_WEBHOOK_SECRET",
+] as const;
+
+export function deployEnvPreflight(): { ok: boolean; missing: string[] } {
+  const missing = REQUIRED_DEPLOY_ENV.filter((n) => !process.env[n]);
+  return { ok: missing.length === 0, missing };
+}
 
 /**
  * Reap any deploy rows on *projectId* that have been `pending` or
@@ -555,6 +571,37 @@ export async function triggerDeploy(
     [deployId, projectId, triggeredBy],
   );
 
+  // Fail fast if Instinct env is not configured for auto-provisioning.
+  // Without these, the dispatched workflow fails at `vercel pull --token=`
+  // before the "Notify Instinct" step runs, so no webhook callback ever
+  // fires — and the UI stays at "Deploying…" until the reaper expires.
+  // Better to mark the deploy failed immediately with an actionable hint.
+  const pf = deployEnvPreflight();
+  if (!pf.ok) {
+    const msg =
+      `Deploy aborted: Instinct is missing required env vars (${pf.missing.join(", ")}). ` +
+      `Set them in Vercel → Instinct → Settings → Environment Variables, then redeploy.`;
+    await safeQuery(
+      `UPDATE apex_site_deploys
+          SET status = 'failed', log_excerpt = $2, finished_at = NOW()
+        WHERE id = $1`,
+      [deployId, msg],
+    );
+    await safeQuery(
+      `UPDATE apex_site_projects
+          SET status = 'failed', updated_at = NOW()
+        WHERE id = $1`,
+      [projectId],
+    );
+    trackEvent("site.deploy_failed", triggeredBy, userRole, {
+      project_id: projectId,
+      deploy_id: deployId,
+      reason: "env_not_configured",
+      missing: pf.missing,
+    });
+    throw new Error(msg);
+  }
+
   let repoFullName = project.github_repo;
   let repoUrl = project.github_repo_url;
 
@@ -610,6 +657,28 @@ export async function triggerDeploy(
       } catch (err) {
         console.warn(
           "[sites] provisionClientRepoSecrets threw unexpectedly for",
+          repoFullName,
+          (err as Error).message,
+        );
+      }
+    } else {
+      // Self-heal for pre-existing repos created before auto-provisioning
+      // shipped (or when Instinct env was previously empty and got filled
+      // in later). PUTting an Actions secret is idempotent — GitHub just
+      // overwrites. No harm in re-running on every deploy; the cost is
+      // five small API calls and it closes the gap that causes stuck
+      // "Deploying…" states on older repos.
+      try {
+        await provisionClientRepoSecrets(
+          client,
+          repoFullName,
+          project,
+          triggeredBy,
+          userRole,
+        );
+      } catch (err) {
+        console.warn(
+          "[sites] self-heal provisionClientRepoSecrets failed for",
           repoFullName,
           (err as Error).message,
         );

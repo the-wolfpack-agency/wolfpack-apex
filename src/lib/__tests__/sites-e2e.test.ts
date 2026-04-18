@@ -218,10 +218,16 @@ async function multipartReq(url: string, parts: Array<{ name: string; value: str
 
 describe("Sites E2E — full Max + Meghan flow", () => {
   beforeAll(() => {
+    // Full preflight must pass — the E2E flow exercises triggerDeploy
+    // end to end, and the preflight refuses to dispatch without these.
     process.env.WOLFPACK_SITES_WEBHOOK_SECRET = "shh-e2e";
+    process.env.VERCEL_TOKEN_WOLFPACK_AGENCY = "vt-e2e";
+    process.env.VERCEL_ORG_ID = "team_e2e";
   });
   afterAll(() => {
     delete process.env.WOLFPACK_SITES_WEBHOOK_SECRET;
+    delete process.env.VERCEL_TOKEN_WOLFPACK_AGENCY;
+    delete process.env.VERCEL_ORG_ID;
   });
   beforeEach(() => {
     projects.clear();

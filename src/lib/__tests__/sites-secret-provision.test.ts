@@ -273,30 +273,33 @@ describe("triggerDeploy → provisionClientRepoSecrets wiring", () => {
     });
   }
 
-  it("invokes provisionClientRepoSecrets after fresh repo creation (env_not_configured is a safe no-op)", async () => {
-    setEnv({}); // env not configured — provisioning returns gracefully
+  it("preflight aborts the deploy (no repo creation, no secrets) when env_not_configured", async () => {
+    // 2026-04-18 regression: when Instinct's own env lacks the Vercel /
+    // webhook secrets, we used to dispatch the workflow anyway and let
+    // it die silently at `vercel pull --token=`. That left the UI stuck
+    // on "Deploying…" until the reaper fired. Now preflight aborts
+    // early with an actionable error — asserted here.
+    setEnv({});
     mockProjectFetch();
     mockSafeQuery.mockResolvedValueOnce({ rows: [] }); // INSERT deploy
-    mockCreateRepo.mockResolvedValueOnce({
-      full_name: "the-wolfpack-agency/wolfpack-acme",
-      html_url: "https://github.com/the-wolfpack-agency/wolfpack-acme",
-    });
-    mockEnableActions.mockResolvedValueOnce(undefined);
-    mockSafeQuery.mockResolvedValueOnce({ rows: [] }); // UPDATE project repo
-    mockPutFile.mockResolvedValueOnce(undefined);
-    mockTriggerWorkflow.mockResolvedValueOnce({ run_id: "run_1" });
-    mockSafeQuery.mockResolvedValueOnce({ rows: [] }); // UPDATE deploy
-    mockSafeQuery.mockResolvedValueOnce({ rows: [] }); // UPDATE project
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] }); // UPDATE deploy fail
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] }); // UPDATE project fail
 
-    await triggerDeploy("site_1", "u_1", "sales");
+    await expect(triggerDeploy("site_1", "u_1", "sales")).rejects.toThrow(
+      /VERCEL_TOKEN_WOLFPACK_AGENCY/,
+    );
 
-    // provisionClientRepoSecrets ran and emitted the env-gated event
-    const eventNames = mockTrackEvent.mock.calls.map((c) => c[0]);
-    expect(eventNames).toContain("site.vercel_project_create_failed");
-    // Deploy still completed end-to-end
-    expect(eventNames).toContain("site.deploy_triggered");
-    // Secrets NOT set (env gate tripped)
+    expect(mockCreateRepo).not.toHaveBeenCalled();
+    expect(mockPutFile).not.toHaveBeenCalled();
+    expect(mockTriggerWorkflow).not.toHaveBeenCalled();
     expect(mockSetRepoSecret).not.toHaveBeenCalled();
+
+    const eventNames = mockTrackEvent.mock.calls.map((c) => c[0]);
+    expect(eventNames).toContain("site.deploy_failed");
+    const deployFailed = mockTrackEvent.mock.calls.find(
+      (c) => c[0] === "site.deploy_failed",
+    );
+    expect(deployFailed?.[3]).toMatchObject({ reason: "env_not_configured" });
   });
 
   it("happy path invokes setRepoSecret for every secret right after repo creation", async () => {
@@ -335,7 +338,12 @@ describe("triggerDeploy → provisionClientRepoSecrets wiring", () => {
     expect(secretNames).toEqual([...CLIENT_REPO_SECRET_NAMES].sort());
   });
 
-  it("skips provisioning entirely when github_repo is already set on the project (existing client)", async () => {
+  it("re-runs provisioning as self-heal when github_repo is already set (existing client)", async () => {
+    // Pre-existing repos (created before auto-provisioning shipped, or
+    // from a session where Instinct env was empty) don't have the
+    // Actions secrets set. Re-running provisionClientRepoSecrets on
+    // every deploy is a cheap self-heal: PUT is idempotent, and it
+    // closes the gap that caused the 2026-04-18 stuck-deploy on test4.
     setEnv({
       VERCEL_TOKEN_WOLFPACK_AGENCY: "vt",
       VERCEL_ORG_ID: "team_1",
@@ -346,15 +354,19 @@ describe("triggerDeploy → provisionClientRepoSecrets wiring", () => {
       github_repo_url: "https://github.com/the-wolfpack-agency/wolfpack-acme",
     });
     mockSafeQuery.mockResolvedValueOnce({ rows: [] }); // INSERT deploy
+    mockCreateVercelProject.mockResolvedValueOnce({ id: "prj_ok", name: "wolfpack-acme" });
+    mockSetRepoSecret.mockResolvedValue({ ok: true });
     mockPutFile.mockResolvedValueOnce(undefined);
     mockTriggerWorkflow.mockResolvedValueOnce({ run_id: "run_2" });
-    mockSafeQuery.mockResolvedValueOnce({ rows: [] });
-    mockSafeQuery.mockResolvedValueOnce({ rows: [] });
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] }); // UPDATE deploy
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] }); // UPDATE project
 
     await triggerDeploy("site_1", "u_1", "sales");
 
+    // Repo not re-created, but self-heal DID run for Vercel + 5 secrets
     expect(mockCreateRepo).not.toHaveBeenCalled();
-    expect(mockCreateVercelProject).not.toHaveBeenCalled();
-    expect(mockSetRepoSecret).not.toHaveBeenCalled();
+    expect(mockCreateVercelProject).toHaveBeenCalled();
+    expect(mockSetRepoSecret).toHaveBeenCalledTimes(5);
+    expect(mockTrackEvent.mock.calls.map((c) => c[0])).toContain("site.deploy_triggered");
   });
 });
