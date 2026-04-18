@@ -241,6 +241,17 @@ function EditHarness() {
   return (
     <div>
       <section data-testid="edit-chat-pane">
+        <nav aria-label="Breadcrumb" data-testid="edit-breadcrumbs">
+          <a href="/sites" data-testid="edit-breadcrumb-sites">← Sites</a>
+          {" / "}
+          <a href={`/sites/${id}`} data-testid="edit-breadcrumb-detail">
+            test
+          </a>
+          {" / Edit"}
+        </nav>
+        <a href={`/sites/${id}`} data-testid="edit-back-to-detail">
+          ← Back to site detail
+        </a>
         <div data-testid="edit-chat-messages">
           {messages.map((m) => (
             <div key={m.id} data-testid={`msg-${m.role}`}>{m.text}</div>
@@ -319,6 +330,25 @@ describe("sites /edit — full user-flow regression", () => {
     expect(screen.getByTestId("edit-publish-btn")).toBeDisabled();
     expect(screen.getByTestId("edit-discard-btn")).toBeDisabled();
     expect(screen.getByTestId("dirty-state")).toHaveTextContent("clean");
+  });
+
+  // Breadcrumbs regression (2026-04-18): the editor had no links back
+  // to the list or detail page — pure dead end. Three nav elements
+  // must be present and point at the right URLs.
+  it("step 1b: breadcrumbs link back to the list + detail page, and a prominent 'Back to site detail' button exists", async () => {
+    await mount();
+    const breadcrumbs = screen.getByTestId("edit-breadcrumbs");
+    expect(breadcrumbs).toBeInTheDocument();
+
+    const sitesCrumb = screen.getByTestId("edit-breadcrumb-sites");
+    expect(sitesCrumb).toHaveAttribute("href", "/sites");
+
+    const detailCrumb = screen.getByTestId("edit-breadcrumb-detail");
+    expect(detailCrumb).toHaveAttribute("href", "/sites/site_x");
+
+    const backBtn = screen.getByTestId("edit-back-to-detail");
+    expect(backBtn).toBeInTheDocument();
+    expect(backBtn).toHaveAttribute("href", "/sites/site_x");
   });
 
   it("step 2: typing a prompt enables Send AND Discard (pre-send)", async () => {

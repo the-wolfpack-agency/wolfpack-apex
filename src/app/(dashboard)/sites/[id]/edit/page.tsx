@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, use } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   authHeaders,
@@ -440,10 +441,64 @@ export default function SiteEditPage({
         data-testid="edit-chat-pane"
       >
         <header style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-          <div style={{ fontSize: 12, opacity: 0.6 }}>{project.client_slug}</div>
+          {/* Breadcrumbs: Sites list ← client name ← Edit. Without these
+              the editor was a dead end — the user could not get back to
+              the detail page or the list without hitting the browser
+              back button or clicking the sidebar. */}
+          <nav
+            aria-label="Breadcrumb"
+            data-testid="edit-breadcrumbs"
+            style={{ fontSize: 12, opacity: 0.7, marginBottom: 4, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}
+          >
+            <Link
+              href="/sites"
+              data-testid="edit-breadcrumb-sites"
+              style={{ color: "var(--wp-text-dim, #8a8a8a)", textDecoration: "none" }}
+            >
+              ← Sites
+            </Link>
+            <span style={{ opacity: 0.4 }}>/</span>
+            <Link
+              href={`/sites/${id}`}
+              data-testid="edit-breadcrumb-detail"
+              style={{ color: "var(--wp-text-dim, #8a8a8a)", textDecoration: "none" }}
+            >
+              {project.client_slug}
+            </Link>
+            <span style={{ opacity: 0.4 }}>/</span>
+            <span style={{ color: "var(--wp-text, #e6e6e6)" }}>Edit</span>
+          </nav>
           <h1 style={{ fontSize: 18, fontWeight: 600, margin: "4px 0 0" }}>
             {project.display_name}
           </h1>
+          <div style={{ marginTop: 8, display: "flex", gap: 12, fontSize: 12 }}>
+            <Link
+              href={`/sites/${id}`}
+              data-testid="edit-back-to-detail"
+              style={{
+                color: "var(--wp-accent, #f3b841)",
+                textDecoration: "none",
+                fontWeight: 600,
+              }}
+            >
+              ← Back to site detail
+            </Link>
+            {project.preview_url && (
+              <a
+                href={project.preview_url}
+                target="_blank"
+                rel="noreferrer"
+                data-testid="edit-open-preview"
+                style={{
+                  color: "var(--wp-accent, #f3b841)",
+                  textDecoration: "none",
+                  fontWeight: 600,
+                }}
+              >
+                Open live preview ↗
+              </a>
+            )}
+          </div>
         </header>
 
         <div
