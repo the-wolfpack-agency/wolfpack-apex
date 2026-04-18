@@ -19,7 +19,7 @@
  * appear automatically when the webhook reports back.
  */
 
-import { useEffect, useState, useRef, use, forwardRef } from "react";
+import { useEffect, useState, useRef, use, forwardRef, memo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BriefForm, type Brief } from "@/components/sites/BriefForm";
@@ -53,6 +53,33 @@ function authHeaders(): HeadersInit {
 function jsonHeaders(): HeadersInit {
   return canonicalJsonHeaders();
 }
+
+// Preview iframe extracted + memoized. The parent re-renders every 4s
+// while a deploy is in flight (status poll). Without memoization the
+// iframe's parent JSX re-evaluates, React reconciles the iframe props,
+// and in some reconciliation paths the iframe reloads — each reload
+// re-requests every asset inside the deployed site, so a stale preview
+// with broken image paths would rack up the same 404s across hundreds
+// of polls. memo + a stable comparator on `src` alone keeps the iframe
+// mounted until the URL actually changes.
+const PreviewIframe = memo(
+  function PreviewIframe({ src, title }: { src: string; title: string }) {
+    return (
+      <iframe
+        src={src}
+        style={{
+          width: "100%",
+          height: "min(70vh, 560px)",
+          border: "1px solid var(--wp-border)",
+          borderRadius: "8px",
+          background: "#fff",
+        }}
+        title={title}
+      />
+    );
+  },
+  (prev, next) => prev.src === next.src && prev.title === next.title,
+);
 
 export function statusCopy(s: string, hasPreview: boolean): { tone: "info" | "warning" | "success" | "error"; title: string; hint: string } {
   switch (s) {
@@ -331,9 +358,8 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
               <button onClick={copyPreview} style={btnStyle()}>Copy link</button>
             </div>
           </div>
-          <iframe
+          <PreviewIframe
             src={project.preview_url!}
-            style={{ width: "100%", height: "min(70vh, 560px)", border: "1px solid var(--wp-border)", borderRadius: "8px", background: "#fff" }}
             title={`${project.display_name} preview`}
           />
         </section>
