@@ -13,11 +13,7 @@
 const mockSafeQuery = jest.fn();
 const mockQuery = jest.fn();
 jest.mock("@/lib/db", () => ({
-  safeQuery: (...args: unknown[]) => {
-    // eslint-disable-next-line no-console
-    console.log("SQ CALL:", String(args[0]).slice(0, 50));
-    return mockSafeQuery(...args);
-  },
+  safeQuery: (...args: unknown[]) => mockSafeQuery(...args),
   query: (...args: unknown[]) => mockQuery(...args),
 }));
 
@@ -279,11 +275,6 @@ describe("triggerDeploy → provisionClientRepoSecrets wiring", () => {
 
   it("invokes provisionClientRepoSecrets after fresh repo creation (env_not_configured is a safe no-op)", async () => {
     setEnv({}); // env not configured — provisioning returns gracefully
-    mockSafeQuery.mockImplementation((sql: string) => {
-      // eslint-disable-next-line no-console
-      console.log("SAFEQUERY:", sql.slice(0, 60));
-      return Promise.resolve({ rows: [] });
-    });
     mockProjectFetch();
     mockSafeQuery.mockResolvedValueOnce({ rows: [] }); // INSERT deploy
     mockCreateRepo.mockResolvedValueOnce({
