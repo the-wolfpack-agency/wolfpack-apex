@@ -400,21 +400,51 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
             ? "Push the saved brief and assets to a fresh build. The preview iframe above will refresh."
             : "Build the site and publish a shareable preview URL. Takes about a minute."}
         </p>
-        <button
-          onClick={handleDeploy}
-          disabled={isDeployInFlight}
-          style={{ ...btnStyle("var(--wp-gold)"), padding: "0.75rem 1.5rem", fontSize: "0.95rem" }}
-        >
-          {isDeployInFlight
-            ? project.status === "provisioning"
-              ? "Provisioning…"
-              : project.status === "deploying"
-              ? "Deploying…"
-              : "Starting deploy…"
-            : hasPreview
-            ? "Re-deploy"
-            : "Generate preview"}
-        </button>
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <button
+            onClick={handleDeploy}
+            disabled={isDeployInFlight}
+            style={{ ...btnStyle("var(--wp-gold)"), padding: "0.75rem 1.5rem", fontSize: "0.95rem" }}
+          >
+            {isDeployInFlight
+              ? project.status === "provisioning"
+                ? "Provisioning…"
+                : project.status === "deploying"
+                ? "Deploying…"
+                : "Starting deploy…"
+              : hasPreview
+              ? "Re-deploy"
+              : "Generate preview"}
+          </button>
+          <Link
+            href={`/sites/${id}/edit`}
+            style={{
+              ...btnStyle("transparent"),
+              padding: "0.75rem 1.5rem",
+              fontSize: "0.95rem",
+              border: "1px solid var(--wp-border, rgba(255,255,255,0.2))",
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+            }}
+            onClick={() => {
+              // Analytics: record the doorway hit so we know which route
+              // (guided flow vs prompt editor) users prefer. No data lost.
+              fetch("/api/track", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  eventType: "site.edit_entry_clicked",
+                  sessionId: window.location.pathname,
+                  page: window.location.pathname,
+                  metadata: { project_id: id, from: "detail_page" },
+                }),
+              }).catch(() => {});
+            }}
+          >
+            Prompt editor →
+          </Link>
+        </div>
       </section>
 
       {/* Inline status messages */}

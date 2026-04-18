@@ -149,6 +149,12 @@ export type ApexEventType =
   | "site.brief_parse_failed"
   | "site.brief_form_edited"
   | "site.dropzone_used"
+  // Sites — prompt-to-brief editor (029)
+  | "site.brief_edit_requested"
+  | "site.brief_edit_generated"
+  | "site.brief_edit_failed"
+  | "site.brief_edit_blocked"
+  | "site.brief_edit_decided"
   // People (HR) — benefits, employees, onboarding, insights
   | "hr.employee_added"
   | "hr.employee_updated"
