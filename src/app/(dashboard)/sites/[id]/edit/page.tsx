@@ -87,14 +87,27 @@ export function briefsDiffer(a: Brief | null, b: Brief | null): boolean {
 }
 
 function trackClient(eventName: string, metadata: Record<string, unknown>) {
-  fetch("/api/track", {
+  // POST to /api/analytics (the real endpoint) with auth + {event, metadata}.
+  // Was /api/track which doesn't exist — produced silent 404s in the
+  // console on every funnel event. Uses jsonHeaders() so the user's
+  // token attaches and the server can scope analytics to their user_id.
+  if (typeof window === "undefined") return;
+  const token =
+    localStorage.getItem("instinct_token") ??
+    localStorage.getItem("apex_token");
+  if (!token) return;
+  fetch("/api/analytics", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
     body: JSON.stringify({
-      eventType: eventName,
-      sessionId: typeof window === "undefined" ? "ssr" : window.location.pathname,
-      page: typeof window === "undefined" ? "/" : window.location.pathname,
-      metadata,
+      event: eventName,
+      metadata: {
+        ...metadata,
+        page: window.location.pathname,
+      },
     }),
   }).catch(() => {
     /* non-fatal — analytics must never break UX */
@@ -616,7 +629,16 @@ export default function SiteEditPage({
             background: "#fff",
           }}
           data-testid="edit-preview-iframe"
-          sandbox="allow-same-origin allow-scripts allow-forms"
+          /*
+           * DON'T set `sandbox` here. Chrome warns when an iframe has
+           * BOTH `allow-same-origin` AND `allow-scripts` because the
+           * sandboxed content can script its way out of the sandbox —
+           * which is the classic bypass pattern. The preview page
+           * lives on the same origin (wolfpack-instinct.vercel.app)
+           * and frame-ancestors 'self' already gates who can embed
+           * it, so a sandbox here is defense-theater, not defense-in-
+           * depth.
+           */
         />
       </section>
     </main>

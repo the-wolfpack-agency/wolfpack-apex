@@ -122,6 +122,19 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     user.role,
   );
 
+  // Close the learning loop — every successful asset upload lands in
+  // the analytics stream with project + file shape so the system can
+  // learn which asset types are actually used + how often. Before
+  // 2026-04-18 the handler docstring promised this event but the code
+  // never emitted it; orphan feature per the engineering directive.
+  trackEvent("site.asset_uploaded", user.id, user.role, {
+    project_id: id,
+    filename: safeName,
+    mime_type: file.type,
+    size_bytes: file.size,
+    committed,
+  });
+
   return NextResponse.json({
     asset: {
       url: storageUrl,

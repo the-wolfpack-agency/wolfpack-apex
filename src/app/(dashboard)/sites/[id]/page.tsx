@@ -489,14 +489,26 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
             onClick={() => {
               // Analytics: record the doorway hit so we know which route
               // (guided flow vs prompt editor) users prefer. No data lost.
-              fetch("/api/track", {
+              // Hits /api/analytics (the real endpoint) with the user's
+              // bearer token — /api/track doesn't exist and was silently
+              // 404ing until 2026-04-18.
+              const token =
+                localStorage.getItem("instinct_token") ??
+                localStorage.getItem("apex_token");
+              if (!token) return;
+              fetch("/api/analytics", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
                 body: JSON.stringify({
-                  eventType: "site.edit_entry_clicked",
-                  sessionId: window.location.pathname,
-                  page: window.location.pathname,
-                  metadata: { project_id: id, from: "detail_page" },
+                  event: "site.edit_entry_clicked",
+                  metadata: {
+                    project_id: id,
+                    from: "detail_page",
+                    page: window.location.pathname,
+                  },
                 }),
               }).catch(() => {});
             }}
