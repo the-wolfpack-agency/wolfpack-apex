@@ -22,6 +22,7 @@ import { QuoteSection } from "./sections/quote";
 import { StatsSection } from "./sections/stats";
 import { CalloutSection } from "./sections/callout";
 import { BannerSection } from "./sections/banner";
+import { VideoSection } from "./sections/video";
 
 export interface RenderBriefProps {
   brief: SiteBrief;
@@ -54,6 +55,8 @@ export function RenderSection({ section, index }: { section: BriefSection; index
       return <CalloutSection key={key} section={section} />;
     case "banner":
       return <BannerSection key={key} section={section} />;
+    case "video":
+      return <VideoSection key={key} section={section} />;
     default:
       return null;
   }

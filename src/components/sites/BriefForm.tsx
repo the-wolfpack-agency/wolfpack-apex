@@ -13,6 +13,7 @@
  */
 
 import { useState, useId } from "react";
+import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 
 // slugify + kebab-case — used to turn a label into a stable DOM id.
 // Every input on every form in this file goes through either Field or
@@ -36,6 +37,7 @@ export const SECTION_TYPES = [
   "cards",
   "gallery",
   "quote",
+  "video",
 ] as const;
 export type SectionType = (typeof SECTION_TYPES)[number];
 
@@ -48,6 +50,11 @@ export interface Section {
   items?: Array<Record<string, unknown>>;
   images?: Array<{ src: string; alt?: string }>;
   attribution?: string;
+  // Video section — see sites-schema.ts BriefSection for canonical shape.
+  videoUrl?: string;
+  provider?: "youtube" | "vimeo";
+  autoplay?: boolean;
+  startSeconds?: number;
 }
 
 export interface Brief {
@@ -82,7 +89,24 @@ export function BriefForm({ value, onChange }: BriefFormProps) {
     if (type === "stats") blank.items = [{ label: "", value: 0 }];
     if (type === "cards") blank.items = [{ title: "", body: "" }];
     if (type === "gallery") blank.images = [];
+    if (type === "video") blank.autoplay = false;
     updateSections([...page.sections, blank]);
+    // Analytics: video is the only newly instrumented section type. Fire
+    // and forget — the /api/analytics route is auth-gated, so a 401 in
+    // non-logged-in previews is expected and non-fatal. No data lost:
+    // the onChange above still flows `site.brief_form_edited`.
+    if (type === "video" && typeof window !== "undefined") {
+      fetchWithRefresh("/api/analytics", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          event: "site.section_video_added",
+          metadata: { client: value.client, page_route: page.route },
+        }),
+      }).catch(() => {
+        /* analytics is best-effort — never block the editor */
+      });
+    }
   }
   function removeSection(idx: number) {
     updateSections(page.sections.filter((_, i) => i !== idx));
@@ -256,6 +280,41 @@ function SectionEditor({ section, onChange }: { section: Section; onChange: (pat
           <Field label="Attribution" value={section.attribution ?? ""} onChange={(v) => onChange({ attribution: v })} />
         </div>
       );
+    case "video": {
+      // Provider auto-derives from the URL host inside buildEmbed() — we
+      // still render a disclosure input so the user can force it when the
+      // URL is ambiguous (rare; kept for transparency).
+      const startValue = typeof section.startSeconds === "number" ? String(section.startSeconds) : "";
+      return (
+        <div style={grid()}>
+          <Field label="Heading" value={section.heading ?? ""} onChange={(v) => onChange({ heading: v })} />
+          <Field label="Caption" value={section.body ?? ""} onChange={(v) => onChange({ body: v })} multiline />
+          <Field
+            label="Video URL (YouTube or Vimeo)"
+            value={section.videoUrl ?? ""}
+            onChange={(v) => onChange({ videoUrl: v })}
+          />
+          <Field
+            label="Start time (seconds)"
+            value={startValue}
+            onChange={(v) => {
+              const n = Number(v);
+              onChange({ startSeconds: v === "" ? undefined : Number.isFinite(n) && n >= 0 ? n : 0 });
+            }}
+          />
+          <label style={{ fontSize: "0.7rem", color: "var(--wp-text-dim)", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+            <input
+              id="video-autoplay"
+              name="video-autoplay"
+              type="checkbox"
+              checked={!!section.autoplay}
+              onChange={(e) => onChange({ autoplay: e.target.checked })}
+            />
+            Autoplay (muted)
+          </label>
+        </div>
+      );
+    }
   }
 }
 

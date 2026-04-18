@@ -23,8 +23,11 @@ export const SUPPORTED_SECTION_TYPES = [
   "stats",
   "gallery",
   "quote",
+  "video",
 ] as const;
 export type SectionType = (typeof SUPPORTED_SECTION_TYPES)[number];
+
+export type VideoProvider = "youtube" | "vimeo";
 
 export interface BriefSection {
   type: SectionType;
@@ -45,6 +48,14 @@ export interface BriefSection {
   }>;
   images?: Array<{ src: string; alt?: string } | string>;
   attribution?: string;
+  // Video section fields — populated only when `type === "video"`.
+  // Inferred provider (`youtube` | `vimeo`) is optional; the renderer
+  // derives it from the URL host when omitted. All fields validated in
+  // `validateBrief` below.
+  videoUrl?: string;
+  provider?: VideoProvider;
+  autoplay?: boolean;
+  startSeconds?: number;
 }
 
 export interface BriefPage {
@@ -123,6 +134,35 @@ export function validateBrief(brief: unknown): asserts brief is SiteBrief {
       }
       if (s.type === "gallery" && !Array.isArray(s.images)) {
         errors.push(`page ${p.route}: gallery.images array required`);
+      }
+      if (s.type === "video") {
+        if (typeof s.videoUrl !== "string" || !s.videoUrl.startsWith("https://")) {
+          errors.push(`page ${p.route}: video.videoUrl is required and must start with https://`);
+        } else {
+          // Only allow exact hosts we know how to convert to a sandboxed
+          // embed URL. Matches the renderer in components/sites/sections/
+          // video.tsx one-to-one — reject here, do not iframe there.
+          let host: string | null = null;
+          try {
+            host = new URL(s.videoUrl).hostname.toLowerCase().replace(/^www\./, "");
+          } catch {
+            host = null;
+          }
+          const allowed = new Set(["youtube.com", "youtu.be", "vimeo.com", "m.youtube.com"]);
+          if (!host || !allowed.has(host)) {
+            errors.push(
+              `page ${p.route}: video.videoUrl must be a youtube.com, youtu.be, or vimeo.com URL`,
+            );
+          }
+        }
+        if (s.startSeconds !== undefined) {
+          if (typeof s.startSeconds !== "number" || !Number.isFinite(s.startSeconds) || s.startSeconds < 0) {
+            errors.push(`page ${p.route}: video.startSeconds must be a non-negative number`);
+          }
+        }
+        if (s.provider !== undefined && s.provider !== "youtube" && s.provider !== "vimeo") {
+          errors.push(`page ${p.route}: video.provider must be "youtube" or "vimeo"`);
+        }
       }
     }
   }

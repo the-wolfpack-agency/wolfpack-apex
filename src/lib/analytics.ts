@@ -156,6 +156,8 @@ export type ApexEventType =
   | "site.brief_parse_failed"
   | "site.brief_form_edited"
   | "site.dropzone_used"
+  // Sites — video section added via BriefForm (YouTube/Vimeo embeds)
+  | "site.section_video_added"
   // Sites — prompt-to-brief editor (029)
   | "site.brief_edit_requested"
   | "site.brief_edit_generated"
