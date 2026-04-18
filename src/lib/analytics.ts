@@ -155,6 +155,9 @@ export type ApexEventType =
   | "site.brief_edit_failed"
   | "site.brief_edit_blocked"
   | "site.brief_edit_decided"
+  // Sites — brief-edit learning loop (030)
+  | "site.insights_viewed"
+  | "site.insights_snapshot_taken"
   // People (HR) — benefits, employees, onboarding, insights
   | "hr.employee_added"
   | "hr.employee_updated"
