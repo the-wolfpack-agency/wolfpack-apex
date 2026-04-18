@@ -49,6 +49,24 @@ describe("middleware security headers", () => {
     expect(csp).toContain("report-uri /api/csp-report");
   });
 
+  // Regression for 2026-04-17: frame-src 'none' broke the /sites/[id]
+  // preview iframe (Vercel previews) AND the new split-screen editor's
+  // /sites/[id]/preview iframe. Needs to allow self + Vercel previews
+  // without weakening clickjacking defense.
+  it("CSP frame-src allows self + Vercel previews so /sites iframes render", async () => {
+    const headers = await getHeaders();
+    const csp = headers.get("Content-Security-Policy") ?? "";
+    expect(csp).toMatch(/frame-src[^;]*'self'/);
+    expect(csp).toMatch(/frame-src[^;]*https:\/\/\*\.vercel\.app/);
+    expect(csp).not.toMatch(/frame-src\s+'none'/);
+  });
+
+  it("CSP frame-ancestors stays 'none' — Instinct cannot be iframed by third parties", async () => {
+    const headers = await getHeaders();
+    const csp = headers.get("Content-Security-Policy") ?? "";
+    expect(csp).toMatch(/frame-ancestors\s+'none'/);
+  });
+
   it("sets X-Content-Type-Options: nosniff", async () => {
     const headers = await getHeaders();
     expect(headers.get("X-Content-Type-Options")).toBe("nosniff");

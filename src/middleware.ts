@@ -23,6 +23,12 @@ const IS_PROD = process.env.NODE_ENV === "production";
  * frame-ancestors 'none' takes precedence over X-Frame-Options; both are set for
  * legacy browser compatibility.
  */
+// frame-src: allow Instinct to iframe its own pages (the /sites/[id]/edit
+// split-screen editor iframes /sites/[id]/preview) plus Vercel preview
+// deployments (the /sites/[id] detail page iframes the live wolfpack-*
+// .vercel.app client-site previews). frame-ancestors 'none' is the
+// clickjacking defense — it's separate and stays locked down so
+// Instinct itself can never be iframed by a third party.
 const CSP_DIRECTIVES = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
@@ -31,7 +37,7 @@ const CSP_DIRECTIVES = [
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https://fonts.gstatic.com",
   "connect-src 'self' https:",
-  "frame-src 'none'",
+  "frame-src 'self' https://*.vercel.app",
   "frame-ancestors 'none'",
   "object-src 'none'",
   "base-uri 'self'",
