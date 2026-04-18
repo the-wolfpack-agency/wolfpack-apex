@@ -24,6 +24,9 @@ export const SUPPORTED_SECTION_TYPES = [
   "gallery",
   "quote",
   "video",
+  "testimonial",
+  "pricing",
+  "faq",
 ] as const;
 export type SectionType = (typeof SUPPORTED_SECTION_TYPES)[number];
 
@@ -36,7 +39,13 @@ export interface BriefSection {
   cta?: { label: string; href: string };
   backgroundImage?: string;
   height?: string;
+  // items[] is a widened union covering every section that uses it
+  // (cards/stats/testimonial/pricing/faq). Each renderer narrows on the
+  // fields it needs; validateBrief enforces per-type invariants. Widening
+  // here instead of splintering into per-type section interfaces keeps
+  // the existing BriefForm/test import surface stable.
   items?: Array<{
+    // cards / stats
     title?: string;
     body?: string;
     accent?: boolean;
@@ -45,6 +54,20 @@ export interface BriefSection {
     value?: number;
     prefix?: string;
     suffix?: string;
+    // testimonial
+    quote?: string;
+    authorName?: string;
+    authorTitle?: string;
+    authorPhotoUrl?: string;
+    // pricing
+    name?: string;
+    price?: string;
+    features?: string[];
+    cta?: { label: string; href: string };
+    highlighted?: boolean;
+    // faq
+    question?: string;
+    answer?: string;
   }>;
   images?: Array<{ src: string; alt?: string } | string>;
   attribution?: string;
@@ -64,6 +87,32 @@ export interface BriefPage {
   sections: BriefSection[];
 }
 
+/**
+ * Per-client brand layer. `theme` was originally a loose
+ * `Record<string, string>` — no field was set, no code read it. The
+ * ThemeEditor (2026-04-17) gave it a typed shape, but existing DB rows
+ * may still carry the flat form. The validator below accepts BOTH:
+ *   - nested: `{ colors: { primary: "#..." }, font: { family: "..." } }`
+ *   - flat legacy: `{ primary: "#...", font: "Inter", ... }`
+ * Consumers should normalize via `normalizeTheme` in site-theme.ts
+ * before reading.
+ */
+export interface SiteThemeColors {
+  primary?: string;
+  accent?: string;
+  bg?: string;
+  fg?: string;
+  muted?: string;
+}
+export interface SiteThemeFont {
+  family?: string;
+  googleFontName?: string;
+}
+export interface SiteTheme {
+  colors?: SiteThemeColors;
+  font?: SiteThemeFont;
+}
+
 export interface SiteBrief {
   client: string;
   product: {
@@ -72,7 +121,12 @@ export interface SiteBrief {
     domain?: string;
     supportEmail?: string;
   };
-  theme?: Record<string, string>;
+  /**
+   * Optional brand theme. Accepts the nested SiteTheme shape OR the
+   * legacy flat `Record<string,string>` form for back-compat. Use
+   * `normalizeTheme` from `site-theme.ts` to coerce to SiteTheme.
+   */
+  theme?: SiteTheme | Record<string, string>;
   pages: BriefPage[];
   contactForm?: { fields: string[] };
 }
@@ -82,6 +136,8 @@ export type SiteStatus = "draft" | "provisioning" | "deploying" | "ready" | "fai
 /* ----------------------------- Validation ----------------------------- */
 
 const SLUG_RE = /^[a-z][a-z0-9-]{1,38}$/;
+const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
+const THEME_COLOR_FIELDS = ["primary", "accent", "bg", "fg", "muted"] as const;
 
 export class BriefValidationError extends Error {
   constructor(public errors: string[]) {
@@ -113,6 +169,58 @@ export function validateBrief(brief: unknown): asserts brief is SiteBrief {
   }
   if (!Array.isArray(b.pages) || b.pages.length === 0) {
     errors.push("pages array required (at least one page)");
+  }
+  // Theme is optional. If present, it must be an object; we accept both
+  // the nested SiteTheme shape and the legacy flat Record<string,string>
+  // form. For the nested shape, validate hex colors + font.family
+  // length. For the flat legacy form we only lightly validate the known
+  // color keys (so old briefs parse without error).
+  if (b.theme !== undefined) {
+    if (!b.theme || typeof b.theme !== "object" || Array.isArray(b.theme)) {
+      errors.push("theme must be an object");
+    } else {
+      const t = b.theme as Record<string, unknown>;
+      const nestedColors = t.colors as Record<string, unknown> | undefined;
+      if (nestedColors !== undefined) {
+        if (typeof nestedColors !== "object" || nestedColors === null || Array.isArray(nestedColors)) {
+          errors.push("theme.colors must be an object");
+        } else {
+          for (const key of THEME_COLOR_FIELDS) {
+            const v = nestedColors[key];
+            if (v !== undefined && (typeof v !== "string" || !HEX_COLOR_RE.test(v))) {
+              errors.push(`theme.colors.${key} must be a hex color like #112233`);
+            }
+          }
+        }
+      } else {
+        // Flat legacy form — validate any known color keys present at top level.
+        for (const key of THEME_COLOR_FIELDS) {
+          const v = t[key];
+          if (v !== undefined && (typeof v !== "string" || !HEX_COLOR_RE.test(v))) {
+            errors.push(`theme.${key} must be a hex color like #112233`);
+          }
+        }
+      }
+      const nestedFont = t.font;
+      if (nestedFont !== undefined && typeof nestedFont === "object" && nestedFont !== null && !Array.isArray(nestedFont)) {
+        const f = nestedFont as Record<string, unknown>;
+        if (f.family !== undefined) {
+          if (typeof f.family !== "string" || f.family.length > 100) {
+            errors.push("theme.font.family must be a string of at most 100 chars");
+          }
+        }
+        if (f.googleFontName !== undefined && typeof f.googleFontName !== "string") {
+          errors.push("theme.font.googleFontName must be a string");
+        }
+      } else if (typeof nestedFont === "string") {
+        // Legacy flat form: `font: "Inter"` — accept it, just enforce length.
+        if (nestedFont.length > 100) {
+          errors.push("theme.font must be a string of at most 100 chars");
+        }
+      } else if (nestedFont !== undefined) {
+        errors.push("theme.font must be an object or string");
+      }
+    }
   }
   const known = new Set<string>(SUPPORTED_SECTION_TYPES);
   for (const p of b.pages || []) {
@@ -163,6 +271,49 @@ export function validateBrief(brief: unknown): asserts brief is SiteBrief {
         if (s.provider !== undefined && s.provider !== "youtube" && s.provider !== "vimeo") {
           errors.push(`page ${p.route}: video.provider must be "youtube" or "vimeo"`);
         }
+      }
+      if (s.type === "testimonial") {
+        const items = Array.isArray(s.items) ? s.items : [];
+        items.forEach((it, i) => {
+          if (typeof it.quote !== "string" || it.quote.length === 0) {
+            errors.push(`page ${p.route}: testimonial.items[${i}].quote required`);
+          }
+          if (typeof it.authorName !== "string" || it.authorName.length === 0) {
+            errors.push(`page ${p.route}: testimonial.items[${i}].authorName required`);
+          }
+          if (it.authorPhotoUrl !== undefined) {
+            if (typeof it.authorPhotoUrl !== "string" || !it.authorPhotoUrl.startsWith("https://")) {
+              errors.push(`page ${p.route}: testimonial.items[${i}].authorPhotoUrl must start with https://`);
+            }
+          }
+        });
+      }
+      if (s.type === "pricing") {
+        const items = Array.isArray(s.items) ? s.items : [];
+        items.forEach((it, i) => {
+          if (typeof it.name !== "string" || it.name.length === 0) {
+            errors.push(`page ${p.route}: pricing.items[${i}].name required`);
+          }
+          if (typeof it.price !== "string" || it.price.length === 0) {
+            errors.push(`page ${p.route}: pricing.items[${i}].price required`);
+          }
+          if (!Array.isArray(it.features) || it.features.length === 0) {
+            errors.push(`page ${p.route}: pricing.items[${i}].features must be a non-empty array`);
+          } else if (!it.features.every((f) => typeof f === "string")) {
+            errors.push(`page ${p.route}: pricing.items[${i}].features must be all strings`);
+          }
+        });
+      }
+      if (s.type === "faq") {
+        const items = Array.isArray(s.items) ? s.items : [];
+        items.forEach((it, i) => {
+          if (typeof it.question !== "string" || it.question.length === 0) {
+            errors.push(`page ${p.route}: faq.items[${i}].question required`);
+          }
+          if (typeof it.answer !== "string" || it.answer.length === 0) {
+            errors.push(`page ${p.route}: faq.items[${i}].answer required`);
+          }
+        });
       }
     }
   }

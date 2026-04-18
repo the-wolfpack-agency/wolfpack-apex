@@ -27,7 +27,11 @@ import {
   authHeaders as canonicalAuthHeaders,
   jsonHeaders as canonicalJsonHeaders,
   fetchWithRefresh,
+  getInstinctUser,
 } from "@/lib/client-auth";
+
+// Roles that can hard-delete (matches server gate hasRole(role, "hr")).
+const HARD_DELETE_ROLES = new Set(["ceo", "cto", "hr"]);
 
 interface SiteProject {
   id: string;
@@ -137,6 +141,8 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
   const [deploying, setDeploying] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [hardDeleting, setHardDeleting] = useState(false);
+  const [role, setRole] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [uploads, setUploads] = useState<UploadedAsset[]>([]);
@@ -183,6 +189,11 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
     }
     if (!opts.fromPoll) setLoading(false);
   }
+
+  useEffect(() => {
+    const u = getInstinctUser<{ role?: string }>();
+    if (u?.role) setRole(u.role);
+  }, []);
 
   useEffect(() => {
     load();
@@ -285,6 +296,37 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
     }
   }
 
+  async function handleHardDelete() {
+    if (!project) return;
+    const msg =
+      `Delete "${project.display_name}" PERMANENTLY?\n\n` +
+      `This will also try to remove:\n` +
+      `  - the GitHub repo (${project.github_repo_url ?? "not provisioned"})\n` +
+      `  - the Vercel project (wolfpack-${project.client_slug})\n\n` +
+      `History stays in the audit log. This cannot be undone.`;
+    if (!confirm(msg)) return;
+    setHardDeleting(true);
+    setError(null);
+    const r = await fetchWithRefresh(`/api/sites/${id}?hard=true`, { method: "DELETE" });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) {
+      const parts: string[] = [];
+      const c = data.cleanup ?? {};
+      if (c.github?.deleted) parts.push(`GitHub: ${c.github.repo} removed`);
+      else if (c.github) parts.push(`GitHub: ${c.github.error ?? "not removed"}`);
+      if (c.vercel?.deleted) parts.push(`Vercel: ${c.vercel.project} removed`);
+      else if (c.vercel) parts.push(`Vercel: ${c.vercel.error ?? "not removed"}`);
+      sessionStorage.setItem(
+        "sites_flash",
+        parts.length ? `Deleted permanently. ${parts.join(" · ")}.` : "Deleted permanently.",
+      );
+      router.push("/sites");
+    } else {
+      setError(data.error ?? "Delete failed.");
+      setHardDeleting(false);
+    }
+  }
+
   function copyPreview() {
     if (project?.preview_url) {
       navigator.clipboard.writeText(project.preview_url);
@@ -312,13 +354,32 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
   return (
     <div style={{ maxWidth: "880px", margin: "0 auto", padding: "1.25rem 1rem 3rem", color: "var(--wp-text)" }}>
       {/* Breadcrumb + archive */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem", gap: "0.5rem" }}>
         <Link href="/sites" style={{ color: "var(--wp-text-dim)", fontSize: "0.85rem", textDecoration: "none" }}>
           ← All sites
         </Link>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+        {role && HARD_DELETE_ROLES.has(role) && (
+          <button
+            onClick={handleHardDelete}
+            disabled={hardDeleting || archiving}
+            style={{
+              background: "transparent",
+              color: "var(--wp-error, #e07070)",
+              border: "1px solid rgba(220, 80, 80, 0.5)",
+              padding: "0.35rem 0.75rem",
+              borderRadius: "6px",
+              fontSize: "0.75rem",
+              cursor: hardDeleting ? "wait" : "pointer",
+            }}
+            aria-label="Delete permanently"
+          >
+            {hardDeleting ? "Deleting…" : "Delete permanently"}
+          </button>
+        )}
         <button
           onClick={handleArchive}
-          disabled={archiving}
+          disabled={archiving || hardDeleting}
           style={{
             background: "transparent",
             color: "var(--wp-text-dim)",
@@ -332,6 +393,7 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
         >
           {archiving ? "Archiving…" : "Archive site"}
         </button>
+        </div>
       </div>
 
       {/* Header */}
@@ -487,21 +549,13 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
               cursor: "pointer",
             }}
             onClick={() => {
-              // Analytics: record the doorway hit so we know which route
-              // (guided flow vs prompt editor) users prefer. No data lost.
-              // Hits /api/analytics (the real endpoint) with the user's
-              // bearer token — /api/track doesn't exist and was silently
-              // 404ing until 2026-04-18.
-              const token =
-                localStorage.getItem("instinct_token") ??
-                localStorage.getItem("apex_token");
-              if (!token) return;
-              fetch("/api/analytics", {
+              // Analytics: which doorway — guided flow vs prompt editor?
+              // fetchWithRefresh rotates the JWT on 401 instead of
+              // silently dropping the event. Fire-and-forget; UX must
+              // not block on analytics.
+              fetchWithRefresh("/api/analytics", {
                 method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${token}`,
-                },
+                headers: jsonHeaders(),
                 body: JSON.stringify({
                   event: "site.edit_entry_clicked",
                   metadata: {

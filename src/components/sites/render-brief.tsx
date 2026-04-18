@@ -13,7 +13,9 @@
  *     defensive) render nothing.
  */
 
+import type { CSSProperties } from "react";
 import type { SiteBrief, BriefSection, SectionType } from "@/lib/sites-schema";
+import { normalizeTheme, themeToCssVars } from "@/lib/site-theme";
 import { HeroSection } from "./sections/hero";
 import { TextSection } from "./sections/text";
 import { CardsSection } from "./sections/cards";
@@ -23,6 +25,9 @@ import { StatsSection } from "./sections/stats";
 import { CalloutSection } from "./sections/callout";
 import { BannerSection } from "./sections/banner";
 import { VideoSection } from "./sections/video";
+import { TestimonialSection } from "./sections/testimonial";
+import { PricingSection } from "./sections/pricing";
+import { FaqSection } from "./sections/faq";
 
 export interface RenderBriefProps {
   brief: SiteBrief;
@@ -57,6 +62,12 @@ export function RenderSection({ section, index }: { section: BriefSection; index
       return <BannerSection key={key} section={section} />;
     case "video":
       return <VideoSection key={key} section={section} />;
+    case "testimonial":
+      return <TestimonialSection key={key} section={section} />;
+    case "pricing":
+      return <PricingSection key={key} section={section} />;
+    case "faq":
+      return <FaqSection key={key} section={section} />;
     default:
       return null;
   }
@@ -81,13 +92,33 @@ export function RenderBrief({ brief, page = 0 }: RenderBriefProps) {
   const selected = pages[page] ?? pages[0];
   const sections = selected.sections ?? [];
 
+  // Brand theme → CSS custom properties. The section components all
+  // reference `var(--wp-site-*)` with baked-in fallbacks, so omitting a
+  // variable here cleanly degrades to the neutral default. We emit the
+  // variables both as a <style>:root{} rule (for selectors inside
+  // sections that look up :root) AND as an inline style on the <main>
+  // (for sections that consume the variable via React's style prop). If
+  // theme is undefined, both paths collapse to no-ops.
+  const normalized = normalizeTheme(selected ? brief.theme : undefined);
+  const cssVars = themeToCssVars(normalized);
+  const rootVarCss = Object.entries(cssVars)
+    .map(([k, v]) => `${k}: ${v};`)
+    .join(" ");
+  const styleBlock = rootVarCss
+    ? `[data-testid="render-brief"] { ${rootVarCss} }`
+    : "";
+
   return (
     <main
       data-testid="render-brief"
       data-page-index={String(page)}
       data-page-route={selected.route}
       className="flex min-h-screen flex-col bg-white text-neutral-900"
+      style={cssVars as CSSProperties}
     >
+      {styleBlock ? (
+        <style data-testid="render-brief-theme-style">{styleBlock}</style>
+      ) : null}
       {selected.title ? (
         <header className="sr-only">
           <h1>{selected.title}</h1>

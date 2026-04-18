@@ -341,6 +341,9 @@ describe("RenderBrief — page selection + escaping", () => {
       { type: "callout", body: "c" },
       { type: "banner", heading: "B" },
       { type: "video", videoUrl: "https://www.youtube.com/watch?v=abc123" },
+      { type: "testimonial", items: [{ quote: "q", authorName: "a" }] },
+      { type: "pricing", items: [{ name: "X", price: "$1", features: ["a"] }] },
+      { type: "faq", items: [{ question: "q", answer: "a" }] },
     ]);
     expect(() => render(<RenderBrief brief={brief} />)).not.toThrow();
     expect(screen.getByTestId("hero-section")).toBeInTheDocument();
@@ -352,6 +355,9 @@ describe("RenderBrief — page selection + escaping", () => {
     expect(screen.getByTestId("callout-section")).toBeInTheDocument();
     expect(screen.getByTestId("banner-section")).toBeInTheDocument();
     expect(screen.getByTestId("video-section")).toBeInTheDocument();
+    expect(screen.getByTestId("testimonial-section")).toBeInTheDocument();
+    expect(screen.getByTestId("pricing-section")).toBeInTheDocument();
+    expect(screen.getByTestId("faq-section")).toBeInTheDocument();
   });
 
   it("escapes raw HTML in section heading (never injects <script>)", () => {

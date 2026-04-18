@@ -96,21 +96,13 @@ export function briefsDiffer(a: Brief | null, b: Brief | null): boolean {
 }
 
 function trackClient(eventName: string, metadata: Record<string, unknown>) {
-  // POST to /api/analytics (the real endpoint) with auth + {event, metadata}.
-  // Was /api/track which doesn't exist — produced silent 404s in the
-  // console on every funnel event. Uses jsonHeaders() so the user's
-  // token attaches and the server can scope analytics to their user_id.
+  // POST to /api/analytics via fetchWithRefresh so a 401 rotates the
+  // JWT instead of silently dropping the event. Must not throw — a
+  // dead analytics POST cannot break the editor UX.
   if (typeof window === "undefined") return;
-  const token =
-    localStorage.getItem("instinct_token") ??
-    localStorage.getItem("apex_token");
-  if (!token) return;
-  fetch("/api/analytics", {
+  fetchWithRefresh("/api/analytics", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
+    headers: jsonHeaders(),
     body: JSON.stringify({
       event: eventName,
       metadata: {

@@ -165,6 +165,12 @@ export type ApexEventType =
   | "site.template_applied"
   // Sites — video section added via BriefForm (YouTube/Vimeo embeds)
   | "site.section_video_added"
+  // Sites — sales/conversion sections added via BriefForm
+  | "site.section_testimonial_added"
+  | "site.section_pricing_added"
+  | "site.section_faq_added"
+  // Sites — brand theme edited via ThemeEditor (colors + font picker)
+  | "site.theme_edited"
   // Sites — prompt-to-brief editor (029)
   | "site.brief_edit_requested"
   | "site.brief_edit_generated"

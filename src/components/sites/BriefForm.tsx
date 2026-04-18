@@ -14,6 +14,8 @@
 
 import { useState, useId } from "react";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+import { ThemeEditor } from "@/components/sites/ThemeEditor";
+import type { SiteTheme } from "@/lib/site-theme";
 
 // slugify + kebab-case — used to turn a label into a stable DOM id.
 // Every input on every form in this file goes through either Field or
@@ -38,6 +40,9 @@ export const SECTION_TYPES = [
   "gallery",
   "quote",
   "video",
+  "testimonial",
+  "pricing",
+  "faq",
 ] as const;
 export type SectionType = (typeof SECTION_TYPES)[number];
 
@@ -60,7 +65,10 @@ export interface Section {
 export interface Brief {
   client: string;
   product: { name: string; tagline?: string; supportEmail?: string; domain?: string };
-  theme?: Record<string, string>;
+  // Accepts both the typed SiteTheme shape and the legacy flat
+  // Record<string,string> form so briefs persisted before the
+  // ThemeEditor rollout still parse cleanly through this editor.
+  theme?: SiteTheme | Record<string, string>;
   pages: Array<{ route: string; title?: string; sections: Section[] }>;
   contactForm?: { fields: string[] };
 }
@@ -90,17 +98,27 @@ export function BriefForm({ value, onChange }: BriefFormProps) {
     if (type === "cards") blank.items = [{ title: "", body: "" }];
     if (type === "gallery") blank.images = [];
     if (type === "video") blank.autoplay = false;
+    if (type === "testimonial") blank.items = [{ quote: "", authorName: "" }];
+    if (type === "pricing") blank.items = [{ name: "", price: "", features: [] }];
+    if (type === "faq") blank.items = [{ question: "", answer: "" }];
     updateSections([...page.sections, blank]);
-    // Analytics: video is the only newly instrumented section type. Fire
-    // and forget — the /api/analytics route is auth-gated, so a 401 in
-    // non-logged-in previews is expected and non-fatal. No data lost:
-    // the onChange above still flows `site.brief_form_edited`.
-    if (type === "video" && typeof window !== "undefined") {
+    // Analytics: fire-and-forget per-type "section_X_added" events. The
+    // /api/analytics route is auth-gated, so a 401 in non-logged-in
+    // previews is expected and non-fatal. No data lost: the onChange
+    // above still flows `site.brief_form_edited` to the learning loop.
+    const eventByType: Partial<Record<SectionType, string>> = {
+      video: "site.section_video_added",
+      testimonial: "site.section_testimonial_added",
+      pricing: "site.section_pricing_added",
+      faq: "site.section_faq_added",
+    };
+    const event = eventByType[type];
+    if (event && typeof window !== "undefined") {
       fetchWithRefresh("/api/analytics", {
         method: "POST",
         headers: jsonHeaders(),
         body: JSON.stringify({
-          event: "site.section_video_added",
+          event,
           metadata: { client: value.client, page_route: page.route },
         }),
       }).catch(() => {
@@ -156,6 +174,12 @@ export function BriefForm({ value, onChange }: BriefFormProps) {
         <Field label="Domain" value={value.product.domain ?? ""} onChange={(v) => update({ product: { ...value.product, domain: v } })} />
         <Field label="Support email" value={value.product.supportEmail ?? ""} onChange={(v) => update({ product: { ...value.product, supportEmail: v } })} />
       </div>
+
+      <ThemeEditor
+        value={(value.theme as SiteTheme | undefined) ?? undefined}
+        onChange={(nextTheme) => update({ theme: nextTheme })}
+        projectId={value.client}
+      />
 
       <h3 style={{ margin: "1rem 0 0.25rem", fontSize: "1rem" }}>Sections ({page.sections.length})</h3>
       {page.sections.map((s, i) => (
@@ -312,6 +336,118 @@ function SectionEditor({ section, onChange }: { section: Section; onChange: (pat
             />
             Autoplay (muted)
           </label>
+        </div>
+      );
+    }
+    case "testimonial": {
+      const items = (section.items ?? []) as Array<{
+        quote?: string;
+        authorName?: string;
+        authorTitle?: string;
+        authorPhotoUrl?: string;
+      }>;
+      return (
+        <div>
+          <Field label="Heading" value={section.heading ?? ""} onChange={(v) => onChange({ heading: v })} />
+          {items.map((it, i) => {
+            const k = `testimonial-${i}`;
+            return (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0.4rem", marginTop: "0.6rem", alignItems: "start", padding: "0.5rem", background: "var(--wp-dark)", borderRadius: "5px" }}>
+                <div style={{ display: "grid", gap: "0.4rem" }}>
+                  <div>
+                    <label htmlFor={`${k}-quote`} style={{ fontSize: "0.7rem", color: "var(--wp-text-dim)", display: "block", marginBottom: "0.2rem" }}>Quote</label>
+                    <textarea id={`${k}-quote`} name={`${k}-quote`} aria-label={`Testimonial ${i + 1} quote`} placeholder="quote" value={it.quote ?? ""} onChange={(e) => updateItem(items, i, { quote: e.target.value }, onChange)} style={{ ...input(), minHeight: "50px", fontFamily: "inherit" }} />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem" }}>
+                    <input id={`${k}-authorName`} name={`${k}-authorName`} aria-label={`Testimonial ${i + 1} author name`} placeholder="author name" value={it.authorName ?? ""} onChange={(e) => updateItem(items, i, { authorName: e.target.value }, onChange)} style={input()} />
+                    <input id={`${k}-authorTitle`} name={`${k}-authorTitle`} aria-label={`Testimonial ${i + 1} author title`} placeholder="author title (optional)" value={it.authorTitle ?? ""} onChange={(e) => updateItem(items, i, { authorTitle: e.target.value }, onChange)} style={input()} />
+                  </div>
+                  <input id={`${k}-authorPhotoUrl`} name={`${k}-authorPhotoUrl`} aria-label={`Testimonial ${i + 1} author photo URL`} placeholder="https://... photo url (optional)" value={it.authorPhotoUrl ?? ""} onChange={(e) => updateItem(items, i, { authorPhotoUrl: e.target.value }, onChange)} style={input()} />
+                </div>
+                <button onClick={() => onChange({ items: items.filter((_, j) => j !== i) })} style={btnSmall("#c44")} aria-label={`Remove testimonial ${i + 1}`}>✕</button>
+              </div>
+            );
+          })}
+          <button onClick={() => onChange({ items: [...items, { quote: "", authorName: "" }] })} style={{ ...btnSmall(), marginTop: "0.5rem" }}>+ testimonial</button>
+        </div>
+      );
+    }
+    case "pricing": {
+      const items = (section.items ?? []) as Array<{
+        name?: string;
+        price?: string;
+        features?: string[];
+        cta?: { label: string; href: string };
+        highlighted?: boolean;
+      }>;
+      return (
+        <div>
+          <Field label="Heading" value={section.heading ?? ""} onChange={(v) => onChange({ heading: v })} />
+          <Field label="Tagline" value={section.body ?? ""} onChange={(v) => onChange({ body: v })} />
+          {items.map((it, i) => {
+            const k = `pricing-${i}`;
+            // Features are stored as a string[] but edited as a textarea,
+            // one feature per line. We split on newlines and trim, so the
+            // user gets a natural editing experience without a repeating
+            // sub-row per bullet. Empty lines are dropped at serialization
+            // time so the stored array matches what the renderer expects.
+            const featuresText = (it.features ?? []).join("\n");
+            return (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0.4rem", marginTop: "0.6rem", alignItems: "start", padding: "0.5rem", background: "var(--wp-dark)", borderRadius: "5px" }}>
+                <div style={{ display: "grid", gap: "0.4rem" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem" }}>
+                    <input id={`${k}-name`} name={`${k}-name`} aria-label={`Pricing tier ${i + 1} name`} placeholder="plan name (Starter, Pro…)" value={it.name ?? ""} onChange={(e) => updateItem(items, i, { name: e.target.value }, onChange)} style={input()} />
+                    <input id={`${k}-price`} name={`${k}-price`} aria-label={`Pricing tier ${i + 1} price`} placeholder="$29/mo or Contact us" value={it.price ?? ""} onChange={(e) => updateItem(items, i, { price: e.target.value }, onChange)} style={input()} />
+                  </div>
+                  <div>
+                    <label htmlFor={`${k}-features`} style={{ fontSize: "0.7rem", color: "var(--wp-text-dim)", display: "block", marginBottom: "0.2rem" }}>Features (one per line)</label>
+                    <textarea
+                      id={`${k}-features`}
+                      name={`${k}-features`}
+                      aria-label={`Pricing tier ${i + 1} features`}
+                      placeholder="One feature per line"
+                      value={featuresText}
+                      onChange={(e) => updateItem(items, i, { features: e.target.value.split("\n").map((s) => s.trim()).filter((s) => s.length > 0) }, onChange)}
+                      style={{ ...input(), minHeight: "70px", fontFamily: "inherit" }}
+                    />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem" }}>
+                    <input id={`${k}-ctaLabel`} name={`${k}-ctaLabel`} aria-label={`Pricing tier ${i + 1} CTA label`} placeholder="CTA label" value={it.cta?.label ?? ""} onChange={(e) => updateItem(items, i, { cta: { label: e.target.value, href: it.cta?.href ?? "" } }, onChange)} style={input()} />
+                    <input id={`${k}-ctaHref`} name={`${k}-ctaHref`} aria-label={`Pricing tier ${i + 1} CTA href`} placeholder="CTA href" value={it.cta?.href ?? ""} onChange={(e) => updateItem(items, i, { cta: { label: it.cta?.label ?? "", href: e.target.value } }, onChange)} style={input()} />
+                  </div>
+                  <label htmlFor={`${k}-highlighted`} style={{ fontSize: "0.7rem", color: "var(--wp-text-dim)" }}>
+                    <input id={`${k}-highlighted`} name={`${k}-highlighted`} type="checkbox" aria-label={`Pricing tier ${i + 1} highlighted`} checked={!!it.highlighted} onChange={(e) => updateItem(items, i, { highlighted: e.target.checked }, onChange)} /> highlighted (featured tier)
+                  </label>
+                </div>
+                <button onClick={() => onChange({ items: items.filter((_, j) => j !== i) })} style={btnSmall("#c44")} aria-label={`Remove pricing tier ${i + 1}`}>✕</button>
+              </div>
+            );
+          })}
+          <button onClick={() => onChange({ items: [...items, { name: "", price: "", features: [] }] })} style={{ ...btnSmall(), marginTop: "0.5rem" }}>+ tier</button>
+        </div>
+      );
+    }
+    case "faq": {
+      const items = (section.items ?? []) as Array<{ question?: string; answer?: string }>;
+      return (
+        <div>
+          <Field label="Heading" value={section.heading ?? ""} onChange={(v) => onChange({ heading: v })} />
+          {items.map((it, i) => {
+            const k = `faq-${i}`;
+            return (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0.4rem", marginTop: "0.6rem", alignItems: "start", padding: "0.5rem", background: "var(--wp-dark)", borderRadius: "5px" }}>
+                <div style={{ display: "grid", gap: "0.4rem" }}>
+                  <input id={`${k}-question`} name={`${k}-question`} aria-label={`FAQ ${i + 1} question`} placeholder="question" value={it.question ?? ""} onChange={(e) => updateItem(items, i, { question: e.target.value }, onChange)} style={input()} />
+                  <div>
+                    <label htmlFor={`${k}-answer`} style={{ fontSize: "0.7rem", color: "var(--wp-text-dim)", display: "block", marginBottom: "0.2rem" }}>Answer</label>
+                    <textarea id={`${k}-answer`} name={`${k}-answer`} aria-label={`FAQ ${i + 1} answer`} placeholder="answer" value={it.answer ?? ""} onChange={(e) => updateItem(items, i, { answer: e.target.value }, onChange)} style={{ ...input(), minHeight: "60px", fontFamily: "inherit" }} />
+                  </div>
+                </div>
+                <button onClick={() => onChange({ items: items.filter((_, j) => j !== i) })} style={btnSmall("#c44")} aria-label={`Remove FAQ ${i + 1}`}>✕</button>
+              </div>
+            );
+          })}
+          <button onClick={() => onChange({ items: [...items, { question: "", answer: "" }] })} style={{ ...btnSmall(), marginTop: "0.5rem" }}>+ question</button>
         </div>
       );
     }
