@@ -155,6 +155,32 @@ describe("/api/sites/[id]", () => {
     expect(data.error).toMatch(/GITHUB_TOKEN_WOLFPACK_AGENCY/);
   });
 
+  it("PATCH ?action=deploy returns 503 + reason=env_not_configured for preflight fail-fast", async () => {
+    // Regression: preflight's actionable message used to get swallowed by
+    // the generic "Check the logs" 500 branch. The UI user saw "Deploy
+    // failed. Check /api/sites/:id/deploys for the log excerpt." with no
+    // hint which env var was actually missing. Surface the preflight
+    // message verbatim at 503 instead.
+    mockGetUser.mockReturnValue({ id: "u_1", role: "sales" });
+    mockDeploy.mockRejectedValueOnce(
+      new Error(
+        "Deploy aborted: Instinct is missing required env vars " +
+          "(VERCEL_TOKEN_WOLFPACK_AGENCY, VERCEL_ORG_ID, WOLFPACK_SITES_WEBHOOK_SECRET). " +
+          "Set them in Vercel → Instinct → Settings → Environment Variables, then redeploy.",
+      ),
+    );
+    const req = new NextRequest("http://test/api/sites/site_1?action=deploy", {
+      method: "PATCH",
+      headers: { authorization: "Bearer x" },
+    });
+    const res = await detailPATCH(req, { params: Promise.resolve({ id: "site_1" }) });
+    expect(res.status).toBe(503);
+    const data = await res.json();
+    expect(data.reason).toBe("env_not_configured");
+    expect(data.error).toMatch(/VERCEL_TOKEN_WOLFPACK_AGENCY/);
+    expect(data.error).toMatch(/Vercel → Instinct → Settings/);
+  });
+
   it("PATCH ?action=deploy returns 500 + reason=deploy_failed on other errors", async () => {
     mockGetUser.mockReturnValue({ id: "u_1", role: "sales" });
     mockDeploy.mockRejectedValueOnce(new Error("github 404: not found"));

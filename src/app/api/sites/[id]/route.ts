@@ -54,6 +54,16 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
           { status: 503 },
         );
       }
+      // Preflight fail-fast (src/lib/sites.ts::deployEnvPreflight). The
+      // thrown message already names the missing Instinct env vars, so
+      // surface it verbatim instead of the generic "Check the logs"
+      // banner — the whole point of preflight is an actionable message.
+      if (msg.startsWith("Deploy aborted: Instinct is missing required env vars")) {
+        return NextResponse.json(
+          { error: msg, reason: "env_not_configured" },
+          { status: 503 },
+        );
+      }
       return NextResponse.json(
         { error: "Deploy failed. Check /api/sites/:id/deploys for the log excerpt.", reason: "deploy_failed" },
         { status: 500 },
