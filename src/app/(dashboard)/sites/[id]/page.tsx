@@ -143,7 +143,14 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
   const briefDropRef = useRef<HTMLDivElement | null>(null);
   const assetDropRef = useRef<HTMLDivElement | null>(null);
 
-  async function load() {
+  // Track the server's last-known brief so we can detect unsaved edits
+  // (localBrief diverges from savedBriefRef when the user has typed).
+  // The poll must NOT overwrite an unsaved brief — without this the
+  // form flickers back to the last-saved value every 4s while a deploy
+  // is in flight, visibly clobbering whatever the user is typing.
+  const savedBriefRef = useRef<string>("");
+
+  async function load(opts: { fromPoll?: boolean } = {}) {
     setLoading(true);
     const r = await fetchWithRefresh(`/api/sites/${id}`, { headers: authHeaders() });
     if (r.status === 404) {
@@ -154,7 +161,18 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
     const data = await r.json();
     if (r.ok) {
       setProject(data.project);
-      setBrief(data.project.brief as Brief);
+      const incoming = data.project.brief as Brief;
+      const incomingJson = JSON.stringify(incoming);
+      const localJson = JSON.stringify(brief);
+      const isDirty = !!brief && localJson !== savedBriefRef.current;
+      // Refresh the local brief on first load, on explicit user-
+      // initiated loads, or when the user hasn't touched anything.
+      // Skip on poll-refreshes when the user has unsaved typing so
+      // we don't clobber their input.
+      if (!opts.fromPoll || !isDirty) {
+        setBrief(incoming);
+      }
+      savedBriefRef.current = incomingJson;
     } else {
       setError(data.error ?? "Failed to load this site.");
     }
@@ -165,7 +183,8 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
     load();
     const interval = setInterval(() => {
       if (project && (project.status === "provisioning" || project.status === "deploying")) {
-        load();
+        // fromPoll:true so load() preserves any unsaved typing
+        load({ fromPoll: true });
       }
     }, 4000);
     return () => clearInterval(interval);

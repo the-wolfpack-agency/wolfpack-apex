@@ -12,7 +12,20 @@
  * `site.brief_form_edited` analytics. NO orphan UI.
  */
 
-import { useState } from "react";
+import { useState, useId } from "react";
+
+// slugify + kebab-case — used to turn a label into a stable DOM id.
+// Every input on every form in this file goes through either Field or
+// NamedInput so each has an id + matching name + htmlFor label. Chrome
+// Issues tab complains "A form field element should have an id or name
+// attribute" otherwise, and those warnings accumulate per-render —
+// during a 4s deploy-status poll the count hits the hundreds quickly.
+function slug(label: string): string {
+  return label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "") || "field";
+}
 
 export const SECTION_TYPES = [
   "hero",
@@ -86,7 +99,13 @@ export function BriefForm({ value, onChange }: BriefFormProps) {
     return (
       <div data-brief-form="json">
         <button onClick={() => setShowJson(false)} style={btn()}>← Form view</button>
+        <label htmlFor="brief-json-editor" style={{ position: "absolute", left: "-9999px" }}>
+          Brief JSON editor
+        </label>
         <textarea
+          id="brief-json-editor"
+          name="brief-json-editor"
+          aria-label="Brief JSON editor"
           value={JSON.stringify(value, null, 2)}
           onChange={(e) => {
             try {
@@ -171,15 +190,18 @@ function SectionEditor({ section, onChange }: { section: Section; onChange: (pat
       return (
         <div>
           <Field label="Heading" value={section.heading ?? ""} onChange={(v) => onChange({ heading: v })} />
-          {items.map((it, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr auto", gap: "0.4rem", marginTop: "0.4rem", alignItems: "center" }}>
-              <input placeholder="label" value={it.label ?? ""} onChange={(e) => updateItem(items, i, { label: e.target.value }, onChange)} style={input()} />
-              <input type="number" placeholder="value" value={String(it.value ?? "")} onChange={(e) => updateItem(items, i, { value: Number(e.target.value) || 0 }, onChange)} style={input()} />
-              <input placeholder="prefix" value={it.prefix ?? ""} onChange={(e) => updateItem(items, i, { prefix: e.target.value }, onChange)} style={input()} />
-              <input placeholder="suffix" value={it.suffix ?? ""} onChange={(e) => updateItem(items, i, { suffix: e.target.value }, onChange)} style={input()} />
-              <button onClick={() => onChange({ items: items.filter((_, j) => j !== i) })} style={btnSmall("#c44")}>✕</button>
-            </div>
-          ))}
+          {items.map((it, i) => {
+            const k = `stat-${i}`;
+            return (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr auto", gap: "0.4rem", marginTop: "0.4rem", alignItems: "center" }}>
+                <input id={`${k}-label`} name={`${k}-label`} aria-label={`Stat ${i + 1} label`} placeholder="label" value={it.label ?? ""} onChange={(e) => updateItem(items, i, { label: e.target.value }, onChange)} style={input()} />
+                <input id={`${k}-value`} name={`${k}-value`} aria-label={`Stat ${i + 1} value`} type="number" placeholder="value" value={String(it.value ?? "")} onChange={(e) => updateItem(items, i, { value: Number(e.target.value) || 0 }, onChange)} style={input()} />
+                <input id={`${k}-prefix`} name={`${k}-prefix`} aria-label={`Stat ${i + 1} prefix`} placeholder="prefix" value={it.prefix ?? ""} onChange={(e) => updateItem(items, i, { prefix: e.target.value }, onChange)} style={input()} />
+                <input id={`${k}-suffix`} name={`${k}-suffix`} aria-label={`Stat ${i + 1} suffix`} placeholder="suffix" value={it.suffix ?? ""} onChange={(e) => updateItem(items, i, { suffix: e.target.value }, onChange)} style={input()} />
+                <button onClick={() => onChange({ items: items.filter((_, j) => j !== i) })} style={btnSmall("#c44")}>✕</button>
+              </div>
+            );
+          })}
           <button onClick={() => onChange({ items: [...items, { label: "", value: 0 }] })} style={{ ...btnSmall(), marginTop: "0.5rem" }}>+ stat</button>
         </div>
       );
@@ -189,17 +211,20 @@ function SectionEditor({ section, onChange }: { section: Section; onChange: (pat
       return (
         <div>
           <Field label="Heading" value={section.heading ?? ""} onChange={(v) => onChange({ heading: v })} />
-          {items.map((it, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 2fr 1fr auto auto", gap: "0.4rem", marginTop: "0.4rem", alignItems: "center" }}>
-              <input placeholder="title" value={it.title ?? ""} onChange={(e) => updateItem(items, i, { title: e.target.value }, onChange)} style={input()} />
-              <input placeholder="body" value={it.body ?? ""} onChange={(e) => updateItem(items, i, { body: e.target.value }, onChange)} style={input()} />
-              <input placeholder="badge" value={it.badge ?? ""} onChange={(e) => updateItem(items, i, { badge: e.target.value }, onChange)} style={input()} />
-              <label style={{ fontSize: "0.7rem", color: "var(--wp-text-dim)" }}>
-                <input type="checkbox" checked={!!it.accent} onChange={(e) => updateItem(items, i, { accent: e.target.checked }, onChange)} /> accent
-              </label>
-              <button onClick={() => onChange({ items: items.filter((_, j) => j !== i) })} style={btnSmall("#c44")}>✕</button>
-            </div>
-          ))}
+          {items.map((it, i) => {
+            const k = `card-${i}`;
+            return (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 2fr 1fr auto auto", gap: "0.4rem", marginTop: "0.4rem", alignItems: "center" }}>
+                <input id={`${k}-title`} name={`${k}-title`} aria-label={`Card ${i + 1} title`} placeholder="title" value={it.title ?? ""} onChange={(e) => updateItem(items, i, { title: e.target.value }, onChange)} style={input()} />
+                <input id={`${k}-body`} name={`${k}-body`} aria-label={`Card ${i + 1} body`} placeholder="body" value={it.body ?? ""} onChange={(e) => updateItem(items, i, { body: e.target.value }, onChange)} style={input()} />
+                <input id={`${k}-badge`} name={`${k}-badge`} aria-label={`Card ${i + 1} badge`} placeholder="badge" value={it.badge ?? ""} onChange={(e) => updateItem(items, i, { badge: e.target.value }, onChange)} style={input()} />
+                <label htmlFor={`${k}-accent`} style={{ fontSize: "0.7rem", color: "var(--wp-text-dim)" }}>
+                  <input id={`${k}-accent`} name={`${k}-accent`} type="checkbox" checked={!!it.accent} onChange={(e) => updateItem(items, i, { accent: e.target.checked }, onChange)} /> accent
+                </label>
+                <button onClick={() => onChange({ items: items.filter((_, j) => j !== i) })} style={btnSmall("#c44")}>✕</button>
+              </div>
+            );
+          })}
           <button onClick={() => onChange({ items: [...items, { title: "", body: "" }] })} style={{ ...btnSmall(), marginTop: "0.5rem" }}>+ card</button>
         </div>
       );
@@ -211,10 +236,11 @@ function SectionEditor({ section, onChange }: { section: Section; onChange: (pat
           <Field label="Heading" value={section.heading ?? ""} onChange={(v) => onChange({ heading: v })} />
           {images.map((img, i) => {
             const obj = typeof img === "string" ? { src: img, alt: "" } : img;
+            const k = `gallery-${i}`;
             return (
               <div key={i} style={{ display: "grid", gridTemplateColumns: "2fr 2fr auto", gap: "0.4rem", marginTop: "0.4rem", alignItems: "center" }}>
-                <input placeholder="image url" value={obj.src} onChange={(e) => onChange({ images: images.map((x, j) => (j === i ? { src: e.target.value, alt: obj.alt } : x)) })} style={input()} />
-                <input placeholder="alt text" value={obj.alt ?? ""} onChange={(e) => onChange({ images: images.map((x, j) => (j === i ? { src: obj.src, alt: e.target.value } : x)) })} style={input()} />
+                <input id={`${k}-src`} name={`${k}-src`} aria-label={`Image ${i + 1} URL`} placeholder="image url" value={obj.src} onChange={(e) => onChange({ images: images.map((x, j) => (j === i ? { src: e.target.value, alt: obj.alt } : x)) })} style={input()} />
+                <input id={`${k}-alt`} name={`${k}-alt`} aria-label={`Image ${i + 1} alt text`} placeholder="alt text" value={obj.alt ?? ""} onChange={(e) => onChange({ images: images.map((x, j) => (j === i ? { src: obj.src, alt: e.target.value } : x)) })} style={input()} />
                 <button onClick={() => onChange({ images: images.filter((_, j) => j !== i) })} style={btnSmall("#c44")}>✕</button>
               </div>
             );
@@ -237,16 +263,23 @@ function updateItem<T>(items: T[], i: number, patch: Partial<T>, onChange: (p: {
   onChange({ items: items.map((it, j) => (j === i ? { ...it, ...patch } : it)) });
 }
 
-function Field({ label, value, onChange, multiline }: { label: string; value: string; onChange: (v: string) => void; multiline?: boolean }) {
+function Field({ label, value, onChange, multiline, idPrefix }: { label: string; value: string; onChange: (v: string) => void; multiline?: boolean; idPrefix?: string }) {
+  const reactId = useId();
+  // Stable, DOM-unique id from the (optional) prefix + label + React
+  // useId counter. Gives us `brief-${prefix}-${slug(label)}-:r1:` which
+  // survives re-renders, composes across nested instances, and never
+  // collides. The name attribute mirrors the id so Chrome's form-field
+  // warning shuts up.
+  const fieldId = `brief-${idPrefix ?? "field"}-${slug(label)}-${reactId}`;
   return (
-    <label style={{ display: "block" }}>
-      <div style={{ fontSize: "0.7rem", color: "var(--wp-text-dim)", marginBottom: "0.2rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
+    <div style={{ display: "block" }}>
+      <label htmlFor={fieldId} style={{ fontSize: "0.7rem", color: "var(--wp-text-dim)", marginBottom: "0.2rem", textTransform: "uppercase", letterSpacing: "0.05em", display: "block" }}>{label}</label>
       {multiline ? (
-        <textarea value={value} onChange={(e) => onChange(e.target.value)} style={{ ...input(), minHeight: "60px", fontFamily: "inherit" }} />
+        <textarea id={fieldId} name={fieldId} value={value} onChange={(e) => onChange(e.target.value)} style={{ ...input(), minHeight: "60px", fontFamily: "inherit" }} />
       ) : (
-        <input value={value} onChange={(e) => onChange(e.target.value)} style={input()} />
+        <input id={fieldId} name={fieldId} value={value} onChange={(e) => onChange(e.target.value)} style={input()} />
       )}
-    </label>
+    </div>
   );
 }
 
