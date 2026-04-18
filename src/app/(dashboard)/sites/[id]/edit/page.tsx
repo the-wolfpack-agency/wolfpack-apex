@@ -478,7 +478,12 @@ export default function SiteEditPage({
               {error}
             </div>
           )}
+          <label htmlFor="edit-prompt-input" style={{ position: "absolute", left: "-9999px" }}>
+            Describe a change to the site
+          </label>
           <textarea
+            id="edit-prompt-input"
+            name="edit-prompt-input"
             data-testid="edit-prompt-input"
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -491,6 +496,7 @@ export default function SiteEditPage({
             placeholder="Describe a change. Cmd/Ctrl+Enter to send."
             rows={3}
             disabled={busy || publishing}
+            aria-label="Describe a change to the site"
             style={{
               width: "100%",
               padding: 10,

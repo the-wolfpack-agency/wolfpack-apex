@@ -6,6 +6,7 @@
 
 import {
   createRepoFromTemplate,
+  deleteRepo,
   enableActions,
   putFile,
   triggerWorkflow,
@@ -214,6 +215,28 @@ describe("github-client", () => {
     } finally {
       global.setTimeout = originalSetTimeout;
     }
+  });
+
+  // deleteRepo — regression for the 2026-04-18 hard-delete flow
+  it("deleteRepo DELETEs /repos/{fullName} and resolves ok", async () => {
+    const { client, calls } = makeClient([{ status: 204 }]);
+    const res = await deleteRepo(client, "the-wolfpack-agency/wolfpack-x");
+    expect(calls[0].url).toBe("https://api.github.com/repos/the-wolfpack-agency/wolfpack-x");
+    expect(calls[0].init.method).toBe("DELETE");
+    expect(res).toEqual({ ok: true, alreadyGone: false });
+  });
+
+  it("deleteRepo treats 404 as idempotent success (already gone)", async () => {
+    const { client } = makeClient([{ status: 404, text: "not found" }]);
+    const res = await deleteRepo(client, "the-wolfpack-agency/wolfpack-gone");
+    expect(res).toEqual({ ok: true, alreadyGone: true });
+  });
+
+  it("deleteRepo throws on non-404 errors (e.g. 403 missing permission)", async () => {
+    const { client } = makeClient([{ status: 403, text: "forbidden" }]);
+    await expect(
+      deleteRepo(client, "the-wolfpack-agency/wolfpack-x"),
+    ).rejects.toThrow(/403/);
   });
 
   it("triggerWorkflow does NOT retry on non-404 errors", async () => {

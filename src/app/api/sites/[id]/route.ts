@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromRequest } from "@/lib/auth";
+import { getUserFromRequest, hasRole } from "@/lib/auth";
 import {
   getSiteProject,
   updateBrief,
@@ -87,20 +87,42 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await context.params;
 
-  const archived = await deleteSiteProject(id, user.id, user.role);
+  // ?hard=true attempts to also delete the provisioned GitHub repo
+  // and Vercel project. Gated to admin-capable roles (hr+) so sales
+  // reps can soft-archive but can't permanently blow away a client's
+  // assets. Soft archive stays available to everyone.
+  const isHard = req.nextUrl.searchParams.get("hard") === "true";
+  if (isHard && !hasRole(user.role, "hr")) {
+    return NextResponse.json(
+      { error: "Hard delete requires admin role", reason: "role_insufficient" },
+      { status: 403 },
+    );
+  }
+
+  const { project: archived, cleanup } = await deleteSiteProject(
+    id,
+    user.id,
+    user.role,
+    { hard: isHard },
+  );
   if (!archived) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const meta = extractRequestMetadata(req);
   await recordAudit({
     actor: { user_id: user.id, role: user.role },
-    action: "site.archived",
+    action: isHard ? "site.hard_deleted" : "site.archived",
     resourceType: "site_project",
     resourceId: id,
-    afterState: { status: "archived", display_name: archived.display_name },
+    afterState: {
+      status: "archived",
+      display_name: archived.display_name,
+      hard: isHard,
+      cleanup: cleanup ?? undefined,
+    },
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
     requestId: meta.requestId,
   }).catch((e) => console.warn("[audit]", (e as Error).message));
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, cleanup: cleanup ?? null });
 }

@@ -16,6 +16,7 @@ import { query, safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import {
   createRepoFromTemplate,
+  deleteRepo,
   enableActions,
   putFile,
   triggerWorkflow,
@@ -116,19 +117,34 @@ export async function listSiteProjects(): Promise<SiteProject[]> {
   return result.rows.map(rowToProject);
 }
 
+/** Outcome of the external-resource cleanup phase of a hard delete. */
+export interface HardDeleteCleanup {
+  githubRepo: { attempted: boolean; ok: boolean; alreadyGone?: boolean; error?: string };
+  vercelProject: { attempted: boolean; ok: boolean; alreadyGone?: boolean; error?: string };
+}
+
 /**
  * Soft-delete a site project. Flips status to 'archived' rather than
  * hard-deleting so audit log, triple-write records, and deployment
  * history remain intact. Returns the archived project (for the caller
  * to confirm + emit audit with before-state).
+ *
+ * When ``opts.hard`` is true, also ATTEMPTS to delete the provisioned
+ * GitHub repo and linked Vercel project. Each cleanup is independent
+ * and defensive: a missing env var, a 404 on the external resource,
+ * or an auth failure is logged + recorded + skipped, not thrown. The
+ * DB row always flips to archived regardless. Every outcome lands in
+ * ``trackEvent`` so the learning loop sees what was cleaned vs
+ * skipped vs errored.
  */
 export async function deleteSiteProject(
   id: string,
   deletedBy: string,
   userRole: string,
-): Promise<SiteProject | null> {
+  opts: { hard?: boolean; githubClient?: GithubClient } = {},
+): Promise<{ project: SiteProject | null; cleanup: HardDeleteCleanup | null }> {
   const before = await getSiteProject(id);
-  if (!before) return null;
+  if (!before) return { project: null, cleanup: null };
   const result = await safeQuery<Record<string, unknown>>(
     `UPDATE apex_site_projects
        SET status = 'archived', updated_at = NOW()
@@ -137,12 +153,142 @@ export async function deleteSiteProject(
     [id],
   );
   const after = result.rows.length > 0 ? rowToProject(result.rows[0]) : before;
-  trackEvent("site.archived", deletedBy, userRole, {
-    project_id: id,
-    client_slug: before.client_slug,
-    prior_status: before.status,
-  });
-  return after;
+
+  let cleanup: HardDeleteCleanup | null = null;
+  if (opts.hard) {
+    cleanup = await runHardDeleteCleanup({
+      project: before,
+      deletedBy,
+      userRole,
+      githubClient: opts.githubClient,
+    });
+    trackEvent("site.hard_deleted", deletedBy, userRole, {
+      project_id: id,
+      client_slug: before.client_slug,
+      prior_status: before.status,
+      github_ok: cleanup.githubRepo.ok,
+      github_already_gone: cleanup.githubRepo.alreadyGone ?? false,
+      vercel_ok: cleanup.vercelProject.ok,
+      vercel_already_gone: cleanup.vercelProject.alreadyGone ?? false,
+    });
+  } else {
+    trackEvent("site.archived", deletedBy, userRole, {
+      project_id: id,
+      client_slug: before.client_slug,
+      prior_status: before.status,
+    });
+  }
+  return { project: after, cleanup };
+}
+
+/**
+ * Internal: runs the GitHub + Vercel cleanup. Each side is gated on
+ * the relevant env var being set; missing creds = skipped, not an
+ * error. Emits per-side analytics so ops can filter success vs skip
+ * vs error counts in the dashboard.
+ */
+async function runHardDeleteCleanup(args: {
+  project: SiteProject;
+  deletedBy: string;
+  userRole: string;
+  githubClient?: GithubClient;
+}): Promise<HardDeleteCleanup> {
+  const { project, deletedBy, userRole, githubClient } = args;
+  const cleanup: HardDeleteCleanup = {
+    githubRepo: { attempted: false, ok: false },
+    vercelProject: { attempted: false, ok: false },
+  };
+
+  // ── GitHub repo ────────────────────────────────────────────────
+  if (project.github_repo) {
+    cleanup.githubRepo.attempted = true;
+    try {
+      const gh = githubClient ?? defaultGithubClient();
+      const { alreadyGone } = await deleteRepo(gh, project.github_repo);
+      cleanup.githubRepo.ok = true;
+      cleanup.githubRepo.alreadyGone = alreadyGone;
+      trackEvent(
+        alreadyGone ? "site.repo_delete_skipped" : "site.repo_deleted",
+        deletedBy,
+        userRole,
+        {
+          project_id: project.id,
+          repo: project.github_repo,
+          reason: alreadyGone ? "already_gone" : "deleted",
+        },
+      );
+    } catch (err) {
+      const message = (err as Error).message;
+      cleanup.githubRepo.ok = false;
+      cleanup.githubRepo.error = message;
+      trackEvent("site.repo_delete_failed", deletedBy, userRole, {
+        project_id: project.id,
+        repo: project.github_repo,
+        error: message.slice(0, 500),
+      });
+    }
+  } else {
+    trackEvent("site.repo_delete_skipped", deletedBy, userRole, {
+      project_id: project.id,
+      reason: "no_repo_provisioned",
+    });
+  }
+
+  // ── Vercel project ─────────────────────────────────────────────
+  cleanup.vercelProject.attempted = true;
+  try {
+    // Lazy-import so the Vercel module is only loaded when hard-delete
+    // runs — keeps cold starts for normal GETs fast.
+    const { defaultVercelClient, findProjectByName, deleteProject } = await import(
+      "@/lib/vercel-client"
+    );
+    const client = defaultVercelClient();
+    const projectName = `wolfpack-${project.client_slug}`;
+    const vp = await findProjectByName(client, projectName);
+    if (!vp) {
+      cleanup.vercelProject.ok = true;
+      cleanup.vercelProject.alreadyGone = true;
+      trackEvent("site.vercel_project_delete_skipped", deletedBy, userRole, {
+        project_id: project.id,
+        vercel_name: projectName,
+        reason: "not_found",
+      });
+    } else {
+      const { alreadyGone } = await deleteProject(client, vp.id);
+      cleanup.vercelProject.ok = true;
+      cleanup.vercelProject.alreadyGone = alreadyGone;
+      trackEvent(
+        alreadyGone ? "site.vercel_project_delete_skipped" : "site.vercel_project_deleted",
+        deletedBy,
+        userRole,
+        {
+          project_id: project.id,
+          vercel_id: vp.id,
+          vercel_name: projectName,
+          reason: alreadyGone ? "already_gone" : "deleted",
+        },
+      );
+    }
+  } catch (err) {
+    const message = (err as Error).message;
+    cleanup.vercelProject.ok = false;
+    cleanup.vercelProject.error = message;
+    // Missing env var → skipped; anything else → failure. Both still
+    // persist to analytics so the learning loop sees why.
+    const eventName = /VERCEL_TOKEN|VERCEL_ORG_ID/.test(message)
+      ? "site.vercel_project_delete_skipped"
+      : "site.vercel_project_delete_failed";
+    const meta: Record<string, string | number | boolean> = {
+      project_id: project.id,
+      error: message.slice(0, 500),
+    };
+    if (eventName === "site.vercel_project_delete_skipped") {
+      meta.reason = "env_not_configured";
+    }
+    trackEvent(eventName, deletedBy, userRole, meta);
+  }
+
+  return cleanup;
 }
 
 /**

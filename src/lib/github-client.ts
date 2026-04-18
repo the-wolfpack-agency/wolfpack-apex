@@ -123,6 +123,27 @@ export async function putFile(
 }
 
 /**
+ * DELETE a repository. Idempotent: 404 is treated as "already gone"
+ * and returns `{ alreadyGone: true }` instead of throwing. Requires a
+ * PAT with Administration: write on the target repo. Used by the
+ * site.hard_delete flow so archiving a client site can optionally
+ * clean up the orphaned GitHub repo that was provisioned for it.
+ */
+export async function deleteRepo(
+  client: GithubClient,
+  repoFullName: string,
+): Promise<{ ok: true; alreadyGone: boolean }> {
+  try {
+    await gh(client, "DELETE", `/repos/${repoFullName}`);
+    return { ok: true, alreadyGone: false };
+  } catch (err) {
+    const msg = (err as Error).message;
+    if (msg.includes("→ 404")) return { ok: true, alreadyGone: true };
+    throw err;
+  }
+}
+
+/**
  * Enable GitHub Actions on a repository. New repos created from a
  * template in orgs that default Actions off land in a disabled state,
  * which makes ``/actions/workflows/:id/dispatches`` 404 until a human

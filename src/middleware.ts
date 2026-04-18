@@ -38,7 +38,13 @@ const CSP_DIRECTIVES = [
   "font-src 'self' data: https://fonts.gstatic.com",
   "connect-src 'self' https:",
   "frame-src 'self' https://*.vercel.app",
-  "frame-ancestors 'none'",
+  // frame-ancestors 'self' (not 'none'): 'none' blocks Instinct from
+  // iframing its own pages, which breaks the /sites/[id]/edit split-
+  // screen editor (its preview iframe loads /sites/[id]/preview on
+  // the SAME origin). 'self' keeps the clickjacking defense — no
+  // third-party site can iframe Instinct — while allowing same-
+  // origin embedding that the editor needs.
+  "frame-ancestors 'self'",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",

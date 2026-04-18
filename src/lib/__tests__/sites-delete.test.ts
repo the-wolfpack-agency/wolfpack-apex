@@ -4,6 +4,10 @@
 
 jest.mock("@/lib/auth", () => ({
   getUserFromRequest: jest.fn(),
+  hasRole: (role: string, required: string) => {
+    const levels: Record<string, number> = { ceo: 5, cto: 5, hr: 4, dev: 3, ops: 2, sales: 1 };
+    return (levels[role] ?? 0) >= (levels[required] ?? 0);
+  },
 }));
 
 const mockDelete = jest.fn();
@@ -54,7 +58,7 @@ describe("DELETE /api/sites/[id]", () => {
 
   test("404 when site doesn't exist", async () => {
     mockGetUser.mockReturnValue(USER);
-    mockDelete.mockResolvedValue(null);
+    mockDelete.mockResolvedValue({ project: null, cleanup: null });
     const res = await DELETE(makeReq("Bearer t"), { params: Promise.resolve({ id: "site_nope" }) });
     expect(res.status).toBe(404);
     expect(mockAudit).not.toHaveBeenCalled();
@@ -63,18 +67,60 @@ describe("DELETE /api/sites/[id]", () => {
   test("200 + soft-deletes + writes audit on happy path", async () => {
     mockGetUser.mockReturnValue(USER);
     mockDelete.mockResolvedValue({
-      id: "site_abc",
-      display_name: "Avis",
-      client_slug: "avis",
-      status: "archived",
+      project: {
+        id: "site_abc",
+        display_name: "Avis",
+        client_slug: "avis",
+        status: "archived",
+      },
+      cleanup: null,
     });
     const res = await DELETE(makeReq("Bearer t"), { params: Promise.resolve({ id: "site_abc" }) });
     expect(res.status).toBe(200);
-    expect(mockDelete).toHaveBeenCalledWith("site_abc", "u_1", "cto");
+    expect(mockDelete).toHaveBeenCalledWith("site_abc", "u_1", "cto", { hard: false });
     expect(mockAudit).toHaveBeenCalledTimes(1);
     const auditCall = mockAudit.mock.calls[0][0];
     expect(auditCall.action).toBe("site.archived");
     expect(auditCall.resourceType).toBe("site_project");
     expect(auditCall.resourceId).toBe("site_abc");
+  });
+
+  // Hard-delete regression — 2026-04-18.
+  test("?hard=true requires hr+ role (sales gets 403)", async () => {
+    mockGetUser.mockReturnValue({ ...USER, role: "sales" as const });
+    const req = new NextRequest("http://localhost/api/sites/site_abc?hard=true", {
+      method: "DELETE",
+      headers: { authorization: "Bearer t" },
+    });
+    const res = await DELETE(req, { params: Promise.resolve({ id: "site_abc" }) });
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.reason).toBe("role_insufficient");
+    expect(mockDelete).not.toHaveBeenCalled();
+  });
+
+  test("?hard=true with hr role calls deleteSiteProject({hard:true}) + audits site.hard_deleted with cleanup", async () => {
+    mockGetUser.mockReturnValue({ ...USER, role: "hr" as const });
+    mockDelete.mockResolvedValue({
+      project: { id: "site_abc", display_name: "Avis", client_slug: "avis", status: "archived" },
+      cleanup: {
+        githubRepo: { attempted: true, ok: true, alreadyGone: false },
+        vercelProject: { attempted: true, ok: true, alreadyGone: true },
+      },
+    });
+    const req = new NextRequest("http://localhost/api/sites/site_abc?hard=true", {
+      method: "DELETE",
+      headers: { authorization: "Bearer t" },
+    });
+    const res = await DELETE(req, { params: Promise.resolve({ id: "site_abc" }) });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.cleanup.githubRepo.ok).toBe(true);
+    expect(body.cleanup.vercelProject.alreadyGone).toBe(true);
+    expect(mockDelete).toHaveBeenCalledWith("site_abc", "u_1", "hr", { hard: true });
+    const auditCall = mockAudit.mock.calls[0][0];
+    expect(auditCall.action).toBe("site.hard_deleted");
+    expect(auditCall.afterState.hard).toBe(true);
+    expect(auditCall.afterState.cleanup.githubRepo.ok).toBe(true);
   });
 });

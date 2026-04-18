@@ -61,10 +61,16 @@ describe("middleware security headers", () => {
     expect(csp).not.toMatch(/frame-src\s+'none'/);
   });
 
-  it("CSP frame-ancestors stays 'none' — Instinct cannot be iframed by third parties", async () => {
+  // Updated 2026-04-18: frame-ancestors tightened from 'none' → 'self'.
+  // 'none' blocked Instinct from iframing its OWN /sites/[id]/preview
+  // inside the split-screen editor (same-origin but blanket blocked).
+  // 'self' still stops any third-party from iframing Instinct (the real
+  // clickjacking concern) while allowing same-origin embedding.
+  it("CSP frame-ancestors is 'self' — blocks third-party clickjacking, allows own-origin iframe", async () => {
     const headers = await getHeaders();
     const csp = headers.get("Content-Security-Policy") ?? "";
-    expect(csp).toMatch(/frame-ancestors\s+'none'/);
+    expect(csp).toMatch(/frame-ancestors\s+'self'/);
+    expect(csp).not.toMatch(/frame-ancestors\s+'none'/);
   });
 
   it("sets X-Content-Type-Options: nosniff", async () => {
