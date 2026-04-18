@@ -35,9 +35,12 @@ export interface SodiumLike {
   /** Bytes of overhead added by sealed_box on top of the message length. */
   crypto_box_SEALBYTES: number;
   /**
-   * sealed_box encrypt. Returns either Uint8Array (binary) or the base64
-   * string when outputFormat="base64". We request base64 directly so we
-   * don't have to hand-encode.
+   * sealed_box encrypt. Returns Uint8Array when outputFormat is omitted
+   * or "uint8array". We used to request "base64" here, but libsodium's
+   * built-in base64 output is URL-safe-without-padding by default, and
+   * GitHub's secrets API strictly rejects anything that isn't standard
+   * base64 (regex /^[A-Za-z0-9+/]+=*$/) — so we encode manually via
+   * `to_base64(bytes, base64_variants.ORIGINAL)`.
    */
   crypto_box_seal(
     message: Uint8Array | string,
@@ -46,6 +49,8 @@ export interface SodiumLike {
   ): Uint8Array | string;
   /** Base64 → Uint8Array decoder. GitHub returns the public key in base64. */
   from_base64(input: string, variant?: number): Uint8Array;
+  /** Uint8Array → Base64 encoder; variant controls URL-safe vs standard. */
+  to_base64(bytes: Uint8Array, variant?: number): string;
   /** Base64 variant constant — GitHub uses standard (not URL-safe) base64. */
   base64_variants: { ORIGINAL: number };
 }
@@ -163,7 +168,12 @@ export async function setRepoSecret(
   const pubKey = await fetchPublicKey(client, repoFullName);
   const sodium = await getSodium();
   const keyBytes = sodium.from_base64(pubKey.key, sodium.base64_variants.ORIGINAL);
-  const sealed = sodium.crypto_box_seal(value, keyBytes, "base64") as string;
+  // crypto_box_seal's built-in base64 output is URL-safe-without-padding,
+  // which GitHub's secrets API rejects with HTTP 422 "Invalid request"
+  // (its regex requires /^[A-Za-z0-9+/]+=*$/). Get the raw bytes and
+  // encode manually with the ORIGINAL (standard) variant instead.
+  const sealedBytes = sodium.crypto_box_seal(value, keyBytes) as Uint8Array;
+  const sealed = sodium.to_base64(sealedBytes, sodium.base64_variants.ORIGINAL);
 
   const url = `https://api.github.com/repos/${repoFullName}/actions/secrets/${encodeURIComponent(name)}`;
   const res = await client.fetch(url, {

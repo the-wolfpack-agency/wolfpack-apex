@@ -48,6 +48,9 @@ function fakeSodium(): SodiumLike {
     from_base64(input: string): Uint8Array {
       return new Uint8Array(Buffer.from(input, "base64"));
     },
+    to_base64(bytes: Uint8Array): string {
+      return Buffer.from(bytes).toString("base64");
+    },
     base64_variants: { ORIGINAL: 1 },
   };
 }
