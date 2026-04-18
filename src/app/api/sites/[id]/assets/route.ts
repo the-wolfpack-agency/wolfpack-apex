@@ -95,11 +95,14 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   if (project.github_repo) {
     try {
       const client = defaultGithubClient();
+      // Pass the raw Buffer — putFile base64-encodes binary directly.
+      // The previous `buffer.toString("base64")` was being UTF-8-encoded
+      // and base64-encoded again inside putFile, corrupting every image.
       await putFile(
         client,
         project.github_repo,
         repoPath,
-        buffer.toString("base64"),
+        buffer,
         `chore: upload ${safeName} for ${project.client_slug}`,
       );
       committed = true;

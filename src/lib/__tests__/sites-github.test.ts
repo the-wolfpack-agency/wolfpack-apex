@@ -83,6 +83,45 @@ describe("github-client", () => {
     expect(putBody.sha).toBeUndefined();
   });
 
+  // Regression for 2026-04-18 broken asset uploads: every image committed
+  // via /api/sites/[id]/assets was corrupt because the route passed
+  // buffer.toString("base64") as `content` and putFile then
+  // UTF-8-encoded-then-base64-encoded that string again, producing
+  // garbage bytes. Symptom: 404 on every /cftr/IMG_*.jpg in the
+  // deployed client-site preview. putFile must accept Buffer and
+  // base64 directly.
+  it("putFile base64-encodes a Buffer directly (no double-encoding of binary)", async () => {
+    const { client, calls } = makeClient([
+      { status: 404, text: "not found" },
+      { status: 201, json: {} },
+    ]);
+    // JPEG magic bytes — use a real binary payload so a double-encode
+    // would produce a detectably wrong output.
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+    await putFile(
+      client,
+      "the-wolfpack-agency/wolfpack-x",
+      "public/cftr/hero.jpg",
+      jpeg,
+      "chore: upload hero",
+    );
+    const putBody = JSON.parse(calls[1].init.body as string);
+    // Decode the base64 we sent and assert it matches the original bytes
+    // exactly — single base64-encode round-trips, double would corrupt.
+    const roundTripped = Buffer.from(putBody.content, "base64");
+    expect(roundTripped).toEqual(jpeg);
+  });
+
+  it("putFile still handles text content as UTF-8 → base64", async () => {
+    const { client, calls } = makeClient([
+      { status: 404, text: "not found" },
+      { status: 201, json: {} },
+    ]);
+    await putFile(client, "a/b", "briefs/x.json", '{"hello":"world"}', "msg");
+    const putBody = JSON.parse(calls[1].init.body as string);
+    expect(Buffer.from(putBody.content, "base64").toString("utf-8")).toBe('{"hello":"world"}');
+  });
+
   it("triggerWorkflow POSTs to the dispatch endpoint with ref", async () => {
     const { client, calls } = makeClient([{ status: 204 }]);
     await triggerWorkflow(client, "the-wolfpack-agency/wolfpack-x", "canary-deploy.yml", "main");

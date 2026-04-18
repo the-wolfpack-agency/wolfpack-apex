@@ -83,11 +83,21 @@ export async function createRepoFromTemplate(
   );
 }
 
+/**
+ * PUT a file into a GitHub repo via the Contents API.
+ *
+ * Accepts either a text string (encoded as UTF-8 → base64) OR a Buffer
+ * of raw bytes (base64 directly — no double-encoding, preserves binary
+ * integrity). The asset upload path was silently corrupting images
+ * before 2026-04-18 because it was passing `buffer.toString("base64")`
+ * as the `content` string, which this helper then UTF-8-encoded and
+ * base64-encoded AGAIN — garbage bytes committed, 404s in the iframe.
+ */
 export async function putFile(
   client: GithubClient,
   repoFullName: string,
   path: string,
-  content: string,
+  content: string | Buffer,
   message: string,
 ): Promise<void> {
   // Need to look up existing sha so we don't 422 on overwrite.
@@ -102,9 +112,12 @@ export async function putFile(
   } catch {
     // file doesn't exist yet — create
   }
+  const base64 = Buffer.isBuffer(content)
+    ? content.toString("base64")
+    : Buffer.from(content, "utf-8").toString("base64");
   await gh(client, "PUT", `/repos/${repoFullName}/contents/${path}`, {
     message,
-    content: Buffer.from(content, "utf-8").toString("base64"),
+    content: base64,
     sha,
   });
 }
