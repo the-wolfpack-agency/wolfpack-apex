@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { authHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import { authHeaders, fetchWithRefresh, getInstinctToken } from "@/lib/client-auth";
 
 interface BellNotification {
   id: string;
@@ -66,6 +66,12 @@ export default function NotificationBell() {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const fetchCount = useCallback(async () => {
+    // Skip polling entirely when there's no session token yet. The bell
+    // renders on every dashboard page, but token hydration from
+    // localStorage races the first mount — without this guard the bell
+    // fires one 401 every 30s even when the user is signed in, floods
+    // the console, and spams /api/csp-report equivalents.
+    if (!getInstinctToken()) return;
     try {
       const res = await fetchWithRefresh("/api/notifications/unread-count", {
         headers: authHeaders(),
@@ -79,6 +85,7 @@ export default function NotificationBell() {
   }, []);
 
   const fetchItems = useCallback(async () => {
+    if (!getInstinctToken()) return;
     setLoading(true);
     try {
       const res = await fetchWithRefresh("/api/notifications?read=unread&limit=10", {
