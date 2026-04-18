@@ -92,6 +92,33 @@ describe("github-client", () => {
     expect(JSON.parse(calls[0].init.body as string)).toEqual({ ref: "main" });
   });
 
+  // Regression: the 2026-04-17 workflow_dispatch was firing without the
+  // deploy_id input, so the canary's "Notify Instinct" step hit its
+  // early-exit branch and preview_url never propagated back to the
+  // apex_site_deploys row.
+  it("triggerWorkflow includes inputs in the dispatch body when provided", async () => {
+    const { client, calls } = makeClient([{ status: 204 }]);
+    await triggerWorkflow(
+      client,
+      "the-wolfpack-agency/wolfpack-x",
+      "canary-deploy.yml",
+      "main",
+      { deploy_id: "deploy_abc" },
+    );
+    expect(JSON.parse(calls[0].init.body as string)).toEqual({
+      ref: "main",
+      inputs: { deploy_id: "deploy_abc" },
+    });
+  });
+
+  it("triggerWorkflow omits inputs key when no inputs passed", async () => {
+    const { client, calls } = makeClient([{ status: 204 }]);
+    await triggerWorkflow(client, "a/b", "x.yml", "main");
+    const body = JSON.parse(calls[0].init.body as string);
+    expect(body).toEqual({ ref: "main" });
+    expect("inputs" in body).toBe(false);
+  });
+
   it("surfaces github errors with status code", async () => {
     const { client } = makeClient([{ status: 422, text: "name already exists" }]);
     await expect(

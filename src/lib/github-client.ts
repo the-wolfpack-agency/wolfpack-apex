@@ -133,11 +133,20 @@ export async function triggerWorkflow(
   repoFullName: string,
   workflowFile: string,
   ref: string,
+  inputs?: Record<string, string>,
 ): Promise<{ run_id: string | null }> {
   // Dispatching a workflow on a freshly-created repo sometimes races
   // GitHub's workflow indexer — the file is committed but the dispatch
   // API returns 404 for a second or two. Retry briefly on 404 before
   // surfacing the error.
+  //
+  // `inputs` maps to the workflow_dispatch `inputs` block. canary-deploy.yml
+  // exposes a `deploy_id` input that the "Notify Instinct" step uses to
+  // correlate the webhook callback with the apex_site_deploys row; without
+  // it, the webhook fires the early-exit branch and preview_url never
+  // propagates back to the project.
+  const body: Record<string, unknown> = { ref };
+  if (inputs && Object.keys(inputs).length > 0) body.inputs = inputs;
   let lastErr: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
@@ -145,7 +154,7 @@ export async function triggerWorkflow(
         client,
         "POST",
         `/repos/${repoFullName}/actions/workflows/${workflowFile}/dispatches`,
-        { ref },
+        body,
       );
       return { run_id: null };
     } catch (err) {

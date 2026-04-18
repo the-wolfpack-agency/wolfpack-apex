@@ -378,6 +378,11 @@ export async function triggerDeploy(
       repoFullName!,
       "canary-deploy.yml",
       "main",
+      // Pass deployId so the workflow's "Notify Instinct" step actually
+      // POSTs back to /api/sites/webhook with preview_url + canary result.
+      // Without it, the step skips (empty deploy_id → early exit) and the
+      // project sits in `deploying` forever.
+      { deploy_id: deployId },
     );
 
     await safeQuery(
