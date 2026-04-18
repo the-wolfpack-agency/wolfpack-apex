@@ -109,19 +109,51 @@ export async function putFile(
   });
 }
 
+/**
+ * Enable GitHub Actions on a repository. New repos created from a
+ * template in orgs that default Actions off land in a disabled state,
+ * which makes ``/actions/workflows/:id/dispatches`` 404 until a human
+ * clicks the "Enable" button in the Actions tab. Calling this right
+ * after ``createRepoFromTemplate`` removes the manual step.
+ *
+ * Requires PAT Administration: write on the target repo.
+ */
+export async function enableActions(
+  client: GithubClient,
+  repoFullName: string,
+): Promise<void> {
+  await gh(client, "PUT", `/repos/${repoFullName}/actions/permissions`, {
+    enabled: true,
+    allowed_actions: "all",
+  });
+}
+
 export async function triggerWorkflow(
   client: GithubClient,
   repoFullName: string,
   workflowFile: string,
   ref: string,
 ): Promise<{ run_id: string | null }> {
-  await gh(
-    client,
-    "POST",
-    `/repos/${repoFullName}/actions/workflows/${workflowFile}/dispatches`,
-    { ref },
-  );
-  // GitHub doesn't return the run id from a dispatch — caller must poll
-  // /actions/runs if needed. For our purposes the webhook reports it.
-  return { run_id: null };
+  // Dispatching a workflow on a freshly-created repo sometimes races
+  // GitHub's workflow indexer — the file is committed but the dispatch
+  // API returns 404 for a second or two. Retry briefly on 404 before
+  // surfacing the error.
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      await gh(
+        client,
+        "POST",
+        `/repos/${repoFullName}/actions/workflows/${workflowFile}/dispatches`,
+        { ref },
+      );
+      return { run_id: null };
+    } catch (err) {
+      lastErr = err;
+      const msg = (err as Error).message;
+      if (!msg.includes("→ 404")) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+    }
+  }
+  throw lastErr;
 }

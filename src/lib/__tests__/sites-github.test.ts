@@ -6,6 +6,7 @@
 
 import {
   createRepoFromTemplate,
+  enableActions,
   putFile,
   triggerWorkflow,
   type GithubClient,
@@ -96,5 +97,64 @@ describe("github-client", () => {
     await expect(
       createRepoFromTemplate(client, "o", "t", "o", "n"),
     ).rejects.toThrow(/422.*name already exists/);
+  });
+
+  // Regression for 2026-04-17: template-created repos landed with Actions
+  // disabled in the the-wolfpack-agency org, so the first workflow
+  // dispatch 404'd and the deploy failed. enableActions() removes the
+  // manual "Enable Actions" click; the 404 retry handles GitHub's
+  // transient post-create indexing delay.
+  it("enableActions PUTs to /actions/permissions with enabled:true", async () => {
+    const { client, calls } = makeClient([{ status: 204 }]);
+    await enableActions(client, "the-wolfpack-agency/wolfpack-new");
+    expect(calls[0].url).toBe(
+      "https://api.github.com/repos/the-wolfpack-agency/wolfpack-new/actions/permissions",
+    );
+    expect(calls[0].init.method).toBe("PUT");
+    expect(JSON.parse(calls[0].init.body as string)).toEqual({
+      enabled: true,
+      allowed_actions: "all",
+    });
+  });
+
+  it("triggerWorkflow retries on 404 and succeeds when GitHub indexes the workflow", async () => {
+    const { client, calls } = makeClient([
+      { status: 404, text: '{"message":"Not Found"}' },
+      { status: 204 },
+    ]);
+    await triggerWorkflow(client, "the-wolfpack-agency/wolfpack-x", "canary-deploy.yml", "main");
+    expect(calls).toHaveLength(2);
+  });
+
+  it("triggerWorkflow gives up after 4 consecutive 404s", async () => {
+    // Skip the real backoff sleeps — we only care that the retry budget
+    // is 4 attempts and that a non-404 is surfaced (asserted separately).
+    const originalSetTimeout = global.setTimeout;
+    global.setTimeout = ((fn: () => void) => {
+      fn();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    try {
+      const { client, calls } = makeClient([
+        { status: 404, text: "not found" },
+        { status: 404, text: "not found" },
+        { status: 404, text: "not found" },
+        { status: 404, text: "not found" },
+      ]);
+      await expect(
+        triggerWorkflow(client, "the-wolfpack-agency/wolfpack-x", "canary-deploy.yml", "main"),
+      ).rejects.toThrow(/404/);
+      expect(calls).toHaveLength(4);
+    } finally {
+      global.setTimeout = originalSetTimeout;
+    }
+  });
+
+  it("triggerWorkflow does NOT retry on non-404 errors", async () => {
+    const { client, calls } = makeClient([{ status: 403, text: "forbidden" }]);
+    await expect(
+      triggerWorkflow(client, "the-wolfpack-agency/wolfpack-x", "canary-deploy.yml", "main"),
+    ).rejects.toThrow(/403/);
+    expect(calls).toHaveLength(1);
   });
 });

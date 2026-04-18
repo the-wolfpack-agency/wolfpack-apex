@@ -16,6 +16,7 @@ import { query, safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import {
   createRepoFromTemplate,
+  enableActions,
   putFile,
   triggerWorkflow,
   type GithubClient,
@@ -338,6 +339,20 @@ export async function triggerDeploy(
       );
       repoFullName = created.full_name;
       repoUrl = created.html_url;
+      // Template-created repos in orgs that default Actions off land in
+      // a disabled state — the first workflow dispatch 404s. Explicitly
+      // enable Actions so no one has to click the button in the UI.
+      // Non-fatal: log and continue if this specific call fails (the
+      // dispatch retry loop below will still surface the real failure).
+      try {
+        await enableActions(client, repoFullName);
+      } catch (err) {
+        console.warn(
+          "[sites] enableActions failed for",
+          repoFullName,
+          (err as Error).message,
+        );
+      }
       await safeQuery(
         `UPDATE apex_site_projects
             SET github_repo = $2, github_repo_url = $3, status = 'provisioning', updated_at = NOW()
