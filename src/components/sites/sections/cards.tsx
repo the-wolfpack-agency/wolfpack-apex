@@ -4,7 +4,7 @@
  * minmax(220px, 1fr) grid, accent via left border).
  */
 
-import type { BriefSection } from "@/lib/sites";
+import type { BriefSection } from "@/lib/sites-schema";
 
 export interface CardsSectionProps {
   section: BriefSection;

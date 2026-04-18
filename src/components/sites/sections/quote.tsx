@@ -4,7 +4,7 @@
  * matches template `blockquote.card` styling.
  */
 
-import type { BriefSection } from "@/lib/sites";
+import type { BriefSection } from "@/lib/sites-schema";
 
 export interface QuoteSectionProps {
   section: BriefSection;

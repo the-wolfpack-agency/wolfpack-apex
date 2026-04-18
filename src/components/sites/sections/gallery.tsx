@@ -5,7 +5,7 @@
  * analytics is emitted by the final deployed template, not the preview.
  */
 
-import type { BriefSection } from "@/lib/sites";
+import type { BriefSection } from "@/lib/sites-schema";
 
 type ImageShape = { src: string; alt?: string };
 

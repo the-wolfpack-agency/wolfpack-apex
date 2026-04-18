@@ -8,7 +8,7 @@
  * responsive, no raw HTML injection.
  */
 
-import type { BriefSection } from "@/lib/sites";
+import type { BriefSection } from "@/lib/sites-schema";
 
 export interface HeroSectionProps {
   section: BriefSection;

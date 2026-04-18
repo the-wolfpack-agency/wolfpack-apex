@@ -3,7 +3,7 @@
  * Renders as a card-like block mirroring the template's `.card` class.
  */
 
-import type { BriefSection } from "@/lib/sites";
+import type { BriefSection } from "@/lib/sites-schema";
 
 export interface TextSectionProps {
   section: BriefSection;

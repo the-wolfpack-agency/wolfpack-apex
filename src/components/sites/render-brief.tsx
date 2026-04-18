@@ -13,7 +13,7 @@
  *     defensive) render nothing.
  */
 
-import type { SiteBrief, BriefSection, SectionType } from "@/lib/sites";
+import type { SiteBrief, BriefSection, SectionType } from "@/lib/sites-schema";
 import { HeroSection } from "./sections/hero";
 import { TextSection } from "./sections/text";
 import { CardsSection } from "./sections/cards";

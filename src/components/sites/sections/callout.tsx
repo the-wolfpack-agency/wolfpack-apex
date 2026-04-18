@@ -4,7 +4,7 @@
  * Heading + body are both optional; CTA is rendered inline.
  */
 
-import type { BriefSection } from "@/lib/sites";
+import type { BriefSection } from "@/lib/sites-schema";
 
 export interface CalloutSectionProps {
   section: BriefSection;

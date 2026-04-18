@@ -42,7 +42,7 @@ import {
   fetchWithRefresh,
   getInstinctToken,
 } from "@/lib/client-auth";
-import { validateBrief, type SiteBrief } from "@/lib/sites";
+import { validateBrief, type SiteBrief } from "@/lib/sites-schema";
 import { RenderBrief } from "@/components/sites/render-brief";
 
 type PreviewSource = "draft" | "saved";

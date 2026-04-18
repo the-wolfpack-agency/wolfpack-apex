@@ -5,7 +5,7 @@
  * immediately, which is what they want to verify.
  */
 
-import type { BriefSection } from "@/lib/sites";
+import type { BriefSection } from "@/lib/sites-schema";
 
 export interface StatsSectionProps {
   section: BriefSection;

@@ -4,7 +4,7 @@
  * heading). Used as a visual divider between other sections.
  */
 
-import type { BriefSection } from "@/lib/sites";
+import type { BriefSection } from "@/lib/sites-schema";
 
 export interface BannerSectionProps {
   section: BriefSection;
