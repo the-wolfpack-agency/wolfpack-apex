@@ -258,14 +258,30 @@ export default function SiteEditPage({
   }
 
   async function discardLast() {
-    // Revert draft to last assistant message's "before" state.
-    // MVP: revert the whole draft to savedBrief and clear messages.
-    if (!savedBrief) return;
-    setDraft(savedBrief);
-    localStorage.removeItem(DRAFT_STORAGE_KEY(id));
-    // Tell the backend the last edit was rejected (so the learning loop
-    // sees "user said no to this patch").
+    // Discard is what the user reaches for when they want to undo their
+    // in-progress work. That "work" can be any of three things:
+    //   - unsaved typing in the prompt input (common, what every user
+    //     tries first)
+    //   - an accumulated draft that diverges from the saved brief
+    //   - a session full of assistant messages they don't want to keep
+    // Pre-2026-04-18 we only handled #2 and bailed early if !savedBrief
+    // or !dirty, so clicking Discard after just typing in the prompt
+    // looked like a broken button. It now clears all three.
+    const hadInput = input.length > 0;
+    const wasDirty = dirty;
     const lastAi = [...messages].reverse().find((m) => m.role === "assistant" && m.editId);
+
+    setInput("");
+    if (savedBrief && wasDirty) {
+      setDraft(savedBrief);
+    }
+    if (wasDirty) {
+      localStorage.removeItem(DRAFT_STORAGE_KEY(id));
+    }
+
+    // Tell the backend the last edit was rejected so the learning loop
+    // captures "user said no to this patch". Non-fatal — analytics and
+    // the UI state always fire.
     if (lastAi?.editId) {
       fetchWithRefresh(`/api/sites/${id}/brief-edit/${lastAi.editId}`, {
         method: "PATCH",
@@ -275,16 +291,27 @@ export default function SiteEditPage({
         /* non-fatal */
       });
     }
+
+    const bannerText = wasDirty
+      ? "Reverted to the last published brief."
+      : hadInput
+        ? "Cleared your typing."
+        : "Nothing to discard — you're in sync with the last published deploy.";
     setMessages([
       {
-        id: "discarded",
+        id: `discarded-${Date.now()}`,
         role: "system",
-        text: "Reverted to the last published brief.",
+        text: bannerText,
         timestamp: Date.now(),
       },
     ]);
-    trackClient("site.edit_discarded", { project_id: id });
-    setIframeNonce((n) => n + 1);
+    trackClient("site.edit_discarded", {
+      project_id: id,
+      had_input: hadInput,
+      had_dirty_draft: wasDirty,
+      had_edit_id: !!lastAi?.editId,
+    });
+    if (wasDirty) setIframeNonce((n) => n + 1);
   }
 
   async function publish() {
@@ -550,7 +577,12 @@ export default function SiteEditPage({
             <button
               data-testid="edit-discard-btn"
               onClick={() => void discardLast()}
-              disabled={!dirty || busy || publishing}
+              // Enabled when there's ANYTHING to discard — unsaved
+              // typing in the prompt OR a dirty draft OR assistant
+              // messages from the current session. Leaving it disabled
+              // when the user typed "hello" in the prompt but hadn't
+              // sent it made the button look dead.
+              disabled={(!dirty && input.length === 0 && messages.length === 0) || busy || publishing}
               style={{
                 padding: "8px 12px",
                 background: "rgba(255,255,255,0.04)",
