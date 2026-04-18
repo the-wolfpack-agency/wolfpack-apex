@@ -445,13 +445,22 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
           <Link
             href={`/sites/${id}/edit`}
             style={{
-              ...btnStyle("transparent"),
+              // Intentionally NOT using btnStyle("transparent") — that
+              // helper picks text color based on the bg arg and falls
+              // back to `var(--wp-dark)` for any non-card bg, which on
+              // the dark theme renders invisible on the page background.
+              // Explicit values here so the label stays legible.
               padding: "0.75rem 1.5rem",
               fontSize: "0.95rem",
+              fontWeight: 600,
+              background: "transparent",
+              color: "var(--wp-text, #e6e6e6)",
               border: "1px solid var(--wp-border, rgba(255,255,255,0.2))",
+              borderRadius: "6px",
               textDecoration: "none",
               display: "inline-flex",
               alignItems: "center",
+              cursor: "pointer",
             }}
             onClick={() => {
               // Analytics: record the doorway hit so we know which route
