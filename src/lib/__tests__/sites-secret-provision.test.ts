@@ -191,21 +191,25 @@ describe("provisionClientRepoSecrets (direct)", () => {
     expect(call?.[3]).toBe("https://staging.example.com/hooks/sites");
   });
 
-  it("per-secret failure is non-fatal — remaining secrets still attempted", async () => {
+  it("per-secret hard failure (all retries exhausted) is non-fatal — remaining secrets still attempted", async () => {
     setEnv({
       VERCEL_TOKEN_WOLFPACK_AGENCY: "vt",
       VERCEL_ORG_ID: "team",
       WOLFPACK_SITES_WEBHOOK_SECRET: "shh",
     });
     mockCreateVercelProject.mockResolvedValueOnce({ id: "prj_1", name: "wolfpack-acme" });
-    // Fail the first secret PUT; succeed the rest.
+    // Fail the FIRST secret's first three attempts (retry exhausted) so
+    // the remaining four are still attempted exactly once each.
     mockSetRepoSecret
+      .mockRejectedValueOnce(new Error("github 403 forbidden"))
+      .mockRejectedValueOnce(new Error("github 403 forbidden"))
       .mockRejectedValueOnce(new Error("github 403 forbidden"))
       .mockResolvedValue({ ok: true });
 
     await provisionClientRepoSecrets(ghClient, "o/r", PROJECT, "u", "r");
 
-    expect(mockSetRepoSecret).toHaveBeenCalledTimes(CLIENT_REPO_SECRET_NAMES.length);
+    // 3 retries for secret #1 + 4 successful ones = 7 total.
+    expect(mockSetRepoSecret).toHaveBeenCalledTimes(CLIENT_REPO_SECRET_NAMES.length + 2);
     const failures = mockTrackEvent.mock.calls.filter(
       (c) => c[0] === "site.repo_secret_failed",
     );
@@ -214,6 +218,35 @@ describe("provisionClientRepoSecrets (direct)", () => {
       secret_name: CLIENT_REPO_SECRET_NAMES[0],
       error: expect.stringContaining("403"),
     });
+  });
+
+  it("transient failure on one secret is recovered by retry (no tracked failure)", async () => {
+    setEnv({
+      VERCEL_TOKEN_WOLFPACK_AGENCY: "vt",
+      VERCEL_ORG_ID: "team",
+      WOLFPACK_SITES_WEBHOOK_SECRET: "shh",
+    });
+    mockCreateVercelProject.mockResolvedValueOnce({ id: "prj_1", name: "wolfpack-acme" });
+    // 2026-04-18 live repro: the very first secret (VERCEL_TOKEN) 422s
+    // or 404s once because the template-forked repo is still replicating.
+    // Second attempt succeeds. With retry in place, no failure should
+    // surface for ops.
+    mockSetRepoSecret
+      .mockRejectedValueOnce(new Error("github 422 replication lag"))
+      .mockResolvedValue({ ok: true });
+
+    await provisionClientRepoSecrets(ghClient, "o/r", PROJECT, "u", "r");
+
+    // 2 for secret #1 (fail + retry success) + 4 for rest = 6.
+    expect(mockSetRepoSecret).toHaveBeenCalledTimes(CLIENT_REPO_SECRET_NAMES.length + 1);
+    const failures = mockTrackEvent.mock.calls.filter(
+      (c) => c[0] === "site.repo_secret_failed",
+    );
+    expect(failures).toHaveLength(0);
+    const successes = mockTrackEvent.mock.calls.filter(
+      (c) => c[0] === "site.repo_secret_set",
+    );
+    expect(successes).toHaveLength(CLIENT_REPO_SECRET_NAMES.length);
   });
 
   it("Vercel createProject failure: skips VERCEL_PROJECT_ID but still sets the other 4", async () => {

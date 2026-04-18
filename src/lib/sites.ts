@@ -532,15 +532,33 @@ export async function provisionClientRepoSecrets(
       });
       continue;
     }
-    try {
-      await setRepoSecret(client, repoFullName, name, value);
+    // Retry 3x with exponential backoff — 2026-04-18 live repro showed
+    // a consistent 1-in-5 failure (always the first secret in the loop)
+    // likely from repo replication lag right after createRepoFromTemplate.
+    // GitHub's public-key endpoint occasionally 404/403s on a brand-new
+    // template-fork repo for a few seconds. Retrying closes the gap.
+    let lastErr: unknown = null;
+    let setOk = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await setRepoSecret(client, repoFullName, name, value);
+        setOk = true;
+        break;
+      } catch (err) {
+        lastErr = err;
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        }
+      }
+    }
+    if (setOk) {
       trackEvent("site.repo_secret_set", triggeredBy, userRole, {
         project_id: project.id,
         repo: repoFullName,
         secret_name: name,
       });
-    } catch (err) {
-      const message = (err as Error).message;
+    } else {
+      const message = (lastErr as Error).message;
       console.warn(
         "[sites] setRepoSecret failed for",
         repoFullName,
