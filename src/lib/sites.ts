@@ -145,7 +145,56 @@ export async function deleteSiteProject(
   return after;
 }
 
+/**
+ * Window after which a deploy that never heard back from the canary
+ * webhook is assumed dead. GitHub Actions runs can be cancelled by
+ * subsequent dispatches or die mid-workflow before the "Notify Instinct"
+ * step fires — without this the row sits at `building` forever and the
+ * UI spins with no way forward (user on 2026-04-18 had to archive a
+ * whole site just to escape the stuck state). 10 min is generous —
+ * a healthy canary promotes in ~3 min.
+ */
+const DEPLOY_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * Reap any deploy rows on *projectId* that have been `pending` or
+ * `building` for longer than ``DEPLOY_TIMEOUT_MS``. Marks them failed
+ * with a clear log excerpt so the UI knows to surface a retry, and
+ * flips the parent project status accordingly. Idempotent.
+ */
+async function reapStuckDeploys(projectId: string): Promise<void> {
+  const cutoffMs = DEPLOY_TIMEOUT_MS;
+  const { rows } = await safeQuery<{ id: string }>(
+    `UPDATE apex_site_deploys
+        SET status = 'failed',
+            log_excerpt = COALESCE(log_excerpt, '') ||
+              '[reaped] no webhook callback within ' || $2 || ' ms',
+            finished_at = NOW()
+      WHERE project_id = $1
+        AND status IN ('pending','building')
+        AND started_at < NOW() - ($2::int * INTERVAL '1 ms')
+      RETURNING id`,
+    [projectId, cutoffMs],
+  );
+  if (rows.length > 0) {
+    // Flip the project if its status still reflects an in-flight deploy.
+    await safeQuery(
+      `UPDATE apex_site_projects
+          SET status = 'failed', updated_at = NOW()
+        WHERE id = $1
+          AND status IN ('provisioning','deploying')`,
+      [projectId],
+    );
+  }
+}
+
 export async function getSiteProject(id: string): Promise<SiteProject | null> {
+  // Cheap, idempotent: any stale in-flight rows get marked failed
+  // before we return the project. Keeps the UI honest without a cron.
+  await reapStuckDeploys(id).catch(() => {
+    // Non-fatal — if the reaper errors we still want to serve the
+    // project data so the page loads.
+  });
   const result = await safeQuery<Record<string, unknown>>(
     `SELECT * FROM apex_site_projects WHERE id = $1`,
     [id],
