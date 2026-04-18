@@ -342,7 +342,7 @@ describe("triggerDeploy", () => {
     expect(deployFailedCall?.[3]).toEqual(
       expect.objectContaining({
         reason: "env_not_configured",
-        missing: expect.arrayContaining(["VERCEL_TOKEN_WOLFPACK_AGENCY"]),
+        missing: expect.stringContaining("VERCEL_TOKEN_WOLFPACK_AGENCY"),
       }),
     );
   });

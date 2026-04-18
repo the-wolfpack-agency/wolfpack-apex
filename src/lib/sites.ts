@@ -597,7 +597,8 @@ export async function triggerDeploy(
       project_id: projectId,
       deploy_id: deployId,
       reason: "env_not_configured",
-      missing: pf.missing,
+      missing: pf.missing.join(","),
+      missing_count: pf.missing.length,
     });
     throw new Error(msg);
   }
