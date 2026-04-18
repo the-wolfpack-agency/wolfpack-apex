@@ -164,6 +164,14 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/sites/[id]/assets/route.ts",
     reason: "site asset upload — same",
   },
+  {
+    route: "src/app/api/sites/[id]/brief-edit/route.ts",
+    reason: "AI-proposed patch generation — the actual brief save (on accept) is audited by PATCH /api/sites/[id]. Every attempt still persists to apex_site_brief_edits for the learning loop.",
+  },
+  {
+    route: "src/app/api/sites/[id]/brief-edit/[editId]/route.ts",
+    reason: "user accept/reject decision on a proposed patch — recorded to apex_site_brief_edits for training; no state change outside that audit table.",
+  },
 
   // Notifications stream (concurrent PR)
   {

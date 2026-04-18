@@ -23,6 +23,7 @@ import {
   type GithubClient,
   defaultGithubClient,
 } from "@/lib/github-client";
+import { setRepoSecret } from "@/lib/github-secrets";
 
 /* ----------------------------- Types + validation --------------------- */
 // Re-exported from sites-schema.ts so client components can import the
@@ -400,6 +401,136 @@ const TEMPLATE_REPO = "wolfpack-site-template";
 const ORG = "the-wolfpack-agency";
 
 /**
+ * Names of the five GitHub Actions secrets every canary-deploy workflow
+ * on a client repo expects. Declared once so test assertions can match the
+ * list without re-typing it.
+ */
+export const CLIENT_REPO_SECRET_NAMES = [
+  "VERCEL_TOKEN",
+  "VERCEL_ORG_ID",
+  "VERCEL_PROJECT_ID",
+  "INSTINCT_WEBHOOK_URL",
+  "WOLFPACK_SITES_WEBHOOK_SECRET",
+] as const;
+
+/**
+ * Auto-provision the five Actions secrets a newly-created client repo
+ * needs before its `canary-deploy.yml` workflow can run. Creates a Vercel
+ * project named `wolfpack-{client_slug}` first (so VERCEL_PROJECT_ID has a
+ * value), then seals + PUTs each secret via `setRepoSecret`.
+ *
+ * Degrades gracefully at every step:
+ *   - Missing env vars → emit `site.vercel_project_create_failed` with
+ *     reason `env_not_configured` and return. No secrets are set; the
+ *     canary-deploy workflow will fail until a human populates them, but
+ *     the deploy row itself isn't blocked.
+ *   - Vercel createProject error → emit `site.vercel_project_create_failed`
+ *     and skip VERCEL_PROJECT_ID; other four secrets still get set so the
+ *     operator only has to paste one value manually.
+ *   - Per-secret PUT error → emit `site.repo_secret_failed` and continue.
+ *
+ * All failures are logged + tracked and NEVER rethrown — the caller's
+ * deploy flow stays intact.
+ */
+export async function provisionClientRepoSecrets(
+  client: GithubClient,
+  repoFullName: string,
+  project: SiteProject,
+  triggeredBy: string,
+  userRole: string,
+): Promise<void> {
+  const vercelToken = process.env.VERCEL_TOKEN_WOLFPACK_AGENCY ?? "";
+  const vercelOrgId = process.env.VERCEL_ORG_ID ?? "";
+  const webhookUrl =
+    process.env.INSTINCT_WEBHOOK_URL ||
+    "https://wolfpack-instinct.vercel.app/api/sites/webhook";
+  const webhookSecret = process.env.WOLFPACK_SITES_WEBHOOK_SECRET ?? "";
+
+  // Env gate: if either shared Vercel credential is missing we can't even
+  // create the per-client Vercel project. Emit the dedicated skip event
+  // so ops can filter "env not configured" out of true failures.
+  if (!vercelToken || !vercelOrgId || !webhookSecret) {
+    trackEvent("site.vercel_project_create_failed", triggeredBy, userRole, {
+      project_id: project.id,
+      repo: repoFullName,
+      reason: "env_not_configured",
+    });
+    return;
+  }
+
+  // Step 1: create the Vercel project. Lazy-import matches the hard-delete
+  // path in runHardDeleteCleanup so Vercel is only loaded when needed.
+  let vercelProjectId: string | null = null;
+  try {
+    const { defaultVercelClient, createProject } = await import("@/lib/vercel-client");
+    const vClient = defaultVercelClient();
+    const projectName = `wolfpack-${project.client_slug}`;
+    const created = await createProject(vClient, projectName, "nextjs");
+    vercelProjectId = created.id;
+    trackEvent("site.vercel_project_created", triggeredBy, userRole, {
+      project_id: project.id,
+      vercel_id: created.id,
+      vercel_name: created.name,
+    });
+  } catch (err) {
+    const message = (err as Error).message;
+    trackEvent("site.vercel_project_create_failed", triggeredBy, userRole, {
+      project_id: project.id,
+      repo: repoFullName,
+      error: message.slice(0, 200),
+    });
+    // Fall through: set the other 4 secrets so only VERCEL_PROJECT_ID is
+    // missing when the operator checks the repo.
+  }
+
+  // Step 2: set each secret. Each failure is logged per-secret so ops can
+  // see exactly which one(s) need a manual copy, not just "the whole batch
+  // failed". VERCEL_PROJECT_ID is skipped if step 1 didn't yield an id.
+  const secretValues: Record<string, string | null> = {
+    VERCEL_TOKEN: vercelToken,
+    VERCEL_ORG_ID: vercelOrgId,
+    VERCEL_PROJECT_ID: vercelProjectId,
+    INSTINCT_WEBHOOK_URL: webhookUrl,
+    WOLFPACK_SITES_WEBHOOK_SECRET: webhookSecret,
+  };
+
+  for (const name of CLIENT_REPO_SECRET_NAMES) {
+    const value = secretValues[name];
+    if (!value) {
+      trackEvent("site.repo_secret_failed", triggeredBy, userRole, {
+        project_id: project.id,
+        repo: repoFullName,
+        secret_name: name,
+        error: "value_unavailable",
+      });
+      continue;
+    }
+    try {
+      await setRepoSecret(client, repoFullName, name, value);
+      trackEvent("site.repo_secret_set", triggeredBy, userRole, {
+        project_id: project.id,
+        repo: repoFullName,
+        secret_name: name,
+      });
+    } catch (err) {
+      const message = (err as Error).message;
+      console.warn(
+        "[sites] setRepoSecret failed for",
+        repoFullName,
+        name,
+        message,
+      );
+      trackEvent("site.repo_secret_failed", triggeredBy, userRole, {
+        project_id: project.id,
+        repo: repoFullName,
+        secret_name: name,
+        error: message.slice(0, 200),
+      });
+    }
+  }
+}
+
+/**
  * Provisions a per-client repo from the template, commits the brief, and
  * triggers the canary deploy workflow. Idempotent on the repo creation
  * step (skipped if github_repo is already set on the project).
@@ -463,6 +594,26 @@ export async function triggerDeploy(
         project_id: projectId,
         repo: repoFullName,
       });
+      // Auto-provision the 5 Actions secrets the canary-deploy workflow
+      // needs. Every failure is per-secret non-fatal — we log + emit
+      // analytics and continue so a misconfigured env never blocks the
+      // operator from completing the rest of the deploy (fallback: manual
+      // paste in GitHub → Settings → Secrets).
+      try {
+        await provisionClientRepoSecrets(
+          client,
+          repoFullName,
+          { ...project, github_repo: repoFullName, github_repo_url: repoUrl },
+          triggeredBy,
+          userRole,
+        );
+      } catch (err) {
+        console.warn(
+          "[sites] provisionClientRepoSecrets threw unexpectedly for",
+          repoFullName,
+          (err as Error).message,
+        );
+      }
     }
 
     await putFile(

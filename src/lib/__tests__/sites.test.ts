@@ -191,6 +191,11 @@ describe("triggerDeploy", () => {
   beforeEach(() => jest.clearAllMocks());
 
   function mockProjectFetch(extra: Partial<Record<string, unknown>> = {}) {
+    // getSiteProject now calls reapStuckDeploys first (an UPDATE on
+    // apex_site_deploys) before the SELECT on apex_site_projects. Add
+    // a no-op UPDATE result at the head of the queue so the real
+    // SELECT still lands on the project row below.
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] });
     mockSafeQuery.mockResolvedValueOnce({
       rows: [
         {
@@ -243,6 +248,9 @@ describe("triggerDeploy", () => {
       "the-wolfpack-agency/wolfpack-cftr",
       "canary-deploy.yml",
       "main",
+      // 5th arg is workflow_dispatch inputs — the deploy_id flows
+      // through so the canary's "Notify Instinct" step can correlate.
+      expect.objectContaining({ deploy_id: expect.any(String) }),
     );
 
     const eventNames = mockTrackEvent.mock.calls.map((c) => c[0]);

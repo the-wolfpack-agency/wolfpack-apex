@@ -152,10 +152,17 @@ export type ApexEventType =
   | "site.vercel_project_deleted"
   | "site.vercel_project_delete_skipped"
   | "site.vercel_project_delete_failed"
+  | "site.vercel_project_created"
+  | "site.vercel_project_create_failed"
+  | "site.repo_secret_set"
+  | "site.repo_secret_failed"
   | "site.brief_auto_parsed"
   | "site.brief_parse_failed"
   | "site.brief_form_edited"
   | "site.dropzone_used"
+  // Sites — starter-template picker (031)
+  | "site.template_previewed"
+  | "site.template_applied"
   // Sites — video section added via BriefForm (YouTube/Vimeo embeds)
   | "site.section_video_added"
   // Sites — prompt-to-brief editor (029)

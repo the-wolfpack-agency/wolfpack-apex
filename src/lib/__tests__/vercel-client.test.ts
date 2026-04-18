@@ -8,6 +8,7 @@
 
 import {
   VercelApiError,
+  createProject,
   defaultVercelClient,
   deleteProject,
   findProjectByName,
@@ -222,6 +223,54 @@ describe("vercel-client / deleteProject", () => {
     await deleteProject(client, "weird name/slash");
     expect(calls[0].url).toBe(
       "https://api.vercel.com/v9/projects/weird%20name%2Fslash?teamId=team_test_01",
+    );
+  });
+});
+
+describe("vercel-client / createProject", () => {
+  it("POSTs to /v9/projects with {name, framework} and returns the id", async () => {
+    const { client, calls } = makeClient([
+      { status: 200, json: { id: "prj_new123", name: "wolfpack-acme" } },
+    ]);
+    const out = await createProject(client, "wolfpack-acme");
+    expect(out).toEqual({ id: "prj_new123", name: "wolfpack-acme" });
+    expect(calls[0].url).toBe(
+      "https://api.vercel.com/v9/projects?teamId=team_test_01",
+    );
+    expect(calls[0].init.method).toBe("POST");
+    const headers = calls[0].init.headers as Record<string, string>;
+    expect(headers["Authorization"]).toBe("Bearer vercel_test_token");
+    const body = JSON.parse(calls[0].init.body as string);
+    expect(body).toEqual({ name: "wolfpack-acme", framework: "nextjs" });
+  });
+
+  it("accepts a custom framework override", async () => {
+    const { client, calls } = makeClient([
+      { status: 201, json: { id: "prj_custom", name: "wolfpack-odd" } },
+    ]);
+    await createProject(client, "wolfpack-odd", "gatsby");
+    const body = JSON.parse(calls[0].init.body as string);
+    expect(body.framework).toBe("gatsby");
+  });
+
+  it("throws VercelApiError on 409 name conflict (preserves status)", async () => {
+    const { client } = makeClient([
+      { status: 409, text: "project name already exists" },
+    ]);
+    try {
+      await createProject(client, "wolfpack-dup");
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(VercelApiError);
+      expect((err as VercelApiError).status).toBe(409);
+      expect((err as VercelApiError).body).toMatch(/name already exists/);
+    }
+  });
+
+  it("throws on a malformed 2xx response (defensive — Vercel has shipped regressions)", async () => {
+    const { client } = makeClient([{ status: 200, json: { name: "no_id" } }]);
+    await expect(createProject(client, "wolfpack-x")).rejects.toThrow(
+      /createProject response malformed/,
     );
   });
 });

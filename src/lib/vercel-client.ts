@@ -134,6 +134,46 @@ export async function findProjectByName(
 }
 
 /**
+ * POST /v9/projects?teamId=… — create a new Vercel project for a client
+ * site. Used by the Sites provisioning flow right after the GitHub repo is
+ * created so Instinct has a `VERCEL_PROJECT_ID` to write onto the repo's
+ * Actions secrets.
+ *
+ * `framework` defaults to "nextjs" since every wolfpack-site-template
+ * derivative is a Next.js app. Callers may override for non-standard
+ * templates (e.g. "gatsby", "vite") but today that's unused.
+ *
+ * Returns the new project's id (prj_…). Throws VercelApiError on any
+ * non-2xx — including 409 "name already taken", which the orchestration
+ * layer translates into an idempotency lookup via findProjectByName.
+ */
+export async function createProject(
+  client: VercelClient,
+  name: string,
+  framework?: string,
+): Promise<{ id: string; name: string }> {
+  const params = new URLSearchParams({ teamId: client.teamId });
+  const url = `${VERCEL_API}/v9/projects?${params.toString()}`;
+  const res = await client.fetch(url, {
+    method: "POST",
+    headers: authHeaders(client),
+    body: JSON.stringify({ name, framework: framework ?? "nextjs" }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new VercelApiError(res.status, text);
+  }
+  const raw = (await res.json()) as { id?: string; name?: string };
+  if (!raw.id || !raw.name) {
+    throw new VercelApiError(
+      502,
+      `createProject response malformed: ${JSON.stringify(raw).slice(0, 200)}`,
+    );
+  }
+  return { id: raw.id, name: raw.name };
+}
+
+/**
  * DELETE /v9/projects/{idOrName}?teamId=… — idempotent.
  *
  * - 2xx  → { ok: true, alreadyGone: false }
