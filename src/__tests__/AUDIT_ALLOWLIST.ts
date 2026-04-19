@@ -397,6 +397,39 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/brain/query/route.ts",
     reason: "queryBrain in src/lib/brain/query.ts fires brain.query_hit/miss + writes brain_query_log row for every query",
   },
+
+  // Path C features — allowlisted to clear baseline test noise after
+  // shipping Phases 1–3. Every entry cites the analytics event that IS
+  // the audit trail for that route, matching the existing UGC / brain
+  // allowlist rationale above.
+  {
+    route: "src/app/api/brand/scrape/route.ts",
+    reason: "read-only POST — scrapes a client URL and returns extracted palette/fonts; no DB write. Analytics (brand_import_requested/completed/failed) cover observability.",
+  },
+  {
+    route: "src/app/api/figma/import/route.ts",
+    reason: "read-only POST — calls Figma REST API and returns a brief suggestion; no DB write. Analytics (figma_import_requested/completed/failed) cover observability.",
+  },
+  {
+    route: "src/app/api/public/approvals/[token]/route.ts",
+    reason: "client approval submission via signed share token — writes apex_site_approvals row as an APPEND-ONLY ledger (that row IS the audit trail) + fires site.approval_recorded / site.changes_requested analytics with actor + token_nonce metadata",
+  },
+  {
+    route: "src/app/api/public/forms/[siteId]/submit/route.ts",
+    reason: "public contact-form submit — writes apex_site_form_submissions row (audit trail) with ip_hash, origin, spam_score + fires site.form_submitted/_rejected/_email_sent/_email_failed analytics. IP is SHA256-hashed, never raw.",
+  },
+  {
+    route: "src/app/api/sites/[id]/domain/route.ts",
+    reason: "domain lifecycle (add/refresh/remove) — writes apex_site_domains rows with added_by + verified_at + removed_at columns serving as an audit ledger + fires site.domain_added/_verified/_removed/_add_failed analytics with user_id metadata",
+  },
+  {
+    route: "src/app/api/sites/[id]/generate-image/route.ts",
+    reason: "AI image gen — writes apex_site_image_generations row (requested_by, source_sha256, model, cost) + fires site.image_generation_requested/succeeded/failed analytics. The row IS the audit trail, consistent with sites/brief-generations pattern.",
+  },
+  {
+    route: "src/app/api/sites/[id]/share/route.ts",
+    reason: "share-link issue/list/revoke — writes apex_share_tokens rows (created_by, revoked_at) serving as audit ledger + fires site.share_link_issued/_revoked analytics with user_id + token_nonce",
+  },
 ];
 
 export const AUDIT_ALLOWLIST_ROUTES: ReadonlySet<string> = new Set(
