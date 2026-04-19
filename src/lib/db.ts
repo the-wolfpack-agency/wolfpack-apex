@@ -97,7 +97,7 @@ export class WriteQueryError extends Error {
  * missing rows surface as errors, not as "the user typed it but nothing
  * happened."
  */
-export async function writeQuery<T extends Record<string, unknown> = Record<string, unknown>>(
+export async function writeQuery<T = Record<string, unknown>>(
   text: string,
   params?: unknown[],
   opts?: { expectRows?: number },
@@ -108,9 +108,13 @@ export async function writeQuery<T extends Record<string, unknown> = Record<stri
       "no_database",
     );
   }
-  let result: QueryResult<T>;
+  // Inner query requires a Record<string, unknown>-shaped generic; we
+  // intersect T with it so callers can pass strict interfaces (like
+  // FeatureRequest) without needing to declare an index signature.
+  // Mirrors the pattern already used in safeQuery above.
+  let result: QueryResult<T & Record<string, unknown>>;
   try {
-    result = await query<T>(text, params);
+    result = await query<T & Record<string, unknown>>(text, params);
   } catch (err) {
     throw new WriteQueryError(
       `writeQuery failed: ${(err as Error).message}`,
@@ -125,5 +129,5 @@ export async function writeQuery<T extends Record<string, unknown> = Record<stri
       { expected: opts.expectRows, actual: result.rows.length },
     );
   }
-  return { rows: result.rows };
+  return { rows: result.rows as T[] };
 }
