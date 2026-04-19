@@ -213,7 +213,7 @@ function getDemoAnalysis(): CodebaseAnalysis {
     testFiles: 35,
     migrations: 6,
     tables: [
-      "apex_users", "apex_events", "apex_documents", "apex_feature_requests",
+      "apex_users", "apex_events", "apex_documents", "instinct_feature_requests",
       "apex_discussions", "apex_clients", "apex_journal_entries",
     ],
     dependencies: {

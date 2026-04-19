@@ -129,7 +129,7 @@ export async function generateFeatureDoc(
 
   try {
     const result = await query<Record<string, unknown>>(
-      `SELECT * FROM apex_feature_requests WHERE id = $1`,
+      `SELECT * FROM instinct_feature_requests WHERE id = $1`,
       [featureRequestId],
     );
 

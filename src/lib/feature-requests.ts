@@ -142,7 +142,7 @@ export async function submitFeatureRequest(
   priority?: FeaturePriority,
 ): Promise<FeatureRequest | null> {
   const { rows } = await safeQuery<FeatureRequest>(
-    `INSERT INTO apex_feature_requests (title, description, submitted_by, target_product, priority)
+    `INSERT INTO instinct_feature_requests (title, description, submitted_by, target_product, priority)
      VALUES ($1, $2, $3, $4, $5)
      RETURNING *`,
     [title, description, userId, targetProduct || null, priority || "medium"],
@@ -185,7 +185,7 @@ export async function submitFeatureRequest(
 export async function analyzeFeatureRequest(requestId: string): Promise<FeatureAnalysis | null> {
   // Fetch the request
   const { rows } = await safeQuery<FeatureRequest>(
-    `SELECT * FROM apex_feature_requests WHERE id = $1`,
+    `SELECT * FROM instinct_feature_requests WHERE id = $1`,
     [requestId],
   );
 
@@ -204,7 +204,7 @@ export async function analyzeFeatureRequest(requestId: string): Promise<FeatureA
          WHEN similarity(title, $1) > 0.3 THEN 'medium'
          ELSE 'low'
        END AS similarity
-     FROM apex_feature_requests
+     FROM instinct_feature_requests
      WHERE id != $2 AND similarity(title, $1) > 0.2
      ORDER BY similarity(title, $1) DESC
      LIMIT 5`,
@@ -233,7 +233,7 @@ export async function analyzeFeatureRequest(requestId: string): Promise<FeatureA
 
   // Store analysis back on the record
   await safeQuery(
-    `UPDATE apex_feature_requests
+    `UPDATE instinct_feature_requests
      SET analysis = $1, estimated_hours = $2, estimated_cost = $3, status = 'analyzing', updated_at = NOW()
      WHERE id = $4`,
     [JSON.stringify(analysis), midHours, midHours * HOURLY_RATE, requestId],
@@ -254,7 +254,7 @@ export async function analyzeFeatureRequest(requestId: string): Promise<FeatureA
  */
 export async function voteOnFeature(requestId: string, userId: string): Promise<number> {
   const { rows } = await safeQuery<{ votes: number }>(
-    `UPDATE apex_feature_requests
+    `UPDATE instinct_feature_requests
      SET votes = votes + 1, updated_at = NOW()
      WHERE id = $1
      RETURNING votes`,
@@ -279,7 +279,7 @@ export async function updateFeatureStatus(
   userId: string,
 ): Promise<FeatureRequest | null> {
   const { rows } = await safeQuery<FeatureRequest>(
-    `UPDATE apex_feature_requests
+    `UPDATE instinct_feature_requests
      SET status = $1, updated_at = NOW()
      WHERE id = $2
      RETURNING *`,
@@ -322,7 +322,7 @@ export async function getFeatureRequests(
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const { rows } = await safeQuery<FeatureRequest>(
-    `SELECT * FROM apex_feature_requests ${where} ORDER BY created_at DESC`,
+    `SELECT * FROM instinct_feature_requests ${where} ORDER BY created_at DESC`,
     params,
   );
   return rows;

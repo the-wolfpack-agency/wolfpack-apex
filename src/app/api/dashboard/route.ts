@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   const [knowledge, discussions, features, team, efficiency] = await Promise.all([
     safeQuery<{ count: number }>("SELECT COUNT(*)::int AS count FROM apex_knowledge"),
     safeQuery<{ count: number }>("SELECT COUNT(*)::int AS count FROM apex_discussions WHERE status = 'open'"),
-    safeQuery<{ count: number }>("SELECT COUNT(*)::int AS count FROM apex_feature_requests"),
+    safeQuery<{ count: number }>("SELECT COUNT(*)::int AS count FROM instinct_feature_requests"),
     safeQuery<{ count: number }>("SELECT COUNT(*)::int AS count FROM apex_team_members WHERE is_active = true"),
     safeQuery<{ zero_token_pct: number; zero_token_answers: number; ai_calls: number }>(
       "SELECT * FROM v_ai_efficiency LIMIT 1"

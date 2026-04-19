@@ -55,7 +55,7 @@ describe("Feature Requests Library", () => {
 
       expect(result).toEqual(mockFeature);
       expect(mockSafeQuery).toHaveBeenCalledTimes(1);
-      expect(mockSafeQuery.mock.calls[0][0]).toContain("INSERT INTO apex_feature_requests");
+      expect(mockSafeQuery.mock.calls[0][0]).toContain("INSERT INTO instinct_feature_requests");
       expect(mockTrackEvent).toHaveBeenCalledWith(
         "feature.request_submitted",
         "user-1",

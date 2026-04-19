@@ -421,7 +421,7 @@ export async function GET(req: NextRequest) {
       "SELECT question, view_count FROM apex_knowledge ORDER BY view_count DESC LIMIT 10",
     ),
     safeQuery<{ status: string; count: number }>(
-      "SELECT status, COUNT(*)::int AS count FROM apex_feature_requests GROUP BY status ORDER BY count DESC",
+      "SELECT status, COUNT(*)::int AS count FROM instinct_feature_requests GROUP BY status ORDER BY count DESC",
     ),
     safeQuery<{ user_id: string; user_name: string | null; event_count: number }>(
       `SELECT e.user_id,

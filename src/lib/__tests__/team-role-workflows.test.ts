@@ -275,7 +275,7 @@ describe("CTO Workflow", () => {
 
     const [knowledge, features, discussions, team] = await Promise.all([
       mockSafeQuery("SELECT COUNT(*) FROM apex_knowledge"),
-      mockSafeQuery("SELECT COUNT(*) FROM apex_feature_requests WHERE status != 'completed'"),
+      mockSafeQuery("SELECT COUNT(*) FROM instinct_feature_requests WHERE status != 'completed'"),
       mockSafeQuery("SELECT COUNT(*) FROM apex_discussions WHERE status = 'open'"),
       mockSafeQuery("SELECT COUNT(*) FROM apex_team_members WHERE is_active = true"),
     ]);

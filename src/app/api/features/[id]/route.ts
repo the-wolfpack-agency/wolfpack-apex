@@ -13,7 +13,7 @@ export async function GET(
 
   const { id } = await params;
   const { rows } = await safeQuery(
-    "SELECT * FROM apex_feature_requests WHERE id = $1",
+    "SELECT * FROM instinct_feature_requests WHERE id = $1",
     [id],
   );
 
