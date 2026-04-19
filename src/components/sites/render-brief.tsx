@@ -16,6 +16,10 @@
 import type { CSSProperties } from "react";
 import type { SiteBrief, BriefSection, SectionType } from "@/lib/sites-schema";
 import { normalizeTheme, themeToCssVars } from "@/lib/site-theme";
+import {
+  resolveThemeTokens,
+  themeTokensToCssVarObject,
+} from "@/lib/site-theme-tokens";
 import { HeroSection } from "./sections/hero";
 import { TextSection } from "./sections/text";
 import { CardsSection } from "./sections/cards";
@@ -99,8 +103,24 @@ export function RenderBrief({ brief, page = 0 }: RenderBriefProps) {
   // sections that look up :root) AND as an inline style on the <main>
   // (for sections that consume the variable via React's style prop). If
   // theme is undefined, both paths collapse to no-ops.
+  //
+  // Path C Phase 1 · Stream P4: we ALSO emit the design-token scales
+  // (spacing / radius / type / motion) from `resolveThemeTokens` so
+  // section renderers can consume `var(--wp-space-md)` etc. without
+  // needing to fall back. The two emitters are merged — legacy color
+  // names stay on `--wp-site-*` so existing CSS selectors don't break.
   const normalized = normalizeTheme(selected ? brief.theme : undefined);
-  const cssVars = themeToCssVars(normalized);
+  const legacyVars = themeToCssVars(normalized);
+  const resolved = resolveThemeTokens(
+    selected && brief.theme && typeof brief.theme === "object"
+      ? (normalized as Parameters<typeof resolveThemeTokens>[0])
+      : undefined,
+  );
+  const tokenVars = themeTokensToCssVarObject(resolved);
+  // Legacy vars win over token vars for the 5 color slots — if a client
+  // set a color but left spacing at defaults, we still emit both; if
+  // spacing has defaults only, the token vars carry them.
+  const cssVars: Record<string, string> = { ...tokenVars, ...legacyVars };
   const rootVarCss = Object.entries(cssVars)
     .map(([k, v]) => `${k}: ${v};`)
     .join(" ");
@@ -130,7 +150,18 @@ export function RenderBrief({ brief, page = 0 }: RenderBriefProps) {
           This page has no sections yet.
         </div>
       ) : (
-        <div className="flex flex-col gap-8 md:gap-12">
+        <div
+          data-testid="render-brief-sections"
+          // Path C · P4: between-section spacing comes from the 2xl spacing
+          // token; designers widen/tighten rhythm per brand.
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--wp-space-2xl, 3rem)",
+            paddingTop: "var(--wp-space-lg, 2rem)",
+            paddingBottom: "var(--wp-space-lg, 2rem)",
+          }}
+        >
           {sections.map((section, idx) => (
             <RenderSection key={`${section.type}-${idx}`} section={section} index={idx} />
           ))}

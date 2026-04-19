@@ -31,7 +31,15 @@ export function CalloutSection({ section }: CalloutSectionProps) {
       data-section-type="callout"
       className="mx-auto w-full max-w-4xl px-4 md:px-6"
     >
-      <aside className="flex flex-col gap-3 rounded-lg border-l-4 border-amber-500 bg-amber-50 p-5 md:p-6">
+      <aside
+        // Path C · P4: radius + padding come from the brand tokens so the
+        // callout matches cards/text across the site.
+        style={{
+          borderRadius: "var(--wp-radius-lg, 0.5rem)",
+          padding: "var(--wp-space-lg, 1.25rem)",
+        }}
+        className="flex flex-col gap-3 border-l-4 border-amber-500 bg-amber-50 md:p-6"
+      >
         {heading ? (
           <h3 className="text-lg font-semibold text-neutral-900">{heading}</h3>
         ) : null}

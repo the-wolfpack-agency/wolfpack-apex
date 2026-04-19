@@ -24,6 +24,21 @@ import {
   getInstinctToken,
 } from "@/lib/client-auth";
 import type { Brief } from "@/components/sites/BriefForm";
+import ViewportToggle, {
+  VIEWPORT_WIDTHS,
+  type Viewport,
+} from "@/components/sites/ViewportToggle";
+import {
+  INSTINCT_EDIT_ORIGIN,
+  applyInlineEdit,
+  encodeBriefPush,
+  isInstinctEditMessage,
+  type InlineEditMessage,
+} from "@/lib/preview-postmessage";
+import type { SiteBrief } from "@/lib/sites-schema";
+import AssetLibraryPicker, {
+  type ClientAssetView,
+} from "@/components/sites/AssetLibraryPicker";
 
 interface SiteProject {
   id: string;
@@ -124,6 +139,109 @@ export function briefsDiffer(a: Brief | null, b: Brief | null): boolean {
   return JSON.stringify(a) !== JSON.stringify(b);
 }
 
+/**
+ * Read the current value of a field from a brief — used to compute
+ * char_delta on inline text edits so the learning loop can see whether
+ * designers are shortening or expanding AI-generated copy. Safe for
+ * malformed briefs: returns "" for any missing path.
+ */
+/**
+ * Pure handler for inline-edit messages arriving from the preview
+ * iframe. Exported so the RTL test can exercise it without mounting
+ * the full edit page (which suspends on `use(params)` in jsdom).
+ *
+ * Returns `null` for messages that should not mutate state (unknown
+ * origin, untrusted source, invalid shape, no-op edit). Otherwise
+ * returns the next draft + the analytics event to fire.
+ *
+ * Security contract:
+ *   - `expectedOrigin` must equal the event's `origin`.
+ *   - `expectedSource` must be the specific `iframeContentWindow` we
+ *     mounted. Anything else is dropped silently.
+ */
+export function handleInlineEditMessage(args: {
+  event: Pick<MessageEvent, "origin" | "source" | "data">;
+  expectedOrigin: string;
+  expectedSource: unknown;
+  currentDraft: SiteBrief | null;
+  siteId: string;
+}): {
+  nextDraft: SiteBrief | null;
+  analytics: {
+    event: "site.inline_text_edited" | "site.inline_cta_edited";
+    metadata: Record<string, unknown>;
+  } | null;
+  hover: { sectionType: string; route: string } | null;
+} | null {
+  const { event, expectedOrigin, expectedSource, currentDraft, siteId } = args;
+  if (event.origin !== expectedOrigin) return null;
+  if (event.source !== expectedSource) return null;
+  if (!isInstinctEditMessage(event.data)) return null;
+  const msg = event.data;
+  if (msg.type === "hover") {
+    const route =
+      currentDraft?.pages?.[msg.pageIndex]?.route ?? "/";
+    return { nextDraft: null, analytics: null, hover: { sectionType: msg.sectionType, route } };
+  }
+  if (msg.type !== "text.edit" && msg.type !== "cta.edit") return null;
+  if (!currentDraft) return null;
+  const nextBrief = applyInlineEdit(currentDraft, msg);
+  if (nextBrief === currentDraft) return null;
+  if (JSON.stringify(nextBrief) === JSON.stringify(currentDraft)) return null;
+
+  if (msg.type === "text.edit") {
+    const oldVal = readFieldValue(currentDraft, msg);
+    const newLen = msg.value.length;
+    const oldLen = typeof oldVal === "string" ? oldVal.length : 0;
+    const sectionType =
+      currentDraft.pages?.[msg.pageIndex]?.sections?.[msg.sectionIndex]?.type ??
+      "unknown";
+    return {
+      nextDraft: nextBrief,
+      analytics: {
+        event: "site.inline_text_edited",
+        metadata: {
+          site_id: siteId,
+          section_type: sectionType,
+          field: msg.field,
+          char_delta: newLen - oldLen,
+        },
+      },
+      hover: null,
+    };
+  }
+  return {
+    nextDraft: nextBrief,
+    analytics: {
+      event: "site.inline_cta_edited",
+      metadata: { site_id: siteId, field: msg.field },
+    },
+    hover: null,
+  };
+}
+
+export function readFieldValue(
+  brief: SiteBrief,
+  msg: Extract<InlineEditMessage, { type: "text.edit" }>,
+): string {
+  const section =
+    brief.pages?.[msg.pageIndex]?.sections?.[msg.sectionIndex];
+  if (!section) return "";
+  if (msg.field === "tagline") return brief.product?.tagline ?? "";
+  if (typeof msg.itemIndex === "number") {
+    const item = section.items?.[msg.itemIndex];
+    if (!item) return "";
+    if (msg.field === "quote") return item.quote ?? "";
+    if (msg.field === "body") return item.body ?? "";
+    if (msg.field === "attribution") return item.authorName ?? "";
+  }
+  if (msg.field === "heading") return section.heading ?? "";
+  if (msg.field === "body") return section.body ?? "";
+  if (msg.field === "quote") return section.body ?? "";
+  if (msg.field === "attribution") return section.attribution ?? "";
+  return "";
+}
+
 function trackClient(eventName: string, metadata: Record<string, unknown>) {
   // POST to /api/analytics via fetchWithRefresh so a 401 rotates the
   // JWT instead of silently dropping the event. Must not throw — a
@@ -162,6 +280,56 @@ export default function SiteEditPage({
   const [error, setError] = useState<string | null>(null);
   const [iframeNonce, setIframeNonce] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  // Transient label shown at the top of the chat pane header — "Hovering:
+  // hero on /" — so designers know which section the cursor is on
+  // without entering inline-edit mode. Cheap UX win per Path C Phase 1.
+  const [hoveredSection, setHoveredSection] = useState<{
+    sectionType: string;
+    route: string;
+  } | null>(null);
+  // Keep a ref to the latest draft so the postMessage handler (which is
+  // registered once) always applies edits to the freshest state. Avoids
+  // stale-closure bugs where a second inline edit reverts the first.
+  const draftRef = useRef<Brief | null>(null);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  // Responsive viewport toggle — Mobile / Tablet / Desktop. Persisted to
+  // the URL as ?viewport=... so refresh + deep-links survive. Default is
+  // desktop per spec. Reading window.location directly (instead of
+  // useSearchParams) keeps this component test-friendly in jsdom and
+  // doesn't pull in extra `<Suspense>` boundaries.
+  const [viewport, setViewportState] = useState<Viewport>("desktop");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const param = new URLSearchParams(window.location.search).get("viewport");
+    if (param === "mobile" || param === "tablet" || param === "desktop") {
+      setViewportState(param);
+    }
+  }, []);
+  function setViewport(next: Viewport) {
+    const prev = viewport;
+    if (prev === next) return;
+    setViewportState(next);
+    // Mirror to URL so refresh / deep-link survives. `replaceState` keeps
+    // history uncluttered — the designer clicking Mobile 20 times should
+    // not pollute browser history with 20 back entries.
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("viewport", next);
+      window.history.replaceState({}, "", url.toString());
+    }
+    // Feed the learning loop: which viewports do designers actually use
+    // per client? The learning view can surface auto-default selections
+    // over time (e.g. "this client's designers spend 70% of edit time in
+    // Mobile — open in Mobile next time").
+    trackClient("site.viewport_changed", {
+      site_id: id,
+      from: prev,
+      to: next,
+    });
+  }
 
   // Auth gate — redirect to login if no token.
   useEffect(() => {
@@ -269,7 +437,77 @@ export default function SiteEditPage({
     } catch {
       /* non-fatal */
     }
-  }, [draft, id]);
+    // Path C / Stream P2 fast-path: push a typed brief.push message so
+    // the inline-edit overlay can re-render without a URL-hash reload.
+    // Payload-capped at 64KB; when exceeded we fall back to the nonce
+    // bump which forces a fresh iframe load.
+    try {
+      const encoded = encodeBriefPush(draft);
+      if (encoded) {
+        iframeRef.current?.contentWindow?.postMessage(
+          JSON.parse(encoded),
+          window.location.origin,
+        );
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }, [draft, id, savedBrief]);
+
+  // Stream P2 inline-edit listener. Designers click any editable text /
+  // CTA inside the preview iframe → the overlay postMessages here →
+  // applyInlineEdit merges the change into `draft`. The draft effect
+  // above then pushes the updated brief back for re-render.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    function onMessage(event: MessageEvent) {
+      // SECURITY: origin + source gate. Only the preview iframe we just
+      // mounted may send inline-edit messages. Silently drop everything
+      // else so extensions / dev tools / third-party iframes can't poke
+      // at our state.
+      if (event.origin !== window.location.origin) return;
+      if (!iframeRef.current) return;
+      if (event.source !== iframeRef.current.contentWindow) return;
+      if (!isInstinctEditMessage(event.data)) return;
+      const msg = event.data;
+      if (msg.type === "hover") {
+        const route = draftRef.current?.pages?.[msg.pageIndex]?.route ?? "/";
+        setHoveredSection({ sectionType: msg.sectionType, route });
+        return;
+      }
+      if (msg.type === "text.edit" || msg.type === "cta.edit") {
+        const current = draftRef.current;
+        if (!current) return;
+        const nextBrief = applyInlineEdit(current as SiteBrief, msg) as Brief;
+        // Only update + fire analytics if the value actually changed.
+        if (JSON.stringify(nextBrief) === JSON.stringify(current)) return;
+        setDraft(nextBrief);
+
+        if (msg.type === "text.edit") {
+          const oldVal = readFieldValue(current as SiteBrief, msg);
+          const newLen = msg.value.length;
+          const oldLen = typeof oldVal === "string" ? oldVal.length : 0;
+          const sectionType =
+            (current as SiteBrief)?.pages?.[msg.pageIndex]?.sections?.[
+              msg.sectionIndex
+            ]?.type ?? "unknown";
+          trackClient("site.inline_text_edited", {
+            site_id: id,
+            section_type: sectionType,
+            field: msg.field,
+            char_delta: newLen - oldLen,
+          });
+        } else {
+          trackClient("site.inline_cta_edited", {
+            site_id: id,
+            field: msg.field,
+          });
+        }
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [id]);
 
   const dirty = useMemo(() => {
     if (!draft || !savedBrief) return false;
@@ -530,6 +768,19 @@ export default function SiteEditPage({
           <h1 style={{ fontSize: 18, fontWeight: 600, margin: "4px 0 0" }}>
             {project.display_name}
           </h1>
+          {hoveredSection ? (
+            <div
+              data-testid="edit-hover-indicator"
+              style={{
+                marginTop: 4,
+                fontSize: 11,
+                opacity: 0.65,
+                color: "var(--wp-accent, #f3b841)",
+              }}
+            >
+              Hovering: {hoveredSection.sectionType} on {hoveredSection.route}
+            </div>
+          ) : null}
           <div style={{ marginTop: 8, display: "flex", gap: 12, fontSize: 12 }}>
             <Link
               href={`/sites/${id}`}
@@ -732,33 +983,142 @@ export default function SiteEditPage({
             {dirty ? "Draft — not yet published." : "In sync with last published deploy."}
           </div>
         </div>
+
+        {/* Asset Library panel (Path C Phase 1, Stream P3). Collapsed
+            by default so it doesn't eat vertical space on the chat pane
+            for designers who don't need it. onPick copies the canonical
+            URL to the clipboard for paste-into-brief; full postMessage
+            swap into the iframe is the follow-up once P2's bridge ships. */}
+        <details
+          data-testid="asset-library-panel"
+          style={{
+            borderTop: "1px solid rgba(255,255,255,0.08)",
+            padding: 16,
+          }}
+        >
+          <summary
+            style={{ cursor: "pointer", fontSize: 13, fontWeight: 600 }}
+            data-testid="asset-library-toggle"
+          >
+            Assets
+          </summary>
+          <div style={{ marginTop: 12 }}>
+            <AssetLibraryPicker
+              clientSlug={project.client_slug}
+              onPick={(asset: ClientAssetView) => {
+                // v1: copy the canonical URL so the designer can paste it
+                // into any image field in the chat prompt. Full inline
+                // image swap hooks into P2's postMessage bridge in a
+                // follow-up commit — intentionally out of scope here.
+                try {
+                  if (typeof navigator !== "undefined" && navigator.clipboard) {
+                    navigator.clipboard.writeText(asset.url).catch(() => {});
+                  }
+                } catch {
+                  /* non-fatal */
+                }
+                trackClient("client_asset_reused", {
+                  client_slug: asset.clientSlug,
+                  asset_id: asset.id,
+                  site_id: id,
+                  kind: asset.assetKind,
+                });
+              }}
+            />
+          </div>
+        </details>
       </section>
 
-      {/* RIGHT — live preview iframe */}
-      <section style={{ position: "relative", minWidth: 0 }} data-testid="edit-preview-pane">
-        <iframe
-          ref={iframeRef}
-          key={iframeNonce /* force re-render when we bump */}
-          src={previewUrl}
-          title="Live preview"
+      {/* RIGHT — live preview iframe, wrapped so we can simulate a
+          device-width responsive preview without leaving the editor. */}
+      <section
+        style={{
+          position: "relative",
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          background: "rgba(0,0,0,0.25)",
+        }}
+        data-testid="edit-preview-pane"
+        data-viewport={viewport}
+      >
+        <header
           style={{
-            width: "100%",
-            height: "100%",
-            border: "none",
-            background: "#fff",
+            padding: "10px 16px",
+            borderBottom: "1px solid rgba(255,255,255,0.08)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
           }}
-          data-testid="edit-preview-iframe"
-          /*
-           * DON'T set `sandbox` here. Chrome warns when an iframe has
-           * BOTH `allow-same-origin` AND `allow-scripts` because the
-           * sandboxed content can script its way out of the sandbox —
-           * which is the classic bypass pattern. The preview page
-           * lives on the same origin (wolfpack-instinct.vercel.app)
-           * and frame-ancestors 'self' already gates who can embed
-           * it, so a sandbox here is defense-theater, not defense-in-
-           * depth.
-           */
-        />
+          data-testid="edit-preview-header"
+        >
+          <div style={{ fontSize: 12, color: "var(--wp-text-dim, #a0a8b4)" }}>
+            Preview · {VIEWPORT_WIDTHS[viewport]}px
+          </div>
+          <ViewportToggle value={viewport} onChange={setViewport} />
+        </header>
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflow: "auto",
+            display: "flex",
+            justifyContent: "center",
+            padding: viewport === "desktop" ? 0 : 16,
+          }}
+          data-testid="edit-preview-canvas"
+        >
+          <div
+            data-testid="edit-preview-frame-wrapper"
+            style={{
+              width: "100%",
+              maxWidth: `${VIEWPORT_WIDTHS[viewport]}px`,
+              // CSS transition so width changes animate. 200ms is fast
+              // enough to feel snappy; slower makes the preview feel laggy.
+              transition: "max-width 200ms ease",
+              height: "100%",
+              // Subtle device-frame outline for mobile/tablet so the
+              // designer visually perceives "this is a phone/tablet sim".
+              // Desktop uses no frame — it's the default rendering.
+              border:
+                viewport === "desktop"
+                  ? "none"
+                  : "1px solid var(--wp-border, rgba(255,255,255,0.12))",
+              borderRadius: viewport === "desktop" ? 0 : 8,
+              overflow: "hidden",
+              background: "#fff",
+              boxShadow:
+                viewport === "desktop" ? "none" : "0 2px 12px rgba(0,0,0,0.25)",
+            }}
+          >
+            <iframe
+              ref={iframeRef}
+              key={iframeNonce /* force re-render when we bump */}
+              src={previewUrl}
+              title="Live preview"
+              style={{
+                width: "100%",
+                height: "100%",
+                border: "none",
+                background: "#fff",
+                display: "block",
+              }}
+              data-testid="edit-preview-iframe"
+              /*
+               * DON'T set `sandbox` here. Chrome warns when an iframe has
+               * BOTH `allow-same-origin` AND `allow-scripts` because the
+               * sandboxed content can script its way out of the sandbox —
+               * which is the classic bypass pattern. The preview page
+               * lives on the same origin (wolfpack-instinct.vercel.app)
+               * and frame-ancestors 'self' already gates who can embed
+               * it, so a sandbox here is defense-theater, not defense-in-
+               * depth.
+               */
+            />
+          </div>
+        </div>
       </section>
     </main>
   );

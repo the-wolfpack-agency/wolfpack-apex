@@ -356,7 +356,54 @@ export type InstinctEventType =
   // Every Playwright reality-check run posts this so the learning loop can
   // track which specs flap, which catch regressions, and which never fail —
   // a signal for trustworthy vs "green but uninformative" test coverage.
-  | "e2e.reality_check_ran";
+  | "e2e.reality_check_ran"
+  // Sites — direct-manipulation (Path C Phase 1)
+  | "site.viewport_changed"
+  // Sites — direct-manipulation (Path C Phase 1, Stream P2)
+  // Designers click any heading/body/CTA label inside the preview iframe,
+  // edit inline, and the brief state updates live. These events feed the
+  // learning loop with signals on:
+  //   - which section types + fields designers touch most (copy-quality gap)
+  //   - inline_text_edited.char_delta — whether designers shorten or
+  //     expand AI-generated copy (model-tuning signal for brief-edit LLM)
+  //   - preview_hovered — which sections designers inspect without editing
+  //     (hover-only = "close enough"; edit = "model was off")
+  | "site.inline_text_edited"
+  | "site.inline_cta_edited"
+  | "site.preview_hovered"
+  // Sites — asset library (Path C Phase 1, Stream P3)
+  // Per-client ASSET LIBRARY — logo / hero photo / product shot uploaded
+  // once per client and reusable across every site. Metadata shape:
+  //   client_asset_uploaded: { client_slug, kind, size_bytes, deduped }
+  //     — `deduped: true` when the sha256 already existed for this client,
+  //       so we bumped use_count instead of inserting a duplicate row.
+  //   client_asset_reused:   { client_slug, asset_id, site_id, kind }
+  //     — fires on recordAssetUsage. Reuse rate is THE key KPI for the
+  //       library's value; the learning loop scores clients by how often
+  //       existing assets get picked instead of re-uploaded.
+  //   client_asset_deleted:  { client_slug, asset_id }
+  | "client_asset_uploaded"
+  | "client_asset_reused"
+  | "client_asset_deleted"
+  // Sites — design tokens (Path C Phase 1, Stream P4)
+  // Designers edit spacing / radius / type-scale / motion / font-stack
+  // tokens via the ThemeEditor. Metadata shape:
+  //   site.design_token_applied:     { site_id, token_group, token_name,
+  //                                    new_value }
+  //     — `token_group` ∈ {"spacing","radius","typeScale","motion","font"}
+  //       `token_name`  is the tier key (e.g. "md", "2xl", "weightBold")
+  //       `new_value`   is the string (or stringified number) the designer
+  //                     entered. For typeScale entries the name is
+  //                     "<tier>.fontSize" or "<tier>.lineHeight".
+  //   site.theme_token_defaults_applied: { site_id }
+  //     — fires exactly once per brief when token scales are first seeded
+  //       from DEFAULT_*, marking the brief as "designer-aware."
+  //
+  // Learning-loop note: diff between edited tokens and defaults is the
+  // signal the brain distills per client. Exemplar extraction surfaces
+  // the most-common override patterns to the next brief generation.
+  | "site.design_token_applied"
+  | "site.theme_token_defaults_applied";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

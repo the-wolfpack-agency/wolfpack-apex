@@ -44,7 +44,12 @@ export function CardsSection({ section }: CardsSectionProps) {
               <div
                 key={idx}
                 data-testid="cards-item"
-                className={`flex flex-col gap-2 rounded-lg border bg-white p-5 shadow-sm ${
+                // Path C · P4: card border-radius + padding from tokens.
+                style={{
+                  borderRadius: "var(--wp-radius-md, 0.5rem)",
+                  padding: "var(--wp-space-lg, 1.25rem)",
+                }}
+                className={`flex flex-col gap-2 border bg-white shadow-sm ${
                   accent
                     ? "border-l-4 border-l-amber-500 border-y-neutral-200 border-r-neutral-200"
                     : "border-neutral-200"

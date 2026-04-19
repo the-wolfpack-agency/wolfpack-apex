@@ -53,7 +53,17 @@ export function HeroSection({ section }: HeroSectionProps) {
     >
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
         {heading ? (
-          <h1 className="text-3xl font-bold leading-tight tracking-tight md:text-5xl">
+          <h1
+            // Path C · P4: design-token-driven heading size/line-height.
+            // Falls back to the Tailwind-inlined default when the CSS var
+            // is not injected (e.g. SSR of a brief with no theme).
+            style={{
+              fontSize: "var(--wp-type-4xl-size, 2.25rem)",
+              lineHeight: "var(--wp-type-4xl-line, 1.1)",
+              fontWeight: "var(--wp-font-weight-bold, 700)",
+            }}
+            className="font-bold leading-tight tracking-tight md:text-5xl"
+          >
             {heading}
           </h1>
         ) : null}

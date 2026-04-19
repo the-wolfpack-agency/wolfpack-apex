@@ -109,13 +109,101 @@ export interface SiteThemeColors {
   fg?: string;
   muted?: string;
 }
+/**
+ * Legacy narrow font shape — kept as an alias for `FontStack` for
+ * back-compat with any caller typed against `SiteThemeFont` before the
+ * design-token expansion (Path C Phase 1 · Stream P4). New callers should
+ * prefer `FontStack` directly. `normalizeFont()` below accepts either.
+ */
 export interface SiteThemeFont {
   family?: string;
   googleFontName?: string;
+  weightRegular?: number;
+  weightMedium?: number;
+  weightBold?: number;
+  bodyFamily?: string;
 }
+
+/**
+ * Typed design-token scales surfaced by the ThemeEditor. Every scale is
+ * fully optional — an un-edited brief keeps its existing behaviour. The
+ * template picks defaults via `resolveThemeTokens()` in site-theme-tokens.ts.
+ * Values are strings (CSS dimensions / durations / easings) because we emit
+ * them verbatim into `--wp-*` custom properties; zero runtime math.
+ */
+export interface SpacingScale {
+  xs?: string;
+  sm?: string;
+  md?: string;
+  lg?: string;
+  xl?: string;
+  "2xl"?: string;
+}
+
+export interface RadiusScale {
+  none?: string;
+  sm?: string;
+  md?: string;
+  lg?: string;
+  full?: string;
+}
+
+export interface TypeScaleEntry {
+  fontSize: string;
+  lineHeight: string;
+}
+
+export interface TypeScale {
+  xs?: TypeScaleEntry;
+  sm?: TypeScaleEntry;
+  base?: TypeScaleEntry;
+  lg?: TypeScaleEntry;
+  xl?: TypeScaleEntry;
+  "2xl"?: TypeScaleEntry;
+  "3xl"?: TypeScaleEntry;
+  "4xl"?: TypeScaleEntry;
+  display?: TypeScaleEntry;
+}
+
+export interface FontStack {
+  family?: string;
+  googleFontName?: string;
+  weightRegular?: number;
+  weightMedium?: number;
+  weightBold?: number;
+  bodyFamily?: string;
+}
+
+export interface MotionScale {
+  fast?: string;
+  normal?: string;
+  slow?: string;
+  ease?: string;
+}
+
 export interface SiteTheme {
   colors?: SiteThemeColors;
-  font?: SiteThemeFont;
+  font?: FontStack;
+  spacing?: SpacingScale;
+  radius?: RadiusScale;
+  typeScale?: TypeScale;
+  motion?: MotionScale;
+}
+
+/**
+ * Accept either the pre-P4 `{ family?: string }` shape or the full
+ * `FontStack` and return a FontStack. Pure, no allocation when the input
+ * already matches. Callers that were written before the design-token
+ * expansion keep working without any change.
+ */
+export function normalizeFont(
+  f: FontStack | { family?: string } | undefined,
+): FontStack {
+  if (!f || typeof f !== "object") return {};
+  // FontStack is a superset of { family?: string } — nothing to do
+  // structurally; return as-is (shallow-cast). We still copy so the caller
+  // can mutate without affecting the input.
+  return { ...(f as FontStack) };
 }
 
 /**
@@ -217,6 +305,178 @@ const SEO_DESCRIPTION_MAX = 170;
 const URL_RE = /^https?:\/\/[^\s<>"']+$/i;
 const FAVICON_SRC_RE = /^(https?:\/\/[^\s<>"']+|\/[^\s<>"']*|data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+)$/i;
 const FAVICON_MONOGRAM_MAX = 2;
+
+// Design tokens (Path C Phase 1 · Stream P4) -----------------------------
+// Font weights accept the nine CSS weight keywords expressed numerically.
+const FONT_WEIGHT_MIN = 100;
+const FONT_WEIGHT_MAX = 900;
+const SPACING_KEYS = ["xs", "sm", "md", "lg", "xl", "2xl"] as const;
+const RADIUS_KEYS = ["none", "sm", "md", "lg", "full"] as const;
+const TYPE_SCALE_KEYS = [
+  "xs",
+  "sm",
+  "base",
+  "lg",
+  "xl",
+  "2xl",
+  "3xl",
+  "4xl",
+  "display",
+] as const;
+const MOTION_KEYS = ["fast", "normal", "slow"] as const;
+// Accept any CSS dimension (px/rem/em/%/ch/vw/vh/vmin/vmax) or "0".
+// We keep the regex intentionally permissive — the goal is to catch
+// obvious garbage ("fast" as a spacing value, a number instead of a
+// string) without becoming a CSS parser. The browser + template are the
+// authoritative validators at render time.
+const CSS_DIMENSION_RE = /^(0|-?\d*\.?\d+(px|rem|em|%|ch|vw|vh|vmin|vmax|pt|pc|in|cm|mm))$/i;
+// line-height can be unitless ("1.4") OR dimensioned.
+const LINE_HEIGHT_RE = /^(0|-?\d*\.?\d+(px|rem|em|%|ch|vw|vh|vmin|vmax|pt|pc|in|cm|mm)?|normal)$/i;
+// CSS times: "150ms" or "0.25s". No bare numbers — CSS requires a unit on
+// non-zero values. "fast" is deliberately rejected so a word never slips
+// into a CSS animation-duration.
+const CSS_TIME_RE = /^(0|-?\d*\.?\d+(ms|s))$/i;
+// cubic-bezier()/steps()/keyword easings. This is a light sanity gate;
+// stricter validation would require a real CSS parser.
+const CSS_EASING_RE =
+  /^(linear|ease|ease-in|ease-out|ease-in-out|step-start|step-end|cubic-bezier\s*\([^)]*\)|steps\s*\([^)]*\))$/i;
+
+function validateSpacing(
+  raw: unknown,
+  errors: string[],
+): void {
+  if (raw === undefined) return;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    errors.push("theme.spacing must be an object");
+    return;
+  }
+  const r = raw as Record<string, unknown>;
+  for (const k of SPACING_KEYS) {
+    const v = r[k];
+    if (v === undefined) continue;
+    if (typeof v !== "string" || !CSS_DIMENSION_RE.test(v.trim())) {
+      errors.push(`theme.spacing.${k} must be a CSS dimension string (e.g. "16px")`);
+    }
+  }
+}
+
+function validateRadius(
+  raw: unknown,
+  errors: string[],
+): void {
+  if (raw === undefined) return;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    errors.push("theme.radius must be an object");
+    return;
+  }
+  const r = raw as Record<string, unknown>;
+  for (const k of RADIUS_KEYS) {
+    const v = r[k];
+    if (v === undefined) continue;
+    if (typeof v !== "string" || !CSS_DIMENSION_RE.test(v.trim())) {
+      errors.push(`theme.radius.${k} must be a CSS dimension string (e.g. "8px", "9999px")`);
+    }
+  }
+}
+
+function validateTypeScale(
+  raw: unknown,
+  errors: string[],
+): void {
+  if (raw === undefined) return;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    errors.push("theme.typeScale must be an object");
+    return;
+  }
+  const r = raw as Record<string, unknown>;
+  for (const k of TYPE_SCALE_KEYS) {
+    const entry = r[k];
+    if (entry === undefined) continue;
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      errors.push(`theme.typeScale.${k} must be an object with fontSize and lineHeight`);
+      continue;
+    }
+    const e = entry as Record<string, unknown>;
+    if (typeof e.fontSize !== "string" || !CSS_DIMENSION_RE.test(String(e.fontSize).trim())) {
+      errors.push(`theme.typeScale.${k}.fontSize must be a CSS dimension string`);
+    }
+    if (typeof e.lineHeight !== "string" || !LINE_HEIGHT_RE.test(String(e.lineHeight).trim())) {
+      errors.push(
+        `theme.typeScale.${k}.lineHeight must be a CSS dimension, unitless ratio, or "normal"`,
+      );
+    }
+  }
+}
+
+function validateMotion(
+  raw: unknown,
+  errors: string[],
+): void {
+  if (raw === undefined) return;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    errors.push("theme.motion must be an object");
+    return;
+  }
+  const r = raw as Record<string, unknown>;
+  for (const k of MOTION_KEYS) {
+    const v = r[k];
+    if (v === undefined) continue;
+    if (typeof v !== "string" || !CSS_TIME_RE.test(v.trim())) {
+      errors.push(`theme.motion.${k} must be a CSS time string (e.g. "150ms", "0.25s")`);
+    }
+  }
+  if (r.ease !== undefined) {
+    if (typeof r.ease !== "string" || !CSS_EASING_RE.test(r.ease.trim())) {
+      errors.push(
+        'theme.motion.ease must be a CSS easing (e.g. "ease-in-out" or "cubic-bezier(...)")',
+      );
+    }
+  }
+}
+
+function validateFontStack(
+  raw: unknown,
+  errors: string[],
+): void {
+  if (raw === undefined) return;
+  if (typeof raw === "string") {
+    // Legacy flat form: `font: "Inter"` — enforce length only.
+    if (raw.length > 100) {
+      errors.push("theme.font must be a string of at most 100 chars");
+    }
+    return;
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    errors.push("theme.font must be an object or string");
+    return;
+  }
+  const f = raw as Record<string, unknown>;
+  if (f.family !== undefined) {
+    if (typeof f.family !== "string" || f.family.length > 100) {
+      errors.push("theme.font.family must be a string of at most 100 chars");
+    }
+  }
+  if (f.googleFontName !== undefined && typeof f.googleFontName !== "string") {
+    errors.push("theme.font.googleFontName must be a string");
+  }
+  if (f.bodyFamily !== undefined) {
+    if (typeof f.bodyFamily !== "string" || f.bodyFamily.length > 100) {
+      errors.push("theme.font.bodyFamily must be a string of at most 100 chars");
+    }
+  }
+  for (const w of ["weightRegular", "weightMedium", "weightBold"] as const) {
+    const v = f[w];
+    if (v === undefined) continue;
+    if (
+      typeof v !== "number" ||
+      !Number.isFinite(v) ||
+      v < FONT_WEIGHT_MIN ||
+      v > FONT_WEIGHT_MAX
+    ) {
+      errors.push(`theme.font.${w} must be a number between ${FONT_WEIGHT_MIN} and ${FONT_WEIGHT_MAX}`);
+    }
+  }
+}
 
 /**
  * Validate a PageSeo blob. Collects errors into `errors[]` with a prefix
@@ -361,25 +621,14 @@ export function validateBrief(brief: unknown): asserts brief is SiteBrief {
           }
         }
       }
-      const nestedFont = t.font;
-      if (nestedFont !== undefined && typeof nestedFont === "object" && nestedFont !== null && !Array.isArray(nestedFont)) {
-        const f = nestedFont as Record<string, unknown>;
-        if (f.family !== undefined) {
-          if (typeof f.family !== "string" || f.family.length > 100) {
-            errors.push("theme.font.family must be a string of at most 100 chars");
-          }
-        }
-        if (f.googleFontName !== undefined && typeof f.googleFontName !== "string") {
-          errors.push("theme.font.googleFontName must be a string");
-        }
-      } else if (typeof nestedFont === "string") {
-        // Legacy flat form: `font: "Inter"` — accept it, just enforce length.
-        if (nestedFont.length > 100) {
-          errors.push("theme.font must be a string of at most 100 chars");
-        }
-      } else if (nestedFont !== undefined) {
-        errors.push("theme.font must be an object or string");
-      }
+      validateFontStack(t.font, errors);
+      // Design-token scales (Path C Phase 1 · Stream P4). Every scale is
+      // optional; unset keys fall through to `DEFAULT_*` constants in
+      // site-theme-tokens.ts at render time.
+      validateSpacing(t.spacing, errors);
+      validateRadius(t.radius, errors);
+      validateTypeScale(t.typeScale, errors);
+      validateMotion(t.motion, errors);
     }
   }
   // Site-level SEO + favicon defaults. All optional.
