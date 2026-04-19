@@ -343,6 +343,43 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "triggerToolRun in src/lib/tools-runner.ts audits via tools.run_triggered",
   },
 
+  // Sites — section comments (Path C Phase 3 · Stream R3). Each write
+  // fires dedicated site.comment_* analytics events which ARE the audit
+  // trail for this feature (comment_posted, comment_replied,
+  // comment_resolved, comment_deleted). The table itself is append-only
+  // modulo soft-delete + state flip, so the row is the compliance
+  // record. Consistent with other "analytics is the audit" sites/*
+  // routes (feature-requests, discussions, knowledge).
+  {
+    route: "src/app/api/public/share/[token]/comments/route.ts",
+    reason: "site.comment_posted / comment_replied fire on every public write; low-sensitivity client feedback UGC",
+  },
+  {
+    route: "src/app/api/sites/[id]/comments/route.ts",
+    reason: "site.comment_posted / comment_replied fire on every authed write; low-sensitivity internal review comments",
+  },
+  {
+    route: "src/app/api/sites/[id]/comments/[commentId]/route.ts",
+    reason: "soft-delete only; site.comment_deleted fires with site_id + comment_id + deleted_by_role — sufficient audit for UGC review comments",
+  },
+  {
+    route: "src/app/api/sites/[id]/comments/[commentId]/resolve/route.ts",
+    reason: "site.comment_resolved fires with site_id + comment_id + resolved_by_role; the KPI event for the feature",
+  },
+
+  // Sites — version history (Path C Phase 3 · Stream R2). The restore
+  // POST already produces a dedicated audit row: it inserts into
+  // apex_site_brief_edits with rejection_reason='restore' and fires
+  // site.version_restored analytics with field_changes. The edit-row
+  // + the analytics event together ARE the compliance record — adding
+  // a second recordAudit() call would duplicate the same facts.
+  // Consistent with the existing "brief-edit audits via the edits
+  // table" allowlist entries directly above.
+  {
+    route: "src/app/api/sites/[id]/versions/route.ts",
+    reason: "restore writes a kind=restore row into apex_site_brief_edits AND fires site.version_restored analytics; the row + event ARE the audit trail for this feature",
+  },
+
   // Central Brain — upload + delete + query routes. Audit happens in
   // src/lib/brain/repo.ts + ingest.ts which fire brain.* analytics events
   // on every state change (upload_started, extraction_*, chunked,

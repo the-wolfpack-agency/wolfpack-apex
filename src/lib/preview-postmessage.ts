@@ -86,6 +86,43 @@ export type InlineEditMessage =
       pageIndex: number;
       fromIndex: number;
       toIndex: number;
+    }
+  | {
+      /**
+       * Path C Phase 3 · Stream R3 — section comments.
+       *
+       * Fired by the preview overlay when an UNAUTH share-link reviewer
+       * clicks a section to leave a comment. The parent (the /share/
+       * [token] page) listens and renders a composer anchored near the
+       * click position. `clientX` / `clientY` are viewport coordinates
+       * in the iframe window — the parent translates them into its own
+       * viewport using the iframe's bounding rect.
+       *
+       * NOT mounted on the designer edit page iframe — the edit page
+       * flow is text.edit / cta.edit / section.reorder. Only the share
+       * review flow emits comment.pin.
+       */
+      origin: typeof INSTINCT_EDIT_ORIGIN;
+      type: "comment.pin";
+      pageIndex: number;
+      sectionIndex: number;
+      clientX: number;
+      clientY: number;
+    }
+  | {
+      /**
+       * Path C Phase 3 · Stream R3 — designer-side comment focus.
+       *
+       * Parent (designer edit page) posts this to the PREVIEW iframe
+       * when the designer clicks a comment in CommentsPane. The preview
+       * scrolls the target section into view + briefly highlights it so
+       * the designer sees which section the comment targets without
+       * having to scroll the iframe manually.
+       */
+      origin: typeof INSTINCT_EDIT_ORIGIN;
+      type: "comment.focus";
+      pageIndex: number;
+      sectionIndex: number;
     };
 
 /**
@@ -148,6 +185,29 @@ export function isInstinctEditMessage(m: unknown): m is InlineEditMessage {
         (obj.toIndex as number) >= 0
       );
     }
+    case "comment.pin": {
+      // Viewport coordinates are finite numbers — Number.isFinite
+      // rejects NaN / Infinity which we'd otherwise forward to the
+      // composer's inline style and blow up React's style serialization.
+      return (
+        Number.isInteger(obj.pageIndex) &&
+        Number.isInteger(obj.sectionIndex) &&
+        (obj.pageIndex as number) >= 0 &&
+        (obj.sectionIndex as number) >= 0 &&
+        typeof obj.clientX === "number" &&
+        typeof obj.clientY === "number" &&
+        Number.isFinite(obj.clientX as number) &&
+        Number.isFinite(obj.clientY as number)
+      );
+    }
+    case "comment.focus": {
+      return (
+        Number.isInteger(obj.pageIndex) &&
+        Number.isInteger(obj.sectionIndex) &&
+        (obj.pageIndex as number) >= 0 &&
+        (obj.sectionIndex as number) >= 0
+      );
+    }
     default:
       return false;
   }
@@ -176,6 +236,9 @@ export function applyInlineEdit(
   if (msg.type === "section.reorder") {
     return applyInlineReorder(brief, msg);
   }
+  // comment.pin / comment.focus are UI-plane messages — they do NOT
+  // mutate the brief. Fall through with the original reference so
+  // applyInlineEdit's contract stays pure-function on the brief.
   if (msg.type !== "text.edit" && msg.type !== "cta.edit") {
     return brief;
   }

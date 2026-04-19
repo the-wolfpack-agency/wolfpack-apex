@@ -415,3 +415,95 @@ describe("encodeBriefPush", () => {
     expect(encodeBriefPush(circ)).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Path C Phase 3 · Stream R3 — comment.pin + comment.focus protocol additions.
+// ---------------------------------------------------------------------------
+describe("comment.pin message type", () => {
+  it("accepts a valid comment.pin with viewport coords", () => {
+    expect(
+      isInstinctEditMessage({
+        origin: INSTINCT_EDIT_ORIGIN,
+        type: "comment.pin",
+        pageIndex: 0,
+        sectionIndex: 1,
+        clientX: 120,
+        clientY: 200,
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects comment.pin with NaN coords (would blow up React style)", () => {
+    expect(
+      isInstinctEditMessage({
+        origin: INSTINCT_EDIT_ORIGIN,
+        type: "comment.pin",
+        pageIndex: 0,
+        sectionIndex: 0,
+        clientX: NaN,
+        clientY: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects comment.pin with negative indices", () => {
+    expect(
+      isInstinctEditMessage({
+        origin: INSTINCT_EDIT_ORIGIN,
+        type: "comment.pin",
+        pageIndex: -1,
+        sectionIndex: 0,
+        clientX: 10,
+        clientY: 10,
+      }),
+    ).toBe(false);
+  });
+
+  it("applyInlineEdit is a NO-OP on comment.pin (does not mutate brief)", () => {
+    const brief = baseBrief();
+    const msg: InlineEditMessage = {
+      origin: INSTINCT_EDIT_ORIGIN,
+      type: "comment.pin",
+      pageIndex: 0,
+      sectionIndex: 0,
+      clientX: 10,
+      clientY: 10,
+    };
+    expect(applyInlineEdit(brief, msg)).toBe(brief);
+  });
+});
+
+describe("comment.focus message type", () => {
+  it("accepts a valid comment.focus", () => {
+    expect(
+      isInstinctEditMessage({
+        origin: INSTINCT_EDIT_ORIGIN,
+        type: "comment.focus",
+        pageIndex: 0,
+        sectionIndex: 1,
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects comment.focus with wrong origin brand", () => {
+    expect(
+      isInstinctEditMessage({
+        origin: "spoof.channel",
+        type: "comment.focus",
+        pageIndex: 0,
+        sectionIndex: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("applyInlineEdit is a NO-OP on comment.focus", () => {
+    const brief = baseBrief();
+    const msg: InlineEditMessage = {
+      origin: INSTINCT_EDIT_ORIGIN,
+      type: "comment.focus",
+      pageIndex: 0,
+      sectionIndex: 0,
+    };
+    expect(applyInlineEdit(brief, msg)).toBe(brief);
+  });
+});

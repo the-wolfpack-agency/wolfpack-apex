@@ -42,6 +42,11 @@ import AssetLibraryPicker, {
 } from "@/components/sites/AssetLibraryPicker";
 import BrandUrlImporter from "@/components/sites/BrandUrlImporter";
 import type { BrandThemeSuggestion } from "@/lib/brand-url-import";
+import FigmaImporter from "@/components/sites/FigmaImporter";
+import type { FigmaBriefSuggestion } from "@/lib/figma-import";
+import VersionHistoryPanel, {
+  type BriefVersionEntryView,
+} from "@/components/sites/VersionHistoryPanel";
 import type { SiteTheme } from "@/lib/site-theme";
 
 interface SiteProject {
@@ -781,14 +786,49 @@ export default function SiteEditPage({
     <main
       style={{
         display: "grid",
-        gridTemplateColumns: "420px 1fr",
+        // Widened from 420 → 520 on 2026-04-19 after the designer reported
+        // the left column feeling cramped with all the nested panels
+        // (Assets, Brand URL, SEO, Domain, Share). clamp so we don't
+        // crush the right-pane preview on narrow laptops.
+        gridTemplateColumns: "clamp(420px, 38vw, 560px) 1fr",
         height: "calc(100vh - 64px)",
         gap: 0,
         color: "var(--wp-fg, #e6e6e6)",
         background: "var(--wp-bg, #0f1115)",
       }}
     >
-      {/* LEFT — chat + publish controls */}
+      {/* LEFT — chat + publish controls. Each <details> panel below gets
+          position:relative + stacking isolation via CSS scoped to this
+          pane so native <select> popups render ABOVE neighbouring panels
+          instead of kissing their borders. */}
+      <style>{`
+        [data-testid="edit-chat-pane"] details {
+          position: relative;
+          isolation: isolate;
+          z-index: 1;
+          margin-bottom: 14px;
+        }
+        [data-testid="edit-chat-pane"] details[open] {
+          z-index: 2;
+        }
+        [data-testid="edit-chat-pane"] details > summary {
+          padding: 8px 10px;
+          margin: -8px -10px;
+          border-radius: 6px;
+        }
+        [data-testid="edit-chat-pane"] select,
+        [data-testid="edit-chat-pane"] input[type="text"],
+        [data-testid="edit-chat-pane"] input[type="search"],
+        [data-testid="edit-chat-pane"] input[type="url"],
+        [data-testid="edit-chat-pane"] input[type="email"] {
+          min-width: 0;
+        }
+        [data-testid="edit-chat-pane"] .panel-row {
+          display: flex;
+          gap: 10px;
+          align-items: stretch;
+        }
+      `}</style>
       <section
         style={{
           borderRight: "1px solid rgba(255,255,255,0.08)",
@@ -1139,6 +1179,107 @@ export default function SiteEditPage({
             />
           </div>
         </details>
+
+        {/* Figma Importer panel (Path C Phase 3, Stream R1). Same shape
+            as the BrandUrlImporter — paste a Figma file URL, Instinct
+            pulls the file's palette + fonts + frame structure via the
+            Figma REST API, and we merge the suggestion non-destructively
+            into the draft. Existing theme fields always win; Figma fills
+            in the gaps and adds any missing pages derived from frames. */}
+        <details
+          data-testid="figma-importer-panel"
+          style={{
+            borderTop: "1px solid rgba(255,255,255,0.08)",
+            padding: 16,
+          }}
+        >
+          <summary
+            style={{ cursor: "pointer", fontSize: 13, fontWeight: 600 }}
+            data-testid="figma-importer-toggle"
+          >
+            Seed from Figma file
+          </summary>
+          <div style={{ marginTop: 12 }}>
+            <FigmaImporter
+              siteId={id}
+              onApply={(suggestion: FigmaBriefSuggestion) => {
+                // Non-destructive merge. Existing theme fields win so a
+                // designer who's already picked colors doesn't get them
+                // stomped on by a fresh import. Pages from Figma are
+                // appended only when their route isn't already present
+                // in the draft.
+                const current = draftRef.current;
+                if (!current) return;
+                const curTheme = (current.theme ?? {}) as SiteTheme;
+                const incomingColors = suggestion.theme?.colors ?? {};
+                const existingColors = curTheme.colors ?? {};
+                // Merge: Figma fills empty slots only.
+                const mergedColors = { ...existingColors };
+                for (const [k, v] of Object.entries(incomingColors)) {
+                  if (v && !(mergedColors as Record<string, string>)[k]) {
+                    (mergedColors as Record<string, string>)[k] = v as string;
+                  }
+                }
+                const mergedFont =
+                  suggestion.theme?.font?.family && !curTheme.font?.family
+                    ? {
+                        ...(curTheme.font ?? {}),
+                        family: suggestion.theme.font.family,
+                      }
+                    : curTheme.font;
+                const existingRoutes = new Set(
+                  (current.pages ?? []).map((p) => p.route),
+                );
+                const extraPages =
+                  suggestion.pages?.filter(
+                    (p) => !existingRoutes.has(p.route),
+                  ) ?? [];
+                const nextBrief: Brief = {
+                  ...current,
+                  theme: {
+                    ...curTheme,
+                    colors: mergedColors,
+                    ...(mergedFont ? { font: mergedFont } : {}),
+                  } as SiteTheme,
+                  pages: [
+                    ...(current.pages ?? []),
+                    // Figma pages arrive as `{ route, title, sections }`
+                    // with `sections: unknown[]` — the Figma library
+                    // keeps that weakened typing because each section's
+                    // validity is governed by BriefSection's own rules.
+                    // We cast here because the merge step is the narrow
+                    // point that makes the composite shape concrete.
+                    ...(extraPages as unknown as Brief["pages"]),
+                  ],
+                };
+                setDraft(nextBrief);
+              }}
+            />
+          </div>
+        </details>
+
+        {/* Version History panel (Path C Phase 3, Stream R2).
+            Unifies apex_site_brief_generations + apex_site_brief_edits
+            into one timeline. Collapsed by default; GET fires on first
+            expand so the page-load path stays cheap. Restore hydrates
+            the edit draft + iframe without a round-trip refetch. */}
+        <VersionHistoryPanel
+          siteId={id}
+          currentBrief={savedBrief as SiteBrief | null}
+          onRestore={(entry: BriefVersionEntryView) => {
+            // Server already wrote apex_site_projects.brief + audit row.
+            // Reflect the restored state locally so the iframe + draft
+            // re-render immediately without a second GET /api/sites/:id.
+            const restoredBrief = entry.brief as Brief;
+            setSavedBrief(restoredBrief);
+            setDraft(restoredBrief);
+            setProject((prev) =>
+              prev ? { ...prev, brief: restoredBrief } : prev,
+            );
+            // Bump the iframe so the preview reloads the updated brief.
+            setIframeNonce((n) => n + 1);
+          }}
+        />
       </section>
 
       {/* RIGHT — live preview iframe, wrapped so we can simulate a

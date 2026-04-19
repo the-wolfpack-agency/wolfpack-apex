@@ -433,7 +433,75 @@ export type InstinctEventType =
   | "brand_import_requested"
   | "brand_import_completed"
   | "brand_import_failed"
-  | "brand_import_applied";
+  | "brand_import_applied"
+  // Sites — Figma import (Path C Phase 3)
+  // Designer pastes a Figma file URL; Instinct calls the Figma REST API
+  // and produces a structured SiteBrief suggestion — theme tokens plus
+  // frame-to-section mapping. Higher fidelity than the HTML scraper
+  // because it reads the designer's actual layers. Metadata:
+  //   figma_import_requested: { file_key }
+  //     — file key only, never the full URL (URLs can contain team /
+  //       node / branch query params that aren't analytics-relevant).
+  //   figma_import_completed: { file_key, frame_count, color_count,
+  //                             font_count, latency_ms }
+  //   figma_import_failed:    { file_key, reason }
+  //     — `reason` ∈ FigmaImportReason except "ok".
+  //   figma_import_applied:   { site_id, file_key, applied_pages_count,
+  //                             applied_theme_fields }
+  //     — KPI for the feature: acceptance rate of the Figma-derived
+  //       suggestion. The exemplar layer distills per-client patterns
+  //       (e.g. "on this client the primary palette always keeps the
+  //       top-2 colors, not all 4") for the next import.
+  | "figma_import_requested"
+  | "figma_import_completed"
+  | "figma_import_failed"
+  | "figma_import_applied"
+  // Sites — version history (Path C Phase 3)
+  // Unified timeline over apex_site_brief_generations +
+  // apex_site_brief_edits. Restore is the strong signal: clients whose
+  // designers roll back often = brittle edit / extraction patterns that
+  // the learning loop flags for tuning.
+  //   site.version_history_viewed: { site_id, version_count }
+  //   site.version_diff_viewed:    { site_id, version_id, field_changes }
+  //     — field count so the learning loop can distill typical diff
+  //       sizes per client
+  //   site.version_restored:       { site_id, from_version_id,
+  //                                  to_version_id, field_changes }
+  //     — restore is a strong signal that something went wrong; the
+  //       learning loop uses this to flag brittle edit patterns
+  | "site.version_history_viewed"
+  | "site.version_diff_viewed"
+  | "site.version_restored"
+  // Sites — section comments (Path C Phase 3 · Stream R3)
+  //
+  // Threaded per-section review comments. Two posting paths: unauth
+  // share-link reviewers (via_share_token=true) and authed designers
+  // (via_share_token=false). Metadata shapes:
+  //
+  //   site.comment_posted:   { site_id, via_share_token, page_index,
+  //                            section_index, section_type, body_length,
+  //                            has_actor_email }
+  //     — body_length is the raw trimmed length; body itself is NEVER
+  //       in analytics (client text may contain business PII).
+  //
+  //   site.comment_resolved: { site_id, comment_id, resolved_by_role }
+  //     — resolve RATE (resolved ÷ posted per site) is THE KPI for this
+  //       feature. A high rate = healthy client feedback loop. A low
+  //       rate = comments are piling up unread, signal for the learning
+  //       loop to flag the client relationship.
+  //
+  //   site.comment_replied:  { site_id, parent_comment_id }
+  //     — thread depth tracking. Deep threads = nuanced feedback; shallow
+  //       threads = quick single-shot comments.
+  //
+  //   site.comment_deleted:  { site_id, comment_id, deleted_by_role }
+  //     — deletes are SOFT (body tombstoned in DB); the row survives so
+  //       the audit trail stays intact. deleted_by_role tells ops
+  //       whether client-side tools are deleting too aggressively.
+  | "site.comment_posted"
+  | "site.comment_resolved"
+  | "site.comment_replied"
+  | "site.comment_deleted";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

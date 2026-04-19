@@ -4,10 +4,15 @@
  * ShareApprovalPanel — client-side submit bar for /share/[token].
  *
  * Split out of page.tsx so the page itself stays a server component
- * (needed for secret access + DB lookup). This component only handles
- * the UI state + the POST to /api/public/approvals/[token]. It renders
+ * (needed for secret access + DB lookup). This component handles the
+ * UI state + the POST to /api/public/approvals/[token]. It renders
  * inline success / error states — we never redirect so the reviewer
  * can still see the preview after clicking Approve.
+ *
+ * Path C Phase 3 · Stream R3 adds a COMMENT COMPOSER. The preview
+ * iframe's overlay emits `comment.pin` postMessages when the reviewer
+ * clicks a section; this component listens + renders a composer that
+ * POSTs to /api/public/share/[token]/comments on submit.
  *
  * Raw fetch is intentional here: this page is UNAUTHENTICATED. There
  * is no JWT, no refresh token, no `fetchWithRefresh` applicable — the
@@ -15,9 +20,21 @@
  * That's why this file is excluded from the `no-raw-api-fetch` guard.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import {
+  INSTINCT_EDIT_ORIGIN,
+  isInstinctEditMessage,
+} from "@/lib/preview-postmessage";
 
 type Status = "idle" | "submitting" | "success" | "error";
+type CommentStatus = "idle" | "submitting" | "posted" | "error";
+
+interface CommentPin {
+  pageIndex: number;
+  sectionIndex: number;
+  clientX: number;
+  clientY: number;
+}
 
 export default function ShareApprovalPanel({ token }: { token: string }) {
   const [comment, setComment] = useState("");
@@ -26,6 +43,88 @@ export default function ShareApprovalPanel({ token }: { token: string }) {
   const [status, setStatus] = useState<Status>("idle");
   const [submittedState, setSubmittedState] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // ---- Section-comment composer state --------------------------------
+  const [pin, setPin] = useState<CommentPin | null>(null);
+  const [sectionCommentBody, setSectionCommentBody] = useState("");
+  const [commentStatus, setCommentStatus] = useState<CommentStatus>("idle");
+  const [commentError, setCommentError] = useState<string | null>(null);
+
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      // Accept same-origin only — the iframe posts from our own domain.
+      if (event.origin !== window.location.origin) return;
+      if (!isInstinctEditMessage(event.data)) return;
+      if (event.data.type !== "comment.pin") return;
+      setPin({
+        pageIndex: event.data.pageIndex,
+        sectionIndex: event.data.sectionIndex,
+        clientX: event.data.clientX,
+        clientY: event.data.clientY,
+      });
+      setSectionCommentBody("");
+      setCommentStatus("idle");
+      setCommentError(null);
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  async function submitSectionComment() {
+    if (!pin) return;
+    if (sectionCommentBody.trim().length === 0) {
+      setCommentStatus("error");
+      setCommentError("Please type a comment before submitting.");
+      return;
+    }
+    setCommentStatus("submitting");
+    setCommentError(null);
+    try {
+      const res = await fetch(
+        `/api/public/share/${encodeURIComponent(token)}/comments`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            pageIndex: pin.pageIndex,
+            sectionIndex: pin.sectionIndex,
+            body: sectionCommentBody.trim(),
+            actorName: actorName.trim() || undefined,
+            actorEmail: actorEmail.trim() || undefined,
+          }),
+        },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setCommentStatus("error");
+        setCommentError(
+          typeof data?.error === "string" ? data.error : "Failed to post comment.",
+        );
+        return;
+      }
+      setCommentStatus("posted");
+      setSectionCommentBody("");
+      // Auto-dismiss after a brief confirmation.
+      setTimeout(() => {
+        setPin(null);
+        setCommentStatus("idle");
+      }, 1500);
+    } catch (err) {
+      setCommentStatus("error");
+      setCommentError((err as Error).message || "Network error.");
+    }
+  }
+
+  function dismissComposer() {
+    setPin(null);
+    setSectionCommentBody("");
+    setCommentStatus("idle");
+    setCommentError(null);
+  }
+
+  // Expose the origin brand so tests can dispatch matching messages.
+  // (unused at runtime — TS dead-import guard needs a reference)
+  void INSTINCT_EDIT_ORIGIN;
 
   async function submit(state: "approved" | "changes_requested") {
     setStatus("submitting");
@@ -84,8 +183,99 @@ export default function ShareApprovalPanel({ token }: { token: string }) {
   }
 
   return (
-    <div
-      data-testid="share-approval-panel"
+    <>
+      {pin && (
+        <div
+          data-testid="share-comment-composer"
+          role="dialog"
+          aria-label="Leave a comment on this section"
+          style={{
+            position: "fixed",
+            // Anchor near the click but keep the composer fully on-screen.
+            // Clamp by viewport so an edge-of-iframe click doesn't render
+            // the dialog off-screen.
+            left: Math.min(
+              Math.max(pin.clientX, 20),
+              (typeof window !== "undefined" ? window.innerWidth : 800) - 340,
+            ),
+            top: Math.min(
+              Math.max(pin.clientY, 20),
+              (typeof window !== "undefined" ? window.innerHeight : 600) - 260,
+            ),
+            width: 320,
+            zIndex: 1000,
+            padding: 16,
+            background: "#1a1a1a",
+            border: "1px solid #444",
+            borderRadius: 6,
+            boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            color: "#f0f0f0",
+          }}
+        >
+          <div style={{ fontSize: 12, color: "#888" }}>
+            Comment on section {pin.sectionIndex + 1} (page {pin.pageIndex + 1})
+          </div>
+          <textarea
+            data-testid="share-comment-composer-body"
+            value={sectionCommentBody}
+            onChange={(e) => setSectionCommentBody(e.target.value)}
+            rows={3}
+            maxLength={5000}
+            placeholder="What would you like the designer to know?"
+            autoFocus
+            style={{ ...inputStyle, resize: "vertical" }}
+          />
+          {commentStatus === "posted" && (
+            <div
+              data-testid="share-comment-composer-success"
+              role="status"
+              aria-live="polite"
+              style={{ fontSize: 12, color: "#8dd4a9" }}
+            >
+              Comment posted.
+            </div>
+          )}
+          {commentStatus === "error" && commentError && (
+            <div
+              data-testid="share-comment-composer-error"
+              role="alert"
+              style={{ fontSize: 12, color: "#ff9e9e" }}
+            >
+              {commentError}
+            </div>
+          )}
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              justifyContent: "flex-end",
+            }}
+          >
+            <button
+              data-testid="share-comment-composer-cancel"
+              type="button"
+              onClick={dismissComposer}
+              style={secondaryBtn}
+            >
+              Cancel
+            </button>
+            <button
+              data-testid="share-comment-composer-submit"
+              type="button"
+              disabled={commentStatus === "submitting"}
+              onClick={submitSectionComment}
+              style={primaryBtn}
+            >
+              {commentStatus === "submitting" ? "Posting…" : "Post comment"}
+            </button>
+          </div>
+        </div>
+      )}
+      <div
+        data-testid="share-approval-panel"
       style={{
         position: "sticky",
         bottom: 0,
@@ -167,7 +357,8 @@ export default function ShareApprovalPanel({ token }: { token: string }) {
           {errorMessage}
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
 
