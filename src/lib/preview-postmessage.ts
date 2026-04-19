@@ -68,6 +68,24 @@ export type InlineEditMessage =
       pageIndex: number;
       sectionIndex: number;
       sectionType: string;
+    }
+  | {
+      /**
+       * Path C Phase 2 · Stream Q1 — drag-to-reorder.
+       *
+       * Designer grabs a section's drag handle in the preview iframe,
+       * drops it onto another section, and the overlay emits this
+       * message. The parent applies `applyInlineReorder` to the draft
+       * brief and pushes the new brief back via "brief.push" so the
+       * iframe re-renders in the new order. Indices are zero-based over
+       * `brief.pages[pageIndex].sections` AFTER the move (standard
+       * splice semantics: remove at fromIndex, insert at toIndex).
+       */
+      origin: typeof INSTINCT_EDIT_ORIGIN;
+      type: "section.reorder";
+      pageIndex: number;
+      fromIndex: number;
+      toIndex: number;
     };
 
 /**
@@ -115,6 +133,21 @@ export function isInstinctEditMessage(m: unknown): m is InlineEditMessage {
         typeof obj.sectionType === "string"
       );
     }
+    case "section.reorder": {
+      // fromIndex === toIndex is allowed at the protocol level — the
+      // edit-page listener short-circuits no-ops (see applyInlineReorder
+      // below) so we don't waste a re-render. Rejecting same-index here
+      // would mean keyboard auto-repeat at list boundaries silently
+      // dropped the message without any feedback.
+      return (
+        Number.isInteger(obj.pageIndex) &&
+        Number.isInteger(obj.fromIndex) &&
+        Number.isInteger(obj.toIndex) &&
+        (obj.pageIndex as number) >= 0 &&
+        (obj.fromIndex as number) >= 0 &&
+        (obj.toIndex as number) >= 0
+      );
+    }
     default:
       return false;
   }
@@ -140,6 +173,9 @@ export function applyInlineEdit(
   brief: SiteBrief,
   msg: InlineEditMessage,
 ): SiteBrief {
+  if (msg.type === "section.reorder") {
+    return applyInlineReorder(brief, msg);
+  }
   if (msg.type !== "text.edit" && msg.type !== "cta.edit") {
     return brief;
   }
@@ -251,6 +287,52 @@ export function encodeBriefPush(brief: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Apply a single `section.reorder` message to a brief, returning a NEW
+ * brief with `pages[pageIndex].sections` reordered.
+ *
+ * Semantics:
+ *   - Out-of-range pageIndex / fromIndex / toIndex → return original
+ *     brief unchanged. Never throws. This is graceful degradation:
+ *     the postMessage layer has already shape-checked the envelope;
+ *     stale indices from a brief that moved forward between drag-
+ *     start and drop simply no-op instead of scrambling the order.
+ *   - Same-index reorder → return original brief unchanged (no-op,
+ *     preserves referential equality so the edit page's listener can
+ *     short-circuit analytics + re-render).
+ *   - NEVER mutates the input brief — we deep-clone before splicing
+ *     so the caller's object graph is safe to hold onto in refs.
+ *   - Splice semantics: remove at fromIndex, insert at toIndex. This
+ *     matches every designer tool's drag-drop mental model (Figma,
+ *     Framer, Notion) so the behavior doesn't surprise users.
+ *
+ * Exported so tests can pin every edge case without mounting a component.
+ */
+export function applyInlineReorder(
+  brief: SiteBrief,
+  msg: Extract<InlineEditMessage, { type: "section.reorder" }>,
+): SiteBrief {
+  const pages = Array.isArray(brief.pages) ? brief.pages : [];
+  if (!Number.isInteger(msg.pageIndex)) return brief;
+  if (msg.pageIndex < 0 || msg.pageIndex >= pages.length) return brief;
+  const page = pages[msg.pageIndex];
+  const sections = Array.isArray(page?.sections) ? page.sections : [];
+  if (!Number.isInteger(msg.fromIndex) || !Number.isInteger(msg.toIndex)) {
+    return brief;
+  }
+  if (msg.fromIndex < 0 || msg.fromIndex >= sections.length) return brief;
+  if (msg.toIndex < 0 || msg.toIndex >= sections.length) return brief;
+  // Same-index → no-op. Return the original reference so callers can
+  // use `nextBrief === brief` as their short-circuit.
+  if (msg.fromIndex === msg.toIndex) return brief;
+
+  const next = cloneBrief(brief);
+  const targetSections = next.pages[msg.pageIndex].sections;
+  const [moved] = targetSections.splice(msg.fromIndex, 1);
+  targetSections.splice(msg.toIndex, 0, moved);
+  return next;
 }
 
 /**

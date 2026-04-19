@@ -31,6 +31,7 @@ import ViewportToggle, {
 import {
   INSTINCT_EDIT_ORIGIN,
   applyInlineEdit,
+  applyInlineReorder,
   encodeBriefPush,
   isInstinctEditMessage,
   type InlineEditMessage,
@@ -39,6 +40,9 @@ import type { SiteBrief } from "@/lib/sites-schema";
 import AssetLibraryPicker, {
   type ClientAssetView,
 } from "@/components/sites/AssetLibraryPicker";
+import BrandUrlImporter from "@/components/sites/BrandUrlImporter";
+import type { BrandThemeSuggestion } from "@/lib/brand-url-import";
+import type { SiteTheme } from "@/lib/site-theme";
 
 interface SiteProject {
   id: string;
@@ -168,7 +172,10 @@ export function handleInlineEditMessage(args: {
 }): {
   nextDraft: SiteBrief | null;
   analytics: {
-    event: "site.inline_text_edited" | "site.inline_cta_edited";
+    event:
+      | "site.inline_text_edited"
+      | "site.inline_cta_edited"
+      | "site.section_reordered";
     metadata: Record<string, unknown>;
   } | null;
   hover: { sectionType: string; route: string } | null;
@@ -182,6 +189,38 @@ export function handleInlineEditMessage(args: {
     const route =
       currentDraft?.pages?.[msg.pageIndex]?.route ?? "/";
     return { nextDraft: null, analytics: null, hover: { sectionType: msg.sectionType, route } };
+  }
+  if (msg.type === "section.reorder") {
+    if (!currentDraft) return null;
+    const nextBrief = applyInlineReorder(currentDraft, msg);
+    // applyInlineReorder returns the original reference on no-op / invalid
+    // indices — a referential compare is enough, no need to stringify.
+    if (nextBrief === currentDraft) return null;
+    // Capture the moved section's TYPE before move so the learning loop
+    // can ask "what section type did the designer promote / demote?"
+    // without needing to diff the before/after briefs itself.
+    const movedSection =
+      currentDraft.pages?.[msg.pageIndex]?.sections?.[msg.fromIndex];
+    const sectionTypeMoved = movedSection?.type ?? "unknown";
+    return {
+      nextDraft: nextBrief,
+      analytics: {
+        event: "site.section_reordered",
+        metadata: {
+          site_id: siteId,
+          page_index: msg.pageIndex,
+          section_type_moved: sectionTypeMoved,
+          from_index: msg.fromIndex,
+          to_index: msg.toIndex,
+          // Signed distance: positive = designer moved the section DOWN
+          // (later in the page flow), negative = UP (promoted toward the
+          // top). The learning loop clusters by sign to surface "this
+          // client always promotes testimonials above pricing" patterns.
+          move_distance: msg.toIndex - msg.fromIndex,
+        },
+      },
+      hover: null,
+    };
   }
   if (msg.type !== "text.edit" && msg.type !== "cta.edit") return null;
   if (!currentDraft) return null;
@@ -473,6 +512,28 @@ export default function SiteEditPage({
       if (msg.type === "hover") {
         const route = draftRef.current?.pages?.[msg.pageIndex]?.route ?? "/";
         setHoveredSection({ sectionType: msg.sectionType, route });
+        return;
+      }
+      if (msg.type === "section.reorder") {
+        const current = draftRef.current;
+        if (!current) return;
+        const nextBrief = applyInlineReorder(current as SiteBrief, msg) as Brief;
+        // applyInlineReorder returns the original ref on no-op / invalid
+        // indices, so this ref-equal check is both the no-op guard AND
+        // the "invalid indices" guard in one line. No render, no analytics.
+        if (nextBrief === (current as SiteBrief)) return;
+        const movedSection = (current as SiteBrief).pages?.[msg.pageIndex]
+          ?.sections?.[msg.fromIndex];
+        const sectionTypeMoved = movedSection?.type ?? "unknown";
+        setDraft(nextBrief);
+        trackClient("site.section_reordered", {
+          site_id: id,
+          page_index: msg.pageIndex,
+          section_type_moved: sectionTypeMoved,
+          from_index: msg.fromIndex,
+          to_index: msg.toIndex,
+          move_distance: msg.toIndex - msg.fromIndex,
+        });
         return;
       }
       if (msg.type === "text.edit" || msg.type === "cta.edit") {
@@ -1023,6 +1084,57 @@ export default function SiteEditPage({
                   site_id: id,
                   kind: asset.assetKind,
                 });
+              }}
+            />
+          </div>
+        </details>
+
+        {/* Brand URL Importer panel (Path C Phase 2, Stream Q2). The
+            designer pastes the client's existing public website and we
+            seed the brief's theme tokens from the scrape. Merges the
+            suggestion into `draft.theme` so the preview updates live
+            and the Publish button becomes available. */}
+        <details
+          data-testid="brand-url-importer-panel"
+          style={{
+            borderTop: "1px solid rgba(255,255,255,0.08)",
+            padding: 16,
+          }}
+        >
+          <summary
+            style={{ cursor: "pointer", fontSize: 13, fontWeight: 600 }}
+            data-testid="brand-url-importer-toggle"
+          >
+            Seed from existing site URL
+          </summary>
+          <div style={{ marginTop: 12 }}>
+            <BrandUrlImporter
+              siteId={id}
+              onApply={(suggestion: BrandThemeSuggestion) => {
+                // Merge scraped theme tokens into the current draft's
+                // theme. We never blow away fields the designer already
+                // edited — the suggestion only fills in what's empty /
+                // undefined. If the designer wants the full overwrite
+                // they can keep editing from here.
+                const current = draftRef.current;
+                if (!current) return;
+                const curTheme = (current.theme ?? {}) as SiteTheme;
+                const mergedColors = {
+                  ...(curTheme.colors ?? {}),
+                  ...(suggestion.colors ?? {}),
+                };
+                const mergedFont = suggestion.font?.family
+                  ? { ...(curTheme.font ?? {}), family: suggestion.font.family }
+                  : curTheme.font;
+                const nextBrief: Brief = {
+                  ...current,
+                  theme: {
+                    ...curTheme,
+                    colors: mergedColors,
+                    ...(mergedFont ? { font: mergedFont } : {}),
+                  } as SiteTheme,
+                };
+                setDraft(nextBrief);
               }}
             />
           </div>

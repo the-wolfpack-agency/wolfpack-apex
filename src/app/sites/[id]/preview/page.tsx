@@ -343,6 +343,29 @@ const EDITABLE_SELECTORS: Record<
 const OVERLAY_HOVER_CLASS = "instinct-inline-editable-hover";
 const OVERLAY_EDITING_CLASS = "instinct-inline-editing";
 
+/* ----------------------------- Reorder overlay ---------------------------- *
+ * Path C Phase 2 · Stream Q1.                                                *
+ *                                                                            *
+ * Designer grabs a section's drag handle → drags it above/below another      *
+ * section → drops → overlay posts a `section.reorder` message to the         *
+ * parent. Parent applies `applyInlineReorder`, pushes the new brief back,    *
+ * iframe re-renders. MIME type + namespaced attributes keep third-party      *
+ * drag sources out of our handler — we only react to our own dataTransfer.   *
+ * -------------------------------------------------------------------------- */
+
+const REORDER_MIME = "application/x-instinct-section";
+const REORDER_HANDLE_CLASS = "instinct-section-reorder-handle";
+const REORDER_DRAGGING_CLASS = "instinct-section-dragging";
+const REORDER_INDICATOR_BEFORE_CLASS = "instinct-section-drop-before";
+const REORDER_INDICATOR_AFTER_CLASS = "instinct-section-drop-after";
+
+interface ReorderDragPayload {
+  origin: typeof INSTINCT_EDIT_ORIGIN;
+  type: "section.reorder";
+  pageIndex: number;
+  fromIndex: number;
+}
+
 function parentIsSameOrigin(): boolean {
   if (typeof window === "undefined") return false;
   if (window.parent === window) return false;
@@ -488,6 +511,234 @@ export function InlineEditOverlay({
     return () => decorated.forEach((d) => d.cleanup());
   }, [brief, pageIndex]);
 
+  // Reorder handles — Path C Phase 2 · Stream Q1. Attach a drag handle to
+  // every `[data-section-type]` element; handle hover-visible; native
+  // HTML5 drag-and-drop fires `section.reorder` to the parent on drop.
+  // Also wires keyboard (ArrowUp/Down) for accessibility when the handle
+  // has focus. Decorators live in the same parentIsSameOrigin gate as
+  // the edit decorators so a deployed/public render never shows handles.
+  useEffect(() => {
+    if (!brief) return;
+    if (typeof document === "undefined") return;
+    if (!parentIsSameOrigin()) return;
+
+    const root = document.querySelector('[data-testid="render-brief"]');
+    if (!root) return;
+
+    const sectionNodes = Array.from(
+      root.querySelectorAll<HTMLElement>("[data-section-type]"),
+    );
+    const sectionCount = sectionNodes.length;
+    const cleanups: Array<() => void> = [];
+
+    sectionNodes.forEach((sectionEl, sectionIndex) => {
+      // Ensure the section is a positioned box so we can float the handle
+      // in its top-right corner with absolute positioning. Stash the
+      // original inline position so we can restore it on cleanup — we
+      // never want to leave layout side-effects behind.
+      const originalPosition = sectionEl.style.position;
+      const computed = window.getComputedStyle(sectionEl);
+      if (computed.position === "static") {
+        sectionEl.style.position = "relative";
+      }
+      sectionEl.dataset.instinctReorderIndex = String(sectionIndex);
+
+      const handle = document.createElement("button");
+      handle.type = "button";
+      handle.className = REORDER_HANDLE_CLASS;
+      handle.setAttribute("data-testid", `section-reorder-handle-${sectionIndex}`);
+      handle.setAttribute(
+        "aria-label",
+        `Reorder section ${sectionIndex + 1}. Press ArrowUp or ArrowDown to move.`,
+      );
+      handle.setAttribute("draggable", "true");
+      handle.tabIndex = 0;
+      // Unicode trigram for heavy horizontal lines ≡ is the universally-
+      // recognized "drag me" affordance. Escape for JSX-free DOM.
+      handle.textContent = "\u2261";
+      sectionEl.appendChild(handle);
+
+      // Also mark the section itself as draggable so grabbing the handle
+      // starts the drag correctly in Firefox (which requires the draggable
+      // attribute on the element that receives the dragstart event).
+      const originalDraggable = sectionEl.getAttribute("draggable");
+
+      const payload: ReorderDragPayload = {
+        origin: INSTINCT_EDIT_ORIGIN,
+        type: "section.reorder",
+        pageIndex,
+        fromIndex: sectionIndex,
+      };
+
+      const onDragStart = (ev: DragEvent) => {
+        if (!ev.dataTransfer) return;
+        try {
+          ev.dataTransfer.setData(REORDER_MIME, JSON.stringify(payload));
+          // Set a plaintext fallback too — some browsers refuse to show
+          // a drag image without text/plain. We prefix with the MIME
+          // brand so any downstream listener that reads text/plain
+          // still knows this is an Instinct drag.
+          ev.dataTransfer.setData(
+            "text/plain",
+            `${REORDER_MIME}:${JSON.stringify(payload)}`,
+          );
+          ev.dataTransfer.effectAllowed = "move";
+        } catch {
+          /* non-fatal — dataTransfer can be null in jsdom */
+        }
+        sectionEl.classList.add(REORDER_DRAGGING_CLASS);
+      };
+
+      const onDragEnd = () => {
+        sectionEl.classList.remove(REORDER_DRAGGING_CLASS);
+        // Clear any residual indicators painted during the drag.
+        sectionNodes.forEach((n) => {
+          n.classList.remove(REORDER_INDICATOR_BEFORE_CLASS);
+          n.classList.remove(REORDER_INDICATOR_AFTER_CLASS);
+        });
+      };
+
+      // dragover must preventDefault to register as a valid drop target.
+      // Visual: paint a 2px guide on the top or bottom edge of the
+      // hovered section depending on whether the cursor is in its upper
+      // or lower half — matches every list-reorder UI on the web.
+      const onDragOver = (ev: DragEvent) => {
+        if (!ev.dataTransfer) return;
+        // Only accept our own drags. Reading getData is forbidden in
+        // dragover per the HTML spec (security), so we sniff the types
+        // list instead. If our MIME isn't present we bail.
+        const types = Array.from(ev.dataTransfer.types ?? []);
+        if (!types.includes(REORDER_MIME) && !types.includes("text/plain")) {
+          return;
+        }
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = "move";
+        const rect = sectionEl.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        const before = ev.clientY < midY;
+        sectionEl.classList.toggle(REORDER_INDICATOR_BEFORE_CLASS, before);
+        sectionEl.classList.toggle(REORDER_INDICATOR_AFTER_CLASS, !before);
+      };
+
+      const onDragLeave = () => {
+        sectionEl.classList.remove(REORDER_INDICATOR_BEFORE_CLASS);
+        sectionEl.classList.remove(REORDER_INDICATOR_AFTER_CLASS);
+      };
+
+      const onDrop = (ev: DragEvent) => {
+        if (!ev.dataTransfer) return;
+        ev.preventDefault();
+        let raw = ev.dataTransfer.getData(REORDER_MIME);
+        if (!raw) {
+          const fallback = ev.dataTransfer.getData("text/plain") ?? "";
+          if (fallback.startsWith(`${REORDER_MIME}:`)) {
+            raw = fallback.slice(REORDER_MIME.length + 1);
+          }
+        }
+        const before = sectionEl.classList.contains(
+          REORDER_INDICATOR_BEFORE_CLASS,
+        );
+        sectionEl.classList.remove(REORDER_INDICATOR_BEFORE_CLASS);
+        sectionEl.classList.remove(REORDER_INDICATOR_AFTER_CLASS);
+        if (!raw) return;
+        let parsed: ReorderDragPayload | null = null;
+        try {
+          parsed = JSON.parse(raw) as ReorderDragPayload;
+        } catch {
+          return;
+        }
+        if (!parsed || parsed.origin !== INSTINCT_EDIT_ORIGIN) return;
+        if (parsed.type !== "section.reorder") return;
+        const from = parsed.fromIndex;
+        // Drop-on-self with no offset → no-op. (The parent also
+        // short-circuits on fromIndex === toIndex via applyInlineReorder.)
+        if (from === sectionIndex) return;
+        // Compute the target index using splice semantics: we remove
+        // `from` first, THEN insert. If we're dropping after a section
+        // that sits below `from`, the removal already shifted every
+        // below-index down by one, so inserting at the raw target
+        // produces the visual "before" position. Handle both paths.
+        let toIndex: number;
+        if (from < sectionIndex) {
+          toIndex = before ? sectionIndex - 1 : sectionIndex;
+        } else {
+          toIndex = before ? sectionIndex : sectionIndex + 1;
+        }
+        if (toIndex < 0) toIndex = 0;
+        if (toIndex >= sectionCount) toIndex = sectionCount - 1;
+        if (toIndex === from) return;
+        postReorderMessage({
+          pageIndex: parsed.pageIndex,
+          fromIndex: from,
+          toIndex,
+        });
+      };
+
+      // Keyboard a11y: ArrowUp/ArrowDown on focused handle moves the
+      // section one slot up/down. Boundary presses silently no-op. No
+      // auto-repeat throttling — the browser already debounces key
+      // repeats to ~30/s and the parent deduplicates same-index moves.
+      const onKeyDown = (ev: KeyboardEvent) => {
+        const current = Number(sectionEl.dataset.instinctReorderIndex ?? "-1");
+        if (!Number.isFinite(current) || current < 0) return;
+        if (ev.key === "ArrowUp") {
+          if (current <= 0) return;
+          ev.preventDefault();
+          postReorderMessage({
+            pageIndex,
+            fromIndex: current,
+            toIndex: current - 1,
+          });
+        } else if (ev.key === "ArrowDown") {
+          if (current >= sectionCount - 1) return;
+          ev.preventDefault();
+          postReorderMessage({
+            pageIndex,
+            fromIndex: current,
+            toIndex: current + 1,
+          });
+        }
+      };
+
+      handle.addEventListener("dragstart", onDragStart);
+      handle.addEventListener("dragend", onDragEnd);
+      handle.addEventListener("keydown", onKeyDown);
+      sectionEl.addEventListener("dragstart", onDragStart);
+      sectionEl.addEventListener("dragend", onDragEnd);
+      sectionEl.addEventListener("dragover", onDragOver);
+      sectionEl.addEventListener("dragleave", onDragLeave);
+      sectionEl.addEventListener("drop", onDrop);
+
+      cleanups.push(() => {
+        handle.removeEventListener("dragstart", onDragStart);
+        handle.removeEventListener("dragend", onDragEnd);
+        handle.removeEventListener("keydown", onKeyDown);
+        sectionEl.removeEventListener("dragstart", onDragStart);
+        sectionEl.removeEventListener("dragend", onDragEnd);
+        sectionEl.removeEventListener("dragover", onDragOver);
+        sectionEl.removeEventListener("dragleave", onDragLeave);
+        sectionEl.removeEventListener("drop", onDrop);
+        handle.remove();
+        if (originalPosition) {
+          sectionEl.style.position = originalPosition;
+        } else {
+          sectionEl.style.removeProperty("position");
+        }
+        if (originalDraggable === null) {
+          sectionEl.removeAttribute("draggable");
+        } else {
+          sectionEl.setAttribute("draggable", originalDraggable);
+        }
+        sectionEl.classList.remove(REORDER_DRAGGING_CLASS);
+        sectionEl.classList.remove(REORDER_INDICATOR_BEFORE_CLASS);
+        sectionEl.classList.remove(REORDER_INDICATOR_AFTER_CLASS);
+        delete sectionEl.dataset.instinctReorderIndex;
+      });
+    });
+
+    return () => cleanups.forEach((fn) => fn());
+  }, [brief, pageIndex]);
+
   // Inline style tag for the dashed outline + cursor. Keeping it scoped
   // by a single className so we don't leak into the section CSS and so
   // we can keep the visual contract unit-testable (check the className,
@@ -504,8 +755,67 @@ export function InlineEditOverlay({
         outline-offset: 2px;
         background: rgba(243, 184, 65, 0.05);
       }
+      /* Reorder handle — Path C Phase 2 · Stream Q1. Hidden until the
+         section is hovered so it doesn't clutter the public/detail view. */
+      [data-section-type] > .${REORDER_HANDLE_CLASS} {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 20;
+        padding: 2px 8px;
+        background: rgba(15, 17, 21, 0.85);
+        color: rgba(243, 184, 65, 0.95);
+        border: 1px solid rgba(243, 184, 65, 0.6);
+        border-radius: 6px;
+        font-size: 16px;
+        line-height: 1;
+        cursor: grab;
+        opacity: 0;
+        transition: opacity 0.12s ease;
+        pointer-events: auto;
+      }
+      [data-section-type]:hover > .${REORDER_HANDLE_CLASS},
+      .${REORDER_HANDLE_CLASS}:focus,
+      .${REORDER_HANDLE_CLASS}:focus-visible {
+        opacity: 1;
+      }
+      .${REORDER_HANDLE_CLASS}:active { cursor: grabbing; }
+      .${REORDER_DRAGGING_CLASS} { opacity: 0.55; }
+      .${REORDER_INDICATOR_BEFORE_CLASS} {
+        box-shadow: 0 -2px 0 0 rgba(80, 140, 220, 0.95);
+      }
+      .${REORDER_INDICATOR_AFTER_CLASS} {
+        box-shadow: 0 2px 0 0 rgba(80, 140, 220, 0.95);
+      }
     `}</style>
   );
+}
+
+/**
+ * Post a `section.reorder` message to the parent window. Extracted so
+ * both the drop handler and the keyboard handler share the exact same
+ * emission path — a regression in one is caught by tests covering the
+ * other. No-ops (same index, missing parent) are silent on purpose.
+ */
+function postReorderMessage(args: {
+  pageIndex: number;
+  fromIndex: number;
+  toIndex: number;
+}) {
+  if (typeof window === "undefined") return;
+  if (args.fromIndex === args.toIndex) return;
+  try {
+    const message: InlineEditMessage = {
+      origin: INSTINCT_EDIT_ORIGIN,
+      type: "section.reorder",
+      pageIndex: args.pageIndex,
+      fromIndex: args.fromIndex,
+      toIndex: args.toIndex,
+    };
+    window.parent.postMessage(message, window.location.origin);
+  } catch {
+    /* non-fatal — parent might not be listening */
+  }
 }
 
 /**

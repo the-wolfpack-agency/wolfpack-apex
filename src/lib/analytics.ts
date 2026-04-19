@@ -403,7 +403,37 @@ export type InstinctEventType =
   // signal the brain distills per client. Exemplar extraction surfaces
   // the most-common override patterns to the next brief generation.
   | "site.design_token_applied"
-  | "site.theme_token_defaults_applied";
+  | "site.theme_token_defaults_applied"
+  // Sites — direct-manipulation (Path C Phase 2)
+  // Designers drag a section's handle inside the preview iframe (or press
+  // ArrowUp/Down on the focused handle) to reorder the brief's sections
+  // live. Metadata shape:
+  //   { site_id, page_index, section_type_moved, from_index, to_index,
+  //     move_distance }
+  // where `move_distance = to_index - from_index` (signed). The learning
+  // loop aggregates per client+section_type_moved to detect patterns like
+  // "designers always move testimonial before pricing" → the exemplar
+  // layer surfaces those so the next brief extraction proposes the common
+  // order automatically (zero-token ordering improvements).
+  | "site.section_reordered"
+  // Sites — brand URL import (Path C Phase 2)
+  // Designer pastes a client's existing website URL; Instinct scrapes
+  // its palette/fonts/logo and maps them into a SiteTheme suggestion
+  // that can seed a new SiteBrief. Metadata:
+  //   brand_import_requested: { url_host }
+  //     — host-only, no full URL (no query PII).
+  //   brand_import_completed: { url_host, palette_size, font_count,
+  //                             latency_ms, had_og_image }
+  //   brand_import_failed:    { url_host, reason }
+  //     — `reason` ∈ BrandImportReason except "ok".
+  //   brand_import_applied:   { site_id, url_host, applied_fields }
+  //     — KPI for the feature: which scraped tokens do designers
+  //       actually accept? `applied_fields` is a joined-string list
+  //       (comma-delimited) of the theme paths the UI wrote back.
+  | "brand_import_requested"
+  | "brand_import_completed"
+  | "brand_import_failed"
+  | "brand_import_applied";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;
