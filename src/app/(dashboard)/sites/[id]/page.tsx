@@ -517,11 +517,16 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
         )}
       </div>
 
-      {/* Live preview — only when there's actually a preview */}
-      {hasPreview && (
-        <section style={{ marginBottom: "2rem" }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", justifyContent: "space-between", alignItems: "center", marginBottom: "0.6rem" }}>
-            <h2 style={{ fontSize: "1.05rem", margin: 0 }}>Preview</h2>
+      {/* Live preview — renders the current SAVED brief through Instinct's
+          internal /sites/[id]/preview route so this iframe ALWAYS matches
+          the /sites/[id]/edit preview iframe exactly. "Open ↗" + "Copy
+          link" still point at the deployed Vercel URL when a deploy has
+          succeeded, so operators can share the true production URL.
+          Before the first deploy, those buttons hide. */}
+      <section style={{ marginBottom: "2rem" }} data-testid="detail-preview-section">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", justifyContent: "space-between", alignItems: "center", marginBottom: "0.6rem" }}>
+          <h2 style={{ fontSize: "1.05rem", margin: 0 }}>Preview</h2>
+          {hasPreview && (
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <a
                 href={project.preview_url!}
@@ -533,13 +538,13 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
               </a>
               <button onClick={copyPreview} style={btnStyle()}>Copy link</button>
             </div>
-          </div>
-          <PreviewIframe
-            src={project.preview_url!}
-            title={`${project.display_name} preview`}
-          />
-        </section>
-      )}
+          )}
+        </div>
+        <PreviewIframe
+          src={`/sites/${id}/preview`}
+          title={`${project.display_name} preview`}
+        />
+      </section>
 
       {/* Step 1 — Brief */}
       <section style={{ marginBottom: "2rem" }}>
