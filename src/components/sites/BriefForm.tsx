@@ -54,7 +54,12 @@ export interface Section {
   cta?: { label: string; href: string };
   backgroundImage?: string;
   items?: Array<Record<string, unknown>>;
-  images?: Array<{ src: string; alt?: string }>;
+  // Accepts both the shaped `{src, alt}` form AND the legacy bare-string
+  // form persisted before the gallery editor enforced objects, matching
+  // BriefSection in sites-schema.ts. The renderer coerces strings at
+  // display time; keeping the type wide here avoids a mismatch when
+  // assigning a SiteBrief from brief-from-image into BriefForm state.
+  images?: Array<string | { src: string; alt?: string }>;
   attribution?: string;
   // Video section — see sites-schema.ts BriefSection for canonical shape.
   videoUrl?: string;
