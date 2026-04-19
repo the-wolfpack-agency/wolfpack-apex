@@ -172,10 +172,16 @@ export default function SettingsPage() {
     const u = decodeUser();
     setUser(u);
 
-    // Load preferences from localStorage
-    const briefing = localStorage.getItem("apex_briefing_enabled");
+    // Load preferences from localStorage. Dual-read for one release to
+    // catch users whose browser missed the boot-time migrator in
+    // client-auth.ts → migrateLegacyApexKeys().
+    const briefing =
+      localStorage.getItem("instinct_briefing_enabled") ??
+      localStorage.getItem("apex_briefing_enabled");
     if (briefing !== null) setBriefingEnabled(briefing === "true");
-    const notifs = localStorage.getItem("apex_email_notifications");
+    const notifs =
+      localStorage.getItem("instinct_email_notifications") ??
+      localStorage.getItem("apex_email_notifications");
     if (notifs !== null) setEmailNotifications(notifs === "true");
 
     // Track page view
@@ -267,13 +273,13 @@ export default function SettingsPage() {
   function toggleBriefing() {
     const next = !briefingEnabled;
     setBriefingEnabled(next);
-    localStorage.setItem("apex_briefing_enabled", String(next));
+    localStorage.setItem("instinct_briefing_enabled", String(next));
   }
 
   function toggleEmailNotifications() {
     const next = !emailNotifications;
     setEmailNotifications(next);
-    localStorage.setItem("apex_email_notifications", String(next));
+    localStorage.setItem("instinct_email_notifications", String(next));
   }
 
   function fmtDate(d: string): string {

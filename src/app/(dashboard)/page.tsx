@@ -68,8 +68,11 @@ export default function DashboardPage() {
   const [setupComplete, setSetupComplete] = useState(true); // default true to avoid flash
 
   useEffect(() => {
-    // Briefing available to all users; respects localStorage preference
-    const disabled = localStorage.getItem("apex_briefing_enabled") === "false";
+    // Briefing available to all users; respects localStorage preference.
+    // Dual-read for one release so pre-migration browsers still honor it.
+    const disabled =
+      (localStorage.getItem("instinct_briefing_enabled") ??
+        localStorage.getItem("apex_briefing_enabled")) === "false";
     if (!disabled) {
       setShowBriefing(true);
     }

@@ -21,6 +21,7 @@ import {
   authHeaders,
   jsonHeaders,
   fetchWithRefresh,
+  getInstinctToken,
 } from "@/lib/client-auth";
 import type { Brief } from "@/components/sites/BriefForm";
 
@@ -165,7 +166,7 @@ export default function SiteEditPage({
   // Auth gate — redirect to login if no token.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const token = localStorage.getItem("instinct_token") ?? localStorage.getItem("apex_token");
+    const token = getInstinctToken();
     if (!token) {
       window.location.href = `/login?next=/sites/${id}/edit`;
     }

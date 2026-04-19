@@ -2,7 +2,12 @@
 
 import { useState, useEffect, ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { getInstinctToken, getInstinctUser, clearInstinctSession } from "@/lib/client-auth";
+import {
+  getInstinctToken,
+  getInstinctUser,
+  clearInstinctSession,
+  migrateLegacyApexKeys,
+} from "@/lib/client-auth";
 import NotificationBell from "@/components/NotificationBell";
 
 interface User {
@@ -49,6 +54,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
+    // One-shot migration: before reading auth state, promote any legacy
+    // `apex_*` localStorage keys to their canonical `instinct_*` names
+    // so users logged in before the 2026-04-19 rename keep their session
+    // and preferences without re-authenticating. Idempotent and safe to
+    // call on every mount — a no-op after the first run.
+    migrateLegacyApexKeys();
+
     const token = getInstinctToken();
     const parsed = getInstinctUser<User>();
     if (!token || !parsed) {

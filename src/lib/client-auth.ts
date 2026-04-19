@@ -21,8 +21,37 @@
  * pre-validated (login, public routes).
  */
 
+/**
+ * Dual-key migration state as of Tier 3 rename (2026-04-19).
+ *
+ * - READ: canonical `instinct_*` first, fallback to legacy `apex_*` so
+ *   existing sessions from before the rename still work.
+ * - WRITE: ONLY `instinct_*`. We no longer mirror writes to `apex_*`.
+ * - MIGRATE: `migrateLegacyApexKeys()` is called once on app boot
+ *   (dashboard layout mount). It copies any legacy `apex_*` key into
+ *   its `instinct_*` equivalent IF the new key is absent, then deletes
+ *   the legacy key. Idempotent; safe to call repeatedly.
+ * - CLEAR: wipes both sets so no stale legacy key survives a logout.
+ *
+ * The fallback-read path stays in place for one release window so edge
+ * browsers that miss the migrator don't get kicked to /login. It can be
+ * removed in a follow-up commit once the migrator has run everywhere.
+ */
+
 const TOKEN_KEYS = ["instinct_token", "apex_token"] as const;
 const USER_KEYS = ["instinct_user", "apex_user"] as const;
+
+/**
+ * Mapping of legacy `apex_*` localStorage keys to their canonical
+ * `instinct_*` names. Used by `migrateLegacyApexKeys()` — see that fn
+ * for the read/write semantics.
+ */
+const LEGACY_KEY_MIGRATIONS: Array<{ legacy: string; canonical: string }> = [
+  { legacy: "apex_token", canonical: "instinct_token" },
+  { legacy: "apex_user", canonical: "instinct_user" },
+  { legacy: "apex_briefing_enabled", canonical: "instinct_briefing_enabled" },
+  { legacy: "apex_email_notifications", canonical: "instinct_email_notifications" },
+];
 
 export function getInstinctToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -48,15 +77,45 @@ export function setInstinctSession(token: string, user: unknown): void {
   if (typeof window === "undefined") return;
   localStorage.setItem("instinct_token", token);
   localStorage.setItem("instinct_user", JSON.stringify(user));
-  // Legacy apex_* mirrors kept until external consumers migrate.
-  localStorage.setItem("apex_token", token);
-  localStorage.setItem("apex_user", JSON.stringify(user));
 }
 
 export function clearInstinctSession(): void {
   if (typeof window === "undefined") return;
   for (const k of TOKEN_KEYS) localStorage.removeItem(k);
   for (const k of USER_KEYS) localStorage.removeItem(k);
+}
+
+/**
+ * One-shot migration: copy legacy `apex_*` localStorage keys into their
+ * canonical `instinct_*` names, then delete the legacy entries.
+ *
+ * Called on app boot (dashboard layout) so existing logged-in users —
+ * who have `apex_token` / `apex_user` / `apex_briefing_enabled` /
+ * `apex_email_notifications` in their browser — keep their session and
+ * preferences across the rename without any user-visible disruption.
+ *
+ * Idempotent: running twice is a no-op (after the first run, the legacy
+ * keys are gone).
+ *
+ * Safe: if the canonical key already has a value, we leave it alone and
+ * just remove the legacy — newer writes always win.
+ *
+ * Returns the count of keys migrated, for analytics/debugging.
+ */
+export function migrateLegacyApexKeys(): number {
+  if (typeof window === "undefined") return 0;
+  let migrated = 0;
+  for (const { legacy, canonical } of LEGACY_KEY_MIGRATIONS) {
+    const legacyValue = localStorage.getItem(legacy);
+    if (legacyValue === null) continue;
+    const canonicalExists = localStorage.getItem(canonical) !== null;
+    if (!canonicalExists) {
+      localStorage.setItem(canonical, legacyValue);
+      migrated++;
+    }
+    localStorage.removeItem(legacy);
+  }
+  return migrated;
 }
 
 export function authHeaders(): HeadersInit {
