@@ -47,7 +47,15 @@ async function main() {
     (await pool.query("SELECT name FROM _migrations")).rows.map((r) => r.name),
   );
 
-  const files = readdirSync(DIR).filter((f) => f.endsWith(".sql")).sort();
+  // Exclude `*.down.sql` rollback scripts — they lexicographically sort
+  // BEFORE their `*.sql` twin and, if included, would execute first and
+  // destroy the schema the up-migration is supposed to build. Rollback
+  // scripts are ops-only tools, run manually by an operator against a
+  // broken DB, never by the deploy runner. See
+  // memory/feedback_migration_safety.md for the full post-mortem.
+  const files = readdirSync(DIR)
+    .filter((f) => f.endsWith(".sql") && !f.endsWith(".down.sql"))
+    .sort();
   let count = 0;
   for (const f of files) {
     if (applied.has(f)) continue;
