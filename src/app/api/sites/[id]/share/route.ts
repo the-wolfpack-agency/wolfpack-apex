@@ -20,6 +20,7 @@ import {
   issueShareToken,
   listShareTokensForSite,
   revokeShareToken,
+  ShareSecretMissingError,
 } from "@/lib/share-tokens";
 import { latestApprovalState } from "@/lib/site-approvals";
 
@@ -107,6 +108,16 @@ export async function POST(
     });
   } catch (err) {
     console.error("[share/POST]", (err as Error).message);
+    if (err instanceof ShareSecretMissingError) {
+      return NextResponse.json(
+        {
+          error:
+            "Share-link signing is not configured. Set INSTINCT_SHARE_SECRET (or APEX_JWT_SECRET as the auto-derived fallback) in the production environment.",
+          reason: "share_secret_missing",
+        },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

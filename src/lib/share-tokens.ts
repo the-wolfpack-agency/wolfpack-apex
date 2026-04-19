@@ -52,11 +52,42 @@ export class ShareSecretMissingError extends Error {
   }
 }
 
-/** Read the signing secret. Fails loud in production; falls back in
- * tests so jest can run without environment munging. */
+/**
+ * Secret-resolution order:
+ *
+ *   1. `INSTINCT_SHARE_SECRET` — explicit, preferred. Operator sets a
+ *      dedicated random string in Vercel env vars. Rotation-friendly.
+ *
+ *   2. `APEX_JWT_SECRET` HKDF-style namespace derivation — production
+ *      fallback so the share-link feature works the instant it ships
+ *      without requiring an ops touch. HMAC(jwt_secret, "instinct-
+ *      share-token-v1") produces a 32-byte secret that is
+ *      deterministic across restarts (so tokens survive redeploys)
+ *      but cryptographically separated from the JWT signing path —
+ *      you cannot use a JWT to forge a share link or vice versa.
+ *      The namespace string includes a version so a future
+ *      INSTINCT_SHARE_SECRET rotation can skip derivation cleanly.
+ *
+ *   3. Test fallback — deterministic string so jest runs without
+ *      environment munging.
+ *
+ *   4. Dev fallback — loud console.warn so `next dev` works locally.
+ *
+ *   5. Production + neither secret set → throw
+ *      ShareSecretMissingError. In practice unreachable because
+ *      APEX_JWT_SECRET is required for auth.
+ */
 export function getShareSecret(): string {
-  const s = process.env.INSTINCT_SHARE_SECRET;
-  if (s && s.length > 0) return s;
+  const explicit = process.env.INSTINCT_SHARE_SECRET;
+  if (explicit && explicit.length > 0) return explicit;
+
+  const jwtSecret = process.env.APEX_JWT_SECRET;
+  if (jwtSecret && jwtSecret.length >= 16) {
+    return createHmac("sha256", jwtSecret)
+      .update("instinct-share-token-v1")
+      .digest("hex");
+  }
+
   if (process.env.NODE_ENV === "test") {
     return "share-test-secret-never-use-in-production";
   }
@@ -64,7 +95,7 @@ export function getShareSecret(): string {
     throw new ShareSecretMissingError();
   }
   console.warn(
-    "[share-tokens] INSTINCT_SHARE_SECRET not set — using dev fallback. Do NOT ship without setting this.",
+    "[share-tokens] INSTINCT_SHARE_SECRET not set and APEX_JWT_SECRET missing — using dev fallback. Do NOT ship without setting one of these.",
   );
   return "share-dev-fallback-do-not-use-in-production";
 }
