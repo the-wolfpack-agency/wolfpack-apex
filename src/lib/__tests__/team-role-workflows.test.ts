@@ -18,8 +18,8 @@
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before imports
 // ---------------------------------------------------------------------------
-const mockQuery = jest.fn();
-const mockSafeQuery = jest.fn();
+const mockQuery: jest.Mock = jest.fn();
+const mockSafeQuery: jest.Mock = jest.fn();
 
 class MockWriteQueryError extends Error {
   readonly code: "no_database" | "db_error" | "unexpected_row_count";
@@ -39,7 +39,7 @@ class MockWriteQueryError extends Error {
 // continues to work against the new strict-write path. The expectRows
 // contract is still enforced — a queued empty-rows result with
 // expectRows: 1 throws, exactly as the production writeQuery would.
-const mockWriteQuery = jest.fn(async (sql: string, params?: any[], opts?: { expectRows?: number }) => {
+const mockWriteQuery: jest.Mock = jest.fn(async (sql: string, params?: any[], opts?: { expectRows?: number }) => {
   const result = await mockSafeQuery(sql, params);
   if (opts?.expectRows !== undefined && result.rows.length !== opts.expectRows) {
     throw new MockWriteQueryError(

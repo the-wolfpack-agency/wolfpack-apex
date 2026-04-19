@@ -1,3 +1,4 @@
+export {};
 /**
  * Mailbox API routes — auth, rate limit, audit on refresh.
  */
@@ -5,26 +6,26 @@
 
 const mockGetUser = jest.fn();
 jest.mock("@/lib/auth", () => ({
-  getUserFromRequest: (...a: unknown[]) => mockGetUser(...a),
+  getUserFromRequest: (...a: any[]) => mockGetUser(...a),
 }));
 
 const mockTrack = jest.fn();
 jest.mock("@/lib/analytics", () => ({
-  trackEvent: (...a: unknown[]) => mockTrack(...a),
+  trackEvent: (...a: any[]) => mockTrack(...a),
 }));
 
 const mockRecordAudit = jest.fn();
-const mockExtractMeta = jest.fn(() => ({}));
+const mockExtractMeta: jest.Mock = jest.fn(() => ({}));
 jest.mock("@/lib/audit-log", () => ({
-  recordAudit: (...a: unknown[]) => mockRecordAudit(...a),
-  extractRequestMetadata: (...a: unknown[]) => mockExtractMeta(...a),
+  recordAudit: (...a: any[]) => mockRecordAudit(...a),
+  extractRequestMetadata: (...a: any[]) => mockExtractMeta(...a),
 }));
 
 const mockGetCachedOOO = jest.fn();
 const mockRefreshOOO = jest.fn();
 jest.mock("@/lib/integrations/microsoft-mailbox", () => ({
-  getCachedOOOState: (...a: unknown[]) => mockGetCachedOOO(...a),
-  refreshOwnOOOState: (...a: unknown[]) => mockRefreshOOO(...a),
+  getCachedOOOState: (...a: any[]) => mockGetCachedOOO(...a),
+  refreshOwnOOOState: (...a: any[]) => mockRefreshOOO(...a),
 }));
 
 function mkReq(path: string, method = "GET", auth?: string): any {

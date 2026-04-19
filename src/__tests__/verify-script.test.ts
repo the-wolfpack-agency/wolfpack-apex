@@ -22,7 +22,7 @@ function shim(dir: string, name: string, body: string) {
   chmodSync(path, 0o755);
 }
 
-function runVerify(stubDir: string, extraEnv: NodeJS.ProcessEnv = {}) {
+function runVerify(stubDir: string, extraEnv: Record<string, string> = {}) {
   return spawnSync("bash", [SCRIPT], {
     env: {
       ...process.env,

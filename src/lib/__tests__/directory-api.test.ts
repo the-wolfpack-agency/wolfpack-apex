@@ -1,3 +1,4 @@
+export {};
 /**
  * Directory API routes — auth, rate limit, audit on sync, analytics.
  */
@@ -5,19 +6,19 @@
 
 const mockGetUser = jest.fn();
 jest.mock("@/lib/auth", () => ({
-  getUserFromRequest: (...a: unknown[]) => mockGetUser(...a),
+  getUserFromRequest: (...a: any[]) => mockGetUser(...a),
 }));
 
 const mockTrack = jest.fn();
 jest.mock("@/lib/analytics", () => ({
-  trackEvent: (...a: unknown[]) => mockTrack(...a),
+  trackEvent: (...a: any[]) => mockTrack(...a),
 }));
 
 const mockRecordAudit = jest.fn();
-const mockExtractMeta = jest.fn(() => ({}));
+const mockExtractMeta: jest.Mock = jest.fn(() => ({}));
 jest.mock("@/lib/audit-log", () => ({
-  recordAudit: (...a: unknown[]) => mockRecordAudit(...a),
-  extractRequestMetadata: (...a: unknown[]) => mockExtractMeta(...a),
+  recordAudit: (...a: any[]) => mockRecordAudit(...a),
+  extractRequestMetadata: (...a: any[]) => mockExtractMeta(...a),
 }));
 
 const mockListUsers = jest.fn();
@@ -36,11 +37,11 @@ jest.mock("@/lib/integrations/microsoft-directory", () => {
     }
   }
   return {
-    listUsers: (...a: unknown[]) => mockListUsers(...a),
-    getUser: (...a: unknown[]) => mockGetUserDir(...a),
-    getManager: (...a: unknown[]) => mockGetManager(...a),
-    getDirectReports: (...a: unknown[]) => mockGetDirectReports(...a),
-    syncDirectory: (...a: unknown[]) => mockSyncDirectory(...a),
+    listUsers: (...a: any[]) => mockListUsers(...a),
+    getUser: (...a: any[]) => mockGetUserDir(...a),
+    getManager: (...a: any[]) => mockGetManager(...a),
+    getDirectReports: (...a: any[]) => mockGetDirectReports(...a),
+    syncDirectory: (...a: any[]) => mockSyncDirectory(...a),
     DirectoryError,
     asScopeMissing: (err: unknown, scope: string) =>
       err instanceof DirectoryError && err.status === 403
@@ -51,7 +52,7 @@ jest.mock("@/lib/integrations/microsoft-directory", () => {
 
 const mockGetCachedOOO = jest.fn();
 jest.mock("@/lib/integrations/microsoft-mailbox", () => ({
-  getCachedOOOState: (...a: unknown[]) => mockGetCachedOOO(...a),
+  getCachedOOOState: (...a: any[]) => mockGetCachedOOO(...a),
 }));
 
 function mkReq(path: string, method = "GET", auth?: string): any {

@@ -146,7 +146,7 @@ describe("POST /api/online-meetings", () => {
 describe("GET /api/online-meetings/[id]", () => {
   it("404s on missing meeting", async () => {
     mockGetMeetingOMA.mockResolvedValueOnce(null);
-    const res = await meetingGET(mkReq("Bearer x"), { params: { id: "m-1" } });
+    const res = await meetingGET(mkReq("Bearer x"), { params: Promise.resolve({ id: "m-1" }) });
     expect(res.status).toBe(404);
   });
 
@@ -156,7 +156,7 @@ describe("GET /api/online-meetings/[id]", () => {
       msMeetingId: "m-1",
       subject: "Kickoff",
     });
-    const res = await meetingGET(mkReq("Bearer x"), { params: { id: "m-1" } });
+    const res = await meetingGET(mkReq("Bearer x"), { params: Promise.resolve({ id: "m-1" }) });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.meeting.msMeetingId).toBe("m-1");
@@ -171,7 +171,7 @@ describe("PATCH /api/online-meetings/[id]", () => {
   it("401s without auth", async () => {
     mockGetUserOMA.mockReturnValueOnce(null);
     const res = await meetingPATCH(mkReq(undefined, { subject: "x" }), {
-      params: { id: "m-1" },
+      params: Promise.resolve({ id: "m-1" }),
     });
     expect(res.status).toBe(401);
   });
@@ -187,7 +187,7 @@ describe("PATCH /api/online-meetings/[id]", () => {
         startAt: "2026-04-01T10:00:00Z",
         gibberish: 123,
       }),
-      { params: { id: "m-1" } },
+      { params: Promise.resolve({ id: "m-1" }) },
     );
     const patchArg = mockUpdateMeetingOMA.mock.calls[0][2] as any;
     expect(patchArg).toEqual({
@@ -205,7 +205,7 @@ describe("PATCH /api/online-meetings/[id]", () => {
     });
     const res = await meetingPATCH(
       mkReq("Bearer x", { subject: "x" }),
-      { params: { id: "m-1" } },
+      { params: Promise.resolve({ id: "m-1" }) },
     );
     expect(res.status).toBe(502);
   });

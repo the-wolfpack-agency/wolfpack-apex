@@ -212,7 +212,9 @@ function jsonReq(url: string, method: string, body: unknown): NextRequest {
   if (body !== null && method !== "GET" && method !== "HEAD") {
     init.body = JSON.stringify(body);
   }
-  return new NextRequest(url, init);
+  // Cast because Next.js's NextRequest RequestInit differs subtly from
+  // the global DOM RequestInit on `signal` nullability.
+  return new NextRequest(url, init as ConstructorParameters<typeof NextRequest>[1]);
 }
 
 async function multipartReq(url: string, parts: Array<{ name: string; value: string | Blob; filename?: string }>) {

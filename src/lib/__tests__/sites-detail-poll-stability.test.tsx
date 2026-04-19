@@ -147,7 +147,7 @@ describe("Detail page poll stability — no flicker to Loading… under polls", 
     // but the user's local brief is different from the last server
     // version they saw. Poll must not overwrite local.
     let version = 0;
-    const fetch = jest.fn(async () => {
+    const fetch = jest.fn(async (_fromPoll?: boolean) => {
       version += 1;
       return makeProject("deploying", version === 1 ? "Server A" : "Server B");
     });

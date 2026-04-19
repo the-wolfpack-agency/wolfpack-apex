@@ -67,7 +67,7 @@ describe("/api/sites/[id]/assets", () => {
   it("401 without auth", async () => {
     mockGetUser.mockReturnValue(null);
     const req = await multipartReq("http://t/x", [
-      { name: "file", value: new Blob([pngBytes()], { type: "image/png" }), filename: "a.png" },
+      { name: "file", value: new Blob([pngBytes() as BlobPart], { type: "image/png" }), filename: "a.png" },
     ]);
     const res = await assetsPOST(req, { params: Promise.resolve({ id: "site_1" }) });
     expect(res.status).toBe(401);
@@ -77,7 +77,7 @@ describe("/api/sites/[id]/assets", () => {
     mockGetUser.mockReturnValue({ id: "u", role: "sales" });
     mockGetProject.mockResolvedValueOnce(null);
     const req = await multipartReq("http://t/x", [
-      { name: "file", value: new Blob([pngBytes()], { type: "image/png" }), filename: "a.png" },
+      { name: "file", value: new Blob([pngBytes() as BlobPart], { type: "image/png" }), filename: "a.png" },
     ]);
     const res = await assetsPOST(req, { params: Promise.resolve({ id: "missing" }) });
     expect(res.status).toBe(404);
@@ -99,7 +99,7 @@ describe("/api/sites/[id]/assets", () => {
     mockPutFile.mockResolvedValueOnce(undefined);
     mockRecordAsset.mockResolvedValueOnce(undefined);
     const req = await multipartReq("http://t/x", [
-      { name: "file", value: new Blob([pngBytes()], { type: "image/png" }), filename: "Hero Photo!.png" },
+      { name: "file", value: new Blob([pngBytes() as BlobPart], { type: "image/png" }), filename: "Hero Photo!.png" },
     ]);
     const res = await assetsPOST(req, { params: Promise.resolve({ id: "site_1" }) });
     const data = await res.json();
@@ -120,7 +120,7 @@ describe("/api/sites/[id]/assets", () => {
     // Silence the console.error in the route
     const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
     const req = await multipartReq("http://t/x", [
-      { name: "file", value: new Blob([pngBytes()], { type: "image/png" }), filename: "a.png" },
+      { name: "file", value: new Blob([pngBytes() as BlobPart], { type: "image/png" }), filename: "a.png" },
     ]);
     const res = await assetsPOST(req, { params: Promise.resolve({ id: "site_1" }) });
     expect(res.status).toBe(200);

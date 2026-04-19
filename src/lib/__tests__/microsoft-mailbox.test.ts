@@ -1,3 +1,4 @@
+export {};
 /**
  * microsoft-mailbox.ts — mailbox settings, auto-reply, OOO refresh/persist.
  */

@@ -110,27 +110,27 @@ describe("JWT Secret Hardening", () => {
   });
 
   it("throws in production when no secret is set", () => {
-    process.env.NODE_ENV = "production";
+    (process.env as Record<string, string>).NODE_ENV = "production";
     const { getJwtSecret } = requireAuth();
     expect(() => getJwtSecret()).toThrow("must be set in production");
   });
 
   it("throws in production when secret is too short", () => {
-    process.env.NODE_ENV = "production";
+    (process.env as Record<string, string>).NODE_ENV = "production";
     process.env.INSTINCT_JWT_SECRET = "short";
     const { getJwtSecret } = requireAuth();
     expect(() => getJwtSecret()).toThrow("at least 32 characters");
   });
 
   it("returns the secret in production when valid", () => {
-    process.env.NODE_ENV = "production";
+    (process.env as Record<string, string>).NODE_ENV = "production";
     process.env.INSTINCT_JWT_SECRET = "a".repeat(32);
     const { getJwtSecret } = requireAuth();
     expect(getJwtSecret()).toBe("a".repeat(32));
   });
 
   it("uses fallback in development", () => {
-    process.env.NODE_ENV = "development";
+    (process.env as Record<string, string>).NODE_ENV = "development";
     const { getJwtSecret } = requireAuth();
     expect(getJwtSecret()).toBe("instinct-dev-secret-do-not-use-in-production");
   });

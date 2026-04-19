@@ -112,7 +112,7 @@ describe("GET /api/teams/teams/[id]/channels", () => {
   it("404s when team not cached", async () => {
     mockGetCachedTeamByIdTC.mockResolvedValueOnce(null);
     const res = await channelsGET(mkReq("Bearer x"), {
-      params: { id: "t-loc-1" },
+      params: Promise.resolve({ id: "t-loc-1" }),
     });
     expect(res.status).toBe(404);
   });
@@ -124,7 +124,7 @@ describe("GET /api/teams/teams/[id]/channels", () => {
     });
     mockListCachedChannelsTC.mockResolvedValueOnce([{ id: "c-1" }]);
     const res = await channelsGET(mkReq("Bearer x"), {
-      params: { id: "t-loc-1" },
+      params: Promise.resolve({ id: "t-loc-1" }),
     });
     expect(res.status).toBe(200);
     const json = await res.json();
@@ -146,7 +146,7 @@ describe("GET messages route", () => {
     });
     const res = await messagesGET(
       mkReq("Bearer x", undefined, "?search=kickoff&since=2026-04-01&mentioned=me&limit=25"),
-      { params: { id: "t-1", channelId: "c-1" } },
+      { params: Promise.resolve({ id: "t-1", channelId: "c-1" }) },
     );
     expect(res.status).toBe(200);
     expect(mockListCachedChannelMessagesTC).toHaveBeenCalledWith(
@@ -165,7 +165,7 @@ describe("GET messages route", () => {
     mockGetCachedTeamByIdTC.mockResolvedValueOnce({ id: "t-1" });
     mockGetCachedChannelByIdTC.mockResolvedValueOnce({ id: "c-1", teamId: "t-other" });
     const res = await messagesGET(mkReq("Bearer x"), {
-      params: { id: "t-1", channelId: "c-1" },
+      params: Promise.resolve({ id: "t-1", channelId: "c-1" }),
     });
     expect(res.status).toBe(404);
   });
@@ -178,7 +178,7 @@ describe("GET messages route", () => {
 describe("POST replies route — 501", () => {
   it("always returns 501 scope_not_granted and fires capability_denied", async () => {
     const res = await repliesPOST(mkReq("Bearer x"), {
-      params: { id: "t-1", channelId: "c-1", messageId: "m-1" },
+      params: Promise.resolve({ id: "t-1", channelId: "c-1", messageId: "m-1" }),
     });
     expect(res.status).toBe(501);
     const body = await res.json();

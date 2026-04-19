@@ -155,7 +155,7 @@ describe("reapStuckDeploys (via getSiteProject)", () => {
     // Make the UPDATE throw once.
     const dbMod = await import("@/lib/db");
     const original = dbMod.safeQuery as unknown as jest.Mock;
-    original.mockImplementationOnce(async (sql: string) => {
+    (original.mockImplementationOnce as (fn: (sql: string) => Promise<{rows: unknown[]; fromCache: boolean}>) => unknown)(async (sql: string) => {
       if (sql.includes("UPDATE apex_site_deploys")) {
         throw new Error("simulated db blip");
       }

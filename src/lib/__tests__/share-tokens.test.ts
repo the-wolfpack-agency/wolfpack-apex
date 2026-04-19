@@ -41,7 +41,7 @@ const TEST_SECRET = "share-test-secret-never-use-in-production";
 
 beforeEach(() => {
   jest.clearAllMocks();
-  process.env.NODE_ENV = "test";
+  (process.env as Record<string, string>).NODE_ENV = "test";
 });
 
 describe("signShareToken + verifyShareToken", () => {
@@ -258,7 +258,7 @@ describe("listShareTokensForSite", () => {
 describe("getShareSecret", () => {
   afterEach(() => {
     delete process.env.INSTINCT_SHARE_SECRET;
-    process.env.NODE_ENV = "test";
+    (process.env as Record<string, string>).NODE_ENV = "test";
   });
 
   it("returns the env value when set", () => {
@@ -267,7 +267,7 @@ describe("getShareSecret", () => {
   });
 
   it("falls back to a deterministic test secret in test env", () => {
-    process.env.NODE_ENV = "test";
+    (process.env as Record<string, string>).NODE_ENV = "test";
     expect(getShareSecret()).toBe(TEST_SECRET);
   });
 });

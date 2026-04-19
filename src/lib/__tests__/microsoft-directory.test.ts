@@ -1,3 +1,4 @@
+export {};
 /**
  * microsoft-directory.ts — listUsers, getUser, getManager, getDirectReports,
  * syncDirectory (delta token roundtrip + 403 scope_missing).

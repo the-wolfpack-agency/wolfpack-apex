@@ -27,10 +27,10 @@ jest.mock("@/lib/sites", () => ({
 }));
 
 const mockPutFile = jest.fn();
-const mockDefaultClient = jest.fn(() => ({ token: "gh_test_token", fetch: jest.fn() }));
+const mockDefaultClient: jest.Mock = jest.fn(() => ({ token: "gh_test_token", fetch: jest.fn() }));
 jest.mock("@/lib/github-client", () => ({
-  putFile: (...args: unknown[]) => mockPutFile(...args),
-  defaultGithubClient: (...args: unknown[]) => mockDefaultClient(...args),
+  putFile: (...args: any[]) => mockPutFile(...args),
+  defaultGithubClient: (...args: any[]) => mockDefaultClient(...args),
 }));
 
 const mockTrack = jest.fn();
@@ -93,7 +93,7 @@ function makeReq(
       });
       fd.append(p.name, file);
     } else {
-      const blob = new Blob([p.value], { type: p.type ?? "application/octet-stream" });
+      const blob = new Blob([p.value as BlobPart], { type: p.type ?? "application/octet-stream" });
       fd.append(p.name, blob, p.filename ?? "unnamed.bin");
     }
   }

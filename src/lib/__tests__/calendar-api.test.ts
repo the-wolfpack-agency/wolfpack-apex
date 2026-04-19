@@ -114,7 +114,7 @@ describe("PATCH /api/calendar/events/[id]", () => {
     mockUpdate.mockResolvedValueOnce({ ok: true, value: { id: "ev-2" } });
     const res = await eventPATCH(
       mkReq({ auth: "Bearer x", body: { subject: "new", location: "new room" }, method: "PATCH", url: "http://test/api/calendar/events/ev-2" }),
-      { params: { id: "ev-2" } },
+      { params: Promise.resolve({ id: "ev-2" }) },
     );
     expect(res.status).toBe(200);
     const patchArg = mockUpdate.mock.calls[0][2];
@@ -123,7 +123,7 @@ describe("PATCH /api/calendar/events/[id]", () => {
 
   it("401 without auth", async () => {
     mockGetUser.mockReturnValueOnce(null);
-    const res = await eventPATCH(mkReq({ method: "PATCH", body: {} }), { params: { id: "ev" } });
+    const res = await eventPATCH(mkReq({ method: "PATCH", body: {} }), { params: Promise.resolve({ id: "ev" }) });
     expect(res.status).toBe(401);
   });
 });
@@ -136,7 +136,7 @@ describe("DELETE /api/calendar/events/[id]", () => {
   it("400 without ?confirm=true", async () => {
     const res = await eventDELETE(
       mkReq({ auth: "Bearer x", method: "DELETE", url: "http://test/api/calendar/events/ev-1" }),
-      { params: { id: "ev-1" } },
+      { params: Promise.resolve({ id: "ev-1" }) },
     );
     expect(res.status).toBe(400);
     const data = await res.json();
@@ -148,7 +148,7 @@ describe("DELETE /api/calendar/events/[id]", () => {
     mockDelete.mockResolvedValueOnce({ ok: true, value: undefined });
     const res = await eventDELETE(
       mkReq({ auth: "Bearer x", method: "DELETE", url: "http://test/api/calendar/events/ev-1?confirm=true" }),
-      { params: { id: "ev-1" } },
+      { params: Promise.resolve({ id: "ev-1" }) },
     );
     expect(res.status).toBe(200);
     expect(mockDelete).toHaveBeenCalledWith("u1", "ev-1", "cto");
