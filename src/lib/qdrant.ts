@@ -1,5 +1,5 @@
 /**
- * Qdrant Client — Vector store for Apex knowledge embeddings.
+ * Qdrant Client — Vector store for Instinct knowledge embeddings.
  *
  * Triple-write secondary store. Stores question+answer as vector points
  * for semantic similarity search. Uses pseudo-embeddings (4-dim zero vector)

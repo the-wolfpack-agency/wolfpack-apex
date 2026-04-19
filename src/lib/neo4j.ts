@@ -1,5 +1,5 @@
 /**
- * Neo4j Client — Team knowledge graph for Wolfpack Apex.
+ * Neo4j Client — Team knowledge graph for Wolfpack Instinct.
  *
  * Triple-write secondary store. Builds a graph of team interactions:
  *   (:TeamMember)-[:ASKED|:ANSWERED|:RATED]->(:Question)

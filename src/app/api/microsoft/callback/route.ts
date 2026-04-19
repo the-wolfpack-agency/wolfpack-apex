@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // Recover the apex user from the signed state parameter. We do NOT
+  // Recover the instinct user from the signed state parameter. We do NOT
   // trust the session cookie alone — cross-site OAuth redirects often
   // drop SameSite cookies. The signed state is the authoritative source.
   // If state is missing, forged, or doesn't match the (optional) session

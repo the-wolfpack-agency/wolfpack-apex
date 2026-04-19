@@ -164,8 +164,8 @@ export async function fetchPlaudTranscript(fileId: string): Promise<PlaudTranscr
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve the apex team member who "owns" this meeting:
- *   1. If Plaud's payload includes an owner email that matches an apex
+ * Resolve the Instinct team member who "owns" this meeting:
+ *   1. If Plaud's payload includes an owner email that matches an Instinct
  *      team member, use that member.
  *   2. Otherwise, fall back to whoever connected the org-level Plaud
  *      account (apex_plaud_connections.connected_by).

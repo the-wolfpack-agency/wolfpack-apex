@@ -1,4 +1,4 @@
-# Wolfpack Apex - Infrastructure & Cost Report
+# Wolfpack Instinct - Infrastructure & Cost Report
 
 **Prepared for:** Hoxsie, CEO - Wolfpack Agency
 **Prepared by:** Nick Homyk, CTO
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-Wolfpack Apex is our team intelligence platform providing AI-powered assistance, knowledge management, reporting, analytics, and internal collaboration for the entire Wolfpack Agency team. This report breaks down every cost required to run Apex in production.
+Wolfpack Instinct is our team intelligence platform providing AI-powered assistance, knowledge management, reporting, analytics, and internal collaboration for the entire Wolfpack Agency team. This report breaks down every cost required to run Instinct in production.
 
 **Bottom line: $125-135/month ($1,500-1,620/year) to run the entire platform for all 5 team members.**
 
@@ -36,7 +36,7 @@ Every team member (Hoxsie, Max, Jorge, Meghan, Nick) gets access to:
 
 | Service | What It Does | Plan | Monthly Cost |
 |---------|-------------|------|-------------|
-| Claude Max | Nick's development tool (IDE, Claude Code, building Apex) | Max 5x (Personal) | $100.00 |
+| Claude Max | Nick's development tool (IDE, Claude Code, building Instinct) | Max 5x (Personal) | $100.00 |
 | Claude API | Powers the Wolfpack Assistant for all 5 team members | Pay-as-you-go | $5.00 - $15.00 |
 
 **AI Subtotal: $105.00 - $115.00/month**
@@ -47,11 +47,11 @@ The Claude API cost scales with usage. At current estimates (each team member as
 
 | Service | What It Does | Plan | Monthly Cost |
 |---------|-------------|------|-------------|
-| Vercel | Hosts the Apex web application (wolfpack-apex.vercel.app) | Pro (1 seat) | $20.00 |
+| Vercel | Hosts the Instinct web application (wolfpack-apex.vercel.app) | Pro (1 seat) | $20.00 |
 
 **Hosting Subtotal: $20.00/month**
 
-All team members access Apex through the browser. Only the builder (Nick) needs a paid Vercel seat. Dashboard viewers are free.
+All team members access Instinct through the browser. Only the builder (Nick) needs a paid Vercel seat. Dashboard viewers are free.
 
 ### 3. Databases & Storage
 
@@ -103,7 +103,7 @@ All three databases offer production-ready free tiers that comfortably handle ou
 
 The following are explicitly **not required** and have zero cost:
 
-- Individual Claude subscriptions for team members (they use the assistant through Apex)
+- Individual Claude subscriptions for team members (they use the assistant through Instinct)
 - Separate chat tools or Slack subscriptions
 - Additional Vercel seats (viewers are free)
 - Redis/caching layer (built-in caching handles current scale)
@@ -141,7 +141,7 @@ Estimated time to production: **under 1 hour.**
 
 ## Summary
 
-Wolfpack Apex gives the entire team an AI-powered workspace with knowledge management, reporting, analytics, and collaboration tools for approximately **$125/month**. Every team interaction makes the system smarter. The platform is built, tested (359 passing tests), and ready to deploy.
+Wolfpack Instinct gives the entire team an AI-powered workspace with knowledge management, reporting, analytics, and collaboration tools for approximately **$125/month**. Every team interaction makes the system smarter. The platform is built, tested (359 passing tests), and ready to deploy.
 
 ---
 

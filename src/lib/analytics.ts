@@ -1,5 +1,5 @@
 /**
- * Apex Analytics — Every interaction feeds the learning loop.
+ * Instinct Analytics — Every interaction feeds the learning loop.
  *
  * Zero-token-first: analytics are stored in PostgreSQL, not sent to AI.
  * The learning loop reads these events to improve knowledge retrieval,

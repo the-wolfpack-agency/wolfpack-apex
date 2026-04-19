@@ -172,7 +172,7 @@ function isShadowMode(): boolean {
  * HMAC-sign a userId so it can safely round-trip through the OAuth state
  * parameter. Format: `${userId}.${sigBase64url}` — verified in the callback
  * to prevent attackers from associating their MS account with someone
- * else's apex user record by guessing IDs.
+ * else's Instinct user record by guessing IDs.
  */
 function getStateSecret(): string {
   return process.env.INSTINCT_JWT_SECRET || process.env.APEX_JWT_SECRET || "instinct-dev-secret-do-not-use-in-production";
@@ -354,7 +354,7 @@ export async function storeTokens(
 }
 
 /**
- * Get a valid (non-expired) access token for a SPECIFIC apex user,
+ * Get a valid (non-expired) access token for a SPECIFIC Instinct user,
  * auto-refreshing if needed. Returns null if that user has no token
  * stored or refresh fails. Never returns another user's token.
  */
@@ -408,7 +408,7 @@ export async function getValidToken(
 }
 
 /**
- * Delete stored Microsoft tokens for a specific apex user (disconnect).
+ * Delete stored Microsoft tokens for a specific Instinct user (disconnect).
  * Only clears that user's row and that user's cache namespace.
  */
 export async function deleteTokens(userId: string): Promise<void> {
@@ -476,7 +476,7 @@ export async function graphFetch<T = unknown>(
 // ---------------------------------------------------------------------------
 
 /**
- * Get the Microsoft Graph connection status for a SPECIFIC apex user.
+ * Get the Microsoft Graph connection status for a SPECIFIC Instinct user.
  * Never returns another user's connection.
  */
 export async function getConnectionStatus(userId: string): Promise<MsConnectionStatus> {

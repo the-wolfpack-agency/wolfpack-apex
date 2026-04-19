@@ -1,5 +1,5 @@
 /**
- * PostgreSQL connection pool for Wolfpack Apex.
+ * PostgreSQL connection pool for Wolfpack Instinct.
  *
  * Singleton pattern survives Next.js HMR. All queries parameterized.
  * Shadow mode: returns empty results when DATABASE_URL is not set.

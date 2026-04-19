@@ -1,8 +1,8 @@
-# 🐺 Wolfpack Apex
+# 🐺 Wolfpack Instinct
 
 **Team intelligence platform for Wolfpack Agency.**
 
-Apex is the central brain connecting the Wolfpack team, AI, and codebase. It compounds knowledge from every team interaction — questions, documents, discussions, feature requests — making the platform smarter the longer the team uses it.
+Instinct is the central brain connecting the Wolfpack team, AI, and codebase. It compounds knowledge from every team interaction — questions, documents, discussions, feature requests — making the platform smarter the longer the team uses it.
 
 ## What It Does
 
@@ -23,7 +23,7 @@ Apex is the central brain connecting the Wolfpack team, AI, and codebase. It com
 
 ## Access
 
-Wolfpack Apex is a hosted web application. Team members access it via browser — no local setup required.
+Wolfpack Instinct is a hosted web application. Team members access it via browser — no local setup required.
 
 **Production:** Deployed on Vercel (URL provided by admin)
 

@@ -2,7 +2,7 @@
  * Team Role Workflow Tests
  *
  * Simulates how each role (cto, dev, sales, ops) interacts with the
- * Wolfpack Apex platform during a typical working day.
+ * Wolfpack Instinct platform during a typical working day.
  *
  * 60+ tests across 6 sections:
  *   1. CTO Workflow (15 tests)

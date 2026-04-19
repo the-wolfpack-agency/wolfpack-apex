@@ -1,5 +1,5 @@
 /**
- * Apex Auth — Role-based authentication for team members.
+ * Instinct Auth — Role-based authentication for team members.
  *
  * Roles:
  *   - cto: Full access, architecture decisions, code editing (highest)

@@ -1,7 +1,7 @@
 /**
  * Claude Report Generator — AI-powered custom report creation.
  *
- * One of the few practical AI applications in Apex. Used when the user
+ * One of the few practical AI applications in Instinct. Used when the user
  * provides a freeform prompt for a custom report that can't be generated
  * from templates alone.
  *
