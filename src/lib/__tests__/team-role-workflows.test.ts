@@ -721,7 +721,7 @@ describe("Dev Workflow", () => {
     mockSafeQuery.mockResolvedValueOnce({ rows: [protoRow], fromCache: false });
 
     const result = await mockSafeQuery(
-      "INSERT INTO apex_prototypes (title, created_by) VALUES ($1, $2) RETURNING *",
+      "INSERT INTO instinct_prototypes (title, created_by) VALUES ($1, $2) RETURNING *",
       ["Cache benchmark prototype", dev.id],
     );
 

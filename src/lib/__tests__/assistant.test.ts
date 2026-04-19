@@ -568,7 +568,7 @@ describe("user memory", () => {
     await setUserMemory("u1", "preference", "theme", "dark", "explicit");
 
     const upsertCalls = queryLog.filter((q) =>
-      q.text.includes("INSERT INTO apex_user_memory"),
+      q.text.includes("INSERT INTO instinct_user_memory"),
     );
     expect(upsertCalls.length).toBe(1);
     expect(upsertCalls[0].params).toContain("u1");
@@ -584,7 +584,7 @@ describe("user memory", () => {
     // Should have stored a topic memory for "inventory"
     const memoryCalls = queryLog.filter(
       (q) =>
-        q.text.includes("INSERT INTO apex_user_memory") &&
+        q.text.includes("INSERT INTO instinct_user_memory") &&
         q.params.includes("topic"),
     );
     expect(memoryCalls.length).toBeGreaterThanOrEqual(1);

@@ -5,7 +5,7 @@
  * webhook endpoint when a recording finishes transcribing; we verify
  * the HMAC signature, fetch the transcript via Plaud's API, run it
  * through the doc quality gate, and write to:
- *   - Postgres (apex_meeting_transcripts) — system of record
+ *   - Postgres (instinct_meeting_transcripts) — system of record
  *   - Qdrant   (via tripleWriteKnowledge)  — semantic search
  *   - Analytics (apex_events)              — learning loop
  *
@@ -195,7 +195,7 @@ export async function resolveOwnerUserId(ownerEmail?: string): Promise<string | 
 async function isAlreadyIngested(fileId: string): Promise<boolean> {
   if (!process.env.DATABASE_URL) return false;
   const { rows } = await safeQuery<{ id: string }>(
-    `SELECT id FROM apex_meeting_transcripts WHERE file_id = $1 LIMIT 1`,
+    `SELECT id FROM instinct_meeting_transcripts WHERE file_id = $1 LIMIT 1`,
     [fileId],
   );
   return rows.length > 0;
@@ -237,7 +237,7 @@ export async function ingestTranscript(fileId: string): Promise<IngestResult> {
     if (process.env.DATABASE_URL) {
       try {
         await query(
-          `INSERT INTO apex_meeting_transcripts
+          `INSERT INTO instinct_meeting_transcripts
              (file_id, owner_user_id, title, transcript_text, summary,
               recorded_at, duration_seconds, source, quality_status, quality_flags)
            VALUES ($1, $2, $3, $4, $5, $6, $7, 'plaud', 'reject', $8)
@@ -285,7 +285,7 @@ export async function ingestTranscript(fileId: string): Promise<IngestResult> {
   if (process.env.DATABASE_URL) {
     try {
       const result = await query<{ id: string }>(
-        `INSERT INTO apex_meeting_transcripts
+        `INSERT INTO instinct_meeting_transcripts
            (file_id, owner_user_id, title, transcript_text, summary,
             recorded_at, duration_seconds, source, quality_status, quality_flags)
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'plaud', $8, $9)
@@ -407,7 +407,7 @@ export async function listMeetingTranscripts(limit = 50): Promise<MeetingTranscr
             m.name AS owner_name,
             t.title, t.summary, t.recorded_at, t.duration_seconds,
             t.quality_status, t.ingested_at
-     FROM apex_meeting_transcripts t
+     FROM instinct_meeting_transcripts t
      LEFT JOIN apex_team_members m ON m.id = t.owner_user_id
      WHERE t.quality_status <> 'reject'
      ORDER BY COALESCE(t.recorded_at, t.ingested_at) DESC
@@ -452,7 +452,7 @@ export async function getMeetingTranscript(id: string): Promise<MeetingTranscrip
             m.name AS owner_name,
             t.title, t.summary, t.transcript_text,
             t.recorded_at, t.duration_seconds, t.quality_status, t.ingested_at
-     FROM apex_meeting_transcripts t
+     FROM instinct_meeting_transcripts t
      LEFT JOIN apex_team_members m ON m.id = t.owner_user_id
      WHERE t.id = $1 AND t.quality_status <> 'reject'
      LIMIT 1`,
@@ -527,7 +527,7 @@ export async function searchMeetingTranscripts(
             m.name AS owner_name,
             t.title, t.summary, t.transcript_text,
             t.recorded_at, t.duration_seconds, t.quality_status, t.ingested_at
-     FROM apex_meeting_transcripts t
+     FROM instinct_meeting_transcripts t
      LEFT JOIN apex_team_members m ON m.id = t.owner_user_id
      WHERE t.quality_status <> 'reject' AND (${conditions.join(" OR ")})
      ORDER BY COALESCE(t.recorded_at, t.ingested_at) DESC

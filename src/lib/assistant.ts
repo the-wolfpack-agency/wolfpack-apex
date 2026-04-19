@@ -557,7 +557,7 @@ export async function getUserMemory(userId: string): Promise<UserMemoryEntry[]> 
     source: string;
   }>(
     `SELECT id, memory_type, key, value, confidence, source
-     FROM apex_user_memory
+     FROM instinct_user_memory
      WHERE user_id = $1
      ORDER BY updated_at DESC`,
     [userId],
@@ -581,7 +581,7 @@ export async function setUserMemory(
   source: string = "auto",
 ): Promise<void> {
   await safeQuery(
-    `INSERT INTO apex_user_memory (id, user_id, memory_type, key, value, source, created_at, updated_at)
+    `INSERT INTO instinct_user_memory (id, user_id, memory_type, key, value, source, created_at, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
      ON CONFLICT (user_id, memory_type, key) DO UPDATE
      SET value = EXCLUDED.value, source = EXCLUDED.source, updated_at = NOW()`,

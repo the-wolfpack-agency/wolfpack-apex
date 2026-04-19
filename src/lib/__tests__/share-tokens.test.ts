@@ -78,7 +78,13 @@ describe("signShareToken + verifyShareToken", () => {
   it("rejects a tampered signature", () => {
     const token = signShareToken(claims, TEST_SECRET);
     const parts = token.split(".");
-    const badSig = parts[1].replace(/.$/, (ch) => (ch === "A" ? "B" : "A"));
+    // Tamper the FIRST sig char, not the last: base64url's final char
+    // carries only 2 significant bits (4 padding bits are discarded on
+    // decode), so flipping low-bit siblings like A↔B decodes identically
+    // and the test would be flaky.
+    const first = parts[1][0];
+    const replacement = first === "A" ? "Z" : "A";
+    const badSig = replacement + parts[1].slice(1);
     const result = verifyShareToken(parts[0] + "." + badSig, TEST_SECRET);
     expect(result.ok).toBe(false);
   });

@@ -703,13 +703,13 @@ describe("Conversation Persistence", () => {
 // ===========================================================================
 
 describe("User Memory Persistence", () => {
-  test("message about pricing stores topic=pricing in apex_user_memory", async () => {
+  test("message about pricing stores topic=pricing in instinct_user_memory", async () => {
     await chat("What is the pricing model?", "u1", "dev");
 
     // Wait for fire-and-forget memory writes
     await new Promise((r) => setTimeout(r, 50));
 
-    const memory = mockDb.selectAll("apex_user_memory");
+    const memory = mockDb.selectAll("instinct_user_memory");
     const pricingEntry = memory.find((m) => m.key === "pricing");
     expect(pricingEntry).toBeDefined();
     expect(pricingEntry!.memory_type).toBe("topic");
@@ -723,7 +723,7 @@ describe("User Memory Persistence", () => {
     await chat("Tell me more about pricing margins", "u1", "dev");
     await new Promise((r) => setTimeout(r, 50));
 
-    const memory = mockDb.selectAll("apex_user_memory");
+    const memory = mockDb.selectAll("instinct_user_memory");
     const pricingEntries = memory.filter((m) => m.key === "pricing" && m.user_id === "u1");
     // UPSERT means only 1 row, not 2
     expect(pricingEntries.length).toBe(1);
@@ -731,7 +731,7 @@ describe("User Memory Persistence", () => {
 
   test("getUserMemory returns all stored entries for user", async () => {
     // Manually store some memory entries
-    mockDb.insert("apex_user_memory", {
+    mockDb.insert("instinct_user_memory", {
       id: "mem-1",
       user_id: "u1",
       memory_type: "topic",
@@ -741,7 +741,7 @@ describe("User Memory Persistence", () => {
       source: "auto",
       updated_at: new Date().toISOString(),
     });
-    mockDb.insert("apex_user_memory", {
+    mockDb.insert("instinct_user_memory", {
       id: "mem-2",
       user_id: "u1",
       memory_type: "preference",
@@ -760,7 +760,7 @@ describe("User Memory Persistence", () => {
   test("setUserMemory with source=explicit stores correctly", async () => {
     await setUserMemory("u1", "preference", "language", "typescript", "explicit");
 
-    const memory = mockDb.selectAll("apex_user_memory");
+    const memory = mockDb.selectAll("instinct_user_memory");
     const entry = memory.find((m) => m.key === "language");
     expect(entry).toBeDefined();
     expect(entry!.source).toBe("explicit");
@@ -780,7 +780,7 @@ describe("User Memory Persistence", () => {
     await chat("Tell me about leads", "u1", "dev");
     await new Promise((r) => setTimeout(r, 50));
 
-    const memory = mockDb.selectAll("apex_user_memory");
+    const memory = mockDb.selectAll("instinct_user_memory");
     const topics = memory.filter((m) => m.memory_type === "topic" && m.user_id === "u1");
     const topicKeys = topics.map((t) => t.key);
     expect(topicKeys).toContain("inventory");

@@ -219,7 +219,7 @@ export async function startOnboarding(
   const now = new Date().toISOString();
 
   await safeQuery(
-    `INSERT INTO apex_onboarding_instances (id, employee_id, template_id, template_name, status, steps, started_at, created_by)
+    `INSERT INTO instinct_onboarding_instances (id, employee_id, template_id, template_name, status, steps, started_at, created_by)
      VALUES ($1, $2, $3, $4, 'in_progress', $5, $6, $7)`,
     [id, employeeId, templateId, template.name, JSON.stringify(steps), now, createdBy],
   );
@@ -281,7 +281,7 @@ export async function completeStep(
   }
 
   await safeQuery(
-    `UPDATE apex_onboarding_instances SET steps = $2, status = $3, completed_at = $4 WHERE id = $1`,
+    `UPDATE instinct_onboarding_instances SET steps = $2, status = $3, completed_at = $4 WHERE id = $1`,
     [instanceId, JSON.stringify(steps), status, completedAt],
   );
 
@@ -368,7 +368,7 @@ export async function uncompleteStep(
   }
 
   await safeQuery(
-    `UPDATE apex_onboarding_instances SET steps = $2, status = $3, completed_at = $4 WHERE id = $1`,
+    `UPDATE instinct_onboarding_instances SET steps = $2, status = $3, completed_at = $4 WHERE id = $1`,
     [instanceId, JSON.stringify(steps), status, completedAt],
   );
 
@@ -391,7 +391,7 @@ export async function getOnboardingForEmployee(
 ): Promise<OnboardingInstance[]> {
   const r = await safeQuery<OnboardingInstance>(
     `SELECT oi.*, ae.full_name AS employee_name, ae.email AS employee_email, ae.department AS employee_department
-     FROM apex_onboarding_instances oi
+     FROM instinct_onboarding_instances oi
      LEFT JOIN apex_employees ae ON ae.id = oi.employee_id
      WHERE oi.employee_id = $1
      ORDER BY oi.started_at DESC`,
@@ -403,7 +403,7 @@ export async function getOnboardingForEmployee(
 export async function listActiveOnboardings(): Promise<OnboardingInstance[]> {
   const r = await safeQuery<OnboardingInstance>(
     `SELECT oi.*, ae.full_name AS employee_name, ae.email AS employee_email, ae.department AS employee_department
-     FROM apex_onboarding_instances oi
+     FROM instinct_onboarding_instances oi
      LEFT JOIN apex_employees ae ON ae.id = oi.employee_id
      WHERE oi.status = 'in_progress'
      ORDER BY oi.started_at ASC`,
@@ -414,7 +414,7 @@ export async function listActiveOnboardings(): Promise<OnboardingInstance[]> {
 export async function listAllOnboardings(): Promise<OnboardingInstance[]> {
   const r = await safeQuery<OnboardingInstance>(
     `SELECT oi.*, ae.full_name AS employee_name, ae.email AS employee_email, ae.department AS employee_department
-     FROM apex_onboarding_instances oi
+     FROM instinct_onboarding_instances oi
      LEFT JOIN apex_employees ae ON ae.id = oi.employee_id
      ORDER BY oi.started_at DESC`,
   );
@@ -431,7 +431,7 @@ export async function cancelOnboarding(
   if (instance.status === "cancelled") throw new Error("Already cancelled");
 
   await safeQuery(
-    `UPDATE apex_onboarding_instances SET status = 'cancelled' WHERE id = $1`,
+    `UPDATE instinct_onboarding_instances SET status = 'cancelled' WHERE id = $1`,
     [instanceId],
   );
 
@@ -489,7 +489,7 @@ export async function checkStalledOnboardings(
 
 async function getInstance(id: string): Promise<OnboardingInstance | null> {
   const r = await safeQuery<OnboardingInstance>(
-    `SELECT * FROM apex_onboarding_instances WHERE id = $1`,
+    `SELECT * FROM instinct_onboarding_instances WHERE id = $1`,
     [id],
   );
   if (r.rows.length === 0) return null;
