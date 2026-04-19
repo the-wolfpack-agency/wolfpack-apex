@@ -56,7 +56,7 @@ interface PreviewState {
 
 const MAX_DRAFT_BYTES = 256 * 1024;
 
-function decodeDraft(raw: string | null): { brief: SiteBrief | null; error: string | null } {
+export function decodeDraft(raw: string | null): { brief: SiteBrief | null; error: string | null } {
   if (!raw) return { brief: null, error: null };
   if (raw.length > MAX_DRAFT_BYTES) {
     return { brief: null, error: "Draft too large to preview (>256KB). Save the brief to preview." };
@@ -66,9 +66,23 @@ function decodeDraft(raw: string | null): { brief: SiteBrief | null; error: stri
     // normalize first.
     const normalized = raw.replace(/-/g, "+").replace(/_/g, "/");
     const pad = normalized.length % 4 === 0 ? "" : "=".repeat(4 - (normalized.length % 4));
-    const json = typeof atob === "function"
-      ? atob(normalized + pad)
-      : Buffer.from(normalized + pad, "base64").toString("utf-8");
+    // The encoder on the editor side uses
+    //   btoa(unescape(encodeURIComponent(JSON.stringify(draft))))
+    // which produces latin1-byte base64. Plain `atob` returns those
+    // raw bytes AS a JS string, so any non-ASCII character in the
+    // brief (e.g. the en-dash "—" in "CFTR — Website…") comes back
+    // as mojibake and JSON.parse either crashes or produces garbled
+    // fields that RenderBrief then displays verbatim.
+    // Symmetrical decode: atob → Uint8Array → TextDecoder("utf-8").
+    let json: string;
+    if (typeof atob === "function") {
+      const bin = atob(normalized + pad);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      json = new TextDecoder("utf-8").decode(bytes);
+    } else {
+      json = Buffer.from(normalized + pad, "base64").toString("utf-8");
+    }
     const parsed = JSON.parse(json) as unknown;
     validateBrief(parsed); // throws BriefValidationError on failure
     return { brief: parsed as SiteBrief, error: null };

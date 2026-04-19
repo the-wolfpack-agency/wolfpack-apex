@@ -167,7 +167,19 @@ jest.mock("@/lib/github-client", () => ({
   })),
   putFile: jest.fn(async () => undefined),
   triggerWorkflow: jest.fn(async () => ({ run_id: "run_e2e_1" })),
+  enableActions: jest.fn(async () => undefined),
   defaultGithubClient: () => ({ token: "test", fetch: jest.fn() }),
+}));
+
+// Mock provisioning side-effects so the E2E path doesn't try real HTTP
+// calls (which would then retry on failure and blow the test timeout).
+// Provisioning is tested in isolation in sites-secret-provision.test.ts.
+jest.mock("@/lib/github-secrets", () => ({
+  setRepoSecret: jest.fn(async () => ({ ok: true })),
+}));
+jest.mock("@/lib/vercel-client", () => ({
+  defaultVercelClient: () => ({ token: "test", teamId: "team_e2e" }),
+  createProject: jest.fn(async () => ({ id: "prj_e2e", name: "wolfpack-e2e" })),
 }));
 
 import { NextRequest } from "next/server";
