@@ -27,7 +27,10 @@ import Dropzone from "@/components/sites/Dropzone";
 import WireframeExtractReview, {
   type WireframeExtractPayload,
 } from "@/components/sites/WireframeExtractReview";
+import { SeoFields } from "@/components/sites/SeoFields";
+import DomainManager from "@/components/sites/DomainManager";
 import type { SiteTheme } from "@/lib/site-theme";
+import type { SiteBrief } from "@/lib/sites-schema";
 import {
   authHeaders as canonicalAuthHeaders,
   jsonHeaders as canonicalJsonHeaders,
@@ -609,6 +612,15 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
         <div style={{ marginTop: "1rem" }}>
           <BriefForm value={brief} onChange={setBrief} />
         </div>
+        {/* SEO + favicon editor — feeds the same brief state; Save brief persists
+            everything in one round-trip. SiteBrief's SEO/favicon fields are all
+            optional so legacy briefs (no SEO keys) keep validating green. */}
+        <div style={{ marginTop: "1.25rem" }}>
+          <SeoFields
+            brief={brief as unknown as SiteBrief}
+            onChange={(next) => setBrief(next as unknown as Brief)}
+          />
+        </div>
         <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem" }}>
           <button onClick={handleSave} disabled={saving} style={btnStyle()}>
             {saving ? "Saving…" : "Save brief"}
@@ -713,6 +725,20 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
           </Link>
         </div>
       </section>
+
+      {/* Step 4 — Custom domain (only surfaces once the first deploy succeeded;
+          before that, there's no Vercel project to bind a domain to). The
+          DomainManager is self-contained: its own state, its own fetches via
+          fetchWithRefresh, its own analytics. */}
+      {hasPreview && (
+        <section style={{ marginBottom: "2rem" }}>
+          <SectionHeading step="4" title="Connect a custom domain (optional)" />
+          <p style={{ fontSize: "0.85rem", color: "var(--wp-text-dim)", marginTop: "-0.25rem", marginBottom: "0.75rem" }}>
+            Bind your client&apos;s domain (e.g. <code>acme.com</code>) so the site is shareable from a branded URL, not a preview link.
+          </p>
+          <DomainManager siteId={id} previewUrl={project.preview_url} />
+        </section>
+      )}
 
       {/* Inline status messages */}
       {error && (

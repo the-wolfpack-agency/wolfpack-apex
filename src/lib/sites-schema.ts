@@ -85,6 +85,11 @@ export interface BriefPage {
   route: string;
   title?: string;
   sections: BriefSection[];
+  /**
+   * Per-page SEO overrides. Each field individually overrides
+   * `SiteBrief.defaultSeo`; missing fields inherit. Optional.
+   */
+  seo?: PageSeo;
 }
 
 /**
@@ -113,6 +118,40 @@ export interface SiteTheme {
   font?: SiteThemeFont;
 }
 
+/**
+ * Per-page SEO metadata. All fields optional; every existing brief must
+ * continue to validate green without emitting any SEO. When a page omits
+ * `seo`, it inherits from `SiteBrief.defaultSeo`; when both are absent,
+ * the only guaranteed head tag is a `<title>` derived from
+ * `brief.product.name`. See `src/lib/seo-head.ts` for the fallback chain.
+ */
+export interface PageSeo {
+  /** `<title>` — ≤70 chars recommended for SERP display. */
+  title?: string;
+  /** `<meta name="description">` — ≤170 chars (Google snippet budget). */
+  description?: string;
+  /** Absolute https URL for `<meta property="og:image">`. */
+  ogImage?: string;
+  /** Emits `<meta name="robots" content="noindex">` when true. */
+  noIndex?: boolean;
+  /** Absolute https URL for `<link rel="canonical">`. */
+  canonical?: string;
+}
+
+/**
+ * Site-level favicon configuration. When `src` is set it wins; otherwise
+ * `autoGenerate` + `monogram` produce an inline SVG data URL via
+ * `briefToFaviconHref` (no network request, no new infra).
+ */
+export interface SiteFavicon {
+  /** Explicit favicon URL (absolute or site-relative). */
+  src?: string;
+  /** When true, generate an SVG favicon from theme colors + monogram. */
+  autoGenerate?: boolean;
+  /** 1-2 char fallback for the generated SVG (e.g. "A" for Acme). */
+  monogram?: string;
+}
+
 export interface SiteBrief {
   client: string;
   product: {
@@ -129,6 +168,16 @@ export interface SiteBrief {
   theme?: SiteTheme | Record<string, string>;
   pages: BriefPage[];
   contactForm?: { fields: string[] };
+  /**
+   * Site-wide SEO defaults. Each page's `seo` overrides these field-by-
+   * field; missing fields on a page fall through to these defaults and
+   * then to product-name/tagline fallbacks. All optional.
+   */
+  defaultSeo?: PageSeo;
+  /**
+   * Optional site-level favicon. Applies to every page. See SiteFavicon.
+   */
+  favicon?: SiteFavicon;
 }
 
 export type SiteStatus = "draft" | "provisioning" | "deploying" | "ready" | "failed";
@@ -138,6 +187,97 @@ export type SiteStatus = "draft" | "provisioning" | "deploying" | "ready" | "fai
 const SLUG_RE = /^[a-z][a-z0-9-]{1,38}$/;
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 const THEME_COLOR_FIELDS = ["primary", "accent", "bg", "fg", "muted"] as const;
+// SEO field budgets. Google truncates titles ~60, descriptions ~160 in
+// SERPs; we cap at 70/170 to leave headroom for brand suffixes and to
+// match the wolfpack-site-template head emitter. URL matcher is strict
+// enough to reject whitespace/relative paths while tolerating query
+// strings and fragments (which canonical URLs frequently carry).
+const SEO_TITLE_MAX = 70;
+const SEO_DESCRIPTION_MAX = 170;
+const URL_RE = /^https?:\/\/[^\s<>"']+$/i;
+const FAVICON_SRC_RE = /^(https?:\/\/[^\s<>"']+|\/[^\s<>"']*|data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+)$/i;
+const FAVICON_MONOGRAM_MAX = 2;
+
+/**
+ * Validate a PageSeo blob. Collects errors into `errors[]` with a prefix
+ * that identifies the source (page route or "defaultSeo"). All fields are
+ * optional — an empty object `{}` is valid. Exported for reuse in tests.
+ */
+export function validatePageSeo(
+  seo: unknown,
+  prefix: string,
+  errors: string[],
+): void {
+  if (seo === undefined) return;
+  if (!seo || typeof seo !== "object" || Array.isArray(seo)) {
+    errors.push(`${prefix} must be an object`);
+    return;
+  }
+  const s = seo as Record<string, unknown>;
+  if (s.title !== undefined) {
+    if (typeof s.title !== "string") {
+      errors.push(`${prefix}.title must be a string`);
+    } else if (s.title.length > SEO_TITLE_MAX) {
+      errors.push(`${prefix}.title must be at most ${SEO_TITLE_MAX} characters`);
+    }
+  }
+  if (s.description !== undefined) {
+    if (typeof s.description !== "string") {
+      errors.push(`${prefix}.description must be a string`);
+    } else if (s.description.length > SEO_DESCRIPTION_MAX) {
+      errors.push(
+        `${prefix}.description must be at most ${SEO_DESCRIPTION_MAX} characters`,
+      );
+    }
+  }
+  if (s.ogImage !== undefined) {
+    if (typeof s.ogImage !== "string" || !URL_RE.test(s.ogImage)) {
+      errors.push(`${prefix}.ogImage must be an absolute http(s) URL`);
+    }
+  }
+  if (s.noIndex !== undefined && typeof s.noIndex !== "boolean") {
+    errors.push(`${prefix}.noIndex must be a boolean`);
+  }
+  if (s.canonical !== undefined) {
+    if (typeof s.canonical !== "string" || !URL_RE.test(s.canonical)) {
+      errors.push(`${prefix}.canonical must be an absolute http(s) URL`);
+    }
+  }
+}
+
+/**
+ * Validate a SiteFavicon blob. All fields optional. Exported for tests.
+ */
+export function validateFavicon(
+  fav: unknown,
+  errors: string[],
+): void {
+  if (fav === undefined) return;
+  if (!fav || typeof fav !== "object" || Array.isArray(fav)) {
+    errors.push("favicon must be an object");
+    return;
+  }
+  const f = fav as Record<string, unknown>;
+  if (f.src !== undefined) {
+    if (typeof f.src !== "string" || !FAVICON_SRC_RE.test(f.src)) {
+      errors.push(
+        "favicon.src must be an http(s) URL, a site-relative path starting with /, or a data:image URL",
+      );
+    }
+  }
+  if (f.autoGenerate !== undefined && typeof f.autoGenerate !== "boolean") {
+    errors.push("favicon.autoGenerate must be a boolean");
+  }
+  if (f.monogram !== undefined) {
+    if (typeof f.monogram !== "string") {
+      errors.push("favicon.monogram must be a string");
+    } else if (f.monogram.length > FAVICON_MONOGRAM_MAX) {
+      errors.push(
+        `favicon.monogram must be at most ${FAVICON_MONOGRAM_MAX} characters`,
+      );
+    }
+  }
+}
 
 export class BriefValidationError extends Error {
   constructor(public errors: string[]) {
@@ -222,6 +362,10 @@ export function validateBrief(brief: unknown): asserts brief is SiteBrief {
       }
     }
   }
+  // Site-level SEO + favicon defaults. All optional.
+  validatePageSeo((b as Record<string, unknown>).defaultSeo, "defaultSeo", errors);
+  validateFavicon((b as Record<string, unknown>).favicon, errors);
+
   const known = new Set<string>(SUPPORTED_SECTION_TYPES);
   for (const p of b.pages || []) {
     if (!p.route?.startsWith("/")) errors.push(`page.route must start with / (got ${p.route})`);
@@ -229,6 +373,12 @@ export function validateBrief(brief: unknown): asserts brief is SiteBrief {
       errors.push(`page ${p.route}: sections array required`);
       continue;
     }
+    // Per-page SEO overrides. Scoped by route so errors are traceable.
+    validatePageSeo(
+      (p as unknown as Record<string, unknown>).seo,
+      `page ${p.route}.seo`,
+      errors,
+    );
     for (const s of p.sections) {
       if (!known.has(s.type)) {
         errors.push(`page ${p.route}: unknown section type "${s.type}"`);

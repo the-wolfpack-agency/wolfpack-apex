@@ -39,6 +39,7 @@ import {
 } from "@/lib/client-auth";
 import { validateBrief, type SiteBrief } from "@/lib/sites-schema";
 import { RenderBrief } from "@/components/sites/render-brief";
+import { buildSeoMetaTags, type SeoMetaTag } from "@/lib/seo-head";
 
 type PreviewSource = "deployed" | "draft" | "fallback_saved";
 
@@ -274,7 +275,78 @@ export default function SitePreviewPage({ params }: { params: Promise<{ id: stri
 
   return (
     <div data-testid="preview-root" data-preview-source={state.source} className="bg-white">
+      <SeoHeadInjector brief={state.brief} pageIndex={pageIndex} />
       <RenderBrief brief={state.brief} page={pageIndex} />
     </div>
   );
+}
+
+/**
+ * SeoHeadInjector — mounts per-page SEO metadata into `document.head`
+ * for the client-rendered preview surface.
+ *
+ * Why DOM-mutate instead of using Next.js `<head>`: the preview route is
+ * a `"use client"` component; Next's metadata API is server-only and the
+ * route mounts INSIDE an iframe where SSR metadata doesn't reach this
+ * nested document's head. We own the surface, so we inject on mount and
+ * clean up on unmount. Tags we own are tagged with
+ * `data-instinct-seo="1"` so we never remove the page's pre-existing
+ * head children.
+ */
+export function SeoHeadInjector({
+  brief,
+  pageIndex,
+}: {
+  brief: SiteBrief | null;
+  pageIndex: number;
+}) {
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (!brief) return;
+    const previewUrl =
+      typeof window !== "undefined" ? window.location.origin : undefined;
+    let tags: SeoMetaTag[];
+    try {
+      tags = buildSeoMetaTags({ brief, pageIndex, previewUrl });
+    } catch {
+      // Never let SEO injection crash the preview render.
+      return;
+    }
+    const appended: Node[] = [];
+    // Remove any previously injected Instinct SEO tags first so we don't
+    // pile up duplicates on route changes (e.g., user paginates pages).
+    document
+      .querySelectorAll('[data-instinct-seo="1"]')
+      .forEach((el) => el.parentElement?.removeChild(el));
+    for (const descriptor of tags) {
+      if (descriptor.tag === "title") {
+        // <title> is a singleton; rewrite its text in-place so we don't
+        // fight existing title elements.
+        let titleEl = document.head.querySelector(
+          'title[data-instinct-seo="1"]',
+        ) as HTMLTitleElement | null;
+        if (!titleEl) {
+          titleEl = document.createElement("title");
+          titleEl.setAttribute("data-instinct-seo", "1");
+          document.head.appendChild(titleEl);
+          appended.push(titleEl);
+        }
+        titleEl.text = descriptor.attrs.text ?? "";
+        continue;
+      }
+      const el = document.createElement(descriptor.tag);
+      el.setAttribute("data-instinct-seo", "1");
+      for (const [k, v] of Object.entries(descriptor.attrs)) {
+        el.setAttribute(k, v);
+      }
+      document.head.appendChild(el);
+      appended.push(el);
+    }
+    return () => {
+      for (const node of appended) {
+        node.parentElement?.removeChild(node);
+      }
+    };
+  }, [brief, pageIndex]);
+  return null;
 }

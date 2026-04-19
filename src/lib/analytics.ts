@@ -160,6 +160,11 @@ export type ApexEventType =
   | "site.brief_parse_failed"
   | "site.brief_form_edited"
   | "site.dropzone_used"
+  // Sites — custom domain binding (033_site_domains)
+  | "site.domain_added"
+  | "site.domain_verified"
+  | "site.domain_removed"
+  | "site.domain_add_failed"
   // Sites — image-wireframe → brief generator (031)
   | "site.brief_generation_requested"
   | "site.brief_generation_succeeded"
@@ -185,6 +190,13 @@ export type ApexEventType =
   | "site.section_faq_added"
   // Sites — brand theme edited via ThemeEditor (colors + font picker)
   | "site.theme_edited"
+  // Sites — per-page SEO edits + favicon generation. Metadata includes
+  // site_id, page_index (or -1 for defaultSeo / site-level favicon),
+  // and fields_changed[] so the learning loop can tell which SEO fields
+  // designers touch most. `site.favicon_generated` metadata.mode is one
+  // of "url" | "auto" | "monogram".
+  | "site.seo_updated"
+  | "site.favicon_generated"
   // Sites — prompt-to-brief editor (029)
   | "site.brief_edit_requested"
   | "site.brief_edit_generated"

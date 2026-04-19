@@ -129,6 +129,158 @@ describe("validateBrief", () => {
       validateBrief({ ...VALID_BRIEF, product: { name: "X", supportEmail: "not-an-email" } }),
     ).toThrow(/valid email/);
   });
+
+  /* ------------------------ SEO + favicon validation ------------------- */
+
+  it("accepts a brief with no SEO / favicon fields (regression)", () => {
+    // This is the load-bearing backwards-compat guarantee: every existing
+    // brief in the DB lacks seo/defaultSeo/favicon and MUST still validate.
+    expect(() => validateBrief(VALID_BRIEF)).not.toThrow();
+  });
+
+  it("accepts a valid per-page seo object", () => {
+    expect(() =>
+      validateBrief({
+        ...VALID_BRIEF,
+        pages: [
+          {
+            ...VALID_BRIEF.pages[0],
+            seo: {
+              title: "A great page",
+              description: "A valid description under 170 characters.",
+              ogImage: "https://cdn.example.com/og.png",
+              noIndex: false,
+              canonical: "https://www.example.com/",
+            },
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts a valid site-level defaultSeo + favicon", () => {
+    expect(() =>
+      validateBrief({
+        ...VALID_BRIEF,
+        defaultSeo: {
+          title: "Default",
+          description: "Default description",
+        },
+        favicon: {
+          src: "https://cdn.example.com/favicon.ico",
+          autoGenerate: false,
+          monogram: "A",
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects seo.title longer than 70 chars", () => {
+    expect(() =>
+      validateBrief({
+        ...VALID_BRIEF,
+        pages: [
+          {
+            ...VALID_BRIEF.pages[0],
+            seo: { title: "X".repeat(71) },
+          },
+        ],
+      }),
+    ).toThrow(/title must be at most 70 characters/);
+  });
+
+  it("rejects seo.description longer than 170 chars", () => {
+    expect(() =>
+      validateBrief({
+        ...VALID_BRIEF,
+        defaultSeo: { description: "y".repeat(171) },
+      }),
+    ).toThrow(/description must be at most 170 characters/);
+  });
+
+  it("rejects non-URL ogImage", () => {
+    expect(() =>
+      validateBrief({
+        ...VALID_BRIEF,
+        pages: [
+          {
+            ...VALID_BRIEF.pages[0],
+            seo: { ogImage: "not a url" },
+          },
+        ],
+      }),
+    ).toThrow(/ogImage must be an absolute/);
+  });
+
+  it("rejects non-URL canonical", () => {
+    expect(() =>
+      validateBrief({
+        ...VALID_BRIEF,
+        defaultSeo: { canonical: "relative/path" },
+      }),
+    ).toThrow(/canonical must be an absolute/);
+  });
+
+  it("rejects non-boolean noIndex", () => {
+    expect(() =>
+      validateBrief({
+        ...VALID_BRIEF,
+        defaultSeo: { noIndex: "yes" as unknown as boolean },
+      }),
+    ).toThrow(/noIndex must be a boolean/);
+  });
+
+  it("rejects monogram longer than 2 chars", () => {
+    expect(() =>
+      validateBrief({
+        ...VALID_BRIEF,
+        favicon: { monogram: "ABC" },
+      }),
+    ).toThrow(/monogram must be at most 2 characters/);
+  });
+
+  it("rejects non-URL favicon.src", () => {
+    expect(() =>
+      validateBrief({
+        ...VALID_BRIEF,
+        favicon: { src: "garbage url" },
+      }),
+    ).toThrow(/favicon.src must be/);
+  });
+
+  it("accepts favicon.src as site-relative path", () => {
+    expect(() =>
+      validateBrief({
+        ...VALID_BRIEF,
+        favicon: { src: "/favicon.ico" },
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts favicon.src as data URL", () => {
+    expect(() =>
+      validateBrief({
+        ...VALID_BRIEF,
+        favicon: {
+          src: "data:image/svg+xml;base64,PHN2Zy8+",
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects non-object seo field", () => {
+    expect(() =>
+      validateBrief({
+        ...VALID_BRIEF,
+        pages: [
+          {
+            ...VALID_BRIEF.pages[0],
+            seo: "not an object" as unknown as never,
+          },
+        ],
+      }),
+    ).toThrow(/seo must be an object/);
+  });
 });
 
 describe("createSiteProject", () => {
