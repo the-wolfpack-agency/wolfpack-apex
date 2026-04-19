@@ -6,7 +6,7 @@
  * composes them into answers like "you've been emailing X a lot this
  * week" or "you haven't taken notes on Client Y in 30 days".
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { safeQuery } from "@/lib/db";
 

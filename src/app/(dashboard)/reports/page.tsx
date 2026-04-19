@@ -118,7 +118,7 @@ export default function ReportsPage() {
       headers: authHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "reports" } }),
     }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   function selectTemplate(t: TemplateInfo) {

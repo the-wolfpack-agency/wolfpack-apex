@@ -247,7 +247,7 @@ export function exemplarsToPromptBlock(exemplars: BriefExemplar[]): string {
   const footer =
     "Use these to infer this client's typical voice, section rhythm, and brand system. Do not copy. If the new wireframe implies different content, follow the wireframe.";
 
-  let lines = renderedLines.slice();
+  const lines = renderedLines.slice();
   while (lines.length > 0) {
     const block = [header, ...lines, "", footer].join("\n");
     if (block.length <= MAX_BLOCK_CHARS) return block;

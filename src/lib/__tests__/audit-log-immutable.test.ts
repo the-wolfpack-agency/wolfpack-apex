@@ -14,7 +14,7 @@
  *     and a check that recordAudit survives (never triggers the error).
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { readFileSync } from "fs";
 import { join } from "path";

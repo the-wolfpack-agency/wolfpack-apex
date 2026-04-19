@@ -4,7 +4,7 @@
  * failures propagate so callers can emit indexing_failed analytics and
  * continue their sync.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 // Make this file a module (not a script) so top-level `const` declarations
 // stay file-scoped and don't collide with sibling test files.

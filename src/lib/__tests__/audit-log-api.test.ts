@@ -9,7 +9,7 @@
  *   - verify emits tamper event on failure
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockQueryAuditLog = jest.fn();
 const mockVerifyChain = jest.fn();

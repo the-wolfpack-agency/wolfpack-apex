@@ -8,7 +8,7 @@
  *
  * No mutations, no analytics — ranker hookup is TODO for a future PR.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { safeQuery } from "@/lib/db";
 

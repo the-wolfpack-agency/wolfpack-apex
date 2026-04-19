@@ -636,7 +636,7 @@ describe("importFromFigmaUrl", () => {
     // A ludicrous fetch that throws a non-Error is one way upstream code
     // can try to escape typed error handling. Assert the lib catches it.
     const fetchImpl = jest.fn().mockImplementation(() => {
-      throw "string-thrown"; // eslint-disable-line no-throw-literal
+      throw "string-thrown";  
     });
     const res = await importFromFigmaUrl(
       { url: "https://www.figma.com/file/ABC123/slug" },

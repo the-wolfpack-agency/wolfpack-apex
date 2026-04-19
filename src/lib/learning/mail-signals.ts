@@ -10,7 +10,7 @@
  * These functions are **exported but not yet wired to a UI surface** —
  * Tier 1 is about getting the data flowing. TODO: consumer integrations.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { safeQuery } from "@/lib/db";
 

@@ -6,7 +6,7 @@
  *
  * TODO: consumer integrations once Stream A ships.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { safeQuery } from "@/lib/db";
 

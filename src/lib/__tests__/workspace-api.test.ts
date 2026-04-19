@@ -6,7 +6,7 @@
  *   GET /api/workspace/status — nextStep derivation for all 4 states
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockSafeQuery = jest.fn();
 jest.mock("@/lib/db", () => ({

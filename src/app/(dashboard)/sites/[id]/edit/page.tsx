@@ -451,7 +451,7 @@ export default function SiteEditPage({
         setError((e as Error).message);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [id]);
 
   // Persist draft to localStorage + nudge iframe on every change.

@@ -70,7 +70,7 @@ export default function DiscussionsPage() {
       headers: authHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "discussions" } }),
     }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   async function fetchThreads() {

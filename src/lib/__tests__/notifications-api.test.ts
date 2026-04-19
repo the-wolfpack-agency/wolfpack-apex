@@ -15,7 +15,7 @@
  * For each: 401 unauthorized, happy path, analytics emission.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockGetUser = jest.fn();
 jest.mock("@/lib/auth", () => ({

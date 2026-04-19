@@ -65,7 +65,7 @@ export default function FeaturesPage() {
       headers: authHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "features" } }),
     }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   async function fetchFeatures() {

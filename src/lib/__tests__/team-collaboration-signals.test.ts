@@ -1,7 +1,7 @@
 /**
  * team-collaboration-signals tests — exercises the SQL shape + shaping logic.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

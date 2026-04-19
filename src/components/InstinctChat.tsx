@@ -271,7 +271,7 @@ export default function InstinctChat({
     } catch {
       // Non-fatal
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   // Load on mount

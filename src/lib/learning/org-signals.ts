@@ -9,7 +9,7 @@
  * `saveAnswer` pattern used for Teams / OneNote so "who handles X" lookups
  * against the Assistant's knowledge base return relevant people.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { safeQuery } from "@/lib/db";
 import { saveAnswer } from "@/lib/knowledge";
