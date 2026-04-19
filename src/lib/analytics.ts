@@ -160,6 +160,11 @@ export type ApexEventType =
   | "site.brief_parse_failed"
   | "site.brief_form_edited"
   | "site.dropzone_used"
+  // Sites — image-wireframe → brief generator (031)
+  | "site.brief_generation_requested"
+  | "site.brief_generation_succeeded"
+  | "site.brief_generation_failed"
+  | "site.brief_image_rejected"
   // Sites — starter-template picker (031)
   | "site.template_previewed"
   | "site.template_applied"
@@ -180,6 +185,14 @@ export type ApexEventType =
   // Sites — brief-edit learning loop (030)
   | "site.insights_viewed"
   | "site.insights_snapshot_taken"
+  // Sites — AI image generation inside BriefForm (032)
+  | "site.image_gen_opened"
+  | "site.image_gen_submitted"
+  | "site.image_gen_succeeded"
+  | "site.image_gen_failed"
+  | "site.image_gen_accepted"
+  | "site.image_gen_regenerated"
+  | "site.image_gen_dismissed"
   // People (HR) — benefits, employees, onboarding, insights
   | "hr.employee_added"
   | "hr.employee_updated"

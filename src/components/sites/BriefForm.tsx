@@ -15,6 +15,7 @@
 import { useState, useId } from "react";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { ThemeEditor } from "@/components/sites/ThemeEditor";
+import { GenerateImageModal } from "@/components/sites/GenerateImageModal";
 import type { SiteTheme } from "@/lib/site-theme";
 
 // slugify + kebab-case — used to turn a label into a stable DOM id.
@@ -76,10 +77,20 @@ export interface Brief {
 export interface BriefFormProps {
   value: Brief;
   onChange: (next: Brief) => void;
+  // Optional — when present, the Generate image button next to hero +
+  // gallery URL fields opens a modal that calls
+  // /api/sites/:projectId/generate-image. When absent (e.g. the "new
+  // site" onboarding flow where no project_id exists yet) the button
+  // is hidden — the user can still paste a URL manually.
+  projectId?: string;
 }
 
-export function BriefForm({ value, onChange }: BriefFormProps) {
+export function BriefForm({ value, onChange, projectId }: BriefFormProps) {
   const [showJson, setShowJson] = useState(false);
+  const [imageGen, setImageGen] = useState<{
+    sectionPath: string;
+    setter: (url: string) => void;
+  } | null>(null);
   const page = value.pages[0] ?? { route: "/", sections: [] };
 
   function update(next: Partial<Brief>) {
@@ -192,9 +203,32 @@ export function BriefForm({ value, onChange }: BriefFormProps) {
               <button onClick={() => removeSection(i)} style={btnSmall("#c44")} aria-label="Remove">✕</button>
             </div>
           </div>
-          <SectionEditor section={s} onChange={(patch) => updateSection(i, patch)} />
+          <SectionEditor
+            section={s}
+            sectionIndex={i}
+            onChange={(patch) => updateSection(i, patch)}
+            onGenerateImage={
+              projectId
+                ? (sectionPath, setter) =>
+                    setImageGen({ sectionPath, setter })
+                : undefined
+            }
+          />
         </div>
       ))}
+
+      {projectId && (
+        <GenerateImageModal
+          open={!!imageGen}
+          projectId={projectId}
+          sectionPath={imageGen?.sectionPath ?? ""}
+          onClose={() => setImageGen(null)}
+          onAccept={(url) => {
+            imageGen?.setter(url);
+            setImageGen(null);
+          }}
+        />
+      )}
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginTop: "0.5rem" }}>
         {SECTION_TYPES.map((t) => (
@@ -205,14 +239,37 @@ export function BriefForm({ value, onChange }: BriefFormProps) {
   );
 }
 
-function SectionEditor({ section, onChange }: { section: Section; onChange: (patch: Partial<Section>) => void }) {
+function SectionEditor({
+  section,
+  sectionIndex,
+  onChange,
+  onGenerateImage,
+}: {
+  section: Section;
+  sectionIndex: number;
+  onChange: (patch: Partial<Section>) => void;
+  onGenerateImage?: (sectionPath: string, setter: (url: string) => void) => void;
+}) {
   switch (section.type) {
     case "hero":
       return (
         <div style={grid()}>
           <Field label="Heading" value={section.heading ?? ""} onChange={(v) => onChange({ heading: v })} />
           <Field label="Body" value={section.body ?? ""} onChange={(v) => onChange({ body: v })} multiline />
-          <Field label="Background image URL" value={section.backgroundImage ?? ""} onChange={(v) => onChange({ backgroundImage: v })} />
+          <FieldWithImageGen
+            label="Background image URL"
+            value={section.backgroundImage ?? ""}
+            onChange={(v) => onChange({ backgroundImage: v })}
+            onGenerateImage={
+              onGenerateImage
+                ? () =>
+                    onGenerateImage(
+                      `/pages/0/sections/${sectionIndex}/backgroundImage`,
+                      (url) => onChange({ backgroundImage: url }),
+                    )
+                : undefined
+            }
+          />
           <Field label="CTA label" value={section.cta?.label ?? ""} onChange={(v) => onChange({ cta: { label: v, href: section.cta?.href ?? "/contact" } })} />
         </div>
       );
@@ -286,9 +343,32 @@ function SectionEditor({ section, onChange }: { section: Section; onChange: (pat
             const obj = typeof img === "string" ? { src: img, alt: "" } : img;
             const k = `gallery-${i}`;
             return (
-              <div key={i} style={{ display: "grid", gridTemplateColumns: "2fr 2fr auto", gap: "0.4rem", marginTop: "0.4rem", alignItems: "center" }}>
+              <div key={i} style={{ display: "grid", gridTemplateColumns: onGenerateImage ? "2fr 2fr auto auto" : "2fr 2fr auto", gap: "0.4rem", marginTop: "0.4rem", alignItems: "center" }}>
                 <input id={`${k}-src`} name={`${k}-src`} aria-label={`Image ${i + 1} URL`} placeholder="image url" value={obj.src} onChange={(e) => onChange({ images: images.map((x, j) => (j === i ? { src: e.target.value, alt: obj.alt } : x)) })} style={input()} />
                 <input id={`${k}-alt`} name={`${k}-alt`} aria-label={`Image ${i + 1} alt text`} placeholder="alt text" value={obj.alt ?? ""} onChange={(e) => onChange({ images: images.map((x, j) => (j === i ? { src: obj.src, alt: e.target.value } : x)) })} style={input()} />
+                {onGenerateImage && (
+                  <button
+                    type="button"
+                    data-generate-image-btn
+                    data-section-path={`/pages/0/sections/${sectionIndex}/images/${i}/src`}
+                    onClick={() =>
+                      onGenerateImage(
+                        `/pages/0/sections/${sectionIndex}/images/${i}/src`,
+                        (url) =>
+                          onChange({
+                            images: images.map((x, j) => {
+                              const o = typeof x === "string" ? { src: x, alt: "" } : x;
+                              return j === i ? { src: url, alt: o.alt } : x;
+                            }),
+                          }),
+                      )
+                    }
+                    style={btnSmall()}
+                    aria-label={`Generate image for slot ${i + 1}`}
+                  >
+                    ✨ Generate
+                  </button>
+                )}
                 <button onClick={() => onChange({ images: images.filter((_, j) => j !== i) })} style={btnSmall("#c44")}>✕</button>
               </div>
             );
@@ -456,6 +536,40 @@ function SectionEditor({ section, onChange }: { section: Section; onChange: (pat
 
 function updateItem<T>(items: T[], i: number, patch: Partial<T>, onChange: (p: { items: T[] }) => void) {
   onChange({ items: items.map((it, j) => (j === i ? { ...it, ...patch } : it)) });
+}
+
+function FieldWithImageGen({
+  label,
+  value,
+  onChange,
+  onGenerateImage,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  onGenerateImage?: () => void;
+}) {
+  const reactId = useId();
+  const fieldId = `brief-imgfield-${slug(label)}-${reactId}`;
+  return (
+    <div style={{ display: "block" }}>
+      <label htmlFor={fieldId} style={{ fontSize: "0.7rem", color: "var(--wp-text-dim)", marginBottom: "0.2rem", textTransform: "uppercase", letterSpacing: "0.05em", display: "block" }}>{label}</label>
+      <div style={{ display: "flex", gap: "0.3rem" }}>
+        <input id={fieldId} name={fieldId} value={value} onChange={(e) => onChange(e.target.value)} style={{ ...input(), flex: 1 }} />
+        {onGenerateImage && (
+          <button
+            type="button"
+            onClick={onGenerateImage}
+            style={btnSmall()}
+            data-generate-image-btn
+            aria-label={`Generate ${label.toLowerCase()}`}
+          >
+            ✨ Generate image
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function Field({ label, value, onChange, multiline, idPrefix }: { label: string; value: string; onChange: (v: string) => void; multiline?: boolean; idPrefix?: string }) {

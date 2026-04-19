@@ -1,37 +1,50 @@
 "use client";
 
 /**
- * /sites/new — starter-template picker + blank-template option.
+ * /sites/new — starter-template picker + blank-template option + wireframe
+ * drop-to-extract (image/PDF → SiteBrief + theme via /api/sites/parse-brief).
  *
- * Max + Meghan-friendly "pick a template, type a slug, go" flow.
- *
- * Behaviour:
- *   1. User types a client slug (same SLUG_RE as POST /api/sites accepts).
+ * Non-technical flow:
+ *   1. User types a client slug (same SLUG_RE as POST /api/sites accepts)
+ *      OR drops a wireframe image and we pre-fill the slug from the
+ *      extracted brief.client.
  *   2. User either:
- *      a) clicks a template card → applyTemplate(id, slug) → POST /api/sites.
- *      b) clicks "Start from blank" → minimal brief → POST /api/sites.
- *   3. On success, fires the `site.template_applied` analytics event
- *      (fire-and-forget) and redirects to /sites/<id>.
+ *        a) clicks a template card → applyTemplate(id, slug) → POST /api/sites.
+ *        b) clicks "Start from blank" → minimal brief → POST /api/sites.
+ *        c) drops a wireframe (png/jpg/webp/pdf) → /api/sites/parse-brief
+ *           → WireframeExtractReview → user applies → POST /api/sites with
+ *           the extracted brief (+theme).
+ *   3. On success, fires `site.template_applied` and redirects to
+ *      /sites/<id>.
  *
  * Analytics:
  *   - `site.template_previewed` — fired inside <TemplatePicker> on click.
  *   - `site.template_applied` — fired here after POST /api/sites returns
  *     201. Tells the learning loop which template actually got shipped.
+ *     For the wireframe path we set templateId = "wireframe" so the
+ *     learning loop can distinguish AI-extracted sites from manual picks.
+ *   - `site.wireframe_review_*` — fired by WireframeExtractReview.
+ *   - `site.wireframe_extraction_failed` — fired here on non-OK parse.
  *
  * Auth:
- *   - Unauthenticated visitors are redirected to /login?next=/sites/new
- *     by the existing (dashboard) layout's guard. We still use
- *     `fetchWithRefresh` for every API call so stale access tokens
- *     are rotated transparently.
+ *   - Unauthenticated visitors are redirected to /login?next=/sites/new by
+ *     the existing (dashboard) layout's guard. We still use
+ *     `fetchWithRefresh` for every API call so stale access tokens are
+ *     rotated transparently.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import TemplatePicker from "@/components/sites/TemplatePicker";
+import Dropzone from "@/components/sites/Dropzone";
+import WireframeExtractReview, {
+  type WireframeExtractPayload,
+} from "@/components/sites/WireframeExtractReview";
 import { applyTemplate } from "@/lib/site-templates";
 import type { SiteBrief } from "@/lib/sites-schema";
-import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+import type { SiteTheme } from "@/lib/site-theme";
+import { fetchWithRefresh, jsonHeaders, authHeaders } from "@/lib/client-auth";
 
 const SLUG_RE = /^[a-z][a-z0-9-]{1,38}$/;
 
@@ -65,19 +78,55 @@ function blankBrief(clientSlug: string): SiteBrief {
   };
 }
 
+function sanitizeSlugStatic(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+/, "")
+    .slice(0, 39);
+}
+
+function parseBriefErrorMessage(status: number, data: { error?: string; reason?: string }): string {
+  if (status === 503 || data.reason === "ai_not_configured") {
+    return (
+      data.error ??
+      "AI extraction isn't configured. An admin needs to set ANTHROPIC_API_KEY on this environment."
+    );
+  }
+  if (status === 413) return data.error ?? "Image too large (10 MB max).";
+  if (status === 415) {
+    return data.error ?? "That file type isn't supported. Try PNG, JPG, WEBP, or PDF.";
+  }
+  return data.error ?? "Couldn't read that file.";
+}
+
+function fireExtractionFailed(reason: string, file: File): void {
+  try {
+    fetchWithRefresh("/api/analytics", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        event: "site.wireframe_extraction_failed",
+        metadata: { reason, mime: file.type, sizeBytes: file.size },
+      }),
+    }).catch(() => {});
+  } catch { /* swallow */ }
+}
+
 export default function NewSitePage() {
   const router = useRouter();
   const [clientSlug, setClientSlug] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Wireframe parse state.
+  const [parsing, setParsing] = useState(false);
+  const [wireframeReview, setWireframeReview] = useState<WireframeExtractPayload | null>(null);
+  const [wireframeError, setWireframeError] = useState<string | null>(null);
+  const parseAbortRef = useRef<AbortController | null>(null);
 
   function sanitizeSlug(raw: string): string {
-    return raw
-      .toLowerCase()
-      .replace(/[^a-z0-9-]/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-+/, "")
-      .slice(0, 39);
+    return sanitizeSlugStatic(raw);
   }
 
   function assertSlugOrReport(): string | null {
@@ -89,7 +138,6 @@ export default function NewSitePage() {
   }
 
   function fireAppliedAnalytics(templateId: string, slug: string): void {
-    // Fire-and-forget. Analytics must never block navigation.
     try {
       fetchWithRefresh("/api/analytics", {
         method: "POST",
@@ -156,13 +204,100 @@ export default function NewSitePage() {
     await createSite(blankBrief(slug), "blank");
   }
 
+  async function handleWireframeFile(file: File): Promise<void> {
+    if (parseAbortRef.current) parseAbortRef.current.abort();
+    const controller = new AbortController();
+    parseAbortRef.current = controller;
+    setParsing(true);
+    setWireframeError(null);
+    setWireframeReview(null);
+    const fd = new FormData();
+    fd.append("file", file);
+    // The server accepts an empty clientSlug and will suggest one from the
+    // extracted brief. If the user has already typed one, respect it.
+    fd.append("clientSlug", clientSlug || "new-site");
+    try {
+      const r = await fetchWithRefresh("/api/sites/parse-brief", {
+        method: "POST",
+        headers: authHeaders(),
+        body: fd,
+        signal: controller.signal,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = parseBriefErrorMessage(r.status, data);
+        setWireframeError(msg);
+        fireExtractionFailed(data.reason ?? `http_${r.status}`, file);
+      } else if (data.source === "vision") {
+        setWireframeReview({
+          brief: data.brief,
+          source: data.source,
+          metadata: data.metadata ?? {},
+        });
+      } else {
+        // Non-vision result (shouldn't happen for images but let the user
+        // know if the server routed it into a different extractor).
+        setWireframeReview({
+          brief: data.brief,
+          source: data.source,
+          metadata: data.metadata ?? {},
+        });
+      }
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        setWireframeError((err as Error).message);
+        fireExtractionFailed("network_error", file);
+      }
+    } finally {
+      if (parseAbortRef.current === controller) parseAbortRef.current = null;
+      setParsing(false);
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (parseAbortRef.current) parseAbortRef.current.abort();
+    };
+  }, []);
+
+  function applyWireframeExtraction(merged: { brief: SiteBrief; theme: SiteTheme }): void {
+    // Pre-fill the slug from the extracted brief when the user hasn't
+    // already set one. sanitize again to enforce SLUG_RE invariants — the
+    // model could hand back anything for `brief.client`.
+    const extractedSlug = sanitizeSlug(merged.brief.client ?? "");
+    if (!clientSlug && SLUG_RE.test(extractedSlug)) {
+      setClientSlug(extractedSlug);
+    }
+    // Keep the review mounted with the applied state so the user can
+    // still bail out; next they either pick a template or click Create.
+    setWireframeReview((prev) =>
+      prev ? { ...prev, brief: { ...merged.brief, theme: merged.theme } } : prev,
+    );
+    setError(null);
+  }
+
+  function dismissWireframeExtraction(): void {
+    setWireframeReview(null);
+  }
+
+  async function handleCreateFromWireframe(): Promise<void> {
+    if (!wireframeReview) return;
+    const extracted = wireframeReview.brief;
+    const slug = assertSlugOrReport();
+    if (!slug) return;
+    // Ensure the brief carries the user-confirmed slug — the model's
+    // suggestion may have been edited by the user before Create.
+    const brief: SiteBrief = { ...extracted, client: slug };
+    await createSite(brief, "wireframe");
+  }
+
   return (
     <div style={{ padding: "2rem", color: "var(--wp-text)" }}>
       <div style={{ marginBottom: "1.5rem" }}>
         <h1 style={{ fontSize: "1.8rem", margin: 0 }}>Start a new site</h1>
         <p style={{ color: "var(--wp-text-dim)", marginTop: "0.4rem" }}>
-          Pick a starter template or begin from a blank brief. You can edit every
-          section afterwards.
+          Pick a starter template, start from blank, or drop a wireframe
+          image and we&apos;ll suggest colors + sections from it.
         </p>
       </div>
 
@@ -215,6 +350,90 @@ export default function NewSitePage() {
           />
         </div>
       </div>
+
+      {/* Wireframe dropzone — drop an image and we extract the brief. */}
+      <section style={{ marginBottom: "2rem" }}>
+        <h2 style={{ fontSize: "1.1rem", margin: "0 0 0.4rem 0" }}>
+          Start from a wireframe (optional)
+        </h2>
+        <p style={{ fontSize: "0.85rem", color: "var(--wp-text-dim)", margin: "0 0 0.6rem 0" }}>
+          Drop a screenshot or PDF of your wireframe. We&apos;ll read it and
+          suggest colors, sections, and a layout you can review before creating
+          the site.
+        </p>
+        <Dropzone
+          label={
+            parsing
+              ? "Analyzing your wireframe… (usually ~10 seconds)"
+              : "Drop a wireframe image (PNG, JPG, WEBP, or PDF) here"
+          }
+          accept=""
+          acceptImages
+          disabled={parsing || submitting}
+          onFile={handleWireframeFile}
+          compact
+          testId="wireframe-dropzone"
+        />
+        {parsing && (
+          <div
+            data-testid="wireframe-loading-indicator"
+            role="status"
+            aria-live="polite"
+            style={{
+              fontSize: "0.8rem",
+              color: "var(--wp-text-dim)",
+              marginTop: "0.5rem",
+            }}
+          >
+            Analyzing your wireframe… (usually ~10 seconds)
+          </div>
+        )}
+        {wireframeError && (
+          <div
+            data-testid="wireframe-error-banner"
+            role="alert"
+            style={{
+              padding: "0.6rem 0.8rem",
+              marginTop: "0.5rem",
+              background: "rgba(220, 80, 80, 0.08)",
+              border: "1px solid rgba(220, 80, 80, 0.4)",
+              color: "#e07070",
+              borderRadius: "6px",
+              fontSize: "0.85rem",
+            }}
+          >
+            {wireframeError}
+          </div>
+        )}
+        {wireframeReview && (
+          <div style={{ marginTop: "0.75rem" }}>
+            <WireframeExtractReview
+              payload={wireframeReview}
+              onApply={applyWireframeExtraction}
+              onDismiss={dismissWireframeExtraction}
+            />
+            <button
+              type="button"
+              data-testid="create-from-wireframe"
+              onClick={handleCreateFromWireframe}
+              disabled={submitting}
+              style={{
+                marginTop: "0.4rem",
+                background: "var(--wp-gold)",
+                color: "var(--wp-dark)",
+                border: "1px solid var(--wp-border)",
+                borderRadius: "6px",
+                padding: "0.55rem 1rem",
+                fontWeight: 600,
+                cursor: submitting ? "not-allowed" : "pointer",
+                fontSize: "0.85rem",
+              }}
+            >
+              {submitting ? "Creating site…" : "Create draft from this wireframe"}
+            </button>
+          </div>
+        )}
+      </section>
 
       <h2 style={{ fontSize: "1.1rem", margin: "0 0 0.75rem 0" }}>Pick a template</h2>
       <TemplatePicker onSelect={handleTemplateSelect} disabled={submitting} />

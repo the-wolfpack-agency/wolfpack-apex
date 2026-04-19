@@ -19,10 +19,15 @@
  * appear automatically when the webhook reports back.
  */
 
-import { useEffect, useState, useRef, use, forwardRef, memo } from "react";
+import { useEffect, useState, useRef, use, memo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BriefForm, type Brief } from "@/components/sites/BriefForm";
+import Dropzone from "@/components/sites/Dropzone";
+import WireframeExtractReview, {
+  type WireframeExtractPayload,
+} from "@/components/sites/WireframeExtractReview";
+import type { SiteTheme } from "@/lib/site-theme";
 import {
   authHeaders as canonicalAuthHeaders,
   jsonHeaders as canonicalJsonHeaders,
@@ -146,6 +151,17 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [uploads, setUploads] = useState<UploadedAsset[]>([]);
+  // Wireframe review — populated once a vision extraction succeeds.
+  // Null hides the review card; user dismissing it also clears this.
+  const [wireframeReview, setWireframeReview] = useState<WireframeExtractPayload | null>(null);
+  // Wireframe-specific error — kept separate from the page-wide `error`
+  // state so save/deploy errors don't bleed into the brief section's
+  // wireframe-error-banner (and vice versa).
+  const [wireframeError, setWireframeError] = useState<string | null>(null);
+  // AbortController for an in-flight parse-brief call. Lets us cancel
+  // when the component unmounts mid-request so the "Parsing…" state
+  // doesn't wedge forever.
+  const parseAbortRef = useRef<AbortController | null>(null);
   const briefDropRef = useRef<HTMLDivElement | null>(null);
   const assetDropRef = useRef<HTMLDivElement | null>(null);
 
@@ -243,26 +259,100 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
     setDeploying(false);
   }
 
+  function parseBriefErrorMessage(status: number, data: { error?: string; reason?: string }): string {
+    // Surface the server's exact message where provided, but add actionable
+    // copy for the known failure modes Max/Meghan might hit.
+    if (status === 503 || data.reason === "ai_not_configured") {
+      return (
+        data.error ??
+        "AI extraction isn't configured. An admin needs to set ANTHROPIC_API_KEY on this environment."
+      );
+    }
+    if (status === 413) return data.error ?? "Image too large (10 MB max).";
+    if (status === 415) {
+      return data.error ?? "That file type isn't supported. Try PNG, JPG, WEBP, or PDF.";
+    }
+    return data.error ?? "Couldn't read that file.";
+  }
+
+  function fireExtractionFailed(reason: string, file: File): void {
+    try {
+      fetchWithRefresh("/api/analytics", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          event: "site.wireframe_extraction_failed",
+          metadata: { reason, mime: file.type, sizeBytes: file.size },
+        }),
+      }).catch(() => {});
+    } catch { /* swallow */ }
+  }
+
   async function handleParseFile(file: File) {
     if (!project) return;
+    // Cancel any in-flight parse when the user drops a new file.
+    if (parseAbortRef.current) parseAbortRef.current.abort();
+    const controller = new AbortController();
+    parseAbortRef.current = controller;
     setParsing(true);
-    setError(null);
+    setWireframeError(null);
+    setWireframeReview(null);
     const fd = new FormData();
     fd.append("file", file);
     fd.append("clientSlug", project.client_slug);
-    const r = await fetchWithRefresh("/api/sites/parse-brief", {
-      method: "POST",
-      headers: authHeaders(),
-      body: fd,
-    });
-    const data = await r.json();
-    if (!r.ok) {
-      setError(data.error ?? "Couldn't parse that file.");
-    } else {
-      setBrief(data.brief);
-      setMessage(`Brief parsed (${data.source}). Review the form below and click Save.`);
+    try {
+      const r = await fetchWithRefresh("/api/sites/parse-brief", {
+        method: "POST",
+        headers: authHeaders(),
+        body: fd,
+        signal: controller.signal,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = parseBriefErrorMessage(r.status, data);
+        setWireframeError(msg);
+        fireExtractionFailed(data.reason ?? `http_${r.status}`, file);
+      } else if (data.source === "vision") {
+        // Image/PDF path — show the review card, DON'T auto-apply. The user
+        // confirms before the extracted brief lands in BriefForm state.
+        setWireframeReview({
+          brief: data.brief,
+          source: data.source,
+          metadata: data.metadata ?? {},
+        });
+      } else {
+        // Text/HTML/Markdown path keeps the legacy behavior — the brief
+        // drops straight into the form.
+        setBrief(data.brief);
+        setMessage(`Brief parsed (${data.source}). Review the form below and click Save.`);
+      }
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        setWireframeError((err as Error).message);
+        fireExtractionFailed("network_error", file);
+      }
+    } finally {
+      if (parseAbortRef.current === controller) parseAbortRef.current = null;
+      setParsing(false);
     }
-    setParsing(false);
+  }
+
+  // Clean up any in-flight parse request when the page unmounts so
+  // the fetch doesn't resolve into a destroyed component.
+  useEffect(() => {
+    return () => {
+      if (parseAbortRef.current) parseAbortRef.current.abort();
+    };
+  }, []);
+
+  function applyWireframeExtraction(merged: { brief: Brief; theme: SiteTheme }): void {
+    setBrief({ ...merged.brief, theme: merged.theme } as Brief);
+    setWireframeReview(null);
+    setMessage("AI suggestions applied — review the form below and click Save.");
+  }
+
+  function dismissWireframeExtraction(): void {
+    setWireframeReview(null);
   }
 
   async function handleUploadAsset(file: File) {
@@ -459,11 +549,58 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
         </p>
         <Dropzone
           ref={briefDropRef}
-          label={parsing ? "Parsing your file…" : "Have a design brief? Drop HTML, text, or Markdown here to auto-fill"}
+          label={
+            parsing
+              ? "Analyzing your wireframe… (usually ~10 seconds)"
+              : "Drop a wireframe image (PNG/JPG/WEBP/PDF), HTML, text, or Markdown to auto-fill"
+          }
           accept=".html,.htm,.txt,.md"
+          acceptImages
+          disabled={parsing}
           onFile={handleParseFile}
           compact
+          testId="wireframe-dropzone"
         />
+        {parsing && (
+          <div
+            data-testid="wireframe-loading-indicator"
+            role="status"
+            aria-live="polite"
+            style={{
+              fontSize: "0.8rem",
+              color: "var(--wp-text-dim)",
+              marginTop: "0.5rem",
+            }}
+          >
+            Analyzing your wireframe… (usually ~10 seconds)
+          </div>
+        )}
+        {wireframeError && (
+          <div
+            data-testid="wireframe-error-banner"
+            role="alert"
+            style={{
+              padding: "0.6rem 0.8rem",
+              marginTop: "0.5rem",
+              background: "rgba(220, 80, 80, 0.08)",
+              border: "1px solid rgba(220, 80, 80, 0.4)",
+              color: "#e07070",
+              borderRadius: "6px",
+              fontSize: "0.85rem",
+            }}
+          >
+            {wireframeError}
+          </div>
+        )}
+        {wireframeReview && (
+          <div style={{ marginTop: "0.75rem" }}>
+            <WireframeExtractReview
+              payload={wireframeReview}
+              onApply={applyWireframeExtraction}
+              onDismiss={dismissWireframeExtraction}
+            />
+          </div>
+        )}
         <div style={{ marginTop: "1rem" }}>
           <BriefForm value={brief} onChange={setBrief} />
         </div>
@@ -612,44 +749,6 @@ function SectionHeading({ step, title }: { step: string; title: string }) {
     </div>
   );
 }
-
-const Dropzone = forwardRef<
-  HTMLDivElement,
-  { label: string; accept: string; onFile: (f: File) => void; compact?: boolean }
->(function Dropzone({ label, accept, onFile, compact }, ref) {
-  const [over, setOver] = useState(false);
-  return (
-    <div
-      ref={ref}
-      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setOver(false);
-        const f = e.dataTransfer.files[0];
-        if (f) onFile(f);
-      }}
-      style={{
-        padding: compact ? "0.85rem 1rem" : "1.25rem",
-        border: `2px dashed ${over ? "var(--wp-gold)" : "var(--wp-border)"}`,
-        borderRadius: "8px",
-        textAlign: "center",
-        background: over ? "rgba(255, 215, 0, 0.05)" : "transparent",
-        transition: "all 0.15s ease",
-        cursor: "pointer",
-      }}
-      onClick={() => {
-        const input = document.createElement("input");
-        input.type = "file";
-        input.accept = accept;
-        input.onchange = () => input.files?.[0] && onFile(input.files[0]);
-        input.click();
-      }}
-    >
-      <span style={{ color: "var(--wp-text-dim)", fontSize: "0.85rem" }}>{label}</span>
-    </div>
-  );
-});
 
 function btnStyle(bg = "var(--wp-card)"): React.CSSProperties {
   return {
