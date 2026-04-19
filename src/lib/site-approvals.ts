@@ -192,21 +192,32 @@ export interface ApprovalGateResult {
 export async function checkApprovalGate(
   siteId: string,
 ): Promise<ApprovalGateResult> {
-  // Feature-flagged gate. Currently OFF by design. When we flip the
-  // flag, the branch below activates and the tests will need to
-  // update — that's the signal to the next engineer that this is a
-  // deliberate behavior change, not a drift.
-  // eslint-disable-next-line no-constant-condition
-  if (false /* process.env.INSTINCT_APPROVAL_GATE_ENABLED === "true" */) {
-    const latest = await latestApprovalState(siteId);
-    if (!latest || latest.state !== "approved") {
-      return {
-        allowed: false,
-        reason: "no_client_approval_recorded",
-        approval: latest,
-      };
-    }
-    return { allowed: true, approval: latest };
+  // Feature-flagged gate. Env-var check instead of the prior
+  // `if (false /* ... */)` pattern — the dead-code comment confused
+  // TS narrowing flow analysis (TS couldn't determine `latest` was
+  // non-null after `!latest ||` inside the unreachable block).
+  // Reading the env var is safe at module scope + in tests because
+  // it's simply undefined in non-prod, so the gate stays OFF by
+  // default and only activates when the operator explicitly opts in.
+  const gateEnabled = process.env.INSTINCT_APPROVAL_GATE_ENABLED === "true";
+  if (!gateEnabled) {
+    return { allowed: true };
   }
-  return { allowed: true };
+
+  const latest = await latestApprovalState(siteId);
+  if (latest === null) {
+    return {
+      allowed: false,
+      reason: "no_client_approval_recorded",
+      approval: null,
+    };
+  }
+  if (latest.state !== "approved") {
+    return {
+      allowed: false,
+      reason: "no_client_approval_recorded",
+      approval: latest,
+    };
+  }
+  return { allowed: true, approval: latest };
 }
