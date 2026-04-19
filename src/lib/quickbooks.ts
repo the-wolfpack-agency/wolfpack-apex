@@ -274,13 +274,13 @@ export async function storeTokens(tokens: QboTokens, userId: string, companyName
 
   try {
     await query(
-      `INSERT INTO apex_qbo_tokens (realm_id, access_token, refresh_token, expires_at, company_name, connected_by)
+      `INSERT INTO instinct_qbo_tokens (realm_id, access_token, refresh_token, expires_at, company_name, connected_by)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (realm_id) DO UPDATE SET
          access_token = EXCLUDED.access_token,
          refresh_token = EXCLUDED.refresh_token,
          expires_at = EXCLUDED.expires_at,
-         company_name = COALESCE(EXCLUDED.company_name, apex_qbo_tokens.company_name),
+         company_name = COALESCE(EXCLUDED.company_name, instinct_qbo_tokens.company_name),
          updated_at = NOW()`,
       [tokens.realm_id, tokens.access_token, tokens.refresh_token, tokens.expires_at, companyName || null, userId],
     );
@@ -304,7 +304,7 @@ export async function getValidToken(): Promise<{ accessToken: string; realmId: s
     connected_by: string;
   }>(
     `SELECT access_token, refresh_token, realm_id, expires_at, connected_by
-     FROM apex_qbo_tokens
+     FROM instinct_qbo_tokens
      ORDER BY updated_at DESC
      LIMIT 1`,
   );
@@ -340,7 +340,7 @@ export async function deleteTokens(): Promise<void> {
   if (!process.env.DATABASE_URL) return;
 
   try {
-    await query(`DELETE FROM apex_qbo_tokens`);
+    await query(`DELETE FROM instinct_qbo_tokens`);
     clearCache();
   } catch (err) {
     console.error("[quickbooks] Failed to delete tokens:", (err as Error).message);
@@ -412,7 +412,7 @@ export async function getConnectionStatus(): Promise<ConnectionStatus> {
     updated_at: string;
   }>(
     `SELECT realm_id, company_name, updated_at
-     FROM apex_qbo_tokens
+     FROM instinct_qbo_tokens
      ORDER BY updated_at DESC
      LIMIT 1`,
   );

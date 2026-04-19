@@ -168,7 +168,7 @@ export async function fetchPlaudTranscript(fileId: string): Promise<PlaudTranscr
  *   1. If Plaud's payload includes an owner email that matches an Instinct
  *      team member, use that member.
  *   2. Otherwise, fall back to whoever connected the org-level Plaud
- *      account (apex_plaud_connections.connected_by).
+ *      account (instinct_plaud_connections.connected_by).
  *   3. If neither resolves, return null and skip ingestion.
  */
 export async function resolveOwnerUserId(ownerEmail?: string): Promise<string | null> {
@@ -183,7 +183,7 @@ export async function resolveOwnerUserId(ownerEmail?: string): Promise<string | 
   }
 
   const { rows } = await safeQuery<{ connected_by: string }>(
-    `SELECT connected_by FROM apex_plaud_connections WHERE scope = 'org' LIMIT 1`,
+    `SELECT connected_by FROM instinct_plaud_connections WHERE scope = 'org' LIMIT 1`,
   );
   return rows.length > 0 ? rows[0].connected_by : null;
 }
@@ -350,11 +350,11 @@ export async function ingestTranscript(fileId: string): Promise<IngestResult> {
 export async function recordConnection(userId: string, displayName?: string): Promise<void> {
   if (!process.env.DATABASE_URL) return;
   await query(
-    `INSERT INTO apex_plaud_connections (scope, connected_by, display_name)
+    `INSERT INTO instinct_plaud_connections (scope, connected_by, display_name)
      VALUES ('org', $1, $2)
      ON CONFLICT (scope) DO UPDATE SET
        connected_by = EXCLUDED.connected_by,
-       display_name = COALESCE(EXCLUDED.display_name, apex_plaud_connections.display_name),
+       display_name = COALESCE(EXCLUDED.display_name, instinct_plaud_connections.display_name),
        updated_at   = NOW()`,
     [userId, displayName || null],
   );
@@ -362,7 +362,7 @@ export async function recordConnection(userId: string, displayName?: string): Pr
 
 export async function deleteConnection(): Promise<void> {
   if (!process.env.DATABASE_URL) return;
-  await query(`DELETE FROM apex_plaud_connections WHERE scope = 'org'`);
+  await query(`DELETE FROM instinct_plaud_connections WHERE scope = 'org'`);
 }
 
 // ---------------------------------------------------------------------------
@@ -603,7 +603,7 @@ export async function getConnectionStatus(): Promise<{
     connected_at: string;
   }>(
     `SELECT connected_by, display_name, connected_at
-     FROM apex_plaud_connections
+     FROM instinct_plaud_connections
      WHERE scope = 'org'
      LIMIT 1`,
   );

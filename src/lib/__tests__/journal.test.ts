@@ -65,7 +65,7 @@ describe("getOrCreateJournal", () => {
     expect(journal.id).toBe("j-1");
     expect(journal.user_id).toBe("u1");
     expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining("INSERT INTO apex_journals"),
+      expect.stringContaining("INSERT INTO instinct_journals"),
       expect.arrayContaining(["u1"]),
     );
     expect(trackEvent).toHaveBeenCalledWith(
@@ -109,7 +109,7 @@ describe("updateJournal", () => {
 
     expect(updated).not.toBeNull();
     expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining("UPDATE apex_journals"),
+      expect.stringContaining("UPDATE instinct_journals"),
       expect.arrayContaining(["Updated", "creative", "j-1", "u1"]),
     );
     expect(trackEvent).toHaveBeenCalledWith(

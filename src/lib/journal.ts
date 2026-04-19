@@ -66,7 +66,7 @@ export async function getOrCreateJournal(
 
   try {
     const result = await query<Record<string, unknown>>(
-      `INSERT INTO apex_journals (user_id, date)
+      `INSERT INTO instinct_journals (user_id, date)
        VALUES ($1, $2)
        ON CONFLICT (user_id, date) DO UPDATE SET updated_at = NOW()
        RETURNING *`,
@@ -133,7 +133,7 @@ export async function updateJournal(
     params.push(journalId, userId);
 
     const result = await query<Record<string, unknown>>(
-      `UPDATE apex_journals SET ${setClauses.join(", ")}
+      `UPDATE instinct_journals SET ${setClauses.join(", ")}
        WHERE id = $${idx++} AND user_id = $${idx}
        RETURNING *`,
       params,
@@ -163,7 +163,7 @@ export async function addAutoContext(
     const targetDate = todayStr();
     // Ensure journal exists first
     await query(
-      `INSERT INTO apex_journals (user_id, date)
+      `INSERT INTO instinct_journals (user_id, date)
        VALUES ($1, $2)
        ON CONFLICT (user_id, date) DO NOTHING`,
       [userId, targetDate],
@@ -171,7 +171,7 @@ export async function addAutoContext(
 
     // Merge context into auto_context JSONB
     await query(
-      `UPDATE apex_journals
+      `UPDATE instinct_journals
        SET auto_context = auto_context || $1, updated_at = NOW()
        WHERE user_id = $2 AND date = $3`,
       [JSON.stringify(context), userId, targetDate],
@@ -196,7 +196,7 @@ export async function getJournalHistory(
   }
 
   const { rows } = await safeQuery<Record<string, unknown>>(
-    `SELECT * FROM apex_journals
+    `SELECT * FROM instinct_journals
      WHERE user_id = $1 AND date >= CURRENT_DATE - $2::int
      ORDER BY date DESC`,
     [userId, days],
@@ -218,7 +218,7 @@ export async function getTeamJournals(date?: string): Promise<JournalEntry[]> {
   }
 
   const { rows } = await safeQuery<Record<string, unknown>>(
-    `SELECT * FROM apex_journals WHERE date = $1 ORDER BY updated_at DESC`,
+    `SELECT * FROM instinct_journals WHERE date = $1 ORDER BY updated_at DESC`,
     [targetDate],
   );
   return rows.map(rowToJournal);

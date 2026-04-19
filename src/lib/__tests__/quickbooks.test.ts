@@ -305,17 +305,46 @@ describe("Migration File", () => {
     expect(fs.existsSync(p)).toBe(true);
   });
 
-  test("migration creates apex_qbo_tokens table", () => {
+  test("migration 004 creates the original apex_qbo_tokens table (historical)", () => {
     const fs = require("fs");
     const sql = fs.readFileSync(
       require("path").resolve(__dirname, "../../db/migrations/004_quickbooks.sql"),
       "utf-8",
     );
+    // Historical migration — MUST keep the original apex_ name; it is
+    // renamed by migration 042. Do not rewrite landed migrations.
     expect(sql).toContain("apex_qbo_tokens");
     expect(sql).toContain("realm_id");
     expect(sql).toContain("access_token");
     expect(sql).toContain("refresh_token");
     expect(sql).toContain("expires_at");
+  });
+
+  test("migration 042 renames apex_qbo_tokens → instinct_qbo_tokens with compat view", () => {
+    const fs = require("fs");
+    const sql = fs.readFileSync(
+      require("path").resolve(__dirname, "../../db/migrations/042_rename_qbo_tokens.sql"),
+      "utf-8",
+    );
+    // Defensive rename (Case B): ALTER TABLE ... RENAME TO
+    expect(sql).toMatch(/ALTER TABLE apex_qbo_tokens RENAME TO instinct_qbo_tokens/);
+    // Backward-compat view so any missed code reference still works.
+    expect(sql).toMatch(/CREATE OR REPLACE VIEW apex_qbo_tokens AS SELECT \* FROM instinct_qbo_tokens/);
+    // Row-count assertion present.
+    expect(sql).toContain("Row-count mismatch after rename");
+    // Index rename aligned with instinct_* convention.
+    expect(sql).toMatch(/ALTER INDEX IF EXISTS idx_qbo_tokens_realm RENAME TO idx_instinct_qbo_tokens_realm/);
+  });
+
+  test("migration 042 has a reversible .down.sql", () => {
+    const fs = require("fs");
+    const down = fs.readFileSync(
+      require("path").resolve(__dirname, "../../db/migrations/042_rename_qbo_tokens.down.sql"),
+      "utf-8",
+    );
+    expect(down).toMatch(/ALTER TABLE IF EXISTS instinct_qbo_tokens RENAME TO apex_qbo_tokens/);
+    expect(down).toMatch(/CREATE OR REPLACE VIEW instinct_qbo_tokens AS/);
+    expect(down).toMatch(/ALTER INDEX IF EXISTS idx_instinct_qbo_tokens_realm RENAME TO idx_qbo_tokens_realm/);
   });
 });
 
