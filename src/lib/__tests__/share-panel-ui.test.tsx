@@ -200,4 +200,121 @@ describe("SharePanel", () => {
       expect(screen.getByTestId("share-error")).toHaveTextContent(/boom/),
     );
   });
+
+  // Regression lock for 2026-04-19 user bug: generated URL disappeared
+  // after 2.5s and overflowed the container. Fix surfaces it as a
+  // persistent readonly input with a dedicated Copy button.
+  it("persists the generated link in a readonly input until dismissed", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        mkResponse(200, { tokens: [], latestApproval: null }),
+      )
+      .mockResolvedValueOnce(
+        mkResponse(200, {
+          token: "payload.sig",
+          shareUrl: "/share/payload.sig",
+          nonce: "nonce-xxx",
+          expiresAt: new Date(Date.now() + 86400_000 * 30).toISOString(),
+        }),
+      )
+      .mockResolvedValueOnce(
+        mkResponse(200, { tokens: [], latestApproval: null }),
+      );
+
+    await act(async () => {
+      render(<SharePanel siteId="site_1" previewUrl="https://example.com" />);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("generate-share-link")).toBeEnabled(),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("generate-share-link"));
+    });
+
+    // The persistent display appears with the FULL URL as the input value.
+    const lastInput = await screen.findByTestId("share-last-generated-input");
+    expect(lastInput).toHaveAttribute("readonly");
+    expect((lastInput as HTMLInputElement).value).toContain("/share/payload.sig");
+
+    // And critically — it does NOT disappear after the 2.5s flash timeout.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 2600));
+    });
+    expect(
+      screen.getByTestId("share-last-generated-input"),
+    ).toBeInTheDocument();
+  });
+
+  it("Copy button in the persistent display re-writes to clipboard", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        mkResponse(200, { tokens: [], latestApproval: null }),
+      )
+      .mockResolvedValueOnce(
+        mkResponse(200, {
+          token: "payload.sig",
+          shareUrl: "/share/payload.sig",
+          nonce: "nonce-xxx",
+          expiresAt: new Date(Date.now() + 86400_000 * 30).toISOString(),
+        }),
+      )
+      .mockResolvedValueOnce(
+        mkResponse(200, { tokens: [], latestApproval: null }),
+      );
+
+    await act(async () => {
+      render(<SharePanel siteId="site_1" previewUrl="https://example.com" />);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("generate-share-link")).toBeEnabled(),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("generate-share-link"));
+    });
+    await screen.findByTestId("share-last-generated-input");
+
+    (navigator.clipboard.writeText as jest.Mock).mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("share-copy-last"));
+    });
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        expect.stringContaining("/share/payload.sig"),
+      );
+    });
+  });
+
+  it("Dismiss (×) removes the persistent display", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        mkResponse(200, { tokens: [], latestApproval: null }),
+      )
+      .mockResolvedValueOnce(
+        mkResponse(200, {
+          token: "payload.sig",
+          shareUrl: "/share/payload.sig",
+          nonce: "nonce-xxx",
+          expiresAt: new Date(Date.now() + 86400_000 * 30).toISOString(),
+        }),
+      )
+      .mockResolvedValueOnce(
+        mkResponse(200, { tokens: [], latestApproval: null }),
+      );
+
+    await act(async () => {
+      render(<SharePanel siteId="site_1" previewUrl="https://example.com" />);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("generate-share-link")).toBeEnabled(),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("generate-share-link"));
+    });
+    await screen.findByTestId("share-last-generated");
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("share-dismiss-last"));
+    });
+    expect(screen.queryByTestId("share-last-generated")).not.toBeInTheDocument();
+  });
 });

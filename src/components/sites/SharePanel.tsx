@@ -80,7 +80,14 @@ export default function SharePanel({ siteId, previewUrl }: Props) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
+  // Transient confirmation banner ("Copied to clipboard", auto-hides in 2.5s).
   const [flash, setFlash] = useState<string | null>(null);
+  // Persistent display of the most recently generated URL. Stays on
+  // screen until a new link is generated or the user explicitly
+  // dismisses it. Designer needs the URL visible long enough to paste
+  // it into Slack / email — 2.5s auto-hide was a UX bug (reported
+  // 2026-04-19: "runs off page and only displays for a few seconds").
+  const [lastGenerated, setLastGenerated] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -126,15 +133,19 @@ export default function SharePanel({ siteId, previewUrl }: Props) {
         typeof window !== "undefined"
           ? `${window.location.origin}${data.shareUrl}`
           : data.shareUrl;
+      // Persistent display — stays until the next generate or a page
+      // reload. This is what the designer pastes from.
+      setLastGenerated(fullUrl);
+      // Transient confirmation — clipboard result. Auto-hides below.
       try {
         if (navigator.clipboard?.writeText) {
           await navigator.clipboard.writeText(fullUrl);
-          setFlash("Copied to clipboard");
+          setFlash("Copied to clipboard — link is saved below too");
         } else {
-          setFlash(fullUrl);
+          setFlash("Link generated — use the copy button below");
         }
       } catch {
-        setFlash(fullUrl);
+        setFlash("Link generated — use the copy button below");
       }
       await load();
     } catch (err) {
@@ -298,6 +309,104 @@ export default function SharePanel({ siteId, previewUrl }: Props) {
           style={{ marginTop: 8, fontSize: 12, color: "var(--wp-error, #e07070)" }}
         >
           {error}
+        </div>
+      )}
+
+      {lastGenerated && (
+        <div
+          data-testid="share-last-generated"
+          style={{
+            marginTop: 12,
+            padding: "10px 12px",
+            border: "1px solid rgba(109, 207, 133, 0.3)",
+            borderRadius: 6,
+            background: "rgba(109, 207, 133, 0.06)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--wp-text-dim)",
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+            }}
+          >
+            New share link
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+            <input
+              type="text"
+              readOnly
+              value={lastGenerated}
+              data-testid="share-last-generated-input"
+              onFocus={(e) => e.currentTarget.select()}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                fontSize: 12,
+                padding: "6px 8px",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 4,
+                background: "var(--wp-dark-surface, #151820)",
+                color: "var(--wp-fg, #e6e6e6)",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              }}
+              aria-label="Most recently generated share link"
+            />
+            <button
+              type="button"
+              data-testid="share-copy-last"
+              onClick={async () => {
+                try {
+                  if (navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(lastGenerated);
+                    setFlash("Copied to clipboard");
+                  }
+                } catch {
+                  setFlash("Copy failed — select + ⌘C manually");
+                }
+              }}
+              style={{
+                padding: "6px 12px",
+                fontSize: 12,
+                fontWeight: 600,
+                background: "var(--wp-gold, #eab308)",
+                color: "var(--wp-dark, #0f1115)",
+                border: "none",
+                borderRadius: 4,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+              aria-label="Copy share link to clipboard"
+            >
+              Copy
+            </button>
+            <button
+              type="button"
+              data-testid="share-dismiss-last"
+              onClick={() => setLastGenerated(null)}
+              style={{
+                padding: "6px 10px",
+                fontSize: 12,
+                background: "transparent",
+                color: "var(--wp-text-dim)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 4,
+                cursor: "pointer",
+              }}
+              aria-label="Dismiss this share link"
+              title="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--wp-text-dim)" }}>
+            Paste into Slack, email, or a DM. The link stays visible until you generate another one.
+          </div>
         </div>
       )}
 
