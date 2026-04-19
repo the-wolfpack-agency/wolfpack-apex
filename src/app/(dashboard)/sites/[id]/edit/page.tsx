@@ -57,6 +57,34 @@ interface ChatMessage {
 
 const DRAFT_STORAGE_KEY = (projectId: string) => `instinct_draft_${projectId}`;
 
+/**
+ * Cheap non-cryptographic content hash for a brief. We don't need
+ * collision resistance — just a stable string that changes whenever the
+ * brief content changes, so we can detect stale localStorage drafts
+ * after the saved brief moved forward server-side.
+ */
+function hashBrief(b: unknown): string {
+  const s = JSON.stringify(b);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = (h * 0x01000193) >>> 0;
+  }
+  return h.toString(16);
+}
+
+interface StoredDraft {
+  brief: Brief;
+  /**
+   * Hash of the SAVED brief at the time this draft was written. Used to
+   * auto-discard when the server-side brief has been updated since.
+   * Missing field = legacy draft from before this guard — always discarded.
+   */
+  savedHashAtWrite?: string;
+  /** ms timestamp for future time-based TTLs; informational today. */
+  writtenAt?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Extracted pure helpers (unit-testable without mounting the page).
 // `use(params: Promise)` suspends in jsdom; RTL never ticks. Helpers live
@@ -155,24 +183,53 @@ export default function SiteEditPage({
         const data = (await r.json()) as { project: SiteProject };
         setProject(data.project);
         setSavedBrief(data.project.brief);
-        // Try to restore any in-progress draft from localStorage; else start from saved.
+        // Restore any in-progress draft from localStorage IF it's still
+        // fresh — i.e. the saved brief hasn't moved forward server-side
+        // since the draft was written. Legacy drafts (pre-staleness
+        // guard) and drafts identical to the saved brief are silently
+        // discarded so the "Restored draft" banner only ever shows when
+        // there's a real uncommitted change worth restoring.
+        const savedHashNow = hashBrief(data.project.brief);
         const stored = localStorage.getItem(DRAFT_STORAGE_KEY(id));
+        let restored = false;
         if (stored) {
           try {
-            const parsed = JSON.parse(stored) as Brief;
-            setDraft(parsed);
-            setMessages([
-              {
-                id: "restore",
-                role: "system",
-                text: "Restored an in-progress draft from your last session. Publish or Discard to reset.",
-                timestamp: Date.now(),
-              },
-            ]);
+            const parsed = JSON.parse(stored) as Brief | StoredDraft;
+            const isStoredDraft =
+              parsed !== null &&
+              typeof parsed === "object" &&
+              "brief" in (parsed as object);
+            const storedBrief = isStoredDraft
+              ? (parsed as StoredDraft).brief
+              : (parsed as Brief);
+            const storedHash = isStoredDraft
+              ? (parsed as StoredDraft).savedHashAtWrite
+              : undefined;
+            const draftIsIdentical =
+              JSON.stringify(storedBrief) === JSON.stringify(data.project.brief);
+            const draftIsStale =
+              storedHash === undefined || storedHash !== savedHashNow;
+            if (!draftIsIdentical && !draftIsStale) {
+              setDraft(storedBrief);
+              setMessages([
+                {
+                  id: "restore",
+                  role: "system",
+                  text: "Restored an in-progress draft from your last session. Publish or Discard to reset.",
+                  timestamp: Date.now(),
+                },
+              ]);
+              restored = true;
+            } else {
+              // Silent auto-discard — the stored draft is either stale
+              // (saved brief moved forward) or a no-op duplicate.
+              localStorage.removeItem(DRAFT_STORAGE_KEY(id));
+            }
           } catch {
-            setDraft(data.project.brief);
+            localStorage.removeItem(DRAFT_STORAGE_KEY(id));
           }
-        } else {
+        }
+        if (!restored) {
           setDraft(data.project.brief);
         }
         trackClient("site.edit_opened", { project_id: id });
@@ -187,7 +244,16 @@ export default function SiteEditPage({
   useEffect(() => {
     if (!draft) return;
     try {
-      localStorage.setItem(DRAFT_STORAGE_KEY(id), JSON.stringify(draft));
+      // Write the new envelope shape including a hash of the SAVED
+      // brief at write time. On next load, if the saved brief has
+      // moved forward (hash mismatch), the stored draft is auto-
+      // discarded rather than restored over fresher server content.
+      const envelope: StoredDraft = {
+        brief: draft,
+        savedHashAtWrite: savedBrief ? hashBrief(savedBrief) : undefined,
+        writtenAt: Date.now(),
+      };
+      localStorage.setItem(DRAFT_STORAGE_KEY(id), JSON.stringify(envelope));
     } catch {
       // storage quota — non-fatal; iframe falls back to saved brief
     }
