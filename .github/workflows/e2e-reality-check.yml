@@ -59,6 +59,16 @@ jobs:
         continue-on-error: true
         run: npx playwright test tests/e2e/sites-designer-journey.spec.ts --config=playwright.config.ts --reporter=github
 
+      # Real DB round-trip for the first Tier-4-renamed table.
+      # POSTs a feature-request through the API and independently GETs
+      # it back — the only test layer that can detect a silent-
+      # discard bug where a 200 response coexists with data that never
+      # landed. Soft gate until smoke creds are in secrets; becomes a
+      # hard gate the moment they are.
+      - name: Feature-requests data-flow spec (soft)
+        continue-on-error: true
+        run: npx playwright test tests/e2e/feature-requests-data-flow.spec.ts --config=playwright.config.ts --reporter=github
+
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4

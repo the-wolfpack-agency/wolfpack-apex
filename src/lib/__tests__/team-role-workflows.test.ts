@@ -21,9 +21,41 @@
 const mockQuery = jest.fn();
 const mockSafeQuery = jest.fn();
 
+class MockWriteQueryError extends Error {
+  readonly code: "no_database" | "db_error" | "unexpected_row_count";
+  readonly expected?: number;
+  readonly actual?: number;
+  constructor(message: string, code: "no_database" | "db_error" | "unexpected_row_count", extra?: { expected?: number; actual?: number }) {
+    super(message);
+    this.name = "WriteQueryError";
+    this.code = code;
+    this.expected = extra?.expected;
+    this.actual = extra?.actual;
+  }
+}
+
+// writeQuery routes through mockSafeQuery so every existing test setup
+// in this file (which queues rows via mockSafeQuery.mockResolvedValueOnce)
+// continues to work against the new strict-write path. The expectRows
+// contract is still enforced — a queued empty-rows result with
+// expectRows: 1 throws, exactly as the production writeQuery would.
+const mockWriteQuery = jest.fn(async (sql: string, params?: any[], opts?: { expectRows?: number }) => {
+  const result = await mockSafeQuery(sql, params);
+  if (opts?.expectRows !== undefined && result.rows.length !== opts.expectRows) {
+    throw new MockWriteQueryError(
+      `writeQuery row-count mismatch: expected ${opts.expectRows}, got ${result.rows.length}`,
+      "unexpected_row_count",
+      { expected: opts.expectRows, actual: result.rows.length },
+    );
+  }
+  return { rows: result.rows };
+});
+
 jest.mock("@/lib/db", () => ({
   query: (...args: any[]) => mockQuery(...args),
   safeQuery: (...args: any[]) => mockSafeQuery(...args),
+  writeQuery: (...args: any[]) => mockWriteQuery(...args),
+  WriteQueryError: MockWriteQueryError,
 }));
 
 const mockTrackEvent = jest.fn();

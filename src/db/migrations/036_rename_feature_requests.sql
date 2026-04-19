@@ -138,4 +138,46 @@ ALTER INDEX IF EXISTS idx_apex_features_status          RENAME TO idx_instinct_f
 ALTER INDEX IF EXISTS idx_apex_features_submitted_by    RENAME TO idx_instinct_features_submitted_by;
 ALTER INDEX IF EXISTS idx_apex_features_product         RENAME TO idx_instinct_features_product;
 
+-- =========================================================================
+-- Compat-view updatability assertion.
+--
+-- The backward-compat view created above is supposed to be auto-updatable
+-- (simple passthrough SELECT * FROM ...) so any legacy code reference
+-- INSERTing / UPDATEing / DELETEing via apex_feature_requests still
+-- propagates to the renamed underlying table.
+--
+-- If for any reason the view is NOT updatable (Postgres rewriter
+-- disagrees about shape, the underlying table has a column we missed,
+-- an RLS policy blocks the view path, etc.), this assertion RAISES
+-- EXCEPTION and the whole migration is rolled back. No silent
+-- write-discard.
+-- =========================================================================
+DO $$
+DECLARE
+  is_updatable TEXT;
+  is_insertable TEXT;
+BEGIN
+  -- Only assert if the compat view was actually created (Cases B, C, A).
+  -- Cases D, E, F skipped the view creation intentionally.
+  IF EXISTS (
+    SELECT 1 FROM information_schema.views
+    WHERE table_schema = current_schema()
+      AND table_name = 'apex_feature_requests'
+  ) THEN
+    SELECT v.is_updatable, v.is_insertable_into
+      INTO is_updatable, is_insertable
+      FROM information_schema.views v
+      WHERE v.table_schema = current_schema()
+        AND v.table_name = 'apex_feature_requests';
+
+    IF is_updatable != 'YES' THEN
+      RAISE EXCEPTION 'Compat view apex_feature_requests is NOT updatable (is_updatable=%). Legacy code UPDATEs/DELETEs would silently fail. Aborting.', is_updatable;
+    END IF;
+    IF is_insertable != 'YES' THEN
+      RAISE EXCEPTION 'Compat view apex_feature_requests is NOT insertable (is_insertable_into=%). Legacy code INSERTs would silently fail. Aborting.', is_insertable;
+    END IF;
+    RAISE NOTICE 'Compat view apex_feature_requests is fully R/W (is_updatable=%, is_insertable_into=%).', is_updatable, is_insertable;
+  END IF;
+END $$;
+
 COMMIT;

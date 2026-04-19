@@ -5,7 +5,7 @@
  * without burning AI tokens. Keyword pattern matching + heuristics.
  */
 
-import { query, safeQuery } from "@/lib/db";
+import { query, safeQuery, writeQuery, WriteQueryError } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 
 export type FeatureStatus = "submitted" | "analyzing" | "approved" | "rejected" | "in_progress" | "completed";
@@ -141,14 +141,49 @@ export async function submitFeatureRequest(
   targetProduct?: string,
   priority?: FeaturePriority,
 ): Promise<FeatureRequest | null> {
-  const { rows } = await safeQuery<FeatureRequest>(
-    `INSERT INTO instinct_feature_requests (title, description, submitted_by, target_product, priority)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING *`,
-    [title, description, userId, targetProduct || null, priority || "medium"],
-  );
+  // If DATABASE_URL is unset we're in shadow/dev mode — return a demo
+  // row upfront. This is the ONLY branch where a "success" response
+  // without a real DB write is acceptable, and it's gated by the
+  // absence of DATABASE_URL so production can never fall into it.
+  if (!process.env.DATABASE_URL) {
+    const demo: FeatureRequest = {
+      id: `demo-fr-${Date.now()}`,
+      title,
+      description,
+      submitted_by: userId,
+      status: "submitted",
+      priority: priority || "medium",
+      target_product: targetProduct || null,
+      analysis: {},
+      comparisons: [],
+      votes: 0,
+      comments: [],
+      estimated_hours: null,
+      estimated_cost: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    return demo;
+  }
 
-  if (rows.length > 0) {
+  // Real database path: writeQuery THROWS on any failure (pg error,
+  // view-propagation drop, RLS discard, etc.) so a non-throwing call
+  // here is a guarantee that the row is actually committed. The
+  // expectRows: 1 check catches the silent-discard case — a "succeeded"
+  // INSERT that returns zero rows, which is what an auto-updatable
+  // view would do if the rewriter rejected the write. End-to-end
+  // verification of the full round-trip happens in
+  // tests/e2e/feature-requests-data-flow.spec.ts (creates, reads back
+  // via a separate request, asserts equality — the reality check that
+  // mocks can't fake).
+  try {
+    const { rows } = await writeQuery<FeatureRequest>(
+      `INSERT INTO instinct_feature_requests (title, description, submitted_by, target_product, priority)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [title, description, userId, targetProduct || null, priority || "medium"],
+      { expectRows: 1 },
+    );
     trackEvent("feature.request_submitted", userId, "unknown", {
       feature_id: rows[0].id,
       title,
@@ -156,27 +191,17 @@ export async function submitFeatureRequest(
       priority: priority || "medium",
     });
     return rows[0];
+  } catch (err) {
+    if (err instanceof WriteQueryError) {
+      trackEvent("feature.request_write_failed", userId, "unknown", {
+        reason: err.code,
+        expected: err.expected ?? -1,
+        actual: err.actual ?? -1,
+        title,
+      });
+    }
+    throw err;
   }
-
-  // Shadow mode: return demo data
-  const demo: FeatureRequest = {
-    id: `demo-fr-${Date.now()}`,
-    title,
-    description,
-    submitted_by: userId,
-    status: "submitted",
-    priority: priority || "medium",
-    target_product: targetProduct || null,
-    analysis: {},
-    comparisons: [],
-    votes: 0,
-    comments: [],
-    estimated_hours: null,
-    estimated_cost: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-  return demo;
 }
 
 /**

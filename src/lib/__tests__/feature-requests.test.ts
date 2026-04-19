@@ -2,12 +2,32 @@
  * Feature Request Library Tests
  */
 
-// Mock db before imports
+// Mock db before imports. writeQuery is the strict path — it throws
+// on any failure (missing DATABASE_URL, pg error, unexpected row count)
+// so the test-side mock mirrors that behaviour explicitly. safeQuery
+// is the lenient path used for reads.
 const mockQuery = jest.fn();
 const mockSafeQuery = jest.fn();
+const mockWriteQuery = jest.fn();
+
+class MockWriteQueryError extends Error {
+  readonly code: "no_database" | "db_error" | "unexpected_row_count";
+  readonly expected?: number;
+  readonly actual?: number;
+  constructor(message: string, code: "no_database" | "db_error" | "unexpected_row_count", extra?: { expected?: number; actual?: number }) {
+    super(message);
+    this.name = "WriteQueryError";
+    this.code = code;
+    this.expected = extra?.expected;
+    this.actual = extra?.actual;
+  }
+}
+
 jest.mock("@/lib/db", () => ({
   query: (...args: unknown[]) => mockQuery(...args),
   safeQuery: (...args: unknown[]) => mockSafeQuery(...args),
+  writeQuery: (...args: unknown[]) => mockWriteQuery(...args),
+  WriteQueryError: MockWriteQueryError,
 }));
 
 const mockTrackEvent = jest.fn();
@@ -25,12 +45,18 @@ import {
 } from "@/lib/feature-requests";
 
 describe("Feature Requests Library", () => {
+  const originalDbUrl = process.env.DATABASE_URL;
   beforeEach(() => {
     jest.clearAllMocks();
   });
+  afterEach(() => {
+    if (originalDbUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = originalDbUrl;
+  });
 
   describe("submitFeatureRequest", () => {
-    it("inserts a feature request and tracks analytics", async () => {
+    it("inserts a feature request, reads it back, and tracks analytics (verified-write path)", async () => {
+      process.env.DATABASE_URL = "postgres://test";
       const mockFeature = {
         id: "fr-1",
         title: "Add dark mode",
@@ -49,13 +75,19 @@ describe("Feature Requests Library", () => {
         updated_at: "2026-01-01",
       };
 
-      mockSafeQuery.mockResolvedValueOnce({ rows: [mockFeature], fromCache: false });
+      // INSERT ... RETURNING * with expectRows: 1 — a zero-rows
+      // response throws, which is the silent-discard defense. The
+      // end-to-end proof that the row actually committed lives in
+      // tests/e2e/feature-requests-data-flow.spec.ts (real POST →
+      // independent GET → assert equality against a real DB).
+      mockWriteQuery.mockResolvedValueOnce({ rows: [mockFeature] });
 
       const result = await submitFeatureRequest("Add dark mode", "Support dark mode toggle", "user-1");
 
       expect(result).toEqual(mockFeature);
-      expect(mockSafeQuery).toHaveBeenCalledTimes(1);
-      expect(mockSafeQuery.mock.calls[0][0]).toContain("INSERT INTO instinct_feature_requests");
+      expect(mockWriteQuery).toHaveBeenCalledTimes(1);
+      expect(mockWriteQuery.mock.calls[0][0]).toContain("INSERT INTO instinct_feature_requests");
+      expect(mockWriteQuery.mock.calls[0][2]).toEqual({ expectRows: 1 });
       expect(mockTrackEvent).toHaveBeenCalledWith(
         "feature.request_submitted",
         "user-1",
@@ -64,8 +96,8 @@ describe("Feature Requests Library", () => {
       );
     });
 
-    it("returns demo data in shadow mode", async () => {
-      mockSafeQuery.mockResolvedValueOnce({ rows: [], fromCache: true });
+    it("returns demo data in shadow mode (DATABASE_URL unset) without calling writeQuery", async () => {
+      delete process.env.DATABASE_URL;
 
       const result = await submitFeatureRequest("Test feature", "Description", "user-1");
 
@@ -73,16 +105,63 @@ describe("Feature Requests Library", () => {
       expect(result!.title).toBe("Test feature");
       expect(result!.id).toMatch(/^demo-fr-/);
       expect(result!.status).toBe("submitted");
+      expect(mockWriteQuery).not.toHaveBeenCalled();
     });
 
-    it("passes target_product and priority", async () => {
-      mockSafeQuery.mockResolvedValueOnce({ rows: [{ id: "fr-2" }], fromCache: false });
+    it("passes target_product and priority through to the INSERT", async () => {
+      process.env.DATABASE_URL = "postgres://test";
+      const mockFeature = { id: "fr-2" };
+      mockWriteQuery.mockResolvedValueOnce({ rows: [mockFeature] });
 
       await submitFeatureRequest("Feature", "Desc", "user-1", "wolfpack-auto", "critical");
 
-      expect(mockSafeQuery.mock.calls[0][1]).toEqual([
+      expect(mockWriteQuery.mock.calls[0][1]).toEqual([
         "Feature", "Desc", "user-1", "wolfpack-auto", "critical",
       ]);
+    });
+
+    it("throws WriteQueryError when the INSERT returns zero rows (silent-discard defense)", async () => {
+      process.env.DATABASE_URL = "postgres://test";
+      // Simulate the auto-updatable view or RLS policy silently dropping
+      // the INSERT — writeQuery sees zero rows and throws.
+      mockWriteQuery.mockRejectedValueOnce(
+        new MockWriteQueryError("row-count mismatch", "unexpected_row_count", { expected: 1, actual: 0 }),
+      );
+
+      await expect(
+        submitFeatureRequest("Feature", "Desc", "user-1"),
+      ).rejects.toThrow("row-count mismatch");
+
+      // Analytics must fire for the failure so the learning loop sees
+      // silent-discard events even when the caller re-throws.
+      expect(mockTrackEvent).toHaveBeenCalledWith(
+        "feature.request_write_failed",
+        "user-1",
+        "unknown",
+        expect.objectContaining({ reason: "unexpected_row_count", expected: 1, actual: 0 }),
+      );
+    });
+
+    it("propagates pg errors wrapped as WriteQueryError(db_error)", async () => {
+      process.env.DATABASE_URL = "postgres://test";
+      // Underlying pg error (unique constraint, timeout, whatever) —
+      // writeQuery wraps as db_error. The library function re-throws
+      // without swallowing so the API route can surface an HTTP error
+      // instead of returning a phantom-success 200.
+      mockWriteQuery.mockRejectedValueOnce(
+        new MockWriteQueryError("writeQuery failed: unique violation", "db_error"),
+      );
+
+      await expect(
+        submitFeatureRequest("Feature", "Desc", "user-1"),
+      ).rejects.toThrow("unique violation");
+
+      expect(mockTrackEvent).toHaveBeenCalledWith(
+        "feature.request_write_failed",
+        "user-1",
+        "unknown",
+        expect.objectContaining({ reason: "db_error" }),
+      );
     });
   });
 

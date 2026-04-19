@@ -44,6 +44,7 @@ export type InstinctEventType =
   | "journal.context_added"
   // Feature requests
   | "feature.request_submitted"
+  | "feature.request_write_failed"
   | "feature.request_analyzed"
   | "feature.request_approved"
   | "feature.request_rejected"
