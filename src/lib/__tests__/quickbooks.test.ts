@@ -346,6 +346,72 @@ describe("Migration File", () => {
     expect(down).toMatch(/CREATE OR REPLACE VIEW instinct_qbo_tokens AS/);
     expect(down).toMatch(/ALTER INDEX IF EXISTS idx_instinct_qbo_tokens_realm RENAME TO idx_qbo_tokens_realm/);
   });
+
+  // -------------------------------------------------------------------------
+  // Migration 047 — ON CONFLICT (realm_id) requires a UNIQUE constraint.
+  //
+  // Latent bug: src/lib/quickbooks.ts::storeTokens has always used
+  // `INSERT ... ON CONFLICT (realm_id) DO UPDATE`, but migration 004 only
+  // created a plain (non-UNIQUE) index on realm_id. A second INSERT for
+  // the same realm would fail at runtime with "there is no unique or
+  // exclusion constraint matching the ON CONFLICT specification". This
+  // test guards the fix: migration 047 MUST add a UNIQUE constraint on
+  // instinct_qbo_tokens.realm_id (the post-042 table name).
+  // -------------------------------------------------------------------------
+  test("migration 047 adds UNIQUE constraint on instinct_qbo_tokens.realm_id so ON CONFLICT works", () => {
+    const fs = require("fs");
+    const path = require("path").resolve(
+      __dirname,
+      "../../db/migrations/047_qbo_tokens_unique_realm_id.sql",
+    );
+    expect(fs.existsSync(path)).toBe(true);
+
+    const sql = fs.readFileSync(path, "utf-8");
+
+    // Must target the post-042 canonical table name.
+    expect(sql).toContain("instinct_qbo_tokens");
+    // Must be a CONSTRAINT (what pg_constraint surfaces + what
+    // ON CONFLICT inference reliably consults), not just an index.
+    expect(sql).toMatch(/ADD CONSTRAINT/i);
+    expect(sql).toMatch(/UNIQUE \(realm_id\)/i);
+    // Named constraint so down migration can drop it deterministically.
+    expect(sql).toContain("instinct_qbo_tokens_realm_id_unique");
+    // Defensive idempotency guard (migration_safety.md requirement).
+    expect(sql).toMatch(/pg_constraint/);
+    // Defensive dup-data pre-check with actionable error.
+    expect(sql).toMatch(/duplicate rows|Dedupe|COUNT\(\*\)\s*>\s*1/i);
+    // BEGIN/COMMIT wrapped.
+    expect(sql).toMatch(/^\s*BEGIN\s*;/m);
+    expect(sql).toMatch(/^\s*COMMIT\s*;/m);
+  });
+
+  test("migration 047 has a reversible .down.sql that drops the constraint", () => {
+    const fs = require("fs");
+    const path = require("path").resolve(
+      __dirname,
+      "../../db/migrations/047_qbo_tokens_unique_realm_id.down.sql",
+    );
+    expect(fs.existsSync(path)).toBe(true);
+
+    const sql = fs.readFileSync(path, "utf-8");
+    expect(sql).toMatch(/DROP CONSTRAINT/i);
+    expect(sql).toContain("instinct_qbo_tokens_realm_id_unique");
+    // Idempotent: only drops if present.
+    expect(sql).toMatch(/pg_constraint/);
+  });
+
+  test("lib/quickbooks.ts storeTokens uses ON CONFLICT (realm_id) — invariant that 047 unblocks", () => {
+    const fs = require("fs");
+    const lib = fs.readFileSync(
+      require("path").resolve(__dirname, "../quickbooks.ts"),
+      "utf-8",
+    );
+    // Confirms the code path 047 exists to support. If this ever
+    // changes to (realm_id, connected_by) or similar, migration 047's
+    // constraint shape must be revisited in lockstep.
+    expect(lib).toMatch(/INSERT\s+INTO\s+instinct_qbo_tokens/i);
+    expect(lib).toMatch(/ON\s+CONFLICT\s*\(\s*realm_id\s*\)\s*DO\s+UPDATE/i);
+  });
 });
 
 // ---------------------------------------------------------------------------

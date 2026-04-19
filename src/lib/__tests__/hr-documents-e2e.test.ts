@@ -78,7 +78,7 @@ function fakeDb(sql: string, params: unknown[] = []) {
     benefitRecs.push({ id, document_id });
     return { rows: [] };
   }
-  if (s.startsWith("INSERT INTO apex_hr_insights")) {
+  if (s.startsWith("INSERT INTO instinct_hr_insights")) {
     return { rows: [] };
   }
   return { rows: [] };

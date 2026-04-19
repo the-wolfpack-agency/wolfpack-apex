@@ -158,7 +158,7 @@ export async function createTemplate(
   }));
   const now = new Date().toISOString();
   await safeQuery(
-    `INSERT INTO apex_onboarding_templates (id, name, department, steps, created_by, created_at, updated_at)
+    `INSERT INTO instinct_onboarding_templates (id, name, department, steps, created_by, created_at, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [id, name, department ?? null, JSON.stringify(fullSteps), createdBy, now, now],
   );
@@ -182,7 +182,7 @@ export async function createTemplate(
 
 export async function listTemplates(): Promise<OnboardingTemplate[]> {
   const r = await safeQuery<OnboardingTemplate>(
-    `SELECT * FROM apex_onboarding_templates ORDER BY created_at DESC`,
+    `SELECT * FROM instinct_onboarding_templates ORDER BY created_at DESC`,
   );
   const dbTemplates = r.rows.map((row) => ({
     ...row,

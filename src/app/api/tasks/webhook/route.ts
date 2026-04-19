@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
 
 /**
  * Best-effort mapping from a Graph resource path ("users/{msUserId}/…")
- * back to the instinct user_id. The existing apex_ms_tokens table keys
+ * back to the instinct user_id. The existing instinct_ms_tokens table keys
  * on connected_by (instinct user id) — we can't resolve the MS principal
  * id without adding a column. For now we return the first connected user
  * when the resource doesn't reveal a match, which is correct for single-
@@ -103,17 +103,17 @@ async function lookupOwnerByResource(resource: string): Promise<string | null> {
 
   if (msUserKey) {
     // We don't currently persist the MS user principal id on
-    // apex_ms_tokens. Match by user_email since some subscriptions carry
-    // it; otherwise fall through to the single-user path.
+    // instinct_ms_tokens. Match by user_email since some subscriptions
+    // carry it; otherwise fall through to the single-user path.
     const { rows } = await safeQuery<{ connected_by: string }>(
-      `SELECT connected_by FROM apex_ms_tokens WHERE user_email = $1 LIMIT 1`,
+      `SELECT connected_by FROM instinct_ms_tokens WHERE user_email = $1 LIMIT 1`,
       [msUserKey],
     );
     if (rows.length > 0) return rows[0].connected_by;
   }
 
   const { rows } = await safeQuery<{ connected_by: string }>(
-    `SELECT connected_by FROM apex_ms_tokens ORDER BY updated_at DESC LIMIT 1`,
+    `SELECT connected_by FROM instinct_ms_tokens ORDER BY updated_at DESC LIMIT 1`,
   );
   return rows.length > 0 ? rows[0].connected_by : null;
 }

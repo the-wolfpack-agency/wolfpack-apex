@@ -794,7 +794,7 @@ export async function saveInsights(insights: HrInsight[], generatedBy: string, u
   for (const ins of insights) {
     const id = `hi_${randomUUID()}`;
     await safeQuery(
-      `INSERT INTO apex_hr_insights (id, category, severity, title, body, related_id, source_rule)
+      `INSERT INTO instinct_hr_insights (id, category, severity, title, body, related_id, source_rule)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [id, ins.category, ins.severity, ins.title, ins.body, ins.related_id ?? null, ins.source_rule],
     );

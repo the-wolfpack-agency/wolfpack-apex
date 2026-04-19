@@ -337,11 +337,11 @@ export async function storeTokens(
 
   try {
     await query(
-      `INSERT INTO apex_ms_tokens (user_email, display_name, access_token, refresh_token, expires_at, connected_by)
+      `INSERT INTO instinct_ms_tokens (user_email, display_name, access_token, refresh_token, expires_at, connected_by)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (connected_by) DO UPDATE SET
          user_email = EXCLUDED.user_email,
-         display_name = COALESCE(EXCLUDED.display_name, apex_ms_tokens.display_name),
+         display_name = COALESCE(EXCLUDED.display_name, instinct_ms_tokens.display_name),
          access_token = EXCLUDED.access_token,
          refresh_token = EXCLUDED.refresh_token,
          expires_at = EXCLUDED.expires_at,
@@ -372,7 +372,7 @@ export async function getValidToken(
     connected_by: string;
   }>(
     `SELECT access_token, refresh_token, user_email, expires_at, connected_by
-     FROM apex_ms_tokens
+     FROM instinct_ms_tokens
      WHERE connected_by = $1
      LIMIT 1`,
     [userId],
@@ -416,7 +416,7 @@ export async function deleteTokens(userId: string): Promise<void> {
   if (!userId) return;
 
   try {
-    await query(`DELETE FROM apex_ms_tokens WHERE connected_by = $1`, [userId]);
+    await query(`DELETE FROM instinct_ms_tokens WHERE connected_by = $1`, [userId]);
     clearCache(userId);
   } catch (err) {
     console.error("[microsoft-graph] Failed to delete tokens:", (err as Error).message);
@@ -499,7 +499,7 @@ export async function getConnectionStatus(userId: string): Promise<MsConnectionS
     updated_at: string;
   }>(
     `SELECT user_email, display_name, updated_at
-     FROM apex_ms_tokens
+     FROM instinct_ms_tokens
      WHERE connected_by = $1
      LIMIT 1`,
     [userId],

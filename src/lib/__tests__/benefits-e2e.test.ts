@@ -40,7 +40,7 @@ function fakeDb(sql: string, params: unknown[] = []) {
     if (r) r.outcome = outcome;
     return { rows: [] };
   }
-  if (s.startsWith("INSERT INTO apex_hr_insights")) {
+  if (s.startsWith("INSERT INTO instinct_hr_insights")) {
     const [id, category, severity, title] = params as [string, string, string, string];
     insights.push({ id, category, severity, title, status: "open" });
     return { rows: [] };
@@ -58,7 +58,7 @@ function fakeDb(sql: string, params: unknown[] = []) {
   if (s.startsWith("SELECT * FROM apex_benefit_recommendations WHERE document_id")) {
     return { rows: recs.filter((r) => r.document_id === params[0]) };
   }
-  if (s.startsWith("SELECT * FROM apex_hr_insights")) {
+  if (s.startsWith("SELECT * FROM instinct_hr_insights")) {
     return { rows: insights.filter((i) => i.status !== "dismissed") };
   }
   return { rows: [] };
