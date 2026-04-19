@@ -15,7 +15,7 @@ Internal OS for Wolfpack Agency: briefing, assistant, knowledge, HR, clients, si
 
 - **API surface**: OpenAPI auto-generated at `public/openapi.json` (when generator exists). Security posture page: `docs/security-posture.md` → served publicly at `/security-posture`.
 - **Capabilities**: `src/lib/auth/capabilities.ts` (list) + `src/lib/auth/role-capabilities.ts` (role map).
-- **Analytics events**: `src/lib/analytics.ts` — `ApexEventType` union is the single source of truth.
+- **Analytics events**: `src/lib/analytics.ts` — `InstinctEventType` union is the single source of truth.
 - **Per-session context + blockers**: `demo/handoff-<date>.md`. Always read the latest before starting work; always write one at session end via `npm run handoff`.
 
 ## Production deployment blockers

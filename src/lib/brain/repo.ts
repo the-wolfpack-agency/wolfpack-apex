@@ -8,7 +8,7 @@
 
 import { createHash } from "node:crypto";
 import { query } from "@/lib/db";
-import { trackEvent, type ApexEventType } from "@/lib/analytics";
+import { trackEvent, type InstinctEventType } from "@/lib/analytics";
 import type {
   BrainChunk,
   BrainDocument,
@@ -325,7 +325,7 @@ export async function markQueryCited(queryLogId: number): Promise<void> {
 // ── internals ──────────────────────────────────────────────────────
 
 async function safeTrack(
-  event: ApexEventType,
+  event: InstinctEventType,
   userId: string,
   userRole: string,
   metadata: Record<string, unknown>,

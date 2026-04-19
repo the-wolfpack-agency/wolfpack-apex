@@ -1,10 +1,10 @@
 "use client";
 
-import ApexChat from "@/components/ApexChat";
+import InstinctChat from "@/components/InstinctChat";
 
 export default function AssistantPage() {
   return (
-    <ApexChat
+    <InstinctChat
       position="inline"
       height="calc(100vh - 120px)"
       showHistory={true}

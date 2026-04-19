@@ -15,7 +15,7 @@ Reference material for adding code that fits the existing system. If it isn't wr
 
 - Capabilities: snake_case dotted, scoped by domain, e.g. `mail.read`, `calendar.write`, `people.manage`. Every capability is listed once in `src/lib/auth/capabilities.ts` and mapped to one or more roles in `src/lib/auth/role-capabilities.ts`.
 - Roles: lowercase singular, e.g. `admin`, `member`, `viewer`.
-- Analytics events: `<domain>.<noun>_<verb_past_tense>`, e.g. `knowledge.question_asked`, `setup.step_viewed`, `system.refresh_token_reuse_detected`. Every new event MUST be added to the `ApexEventType` union in `src/lib/analytics.ts`. The `audit-coverage.test.ts` and `capability-coverage.test.ts` tests enforce registration.
+- Analytics events: `<domain>.<noun>_<verb_past_tense>`, e.g. `knowledge.question_asked`, `setup.step_viewed`, `system.refresh_token_reuse_detected`. Every new event MUST be added to the `InstinctEventType` union in `src/lib/analytics.ts`. The `audit-coverage.test.ts` and `capability-coverage.test.ts` tests enforce registration.
 - Audit events: same shape as analytics, but written through `lib/audit-log.ts` (hash-chained) only for security-relevant actions (auth, capability grant, data export, admin impersonation).
 
 ## Migrations
@@ -34,7 +34,7 @@ Reference material for adding code that fits the existing system. If it isn't wr
 4. Push business logic into `src/lib/<domain>.ts`. Route handler just parses, delegates, serializes.
 5. If the route touches Graph, call `src/lib/integrations/microsoft-<surface>.ts` — never `microsoft-graph.ts` directly.
 6. If the route writes a durable entity, use `src/lib/triple-write.ts`, not raw `query()`.
-7. Emit `trackEvent({ type: '<domain>.<action>' })` for the action; add the type to `ApexEventType`.
+7. Emit `trackEvent({ type: '<domain>.<action>' })` for the action; add the type to `InstinctEventType`.
 8. Add a contract test under `src/app/api/<resource>/__tests__/<resource>-route.test.ts` asserting 200 (not just "not 500"), 401, 403.
 9. If the route backs a UI, add a Jest + Testing Library test; if it's user-facing flow, an E2E test.
 
@@ -46,7 +46,7 @@ Reference material for adding code that fits the existing system. If it isn't wr
 
 ## Adding an analytics event
 
-1. Add to `ApexEventType` union in `src/lib/analytics.ts`.
+1. Add to `InstinctEventType` union in `src/lib/analytics.ts`.
 2. Call `trackEvent(...)` from the code path that performs the action.
 3. If the event should surface in learning, add a row consumer in `src/lib/learning/<surface>-signals.ts`.
 

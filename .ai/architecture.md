@@ -23,7 +23,7 @@ src/
     integrations/      one file per Microsoft Graph surface (mail, calendar, tasks, people, files, …)
     learning/          per-surface signal extractors that feed the learning loop
     notifications/     Resend-backed notification dispatch
-    analytics.ts       trackEvent() + ApexEventType union (single source of truth for event names)
+    analytics.ts       trackEvent() + InstinctEventType union (single source of truth for event names)
     audit-log.ts       append-only hash-chained audit log
     triple-write.ts    fan-out writer (Postgres + Qdrant + Neo4j)
     db.ts              pg pool + query() helper
@@ -68,7 +68,7 @@ Stateless JWT (HS256 today, crypto-agile via `lib/crypto/algorithms.ts`) + rotat
 
 - API surface: `public/openapi.json` is auto-generated; human docs in `docs/` if present.
 - Capability registry: `src/lib/auth/capabilities.ts` (list) + `src/lib/auth/role-capabilities.ts` (role→capability map).
-- Analytics event names: `src/lib/analytics.ts` — `ApexEventType` union is the single source of truth.
+- Analytics event names: `src/lib/analytics.ts` — `InstinctEventType` union is the single source of truth.
 - Security posture + PQ roadmap: `docs/security-posture.md` (also served publicly at `/security-posture`).
 - Per-session context + blockers: `demo/handoff-<date>.md`.
 

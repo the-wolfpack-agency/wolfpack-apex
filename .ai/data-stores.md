@@ -42,7 +42,7 @@ Schema evolves via numbered migrations in `src/db/migrations/`. Run with `npm ru
 
 - **Auth**: `users`, `user_sessions`, `instinct_refresh_tokens`, `capability_overrides`.
 - **Audit**: `audit_log_entries` — hash-chained, immutable (enforced by trigger + `audit-log-immutable.test.ts`).
-- **Analytics**: `analytics_events` — ApexEventType rows; downstream learning views read from here.
+- **Analytics**: `analytics_events` — InstinctEventType rows; downstream learning views read from here.
 - **Workspace**: `workspaces`, `workspace_members`, `instinct_setup_events`, view `instinct_setup_funnel`.
 - **Graph caches**: one table per surface (`ms_mail_cache`, `ms_calendar_cache`, …) with `user_id`, `item_id`, payload, `fetched_at`, `expires_at`.
 

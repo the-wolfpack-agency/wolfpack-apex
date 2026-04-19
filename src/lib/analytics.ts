@@ -12,7 +12,7 @@
 import { query } from "@/lib/db";
 import { tripleWriteEvent } from "@/lib/triple-write";
 
-export type ApexEventType =
+export type InstinctEventType =
   // Knowledge
   | "knowledge.question_asked"
   | "knowledge.answer_found"
@@ -357,8 +357,8 @@ export type ApexEventType =
   // a signal for trustworthy vs "green but uninformative" test coverage.
   | "e2e.reality_check_ran";
 
-export interface ApexEvent {
-  event_type: ApexEventType;
+export interface InstinctEvent {
+  event_type: InstinctEventType;
   user_id: string;
   user_role: string;
   metadata: Record<string, string | number | boolean>;
@@ -369,7 +369,7 @@ export interface ApexEvent {
  * Track an event. Fire-and-forget — never blocks, never throws.
  */
 export function trackEvent(
-  event: ApexEventType,
+  event: InstinctEventType,
   userId: string,
   userRole: string,
   metadata: Record<string, string | number | boolean> = {},

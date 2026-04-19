@@ -51,7 +51,7 @@ jest.mock("@/lib/auth", () => ({
 
 // ---------------------------------------------------------------------------
 // File validation logic (extracted for testability)
-// These mirror the constants and functions in ApexChat.tsx
+// These mirror the constants and functions in InstinctChat.tsx
 // ---------------------------------------------------------------------------
 
 const MAX_FILE_SIZE = 512_000;

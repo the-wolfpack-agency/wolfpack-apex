@@ -34,7 +34,7 @@ interface Conversation {
   createdAt: string;
 }
 
-export interface ApexChatProps {
+export interface InstinctChatProps {
   /** Page-specific context injected into every message */
   pageContext?: string;
   /** Arbitrary data passed as context */
@@ -67,7 +67,7 @@ const SOURCE_BADGE: Record<string, { label: string; color: string }> = {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function ApexChat({
+export default function InstinctChat({
   pageContext,
   contextData,
   position = "inline",
@@ -75,7 +75,7 @@ export default function ApexChat({
   showHistory = true,
   showSource = true,
   showRating = true,
-}: ApexChatProps) {
+}: InstinctChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);

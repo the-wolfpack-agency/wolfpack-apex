@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
-import { trackEvent, getEventCounts, type ApexEventType } from "@/lib/analytics";
+import { trackEvent, getEventCounts, type InstinctEventType } from "@/lib/analytics";
 import { safeQuery } from "@/lib/db";
 
 // Valid values for instinct_setup_events columns (must match migration 016 CHECK constraints)
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     }
 
     const meta = metadata || {};
-    trackEvent(event as ApexEventType, user.id, user.role, meta);
+    trackEvent(event as InstinctEventType, user.id, user.role, meta);
 
     if (event.startsWith("system.setup_") && event in SETUP_EVENT_MAP) {
       await writeSetupEvent(user.id, event, meta);

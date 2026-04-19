@@ -11,7 +11,7 @@
  *   - POST /api/sites/[id]/brief-edit request body
  *   - POST response shape (success, ai_unavailable, patch_blocked)
  *   - PATCH /api/sites/[id]/brief-edit/[editId] request body + response
- *   - 5 new analytics event names land in ApexEventType (so trackEvent
+ *   - 5 new analytics event names land in InstinctEventType (so trackEvent
  *     calls compile against the SSOT)
  *
  * Pattern mirrors brief-edit-migration.test.ts: parse source, assert
@@ -101,7 +101,7 @@ describe("Brief-edit lib surface — shapes the route depends on", () => {
   });
 });
 
-describe("Analytics event names land in ApexEventType (SSOT for events)", () => {
+describe("Analytics event names land in InstinctEventType (SSOT for events)", () => {
   const events = [
     "site.brief_edit_requested",
     "site.brief_edit_generated",
@@ -110,7 +110,7 @@ describe("Analytics event names land in ApexEventType (SSOT for events)", () => 
     "site.brief_edit_decided",
   ];
   for (const ev of events) {
-    it(`${ev} is a known ApexEventType`, () => {
+    it(`${ev} is a known InstinctEventType`, () => {
       // Escape the dot for the regex.
       const re = new RegExp(`["']${ev.replace(".", "\\.")}["']`);
       expect(analyticsSource).toMatch(re);
