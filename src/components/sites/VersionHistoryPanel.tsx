@@ -18,7 +18,7 @@
  * diff-viewed event is best-effort because it's a pure UX signal.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import type { SiteBrief } from "@/lib/sites-schema";
 

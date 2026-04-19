@@ -60,18 +60,6 @@ beforeEach(() => {
   window.localStorage.setItem("instinct_token", "test-token");
 });
 
-/**
- * Stage a GET /versions response. Subsequent analytics + restore
- * POSTs fall through to a generic 200 so opportunistic side-channel
- * fetches don't steal a once-response from the primary flow.
- */
-function stageListFetch(versions: BriefVersionEntryView[]) {
-  // Order-sensitive: queue the list GET FIRST (consumed on expand),
-  // then a blanket default for any analytics POST or second call.
-  fetchSpy.mockResolvedValueOnce(mkJson(200, { versions }));
-  fetchSpy.mockResolvedValue(mkJson(200, { ok: true }));
-}
-
 afterEach(() => {
   window.localStorage.clear();
   jest.restoreAllMocks();

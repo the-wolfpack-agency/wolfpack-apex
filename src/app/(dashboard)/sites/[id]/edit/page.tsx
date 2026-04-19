@@ -47,6 +47,7 @@ import type { FigmaBriefSuggestion } from "@/lib/figma-import";
 import VersionHistoryPanel, {
   type BriefVersionEntryView,
 } from "@/components/sites/VersionHistoryPanel";
+import CommentsPane from "@/components/sites/CommentsPane";
 import type { SiteTheme } from "@/lib/site-theme";
 
 interface SiteProject {
@@ -1280,6 +1281,13 @@ export default function SiteEditPage({
             setIframeNonce((n) => n + 1);
           }}
         />
+
+        {/* Comments pane (Path C Phase 3, Stream R3). Threaded per-
+            section review comments — open + resolved + all. Clicking a
+            comment posts comment.focus to the preview iframe so the
+            designer sees which section was targeted. Resolve, reply,
+            and soft-delete are all routed through authed APIs. */}
+        <CommentsPane siteId={id} previewIframeRef={iframeRef} />
       </section>
 
       {/* RIGHT — live preview iframe, wrapped so we can simulate a

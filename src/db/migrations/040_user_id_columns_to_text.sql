@@ -39,16 +39,40 @@ DECLARE
   col_type TEXT;
 BEGIN
   -- apex_share_tokens.created_by
+  --
+  -- The `instinct_share_tokens` view from migration 035 is a simple
+  -- `SELECT * FROM apex_share_tokens` pass-through, which means
+  -- Postgres's dependency tracker blocks `ALTER COLUMN ... TYPE` on
+  -- any column the view references. The column-type change is
+  -- structurally safe (UUID can cast to TEXT without data loss), but
+  -- we have to drop the view before the ALTER and recreate it after.
+  -- Any table rows stay put across this — views are pure metadata.
+  --
+  -- First deploy on 2026-04-19 hit exactly this: error 0A000,
+  -- `rule _RETURN on view instinct_share_tokens depends on column
+  -- created_by`.
   SELECT data_type INTO col_type
     FROM information_schema.columns
     WHERE table_schema = current_schema()
       AND table_name = 'apex_share_tokens'
       AND column_name = 'created_by';
   IF col_type = 'uuid' THEN
+    -- Drop the dependent view so Postgres lets us retype the column.
+    -- IF EXISTS so the migration also runs on fresh DBs where the
+    -- view isn't present yet (e.g. a new tenant post-035-recreate).
+    EXECUTE 'DROP VIEW IF EXISTS instinct_share_tokens';
     EXECUTE 'ALTER TABLE apex_share_tokens ALTER COLUMN created_by TYPE TEXT USING created_by::text';
-    RAISE NOTICE 'apex_share_tokens.created_by: UUID → TEXT';
+    -- Recreate the view exactly as 035 defined it. `SELECT *` auto-
+    -- adopts the new TEXT type so callers see the widened column
+    -- without any code change.
+    EXECUTE 'CREATE OR REPLACE VIEW instinct_share_tokens AS SELECT * FROM apex_share_tokens';
+    RAISE NOTICE 'apex_share_tokens.created_by: UUID → TEXT (view rebuilt)';
   ELSIF col_type = 'text' THEN
-    RAISE NOTICE 'apex_share_tokens.created_by is already TEXT — skipping.';
+    -- Already widened. Make sure the view still exists (idempotent
+    -- recovery — if a prior migration attempt dropped the view but
+    -- failed before recreate, this restores it).
+    EXECUTE 'CREATE OR REPLACE VIEW instinct_share_tokens AS SELECT * FROM apex_share_tokens';
+    RAISE NOTICE 'apex_share_tokens.created_by is already TEXT — ensured view exists.';
   ELSIF col_type IS NULL THEN
     RAISE NOTICE 'apex_share_tokens.created_by does not exist — skipping.';
   ELSE
