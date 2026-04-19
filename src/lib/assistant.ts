@@ -417,7 +417,7 @@ export async function chat(
   // --- Fallback ---
   const fallbackMsg =
     "I don't have information on that yet. You can help me learn by adding it to the Knowledge Base, or try asking about:\n\n" +
-    "- Our platforms (Apex, Auto, Learn)\n" +
+    "- Our platforms (Instinct, Auto, Learn)\n" +
     "- Team members and roles\n" +
     "- Tech stack and infrastructure\n" +
     "- Costs and pricing\n" +

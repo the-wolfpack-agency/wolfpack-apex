@@ -142,7 +142,7 @@ const KNOWLEDGE: KnowledgeEntry[] = [
   },
   {
     question: "what can you do",
-    answer: "I can help with:\n- Platform questions (Apex, Auto, Learn)\n- Team info (who does what, roles, access)\n- Technical details (tech stack, infrastructure, costs)\n- Client information and communication\n- Analytics and usage data\n- Feature requests and discussions\n- Report and document generation\n\nI check our knowledge base first (instant, zero cost), then analytics data, and only use AI for truly novel questions. Everything I learn gets saved so future answers are faster and free.",
+    answer: "I can help with:\n- Platform questions (Instinct, Auto, Learn)\n- Team info (who does what, roles, access)\n- Technical details (tech stack, infrastructure, costs)\n- Client information and communication\n- Analytics and usage data\n- Feature requests and discussions\n- Report and document generation\n\nI check our knowledge base first (instant, zero cost), then analytics data, and only use AI for truly novel questions. Everything I learn gets saved so future answers are faster and free.",
     source: "human",
     tags: ["capabilities", "help"],
   },

@@ -54,7 +54,7 @@ const DEMO_ENTRIES: KnowledgeEntry[] = [
   },
   {
     id: "demo-k2",
-    question: "What database does Apex use?",
+    question: "What database does Instinct use?",
     answer: "PostgreSQL with pg_trgm for full-text search and JSONB for flexible metadata storage.",
     source: "codebase",
     asked_by: "demo-dev",

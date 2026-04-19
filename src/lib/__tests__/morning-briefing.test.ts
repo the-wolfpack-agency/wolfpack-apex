@@ -47,7 +47,7 @@ jest.mock("@/lib/quickbooks", () => ({
     { customerName: "Greenfield Corp", amount: 4200, balance: 4200, dueDate: "2026-04-20" },
   ]),
   fetchRecentPayments: jest.fn().mockResolvedValue([
-    { customerName: "Apex Media", amount: 6500, date: "2026-04-04" },
+    { customerName: "Northstar Media", amount: 6500, date: "2026-04-04" },
   ]),
   fetchAgedReceivables: jest.fn().mockResolvedValue({
     total: 12700,

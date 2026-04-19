@@ -42,7 +42,7 @@ const DEMO_DOCS: GeneratedDocument[] = [
     id: "demo-d1",
     title: "API Documentation - auth.ts",
     doc_type: "api_doc",
-    content: "# Auth API\n\nJWT-based authentication for Wolfpack Apex.",
+    content: "# Auth API\n\nJWT-based authentication for Wolfpack Instinct.",
     format: "markdown",
     generated_from: "src/lib/auth.ts",
     generated_by: "demo-cto",

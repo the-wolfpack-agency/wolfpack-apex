@@ -816,7 +816,7 @@ function demoAgedReceivables(): AgedSummary {
     details: [
       { name: "Greenfield Corp", current: 8_500, days1to30: 0, days31to60: 0, days61to90: 0, over90: 0, total: 8_500 },
       { name: "Horizon Digital", current: 4_200, days1to30: 6_000, days31to60: 0, days61to90: 0, over90: 0, total: 10_200 },
-      { name: "Apex Ventures", current: 3_800, days1to30: 3_250, days31to60: 2_500, days61to90: 0, over90: 0, total: 9_550 },
+      { name: "Lantern Ventures", current: 3_800, days1to30: 3_250, days31to60: 2_500, days61to90: 0, over90: 0, total: 9_550 },
       { name: "Bloom & Co", current: 2_000, days1to30: 3_000, days31to60: 3_000, days61to90: 0, over90: 0, total: 8_000 },
       { name: "Redline Studios", current: 0, days1to30: 0, days31to60: 0, days61to90: 2_000, over90: 500, total: 2_500 },
     ],
@@ -846,10 +846,10 @@ function demoUnpaidInvoices(): Invoice[] {
   return [
     { id: "INV-1047", customerName: "Greenfield Corp", amount: 8_500, balance: 8_500, dueDate: futureDate(today, 14), status: "Unpaid" },
     { id: "INV-1044", customerName: "Horizon Digital", amount: 6_000, balance: 6_000, dueDate: futureDate(today, 3), status: "Unpaid" },
-    { id: "INV-1042", customerName: "Apex Ventures", amount: 5_750, balance: 3_250, dueDate: pastDate(today, 5), status: "Partial" },
+    { id: "INV-1042", customerName: "Lantern Ventures", amount: 5_750, balance: 3_250, dueDate: pastDate(today, 5), status: "Partial" },
     { id: "INV-1039", customerName: "Bloom & Co", amount: 4_200, balance: 4_200, dueDate: pastDate(today, 12), status: "Unpaid" },
     { id: "INV-1041", customerName: "Horizon Digital", amount: 4_200, balance: 4_200, dueDate: futureDate(today, 7), status: "Unpaid" },
-    { id: "INV-1038", customerName: "Apex Ventures", amount: 3_800, balance: 3_800, dueDate: futureDate(today, 21), status: "Unpaid" },
+    { id: "INV-1038", customerName: "Lantern Ventures", amount: 3_800, balance: 3_800, dueDate: futureDate(today, 21), status: "Unpaid" },
     { id: "INV-1035", customerName: "Redline Studios", amount: 2_500, balance: 2_500, dueDate: pastDate(today, 45), status: "Unpaid" },
     { id: "INV-1046", customerName: "Bloom & Co", amount: 2_000, balance: 2_000, dueDate: futureDate(today, 10), status: "Unpaid" },
   ];
@@ -859,12 +859,12 @@ function demoRecentPayments(limit: number): Payment[] {
   const today = new Date();
   const all: Payment[] = [
     { id: "PMT-892", customerName: "Greenfield Corp", amount: 12_000, date: pastDate(today, 2), method: "ACH" },
-    { id: "PMT-891", customerName: "Apex Ventures", amount: 2_500, date: pastDate(today, 4), method: "Credit Card" },
+    { id: "PMT-891", customerName: "Lantern Ventures", amount: 2_500, date: pastDate(today, 4), method: "Credit Card" },
     { id: "PMT-890", customerName: "Horizon Digital", amount: 8_400, date: pastDate(today, 7), method: "ACH" },
     { id: "PMT-889", customerName: "Bloom & Co", amount: 3_600, date: pastDate(today, 10), method: "Check" },
     { id: "PMT-888", customerName: "Greenfield Corp", amount: 6_500, date: pastDate(today, 15), method: "ACH" },
     { id: "PMT-887", customerName: "Redline Studios", amount: 4_000, date: pastDate(today, 18), method: "Wire" },
-    { id: "PMT-886", customerName: "Apex Ventures", amount: 7_200, date: pastDate(today, 22), method: "ACH" },
+    { id: "PMT-886", customerName: "Lantern Ventures", amount: 7_200, date: pastDate(today, 22), method: "ACH" },
     { id: "PMT-885", customerName: "Bloom & Co", amount: 2_800, date: pastDate(today, 25), method: "Credit Card" },
   ];
   return all.slice(0, limit);

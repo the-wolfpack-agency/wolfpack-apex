@@ -40,7 +40,7 @@ function demoJournal(userId: string, date: string): JournalEntry {
     content: "Shadow mode journal entry. Connect a database to persist entries.",
     auto_context: { events: [], questions: [], actions: [] },
     mood: "productive",
-    highlights: ["Explored the Apex platform"],
+    highlights: ["Explored the Instinct platform"],
     blockers: [],
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),

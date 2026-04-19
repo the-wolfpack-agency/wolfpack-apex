@@ -304,7 +304,7 @@ export default function FeaturesPage() {
                 }}
               >
                 <option value="">Target Product (optional)</option>
-                <option value="apex">Apex</option>
+                <option value="apex">Instinct</option>
                 <option value="wolfpack-auto">Wolfpack Auto</option>
                 <option value="agenticqa">AgenticQA</option>
                 <option value="other">Other</option>

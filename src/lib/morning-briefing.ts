@@ -418,10 +418,10 @@ function getDemoBriefing(userName: string): MorningBriefing {
       location: "Zoom",
     },
     {
-      subject: "Apex Media Campaign Kickoff",
+      subject: "Northstar Media Campaign Kickoff",
       startTime: `${today}T14:00:00`,
       endTime: `${today}T15:00:00`,
-      attendees: ["Lisa Park (Apex Media)", "Jordan Lee", "Mike Rivera"],
+      attendees: ["Lisa Park (Northstar Media)", "Jordan Lee", "Mike Rivera"],
       location: "Conference Room A",
     },
     {
@@ -440,7 +440,7 @@ function getDemoBriefing(userName: string): MorningBriefing {
       preview: "Hi, we've reviewed the proposal and are ready to move forward with the $48K package. Can we finalize...",
     },
     {
-      from: "Lisa Park (Apex Media)",
+      from: "Lisa Park (Northstar Media)",
       subject: "Campaign Assets - Need Creative Direction",
       receivedAt: `${today}T08:12:00`,
       preview: "The design team has three directions ready for review. Attached are the mockups. We need your sign-off by...",
@@ -475,7 +475,7 @@ function getDemoBriefing(userName: string): MorningBriefing {
     recentPayments: [
       { customer: "Greenfield Corp", amount: 12_500 },
       { customer: "Horizon Digital", amount: 8_750 },
-      { customer: "Apex Media", amount: 15_000 },
+      { customer: "Northstar Media", amount: 15_000 },
     ],
   };
 
@@ -512,7 +512,7 @@ function getDemoBriefing(userName: string): MorningBriefing {
     },
     {
       priority: "medium",
-      text: "Review Apex Media campaign creative direction",
+      text: "Review Northstar Media campaign creative direction",
       context: "Lisa Park needs sign-off on mockups today",
     },
     {
