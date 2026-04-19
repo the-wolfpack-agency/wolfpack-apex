@@ -165,6 +165,22 @@ export type ApexEventType =
   | "site.domain_verified"
   | "site.domain_removed"
   | "site.domain_add_failed"
+  // Sites — unauthenticated share links + client approval workflow
+  // (035_share_and_approvals). `token_nonce` is the UUID stored in
+  // apex_share_tokens — never the signed blob, never the secret.
+  | "site.share_link_issued"
+  | "site.share_link_accessed"
+  | "site.share_link_revoked"
+  | "site.approval_recorded"
+  | "site.changes_requested"
+  | "site.approval_expired"
+  // Sites — PUBLIC contact-form submissions (034_site_form_submissions).
+  // Metadata NEVER contains the recipient email in plaintext; we emit a
+  // boolean `had_recipient` + the reason codes only.
+  | "site.form_submitted"
+  | "site.form_rejected"
+  | "site.form_email_sent"
+  | "site.form_email_failed"
   // Sites — image-wireframe → brief generator (031)
   | "site.brief_generation_requested"
   | "site.brief_generation_succeeded"

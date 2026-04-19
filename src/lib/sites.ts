@@ -593,6 +593,14 @@ export async function triggerDeploy(
   const project = await getSiteProject(projectId);
   if (!project) throw new Error("project not found");
 
+  // TODO(wave-I-B+1): client approval gate.
+  // Call `checkApprovalGate(projectId)` from `@/lib/site-approvals`
+  // here. When it returns { allowed: false }, short-circuit with a
+  // typed error that the HTTP route maps to a 409 so the UI can render
+  // "Client has not approved this preview yet." Gate is intentionally
+  // OFF for this wave — data model + UI shipped first so approvals
+  // accumulate before we start blocking deploys on them.
+
   const deployId = `deploy_${randomUUID()}`;
   await safeQuery(
     `INSERT INTO apex_site_deploys (id, project_id, triggered_by, status)

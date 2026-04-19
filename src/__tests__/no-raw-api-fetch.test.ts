@@ -17,6 +17,10 @@ const EXCEPTIONS = [
   "src/lib/client-auth.ts", // the implementation itself
   "src/app/login",           // pre-auth by definition
   "src/app/api/",            // server routes, not client
+  "src/app/share/",          // unauthenticated client share pages (035) —
+                             //   the signed share token IS the credential; no
+                             //   JWT refresh flow applies. See
+                             //   src/app/share/[token]/ShareApprovalPanel.tsx.
   "src/lib/__tests__/",      // test files
   "src/__tests__/",
   "node_modules/",

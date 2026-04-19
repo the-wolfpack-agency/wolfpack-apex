@@ -167,7 +167,27 @@ export interface SiteBrief {
    */
   theme?: SiteTheme | Record<string, string>;
   pages: BriefPage[];
-  contactForm?: { fields: string[] };
+  /**
+   * Contact form configuration. `fields` is the list of required user-
+   * facing inputs (e.g. `["name","email","message"]`). When the public
+   * submission handler at `/api/public/forms/{siteId}/submit` receives
+   * a POST, every field in this list must be present + non-empty, and
+   * no extra fields (beyond the `_hp_website` honeypot) are accepted.
+   *
+   * `recipientEmail` (added in migration 034) is where accepted
+   * submissions are sent via email. `subjectTemplate` overrides the
+   * default subject line. `notifySlack` optionally fires a webhook on
+   * every accepted submission in addition to the email.
+   *
+   * All fields are OPTIONAL — briefs authored before migration 034
+   * continue to validate green without change.
+   */
+  contactForm?: {
+    fields: string[];
+    recipientEmail?: string;
+    subjectTemplate?: string;
+    notifySlack?: string;
+  };
   /**
    * Site-wide SEO defaults. Each page's `seo` overrides these field-by-
    * field; missing fields on a page fall through to these defaults and
@@ -365,6 +385,51 @@ export function validateBrief(brief: unknown): asserts brief is SiteBrief {
   // Site-level SEO + favicon defaults. All optional.
   validatePageSeo((b as Record<string, unknown>).defaultSeo, "defaultSeo", errors);
   validateFavicon((b as Record<string, unknown>).favicon, errors);
+
+  // Contact form — all fields optional. When present, enforce shapes so
+  // the public submission handler can trust the brief without re-checking.
+  const contactFormRaw = (b as Record<string, unknown>).contactForm;
+  if (contactFormRaw !== undefined) {
+    if (!contactFormRaw || typeof contactFormRaw !== "object" || Array.isArray(contactFormRaw)) {
+      errors.push("contactForm must be an object");
+    } else {
+      const cf = contactFormRaw as Record<string, unknown>;
+      if (cf.fields !== undefined) {
+        if (!Array.isArray(cf.fields)) {
+          errors.push("contactForm.fields must be an array");
+        } else if (!cf.fields.every((f) => typeof f === "string" && f.length > 0 && f.length <= 64)) {
+          errors.push(
+            "contactForm.fields must be non-empty strings of at most 64 chars each",
+          );
+        }
+      }
+      if (cf.recipientEmail !== undefined) {
+        if (
+          typeof cf.recipientEmail !== "string" ||
+          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cf.recipientEmail)
+        ) {
+          errors.push("contactForm.recipientEmail must be a valid email");
+        }
+      }
+      if (cf.subjectTemplate !== undefined) {
+        if (typeof cf.subjectTemplate !== "string") {
+          errors.push("contactForm.subjectTemplate must be a string");
+        } else if (cf.subjectTemplate.length > 120) {
+          errors.push("contactForm.subjectTemplate must be at most 120 characters");
+        }
+      }
+      if (cf.notifySlack !== undefined) {
+        if (
+          typeof cf.notifySlack !== "string" ||
+          !cf.notifySlack.startsWith("https://hooks.slack.com/")
+        ) {
+          errors.push(
+            "contactForm.notifySlack must be an https://hooks.slack.com/ webhook URL",
+          );
+        }
+      }
+    }
+  }
 
   const known = new Set<string>(SUPPORTED_SECTION_TYPES);
   for (const p of b.pages || []) {

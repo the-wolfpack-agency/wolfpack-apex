@@ -29,6 +29,8 @@ import WireframeExtractReview, {
 } from "@/components/sites/WireframeExtractReview";
 import { SeoFields } from "@/components/sites/SeoFields";
 import DomainManager from "@/components/sites/DomainManager";
+import ContactFormSettings from "@/components/sites/ContactFormSettings";
+import SharePanel from "@/components/sites/SharePanel";
 import type { SiteTheme } from "@/lib/site-theme";
 import type { SiteBrief } from "@/lib/sites-schema";
 import {
@@ -621,6 +623,15 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
             onChange={(next) => setBrief(next as unknown as Brief)}
           />
         </div>
+        {/* Contact form settings — recipient, subject, honeypot-ready HTML
+            snippet. Feeds the same brief state so one Save persists
+            everything together. */}
+        <div style={{ marginTop: "1.25rem" }}>
+          <ContactFormSettings
+            brief={brief as unknown as SiteBrief}
+            onChange={(next) => setBrief(next as unknown as Brief)}
+          />
+        </div>
         <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem" }}>
           <button onClick={handleSave} disabled={saving} style={btnStyle()}>
             {saving ? "Saving…" : "Save brief"}
@@ -737,6 +748,22 @@ export default function SiteDetailPage({ params }: { params: Promise<{ id: strin
             Bind your client&apos;s domain (e.g. <code>acme.com</code>) so the site is shareable from a branded URL, not a preview link.
           </p>
           <DomainManager siteId={id} previewUrl={project.preview_url} />
+        </section>
+      )}
+
+      {/* Step 5 — Share with the client for approval. Unauth signed share
+          links let the client review without signing in; their approval
+          is recorded as an append-only audit trail. Deploys are NOT gated
+          on approval yet (checkApprovalGate returns allowed:true) —
+          when the gate flips on in a later wave, existing approval rows
+          become the source of truth without any schema change. */}
+      {hasPreview && (
+        <section style={{ marginBottom: "2rem" }}>
+          <SectionHeading step="5" title="Share with the client for approval (optional)" />
+          <p style={{ fontSize: "0.85rem", color: "var(--wp-text-dim)", marginTop: "-0.25rem", marginBottom: "0.75rem" }}>
+            Generate a signed link so the client can review and approve (or request changes) without logging in. Links expire after 30 days.
+          </p>
+          <SharePanel siteId={id} previewUrl={project.preview_url} />
         </section>
       )}
 
