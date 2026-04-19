@@ -214,7 +214,7 @@ function getDemoAnalysis(): CodebaseAnalysis {
     migrations: 6,
     tables: [
       "apex_users", "apex_events", "apex_documents", "instinct_feature_requests",
-      "apex_discussions", "apex_clients", "apex_journal_entries",
+      "instinct_discussions", "instinct_clients", "apex_journal_entries",
     ],
     dependencies: {
       next: "16.2.2", react: "19.2.4", pg: "^8.20.0",

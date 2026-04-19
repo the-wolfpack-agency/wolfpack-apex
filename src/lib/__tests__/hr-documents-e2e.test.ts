@@ -4,9 +4,9 @@
  * Walks the smart-router flow against the real route handler with a
  * stateful in-memory DB stub:
  *   1. Upload a W-4 to /api/people/documents
- *   2. Verify it's stored in apex_hr_documents with category=w4
+ *   2. Verify it's stored in instinct_hr_documents with category=w4
  *   3. Upload a benefits renewal — verify it's stored AND the
- *      benefits pipeline ran (apex_benefit_documents row + plans + rec)
+ *      benefits pipeline ran (instinct_benefit_documents row + plans + rec)
  *   4. List documents (filter by category)
  *   5. Recategorize a doc
  *   6. Delete a doc
@@ -24,17 +24,17 @@ const benefitRecs: BenefitRecRow[] = [];
 
 function fakeDb(sql: string, params: unknown[] = []) {
   const s = sql.replace(/\s+/g, " ").trim();
-  // INSERT into apex_hr_documents
-  if (s.startsWith("INSERT INTO apex_hr_documents")) {
+  // INSERT into instinct_hr_documents
+  if (s.startsWith("INSERT INTO instinct_hr_documents")) {
     const [id, filename, , size_bytes, , category] = params as [string, string, string, number, number, string];
     hrDocs.set(id, { id, filename, category, size_bytes, status: "active", uploaded_at: new Date().toISOString() });
     return { rows: [] };
   }
-  if (s.startsWith("SELECT * FROM apex_hr_documents WHERE id =")) {
+  if (s.startsWith("SELECT * FROM instinct_hr_documents WHERE id =")) {
     const r = hrDocs.get(params[0] as string);
     return { rows: r ? [r] : [] };
   }
-  if (s.startsWith("SELECT * FROM apex_hr_documents WHERE status")) {
+  if (s.startsWith("SELECT * FROM instinct_hr_documents WHERE status")) {
     let results = [...hrDocs.values()];
     // Handle combined filters: category and/or employee_id after status = 'active'
     if (s.includes("category =")) {
@@ -43,37 +43,37 @@ function fakeDb(sql: string, params: unknown[] = []) {
     }
     return { rows: results };
   }
-  if (s.startsWith("UPDATE apex_hr_documents SET category")) {
+  if (s.startsWith("UPDATE instinct_hr_documents SET category")) {
     const [id, category] = params as [string, string];
     const r = hrDocs.get(id);
     if (!r) return { rows: [] };
     r.category = category;
     return { rows: [r] };
   }
-  if (s.startsWith("UPDATE apex_hr_documents SET employee_id")) {
+  if (s.startsWith("UPDATE instinct_hr_documents SET employee_id")) {
     const id = params[0] as string;
     const r = hrDocs.get(id);
     if (!r) return { rows: [] };
     return { rows: [r] };
   }
-  if (s.startsWith("DELETE FROM apex_hr_documents")) {
+  if (s.startsWith("DELETE FROM instinct_hr_documents")) {
     const id = params[0] as string;
     const had = hrDocs.has(id);
     hrDocs.delete(id);
     return { rows: had ? [{ id }] : [] };
   }
   // benefits side-effects
-  if (s.startsWith("INSERT INTO apex_benefit_documents")) {
+  if (s.startsWith("INSERT INTO instinct_benefit_documents")) {
     const [id] = params as [string];
     benefitDocs.set(id, { id });
     return { rows: [] };
   }
-  if (s.startsWith("INSERT INTO apex_benefit_plans")) {
+  if (s.startsWith("INSERT INTO instinct_benefit_plans")) {
     const [id, document_id, plan_id] = params as [string, string, string];
     benefitPlans.push({ id, document_id, plan_id });
     return { rows: [] };
   }
-  if (s.startsWith("INSERT INTO apex_benefit_recommendations")) {
+  if (s.startsWith("INSERT INTO instinct_benefit_recommendations")) {
     const [id, document_id] = params as [string, string];
     benefitRecs.push({ id, document_id });
     return { rows: [] };
@@ -177,7 +177,7 @@ describe("HR Documents E2E — smart router", () => {
     benefitRecs.length = 0;
   });
 
-  it("upload W-4 → categorized as w4 → stored in apex_hr_documents → no benefits side-effects", async () => {
+  it("upload W-4 → categorized as w4 → stored in instinct_hr_documents → no benefits side-effects", async () => {
     const req = await multipartReq("http://t/api/people/documents", [
       { name: "file", value: new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46])], { type: "application/pdf" }), filename: "alicia-w4.pdf" },
     ]);
@@ -191,7 +191,7 @@ describe("HR Documents E2E — smart router", () => {
     expect(benefitDocs.size).toBe(0);
   });
 
-  it("upload benefits renewal → categorized as benefits_renewal → BOTH apex_hr_documents AND apex_benefit_* populated", async () => {
+  it("upload benefits renewal → categorized as benefits_renewal → BOTH instinct_hr_documents AND apex_benefit_* populated", async () => {
     const req = await multipartReq("http://t/api/people/documents", [
       { name: "file", value: new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46])], { type: "application/pdf" }), filename: "bcbs-renewal.pdf" },
     ]);

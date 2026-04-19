@@ -18,23 +18,23 @@ const insights: InsightRow[] = [];
 
 function fakeDb(sql: string, params: unknown[] = []) {
   const s = sql.replace(/\s+/g, " ").trim();
-  if (s.startsWith("INSERT INTO apex_benefit_documents")) {
+  if (s.startsWith("INSERT INTO instinct_benefit_documents")) {
     const [id, filename, carrier] = params as [string, string, string];
     const row: DocRow = { id, filename, carrier, uploaded_at: new Date().toISOString() };
     docs.set(id, row);
     return { rows: [row] };
   }
-  if (s.startsWith("INSERT INTO apex_benefit_plans")) {
+  if (s.startsWith("INSERT INTO instinct_benefit_plans")) {
     const [id, document_id, plan_id] = params as [string, string, string];
     plans.push({ id, document_id, plan_id });
     return { rows: [] };
   }
-  if (s.startsWith("INSERT INTO apex_benefit_recommendations")) {
+  if (s.startsWith("INSERT INTO instinct_benefit_recommendations")) {
     const [id, document_id, rule_name, recommended_plan_id] = params as [string, string, string, string];
     recs.push({ id, document_id, rule_name, recommended_plan_id, outcome: "pending" });
     return { rows: [] };
   }
-  if (s.startsWith("UPDATE apex_benefit_recommendations")) {
+  if (s.startsWith("UPDATE instinct_benefit_recommendations")) {
     const [id, outcome] = params as [string, string];
     const r = recs.find((x) => x.id === id);
     if (r) r.outcome = outcome;
@@ -45,17 +45,17 @@ function fakeDb(sql: string, params: unknown[] = []) {
     insights.push({ id, category, severity, title, status: "open" });
     return { rows: [] };
   }
-  if (s.startsWith("SELECT * FROM apex_benefit_documents ORDER BY")) {
+  if (s.startsWith("SELECT * FROM instinct_benefit_documents ORDER BY")) {
     return { rows: [...docs.values()] };
   }
-  if (s.startsWith("SELECT * FROM apex_benefit_documents WHERE id =")) {
+  if (s.startsWith("SELECT * FROM instinct_benefit_documents WHERE id =")) {
     const row = docs.get(params[0] as string);
     return { rows: row ? [row] : [] };
   }
-  if (s.startsWith("SELECT * FROM apex_benefit_plans WHERE document_id")) {
+  if (s.startsWith("SELECT * FROM instinct_benefit_plans WHERE document_id")) {
     return { rows: plans.filter((p) => p.document_id === params[0]) };
   }
-  if (s.startsWith("SELECT * FROM apex_benefit_recommendations WHERE document_id")) {
+  if (s.startsWith("SELECT * FROM instinct_benefit_recommendations WHERE document_id")) {
     return { rows: recs.filter((r) => r.document_id === params[0]) };
   }
   if (s.startsWith("SELECT * FROM instinct_hr_insights")) {

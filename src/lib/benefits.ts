@@ -533,7 +533,7 @@ export async function saveBenefitDocument(
 ): Promise<{ documentId: string; planIds: string[] }> {
   const documentId = `bd_${randomUUID()}`;
   await safeQuery(
-    `INSERT INTO apex_benefit_documents
+    `INSERT INTO instinct_benefit_documents
        (id, filename, carrier, effective_date, account_number, page_count, size_bytes, raw_text_excerpt, uploaded_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     [
@@ -554,7 +554,7 @@ export async function saveBenefitDocument(
     const id = `bp_${randomUUID()}`;
     planIds.push(id);
     await safeQuery(
-      `INSERT INTO apex_benefit_plans
+      `INSERT INTO instinct_benefit_plans
          (id, document_id, plan_id, plan_name, network, metal_tier, is_hsa,
           individual_deductible_in_network, individual_deductible_out_of_network,
           individual_oop_max_in_network, individual_oop_max_out_of_network,
@@ -610,7 +610,7 @@ export async function saveRecommendation(
 ): Promise<string> {
   const id = `br_${randomUUID()}`;
   await safeQuery(
-    `INSERT INTO apex_benefit_recommendations
+    `INSERT INTO instinct_benefit_recommendations
        (id, document_id, rule_name, recommended_plan_id, reasoning, score_breakdown)
      VALUES ($1, $2, $3, $4, $5, $6)`,
     [id, documentId, rec.rule, rec.plan.plan_id, rec.reasoning, JSON.stringify(rec.score_breakdown)],
@@ -631,7 +631,7 @@ export async function decideRecommendation(
   userRole: string,
 ): Promise<void> {
   await safeQuery(
-    `UPDATE apex_benefit_recommendations
+    `UPDATE instinct_benefit_recommendations
         SET outcome = $2, decided_by = $3, decided_at = NOW()
       WHERE id = $1`,
     [recommendationId, outcome, decidedBy],
@@ -650,7 +650,7 @@ export async function deleteBenefitDocument(
   userRole: string,
 ): Promise<boolean> {
   const r = await safeQuery(
-    `DELETE FROM apex_benefit_documents WHERE id = $1 RETURNING id`,
+    `DELETE FROM instinct_benefit_documents WHERE id = $1 RETURNING id`,
     [id],
   );
   if (r.rows.length === 0) return false;
@@ -664,7 +664,7 @@ export async function deleteBenefitDocument(
 
 export async function listBenefitDocuments(): Promise<Array<Record<string, unknown>>> {
   const r = await safeQuery(
-    `SELECT * FROM apex_benefit_documents ORDER BY uploaded_at DESC`,
+    `SELECT * FROM instinct_benefit_documents ORDER BY uploaded_at DESC`,
   );
   return r.rows;
 }
@@ -675,16 +675,16 @@ export async function getBenefitDocument(id: string): Promise<{
   recommendations: Array<Record<string, unknown>>;
 }> {
   const docR = await safeQuery(
-    `SELECT * FROM apex_benefit_documents WHERE id = $1`,
+    `SELECT * FROM instinct_benefit_documents WHERE id = $1`,
     [id],
   );
   if (docR.rows.length === 0) return { document: null, plans: [], recommendations: [] };
   const plansR = await safeQuery(
-    `SELECT * FROM apex_benefit_plans WHERE document_id = $1 ORDER BY monthly_premium_age_employee_only ASC NULLS LAST`,
+    `SELECT * FROM instinct_benefit_plans WHERE document_id = $1 ORDER BY monthly_premium_age_employee_only ASC NULLS LAST`,
     [id],
   );
   const recsR = await safeQuery(
-    `SELECT * FROM apex_benefit_recommendations WHERE document_id = $1 ORDER BY created_at DESC`,
+    `SELECT * FROM instinct_benefit_recommendations WHERE document_id = $1 ORDER BY created_at DESC`,
     [id],
   );
   // Postgres NUMERIC columns come back as strings via node-postgres by

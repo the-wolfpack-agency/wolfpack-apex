@@ -57,8 +57,8 @@ describe("Discussions Library", () => {
 
       expect(result).toEqual({ ...mockDiscussion, reply_count: 1 });
       expect(mockSafeQuery).toHaveBeenCalledTimes(2);
-      expect(mockSafeQuery.mock.calls[0][0]).toContain("INSERT INTO apex_discussions");
-      expect(mockSafeQuery.mock.calls[1][0]).toContain("INSERT INTO apex_discussion_replies");
+      expect(mockSafeQuery.mock.calls[0][0]).toContain("INSERT INTO instinct_discussions");
+      expect(mockSafeQuery.mock.calls[1][0]).toContain("INSERT INTO instinct_discussion_replies");
       expect(mockTrackEvent).toHaveBeenCalledWith(
         "discussion.thread_created",
         "user-1",
@@ -97,7 +97,7 @@ describe("Discussions Library", () => {
 
       expect(result).toEqual(mockReply);
       expect(mockSafeQuery).toHaveBeenCalledTimes(2);
-      expect(mockSafeQuery.mock.calls[1][0]).toContain("UPDATE apex_discussions");
+      expect(mockSafeQuery.mock.calls[1][0]).toContain("UPDATE instinct_discussions");
       expect(mockTrackEvent).toHaveBeenCalledWith(
         "discussion.reply_posted",
         "user-1",

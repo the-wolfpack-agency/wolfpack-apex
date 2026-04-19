@@ -389,16 +389,21 @@ export async function computeBriefEditInsights(
 
 /**
  * Persist a computed insights object into
- * apex_brief_edit_insights_snapshots. Returns the generated row id.
- * Shadow-mode safe: when DATABASE_URL is unset, safeQuery silently
- * no-ops and we return the id without throwing.
+ * instinct_brief_edit_insights_snapshots. Returns the generated row
+ * id. Shadow-mode safe: when DATABASE_URL is unset, safeQuery
+ * silently no-ops and we return the id without throwing.
+ *
+ * Note: the table was renamed from apex_brief_edit_insights_snapshots
+ * in migration 055. A backward-compat view with the old name still
+ * exists (auto-updatable passthrough) so legacy deployments don't
+ * break, but new code targets the canonical instinct_* name.
  */
 export async function writeInsightsSnapshot(
   insights: BriefEditInsights,
 ): Promise<string> {
   const id = `brief_edit_insights_${randomUUID()}`;
   await safeQuery(
-    `INSERT INTO apex_brief_edit_insights_snapshots
+    `INSERT INTO instinct_brief_edit_insights_snapshots
         (id, window_start, window_end, payload)
       VALUES ($1, $2, $3, $4)`,
     [id, insights.window.start, insights.window.end, JSON.stringify(insights)],

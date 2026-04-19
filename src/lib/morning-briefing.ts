@@ -261,7 +261,7 @@ async function fetchClientAttention(): Promise<ClientAttention[]> {
   const { rows } = await safeQuery<{ name: string; last_contact: string | null }>(
     `SELECT c.name,
             MAX(e.timestamp) AS last_contact
-     FROM apex_clients c
+     FROM instinct_clients c
      LEFT JOIN apex_events e ON e.metadata::text LIKE '%' || c.name || '%'
        AND e.timestamp > NOW() - INTERVAL '30 days'
      GROUP BY c.name

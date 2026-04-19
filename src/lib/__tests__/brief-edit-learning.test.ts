@@ -370,7 +370,7 @@ describe("computeBriefEditInsights — DB layer", () => {
 describe("writeInsightsSnapshot", () => {
   beforeEach(() => jest.clearAllMocks());
 
-  it("INSERTs into apex_brief_edit_insights_snapshots with JSON payload", async () => {
+  it("INSERTs into instinct_brief_edit_insights_snapshots with JSON payload (migration 055 canonical name)", async () => {
     mockSafeQuery.mockResolvedValueOnce({ rows: [], fromCache: false });
     const insights = aggregateInsights([], WINDOW);
     const id = await writeInsightsSnapshot(insights);
@@ -378,7 +378,12 @@ describe("writeInsightsSnapshot", () => {
     expect(id).toMatch(/^brief_edit_insights_/);
     expect(mockSafeQuery).toHaveBeenCalledTimes(1);
     const [sql, params] = mockSafeQuery.mock.calls[0];
-    expect(String(sql)).toMatch(/apex_brief_edit_insights_snapshots/);
+    // Post-055 canonical name. A backward-compat view with the old
+    // apex_* name still exists in the DB, but new code always writes
+    // to the canonical instinct_* name so tests must track that.
+    expect(String(sql)).toMatch(/instinct_brief_edit_insights_snapshots/);
+    // Must NOT regress to the old name at the code layer.
+    expect(String(sql)).not.toMatch(/apex_brief_edit_insights_snapshots/);
     expect(params[0]).toBe(id);
     expect(params[1]).toBe(WINDOW.start.toISOString());
     expect(params[2]).toBe(WINDOW.end.toISOString());

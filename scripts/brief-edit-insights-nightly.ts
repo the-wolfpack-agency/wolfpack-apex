@@ -6,7 +6,8 @@
  *
  * For each of the 7-day and 30-day windows:
  *   1. compute BriefEditInsights via computeBriefEditInsights()
- *   2. persist the snapshot into apex_brief_edit_insights_snapshots
+ *   2. persist the snapshot into instinct_brief_edit_insights_snapshots
+ *      (formerly apex_brief_edit_insights_snapshots — see migration 055)
  *   3. emit a site.insights_snapshot_taken analytics event
  *
  * Exits 0 on success, non-zero with a loud banner on failure so the

@@ -195,7 +195,7 @@ export interface RoutedUploadResult {
  *   1. Extract text from PDF (via benefits parseBenefitDocument helper —
  *      we reuse the same unpdf-backed extractor)
  *   2. Classify with the deterministic rule engine
- *   3. Persist row in apex_hr_documents
+ *   3. Persist row in instinct_hr_documents
  *   4. If classified as benefits_renewal, ALSO run the benefit
  *      parsing pipeline so the Benefits tab has its plans + rec
  *   5. Emit hr.document_uploaded + hr.document_classified events
@@ -257,10 +257,10 @@ export async function routeUpload(
     extraction_notes: extraction.extraction_notes,
   } : {};
 
-  // Always store an apex_hr_documents row as the system of record
+  // Always store an instinct_hr_documents row as the system of record
   const documentId = `hd_${randomUUID()}`;
   await safeQuery(
-    `INSERT INTO apex_hr_documents
+    `INSERT INTO instinct_hr_documents
        (id, filename, mime_type, size_bytes, page_count, category,
         classification_confidence, classification_reasons,
         benefit_document_id, raw_text_excerpt, uploaded_by, metadata)
@@ -374,14 +374,14 @@ export async function listHrDocuments(filter?: { category?: HrCategory; employee
   }
   const where = conditions.join(" AND ");
   const r = await safeQuery(
-    `SELECT * FROM apex_hr_documents WHERE ${where} ORDER BY uploaded_at DESC`,
+    `SELECT * FROM instinct_hr_documents WHERE ${where} ORDER BY uploaded_at DESC`,
     params,
   );
   return r.rows.map(rowToHrDocument);
 }
 
 export async function getHrDocument(id: string): Promise<HrDocument | null> {
-  const r = await safeQuery(`SELECT * FROM apex_hr_documents WHERE id = $1`, [id]);
+  const r = await safeQuery(`SELECT * FROM instinct_hr_documents WHERE id = $1`, [id]);
   if (r.rows.length === 0) return null;
   return rowToHrDocument(r.rows[0]);
 }
@@ -393,7 +393,7 @@ export async function recategorizeDocument(
   userRole: string,
 ): Promise<HrDocument | null> {
   const r = await safeQuery(
-    `UPDATE apex_hr_documents
+    `UPDATE instinct_hr_documents
         SET category = $2, updated_at = NOW()
       WHERE id = $1
   RETURNING *`,
@@ -414,7 +414,7 @@ export async function linkDocumentToEmployee(
   userRole: string,
 ): Promise<HrDocument | null> {
   const r = await safeQuery(
-    `UPDATE apex_hr_documents
+    `UPDATE instinct_hr_documents
         SET employee_id = $2, updated_at = NOW()
       WHERE id = $1
   RETURNING *`,
@@ -434,7 +434,7 @@ export async function unlinkDocumentFromEmployee(
   userRole: string,
 ): Promise<HrDocument | null> {
   const r = await safeQuery(
-    `UPDATE apex_hr_documents
+    `UPDATE instinct_hr_documents
         SET employee_id = NULL, updated_at = NOW()
       WHERE id = $1
   RETURNING *`,
@@ -449,7 +449,7 @@ export async function unlinkDocumentFromEmployee(
 
 export async function deleteHrDocument(id: string, deletedBy: string, userRole: string): Promise<boolean> {
   const r = await safeQuery(
-    `DELETE FROM apex_hr_documents WHERE id = $1 RETURNING id`,
+    `DELETE FROM instinct_hr_documents WHERE id = $1 RETURNING id`,
     [id],
   );
   if (r.rows.length === 0) return false;

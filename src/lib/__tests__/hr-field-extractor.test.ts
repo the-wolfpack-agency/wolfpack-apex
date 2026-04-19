@@ -471,7 +471,7 @@ describe("routeUpload with field extraction", () => {
     saveInsights.mockResolvedValue(undefined);
   });
 
-  it("stores extraction metadata in apex_hr_documents for W-4", async () => {
+  it("stores extraction metadata in instinct_hr_documents for W-4", async () => {
     parseBenefitDocument.mockResolvedValueOnce({
       filename: "w4-test.pdf",
       carrier: null,
@@ -488,7 +488,7 @@ describe("routeUpload with field extraction", () => {
 
     // The INSERT call should have metadata as the 12th parameter
     const insertCall = mockSafeQuery.mock.calls.find(
-      (c: unknown[]) => typeof c[0] === "string" && (c[0] as string).includes("INSERT INTO apex_hr_documents"),
+      (c: unknown[]) => typeof c[0] === "string" && (c[0] as string).includes("INSERT INTO instinct_hr_documents"),
     );
     expect(insertCall).toBeDefined();
     const params = insertCall![1] as unknown[];
@@ -584,7 +584,7 @@ describe("routeUpload with field extraction", () => {
 
     // metadata should be empty object
     const insertCall = mockSafeQuery.mock.calls.find(
-      (c: unknown[]) => typeof c[0] === "string" && (c[0] as string).includes("INSERT INTO apex_hr_documents"),
+      (c: unknown[]) => typeof c[0] === "string" && (c[0] as string).includes("INSERT INTO instinct_hr_documents"),
     );
     const params = insertCall![1] as unknown[];
     const metadata = JSON.parse(params[11] as string);

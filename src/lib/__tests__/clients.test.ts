@@ -46,7 +46,7 @@ describe("Clients Library", () => {
       const result = await createClient("Acme Corp", "tech", "john@acme.com", "John", "Big deal");
 
       expect(result).toEqual(mockClient);
-      expect(mockSafeQuery.mock.calls[0][0]).toContain("INSERT INTO apex_clients");
+      expect(mockSafeQuery.mock.calls[0][0]).toContain("INSERT INTO instinct_clients");
       expect(mockTrackEvent).toHaveBeenCalledWith(
         "client.doc_generated",
         "client-1",

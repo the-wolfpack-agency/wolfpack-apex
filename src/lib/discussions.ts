@@ -53,7 +53,7 @@ export async function createThread(
 ): Promise<Discussion | null> {
   // Insert discussion
   const { rows: discussions } = await safeQuery<Discussion>(
-    `INSERT INTO apex_discussions (title, category, created_by, tags)
+    `INSERT INTO instinct_discussions (title, category, created_by, tags)
      VALUES ($1, $2, $3, $4)
      RETURNING *`,
     [title, category, userId, tags || []],
@@ -80,7 +80,7 @@ export async function createThread(
 
   // Insert the initial reply
   await safeQuery(
-    `INSERT INTO apex_discussion_replies (discussion_id, author_id, content)
+    `INSERT INTO instinct_discussion_replies (discussion_id, author_id, content)
      VALUES ($1, $2, $3)`,
     [discussion.id, userId, initialContent],
   );
@@ -104,7 +104,7 @@ export async function replyToThread(
   attachments?: unknown[],
 ): Promise<DiscussionReply | null> {
   const { rows } = await safeQuery<DiscussionReply>(
-    `INSERT INTO apex_discussion_replies (discussion_id, author_id, content, attachments)
+    `INSERT INTO instinct_discussion_replies (discussion_id, author_id, content, attachments)
      VALUES ($1, $2, $3, $4)
      RETURNING *`,
     [discussionId, userId, content, JSON.stringify(attachments || [])],
@@ -113,7 +113,7 @@ export async function replyToThread(
   if (rows.length > 0) {
     // Bump the discussion updated_at
     await safeQuery(
-      `UPDATE apex_discussions SET updated_at = NOW() WHERE id = $1`,
+      `UPDATE instinct_discussions SET updated_at = NOW() WHERE id = $1`,
       [discussionId],
     );
 
@@ -143,7 +143,7 @@ export async function resolveThread(
   userId: string,
 ): Promise<Discussion | null> {
   const { rows } = await safeQuery<Discussion>(
-    `UPDATE apex_discussions
+    `UPDATE instinct_discussions
      SET status = 'resolved', updated_at = NOW()
      WHERE id = $1
      RETURNING *`,
@@ -183,10 +183,10 @@ export async function getThreads(
 
   const { rows } = await safeQuery<Discussion>(
     `SELECT d.*, COALESCE(r.cnt, 0)::int AS reply_count
-     FROM apex_discussions d
+     FROM instinct_discussions d
      LEFT JOIN (
        SELECT discussion_id, COUNT(*) AS cnt
-       FROM apex_discussion_replies
+       FROM instinct_discussion_replies
        GROUP BY discussion_id
      ) r ON r.discussion_id = d.id
      ${where}
@@ -202,10 +202,10 @@ export async function getThreads(
 export async function getThread(discussionId: string): Promise<ThreadDetail | null> {
   const { rows: discussions } = await safeQuery<Discussion>(
     `SELECT d.*, COALESCE(r.cnt, 0)::int AS reply_count
-     FROM apex_discussions d
+     FROM instinct_discussions d
      LEFT JOIN (
        SELECT discussion_id, COUNT(*) AS cnt
-       FROM apex_discussion_replies
+       FROM instinct_discussion_replies
        GROUP BY discussion_id
      ) r ON r.discussion_id = d.id
      WHERE d.id = $1`,
@@ -216,7 +216,7 @@ export async function getThread(discussionId: string): Promise<ThreadDetail | nu
 
   const { rows: replies } = await safeQuery<DiscussionReply>(
     `SELECT dr.*, tm.name AS author_name, tm.role AS author_role
-     FROM apex_discussion_replies dr
+     FROM instinct_discussion_replies dr
      LEFT JOIN apex_team_members tm ON tm.id = dr.author_id
      WHERE dr.discussion_id = $1
      ORDER BY dr.created_at ASC`,
@@ -239,7 +239,7 @@ export async function pinThread(
   }
 
   const { rows } = await safeQuery<{ pinned: boolean }>(
-    `UPDATE apex_discussions
+    `UPDATE instinct_discussions
      SET pinned = NOT pinned, updated_at = NOW()
      WHERE id = $1
      RETURNING pinned`,

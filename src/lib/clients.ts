@@ -39,7 +39,7 @@ export async function createClient(
   notes?: string,
 ): Promise<Client | null> {
   const { rows } = await safeQuery<Client>(
-    `INSERT INTO apex_clients (name, industry, contact_email, contact_name, notes)
+    `INSERT INTO instinct_clients (name, industry, contact_email, contact_name, notes)
      VALUES ($1, $2, $3, $4, $5)
      RETURNING *`,
     [name, industry || null, contactEmail || null, contactName || null, notes || null],
@@ -105,7 +105,7 @@ export async function updateClient(
   params.push(clientId);
 
   const { rows } = await safeQuery<Client>(
-    `UPDATE apex_clients SET ${setClauses.join(", ")} WHERE id = $${idx} RETURNING *`,
+    `UPDATE instinct_clients SET ${setClauses.join(", ")} WHERE id = $${idx} RETURNING *`,
     params,
   );
 
@@ -117,7 +117,7 @@ export async function updateClient(
  */
 export async function getClients(): Promise<Client[]> {
   const { rows } = await safeQuery<Client>(
-    `SELECT * FROM apex_clients ORDER BY name ASC`,
+    `SELECT * FROM instinct_clients ORDER BY name ASC`,
   );
   return rows;
 }
@@ -127,7 +127,7 @@ export async function getClients(): Promise<Client[]> {
  */
 export async function getClient(clientId: string): Promise<Client | null> {
   const { rows } = await safeQuery<Client>(
-    `SELECT * FROM apex_clients WHERE id = $1`,
+    `SELECT * FROM instinct_clients WHERE id = $1`,
     [clientId],
   );
   return rows[0] || null;
@@ -141,7 +141,7 @@ export async function linkDocToClient(
   docId: string,
 ): Promise<Client | null> {
   const { rows } = await safeQuery<Client>(
-    `UPDATE apex_clients
+    `UPDATE instinct_clients
      SET docs = docs || $1::jsonb, updated_at = NOW()
      WHERE id = $2
      RETURNING *`,
