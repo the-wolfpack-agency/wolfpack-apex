@@ -57,6 +57,17 @@ export interface DropzoneProps {
   accept: string;
   /** Called once with the first dropped/selected file. */
   onFile: (file: File) => void;
+  /**
+   * Called when one-or-more files are dropped/selected while `multiple`
+   * is on. Preferred when the caller wants the full list. `onFile` is
+   * still called with file[0] for back-compat with single-file callers.
+   */
+  onFiles?: (files: File[]) => void;
+  /**
+   * Accept multiple files at once. When true the native input gets
+   * `multiple` + the drop handler reads every file from dataTransfer.
+   */
+  multiple?: boolean;
   /** Tighter padding — used when the dropzone sits above a form. */
   compact?: boolean;
   /**
@@ -77,7 +88,7 @@ export interface DropzoneProps {
 }
 
 const Dropzone = forwardRef<HTMLDivElement, DropzoneProps>(function Dropzone(
-  { label, accept, onFile, compact, acceptImages, disabled, testId },
+  { label, accept, onFile, onFiles, multiple, compact, acceptImages, disabled, testId },
   ref,
 ) {
   const [over, setOver] = useState(false);
@@ -90,9 +101,15 @@ const Dropzone = forwardRef<HTMLDivElement, DropzoneProps>(function Dropzone(
 
   const effectiveTestId = testId ?? (acceptImages ? "wireframe-dropzone" : undefined);
 
-  function handleFile(file: File | undefined | null): void {
-    if (!file || disabled) return;
-    onFile(file);
+  function dispatchFiles(files: FileList | File[] | null | undefined): void {
+    if (!files || disabled) return;
+    const list: File[] = Array.from(files).filter((f): f is File => !!f);
+    if (list.length === 0) return;
+    if (multiple && onFiles) {
+      onFiles(list);
+      return;
+    }
+    onFile(list[0]);
   }
 
   return (
@@ -113,19 +130,18 @@ const Dropzone = forwardRef<HTMLDivElement, DropzoneProps>(function Dropzone(
         if (disabled) return;
         e.preventDefault();
         setOver(false);
-        const f = e.dataTransfer.files[0];
-        handleFile(f);
+        dispatchFiles(e.dataTransfer.files);
       }}
       onKeyDown={(e) => {
         if (disabled) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          openPicker(fullAccept, (f) => handleFile(f));
+          openPicker(fullAccept, !!multiple, (files) => dispatchFiles(files));
         }
       }}
       onClick={() => {
         if (disabled) return;
-        openPicker(fullAccept, (f) => handleFile(f));
+        openPicker(fullAccept, !!multiple, (files) => dispatchFiles(files));
       }}
       style={{
         padding: compact ? "0.85rem 1rem" : "1.25rem",
@@ -143,12 +159,17 @@ const Dropzone = forwardRef<HTMLDivElement, DropzoneProps>(function Dropzone(
   );
 });
 
-function openPicker(accept: string, onPick: (f: File | undefined) => void): void {
+function openPicker(
+  accept: string,
+  multiple: boolean,
+  onPick: (files: FileList | null) => void,
+): void {
   if (typeof document === "undefined") return;
   const input = document.createElement("input");
   input.type = "file";
   input.accept = accept;
-  input.onchange = () => onPick(input.files?.[0]);
+  if (multiple) input.multiple = true;
+  input.onchange = () => onPick(input.files);
   input.click();
 }
 

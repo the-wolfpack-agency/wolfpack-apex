@@ -5,7 +5,13 @@
  * self-contained repos, no shared npm package). The shape is intentionally
  * aligned across repos so tests read the same way everywhere.
  */
-import { expect, type Page, type Response, type ConsoleMessage } from "@playwright/test";
+import {
+  expect,
+  type APIRequestContext,
+  type Page,
+  type Response,
+  type ConsoleMessage,
+} from "@playwright/test";
 
 export interface SmokeProbe {
   path: string;
@@ -141,4 +147,101 @@ export async function probePath(
     failures,
     `CSP/network failures on ${probe.path}:\n${failures.map((f) => `  - [${f.kind}] ${f.detail}`).join("\n")}`,
   ).toEqual([]);
+}
+
+// ---------------------------------------------------------------------------
+// Reality-check suite helpers (sites-preview-reality-check,
+// sites-upload-reality-check, sites-designer-journey).
+//
+// These three specs answer: "does the pixel the user actually sees match
+// what we claim is deployed?" — the layer that the 400+ jest suite can't
+// cover. The helpers below are shared across all three.
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the auth token the client-side code stashes after login.
+ * Looks at both keys since the rename from apex → instinct.
+ */
+export async function authToken(page: Page): Promise<string> {
+  return page.evaluate(
+    () =>
+      localStorage.getItem("instinct_token") ??
+      localStorage.getItem("apex_token") ??
+      "",
+  );
+}
+
+/**
+ * Fire-and-forget learning-loop signal. Every reality-check spec calls
+ * this at the end of its run (pass OR fail) so we get a feedback loop
+ * on which specs flap vs which specs never fail.
+ *
+ * Silently swallows errors — analytics must NEVER fail a test.
+ */
+export async function recordRealityCheckRun(
+  request: APIRequestContext,
+  target: SmokeTarget,
+  token: string | null,
+  payload: {
+    spec: string;
+    result: "pass" | "fail" | "skip";
+    duration_ms: number;
+    note?: string;
+  },
+): Promise<void> {
+  try {
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (token) headers["authorization"] = `Bearer ${token}`;
+    await request.post(`${target.baseUrl}/api/analytics`, {
+      headers,
+      data: {
+        event: "e2e.reality_check_ran",
+        metadata: {
+          spec: payload.spec,
+          result: payload.result,
+          duration_ms: payload.duration_ms,
+          env: target.baseUrl,
+          ...(payload.note ? { note: payload.note } : {}),
+        },
+      },
+      timeout: 5_000,
+    });
+  } catch {
+    // Analytics never fails a test. Learning signal is best-effort.
+  }
+}
+
+/**
+ * Grab the "headline" of a rendered site — the first visible <h1>, then
+ * the first <h2>, then the first 120 chars of body text as a fallback.
+ * Used to compare the detail-page iframe content against the raw
+ * deployed URL for parity.
+ */
+export async function extractHeadline(page: Page): Promise<string> {
+  const h1 = await page.locator("h1").first().innerText().catch(() => "");
+  if (h1 && h1.trim().length > 0) return h1.trim();
+  const h2 = await page.locator("h2").first().innerText().catch(() => "");
+  if (h2 && h2.trim().length > 0) return h2.trim();
+  const body = await page.locator("body").innerText().catch(() => "");
+  return body.trim().slice(0, 120);
+}
+
+/**
+ * Stub-text detector for the 9097a47-class regression. Returns the first
+ * stub phrase found (or null). Stub phrases are strings that ONLY belong
+ * on a pre-deploy brief — if they show up on a project whose preview_url
+ * is set, the internal /sites/[id]/preview route is rendering the
+ * SiteBrief stub instead of iframing the real deployed site.
+ */
+export function findPreviewStubPhrase(bodyText: string): string | null {
+  const stubs = [
+    "Edit this brief in Instinct",
+    "populate the rest",
+    "Get in touch",
+  ];
+  const lower = bodyText.toLowerCase();
+  for (const s of stubs) {
+    if (lower.includes(s.toLowerCase())) return s;
+  }
+  return null;
 }

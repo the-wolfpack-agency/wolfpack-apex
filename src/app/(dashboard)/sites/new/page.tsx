@@ -37,7 +37,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import TemplatePicker from "@/components/sites/TemplatePicker";
-import Dropzone from "@/components/sites/Dropzone";
+import MultiFrameUploader from "@/components/sites/MultiFrameUploader";
 import WireframeExtractReview, {
   type WireframeExtractPayload,
 } from "@/components/sites/WireframeExtractReview";
@@ -98,17 +98,30 @@ function parseBriefErrorMessage(status: number, data: { error?: string; reason?:
   if (status === 415) {
     return data.error ?? "That file type isn't supported. Try PNG, JPG, WEBP, or PDF.";
   }
+  if (data.reason === "too_many_frames") {
+    return data.error ?? "Too many frames in one upload (max 10). Remove some and try again.";
+  }
+  if (data.reason === "unsupported_mime") {
+    return data.error ?? "One of the frames isn't a supported format. Use PNG, JPG, WEBP, or PDF.";
+  }
   return data.error ?? "Couldn't read that file.";
 }
 
-function fireExtractionFailed(reason: string, file: File): void {
+function fireExtractionFailed(reason: string, files: File[]): void {
+  const mimes = Array.from(new Set(files.map((f) => f.type))).join(",");
+  const sizeBytes = files.reduce((n, f) => n + f.size, 0);
   try {
     fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({
         event: "site.wireframe_extraction_failed",
-        metadata: { reason, mime: file.type, sizeBytes: file.size },
+        metadata: {
+          reason,
+          mime: mimes,
+          sizeBytes,
+          frameCount: files.length,
+        },
       }),
     }).catch(() => {});
   } catch { /* swallow */ }
@@ -204,7 +217,8 @@ export default function NewSitePage() {
     await createSite(blankBrief(slug), "blank");
   }
 
-  async function handleWireframeFile(file: File): Promise<void> {
+  async function handleWireframeFiles(files: File[]): Promise<void> {
+    if (files.length === 0) return;
     if (parseAbortRef.current) parseAbortRef.current.abort();
     const controller = new AbortController();
     parseAbortRef.current = controller;
@@ -212,7 +226,15 @@ export default function NewSitePage() {
     setWireframeError(null);
     setWireframeReview(null);
     const fd = new FormData();
-    fd.append("file", file);
+    // Back-compat: exactly one file → legacy `file` field so the
+    // server single-file path stays hot. Multiple files → `files[]`
+    // (API route accepts either for 1 frame, but we keep the legacy
+    // name for 1-file uploads so older surfaces stay unchanged).
+    if (files.length === 1) {
+      fd.append("file", files[0]);
+    } else {
+      for (const f of files) fd.append("files[]", f);
+    }
     // The server accepts an empty clientSlug and will suggest one from the
     // extracted brief. If the user has already typed one, respect it.
     fd.append("clientSlug", clientSlug || "new-site");
@@ -227,7 +249,7 @@ export default function NewSitePage() {
       if (!r.ok) {
         const msg = parseBriefErrorMessage(r.status, data);
         setWireframeError(msg);
-        fireExtractionFailed(data.reason ?? `http_${r.status}`, file);
+        fireExtractionFailed(data.reason ?? `http_${r.status}`, files);
       } else if (data.source === "vision") {
         setWireframeReview({
           brief: data.brief,
@@ -246,7 +268,7 @@ export default function NewSitePage() {
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
         setWireframeError((err as Error).message);
-        fireExtractionFailed("network_error", file);
+        fireExtractionFailed("network_error", files);
       }
     } finally {
       if (parseAbortRef.current === controller) parseAbortRef.current = null;
@@ -361,17 +383,14 @@ export default function NewSitePage() {
           suggest colors, sections, and a layout you can review before creating
           the site.
         </p>
-        <Dropzone
+        <MultiFrameUploader
           label={
             parsing
               ? "Analyzing your wireframe… (usually ~10 seconds)"
-              : "Drop a wireframe image (PNG, JPG, WEBP, or PDF) here"
+              : "Drop one or more wireframe frames (PNG, JPG, WEBP, or PDF)"
           }
-          accept=""
-          acceptImages
           disabled={parsing || submitting}
-          onFile={handleWireframeFile}
-          compact
+          onSubmit={handleWireframeFiles}
           testId="wireframe-dropzone"
         />
         {parsing && (

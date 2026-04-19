@@ -165,6 +165,15 @@ export type ApexEventType =
   | "site.brief_generation_succeeded"
   | "site.brief_generation_failed"
   | "site.brief_image_rejected"
+  // Sites — exemplar retrieval primer (reads accepted generations per client)
+  | "site.brief_exemplars_served"
+  | "site.brief_exemplars_empty"
+  // Sites — multi-frame wireframe upload (033)
+  | "site.brief_upload_frames_added"
+  | "site.brief_upload_frame_removed"
+  | "site.brief_upload_reordered"
+  | "site.brief_multi_frame_requested"
+  | "site.brief_multi_frame_rejected"
   // Sites — starter-template picker (031)
   | "site.template_previewed"
   | "site.template_applied"
@@ -313,7 +322,12 @@ export type ApexEventType =
   | "tools.demo_deck_captured"
   | "tools.visual_diff_run"
   | "tools.accessibility_checked"
-  | "tools.page_viewed";
+  | "tools.page_viewed"
+  // E2E reality-check suite (browser-level parity + upload + designer journey)
+  // Every Playwright reality-check run posts this so the learning loop can
+  // track which specs flap, which catch regressions, and which never fail —
+  // a signal for trustworthy vs "green but uninformative" test coverage.
+  | "e2e.reality_check_ran";
 
 export interface ApexEvent {
   event_type: ApexEventType;

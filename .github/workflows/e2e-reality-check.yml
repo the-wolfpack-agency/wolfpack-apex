@@ -1,0 +1,71 @@
+name: E2E Reality Check
+
+# Browser-level reality-check specs — the layer that would have caught the
+# 2026-04-19 iframe-parity regression (commit 9097a47) that 400+ jest tests
+# missed. Runs three specs:
+#   1. sites-preview-reality-check — gate (must pass to merge)
+#   2. sites-upload-reality-check  — continue-on-error until SMOKE creds
+#                                    are wired into CI secrets
+#   3. sites-designer-journey      — continue-on-error until SMOKE creds
+#                                    are wired + SITES_SMOKE_PROJECT_ID set
+#
+# Gate promotion: flip `continue-on-error` to `false` once the creds are
+# in repo secrets. Track in next handoff.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-reality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reality-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: "true"
+      PROD_URL: ${{ secrets.PROD_URL }}
+      SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+      SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+      SITES_SMOKE_PROJECT_ID: ${{ secrets.SITES_SMOKE_PROJECT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      # Gate — must pass. Parity regression = merge blocked.
+      - name: Preview parity spec (gate)
+        run: npx playwright test tests/e2e/sites-preview-reality-check.spec.ts --config=playwright.config.ts --reporter=github
+
+      # Soft gates until creds land. Still surface failures in the run
+      # log so we can watch them mature.
+      - name: Upload reality spec (soft)
+        continue-on-error: true
+        run: npx playwright test tests/e2e/sites-upload-reality-check.spec.ts --config=playwright.config.ts --reporter=github
+
+      - name: Designer journey spec (soft)
+        continue-on-error: true
+        run: npx playwright test tests/e2e/sites-designer-journey.spec.ts --config=playwright.config.ts --reporter=github
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reality-check-report
+          path: |
+            playwright-report/
+            tests/e2e/screenshots/
+          retention-days: 14
+          if-no-files-found: ignore
