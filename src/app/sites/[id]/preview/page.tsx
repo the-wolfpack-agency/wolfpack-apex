@@ -1,37 +1,32 @@
 "use client";
 
 /**
- * Sites preview — live-rendered brief inside an iframe.
+ * Sites preview — iframed by both /sites/[id] (detail) and
+ * /sites/[id]/edit (prompt editor). Three render paths:
  *
- * This page is what the split-screen editor points its `<iframe src>` at.
- * Same-origin means localStorage + Bearer token auth flow through from the
- * parent editor, so no extra session plumbing required.
+ *   1. ?draft=<base64(JSON)>  → RenderBrief of the in-memory draft
+ *                               (editor's unsaved pane).
+ *   2. no draft, project.preview_url set → iframe the DEPLOYED Vercel
+ *                                          URL served by wolfpack-site-
+ *                                          template. This is the real
+ *                                          styled site a client would
+ *                                          see, including content
+ *                                          sourced from wireframe
+ *                                          uploads that live on the
+ *                                          template side (not in
+ *                                          SiteBrief).
+ *   3. no draft, no preview_url → RenderBrief of the saved brief as a
+ *                                  pre-deploy fallback so the editor
+ *                                  never blanks.
  *
- * Draft passthrough:
- *   We support `?draft=<base64(JSON)>` so the editor can stream the
- *   in-memory, unsaved brief into the iframe without writing to the DB.
- *   Rationale for the query-param route over a POST draft endpoint:
- *     1. Iframe src changes are the natural trigger — parent just updates
- *        `iframeRef.current.src`; no postMessage / no fetch round-trip.
- *     2. No new API surface → nothing to authorize, rate-limit, or
- *        test on the server side. validateBrief runs here in the browser.
- *     3. Bounded payload: we cap `draft` at 256KB of base64 to avoid
- *        pathological URLs. Real briefs are well under 32KB.
- *   If draft is absent or invalid, we fall back to the saved brief
- *   fetched from GET /api/sites/[id].
+ * Parity: detail and edit iframes both point here, so whatever decision
+ * this page makes renders identically in both surfaces.
  *
- * Chrome note: this page intentionally lives OUTSIDE the (dashboard)
- * route group (moved 2026-04-17) so it renders chrome-less when iframed.
- * Auth is handled client-side below via the same pattern the dashboard
- * layout uses — unauthenticated requests redirect to /login with a next
- * param. Preview API calls go through fetchWithRefresh so the HttpOnly
- * refresh cookie rotates tokens same as the dashboard pages.
- *
- * Analytics: fires `site.preview_viewed` (existing event type) on mount
- * with {project_id, source, brief_section_count}. The spec originally
- * asked for a new `site.preview_loaded` event, but ApexEventType is
- * owned by another agent this cycle — reusing preview_viewed keeps the
- * analytics contract honest and the learning loop unbroken.
+ * Analytics: fires `site.preview_viewed` on mount with
+ *   { project_id, source, brief_section_count, has_preview_url }
+ * `source` is one of "deployed" | "draft" | "fallback_saved" so the
+ * learning loop can track how often operators see the real site vs the
+ * internal renderer — a signal for template/brief drift health.
  */
 
 import { useEffect, useMemo, useState, use } from "react";
@@ -45,10 +40,11 @@ import {
 import { validateBrief, type SiteBrief } from "@/lib/sites-schema";
 import { RenderBrief } from "@/components/sites/render-brief";
 
-type PreviewSource = "draft" | "saved";
+type PreviewSource = "deployed" | "draft" | "fallback_saved";
 
 interface PreviewState {
   brief: SiteBrief | null;
+  deployedUrl: string | null;
   source: PreviewSource;
   error: string | null;
   loading: boolean;
@@ -62,18 +58,8 @@ export function decodeDraft(raw: string | null): { brief: SiteBrief | null; erro
     return { brief: null, error: "Draft too large to preview (>256KB). Save the brief to preview." };
   }
   try {
-    // Accept both standard and URL-safe base64. atob rejects URL-safe;
-    // normalize first.
     const normalized = raw.replace(/-/g, "+").replace(/_/g, "/");
     const pad = normalized.length % 4 === 0 ? "" : "=".repeat(4 - (normalized.length % 4));
-    // The encoder on the editor side uses
-    //   btoa(unescape(encodeURIComponent(JSON.stringify(draft))))
-    // which produces latin1-byte base64. Plain `atob` returns those
-    // raw bytes AS a JS string, so any non-ASCII character in the
-    // brief (e.g. the en-dash "—" in "CFTR — Website…") comes back
-    // as mojibake and JSON.parse either crashes or produces garbled
-    // fields that RenderBrief then displays verbatim.
-    // Symmetrical decode: atob → Uint8Array → TextDecoder("utf-8").
     let json: string;
     if (typeof atob === "function") {
       const bin = atob(normalized + pad);
@@ -84,12 +70,30 @@ export function decodeDraft(raw: string | null): { brief: SiteBrief | null; erro
       json = Buffer.from(normalized + pad, "base64").toString("utf-8");
     }
     const parsed = JSON.parse(json) as unknown;
-    validateBrief(parsed); // throws BriefValidationError on failure
+    validateBrief(parsed);
     return { brief: parsed as SiteBrief, error: null };
   } catch (err) {
     const msg = (err as Error).message || "Unknown draft error";
     return { brief: null, error: `Draft could not be rendered: ${msg}` };
   }
+}
+
+/**
+ * Pure decision: given decoded draft + saved project fields, pick the
+ * render path. Exported for unit tests so every branch is locked.
+ */
+export function selectPreviewSource(args: {
+  draftBrief: SiteBrief | null;
+  savedBrief: SiteBrief | null;
+  previewUrl: string | null;
+}): { source: PreviewSource; brief: SiteBrief | null; deployedUrl: string | null } {
+  if (args.draftBrief) {
+    return { source: "draft", brief: args.draftBrief, deployedUrl: null };
+  }
+  if (args.previewUrl && args.previewUrl.length > 0) {
+    return { source: "deployed", brief: null, deployedUrl: args.previewUrl };
+  }
+  return { source: "fallback_saved", brief: args.savedBrief, deployedUrl: null };
 }
 
 export default function SitePreviewPage({ params }: { params: Promise<{ id: string }> }) {
@@ -100,25 +104,33 @@ export default function SitePreviewPage({ params }: { params: Promise<{ id: stri
 
   const decodedDraft = useMemo(() => decodeDraft(draftRaw), [draftRaw]);
 
-  const [state, setState] = useState<PreviewState>(() => ({
-    brief: decodedDraft.brief,
-    source: decodedDraft.brief ? "draft" : "saved",
-    error: decodedDraft.error,
-    loading: decodedDraft.brief === null && decodedDraft.error === null,
-  }));
+  const [state, setState] = useState<PreviewState>(() => {
+    if (decodedDraft.brief) {
+      return {
+        brief: decodedDraft.brief,
+        deployedUrl: null,
+        source: "draft",
+        error: null,
+        loading: false,
+      };
+    }
+    return {
+      brief: null,
+      deployedUrl: null,
+      source: "fallback_saved",
+      error: decodedDraft.error,
+      loading: decodedDraft.error === null,
+    };
+  });
 
-  // Load the saved brief from the server unless we have a valid draft.
   useEffect(() => {
     let cancelled = false;
 
     async function loadSaved() {
-      // If a valid draft is present, skip the network call.
       if (decodedDraft.brief) return;
 
       const token = getInstinctToken();
       if (!token) {
-        // No session → kick to login, preserving where we were for
-        // post-login redirect. Matches the rest of the dashboard.
         if (typeof window !== "undefined") {
           const next = encodeURIComponent(window.location.pathname + window.location.search);
           window.location.href = `/login?next=${next}`;
@@ -129,27 +141,39 @@ export default function SitePreviewPage({ params }: { params: Promise<{ id: stri
       try {
         const res = await fetchWithRefresh(`/api/sites/${id}`, { headers: authHeaders() });
         if (cancelled) return;
-        if (res.status === 401) {
-          // fetchWithRefresh already redirects on a hard refresh failure.
-          return;
-        }
+        if (res.status === 401) return;
         if (res.status === 404) {
-          setState({ brief: null, source: "saved", error: "Site not found.", loading: false });
+          setState({
+            brief: null,
+            deployedUrl: null,
+            source: "fallback_saved",
+            error: "Site not found.",
+            loading: false,
+          });
           return;
         }
         const data = await res.json();
         if (!res.ok) {
           setState({
             brief: null,
-            source: "saved",
+            deployedUrl: null,
+            source: "fallback_saved",
             error: data?.error ?? "Failed to load the saved brief.",
             loading: false,
           });
           return;
         }
+        const savedBrief = (data.project?.brief ?? null) as SiteBrief | null;
+        const previewUrl = (data.project?.preview_url ?? null) as string | null;
+        const decision = selectPreviewSource({
+          draftBrief: null,
+          savedBrief,
+          previewUrl,
+        });
         setState({
-          brief: (data.project?.brief ?? null) as SiteBrief | null,
-          source: "saved",
+          brief: decision.brief,
+          deployedUrl: decision.deployedUrl,
+          source: decision.source,
           error: null,
           loading: false,
         });
@@ -157,7 +181,8 @@ export default function SitePreviewPage({ params }: { params: Promise<{ id: stri
         if (cancelled) return;
         setState({
           brief: null,
-          source: "saved",
+          deployedUrl: null,
+          source: "fallback_saved",
           error: (err as Error).message || "Preview request failed.",
           loading: false,
         });
@@ -171,14 +196,15 @@ export default function SitePreviewPage({ params }: { params: Promise<{ id: stri
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, draftRaw]);
 
-  // Fire preview_viewed analytics event once per mount / source transition.
+  // Analytics: every render path feeds the same event. source + has_preview_url
+  // let the brain distinguish (a) how often operators see the real deployed
+  // site vs the internal renderer and (b) brief/template drift health.
   useEffect(() => {
     if (state.loading) return;
-    if (!state.brief) return;
-    const sectionCount = (state.brief.pages ?? []).reduce(
-      (n, p) => n + (p.sections?.length ?? 0),
-      0,
-    );
+    if (!state.brief && !state.deployedUrl) return;
+    const sectionCount = state.brief
+      ? (state.brief.pages ?? []).reduce((n, p) => n + (p.sections?.length ?? 0), 0)
+      : 0;
     void fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: jsonHeaders(),
@@ -188,12 +214,11 @@ export default function SitePreviewPage({ params }: { params: Promise<{ id: stri
           project_id: id,
           source: state.source,
           brief_section_count: sectionCount,
+          has_preview_url: Boolean(state.deployedUrl),
         },
       }),
-    }).catch(() => {
-      // Fire-and-forget — analytics failure must never blank the preview.
-    });
-  }, [id, state.loading, state.brief, state.source]);
+    }).catch(() => {});
+  }, [id, state.loading, state.brief, state.deployedUrl, state.source]);
 
   if (state.loading) {
     return (
@@ -206,7 +231,7 @@ export default function SitePreviewPage({ params }: { params: Promise<{ id: stri
     );
   }
 
-  if (state.error && !state.brief) {
+  if (state.error && !state.brief && !state.deployedUrl) {
     return (
       <div
         data-testid="preview-error"
@@ -215,6 +240,24 @@ export default function SitePreviewPage({ params }: { params: Promise<{ id: stri
         <h2 className="text-lg font-semibold text-neutral-900">Preview unavailable</h2>
         <p className="max-w-md text-sm text-neutral-500">{state.error}</p>
       </div>
+    );
+  }
+
+  if (state.source === "deployed" && state.deployedUrl) {
+    return (
+      <iframe
+        data-testid="preview-root"
+        data-preview-source="deployed"
+        src={state.deployedUrl}
+        title="Deployed site preview"
+        style={{
+          display: "block",
+          width: "100%",
+          height: "100vh",
+          border: "none",
+          background: "#fff",
+        }}
+      />
     );
   }
 
