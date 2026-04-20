@@ -114,7 +114,7 @@ export default function TabDock({
         onKeyDown={handleKey}
         data-testid={`${testIdPrefix}-rail`}
         style={{
-          width: 56,
+          width: 76,
           flexShrink: 0,
           display: "flex",
           flexDirection: "column",
@@ -161,12 +161,27 @@ export default function TabDock({
                 fontWeight: selected ? 600 : 500,
                 outline: "none",
                 position: "relative",
+                width: "100%",
+                boxSizing: "border-box",
+                overflow: "hidden",
               }}
             >
               <span aria-hidden="true" style={{ fontSize: 16, lineHeight: 1 }}>
                 {tab.icon ?? tab.label[0]}
               </span>
-              <span style={{ fontSize: 10, lineHeight: 1.1 }}>{tab.label}</span>
+              <span
+                style={{
+                  fontSize: 10,
+                  lineHeight: 1.1,
+                  maxWidth: "100%",
+                  textAlign: "center",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {tab.label}
+              </span>
               {tab.badge !== undefined && tab.badge !== "" && tab.badge !== 0 && (
                 <span
                   aria-hidden="true"
