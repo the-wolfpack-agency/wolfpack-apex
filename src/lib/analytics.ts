@@ -547,6 +547,15 @@ export type InstinctEventType =
   //       are flaky vs. which are terminal (auth, validation).
   //   offline.brief_served_from_cache:   { site_id, cache_age_ms }
   //     — cold-load from cache actually unblocked a designer (KPI).
+  //   offline.resource_served_from_cache:
+  //     { resource_type, resource_id, cache_age_ms }
+  //     — Stream U4 generalization of brief_served_from_cache. Fires
+  //       for every feature that uses offline-cache.ts (brief,
+  //       meeting_draft, hr_doc_pending, journal_entry, ...). The
+  //       `resource_type` metadata lets the analytics dashboard slice
+  //       offline usage per feature area. For backward compat the
+  //       brief cache still ALSO fires offline.brief_served_from_cache
+  //       when resource_type === "brief".
   // PWA install signals:
   //   pwa.install_prompt_shown:          {}
   //   pwa.install_prompt_dismissed:      { outcome }  "accepted"|"dismissed"
@@ -557,6 +566,7 @@ export type InstinctEventType =
   | "offline.mutation_replayed"
   | "offline.mutation_replay_failed"
   | "offline.brief_served_from_cache"
+  | "offline.resource_served_from_cache"
   | "pwa.install_prompt_shown"
   | "pwa.install_prompt_dismissed"
   | "pwa.installed"
