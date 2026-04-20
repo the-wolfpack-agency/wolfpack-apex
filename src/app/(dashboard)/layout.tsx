@@ -6,9 +6,11 @@ import {
   getInstinctToken,
   getInstinctUser,
   clearInstinctSession,
+  fetchWithRefresh,
   migrateLegacyApexKeys,
 } from "@/lib/client-auth";
 import NotificationBell from "@/components/NotificationBell";
+import OfflineStatusPill from "@/components/sites/OfflineStatusPill";
 
 interface User {
   id: string;
@@ -69,6 +71,51 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     }
     setUser(parsed);
   }, [router]);
+
+  // Register the Instinct service worker + listen for the PWA install
+  // prompt. Scoped to root so it controls every dashboard page; fires
+  // analytics via /api/analytics (fire-and-forget) for pwa.* events.
+  // Graceful degradation: any registration error is swallowed — the
+  // app keeps working online even if the SW can't install (Safari ITP,
+  // private mode, iframes, dev servers without HTTPS).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!("serviceWorker" in navigator)) return;
+
+    navigator.serviceWorker
+      .register("/sw.js", { scope: "/" })
+      .catch((err) => {
+        console.warn("[sw] registration failed:", (err as Error).message);
+      });
+
+    function trackPwa(event: string, metadata: Record<string, string | number | boolean> = {}) {
+      if (!getInstinctToken()) return;
+      void fetchWithRefresh("/api/analytics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event, metadata }),
+        keepalive: true,
+      }).catch(() => undefined);
+    }
+
+    const onBeforeInstall = (e: Event) => {
+      // Let the browser show its native prompt; we just track visibility.
+      trackPwa("pwa.install_prompt_shown");
+      // Capture the event so other UI can trigger install if desired.
+      (window as unknown as { __instinctInstallPrompt?: Event }).__instinctInstallPrompt = e;
+    };
+    const onInstalled = () => trackPwa("pwa.installed");
+    const onAppinstalled = () => trackPwa("pwa.installed");
+
+    window.addEventListener("beforeinstallprompt", onBeforeInstall);
+    window.addEventListener("appinstalled", onAppinstalled);
+    window.addEventListener("instinctinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+      window.removeEventListener("appinstalled", onAppinstalled);
+      window.removeEventListener("instinctinstalled", onInstalled);
+    };
+  }, []);
 
   function handleLogout() {
     clearInstinctSession();
@@ -228,6 +275,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           {children}
         </main>
       </div>
+
+      {/* Persistent top-right pill: online / offline / syncing / failed.
+          Mounted once at the dashboard layout so every dashboard route
+          gets reconnect-flush behavior without individual wiring. */}
+      <OfflineStatusPill />
     </div>
   );
 }

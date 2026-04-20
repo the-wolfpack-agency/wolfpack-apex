@@ -11,6 +11,8 @@
 import {
   INSTINCT_EDIT_ORIGIN,
   applyInlineEdit,
+  applyInlineDelete,
+  applyInlineDuplicate,
   buildTestimonialEditMessage,
   encodeBriefPush,
   isInstinctEditMessage,
@@ -470,6 +472,140 @@ describe("comment.pin message type", () => {
       clientY: 10,
     };
     expect(applyInlineEdit(brief, msg)).toBe(brief);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Path C Phase 4 · Stream U2 — section.duplicate + section.delete.
+// These ride the same postMessage channel and MUST be guard-validated
+// before any mutation reaches the brief.
+// ---------------------------------------------------------------------------
+describe("section.duplicate + section.delete protocol", () => {
+  it("accepts a valid section.duplicate envelope", () => {
+    expect(
+      isInstinctEditMessage({
+        origin: INSTINCT_EDIT_ORIGIN,
+        type: "section.duplicate",
+        pageIndex: 0,
+        sectionIndex: 1,
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts a valid section.delete envelope", () => {
+    expect(
+      isInstinctEditMessage({
+        origin: INSTINCT_EDIT_ORIGIN,
+        type: "section.delete",
+        pageIndex: 0,
+        sectionIndex: 2,
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects negative indices on section.duplicate / section.delete", () => {
+    expect(
+      isInstinctEditMessage({
+        origin: INSTINCT_EDIT_ORIGIN,
+        type: "section.duplicate",
+        pageIndex: -1,
+        sectionIndex: 0,
+      }),
+    ).toBe(false);
+    expect(
+      isInstinctEditMessage({
+        origin: INSTINCT_EDIT_ORIGIN,
+        type: "section.delete",
+        pageIndex: 0,
+        sectionIndex: -5,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects wrong origin brand on new message types", () => {
+    expect(
+      isInstinctEditMessage({
+        origin: "spoof.channel",
+        type: "section.duplicate",
+        pageIndex: 0,
+        sectionIndex: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("applyInlineDuplicate clones the section at sectionIndex + 1", () => {
+    const brief = baseBrief();
+    const next = applyInlineDuplicate(brief, {
+      origin: INSTINCT_EDIT_ORIGIN,
+      type: "section.duplicate",
+      pageIndex: 0,
+      sectionIndex: 0, // hero
+    });
+    // hero clone lands at index 1; original text section shifts to 2.
+    expect(next.pages[0].sections.length).toBe(brief.pages[0].sections.length + 1);
+    expect(next.pages[0].sections[1].type).toBe("hero");
+    expect(next.pages[0].sections[1].heading).toBe("Hero H");
+    // Original brief untouched.
+    expect(brief.pages[0].sections.length).toBe(4);
+    // Deep-clone: mutating clone doesn't leak to the original.
+    next.pages[0].sections[1].heading = "Mutated";
+    expect(brief.pages[0].sections[0].heading).toBe("Hero H");
+  });
+
+  it("applyInlineDuplicate is a no-op on out-of-range indices", () => {
+    const brief = baseBrief();
+    const out: Extract<InlineEditMessage, { type: "section.duplicate" }> = {
+      origin: INSTINCT_EDIT_ORIGIN,
+      type: "section.duplicate",
+      pageIndex: 0,
+      sectionIndex: 99,
+    };
+    expect(applyInlineDuplicate(brief, out)).toBe(brief);
+  });
+
+  it("applyInlineDelete removes the section", () => {
+    const brief = baseBrief();
+    const before = brief.pages[0].sections.length;
+    const next = applyInlineDelete(brief, {
+      origin: INSTINCT_EDIT_ORIGIN,
+      type: "section.delete",
+      pageIndex: 0,
+      sectionIndex: 1, // text
+    });
+    expect(next.pages[0].sections.length).toBe(before - 1);
+    // Indexing shifted — what was at index 2 (quote) is now at 1.
+    expect(next.pages[0].sections[1].type).toBe("quote");
+  });
+
+  it("applyInlineDelete is a no-op on out-of-range indices", () => {
+    const brief = baseBrief();
+    const out: Extract<InlineEditMessage, { type: "section.delete" }> = {
+      origin: INSTINCT_EDIT_ORIGIN,
+      type: "section.delete",
+      pageIndex: 0,
+      sectionIndex: 99,
+    };
+    expect(applyInlineDelete(brief, out)).toBe(brief);
+  });
+
+  it("applyInlineEdit dispatches section.duplicate + section.delete through the canonical path", () => {
+    const brief = baseBrief();
+    const dup = applyInlineEdit(brief, {
+      origin: INSTINCT_EDIT_ORIGIN,
+      type: "section.duplicate",
+      pageIndex: 0,
+      sectionIndex: 0,
+    });
+    expect(dup.pages[0].sections.length).toBe(
+      brief.pages[0].sections.length + 1,
+    );
+    const del = applyInlineEdit(dup, {
+      origin: INSTINCT_EDIT_ORIGIN,
+      type: "section.delete",
+      pageIndex: 0,
+      sectionIndex: 1,
+    });
+    expect(del.pages[0].sections.length).toBe(brief.pages[0].sections.length);
   });
 });
 

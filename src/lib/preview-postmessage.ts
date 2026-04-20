@@ -123,6 +123,39 @@ export type InlineEditMessage =
       type: "comment.focus";
       pageIndex: number;
       sectionIndex: number;
+    }
+  | {
+      /**
+       * Path C Phase 4 · Stream U2 — direct-manipulation section.duplicate.
+       *
+       * Fired by the direct-edit overlay when a designer clicks the
+       * Duplicate button on a section's floating toolbar. The parent
+       * edit-page listener clones the section at `sectionIndex` and
+       * inserts the clone directly below it, then pushes the new brief
+       * back via brief.push. Indices are zero-based over
+       * `brief.pages[pageIndex].sections` BEFORE the duplication (so the
+       * clone lands at sectionIndex + 1).
+       */
+      origin: typeof INSTINCT_EDIT_ORIGIN;
+      type: "section.duplicate";
+      pageIndex: number;
+      sectionIndex: number;
+    }
+  | {
+      /**
+       * Path C Phase 4 · Stream U2 — direct-manipulation section.delete.
+       *
+       * Fired by the direct-edit overlay when a designer confirms the
+       * Delete action on a section's floating toolbar. The parent
+       * removes `brief.pages[pageIndex].sections[sectionIndex]` and
+       * pushes the new brief back via brief.push. Out-of-range indices
+       * are treated as no-ops by applyInlineEdit so the brief never
+       * gets corrupted by stale overlays.
+       */
+      origin: typeof INSTINCT_EDIT_ORIGIN;
+      type: "section.delete";
+      pageIndex: number;
+      sectionIndex: number;
     };
 
 /**
@@ -208,6 +241,18 @@ export function isInstinctEditMessage(m: unknown): m is InlineEditMessage {
         (obj.sectionIndex as number) >= 0
       );
     }
+    case "section.duplicate":
+    case "section.delete": {
+      // Direct-manipulation section CRUD — we require non-negative
+      // integer indices. The edit page re-checks range against the
+      // current brief before applying, so stale overlays no-op gracefully.
+      return (
+        Number.isInteger(obj.pageIndex) &&
+        Number.isInteger(obj.sectionIndex) &&
+        (obj.pageIndex as number) >= 0 &&
+        (obj.sectionIndex as number) >= 0
+      );
+    }
     default:
       return false;
   }
@@ -235,6 +280,12 @@ export function applyInlineEdit(
 ): SiteBrief {
   if (msg.type === "section.reorder") {
     return applyInlineReorder(brief, msg);
+  }
+  if (msg.type === "section.duplicate") {
+    return applyInlineDuplicate(brief, msg);
+  }
+  if (msg.type === "section.delete") {
+    return applyInlineDelete(brief, msg);
   }
   // comment.pin / comment.focus are UI-plane messages — they do NOT
   // mutate the brief. Fall through with the original reference so
@@ -395,6 +446,65 @@ export function applyInlineReorder(
   const targetSections = next.pages[msg.pageIndex].sections;
   const [moved] = targetSections.splice(msg.fromIndex, 1);
   targetSections.splice(msg.toIndex, 0, moved);
+  return next;
+}
+
+/**
+ * Apply a single `section.duplicate` message to a brief. Returns a NEW
+ * brief with the clone inserted directly after `sectionIndex`. Out-of-
+ * range indices return the original brief unchanged. Never throws.
+ *
+ * Exported so tests can pin the splice/clone contract without mounting a
+ * component. Keeps parity with `applyInlineReorder` — pure, immutable,
+ * same-ref short-circuit on no-op.
+ */
+export function applyInlineDuplicate(
+  brief: SiteBrief,
+  msg: Extract<InlineEditMessage, { type: "section.duplicate" }>,
+): SiteBrief {
+  const pages = Array.isArray(brief.pages) ? brief.pages : [];
+  if (!Number.isInteger(msg.pageIndex)) return brief;
+  if (msg.pageIndex < 0 || msg.pageIndex >= pages.length) return brief;
+  const page = pages[msg.pageIndex];
+  const sections = Array.isArray(page?.sections) ? page.sections : [];
+  if (!Number.isInteger(msg.sectionIndex)) return brief;
+  if (msg.sectionIndex < 0 || msg.sectionIndex >= sections.length) return brief;
+
+  const next = cloneBrief(brief);
+  const targetSections = next.pages[msg.pageIndex].sections;
+  // Deep-clone the section itself so subsequent edits on the clone do
+  // not mutate the original (JSON round-trip matches cloneBrief semantics
+  // and the schema is JSON-safe by construction).
+  const clone = JSON.parse(
+    JSON.stringify(targetSections[msg.sectionIndex]),
+  ) as (typeof targetSections)[number];
+  targetSections.splice(msg.sectionIndex + 1, 0, clone);
+  return next;
+}
+
+/**
+ * Apply a single `section.delete` message to a brief. Returns a NEW
+ * brief with `brief.pages[pageIndex].sections[sectionIndex]` removed.
+ * Out-of-range indices return the original brief unchanged.
+ *
+ * Deliberately permissive on pages that are left with zero sections —
+ * the preview renders an empty-state message in that case, and the
+ * designer can add a new section via the parent editor.
+ */
+export function applyInlineDelete(
+  brief: SiteBrief,
+  msg: Extract<InlineEditMessage, { type: "section.delete" }>,
+): SiteBrief {
+  const pages = Array.isArray(brief.pages) ? brief.pages : [];
+  if (!Number.isInteger(msg.pageIndex)) return brief;
+  if (msg.pageIndex < 0 || msg.pageIndex >= pages.length) return brief;
+  const page = pages[msg.pageIndex];
+  const sections = Array.isArray(page?.sections) ? page.sections : [];
+  if (!Number.isInteger(msg.sectionIndex)) return brief;
+  if (msg.sectionIndex < 0 || msg.sectionIndex >= sections.length) return brief;
+
+  const next = cloneBrief(brief);
+  next.pages[msg.pageIndex].sections.splice(msg.sectionIndex, 1);
   return next;
 }
 

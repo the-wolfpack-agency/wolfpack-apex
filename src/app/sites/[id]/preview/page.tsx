@@ -46,6 +46,7 @@ import {
   type InlineEditMessage,
   type TextField,
 } from "@/lib/preview-postmessage";
+import { DirectEditOverlay } from "@/components/sites/DirectEditOverlay";
 
 type PreviewSource = "deployed" | "draft" | "fallback_saved";
 
@@ -108,6 +109,10 @@ export default function SitePreviewPage({ params }: { params: Promise<{ id: stri
   const searchParams = useSearchParams();
   const draftRaw = searchParams?.get("draft") ?? null;
   const pageIndex = Number(searchParams?.get("page") ?? "0") || 0;
+  // Path C Phase 4 · Stream U2 — direct-manipulation overlay is
+  // gated on this query param. Public share links never pass it, so
+  // the overlay + floating toolbar are invisible to clients.
+  const directEditMode = searchParams?.get("mode") === "edit";
 
   const decodedDraft = useMemo(() => decodeDraft(draftRaw), [draftRaw]);
 
@@ -290,6 +295,14 @@ export default function SitePreviewPage({ params }: { params: Promise<{ id: stri
           setState((s) => ({ ...s, brief: next, source: s.source }))
         }
       />
+      {directEditMode ? (
+        <DirectEditOverlay
+          pageIndex={pageIndex}
+          sectionCount={
+            (state.brief.pages ?? [])[pageIndex]?.sections?.length ?? 0
+          }
+        />
+      ) : null}
     </div>
   );
 }

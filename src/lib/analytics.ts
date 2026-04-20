@@ -501,7 +501,99 @@ export type InstinctEventType =
   | "site.comment_posted"
   | "site.comment_resolved"
   | "site.comment_replied"
-  | "site.comment_deleted";
+  | "site.comment_deleted"
+  // Sites — direct-manipulation canvas (Path C Phase 4 · Stream U2)
+  //
+  // Designer toggles the canvas into direct-edit mode and drives section
+  // and field changes by clicking directly on the preview — no prompt,
+  // no sidebar. Each of the six events feeds the learning loop with a
+  // distinct signal:
+  //
+  //   direct_edit.enabled / direct_edit.disabled
+  //     — raw adoption signal; what % of edit sessions use direct-edit
+  //       vs. prompt-only. Low adoption = discoverability problem on the
+  //       toggle chrome; high adoption = we should invest in the flow.
+  //   direct_edit.element_clicked (metadata: element_type)
+  //     — which element types designers REACH for first. If everyone
+  //       clicks headings but never CTAs, the CTA toolbar is buried.
+  //   direct_edit.text_committed (metadata: section_id, field)
+  //     — committed inline text edits. Feeds same learning loop as
+  //       `site.inline_text_edited` but scoped to the canvas UX so we
+  //       can compare prompt-driven vs direct-manipulation quality.
+  //   direct_edit.cta_committed (metadata: section_id)
+  //     — CTA label/href changes from the floating toolbar.
+  //   direct_edit.section_reordered_via_canvas (metadata: from_idx, to_idx)
+  //     — parallels `site.section_reordered` but distinguishes
+  //       toolbar-arrow usage from drag-handle usage. Designer
+  //       preference here drives future UX investment.
+  | "direct_edit.enabled"
+  | "direct_edit.disabled"
+  | "direct_edit.element_clicked"
+  | "direct_edit.text_committed"
+  | "direct_edit.cta_committed"
+  | "direct_edit.section_reordered_via_canvas"
+  // Sites — offline mode (Path C — site editor resiliency). The editor
+  // persists failed mutations to IndexedDB and replays on reconnect.
+  // Metadata shapes:
+  //   offline.detected:                  {}
+  //     — fires once when navigator goes offline with editor open.
+  //   offline.returned_online:           { queue_size }
+  //     — fires at the top of flushQueue so we see inbound-replay
+  //       burst size per user session.
+  //   offline.mutation_queued:           { endpoint, method }
+  //   offline.mutation_replayed:         { endpoint, success }
+  //   offline.mutation_replay_failed:    { endpoint, error, attempt }
+  //     — retry counter so the learning loop can see which endpoints
+  //       are flaky vs. which are terminal (auth, validation).
+  //   offline.brief_served_from_cache:   { site_id, cache_age_ms }
+  //     — cold-load from cache actually unblocked a designer (KPI).
+  // PWA install signals:
+  //   pwa.install_prompt_shown:          {}
+  //   pwa.install_prompt_dismissed:      { outcome }  "accepted"|"dismissed"
+  //   pwa.installed:                     {}
+  | "offline.detected"
+  | "offline.returned_online"
+  | "offline.mutation_queued"
+  | "offline.mutation_replayed"
+  | "offline.mutation_replay_failed"
+  | "offline.brief_served_from_cache"
+  | "pwa.install_prompt_shown"
+  | "pwa.install_prompt_dismissed"
+  | "pwa.installed"
+  // Sites — unified studio shell (Path C Phase 4 · Stream U1)
+  //
+  // The /sites/[id] page is the unified studio (formerly split across
+  // /sites/[id] + /sites/[id]/edit). Framer/Webflow-style 3-pane
+  // layout: left TabDock (Chat / Sections / Theme / Assets / SEO /
+  // Forms / Domain / Share / Versions / Comments), center preview
+  // iframe, right Inspector. Every interaction feeds the learning
+  // loop so we can surface "designers who open the Sections tab
+  // first publish 2x faster" style patterns.
+  //
+  //   studio.opened:                  { site_id }
+  //   studio.tab_changed:             { site_id, tab_name }
+  //     — tab_name ∈ {"chat","sections","theme","assets","seo","forms",
+  //                   "domain","share","versions","comments"}
+  //   studio.section_selected:        { site_id, section_id }
+  //     — section_id is "<index>:<type>" so analytics queries can
+  //       group by section type without requiring a join to the brief.
+  //   studio.section_reordered:       { site_id, from_idx, to_idx }
+  //   studio.section_duplicated:      { site_id, section_id }
+  //   studio.section_deleted:         { site_id, section_id }
+  //   studio.section_added:           { site_id, section_type }
+  //   studio.inspector_field_edited:  { site_id, field_path, section_id }
+  //     — field_path is slash-delimited (e.g. "heading", "cta/label").
+  //   studio.publish_clicked:         { site_id, pending_edit_count }
+  //     — publish was clicked; server-side save+deploy runs separately.
+  | "studio.opened"
+  | "studio.tab_changed"
+  | "studio.section_selected"
+  | "studio.section_reordered"
+  | "studio.section_duplicated"
+  | "studio.section_deleted"
+  | "studio.section_added"
+  | "studio.inspector_field_edited"
+  | "studio.publish_clicked";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;
