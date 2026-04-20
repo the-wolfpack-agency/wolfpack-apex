@@ -20,6 +20,7 @@ import {
   clearAllResources,
   __resetForTests,
 } from "@/lib/offline-cache";
+import { __resetBackfillForTests } from "@/lib/rag-offline-backfill";
 
 type AnalyticsEvent = [string, Record<string, string | number | boolean>];
 
@@ -42,6 +43,7 @@ function onlineFalse(): boolean {
 
 beforeEach(async () => {
   __resetForTests();
+  __resetBackfillForTests();
   await clearAllResources();
   window.localStorage.setItem("instinct_token", "TEST-TOKEN");
 });
@@ -222,6 +224,36 @@ describe("queryAssistantWithCache — navigator.onLine integration", () => {
       }),
     ).rejects.toBeInstanceOf(RagOfflineMissError);
     expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+describe("queryAssistantWithCache — backfill integration", () => {
+  it("schedules ambient doc-body backfill after successful online cache", async () => {
+    // Reset so the "onLine" flag from the previous test doesn't leak.
+    Object.defineProperty(navigator, "onLine", {
+      value: true,
+      configurable: true,
+    });
+    const fetcher = jest.fn().mockResolvedValue(
+      jsonResponse({
+        response: "hi",
+        source: "ai",
+        tokensUsed: 0,
+        sources: [{ id: "s1", title: "Doc A" }],
+      }),
+    );
+    const events: AnalyticsEvent[] = [];
+    await queryAssistantWithCache("hello", {
+      isOnline: onlineTrue,
+      fetcher: fetcher as unknown as typeof fetch,
+      onAnalytics: (e, m) => events.push([e, m]),
+    });
+    // Wait a few microtasks — scheduleDocBodyBackfill fires on a
+    // queueMicrotask boundary.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(
+      events.some(([e]) => e === "rag.doc_backfill_scheduled"),
+    ).toBe(true);
   });
 });
 

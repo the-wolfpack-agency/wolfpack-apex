@@ -36,6 +36,7 @@ import {
   cacheRagResult,
   findCachedRagResult,
 } from "@/lib/rag-offline";
+import { scheduleDocBodyBackfill } from "@/lib/rag-offline-backfill";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -169,6 +170,14 @@ export async function queryAssistantWithCache(
         } catch {
           /* cache write is best-effort */
         }
+
+        // Ambient doc-body backfill — fire-and-forget, never throws.
+        // See rag-offline-backfill.ts for concurrency + dedup rules.
+        scheduleDocBodyBackfill(
+          "assistant",
+          sources,
+          onAnalytics ? { onAnalytics } : undefined,
+        );
 
         return {
           answer,

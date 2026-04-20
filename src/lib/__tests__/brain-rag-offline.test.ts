@@ -15,6 +15,7 @@ import {
   clearAllResources,
   __resetForTests,
 } from "@/lib/offline-cache";
+import { __resetBackfillForTests } from "@/lib/rag-offline-backfill";
 
 type AnalyticsEvent = [string, Record<string, string | number | boolean>];
 
@@ -44,6 +45,7 @@ function makeHit(i: number): BrainQueryHit {
 
 beforeEach(async () => {
   __resetForTests();
+  __resetBackfillForTests();
   await clearAllResources();
   window.localStorage.setItem("instinct_token", "TEST-TOKEN");
 });
@@ -175,5 +177,41 @@ describe("queryBrainWithCache — forceRefresh + fetch-throws", () => {
     });
     expect(result.from_cache).toBe(true);
     expect(result.hits[0].chunk_id).toBe("c-3");
+  });
+});
+
+describe("queryBrainWithCache — backfill integration", () => {
+  it("schedules ambient doc-body backfill keyed on unique document_ids", async () => {
+    // Two hits from the SAME document should yield ONE backfill
+    // target — the wrapper dedups on document_id before scheduling.
+    const hits = [
+      { ...makeHit(0), document_id: "doc-A" },
+      { ...makeHit(1), document_id: "doc-A" },
+      { ...makeHit(2), document_id: "doc-B" },
+    ];
+    const fetcher = jest.fn().mockResolvedValue(
+      jsonResponse({
+        query: "k",
+        hits,
+        keyword_hits: 3,
+        semantic_hits: 0,
+        latency_ms: 1,
+        tokens_used: 0,
+      }),
+    );
+    const events: AnalyticsEvent[] = [];
+    await queryBrainWithCache("k", {
+      isOnline: () => true,
+      fetcher: fetcher as unknown as typeof fetch,
+      onAnalytics: (e, m) => events.push([e, m]),
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    const scheduled = events.find(
+      ([e]) => e === "rag.doc_backfill_scheduled",
+    );
+    expect(scheduled).toBeDefined();
+    // 2 unique docs → source_count=2, top_k capped at 2 (<= 3).
+    expect(scheduled![1].source_count).toBe(2);
+    expect(scheduled![1].scope).toBe("brain");
   });
 });

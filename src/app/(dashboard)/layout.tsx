@@ -11,6 +11,7 @@ import {
 } from "@/lib/client-auth";
 import NotificationBell from "@/components/NotificationBell";
 import OfflineStatusPill from "@/components/sites/OfflineStatusPill";
+import { useAmbientRefresh } from "@/lib/hooks/useAmbientRefresh";
 
 interface User {
   id: string;
@@ -54,6 +55,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Ambient RAG refresh orchestrator (Path C · Stream U6). Silent by
+  // design — runs a session-start warm pass of recent cached queries
+  // and an idle-driven stale refresh loop. No UI, no prompts. Mounts
+  // once here so every dashboard route benefits.
+  useAmbientRefresh();
 
   useEffect(() => {
     // One-shot migration: before reading auth state, promote any legacy

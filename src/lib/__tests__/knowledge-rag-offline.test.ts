@@ -15,6 +15,7 @@ import {
   clearAllResources,
   __resetForTests,
 } from "@/lib/offline-cache";
+import { __resetBackfillForTests } from "@/lib/rag-offline-backfill";
 
 type AnalyticsEvent = [string, Record<string, string | number | boolean>];
 
@@ -30,6 +31,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 beforeEach(async () => {
   __resetForTests();
+  __resetBackfillForTests();
   await clearAllResources();
   window.localStorage.setItem("instinct_token", "TEST-TOKEN");
 });
@@ -167,5 +169,41 @@ describe("queryKnowledgeWithCache — forceRefresh + fetch-throws", () => {
     });
     expect(result.from_cache).toBe(true);
     expect(result.answer).toBe("from snapshot");
+  });
+});
+
+describe("queryKnowledgeWithCache — backfill integration", () => {
+  it("schedules ambient doc-body backfill after successful online cache", async () => {
+    const fetcher = jest.fn().mockResolvedValue(
+      jsonResponse({
+        answer: {
+          id: "k-42",
+          question: "q",
+          answer: "a",
+          source: "docs",
+        },
+        source: "cache",
+        tokens_used: 0,
+      }),
+    );
+    const events: AnalyticsEvent[] = [];
+    await queryKnowledgeWithCache("test query", {
+      isOnline: () => true,
+      fetcher: fetcher as unknown as typeof fetch,
+      onAnalytics: (e, m) => events.push([e, m]),
+    });
+    // Microtask boundary for scheduleDocBodyBackfill.
+    await new Promise((r) => setTimeout(r, 10));
+    // Knowledge has no doc-body endpoint today — scheduled fires, then
+    // skipped with reason=no_endpoint (see rag-offline-backfill.ts).
+    expect(
+      events.some(([e]) => e === "rag.doc_backfill_scheduled"),
+    ).toBe(true);
+    expect(
+      events.some(
+        ([e, m]) =>
+          e === "rag.doc_backfill_skipped" && m.reason === "no_endpoint",
+      ),
+    ).toBe(true);
   });
 });

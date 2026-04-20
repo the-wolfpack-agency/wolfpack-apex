@@ -20,6 +20,7 @@ import {
   findCachedRagResult,
 } from "@/lib/rag-offline";
 import { RagOfflineMissError } from "@/lib/assistant-rag-offline";
+import { scheduleDocBodyBackfill } from "@/lib/rag-offline-backfill";
 
 export interface KnowledgeRagSource {
   id: string;
@@ -118,6 +119,17 @@ export async function queryKnowledgeWithCache(
           } catch {
             /* best-effort */
           }
+
+          // Ambient doc-body backfill — today the knowledge scope has
+          // no /api/knowledge/[id] endpoint; the scheduler emits
+          // `rag.doc_backfill_skipped { reason: "no_endpoint" }` and
+          // bails. Left in place so the day we ship that endpoint the
+          // backfill lights up with zero wrapper edits.
+          scheduleDocBodyBackfill(
+            "knowledge",
+            sources,
+            onAnalytics ? { onAnalytics } : undefined,
+          );
 
           return {
             answer: data.answer.answer,

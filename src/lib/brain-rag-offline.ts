@@ -26,6 +26,7 @@ import {
   findCachedRagResult,
 } from "@/lib/rag-offline";
 import { RagOfflineMissError } from "@/lib/assistant-rag-offline";
+import { scheduleDocBodyBackfill } from "@/lib/rag-offline-backfill";
 
 export interface BrainQueryHit {
   chunk_id: string;
@@ -200,6 +201,25 @@ export async function queryBrainWithCache(
         } catch {
           /* best-effort */
         }
+
+        // Ambient doc-body backfill. `sources[].id` is a chunk_id, but
+        // the /api/brain/documents/[id] endpoint is keyed by
+        // document_id — so we dedupe hits down to unique documents and
+        // schedule against THOSE. Chunk content is already in-snapshot;
+        // what we need offline is the full document body for deep
+        // linking from a source chip.
+        const seenDocs = new Set<string>();
+        const docSources: Array<{ id: string; title?: string }> = [];
+        for (const h of hits) {
+          if (seenDocs.has(h.document_id)) continue;
+          seenDocs.add(h.document_id);
+          docSources.push({ id: h.document_id, title: h.document_filename });
+        }
+        scheduleDocBodyBackfill(
+          "brain",
+          docSources,
+          onAnalytics ? { onAnalytics } : undefined,
+        );
 
         return {
           answer: topSnippet,

@@ -603,6 +603,76 @@ export type InstinctEventType =
   | "rag.served_from_cache"
   | "rag.cache_miss_offline"
   | "rag.cache_evicted"
+  // RAG ambient doc-body backfill (Path C — Stream U5 follow-up).
+  //
+  // When any of the 3 RAG wrappers (assistant / brain / knowledge)
+  // successfully caches a fresh online response, we silently fire
+  // background fetches for the top-K source doc bodies and stash them
+  // in the generic resource cache under resource_type="doc_body" so
+  // that if the user taps a source offline we can show the full text.
+  // This is pure infrastructure — no UI surface. The four events below
+  // let the learning loop see how often backfill runs, how much it
+  // hydrates, and where it has coverage gaps.
+  //
+  //   rag.doc_backfill_scheduled { scope, source_count, top_k }
+  //     — scheduleDocBodyBackfill() was invoked by a wrapper. Fires
+  //       ONCE per wrapper success, BEFORE any network work starts.
+  //       source_count = raw sources length, top_k = how many we will
+  //       actually attempt after truncation.
+  //
+  //   rag.doc_backfilled { scope, doc_id, bytes }
+  //     — one doc body was fetched + cached successfully. `bytes` is
+  //       approx byte length of the cached `content` string so the
+  //       learning loop can detect pathological payloads.
+  //
+  //   rag.doc_backfill_skipped { scope, doc_id, reason }
+  //     — one doc body fetch was skipped or failed. `reason` ∈
+  //       { "recent_cache_hit" | "no_endpoint" | "fetch_failed"
+  //         | "timeout" }. High `no_endpoint` rates on a scope mean we
+  //       should ship a doc-body route for that scope.
+  //
+  //   rag.doc_backfill_completed { scope, attempted, cached, skipped,
+  //                                 failed, duration_ms }
+  //     — fires when a single scheduled backfill batch finishes. Useful
+  //       for measuring actual hydration rate: cached / attempted.
+  | "rag.doc_backfill_scheduled"
+  | "rag.doc_backfilled"
+  | "rag.doc_backfill_skipped"
+  | "rag.doc_backfill_completed"
+  // Ambient RAG refresh (Path C · Stream U6). Silent re-touch of cached
+  // queries on session-start and during idle to keep cached_at fresh
+  // ahead of offline moments. Emitted from `src/lib/ambient-refresh.ts`.
+  //
+  //   ambient.warm_pass_started     { scope_count }
+  //     — fired once at the start of each runSessionWarmPass(). scope_count
+  //       is the number of scopes the pass will iterate (currently 3).
+  //
+  //   ambient.warm_pass_completed   { scope, attempted, refreshed, failed,
+  //                                   duration_ms }
+  //     — one per scope once that scope's iteration finishes (or is
+  //       aborted). attempted/refreshed/failed let dashboards surface how
+  //       effective the pass is per scope so we can tune topN + delay.
+  //
+  //   ambient.idle_detected         { idle_ms }
+  //     — the user has been idle for idle_ms (≥ idleThresholdMs). Fires
+  //       every time the idle watcher ticks; high frequency + low
+  //       refresh rate suggests the user lingers but doesn't interact.
+  //
+  //   ambient.idle_refresh_fired    { scope, cache_age_ms_before,
+  //                                   cache_age_ms_after }
+  //     — a stalest-entry refresh succeeded. cache_age_ms_after is the
+  //       age right after the refresh write (typically 0).
+  //
+  //   ambient.idle_refresh_skipped  { reason }
+  //     — idle refresh was deliberately suppressed. reason ∈
+  //       {"offline","save_data","no_stale_entries","max_refreshes_reached"}
+  //       — lets us slice by cause (bandwidth preference vs cap vs
+  //       nothing stale) when looking at refresh-churn telemetry.
+  | "ambient.warm_pass_started"
+  | "ambient.warm_pass_completed"
+  | "ambient.idle_detected"
+  | "ambient.idle_refresh_fired"
+  | "ambient.idle_refresh_skipped"
   | "pwa.install_prompt_shown"
   | "pwa.install_prompt_dismissed"
   | "pwa.installed"
