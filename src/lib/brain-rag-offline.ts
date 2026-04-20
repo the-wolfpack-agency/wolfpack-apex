@@ -20,13 +20,14 @@
  * is the Brain-specific adaptation.
  */
 
-import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+import { fetchWithRefresh, jsonHeaders, getInstinctToken } from "@/lib/client-auth";
 import {
   cacheRagResult,
   findCachedRagResult,
 } from "@/lib/rag-offline";
 import { RagOfflineMissError } from "@/lib/assistant-rag-offline";
 import { scheduleDocBodyBackfill } from "@/lib/rag-offline-backfill";
+import type { AnnSearchResult } from "@/lib/brain-ann";
 
 export interface BrainQueryHit {
   chunk_id: string;
@@ -48,6 +49,13 @@ export interface BrainRagResult {
   /** Normalized for the RagSnapshotBadge helpers. */
   sources: Array<{ id: string; title?: string; score?: number }>;
   from_cache: boolean;
+  /**
+   * True when the hits were synthesized from the Level-2 Brain Pack
+   * (client-side ANN over cached chunks) rather than from the Level-1
+   * fingerprint cache. When true, `from_cache` is ALSO true — pack-
+   * served responses count as cache hits for the offline UX pill.
+   */
+  from_pack?: boolean;
   is_fuzzy?: boolean;
   similarity?: number;
   cached_at_ms?: number;
@@ -65,6 +73,27 @@ export interface QueryBrainOptions {
   kind?: string;
   uploadedBy?: string;
   conversationId?: string | null;
+  /**
+   * Workspace key for the Level-2 Brain Pack lookup. When omitted we
+   * use `"default"`. The offline Level-2 ANN path runs against the pack
+   * cached for this workspace.
+   */
+  workspace?: string;
+  /**
+   * Test seam — override the pack-stats probe used to decide whether
+   * the Level-2 path is viable. Returning `chunk_count === 0` forces
+   * Level-2 to short-circuit into the Level-1 fingerprint path.
+   */
+  getPackStats?: (workspace: string) => Promise<{ chunk_count: number }>;
+  /**
+   * Test seam — override the ANN search. Default: dynamic import of
+   * `brain-ann.searchCachedChunks`.
+   */
+  annSearch?: (
+    query: string,
+    workspace: string,
+    topK: number,
+  ) => Promise<AnnSearchResult>;
   onAnalytics?: (
     event: string,
     metadata: Record<string, string | number | boolean>,
@@ -75,6 +104,74 @@ export interface QueryBrainOptions {
 
 function probeOnline(): boolean {
   return typeof navigator !== "undefined" ? navigator.onLine : true;
+}
+
+async function postAnalytics(
+  event: string,
+  metadata: Record<string, string | number | boolean>,
+): Promise<void> {
+  if (typeof window === "undefined") return;
+  const token = getInstinctToken();
+  if (!token) return;
+  try {
+    await fetchWithRefresh("/api/analytics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event, metadata }),
+      keepalive: true,
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+function emitPackServed(
+  metadata: Record<string, string | number | boolean>,
+  override?: QueryBrainOptions["onAnalytics"],
+): void {
+  if (override) {
+    try {
+      override("rag.served_from_pack", metadata);
+    } catch {
+      /* best-effort */
+    }
+    return;
+  }
+  void postAnalytics("rag.served_from_pack", metadata);
+}
+
+/**
+ * Default Level-2 providers. Dynamically imported so the module can
+ * load even before U3 has shipped `brain-pack-store` / `brain-ann` —
+ * the probe resolves to zero-chunks and the caller falls through to
+ * the L1 fingerprint path.
+ */
+async function defaultGetPackStats(
+  workspace: string,
+): Promise<{ chunk_count: number }> {
+  try {
+    const mod = (await import("@/lib/brain-pack-store")) as {
+      getPackStats: (w: string) => Promise<{ chunk_count: number }>;
+    };
+    return await mod.getPackStats(workspace);
+  } catch {
+    return { chunk_count: 0 };
+  }
+}
+
+async function defaultAnnSearch(
+  query: string,
+  workspace: string,
+  topK: number,
+): Promise<AnnSearchResult> {
+  const mod = (await import("@/lib/brain-ann")) as {
+    searchCachedChunks: (
+      q: string,
+      w: string,
+      k: number,
+    ) => Promise<AnnSearchResult>;
+  };
+  return mod.searchCachedChunks(query, workspace, topK);
 }
 
 interface CachedBrainExtras {
@@ -235,6 +332,101 @@ export async function queryBrainWithCache(
       }
     } catch {
       // Network error → fall through.
+    }
+  }
+
+  // Level-2: offline + pack-backed semantic retrieval. Skipped when
+  // online (L1 fingerprint cache is still the right warm path for
+  // repeat queries so we don't churn the ANN pass). When the pack has
+  // zero chunks, or ANN fails, we fall through to L1.
+  if (!online) {
+    const workspace = opts?.workspace ?? "default";
+    const getPackStats = opts?.getPackStats ?? defaultGetPackStats;
+    const annSearch = opts?.annSearch ?? defaultAnnSearch;
+    let stats: { chunk_count: number } = { chunk_count: 0 };
+    try {
+      stats = await getPackStats(workspace);
+    } catch {
+      stats = { chunk_count: 0 };
+    }
+    if (stats && stats.chunk_count > 0) {
+      try {
+        const topK = opts?.limit ?? 10;
+        const ann = await annSearch(query, workspace, topK);
+        if (ann.hits.length > 0) {
+          const hits: BrainQueryHit[] = ann.hits.map((h) => ({
+            chunk_id: h.chunk_id,
+            document_id: h.document_id,
+            document_filename: h.document_filename,
+            document_kind: h.document_kind,
+            chunk_idx: h.chunk_idx,
+            content: h.content,
+            score: h.score,
+            source: h.source,
+            snippet: h.snippet,
+          }));
+          const sources = hits.map((h) => ({
+            id: h.chunk_id,
+            title: `${h.document_filename} #${h.chunk_idx}`,
+            score: h.score,
+          }));
+          const topSnippet = hits[0].snippet;
+
+          // Write to L1 so future fuzzy fingerprint matches hit without
+          // re-running ANN. Best-effort — a cache-write failure must not
+          // break the offline response.
+          try {
+            await cacheRagResult(
+              "brain",
+              {
+                query,
+                retrieved_docs: [
+                  packBrainExtras({
+                    hits,
+                    keyword_hits: ann.keyword_hits,
+                    semantic_hits: ann.semantic_hits,
+                    latency_ms: ann.latency_ms,
+                  }),
+                  ...hits.map((h) => ({
+                    id: h.chunk_id,
+                    title: h.document_filename,
+                    content: h.content,
+                  })),
+                ],
+                answer: topSnippet,
+                sources,
+                scope: "brain",
+              },
+              onAnalytics ? { onAnalytics } : undefined,
+            );
+          } catch {
+            /* best-effort */
+          }
+
+          emitPackServed(
+            {
+              workspace,
+              top_score: hits[0].score,
+              hit_count: hits.length,
+              is_fuzzy: false,
+            },
+            onAnalytics,
+          );
+
+          return {
+            answer: topSnippet,
+            hits,
+            sources,
+            from_cache: true,
+            from_pack: true,
+            keyword_hits: ann.keyword_hits,
+            semantic_hits: ann.semantic_hits,
+            latency_ms: ann.latency_ms,
+          };
+        }
+      } catch {
+        // ANN errored — fall through to L1 fingerprint path.
+      }
     }
   }
 

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import { saveJournalEntryOffline } from "@/lib/journals-offline";
 
 interface TimelineEvent {
   time: string;
@@ -174,21 +175,19 @@ export default function JournalPage() {
     setSaving(true);
     setSaveMsg("");
     try {
-      const res = await fetchWithRefresh("/api/journal", {
-        method: "PUT",
-        headers: authHeaders(),
-        body: JSON.stringify({
-          journal_id: journal.id,
-          content: note,
-          mood,
-        }),
+      // Offline-first wrapper: caches locally, attempts inline PUT, queues
+      // on offline/flaky network. Status tells the user which path ran.
+      const result = await saveJournalEntryOffline({
+        journal_id: journal.id,
+        content: note,
+        mood,
       });
-      if (res.ok) {
+      if (result.status === "created") {
         setSaveMsg("Saved");
-        setTimeout(() => setSaveMsg(""), 2000);
       } else {
-        setSaveMsg("Failed to save");
+        setSaveMsg("Saved locally — will sync when online");
       }
+      setTimeout(() => setSaveMsg(""), 3000);
     } catch {
       setSaveMsg("Failed to save");
     }
@@ -341,7 +340,11 @@ export default function JournalPage() {
           {saveMsg && (
             <span
               className="text-sm"
-              style={{ color: saveMsg === "Saved" ? "var(--wp-success)" : "var(--wp-error)" }}
+              style={{
+                color: saveMsg.startsWith("Saved")
+                  ? "var(--wp-success)"
+                  : "var(--wp-error)",
+              }}
             >
               {saveMsg}
             </span>

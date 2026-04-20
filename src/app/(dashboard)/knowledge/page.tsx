@@ -6,6 +6,7 @@ import {
   queryKnowledgeWithCache,
   RagOfflineMissError,
 } from "@/lib/knowledge-rag-offline";
+import { saveKnowledgeEntryOffline } from "@/lib/knowledge-capture-offline";
 import { RagSnapshotBadge } from "@/components/RagSnapshotBadge";
 
 interface KnowledgeEntry {
@@ -42,6 +43,13 @@ interface AskResult {
   offlineMiss?: boolean;
 }
 
+function mkEntryId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `k_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export default function KnowledgePage() {
   const [entries, setEntries] = useState<KnowledgeEntry[]>([]);
   const [search, setSearch] = useState("");
@@ -54,6 +62,14 @@ export default function KnowledgePage() {
   const [isOnline, setIsOnline] = useState<boolean>(
     typeof navigator !== "undefined" ? navigator.onLine : true,
   );
+  // Capture panel state (add-new-entry path — routed through the
+  // offline wrapper so field saves during flaky networks aren't lost).
+  const [showCapture, setShowCapture] = useState(false);
+  const [captureQuestion, setCaptureQuestion] = useState("");
+  const [captureAnswer, setCaptureAnswer] = useState("");
+  const [captureTags, setCaptureTags] = useState("");
+  const [capturing, setCapturing] = useState(false);
+  const [captureMsg, setCaptureMsg] = useState("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -161,6 +177,48 @@ export default function KnowledgePage() {
     setAsking(false);
   }
 
+  async function handleCapture(e: FormEvent) {
+    e.preventDefault();
+    const q = captureQuestion.trim();
+    const a = captureAnswer.trim();
+    if (!q || !a) {
+      setCaptureMsg("Both question and answer are required");
+      return;
+    }
+    setCapturing(true);
+    setCaptureMsg("");
+    try {
+      const tags = captureTags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      const result = await saveKnowledgeEntryOffline({
+        entry_id: mkEntryId(),
+        question: q,
+        answer: a,
+        source: "human",
+        tags,
+        created_at: Date.now(),
+      });
+      if (result.status === "created") {
+        setCaptureMsg("Saved");
+        // Refresh list so the new entry shows up (online path only —
+        // when queued, the entry is pending server-side and won't
+        // appear in the list until replay).
+        fetchEntries();
+      } else {
+        setCaptureMsg("Saved locally — will sync when online");
+      }
+      setCaptureQuestion("");
+      setCaptureAnswer("");
+      setCaptureTags("");
+      setTimeout(() => setCaptureMsg(""), 3000);
+    } catch (err) {
+      setCaptureMsg((err as Error).message || "Failed to save");
+    }
+    setCapturing(false);
+  }
+
   async function handleRate(entryId: string, rating: number) {
     // Optimistic UI
     setEntries((prev) =>
@@ -207,14 +265,101 @@ export default function KnowledgePage() {
         <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>
           Knowledge Base
         </h1>
-        <button
-          onClick={() => { setShowAsk(!showAsk); setAskResult(null); }}
-          className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
-          style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
-        >
-          Ask a Question
-        </button>
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => { setShowAsk(!showAsk); setAskResult(null); }}
+            className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+            style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+          >
+            Ask a Question
+          </button>
+          <button
+            onClick={() => { setShowCapture(!showCapture); setCaptureMsg(""); }}
+            className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors border"
+            style={{
+              background: "var(--wp-dark-surface2)",
+              borderColor: "var(--wp-dark-border)",
+              color: "var(--wp-text)",
+            }}
+          >
+            {showCapture ? "Close capture" : "Capture knowledge"}
+          </button>
+        </div>
       </div>
+
+      {/* Capture Knowledge Panel — offline-first CREATE path */}
+      {showCapture && (
+        <div
+          className="rounded-lg border p-5 space-y-3"
+          style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+          data-testid="knowledge-capture-panel"
+        >
+          <h3 className="text-sm font-semibold" style={{ color: "var(--wp-gold)" }}>
+            Capture a new knowledge entry
+          </h3>
+          <form onSubmit={handleCapture} className="space-y-3">
+            <input
+              type="text"
+              value={captureQuestion}
+              onChange={(e) => setCaptureQuestion(e.target.value)}
+              placeholder="Question (e.g. How do I rotate a JWT refresh token?)"
+              className="w-full rounded-lg border px-4 py-2 text-sm outline-none"
+              style={{
+                background: "var(--wp-dark-surface2)",
+                borderColor: "var(--wp-dark-border)",
+                color: "var(--wp-text)",
+              }}
+            />
+            <textarea
+              value={captureAnswer}
+              onChange={(e) => setCaptureAnswer(e.target.value)}
+              placeholder="Answer (markdown ok)"
+              rows={4}
+              className="w-full rounded-lg border px-4 py-3 text-sm outline-none resize-none"
+              style={{
+                background: "var(--wp-dark-surface2)",
+                borderColor: "var(--wp-dark-border)",
+                color: "var(--wp-text)",
+              }}
+            />
+            <input
+              type="text"
+              value={captureTags}
+              onChange={(e) => setCaptureTags(e.target.value)}
+              placeholder="Tags, comma-separated (optional)"
+              className="w-full rounded-lg border px-4 py-2 text-sm outline-none"
+              style={{
+                background: "var(--wp-dark-surface2)",
+                borderColor: "var(--wp-dark-border)",
+                color: "var(--wp-text)",
+              }}
+            />
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                disabled={capturing}
+                className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+              >
+                {capturing ? "Saving..." : "Save entry"}
+              </button>
+              {captureMsg && (
+                <span
+                  className="text-sm"
+                  style={{
+                    color: captureMsg.startsWith("Saved")
+                      ? "var(--wp-success)"
+                      : "var(--wp-error)",
+                  }}
+                  data-testid="knowledge-capture-msg"
+                >
+                  {captureMsg}
+                </span>
+              )}
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Search */}
       <form onSubmit={handleSearch} className="flex gap-2">

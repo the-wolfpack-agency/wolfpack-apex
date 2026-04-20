@@ -120,13 +120,20 @@ test("offline + cached → renders cached answer with RagSnapshotBadge", async (
   await clearAllResources();
 });
 
-test("offline + no cache → renders offline-miss fallback message", async () => {
+test("offline + no cache → queues the user message and shows a 'will send when online' ack", async () => {
   const {
     clearAllResources,
     __resetForTests,
   } = require("@/lib/offline-cache") as typeof import("@/lib/offline-cache");
+  const {
+    clearQueue,
+    listQueue,
+    __resetForTests: resetQueue,
+  } = require("@/lib/offline-queue") as typeof import("@/lib/offline-queue");
   __resetForTests();
+  resetQueue();
   await clearAllResources();
+  await clearQueue();
 
   Object.defineProperty(navigator, "onLine", {
     value: false,
@@ -151,9 +158,15 @@ test("offline + no cache → renders offline-miss fallback message", async () =>
 
   await waitFor(() => {
     expect(
-      screen.getByText(/hasn't been asked before/i),
+      screen.getByText(/will send when you're back online/i),
     ).toBeInTheDocument();
   });
 
+  // The user's message must be queued (not dropped) so flush-on-online
+  // replays it when we reconnect.
+  const rows = await listQueue();
+  expect(rows.filter((r) => r.endpoint === "/api/assistant")).toHaveLength(1);
+
   Object.defineProperty(navigator, "onLine", { value: true, configurable: true });
+  await clearQueue();
 });

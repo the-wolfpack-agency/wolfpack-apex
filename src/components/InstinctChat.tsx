@@ -6,6 +6,7 @@ import {
   queryAssistantWithCache,
   RagOfflineMissError,
 } from "@/lib/assistant-rag-offline";
+import { sendAssistantMessageOffline } from "@/lib/assistant-drafts-offline";
 import { RagSnapshotBadge } from "@/components/RagSnapshotBadge";
 
 // ---------------------------------------------------------------------------
@@ -440,12 +441,26 @@ export default function InstinctChat({
           return;
         } catch (wrapErr) {
           if (wrapErr instanceof RagOfflineMissError) {
+            // Offline + no RAG cache hit: queue the user message via
+            // the assistant-drafts-offline wrapper so flush-on-online
+            // (owned by OfflineStatusPill) replays it once we reconnect.
+            // Best-effort — the queue itself shouldn't throw.
+            try {
+              await sendAssistantMessageOffline({
+                message: fullMessage,
+                conversationId,
+                pageContext,
+                contextData,
+              });
+            } catch {
+              /* queue failure is non-fatal; fall through to the fallback msg */
+            }
             setMessages((prev) => [
               ...prev,
               {
                 role: "assistant",
                 content:
-                  "You're offline and this question hasn't been asked before. Reconnect and ask to cache the answer.",
+                  "You're offline and this question hasn't been asked before. Your message will send when you're back online.",
                 source: "fallback",
                 tokensUsed: 0,
                 timestamp: new Date().toISOString(),

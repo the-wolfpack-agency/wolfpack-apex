@@ -38,10 +38,89 @@ export type InstinctEventType =
   | "brain.query_hit"
   | "brain.query_miss"
   | "brain.query_cited_in_answer"
+  // Brain Pack Level-2 (client-side ANN over cached pack chunks).
+  //
+  //   brain.embedding_model_loaded        { duration_ms, size_bytes }
+  //     — the lazy transformers.js MiniLM pipeline finished its first
+  //       load. `size_bytes` is a best-effort total of fetched weight
+  //       bytes; 0 when the loader could not observe the network.
+  //
+  //   brain.embedding_model_load_failed   { error }
+  //     — load failed or timed out. The caller falls back to the
+  //       Level-1 fingerprint path; the user still sees cached results
+  //       when available.
+  //
+  //   brain.query_embedded                { duration_ms }
+  //     — per-call embedding timing, not including model load. Lets the
+  //       learning loop see the steady-state encode cost.
+  //
+  //   brain.ann_search_performed          { workspace, chunk_count,
+  //                                          top_k, duration_ms }
+  //     — one full Level-2 search finished. `chunk_count` is the number
+  //       of pack chunks we scored against; `duration_ms` includes
+  //       keyword + semantic + merge.
+  //
+  //   rag.served_from_pack                { workspace, top_score,
+  //                                          is_fuzzy }
+  //     — fires on every Level-2 hit that returns to the caller, so
+  //       the offline-hit dashboards can distinguish pack-served from
+  //       fingerprint-served cache hits.
+  | "brain.embedding_model_loaded"
+  | "brain.embedding_model_load_failed"
+  | "brain.query_embedded"
+  | "brain.ann_search_performed"
+  | "rag.served_from_pack"
+  // Brain Pack Level-2 — progressive download / sync lifecycle (Stream U3).
+  //
+  //   brain.pack_sync_started      { workspace, resume }
+  //     — a sync cycle kicked off. `resume` is true when we're continuing
+  //       a previously-aborted sync by carrying the server cursor forward.
+  //
+  //   brain.pack_page_downloaded   { workspace, page_chunks, total_cached,
+  //                                   duration_ms }
+  //     — one page landed in IDB. `total_cached` is the running count of
+  //       cached chunks for the workspace AFTER this page applied.
+  //
+  //   brain.pack_sync_completed    { workspace, downloaded, skipped,
+  //                                   failed, duration_ms }
+  //     — the sync finished naturally (no more pages / cursor exhausted).
+  //
+  //   brain.pack_sync_skipped      { reason }
+  //     — the sync was short-circuited before any network. `reason` is
+  //       one of "save_data" | "cellular" | "offline" | "quota_exceeded"
+  //       | "already_running". Save-data + cellular respect user prefs;
+  //       quota_exceeded fires after a QuotaExceededError from IDB.
+  //
+  //   brain.pack_chunk_evicted     { workspace, reason }
+  //     — a cached chunk was evicted (workspace cleared, LRU trim on
+  //       quota pressure, doc removed server-side). `reason` ∈
+  //       "workspace_cleared" | "quota_pressure" | "stale".
+  | "brain.pack_sync_started"
+  | "brain.pack_page_downloaded"
+  | "brain.pack_sync_completed"
+  | "brain.pack_sync_skipped"
+  | "brain.pack_chunk_evicted"
   // Journal
   | "journal.entry_created"
   | "journal.entry_updated"
   | "journal.context_added"
+  // Offline draft creation (Path C · Stream U1 — text-draft offline)
+  //
+  // Fires ONLY on the queue path (i.e. the user created the draft
+  // offline or the server was unreachable). Online inline creates do
+  // NOT fire these — the underlying create endpoint already emits its
+  // own event (journal.entry_updated, meeting.transcript_ingested,
+  // knowledge.question_asked, ...). The `offline.mutation_queued`
+  // event fires for every queued mutation, but these per-feature
+  // events let dashboards slice by feature without having to parse
+  // the generic `endpoint` metadata.
+  //
+  //   meeting.draft_created_offline   { resource_type, draft_id }
+  //   journal.entry_created_offline   { resource_type, entry_id }
+  //   knowledge.entry_created_offline { resource_type, entry_id }
+  | "meeting.draft_created_offline"
+  | "journal.entry_created_offline"
+  | "knowledge.entry_created_offline"
   // Feature requests
   | "feature.request_submitted"
   | "feature.request_write_failed"
@@ -54,6 +133,15 @@ export type InstinctEventType =
   | "discussion.reply_posted"
   | "discussion.resolved"
   | "discussion.doc_attached"
+  // Discussions — offline queueing (Stream U2 templated offline rollout).
+  // Fired ONLY on the queue path: navigator.onLine===false, or an inline
+  // POST that returned non-ok / threw mid-flight. Inline 2xx writes keep
+  // firing the existing server-side `discussion.thread_created` /
+  // `discussion.reply_posted` events. On reconnect the queue drains and
+  // emits `offline.mutation_replayed` / `offline.mutation_replay_failed`
+  // from offline-queue itself — no new replay-side events needed.
+  | "discussion.reply_queued_offline"
+  | "discussion.thread_queued_offline"
   // Prototypes
   | "prototype.created"
   | "prototype.deployed"

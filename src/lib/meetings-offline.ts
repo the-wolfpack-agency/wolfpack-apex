@@ -37,7 +37,7 @@ import {
 } from "@/lib/offline-cache";
 import { enqueueMutation } from "@/lib/offline-queue";
 import { notifyQueueChanged } from "@/components/sites/OfflineStatusPill";
-import { fetchWithRefresh } from "@/lib/client-auth";
+import { fetchWithRefresh, getInstinctToken } from "@/lib/client-auth";
 
 export const MEETING_DRAFT_RESOURCE = "meeting_draft";
 export const MEETING_DRAFT_ENDPOINT = "/api/meetings/draft";
@@ -108,7 +108,38 @@ export async function saveMeetingDraftOffline(
     body: draft,
   });
   notifyQueueChanged();
+  // Per-feature offline-create event. The underlying queue also fires
+  // `offline.mutation_queued` with endpoint/method; this extra event
+  // lets feature-specific dashboards slice by `resource_type` + the
+  // draft_id without having to parse the generic `endpoint` metadata.
+  void emitOfflineCreateEvent("meeting.draft_created_offline", {
+    resource_type: MEETING_DRAFT_RESOURCE,
+    draft_id: draft.draft_id,
+  });
   return { queueId: entry.id, syncedInline: false };
+}
+
+// ---------------------------------------------------------------------------
+// Analytics — fire-and-forget per-feature offline-create event
+// ---------------------------------------------------------------------------
+
+async function emitOfflineCreateEvent(
+  event: "meeting.draft_created_offline",
+  metadata: Record<string, string | number | boolean>,
+): Promise<void> {
+  if (typeof window === "undefined") return;
+  const token = getInstinctToken();
+  if (!token) return;
+  try {
+    await fetchWithRefresh("/api/analytics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event, metadata }),
+      keepalive: true,
+    });
+  } catch {
+    /* best-effort */
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { authHeaders as canonicalAuthHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import { saveMeetingDraftOffline } from "@/lib/meetings-offline";
 
 interface Meeting {
   id: string;
@@ -49,11 +50,23 @@ function fmtDuration(s: number | null): string {
   return `${m}m`;
 }
 
+function mkDraftId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `d_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export default function MeetingsPage() {
   const [meetings, setMeetings] = useState<Meeting[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detailCache, setDetailCache] = useState<Record<string, string>>({});
+  const [showDraft, setShowDraft] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftNotes, setDraftNotes] = useState("");
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [draftMsg, setDraftMsg] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -100,14 +113,110 @@ export default function MeetingsPage() {
     }
   }
 
+  async function handleSaveDraft() {
+    const title = draftTitle.trim();
+    const notes = draftNotes.trim();
+    if (!title && !notes) {
+      setDraftMsg("Add a title or notes before saving");
+      return;
+    }
+    setDraftSaving(true);
+    setDraftMsg("");
+    try {
+      const result = await saveMeetingDraftOffline({
+        draft_id: mkDraftId(),
+        title: title || "Untitled meeting",
+        notes,
+        created_at: Date.now(),
+      });
+      if (result.syncedInline) {
+        setDraftMsg("Saved");
+      } else {
+        setDraftMsg("Saved locally — will sync when online");
+      }
+      setDraftTitle("");
+      setDraftNotes("");
+      setTimeout(() => setDraftMsg(""), 3000);
+    } catch {
+      setDraftMsg("Failed to save");
+    }
+    setDraftSaving(false);
+  }
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>Meetings</h1>
-        <p className="text-sm mt-1" style={{ color: "var(--wp-text-dim)" }}>
-          Recordings ingested from Plaud. Shared across the team.
-        </p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>Meetings</h1>
+          <p className="text-sm mt-1" style={{ color: "var(--wp-text-dim)" }}>
+            Recordings ingested from Plaud. Shared across the team.
+          </p>
+        </div>
+        <button
+          onClick={() => { setShowDraft((v) => !v); setDraftMsg(""); }}
+          className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+          style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+        >
+          {showDraft ? "Cancel" : "Add meeting note"}
+        </button>
       </div>
+
+      {showDraft && (
+        <div
+          className="rounded-lg border p-5 space-y-3"
+          style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+        >
+          <h2 className="text-sm font-semibold" style={{ color: "var(--wp-gold)" }}>
+            New meeting note
+          </h2>
+          <input
+            type="text"
+            value={draftTitle}
+            onChange={(e) => setDraftTitle(e.target.value)}
+            placeholder="Meeting title"
+            className="w-full rounded-lg border px-4 py-2 text-sm outline-none"
+            style={{
+              background: "var(--wp-dark-surface2)",
+              borderColor: "var(--wp-dark-border)",
+              color: "var(--wp-text)",
+            }}
+          />
+          <textarea
+            value={draftNotes}
+            onChange={(e) => setDraftNotes(e.target.value)}
+            placeholder="Notes..."
+            rows={4}
+            className="w-full rounded-lg border px-4 py-3 text-sm outline-none resize-none"
+            style={{
+              background: "var(--wp-dark-surface2)",
+              borderColor: "var(--wp-dark-border)",
+              color: "var(--wp-text)",
+            }}
+          />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSaveDraft}
+              disabled={draftSaving}
+              className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+              style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+            >
+              {draftSaving ? "Saving..." : "Save draft"}
+            </button>
+            {draftMsg && (
+              <span
+                className="text-sm"
+                style={{
+                  color: draftMsg.startsWith("Saved")
+                    ? "var(--wp-success)"
+                    : "var(--wp-error)",
+                }}
+              >
+                {draftMsg}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {error && (
         <div

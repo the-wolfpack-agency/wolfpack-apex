@@ -2,6 +2,10 @@
 
 import { useState, useEffect, FormEvent } from "react";
 import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import {
+  sendDiscussionThreadOffline,
+  sendDiscussionReplyOffline,
+} from "@/lib/discussions-offline";
 
 interface Discussion {
   id: string;
@@ -102,26 +106,23 @@ export default function DiscussionsPage() {
     setCreating(true);
     setCreateMsg("");
     try {
-      const res = await fetchWithRefresh("/api/discussions", {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({
-          title: newTitle,
-          category: newCategory,
-          content: newContent,
-        }),
+      // Route through the offline-aware wrapper so a network blip queues
+      // the write for replay instead of dropping it on the floor.
+      const result = await sendDiscussionThreadOffline({
+        title: newTitle,
+        category: newCategory,
+        content: newContent,
       });
-      if (res.ok) {
+      if (result.status === "sent") {
         setCreateMsg("Discussion created!");
-        setNewTitle("");
-        setNewContent("");
-        setNewCategory("general");
-        setShowNew(false);
-        fetchThreads();
       } else {
-        const data = await res.json();
-        setCreateMsg(data.error || "Failed to create");
+        setCreateMsg("Offline — will send when online");
       }
+      setNewTitle("");
+      setNewContent("");
+      setNewCategory("general");
+      setShowNew(false);
+      fetchThreads();
     } catch {
       setCreateMsg("Failed to create");
     }
@@ -133,16 +134,19 @@ export default function DiscussionsPage() {
     if (!selectedThread || !replyContent.trim()) return;
     setReplying(true);
     try {
-      const res = await fetchWithRefresh(`/api/discussions/${selectedThread.discussion.id}`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({ content: replyContent }),
+      const result = await sendDiscussionReplyOffline({
+        thread_id: selectedThread.discussion.id,
+        content: replyContent,
       });
-      if (res.ok) {
-        setReplyContent("");
+      setReplyContent("");
+      if (result.status === "sent") {
         openThread(selectedThread.discussion.id);
         fetchThreads();
       }
+      // When queued we don't refresh the thread (the reply isn't on the
+      // server yet). The OfflineStatusPill surfaces the pending count;
+      // flush-on-online will replay the reply and the next open will
+      // show it.
     } catch {
       // silent
     }

@@ -134,6 +134,43 @@ export async function searchBrain(
   }));
 }
 
+/**
+ * Fetch the raw vectors for a batch of Qdrant point ids. Used by the
+ * Brain Pack endpoint so we can ship embeddings client-side for Level-2
+ * ANN without leaking our Qdrant URL. Returns a Map keyed by point_id;
+ * missing ids are simply absent from the map (never throws per-point).
+ *
+ * If the whole Qdrant call fails (network, 5xx) we return an empty Map
+ * rather than throwing — callers degrade to a fingerprint-only pack.
+ */
+export async function fetchBrainVectors(
+  pointIds: string[],
+): Promise<Map<string, number[]>> {
+  const out = new Map<string, number[]>();
+  if (pointIds.length === 0) return out;
+  try {
+    const res = await qd<{
+      result: { id: string; vector?: number[] | Record<string, number[]> }[];
+    }>("POST", `/collections/${BRAIN_COLLECTION}/points`, {
+      ids: pointIds,
+      with_vector: true,
+      with_payload: false,
+    });
+    for (const p of res.result || []) {
+      const v = Array.isArray(p.vector)
+        ? p.vector
+        : p.vector && typeof p.vector === "object"
+          ? Object.values(p.vector).find(Array.isArray) ?? null
+          : null;
+      if (v && v.length > 0) out.set(String(p.id), v);
+    }
+  } catch {
+    // best-effort — pack caller sees "no vectors available" and ships
+    // chunks without embeddings. Level-2 ANN degrades to keyword-only.
+  }
+  return out;
+}
+
 export async function brainHealth(): Promise<boolean> {
   try {
     await qd("GET", "/collections");
