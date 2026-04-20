@@ -2,6 +2,11 @@
 
 import { useState, useEffect, FormEvent } from "react";
 import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import {
+  queryKnowledgeWithCache,
+  RagOfflineMissError,
+} from "@/lib/knowledge-rag-offline";
+import { RagSnapshotBadge } from "@/components/RagSnapshotBadge";
 
 interface KnowledgeEntry {
   id: string;
@@ -25,6 +30,18 @@ const SOURCE_COLORS: Record<string, string> = {
   human: "var(--wp-gold)",
 };
 
+interface AskResult {
+  answer: KnowledgeEntry | null;
+  source: string;
+  /** Set when the answer came from U1's offline RAG cache. */
+  fromCache?: boolean;
+  cachedAtMs?: number;
+  isFuzzy?: boolean;
+  similarity?: number;
+  /** True when the server replied but has no cached answer for this question. */
+  offlineMiss?: boolean;
+}
+
 export default function KnowledgePage() {
   const [entries, setEntries] = useState<KnowledgeEntry[]>([]);
   const [search, setSearch] = useState("");
@@ -33,7 +50,22 @@ export default function KnowledgePage() {
   const [showAsk, setShowAsk] = useState(false);
   const [question, setQuestion] = useState("");
   const [asking, setAsking] = useState(false);
-  const [askResult, setAskResult] = useState<{ answer: KnowledgeEntry | null; source: string } | null>(null);
+  const [askResult, setAskResult] = useState<AskResult | null>(null);
+  const [isOnline, setIsOnline] = useState<boolean>(
+    typeof navigator !== "undefined" ? navigator.onLine : true,
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const on = () => setIsOnline(true);
+    const off = () => setIsOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
 
   function authHeaders(): HeadersInit {
     return jsonHeaders();
@@ -67,21 +99,64 @@ export default function KnowledgePage() {
     fetchEntries(search || undefined);
   }
 
-  async function handleAsk(e: FormEvent) {
+  async function handleAsk(e: FormEvent, forceRefresh = false) {
     e.preventDefault();
     if (!question.trim()) return;
     setAsking(true);
     setAskResult(null);
     try {
-      const res = await fetchWithRefresh("/api/knowledge", {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({ question }),
-      });
-      const data = await res.json();
-      setAskResult({ answer: data.answer, source: data.source });
-    } catch {
-      setAskResult({ answer: null, source: "error" });
+      const result = await queryKnowledgeWithCache(question, { forceRefresh });
+      if (result.from_cache) {
+        // Wrap the cached answer in a synthetic KnowledgeEntry so the
+        // existing renderer shape stays the same.
+        const synthetic: KnowledgeEntry = {
+          id: result.sources[0]?.id ?? "cache",
+          question,
+          answer: result.answer,
+          source: "cache",
+          asked_by: "offline",
+          confidence: result.similarity ?? 1,
+          rating: null,
+          view_count: 0,
+          tokens_used: 0,
+          tags: [],
+          created_at: new Date(result.cached_at_ms ?? Date.now()).toISOString(),
+        };
+        setAskResult({
+          answer: synthetic,
+          source: "cache",
+          fromCache: true,
+          cachedAtMs: result.cached_at_ms,
+          isFuzzy: result.is_fuzzy,
+          similarity: result.similarity,
+        });
+      } else if (result.server_has_no_answer || !result.answer) {
+        setAskResult({ answer: null, source: "none" });
+      } else {
+        // The server replied with a real answer; synthesize the full
+        // entry from the wrapper's source list. The wrapper's primary
+        // source carries id+title and the answer string.
+        const entry: KnowledgeEntry = {
+          id: result.sources[0]?.id ?? "server",
+          question,
+          answer: result.answer,
+          source: result.source_kind ?? "docs",
+          asked_by: "",
+          confidence: 1,
+          rating: null,
+          view_count: 0,
+          tokens_used: result.tokens_used ?? 0,
+          tags: [],
+          created_at: new Date().toISOString(),
+        };
+        setAskResult({ answer: entry, source: result.source_kind ?? "docs" });
+      }
+    } catch (err) {
+      if (err instanceof RagOfflineMissError) {
+        setAskResult({ answer: null, source: "offline", offlineMiss: true });
+      } else {
+        setAskResult({ answer: null, source: "error" });
+      }
     }
     setAsking(false);
   }
@@ -197,12 +272,32 @@ export default function KnowledgePage() {
           </form>
 
           {askResult && (
-            <div className="mt-4">
+            <div className="mt-4" data-testid="knowledge-ask-result">
               {askResult.answer ? (
                 <div
                   className="rounded-lg border p-4"
                   style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
                 >
+                  {askResult.fromCache && askResult.cachedAtMs && (
+                    <div className="mb-2" data-testid="knowledge-snapshot-badge">
+                      <RagSnapshotBadge
+                        cachedAtMs={askResult.cachedAtMs}
+                        isFuzzy={!!askResult.isFuzzy}
+                        similarity={askResult.similarity}
+                        isOnline={isOnline}
+                        onRefresh={
+                          isOnline
+                            ? () => {
+                                void handleAsk(
+                                  { preventDefault: () => undefined } as FormEvent,
+                                  true,
+                                );
+                              }
+                            : undefined
+                        }
+                      />
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 mb-2">
                     <span
                       className="text-xs px-2 py-0.5 rounded font-medium"
@@ -219,6 +314,15 @@ export default function KnowledgePage() {
                   </div>
                   <p className="text-sm">{askResult.answer.answer}</p>
                 </div>
+              ) : askResult.offlineMiss ? (
+                <p
+                  className="text-sm"
+                  style={{ color: "var(--wp-text-muted)" }}
+                  data-testid="knowledge-offline-miss"
+                >
+                  You&apos;re offline and this question hasn&apos;t been asked before.
+                  Connect and ask to cache it.
+                </p>
               ) : (
                 <p className="text-sm" style={{ color: "var(--wp-text-muted)" }}>
                   No cached answer found. This question has been logged for the knowledge system to learn.

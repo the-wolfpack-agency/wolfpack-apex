@@ -239,6 +239,100 @@ test("snippet renders ts_headline <b> as <strong> and escapes hostile HTML", asy
   expect(result.textContent).toContain("<img src=x onerror=alert(2)>");
 });
 
+test("offline query hits cached result and renders RagSnapshotBadge", async () => {
+  // Seed the cache directly via U1's primitive then flip offline
+  // before render so the component's query goes through the cache
+  // path. No network fetch for /api/brain/query should fire.
+  require("fake-indexeddb/auto");
+  const {
+    cacheRagResult,
+  } = require("@/lib/rag-offline") as typeof import("@/lib/rag-offline");
+  const { clearAllResources, __resetForTests } = require(
+    "@/lib/offline-cache",
+  ) as typeof import("@/lib/offline-cache");
+  __resetForTests();
+  await clearAllResources();
+  const hits = [
+    {
+      chunk_id: "c-off",
+      document_id: "d-off",
+      document_filename: "snap.pdf",
+      document_kind: "pdf",
+      chunk_idx: 0,
+      content: "body",
+      score: 0.9,
+      source: "keyword" as const,
+      snippet: "snap snippet",
+    },
+  ];
+  await cacheRagResult("brain", {
+    query: "escalate offline",
+    retrieved_docs: [
+      {
+        id: "__brain_extras__",
+        title: "__brain_extras__",
+        content: JSON.stringify({
+          hits,
+          keyword_hits: 1,
+          semantic_hits: 0,
+          latency_ms: 1,
+          tokens_used: 0,
+          query_log_id: 99,
+        }),
+      },
+      ...hits.map((h) => ({
+        id: h.chunk_id,
+        title: h.document_filename,
+        content: h.content,
+      })),
+    ],
+    answer: hits[0].snippet,
+    sources: hits.map((h) => ({
+      id: h.chunk_id,
+      title: h.document_filename,
+      score: h.score,
+    })),
+    scope: "brain",
+  });
+
+  setupFetchQueue([
+    () => jsonOk({ documents: [], count: 0, filters: {} }),
+    () => jsonOk({}),
+  ]);
+
+  Object.defineProperty(navigator, "onLine", {
+    value: false,
+    configurable: true,
+  });
+
+  const Page = await importPage();
+  await act(async () => {
+    render(<Page />);
+  });
+  const input = await screen.findByPlaceholderText(/dealer escalation/i);
+  await act(async () => {
+    fireEvent.change(input, { target: { value: "escalate offline" } });
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /search/i }));
+  });
+  await waitFor(() => {
+    expect(screen.getByTestId("brain-snapshot-badge")).toBeInTheDocument();
+  });
+  expect(screen.getByText(/snap\.pdf/)).toBeInTheDocument();
+  const queryCalls = fetchMock.mock.calls
+    .map((c) => (typeof c[0] === "string" ? c[0] : ""))
+    .filter((u) => u.includes("/api/brain/query"));
+  expect(queryCalls).toHaveLength(0);
+
+  // Restore online for later tests.
+  Object.defineProperty(navigator, "onLine", {
+    value: true,
+    configurable: true,
+  });
+  await clearAllResources();
+});
+
 test("Mine / All toggle switches the uploaded_by filter", async () => {
   // first load (mine), then second load (all)
   setupFetchQueue([

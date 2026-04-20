@@ -16,6 +16,12 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+import {
+  queryBrainWithCache,
+  RagOfflineMissError,
+  type BrainQueryHit,
+} from "@/lib/brain-rag-offline";
+import { RagSnapshotBadge } from "@/components/RagSnapshotBadge";
 
 /**
  * Safely render a Postgres `ts_headline` snippet. ts_headline ONLY emits
@@ -69,17 +75,7 @@ interface BrainDocument {
   indexed_at: string | null;
 }
 
-interface QueryHit {
-  chunk_id: string;
-  document_id: string;
-  document_filename: string;
-  document_kind: string;
-  chunk_idx: number;
-  content: string;
-  score: number;
-  source: "keyword" | "semantic" | "keyword+semantic";
-  snippet: string;
-}
+type QueryHit = BrainQueryHit;
 
 interface QueryResponse {
   query: string;
@@ -89,6 +85,13 @@ interface QueryResponse {
   latency_ms: number;
   tokens_used: number;
   query_log_id: number;
+  /** Set when this result was served from U1's offline RAG cache. */
+  fromCache?: boolean;
+  cachedAtMs?: number;
+  isFuzzy?: boolean;
+  similarity?: number;
+  /** Set when the cache lookup missed while offline. */
+  offlineMiss?: boolean;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -118,6 +121,21 @@ export default function BrainPage() {
   const [uploadProgress, setUploadProgress] = useState<{ filename: string; status: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [isOnline, setIsOnline] = useState<boolean>(
+    typeof navigator !== "undefined" ? navigator.onLine : true,
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const on = () => setIsOnline(true);
+    const off = () => setIsOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
 
   const loadDocs = useCallback(async () => {
     setLoading(true);
@@ -189,25 +207,47 @@ export default function BrainPage() {
     [uploadFile],
   );
 
-  const runQuery = useCallback(async () => {
-    const q = queryText.trim();
-    if (!q) return;
-    setQuerying(true);
-    try {
-      const res = await fetchWithRefresh("/api/brain/query", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify({ query: q, limit: 8 }),
-      });
-      if (res.ok) {
-        setQueryResult((await res.json()) as QueryResponse);
-      } else {
-        setQueryResult(null);
+  const runQuery = useCallback(
+    async (forceRefresh = false) => {
+      const q = queryText.trim();
+      if (!q) return;
+      setQuerying(true);
+      try {
+        const result = await queryBrainWithCache(q, { limit: 8, forceRefresh });
+        setQueryResult({
+          query: q,
+          hits: result.hits,
+          keyword_hits: result.keyword_hits ?? 0,
+          semantic_hits: result.semantic_hits ?? 0,
+          latency_ms: result.latency_ms ?? 0,
+          tokens_used: result.tokens_used ?? 0,
+          query_log_id: result.query_log_id ?? 0,
+          fromCache: result.from_cache,
+          cachedAtMs: result.cached_at_ms,
+          isFuzzy: result.is_fuzzy,
+          similarity: result.similarity,
+        });
+      } catch (err) {
+        if (err instanceof RagOfflineMissError) {
+          setQueryResult({
+            query: q,
+            hits: [],
+            keyword_hits: 0,
+            semantic_hits: 0,
+            latency_ms: 0,
+            tokens_used: 0,
+            query_log_id: 0,
+            offlineMiss: true,
+          });
+        } else {
+          setQueryResult(null);
+        }
+      } finally {
+        setQuerying(false);
       }
-    } finally {
-      setQuerying(false);
-    }
-  }, [queryText]);
+    },
+    [queryText],
+  );
 
   const indexedCount = useMemo(() => docs.filter((d) => d.status === "indexed").length, [docs]);
   const totalChunks = useMemo(() => docs.reduce((s, d) => s + d.chunk_count, 0), [docs]);
@@ -324,11 +364,26 @@ export default function BrainPage() {
         </form>
         {queryResult && (
           <div data-testid="query-result" style={{ marginTop: "1rem" }}>
+            {queryResult.fromCache && queryResult.cachedAtMs && (
+              <div style={{ marginBottom: "0.5rem" }} data-testid="brain-snapshot-badge">
+                <RagSnapshotBadge
+                  cachedAtMs={queryResult.cachedAtMs}
+                  isFuzzy={!!queryResult.isFuzzy}
+                  similarity={queryResult.similarity}
+                  isOnline={isOnline}
+                  onRefresh={isOnline ? () => void runQuery(true) : undefined}
+                />
+              </div>
+            )}
             <div style={{ color: "var(--wp-muted)", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
               {queryResult.hits.length} hits · {queryResult.keyword_hits} keyword ·{" "}
               {queryResult.semantic_hits} semantic · {queryResult.latency_ms} ms
             </div>
-            {queryResult.hits.length === 0 ? (
+            {queryResult.offlineMiss ? (
+              <div style={{ color: "var(--wp-muted)" }} data-testid="brain-offline-miss">
+                You&apos;re offline and this query hasn&apos;t been asked before. Connect and ask to cache it.
+              </div>
+            ) : queryResult.hits.length === 0 ? (
               <div style={{ color: "var(--wp-muted)" }}>No matches yet. Try different words or upload more docs.</div>
             ) : (
               <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "0.5rem" }}>

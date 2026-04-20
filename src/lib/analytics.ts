@@ -567,6 +567,42 @@ export type InstinctEventType =
   | "offline.mutation_replay_failed"
   | "offline.brief_served_from_cache"
   | "offline.resource_served_from_cache"
+  // RAG offline cache (Path C — Stream U5)
+  //
+  // Reusable primitive sitting on top of offline-cache.ts that stashes
+  // RAG query+answer+sources snapshots so assistant / brain / knowledge
+  // flows survive a cold-load while the user is offline. Keys by
+  // normalized query fingerprint; falls back to Jaccard fuzzy match on
+  // the tokenized query when no exact hit exists. Metadata shapes:
+  //
+  //   rag.result_cached       { scope, query_token_count, doc_count }
+  //     — `scope` is the RAG sub-scope ("assistant" | "brain" |
+  //       "knowledge" | caller-defined string). `query_token_count` is
+  //       post-stopword-strip so the learning loop can see how much
+  //       signal the query carried. `doc_count` is retrieved_docs.length
+  //       so we can distill per-scope the typical breadth of a hit.
+  //
+  //   rag.served_from_cache   { scope, similarity, is_fuzzy,
+  //                             cache_age_ms }
+  //     — fires on cache hit (exact OR fuzzy). `similarity` ∈ [0,1],
+  //       Jaccard on tokens. `is_fuzzy=false` implies similarity===1.
+  //       The learning loop watches `is_fuzzy` rate — too many fuzzy
+  //       hits means the fingerprint is underspecified (stopword list
+  //       may need trimming) or the scope has too few cached queries.
+  //
+  //   rag.cache_miss_offline  { scope }
+  //     — offline read path found no cached match (exact or fuzzy).
+  //       The user is about to see an empty RAG state; this is the
+  //       clearest signal of a coverage gap for that scope.
+  //
+  //   rag.cache_evicted       { scope, count }
+  //     — fires on every eviction sweep. `count` is the number of rows
+  //       dropped. High frequency here = the per-scope cap is too
+  //       aggressive for the traffic pattern.
+  | "rag.result_cached"
+  | "rag.served_from_cache"
+  | "rag.cache_miss_offline"
+  | "rag.cache_evicted"
   | "pwa.install_prompt_shown"
   | "pwa.install_prompt_dismissed"
   | "pwa.installed"

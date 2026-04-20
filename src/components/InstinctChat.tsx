@@ -2,6 +2,11 @@
 
 import { useState, useEffect, useRef, useCallback, KeyboardEvent, DragEvent, ChangeEvent } from "react";
 import { getInstinctToken, clearInstinctSession, jsonHeaders as canonicalJsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import {
+  queryAssistantWithCache,
+  RagOfflineMissError,
+} from "@/lib/assistant-rag-offline";
+import { RagSnapshotBadge } from "@/components/RagSnapshotBadge";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -22,6 +27,12 @@ interface Message {
   timestamp: string;
   rating?: number;
   attachments?: AttachedFile[];
+  /** Set when this reply was served from U1's offline RAG cache. */
+  fromCache?: boolean;
+  /** Cache metadata — fed into RagSnapshotBadge. */
+  cachedAtMs?: number;
+  isFuzzy?: boolean;
+  similarity?: number;
 }
 
 interface Conversation {
@@ -89,6 +100,23 @@ export default function InstinctChat({
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [isOnline, setIsOnline] = useState<boolean>(
+    typeof navigator !== "undefined" ? navigator.onLine : true,
+  );
+
+  // Keep isOnline fresh so the offline UX + RagSnapshotBadge refresh
+  // button both reflect real connectivity.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const on = () => setIsOnline(true);
+    const off = () => setIsOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
 
   // --- File attachment constants ---
   const MAX_FILE_SIZE = 512_000; // 512KB per file
@@ -291,6 +319,55 @@ export default function InstinctChat({
     }
   }, [position, floatingOpen]);
 
+  /**
+   * Re-ask the query that produced a cached assistant message, with
+   * `forceRefresh: true` so the wrapper skips the cache hit path. Used
+   * by the `<RagSnapshotBadge>` refresh button.
+   */
+  async function refreshCachedMessage(
+    assistantIdx: number,
+    _fallbackContent: string,
+  ): Promise<void> {
+    if (!isOnline) return;
+    // Walk back to the preceding user message — that's the query.
+    let userMsg: Message | null = null;
+    for (let i = assistantIdx - 1; i >= 0; i--) {
+      if (messages[i] && messages[i].role === "user") {
+        userMsg = messages[i];
+        break;
+      }
+    }
+    if (!userMsg) return;
+    try {
+      const result = await queryAssistantWithCache(userMsg.content, {
+        conversationId,
+        pageContext,
+        contextData,
+        forceRefresh: true,
+      });
+      setMessages((prev) =>
+        prev.map((m, i) =>
+          i === assistantIdx
+            ? {
+                ...m,
+                id: result.message_id,
+                content: result.answer,
+                source: result.source_kind,
+                tokensUsed: result.tokens_used ?? 0,
+                timestamp: new Date().toISOString(),
+                fromCache: result.from_cache,
+                cachedAtMs: result.cached_at_ms,
+                isFuzzy: result.is_fuzzy,
+                similarity: result.similarity,
+              }
+            : m,
+        ),
+      );
+    } catch {
+      // Non-fatal — keep the cached copy visible.
+    }
+  }
+
   async function handleSend() {
     const trimmed = input.trim();
     if (!trimmed || loading) return;
@@ -329,26 +406,76 @@ export default function InstinctChat({
     }
 
     try {
+      // Fast-path: no attachments → use the offline-aware wrapper so
+      // offline users get a cached answer instead of a blank failure.
+      // With attachments we stay on the original code path because the
+      // cache layer doesn't model per-file quality gates or doc
+      // ingestion side-effects.
+      if (currentAttachments.length === 0) {
+        try {
+          const result = await queryAssistantWithCache(fullMessage, {
+            conversationId,
+            pageContext,
+            contextData,
+          });
+
+          if (!conversationId && result.conversation_id) {
+            setConversationId(result.conversation_id);
+            loadConversations();
+          }
+
+          const assistantMsg: Message = {
+            id: result.message_id,
+            role: "assistant",
+            content: result.answer,
+            source: result.source_kind,
+            tokensUsed: result.tokens_used ?? 0,
+            timestamp: new Date().toISOString(),
+            fromCache: result.from_cache,
+            cachedAtMs: result.cached_at_ms,
+            isFuzzy: result.is_fuzzy,
+            similarity: result.similarity,
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+          return;
+        } catch (wrapErr) {
+          if (wrapErr instanceof RagOfflineMissError) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "assistant",
+                content:
+                  "You're offline and this question hasn't been asked before. Reconnect and ask to cache the answer.",
+                source: "fallback",
+                tokensUsed: 0,
+                timestamp: new Date().toISOString(),
+              },
+            ]);
+            return;
+          }
+          // Any other failure falls through to the legacy path below
+          // (which surfaces the canonical "Something went wrong" UI).
+          throw wrapErr;
+        }
+      }
+
       const body: Record<string, unknown> = {
         message: fullMessage,
         conversationId,
       };
       if (pageContext) body.pageContext = pageContext;
       if (contextData) body.contextData = contextData;
-      if (currentAttachments.length > 0) {
-        body.attachments = currentAttachments.map((f) => ({
+      body.attachments = currentAttachments.map((f) => ({
+        name: f.name,
+        type: f.type,
+        size: f.content.length,
+      }));
+      const textFiles = currentAttachments.filter((f) => !isBinaryType(f.type));
+      if (textFiles.length > 0) {
+        body.fileContents = textFiles.map((f) => ({
           name: f.name,
-          type: f.type,
-          size: f.content.length,
+          content: f.content,
         }));
-        // Send text file contents for quality gate checking
-        const textFiles = currentAttachments.filter((f) => !isBinaryType(f.type));
-        if (textFiles.length > 0) {
-          body.fileContents = textFiles.map((f) => ({
-            name: f.name,
-            content: f.content,
-          }));
-        }
       }
 
       const res = await fetchWithRefresh("/api/assistant", {
@@ -795,6 +922,25 @@ export default function InstinctChat({
                     </div>
                   )}
 
+                  {/* Cached-snapshot badge — rendered above the answer
+                      so it's the first thing users see when offline. */}
+                  {msg.role === "assistant" && msg.fromCache && msg.cachedAtMs && (
+                    <div className="mb-2" data-testid="assistant-snapshot-badge">
+                      <RagSnapshotBadge
+                        cachedAtMs={msg.cachedAtMs}
+                        isFuzzy={!!msg.isFuzzy}
+                        similarity={msg.similarity}
+                        isOnline={isOnline}
+                        onRefresh={
+                          isOnline
+                            ? () => {
+                                void refreshCachedMessage(idx, msg.content);
+                              }
+                            : undefined
+                        }
+                      />
+                    </div>
+                  )}
                   <div className="text-sm whitespace-pre-wrap leading-relaxed break-words overflow-hidden">
                     {msg.content}
                   </div>
