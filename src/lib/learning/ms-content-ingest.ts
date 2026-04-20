@@ -1,14 +1,14 @@
 /**
  * Microsoft content → Wolfpack Assistant RAG ingest.
  *
- * The Assistant's zero-token path reads from `apex_knowledge` (Postgres,
+ * The Assistant's zero-token path reads from `instinct_knowledge` (Postgres,
  * searched via pg_trgm in `@/lib/knowledge`). The triple-write orchestrator
  * fans that write out to Qdrant + Neo4j via `saveAnswer`.
  *
  * RAG integration path chosen: **direct-write** through `saveAnswer`.
  *   - Reuses existing PG + Qdrant + Neo4j fan-out (one code path)
  *   - No new queue, no new infra, no new runtime deps
- *   - Dedup via UNIQUE(question, asked_by) on apex_knowledge? No — we key
+ *   - Dedup via UNIQUE(question, asked_by) on instinct_knowledge? No — we key
  *     on stable doc ids (e.g. `ms-teams:<messageId>`) via source field to
  *     keep it replayable without schema changes; duplicate writes are
  *     idempotent against the knowledge + triple-write stores.

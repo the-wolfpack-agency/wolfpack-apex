@@ -4,7 +4,7 @@
  * Body: { role: TeamRole }
  *
  * Requires: `admin.roles.assign`. Emits `system.role_changed`.
- * The existing apex_team_members.role column is the source of truth —
+ * The existing instinct_team_members.role column is the source of truth —
  * no new schema.
  */
 
@@ -40,7 +40,7 @@ export async function POST(
 
   // Look up existing role for the audit event
   const { rows } = await safeQuery<{ role: string }>(
-    `SELECT role FROM apex_team_members WHERE id = $1 AND is_active = true`,
+    `SELECT role FROM instinct_team_members WHERE id = $1 AND is_active = true`,
     [targetUserId],
   );
   if (rows.length === 0) {
@@ -49,7 +49,7 @@ export async function POST(
   const fromRole = rows[0].role;
 
   const result = await query(
-    `UPDATE apex_team_members SET role = $2 WHERE id = $1 AND is_active = true`,
+    `UPDATE instinct_team_members SET role = $2 WHERE id = $1 AND is_active = true`,
     [targetUserId, body.role],
   );
   if ((result.rowCount ?? 0) === 0) {

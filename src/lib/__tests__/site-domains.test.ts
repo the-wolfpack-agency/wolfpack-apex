@@ -105,7 +105,7 @@ describe("registerDomain", () => {
       token: "tok_xyz",
     });
     const sql = safeQueryMock.mock.calls[0][0] as string;
-    expect(sql).toContain("INSERT INTO apex_site_domains");
+    expect(sql).toContain("INSERT INTO instinct_site_domains");
     expect(trackMock).toHaveBeenCalledWith(
       "site.domain_added",
       "u_1",
@@ -456,7 +456,7 @@ describe("listDomainsForSite", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].domain).toBe("acme.com");
     const sql = safeQueryMock.mock.calls[0][0] as string;
-    expect(sql).toContain("FROM apex_site_domains");
+    expect(sql).toContain("FROM instinct_site_domains");
     expect(sql).toContain("ORDER BY added_at DESC");
   });
 

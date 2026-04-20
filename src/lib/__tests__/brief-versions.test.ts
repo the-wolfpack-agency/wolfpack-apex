@@ -132,8 +132,8 @@ describe("listVersionsForSite", () => {
 
     const [sql, params] = safeQueryMock.mock.calls[0];
     expect(String(sql)).toContain("UNION ALL");
-    expect(String(sql)).toContain("apex_site_brief_generations");
-    expect(String(sql)).toContain("apex_site_brief_edits");
+    expect(String(sql)).toContain("instinct_site_brief_generations");
+    expect(String(sql)).toContain("instinct_site_brief_edits");
     expect(String(sql)).toMatch(/ORDER BY created_at DESC/);
     expect(params[0]).toBe("site_1");
   });
@@ -414,9 +414,9 @@ describe("restoreVersion", () => {
       userRole: "sales",
     });
 
-    // First writeQuery = UPDATE apex_site_projects
+    // First writeQuery = UPDATE instinct_site_projects
     const [sql1, , opts1] = writeQueryMock.mock.calls[0];
-    expect(String(sql1)).toContain("UPDATE apex_site_projects");
+    expect(String(sql1)).toContain("UPDATE instinct_site_projects");
     expect(opts1).toEqual({ expectRows: 1 });
   });
 
@@ -447,7 +447,7 @@ describe("restoreVersion", () => {
 
     expect(writeQueryMock).toHaveBeenCalledTimes(2);
     const [sql2, params2, opts2] = writeQueryMock.mock.calls[1];
-    expect(String(sql2)).toContain("INSERT INTO apex_site_brief_edits");
+    expect(String(sql2)).toContain("INSERT INTO instinct_site_brief_edits");
     expect(String(sql2)).toContain("'restore'");
     expect(opts2).toEqual({ expectRows: 1 });
     // user_id + user_role recorded

@@ -18,7 +18,7 @@
  * The patch is NOT applied to the saved brief here — this route only
  * stages the proposal. The PATCH handler at brief-edit/[editId]/route.ts
  * records the accept/reject decision. The existing /api/sites/[id]
- * PATCH is the only path that actually mutates apex_site_projects.brief.
+ * PATCH is the only path that actually mutates instinct_site_projects.brief.
  */
 
 import { NextRequest, NextResponse } from "next/server";

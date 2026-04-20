@@ -213,7 +213,7 @@ function getDemoAnalysis(): CodebaseAnalysis {
     testFiles: 35,
     migrations: 6,
     tables: [
-      "apex_users", "apex_events", "apex_documents", "instinct_feature_requests",
+      "apex_users", "instinct_events", "instinct_documents", "instinct_feature_requests",
       "instinct_discussions", "instinct_clients", "apex_journal_entries",
     ],
     dependencies: {
@@ -838,7 +838,7 @@ async function genRoadmap(_ctx: ReportContext): Promise<string> {
 async function genTrafficSummary(ctx: ReportContext): Promise<string> {
   // Pull from analytics_events or use demo data
   const { rows } = await safeQuery<{ count: number }>(
-    `SELECT COUNT(*)::int AS count FROM apex_events
+    `SELECT COUNT(*)::int AS count FROM instinct_events
      WHERE event_type = 'system.page_viewed'
      AND timestamp >= $1 AND timestamp <= $2`,
     [ctx.dateRange?.start || "2026-01-01", ctx.dateRange?.end || new Date().toISOString()],
@@ -862,7 +862,7 @@ async function genTrafficSummary(ctx: ReportContext): Promise<string> {
 
 async function genLeadPerformance(ctx: ReportContext): Promise<string> {
   const { rows } = await safeQuery<{ count: number }>(
-    `SELECT COUNT(*)::int AS count FROM apex_events
+    `SELECT COUNT(*)::int AS count FROM instinct_events
      WHERE event_type LIKE 'feature.%'
      AND timestamp >= $1 AND timestamp <= $2`,
     [ctx.dateRange?.start || "2026-01-01", ctx.dateRange?.end || new Date().toISOString()],
@@ -901,7 +901,7 @@ async function genConversionMetrics(_ctx: ReportContext): Promise<string> {
 
 async function genFeatureUsage(ctx: ReportContext): Promise<string> {
   const { rows } = await safeQuery<{ event_type: string; count: number }>(
-    `SELECT event_type, COUNT(*)::int AS count FROM apex_events
+    `SELECT event_type, COUNT(*)::int AS count FROM instinct_events
      WHERE timestamp >= $1 AND timestamp <= $2
      GROUP BY event_type ORDER BY count DESC LIMIT 10`,
     [ctx.dateRange?.start || "2026-01-01", ctx.dateRange?.end || new Date().toISOString()],
@@ -1164,7 +1164,7 @@ export async function saveAsTemplate(
     try {
       const { query: dbQuery } = await import("@/lib/db");
       await dbQuery(
-        `INSERT INTO apex_documents (id, title, doc_type, content, format, generated_from, generated_by)
+        `INSERT INTO instinct_documents (id, title, doc_type, content, format, generated_from, generated_by)
          VALUES ($1, $2, 'template', $3, 'json', 'custom', $4)`,
         [template.id, name, JSON.stringify({ description, category, sectionIds }), userId],
       );
@@ -1190,7 +1190,7 @@ export async function loadCustomTemplates(): Promise<void> {
   try {
     const { query: dbQuery } = await import("@/lib/db");
     const result = await dbQuery(
-      `SELECT id, title, content FROM apex_documents WHERE doc_type = 'template' ORDER BY created_at DESC`,
+      `SELECT id, title, content FROM instinct_documents WHERE doc_type = 'template' ORDER BY created_at DESC`,
     );
     for (const row of result.rows) {
       const meta = typeof row.content === "string" ? JSON.parse(row.content as string) : row.content;
@@ -1584,15 +1584,15 @@ export function renderReportHtml(markdown: string): string {
 }
 
 /**
- * Get past reports from apex_documents.
+ * Get past reports from instinct_documents.
  */
 export async function getReportHistory(
   userId?: string,
 ): Promise<Array<{ id: string; title: string; created_at: string; generated_from: string | null }>> {
   const { rows } = await safeQuery<{ id: string; title: string; created_at: string; generated_from: string | null }>(
     userId
-      ? `SELECT id, title, created_at, generated_from FROM apex_documents WHERE doc_type = 'report' AND generated_by = $1 ORDER BY created_at DESC LIMIT 50`
-      : `SELECT id, title, created_at, generated_from FROM apex_documents WHERE doc_type = 'report' ORDER BY created_at DESC LIMIT 50`,
+      ? `SELECT id, title, created_at, generated_from FROM instinct_documents WHERE doc_type = 'report' AND generated_by = $1 ORDER BY created_at DESC LIMIT 50`
+      : `SELECT id, title, created_at, generated_from FROM instinct_documents WHERE doc_type = 'report' ORDER BY created_at DESC LIMIT 50`,
     userId ? [userId] : [],
   );
   return rows;

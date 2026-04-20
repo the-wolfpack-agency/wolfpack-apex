@@ -7,7 +7,7 @@
  *   3. Call AI only as last resort
  *
  * Conversations, messages, and user memory are persisted to PostgreSQL.
- * AI responses are cached in apex_knowledge for future zero-token retrieval.
+ * AI responses are cached in instinct_knowledge for future zero-token retrieval.
  */
 
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
@@ -108,7 +108,7 @@ async function dbCreateConversation(
 ): Promise<string> {
   const id = generateId();
   await safeQuery(
-    `INSERT INTO apex_conversations (id, user_id, title, status, message_count, total_tokens, last_message_at, created_at)
+    `INSERT INTO instinct_conversations (id, user_id, title, status, message_count, total_tokens, last_message_at, created_at)
      VALUES ($1, $2, $3, 'active', 0, 0, NOW(), NOW())`,
     [id, userId, title || null],
   );
@@ -125,7 +125,7 @@ async function dbSaveMessage(
 ): Promise<string> {
   const id = generateId();
   await safeQuery(
-    `INSERT INTO apex_messages (id, conversation_id, role, content, source, tokens_used, metadata, created_at)
+    `INSERT INTO instinct_messages (id, conversation_id, role, content, source, tokens_used, metadata, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
     [id, conversationId, role, content, source, tokensUsed, JSON.stringify(metadata)],
   );
@@ -137,7 +137,7 @@ async function dbUpdateConversationStats(
   tokensUsed: number,
 ): Promise<void> {
   await safeQuery(
-    `UPDATE apex_conversations
+    `UPDATE instinct_conversations
      SET message_count = message_count + 1,
          total_tokens = total_tokens + $2,
          last_message_at = NOW()
@@ -151,7 +151,7 @@ async function dbSetConversationTitle(
   title: string,
 ): Promise<void> {
   await safeQuery(
-    `UPDATE apex_conversations SET title = $2 WHERE id = $1 AND title IS NULL`,
+    `UPDATE instinct_conversations SET title = $2 WHERE id = $1 AND title IS NULL`,
     [conversationId, title],
   );
 }
@@ -160,7 +160,7 @@ async function dbGetRecentActiveConversation(
   userId: string,
 ): Promise<{ id: string; last_message_at: string } | null> {
   const result = await safeQuery<{ id: string; last_message_at: string }>(
-    `SELECT id, last_message_at FROM apex_conversations
+    `SELECT id, last_message_at FROM instinct_conversations
      WHERE user_id = $1 AND status = 'active'
      ORDER BY last_message_at DESC NULLS LAST
      LIMIT 1`,
@@ -185,7 +185,7 @@ async function dbGetConversationMessages(
     created_at: string;
   }>(
     `SELECT id, role, content, source, tokens_used, rating, metadata, created_at
-     FROM apex_messages
+     FROM instinct_messages
      WHERE conversation_id = $1
      ORDER BY created_at DESC
      LIMIT $2`,
@@ -451,7 +451,7 @@ export async function getConversations(userId: string): Promise<ConversationSumm
     created_at: string;
   }>(
     `SELECT id, title, status, message_count, total_tokens, last_message_at, created_at
-     FROM apex_conversations
+     FROM instinct_conversations
      WHERE user_id = $1
      ORDER BY last_message_at DESC NULLS LAST`,
     [userId],
@@ -478,7 +478,7 @@ export async function getConversationMessages(
 ): Promise<AssistantMessage[]> {
   // Verify ownership
   const convResult = await safeQuery<{ id: string }>(
-    `SELECT id FROM apex_conversations WHERE id = $1 AND user_id = $2`,
+    `SELECT id FROM instinct_conversations WHERE id = $1 AND user_id = $2`,
     [conversationId, userId],
   );
   if (convResult.rows.length === 0) return [];
@@ -487,7 +487,7 @@ export async function getConversationMessages(
 }
 
 // ---------------------------------------------------------------------------
-// rateMessage -- Update rating in apex_messages
+// rateMessage -- Update rating in instinct_messages
 // ---------------------------------------------------------------------------
 
 export async function rateMessage(
@@ -499,9 +499,9 @@ export async function rateMessage(
   if (rating < 1 || rating > 5) return false;
 
   const result = await safeQuery<{ id: string; source: string }>(
-    `UPDATE apex_messages SET rating = $2
+    `UPDATE instinct_messages SET rating = $2
      WHERE id = $1
-     AND conversation_id IN (SELECT id FROM apex_conversations WHERE user_id = $3)
+     AND conversation_id IN (SELECT id FROM instinct_conversations WHERE user_id = $3)
      RETURNING id, source`,
     [messageId, rating, userId],
   );
@@ -533,7 +533,7 @@ export async function archiveConversation(
   const summary = generateConversationSummary(messages);
 
   const result = await safeQuery<{ id: string }>(
-    `UPDATE apex_conversations
+    `UPDATE instinct_conversations
      SET status = 'archived', summary = $2
      WHERE id = $1 AND user_id = $3
      RETURNING id`,
@@ -693,7 +693,7 @@ async function tryAnalyticsQuery(
   try {
     const result = await safeQuery<{ event_type: string; count: number }>(
       `SELECT event_type, COUNT(*)::int AS count
-       FROM apex_events
+       FROM instinct_events
        WHERE timestamp > NOW() - INTERVAL '7 days'
        GROUP BY event_type
        ORDER BY count DESC

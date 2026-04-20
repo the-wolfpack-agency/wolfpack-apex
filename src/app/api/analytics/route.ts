@@ -155,7 +155,7 @@ function bucketEvents(eventCounts: Record<string, number>): ActivityBucket[] {
 }
 
 // ---------------------------------------------------------------------------
-// AI efficiency — compute real values from apex_events.
+// AI efficiency — compute real values from instinct_events.
 // ---------------------------------------------------------------------------
 
 interface AiEfficiency {
@@ -177,7 +177,7 @@ async function computeAiEfficiency(): Promise<AiEfficiency | null> {
        COUNT(*) FILTER (WHERE event_type = 'system.ai_call_made')::int                                   AS made,
        COUNT(*) FILTER (WHERE event_type = 'system.ai_call_skipped' AND metadata->>'reason' = 'meeting_transcripts_hit')::int AS meeting,
        COUNT(*) FILTER (WHERE event_type = 'system.ai_call_skipped' AND metadata->>'reason' = 'knowledge_cache_hit')::int     AS cache
-     FROM apex_events
+     FROM instinct_events
      WHERE timestamp > NOW() - INTERVAL '7 days'`,
   );
 
@@ -192,7 +192,7 @@ async function computeAiEfficiency(): Promise<AiEfficiency | null> {
        date_trunc('day', timestamp) AS day,
        COUNT(*) FILTER (WHERE event_type = 'system.ai_call_skipped')::int AS skipped,
        COUNT(*) FILTER (WHERE event_type = 'system.ai_call_made')::int    AS made
-     FROM apex_events
+     FROM instinct_events
      WHERE timestamp > NOW() - INTERVAL '7 days'
        AND event_type IN ('system.ai_call_skipped', 'system.ai_call_made')
      GROUP BY 1
@@ -240,7 +240,7 @@ async function fetchGateActivity(): Promise<GateActivity | null> {
 
   const summary = await safeQuery<{ verdict: string; n: number }>(
     `SELECT metadata->>'verdict' AS verdict, COUNT(*)::int AS n
-     FROM apex_events
+     FROM instinct_events
      WHERE event_type = 'assistant.doc_quality_checked'
        AND timestamp > NOW() - INTERVAL '7 days'
      GROUP BY 1`,
@@ -259,7 +259,7 @@ async function fetchGateActivity(): Promise<GateActivity | null> {
        metadata->>'file_name' AS file_name,
        metadata->>'reasons'   AS reasons,
        timestamp::text        AS ts
-     FROM apex_events
+     FROM instinct_events
      WHERE event_type = 'assistant.doc_rejected'
        AND timestamp > NOW() - INTERVAL '7 days'
      ORDER BY timestamp DESC
@@ -307,7 +307,7 @@ async function fetchIntegrationHealth(): Promise<IntegrationHealth[]> {
       `SELECT
          COUNT(*)::int                AS events_7d,
          MAX(timestamp)::text         AS last_event_at
-       FROM apex_events
+       FROM instinct_events
        WHERE event_type LIKE $1
          AND timestamp > NOW() - INTERVAL '7 days'`,
       [`${i.prefix}%`],
@@ -418,7 +418,7 @@ export async function GET(req: NextRequest) {
     meetingStats,
   ] = await Promise.all([
     safeQuery<{ question: string; view_count: number }>(
-      "SELECT question, view_count FROM apex_knowledge ORDER BY view_count DESC LIMIT 10",
+      "SELECT question, view_count FROM instinct_knowledge ORDER BY view_count DESC LIMIT 10",
     ),
     safeQuery<{ status: string; count: number }>(
       "SELECT status, COUNT(*)::int AS count FROM instinct_feature_requests GROUP BY status ORDER BY count DESC",
@@ -427,8 +427,8 @@ export async function GET(req: NextRequest) {
       `SELECT e.user_id,
               m.name AS user_name,
               COUNT(*)::int AS event_count
-       FROM apex_events e
-       LEFT JOIN apex_team_members m ON m.id = e.user_id
+       FROM instinct_events e
+       LEFT JOIN instinct_team_members m ON m.id = e.user_id
        WHERE e.timestamp > NOW() - INTERVAL '7 days'
          AND e.user_id NOT IN ('system')
        GROUP BY e.user_id, m.name
@@ -437,12 +437,12 @@ export async function GET(req: NextRequest) {
     ),
     safeQuery<{ doc_type: string; count: number; total_downloads: number }>(
       `SELECT doc_type, COUNT(*)::int AS count, COALESCE(SUM(downloads), 0)::int AS total_downloads
-       FROM apex_documents
+       FROM instinct_documents
        GROUP BY doc_type`,
     ),
     safeQuery<{ term: string; count: number }>(
       `SELECT metadata->>'module' AS term, COUNT(*)::int AS count
-       FROM apex_events
+       FROM instinct_events
        WHERE event_type = 'system.search_performed'
          AND timestamp > NOW() - INTERVAL '7 days'
        GROUP BY metadata->>'module'

@@ -81,7 +81,7 @@ describe("generateCustomReport", () => {
 
     // safeQuery was called to check cache
     expect(safeQuery).toHaveBeenCalledWith(
-      expect.stringContaining("apex_knowledge"),
+      expect.stringContaining("instinct_knowledge"),
       expect.any(Array),
     );
     // No cache hit, so not cached

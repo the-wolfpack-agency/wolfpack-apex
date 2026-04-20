@@ -42,7 +42,7 @@ describe("insertImageGeneration", () => {
 
     expect(mockSafeQuery).toHaveBeenCalledTimes(1);
     const [sql, params] = mockSafeQuery.mock.calls[0];
-    expect(sql).toMatch(/INSERT INTO apex_site_image_generations/);
+    expect(sql).toMatch(/INSERT INTO instinct_site_image_generations/);
     expect(sql).toMatch(/accepted/);
     // 11 positional params + implicit NULL for accepted via VALUES
     expect(params).toEqual([
@@ -93,7 +93,7 @@ describe("markImageGenerationAccepted", () => {
     expect(out.projectId).toBe("site_1");
 
     const [sql, params] = mockSafeQuery.mock.calls[0];
-    expect(sql).toMatch(/UPDATE apex_site_image_generations/);
+    expect(sql).toMatch(/UPDATE instinct_site_image_generations/);
     expect(sql).toMatch(/SET accepted = \$2/);
     expect(params).toEqual(["img_gen_1", true]);
   });

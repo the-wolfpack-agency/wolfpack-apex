@@ -18,7 +18,7 @@
  *   3. Fetch the image bytes, commit to the project's github repo at
  *      public/generated/{generationId}.jpg via putFile, so the deployed
  *      site owns its own copy and doesn't break if fal's CDN expires.
- *   4. Persist a row in apex_site_image_generations (even on fal errors
+ *   4. Persist a row in instinct_site_image_generations (even on fal errors
  *      — data never lost).
  *   5. Return the raw.githubusercontent.com URL that points at the
  *      freshly-committed file.
@@ -110,7 +110,7 @@ export class ImageGenProviderError extends Error {
 /* ------------------------- Constants --------------------------------- */
 
 // FLUX.1 [schnell] on fal.ai — fast + cheapest. Update this string when
-// you swap models; the value flows into apex_site_image_generations.model
+// you swap models; the value flows into instinct_site_image_generations.model
 // so the learning loop can segment performance by model.
 export const IMAGE_GEN_MODEL = "fal-ai/flux/schnell";
 
@@ -192,7 +192,7 @@ async function callFalAi(args: {
  * Generate an image, commit it to the client repo (if provisioned), and
  * persist the round-trip to the learning table.
  *
- * Failure modes (all persisted to apex_site_image_generations so no
+ * Failure modes (all persisted to instinct_site_image_generations so no
  * request ever disappears):
  *   - FAL_API_KEY missing → throws ImageGenNotConfiguredError BEFORE
  *     inserting (nothing happened — same contract as brief-edit).

@@ -217,7 +217,7 @@ export async function getThread(discussionId: string): Promise<ThreadDetail | nu
   const { rows: replies } = await safeQuery<DiscussionReply>(
     `SELECT dr.*, tm.name AS author_name, tm.role AS author_role
      FROM instinct_discussion_replies dr
-     LEFT JOIN apex_team_members tm ON tm.id = dr.author_id
+     LEFT JOIN instinct_team_members tm ON tm.id = dr.author_id
      WHERE dr.discussion_id = $1
      ORDER BY dr.created_at ASC`,
     [discussionId],

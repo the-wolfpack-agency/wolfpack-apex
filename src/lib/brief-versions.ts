@@ -5,18 +5,18 @@
  * compare, and let me roll back." We do NOT own a new table — every
  * version event is already persisted by existing flows:
  *
- *   - apex_site_brief_generations (031) — every AI/PDF/image extraction
+ *   - instinct_site_brief_generations (031) — every AI/PDF/image extraction
  *     that ultimately landed on this site
- *   - apex_site_brief_edits      (029) — every prompt-editor RFC-6902
+ *   - instinct_site_brief_edits      (029) — every prompt-editor RFC-6902
  *     patch applied on top of the current brief
  *
  * We UNION both tables at the SQL layer (single round-trip, ordered
  * DESC) and project them into a homogeneous `BriefVersionEntry` so the
  * UI can render one timeline regardless of source.
  *
- * Restore path is the only WRITE: it updates apex_site_projects.brief
+ * Restore path is the only WRITE: it updates instinct_site_projects.brief
  * (the canonical current state) AND inserts an audit row into
- * apex_site_brief_edits with kind="restore" so the timeline captures
+ * instinct_site_brief_edits with kind="restore" so the timeline captures
  * the rollback itself. Everything goes through `writeQuery` with
  * expectRows: 1 — silent-discard on restore is the worst possible
  * failure mode here, so we defend against it loudly.
@@ -100,7 +100,7 @@ const LIST_VERSIONS_SQL = `
     NULL::text             AS detail_instruction,
     gen.created_at         AS created_at,
     NULL::text             AS parent_version_id
-  FROM apex_site_brief_generations gen
+  FROM instinct_site_brief_generations gen
   WHERE gen.project_id = $1 AND gen.accepted IS NOT FALSE
 
   UNION ALL
@@ -122,8 +122,8 @@ const LIST_VERSIONS_SQL = `
     e.instruction          AS detail_instruction,
     e.created_at           AS created_at,
     e.brief_before_hash    AS parent_version_id
-  FROM apex_site_brief_edits e
-  JOIN apex_site_projects p ON p.id = e.project_id
+  FROM instinct_site_brief_edits e
+  JOIN instinct_site_projects p ON p.id = e.project_id
   WHERE e.project_id = $1
     AND (e.accepted IS NULL OR e.accepted = TRUE)
 
@@ -345,7 +345,7 @@ function hashBrief(brief: unknown): string {
 
 /**
  * Roll the site's current brief back to a previous version. Both writes
- * (the brief update AND the audit row in apex_site_brief_edits) use
+ * (the brief update AND the audit row in instinct_site_brief_edits) use
  * `writeQuery` with expectRows: 1 so any silent-discard surfaces as
  * WriteQueryError — never as a 200 with stale state.
  *
@@ -370,7 +370,7 @@ export async function restoreVersion(
   // Read current brief (SELECT — safeQuery is fine) so we can diff for
   // the analytics signal + supply the before-hash for the audit row.
   const current = await safeQuery<{ brief: SiteBrief | string }>(
-    `SELECT brief FROM apex_site_projects WHERE id = $1`,
+    `SELECT brief FROM instinct_site_projects WHERE id = $1`,
     [input.siteId],
   );
   if (current.rows.length === 0) {
@@ -390,7 +390,7 @@ export async function restoreVersion(
   // we don't silently "succeed" against an RLS policy or auto-updatable
   // view that dropped the write.
   await writeQuery(
-    `UPDATE apex_site_projects
+    `UPDATE instinct_site_projects
         SET brief = $2,
             display_name = $3,
             updated_at = NOW()
@@ -405,12 +405,12 @@ export async function restoreVersion(
   );
 
   // WRITE 2: audit row so the timeline itself shows the restore event.
-  // We shape it to be a valid apex_site_brief_edits row; kind="restore"
+  // We shape it to be a valid instinct_site_brief_edits row; kind="restore"
   // is encoded in rejection_reason so the UNION query above can flip
   // `kind` without needing a new column.
   const auditId = `brief_edit_${randomUUID()}`;
   await writeQuery(
-    `INSERT INTO apex_site_brief_edits
+    `INSERT INTO instinct_site_brief_edits
        (id, project_id, user_id, user_role, instruction, patch,
         brief_before_hash, brief_after_hash, accepted, rejection_reason,
         latency_ms, tokens_in, tokens_out, cost_usd, model,

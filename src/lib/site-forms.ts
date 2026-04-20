@@ -2,7 +2,7 @@
  * site-forms.ts — PUBLIC contact-form submission handler logic.
  *
  * The deployed `wolfpack-{slug}.vercel.app` site (or any verified custom
- * domain from `apex_site_domains`) submits a `<form>` POST to
+ * domain from `instinct_site_domains`) submits a `<form>` POST to
  *   https://wolfpack-instinct.vercel.app/api/public/forms/{siteId}/submit
  * which calls `submitForm()` in this module.
  *
@@ -163,7 +163,7 @@ export function normalizeOrigin(value: string | null | undefined): string | null
 }
 
 /**
- * Default site loader — reads from apex_site_projects. Exposed so the
+ * Default site loader — reads from instinct_site_projects. Exposed so the
  * HTTP route can reuse it; tests inject via `deps.getSite`.
  */
 export async function defaultGetSite(
@@ -171,7 +171,7 @@ export async function defaultGetSite(
 ): Promise<SiteProjectLite | null> {
   const { rows } = await safeQuery<Record<string, unknown>>(
     `SELECT id, client_slug, display_name, preview_url, brief
-       FROM apex_site_projects
+       FROM instinct_site_projects
       WHERE id = $1`,
     [id],
   );
@@ -197,7 +197,7 @@ export async function defaultGetSite(
  */
 export async function defaultListVerifiedDomains(siteId: string): Promise<string[]> {
   const { rows } = await safeQuery<{ domain: string; status: string }>(
-    `SELECT domain, status FROM apex_site_domains
+    `SELECT domain, status FROM instinct_site_domains
       WHERE site_id = $1 AND status = 'verified'`,
     [siteId],
   );
@@ -315,7 +315,7 @@ function hostFromOrBare(value: string | null | undefined): string | null {
 /**
  * Build the set of allowed origin hosts for a site:
  *   - preview_url host (once deployed)
- *   - every verified custom domain (from apex_site_domains)
+ *   - every verified custom domain (from instinct_site_domains)
  * All lowercased, trailing slash stripped.
  */
 export function buildAllowedOrigins(
@@ -523,7 +523,7 @@ export async function submitForm(input: FormSubmitInput): Promise<FormSubmitResu
     .then(async () => {
       if (submissionId) {
         await safeQuery(
-          `UPDATE apex_site_form_submissions
+          `UPDATE instinct_site_form_submissions
               SET email_status = 'sent'
             WHERE id = $1`,
           [submissionId],
@@ -538,7 +538,7 @@ export async function submitForm(input: FormSubmitInput): Promise<FormSubmitResu
       const msg = (err as Error).message ?? "unknown";
       if (submissionId) {
         await safeQuery(
-          `UPDATE apex_site_form_submissions
+          `UPDATE instinct_site_form_submissions
               SET email_status = 'failed', email_error = $2
             WHERE id = $1`,
           [submissionId, msg.slice(0, 500)],
@@ -596,7 +596,7 @@ async function persistSubmission(args: PersistArgs): Promise<string | null> {
   const id = randomUUID();
   try {
     await safeQuery(
-      `INSERT INTO apex_site_form_submissions
+      `INSERT INTO instinct_site_form_submissions
          (id, site_id, payload, origin, ip_hash, user_agent,
           recipient_email, email_status, email_error, spam_score)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,

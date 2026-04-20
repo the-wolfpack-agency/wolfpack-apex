@@ -443,7 +443,7 @@ describe("Plaud migration + analytics", () => {
     expect(sql).toContain("apex_v_meeting_ingestion_quality");
   });
 
-  test("migration 008 adds meeting_transcripts to apex_messages source check", () => {
+  test("migration 008 adds meeting_transcripts to instinct_messages source check", () => {
     const fs = require("fs");
     const p = require("path").resolve(__dirname, "../../db/migrations/008_assistant_meeting_source.sql");
     expect(fs.existsSync(p)).toBe(true);

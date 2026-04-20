@@ -327,8 +327,8 @@ describe("getAcceptedExemplars", () => {
     expect(out).toHaveLength(3);
     expect(out.map((e) => e.productName)).toEqual(["One", "Two", "Three"]);
     const [sql, params] = mockSafeQuery.mock.calls[0];
-    expect(sql).toContain("apex_site_brief_generations");
-    expect(sql).toContain("apex_site_projects");
+    expect(sql).toContain("instinct_site_brief_generations");
+    expect(sql).toContain("instinct_site_projects");
     expect(sql).toContain("accepted = true");
     expect(sql).toContain("client_slug = $1");
     expect(params[0]).toBe("cftr");

@@ -8,7 +8,7 @@
  * All operations are fire-and-forget — never throw, never block.
  */
 
-const COLLECTION = "apex_knowledge";
+const COLLECTION = "instinct_knowledge";
 
 function getQdrantUrl(): string | null {
   return process.env.QDRANT_URL || null;

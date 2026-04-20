@@ -28,7 +28,7 @@ export async function GET(
     created_at: string;
   }>(
     `SELECT id, title, content, doc_type, generated_from, generated_by, created_at
-     FROM apex_documents WHERE id = $1 AND doc_type = 'report'
+     FROM instinct_documents WHERE id = $1 AND doc_type = 'report'
      AND (generated_by = $2 OR $3 IN ('cto', 'ceo'))`,
     [id, user.id, user.role],
   );

@@ -1,5 +1,5 @@
 /**
- * image-generations — CRUD helpers for apex_site_image_generations.
+ * image-generations — CRUD helpers for instinct_site_image_generations.
  *
  * Every AI image-generation request (success OR failure) inserts a row.
  * Rows flip accepted=true when the user clicks "Use this image" in the
@@ -54,7 +54,7 @@ export async function insertImageGeneration(
   input: InsertImageGenerationInput,
 ): Promise<void> {
   await safeQuery(
-    `INSERT INTO apex_site_image_generations
+    `INSERT INTO instinct_site_image_generations
        (id, project_id, requested_by, prompt, aspect_ratio, seed,
         model, image_url, repo_committed, cost_cents, latency_ms, accepted)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL)`,
@@ -85,7 +85,7 @@ export async function markImageGenerationAccepted(
   accepted: boolean,
 ): Promise<{ projectId: string | null }> {
   const result = await safeQuery<{ project_id: string | null }>(
-    `UPDATE apex_site_image_generations
+    `UPDATE instinct_site_image_generations
         SET accepted = $2
       WHERE id = $1
       RETURNING project_id`,
@@ -105,7 +105,7 @@ export async function countUserGenerationsSince(
 ): Promise<number> {
   const result = await safeQuery<{ n: number }>(
     `SELECT COUNT(*)::int AS n
-       FROM apex_site_image_generations
+       FROM instinct_site_image_generations
       WHERE requested_by = $1
         AND created_at > NOW() - INTERVAL '1 hour' * $2`,
     [userId, sinceHours],
@@ -125,7 +125,7 @@ export async function listImageGenerationsForUser(
     `SELECT id, project_id, requested_by, prompt, aspect_ratio, seed,
             model, image_url, repo_committed, cost_cents, latency_ms,
             accepted, created_at
-       FROM apex_site_image_generations
+       FROM instinct_site_image_generations
       WHERE requested_by = $1
       ORDER BY created_at DESC
       LIMIT $2`,

@@ -7,7 +7,7 @@
  * typed errors, no new runtime dependencies. Zero data lost: every call
  * returns enough detail that the orchestration layer
  * (`site-domains.ts`) can persist the full verification-record set into
- * `apex_site_domains` and keep the learning loop honest.
+ * `instinct_site_domains` and keep the learning loop honest.
  *
  * Scope is deliberately small — add / status / remove. Anything else
  * (TLS monitoring, redirect rules, wildcard issuance) stays out of this
@@ -80,7 +80,7 @@ export function classifyVercelError(
  *
  * Vercel does its own validation server-side; this check keeps obvious
  * junk from hitting the API (and eating rate limit) and also hardens
- * the DB path where we insert into `apex_site_domains`.
+ * the DB path where we insert into `instinct_site_domains`.
  */
 export function isValidDomain(input: unknown): input is string {
   if (typeof input !== "string") return false;

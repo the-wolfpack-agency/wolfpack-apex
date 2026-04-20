@@ -1,7 +1,7 @@
 /**
  * Qdrant client scoped to the `apex_brain` collection.
  *
- * Deliberately a separate collection from `apex_knowledge` — different
+ * Deliberately a separate collection from `instinct_knowledge` — different
  * dim (1536 vs 4), different payload shape, and upgrade cadence of the
  * two systems is independent. A failure in either never takes the other
  * down.

@@ -1260,7 +1260,7 @@ export default function SiteEditPage({
         </details>
 
         {/* Version History panel (Path C Phase 3, Stream R2).
-            Unifies apex_site_brief_generations + apex_site_brief_edits
+            Unifies instinct_site_brief_generations + instinct_site_brief_edits
             into one timeline. Collapsed by default; GET fires on first
             expand so the page-load path stays cheap. Restore hydrates
             the edit draft + iframe without a round-trip refetch. */}
@@ -1268,7 +1268,7 @@ export default function SiteEditPage({
           siteId={id}
           currentBrief={savedBrief as SiteBrief | null}
           onRestore={(entry: BriefVersionEntryView) => {
-            // Server already wrote apex_site_projects.brief + audit row.
+            // Server already wrote instinct_site_projects.brief + audit row.
             // Reflect the restored state locally so the iframe + draft
             // re-render immediately without a second GET /api/sites/:id.
             const restoredBrief = entry.brief as Brief;

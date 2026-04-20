@@ -49,7 +49,7 @@ describe("insertBriefGeneration", () => {
     });
     expect(mockSafeQuery).toHaveBeenCalledTimes(1);
     const [sql, params] = mockSafeQuery.mock.calls[0];
-    expect(sql).toContain("INSERT INTO apex_site_brief_generations");
+    expect(sql).toContain("INSERT INTO instinct_site_brief_generations");
     expect(sql).toContain("accepted");
     expect(params[0]).toBe("site_brief_gen_abc");
     expect(params[1]).toBe("u_1");
@@ -96,7 +96,7 @@ describe("recordBriefGenerationDecision", () => {
     );
     expect(out.projectId).toBe("site_1");
     const [sql, params] = mockSafeQuery.mock.calls[0];
-    expect(sql).toContain("UPDATE apex_site_brief_generations");
+    expect(sql).toContain("UPDATE instinct_site_brief_generations");
     expect(sql).toContain("SET accepted");
     expect(params[0]).toBe("site_brief_gen_abc");
     expect(params[1]).toBe(true);

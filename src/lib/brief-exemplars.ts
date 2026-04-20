@@ -1,6 +1,6 @@
 /**
  * brief-exemplars — retrieval layer that turns the stream of accepted
- * brief generations in `apex_site_brief_generations` into few-shot
+ * brief generations in `instinct_site_brief_generations` into few-shot
  * exemplars for the next image→brief extraction.
  *
  * Why this exists: every image upload today hits Haiku cold. The brain
@@ -154,7 +154,7 @@ export function summarizeGeneration(row: {
  *
  * Linking note: generations land with project_id=NULL and only get a
  * project_id once the designer accepts and commits to a new site. So
- * the client filter necessarily goes through apex_site_projects. A
+ * the client filter necessarily goes through instinct_site_projects. A
  * generation with project_id=NULL cannot be exemplar-ized (we have no
  * way to attribute it to a client).
  */
@@ -172,8 +172,8 @@ export async function getAcceptedExemplars(
   try {
     const result = await safeQuery<BriefGenerationExemplarRow>(
       `SELECT g.extracted_brief, g.extracted_colors, g.detected_font, g.created_at
-         FROM apex_site_brief_generations g
-         JOIN apex_site_projects p ON p.id = g.project_id
+         FROM instinct_site_brief_generations g
+         JOIN instinct_site_projects p ON p.id = g.project_id
         WHERE g.accepted = true
           AND g.project_id IS NOT NULL
           AND p.client_slug = $1

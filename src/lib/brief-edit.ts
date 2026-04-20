@@ -9,7 +9,7 @@
  *      validateBrief() so we never land invalid state on the real brief,
  *      and check every patch path against a guardrail allow-list so a
  *      mis-prompted edit can't rename client_slug, swap github_repo, etc.
- *   4. The proposed patch is persisted to apex_site_brief_edits with
+ *   4. The proposed patch is persisted to instinct_site_brief_edits with
  *      accepted=NULL. The UI shows a diff. The user approves or discards,
  *      which triggers recordBriefEditDecision() to flip the row.
  *
@@ -106,7 +106,7 @@ export class BriefEditNotConfiguredError extends Error {
 export const BRIEF_EDIT_MODEL = "claude-haiku-4-5-20251001";
 
 // Anthropic list price for Haiku 4.5 (2026-04). Update alongside the model
-// string — the number flows into apex_site_brief_edits.cost_usd for FinOps.
+// string — the number flows into instinct_site_brief_edits.cost_usd for FinOps.
 // USD per 1M tokens.
 const HAIKU_INPUT_USD_PER_MTOK = 1.0;
 const HAIKU_OUTPUT_USD_PER_MTOK = 5.0;
@@ -465,7 +465,7 @@ async function insertAuditRow(args: {
   metrics: BriefEditMetrics;
 }): Promise<void> {
   await safeQuery(
-    `INSERT INTO apex_site_brief_edits
+    `INSERT INTO instinct_site_brief_edits
        (id, project_id, user_id, user_role, instruction, patch,
         brief_before_hash, brief_after_hash, accepted, rejection_reason,
         latency_ms, tokens_in, tokens_out, cost_usd, model, decided_at)
@@ -678,7 +678,7 @@ export async function recordBriefEditDecision(
 ): Promise<RecordDecisionResult> {
   const reason = accepted ? null : (rejectionReason ?? "user_rejected");
   const result = await safeQuery<{ project_id: string }>(
-    `UPDATE apex_site_brief_edits
+    `UPDATE instinct_site_brief_edits
         SET accepted = $2,
             rejection_reason = $3,
             decided_at = NOW()

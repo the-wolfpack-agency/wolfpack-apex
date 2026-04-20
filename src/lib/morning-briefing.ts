@@ -218,7 +218,7 @@ async function fetchFinancialData() {
 async function fetchTeamActivity(): Promise<{ activeMembers: number; recentHighlights: string[] }> {
   const { rows } = await safeQuery<{ user_id: string; event_type: string; metadata: string }>(
     `SELECT DISTINCT user_id, event_type, metadata
-     FROM apex_events
+     FROM instinct_events
      WHERE timestamp > NOW() - INTERVAL '24 hours'
        AND event_type NOT IN ('system.page_viewed', 'system.login')
      ORDER BY timestamp DESC
@@ -262,7 +262,7 @@ async function fetchClientAttention(): Promise<ClientAttention[]> {
     `SELECT c.name,
             MAX(e.timestamp) AS last_contact
      FROM instinct_clients c
-     LEFT JOIN apex_events e ON e.metadata::text LIKE '%' || c.name || '%'
+     LEFT JOIN instinct_events e ON e.metadata::text LIKE '%' || c.name || '%'
        AND e.timestamp > NOW() - INTERVAL '30 days'
      GROUP BY c.name
      ORDER BY last_contact ASC NULLS FIRST

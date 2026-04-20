@@ -4,7 +4,7 @@
  *
  * Body: { accepted: boolean, rejectionReason?: string }
  *
- * Flips the audit row in apex_site_brief_edits from accepted=NULL to
+ * Flips the audit row in instinct_site_brief_edits from accepted=NULL to
  * accepted=true|false and stamps decided_at. Emits site.brief_edit_decided
  * so the brain learns which prompts converted to real saves vs. were
  * discarded — this is the learning signal for the editor quality over time.

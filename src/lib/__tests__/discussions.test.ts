@@ -191,7 +191,7 @@ describe("Discussions Library", () => {
       const result = await getThread("disc-1");
 
       expect(result).toEqual({ discussion, replies });
-      expect(mockSafeQuery.mock.calls[1][0]).toContain("LEFT JOIN apex_team_members");
+      expect(mockSafeQuery.mock.calls[1][0]).toContain("LEFT JOIN instinct_team_members");
     });
 
     it("returns null for non-existent thread", async () => {

@@ -104,7 +104,7 @@ export async function askQuestion(
 
   try {
     const result = await query<Record<string, unknown>>(
-      `SELECT * FROM apex_knowledge
+      `SELECT * FROM instinct_knowledge
        WHERE similarity(question, $1) > 0.3
          AND rating IS NOT NULL AND rating >= 3
        ORDER BY similarity(question, $1) DESC, view_count DESC
@@ -116,7 +116,7 @@ export async function askQuestion(
       const row = result.rows[0];
       // Increment view_count
       await query(
-        `UPDATE apex_knowledge SET view_count = view_count + 1, updated_at = NOW() WHERE id = $1`,
+        `UPDATE instinct_knowledge SET view_count = view_count + 1, updated_at = NOW() WHERE id = $1`,
         [row.id],
       );
 
@@ -180,7 +180,7 @@ export async function saveAnswer(
 
   try {
     const result = await query<Record<string, unknown>>(
-      `INSERT INTO apex_knowledge (question, answer, source, asked_by, repo, file_path, tokens_used)
+      `INSERT INTO instinct_knowledge (question, answer, source, asked_by, repo, file_path, tokens_used)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
       [question, answer, source, userId, repo ?? null, filePath ?? null, tokensUsed ?? 0],
@@ -222,7 +222,7 @@ export async function rateAnswer(
 
   try {
     await query(
-      `UPDATE apex_knowledge SET rating = $1, updated_at = NOW() WHERE id = $2`,
+      `UPDATE instinct_knowledge SET rating = $1, updated_at = NOW() WHERE id = $2`,
       [rating, knowledgeId],
     );
     return true;
@@ -239,7 +239,7 @@ export async function getPopularQuestions(limit: number = 10): Promise<Knowledge
   if (!process.env.DATABASE_URL) return DEMO_ENTRIES;
 
   const { rows } = await safeQuery<Record<string, unknown>>(
-    `SELECT * FROM apex_knowledge ORDER BY view_count DESC LIMIT $1`,
+    `SELECT * FROM instinct_knowledge ORDER BY view_count DESC LIMIT $1`,
     [limit],
   );
   return rows.map(rowToKnowledge);
@@ -282,7 +282,7 @@ export async function searchKnowledge(
 
   const { rows } = await safeQuery<Record<string, unknown>>(
     `SELECT *, similarity(question, $1) AS sim
-     FROM apex_knowledge
+     FROM instinct_knowledge
      WHERE similarity(question, $1) > 0.1
         OR question ILIKE '%' || $1 || '%'
         OR answer ILIKE '%' || $1 || '%'

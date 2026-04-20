@@ -1,5 +1,5 @@
 /**
- * brief-generations — CRUD helpers for apex_site_brief_generations.
+ * brief-generations — CRUD helpers for instinct_site_brief_generations.
  *
  * Every image/PDF → SiteBrief round-trip lands here. The table exists
  * primarily for the learning loop: Qdrant + Neo4j get the event via
@@ -55,7 +55,7 @@ export async function insertBriefGeneration(
   input: InsertBriefGenerationInput,
 ): Promise<void> {
   await safeQuery(
-    `INSERT INTO apex_site_brief_generations
+    `INSERT INTO instinct_site_brief_generations
        (id, project_id, requested_by, source_mime, source_size, source_sha256,
         extracted_brief, extracted_colors, detected_font, model,
         latency_ms, token_cost_cents, accepted)
@@ -88,7 +88,7 @@ export async function recordBriefGenerationDecision(
   projectId: string | null = null,
 ): Promise<{ projectId: string | null }> {
   const result = await safeQuery<{ project_id: string | null }>(
-    `UPDATE apex_site_brief_generations
+    `UPDATE instinct_site_brief_generations
         SET accepted = $2,
             project_id = COALESCE($3, project_id)
       WHERE id = $1
@@ -111,7 +111,7 @@ export async function listBriefGenerationsForUser(
             source_sha256, extracted_brief, extracted_colors,
             detected_font, model, latency_ms, token_cost_cents,
             accepted, created_at
-       FROM apex_site_brief_generations
+       FROM instinct_site_brief_generations
       WHERE requested_by = $1
       ORDER BY created_at DESC
       LIMIT $2`,
@@ -133,7 +133,7 @@ export async function findRecentGenerationBySha(
             source_sha256, extracted_brief, extracted_colors,
             detected_font, model, latency_ms, token_cost_cents,
             accepted, created_at
-       FROM apex_site_brief_generations
+       FROM instinct_site_brief_generations
       WHERE source_sha256 = $1
         AND created_at > NOW() - INTERVAL '1 hour' * $2
       ORDER BY created_at DESC

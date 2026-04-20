@@ -46,8 +46,8 @@ const assets: Array<Record<string, unknown>> = [];
 
 function fakeDb(sql: string, params: unknown[] = []) {
   const s = sql.replace(/\s+/g, " ").trim();
-  // INSERT INTO apex_site_projects
-  if (s.startsWith("INSERT INTO apex_site_projects")) {
+  // INSERT INTO instinct_site_projects
+  if (s.startsWith("INSERT INTO instinct_site_projects")) {
     const [id, client_slug, display_name, brief, , created_by] = params as [string, string, string, string, string, string];
     const row: Row = {
       id,
@@ -68,16 +68,16 @@ function fakeDb(sql: string, params: unknown[] = []) {
     projects.set(id, row);
     return { rows: [row] };
   }
-  if (s.startsWith("SELECT * FROM apex_site_projects WHERE id =")) {
+  if (s.startsWith("SELECT * FROM instinct_site_projects WHERE id =")) {
     const row = projects.get(params[0] as string);
     return { rows: row ? [row] : [] };
   }
-  if (s.startsWith("SELECT * FROM apex_site_projects ORDER BY") ||
-      s.startsWith("SELECT * FROM apex_site_projects WHERE status != 'archived' ORDER BY")) {
+  if (s.startsWith("SELECT * FROM instinct_site_projects ORDER BY") ||
+      s.startsWith("SELECT * FROM instinct_site_projects WHERE status != 'archived' ORDER BY")) {
     const rows = [...projects.values()].filter((r) => r.status !== "archived");
     return { rows: rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at)) };
   }
-  if (s.startsWith("UPDATE apex_site_projects SET brief =")) {
+  if (s.startsWith("UPDATE instinct_site_projects SET brief =")) {
     const [id, brief, display_name] = params as [string, string, string];
     const row = projects.get(id);
     if (!row) return { rows: [] };
@@ -86,7 +86,7 @@ function fakeDb(sql: string, params: unknown[] = []) {
     row.updated_at = new Date().toISOString();
     return { rows: [row] };
   }
-  if (s.startsWith("UPDATE apex_site_projects SET github_repo =")) {
+  if (s.startsWith("UPDATE instinct_site_projects SET github_repo =")) {
     const [id, github_repo, github_repo_url] = params as [string, string, string];
     const row = projects.get(id);
     if (!row) return { rows: [] };
@@ -106,13 +106,13 @@ function fakeDb(sql: string, params: unknown[] = []) {
     row.last_deploy_id = deploy_id;
     return { rows: [row] };
   }
-  if (s.includes("UPDATE apex_site_projects SET status = 'failed'")) {
+  if (s.includes("UPDATE instinct_site_projects SET status = 'failed'")) {
     const [id] = params as [string];
     const row = projects.get(id);
     if (row) row.status = "failed";
     return { rows: row ? [row] : [] };
   }
-  if (s.startsWith("UPDATE apex_site_projects SET status = $2, preview_url")) {
+  if (s.startsWith("UPDATE instinct_site_projects SET status = $2, preview_url")) {
     const [id, status, preview_url, canary_passed] = params as [string, string, string | null, boolean | null];
     const row = projects.get(id);
     if (!row) return { rows: [] };
@@ -121,16 +121,16 @@ function fakeDb(sql: string, params: unknown[] = []) {
     row.last_canary_passed = canary_passed;
     return { rows: [row] };
   }
-  // INSERT INTO apex_site_deploys
-  if (s.startsWith("INSERT INTO apex_site_deploys")) {
+  // INSERT INTO instinct_site_deploys
+  if (s.startsWith("INSERT INTO instinct_site_deploys")) {
     const [id, project_id, triggered_by] = params as [string, string, string];
     deploys.set(id, { id, project_id, triggered_by, status: "pending", preview_url: null, canary_passed: null });
     return { rows: [] };
   }
-  if (s.startsWith("UPDATE apex_site_deploys SET workflow_run")) {
+  if (s.startsWith("UPDATE instinct_site_deploys SET workflow_run")) {
     return { rows: [] };
   }
-  if (s.startsWith("UPDATE apex_site_deploys SET status = $2, preview_url")) {
+  if (s.startsWith("UPDATE instinct_site_deploys SET status = $2, preview_url")) {
     const [id, status, preview_url, canary_passed] = params as [string, string, string | null, boolean | null];
     const d = deploys.get(id);
     if (!d) return { rows: [] };
@@ -139,7 +139,7 @@ function fakeDb(sql: string, params: unknown[] = []) {
     d.canary_passed = canary_passed;
     return { rows: [d] };
   }
-  if (s.startsWith("INSERT INTO apex_site_assets")) {
+  if (s.startsWith("INSERT INTO instinct_site_assets")) {
     const [id, project_id, filename, mime_type, size_bytes, storage_url, uploaded_by] = params as string[];
     assets.push({ id, project_id, filename, mime_type, size_bytes, storage_url, uploaded_by });
     return { rows: [] };

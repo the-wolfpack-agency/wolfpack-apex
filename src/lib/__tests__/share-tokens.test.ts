@@ -153,7 +153,7 @@ describe("issueShareToken", () => {
     if (verified.ok) expect(verified.claims.siteId).toBe("site_1");
 
     expect(safeQueryMock).toHaveBeenCalledWith(
-      expect.stringContaining("INSERT INTO apex_share_tokens"),
+      expect.stringContaining("INSERT INTO instinct_share_tokens"),
       expect.arrayContaining(["site_1", issued.nonce, "user-xyz"]),
     );
   });
@@ -188,7 +188,7 @@ describe("revokeShareToken", () => {
     safeQueryMock.mockResolvedValueOnce({ rows: [], fromCache: false });
     await revokeShareToken("row-9");
     expect(safeQueryMock).toHaveBeenCalledWith(
-      expect.stringMatching(/UPDATE apex_share_tokens[\s\S]*revoked_at = NOW\(\)[\s\S]*revoked_at IS NULL/),
+      expect.stringMatching(/UPDATE instinct_share_tokens[\s\S]*revoked_at = NOW\(\)[\s\S]*revoked_at IS NULL/),
       ["row-9"],
     );
   });
@@ -255,7 +255,7 @@ describe("listShareTokensForSite", () => {
     safeQueryMock.mockResolvedValueOnce({ rows: [], fromCache: false });
     await listShareTokensForSite("site_q");
     const sqlCalled = String(safeQueryMock.mock.calls[0][0]);
-    expect(sqlCalled).toMatch(/FROM apex_share_tokens/);
+    expect(sqlCalled).toMatch(/FROM instinct_share_tokens/);
     expect(sqlCalled).toMatch(/WHERE site_id = \$1/);
     expect(sqlCalled).toMatch(/ORDER BY created_at DESC/);
   });

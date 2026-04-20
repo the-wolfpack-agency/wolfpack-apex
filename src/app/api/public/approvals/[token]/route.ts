@@ -4,7 +4,7 @@
  * Called from the /share/[token] page when a client clicks Approve
  * or Request changes. The signed token IS the authentication: it
  * encodes the siteId + nonce, which we then look up in
- * apex_share_tokens to enforce revocation + expiry.
+ * instinct_share_tokens to enforce revocation + expiry.
  *
  * Safety:
  *   - `noindex` response headers so crawlers never cache a token.

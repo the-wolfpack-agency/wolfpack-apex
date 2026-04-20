@@ -47,7 +47,7 @@ async function checkCache(prompt: string): Promise<string | null> {
 
   try {
     const result = await safeQuery<{ answer: string; id: string }>(
-      `SELECT id, answer FROM apex_knowledge
+      `SELECT id, answer FROM instinct_knowledge
        WHERE question % $1
          AND source = 'ai'
          AND rating >= 3
@@ -61,7 +61,7 @@ async function checkCache(prompt: string): Promise<string | null> {
       // Increment view count
       const { query } = await import("@/lib/db");
       await query(
-        "UPDATE apex_knowledge SET view_count = view_count + 1 WHERE id = $1",
+        "UPDATE instinct_knowledge SET view_count = view_count + 1 WHERE id = $1",
         [result.rows[0].id],
       ).catch(() => {});
       return result.rows[0].answer;
@@ -184,7 +184,7 @@ export async function generateCustomReport(req: ClaudeReportRequest): Promise<Cl
     try {
       const { query } = await import("@/lib/db");
       await query(
-        `INSERT INTO apex_knowledge (question, answer, source, asked_by, tags, tokens_used)
+        `INSERT INTO instinct_knowledge (question, answer, source, asked_by, tags, tokens_used)
          VALUES ($1, $2, 'ai', $3, ARRAY['report', 'custom', 'claude'], $4)`,
         [prompt, cleanedContent, userId, result.tokensUsed],
       ).catch(() => {});

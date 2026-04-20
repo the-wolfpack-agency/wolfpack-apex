@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
     if (process.env.DATABASE_URL) {
       const result = await query(
         `SELECT id, email, name, role, avatar_url, created_at
-         FROM apex_team_members
+         FROM instinct_team_members
          WHERE id = $1 AND is_active = true`,
         [rotated.userId],
       );

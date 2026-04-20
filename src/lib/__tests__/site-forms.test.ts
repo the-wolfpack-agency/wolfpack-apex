@@ -125,7 +125,7 @@ describe("submitForm — happy path", () => {
 
     // Insert was attempted
     const inserts = safeQueryMock.mock.calls.filter((c) =>
-      /INSERT INTO apex_site_form_submissions/i.test(c[0] as string),
+      /INSERT INTO instinct_site_form_submissions/i.test(c[0] as string),
     );
     expect(inserts).toHaveLength(1);
 
@@ -298,7 +298,7 @@ describe("submitForm — honeypot trickery", () => {
 
     // Row WAS persisted (for learning-loop signal), with email_status='throttled'
     const insertCall = safeQueryMock.mock.calls.find((c) =>
-      /INSERT INTO apex_site_form_submissions/i.test(c[0] as string),
+      /INSERT INTO instinct_site_form_submissions/i.test(c[0] as string),
     );
     expect(insertCall).toBeDefined();
     const params = insertCall![1] as unknown[];

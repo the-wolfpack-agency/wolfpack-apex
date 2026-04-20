@@ -6,7 +6,7 @@ import { safeQuery } from "@/lib/db";
 /**
  * GET /api/journal — Get today's journal for the authenticated user.
  *
- * Automatically populates from apex_events for the user's day.
+ * Automatically populates from instinct_events for the user's day.
  * Query params:
  *   ?date=YYYY-MM-DD — specific date (defaults to today)
  */
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   try {
     const journal = await getOrCreateJournal(user.id, date);
 
-    // Auto-populate events from apex_events for this user + date
+    // Auto-populate events from instinct_events for this user + date
     const targetDate = date || new Date().toISOString().slice(0, 10);
     const { rows: eventRows, fromCache } = await safeQuery<{
       id: string;
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
       timestamp: string;
     }>(
       `SELECT id::text, event_type, user_id, metadata, timestamp
-       FROM apex_events
+       FROM instinct_events
        WHERE user_id = $1
          AND timestamp::date = $2::date
        ORDER BY timestamp ASC`,

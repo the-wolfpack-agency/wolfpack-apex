@@ -270,7 +270,7 @@ export function generateReleaseNotes(repoPath: string, sinceDate: string): Gener
 }
 
 // ---------------------------------------------------------------------------
-// saveDocument — INSERT into apex_documents
+// saveDocument — INSERT into instinct_documents
 // ---------------------------------------------------------------------------
 export async function saveDocument(
   doc: Omit<GeneratedDocument, "id" | "revision" | "downloads" | "created_at" | "updated_at">,
@@ -294,7 +294,7 @@ export async function saveDocument(
 
   try {
     const result = await query<Record<string, unknown>>(
-      `INSERT INTO apex_documents (title, doc_type, content, format, generated_from, generated_by, tokens_used)
+      `INSERT INTO instinct_documents (title, doc_type, content, format, generated_from, generated_by, tokens_used)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
       [doc.title, doc.doc_type, doc.content, doc.format, doc.generated_from, doc.generated_by, doc.tokens_used],
@@ -330,7 +330,7 @@ export async function getDocuments(
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const { rows } = await safeQuery<Record<string, unknown>>(
-    `SELECT * FROM apex_documents ${where} ORDER BY created_at DESC LIMIT 50`,
+    `SELECT * FROM instinct_documents ${where} ORDER BY created_at DESC LIMIT 50`,
     params,
   );
   return rows.map(rowToDocument);
@@ -351,7 +351,7 @@ export async function downloadDocument(
 
   try {
     const result = await query<Record<string, unknown>>(
-      `UPDATE apex_documents SET downloads = downloads + 1, updated_at = NOW()
+      `UPDATE instinct_documents SET downloads = downloads + 1, updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
       [docId],

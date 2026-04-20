@@ -151,7 +151,7 @@ describe("askQuestion", () => {
     await askQuestion("auth", "u1", "dev");
 
     expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining("UPDATE apex_knowledge SET view_count"),
+      expect.stringContaining("UPDATE instinct_knowledge SET view_count"),
       ["k-1"],
     );
   });
@@ -170,7 +170,7 @@ describe("saveAnswer", () => {
     expect(result).not.toBeNull();
     expect(result!.id).toBe("k-1");
     expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining("INSERT INTO apex_knowledge"),
+      expect.stringContaining("INSERT INTO instinct_knowledge"),
       ["Q?", "A.", "human", "u1", "repo", "file.ts", 0],
     );
     expect(trackEvent).toHaveBeenCalledWith(
@@ -204,7 +204,7 @@ describe("rateAnswer", () => {
 
     expect(ok).toBe(true);
     expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining("UPDATE apex_knowledge SET rating"),
+      expect.stringContaining("UPDATE instinct_knowledge SET rating"),
       [4, "k-1"],
     );
     expect(trackEvent).toHaveBeenCalledWith(

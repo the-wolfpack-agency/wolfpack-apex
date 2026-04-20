@@ -438,7 +438,7 @@ describe("Full Message Flow", () => {
   test("user message is persisted with role=user and correct content", async () => {
     await chat("How does the pricing engine work?", "u1", "dev");
 
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     const userMsg = messages.find((m) => m.role === "user");
     expect(userMsg).toBeDefined();
     expect(userMsg!.content).toBe("How does the pricing engine work?");
@@ -448,7 +448,7 @@ describe("Full Message Flow", () => {
   test("conversation record is created on first message", async () => {
     await chat("How does the pricing engine work?", "u1", "dev");
 
-    const conversations = mockDb.selectAll("apex_conversations");
+    const conversations = mockDb.selectAll("instinct_conversations");
     expect(conversations.length).toBe(1);
     expect(conversations[0].user_id).toBe("u1");
     expect(conversations[0].status).toBe("active");
@@ -457,7 +457,7 @@ describe("Full Message Flow", () => {
   test("conversation message_count is incremented", async () => {
     await chat("How does the pricing engine work?", "u1", "dev");
 
-    const conversations = mockDb.selectAll("apex_conversations");
+    const conversations = mockDb.selectAll("instinct_conversations");
     // Two increments: one for user message, one for assistant response
     expect(Number(conversations[0].message_count)).toBeGreaterThanOrEqual(2);
   });
@@ -483,7 +483,7 @@ describe("Full Message Flow", () => {
   test("assistant response is persisted with role=assistant", async () => {
     await chat("How does the pricing engine work?", "u1", "dev");
 
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     const assistantMsg = messages.find((m) => m.role === "assistant");
     expect(assistantMsg).toBeDefined();
     expect(assistantMsg!.role).toBe("assistant");
@@ -509,7 +509,7 @@ describe("Full Message Flow", () => {
 
     expect(result.source).toBe("knowledge_cache");
 
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     const assistantMsg = messages.find((m) => m.role === "assistant");
     expect(assistantMsg!.source).toBe("knowledge_cache");
   });
@@ -519,7 +519,7 @@ describe("Full Message Flow", () => {
 
     expect(result.tokensUsed).toBe(0);
 
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     for (const msg of messages) {
       expect(Number(msg.tokens_used)).toBe(0);
     }
@@ -548,7 +548,7 @@ describe("Full Message Flow", () => {
   test("full message produces exactly 2 messages in DB (user + assistant)", async () => {
     await chat("How does the pricing engine work?", "u1", "dev");
 
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     expect(messages.length).toBe(2);
     expect(messages[0].role).toBe("user");
     expect(messages[1].role).toBe("assistant");
@@ -569,7 +569,7 @@ describe("Full Message Flow", () => {
     expect(result.source).toBe("ai");
     expect(result.tokensUsed).toBe(300);
 
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     const aiMsg = messages.find((m) => m.source === "ai");
     expect(aiMsg).toBeDefined();
     expect(Number(aiMsg!.tokens_used)).toBe(300);
@@ -586,13 +586,13 @@ describe("Conversation Persistence", () => {
     const convId = result.conversationId;
 
     // Data is in mock DB -- verify it persists across "sessions"
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     const convMessages = messages.filter((m) => m.conversation_id === convId);
     expect(convMessages.length).toBe(2); // user + assistant
     expect(convMessages[0].content).toBe("Hello world");
   });
 
-  test("3 sequential messages produce 6 rows in apex_messages", async () => {
+  test("3 sequential messages produce 6 rows in instinct_messages", async () => {
     // First message creates conversation
     const r1 = await chat("First question", "u1", "dev");
     const convId = r1.conversationId;
@@ -601,7 +601,7 @@ describe("Conversation Persistence", () => {
     await chat("Second question", "u1", "dev", convId);
     await chat("Third question", "u1", "dev", convId);
 
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     const convMessages = messages.filter((m) => m.conversation_id === convId);
     expect(convMessages.length).toBe(6); // 3 user + 3 assistant
   });
@@ -613,7 +613,7 @@ describe("Conversation Persistence", () => {
     await chat("Second", "u1", "dev", convId);
     await chat("Third", "u1", "dev", convId);
 
-    const conversations = mockDb.selectAll("apex_conversations");
+    const conversations = mockDb.selectAll("instinct_conversations");
     const conv = conversations.find((c) => c.id === convId);
     expect(conv).toBeDefined();
     // Each message (user + assistant) increments by 1, so 6 increments total
@@ -624,7 +624,7 @@ describe("Conversation Persistence", () => {
     const r1 = await chat("First", "u1", "dev");
     const convId = r1.conversationId;
 
-    const conversations = mockDb.selectAll("apex_conversations");
+    const conversations = mockDb.selectAll("instinct_conversations");
     const conv = conversations.find((c) => c.id === convId);
     expect(conv!.last_message_at).toBeTruthy();
   });
@@ -635,7 +635,7 @@ describe("Conversation Persistence", () => {
     const convId1 = r1.conversationId;
 
     // Update last_message_at to be recent (already set by the first call)
-    const conv = mockDb.selectAll("apex_conversations").find((c) => c.id === convId1);
+    const conv = mockDb.selectAll("instinct_conversations").find((c) => c.id === convId1);
     if (conv) {
       conv.last_message_at = new Date().toISOString();
     }
@@ -651,7 +651,7 @@ describe("Conversation Persistence", () => {
     const convId1 = r1.conversationId;
 
     // Age the conversation to 3 hours ago
-    const conv = mockDb.selectAll("apex_conversations").find((c) => c.id === convId1);
+    const conv = mockDb.selectAll("instinct_conversations").find((c) => c.id === convId1);
     if (conv) {
       conv.last_message_at = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
     }
@@ -773,7 +773,7 @@ describe("User Memory Persistence", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     // Age the conversation
-    const conv = mockDb.selectAll("apex_conversations")[0];
+    const conv = mockDb.selectAll("instinct_conversations")[0];
     if (conv) conv.last_message_at = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
 
     // Second conversation (new one due to age)
@@ -817,7 +817,7 @@ describe("User Memory Persistence", () => {
 // ===========================================================================
 
 describe("Rating Flow", () => {
-  test("rate a message updates rating in apex_messages", async () => {
+  test("rate a message updates rating in instinct_messages", async () => {
     const result = await chat("Hello", "u1", "dev");
     const msgId = result.messageId!;
     const convId = result.conversationId;
@@ -826,8 +826,8 @@ describe("Rating Flow", () => {
     const ok = await rateMessage(msgId, 5, "u1", "dev");
 
     // rateMessage does a compound UPDATE with subquery checking conversation ownership
-    // Our mock handles basic UPDATEs on apex_messages
-    const messages = mockDb.selectAll("apex_messages");
+    // Our mock handles basic UPDATEs on instinct_messages
+    const messages = mockDb.selectAll("instinct_messages");
     const ratedMsg = messages.find((m) => m.id === msgId);
 
     // Verify the rating update was attempted
@@ -913,7 +913,7 @@ describe("Triple-Write Verification", () => {
   test("PG row created for user message and assistant message", async () => {
     await chat("Test question", "u1", "dev");
 
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     expect(messages.length).toBe(2);
 
     const userMsg = messages.find((m) => m.role === "user");
@@ -940,7 +940,7 @@ describe("Triple-Write Verification", () => {
 
     await chat("Test", "u1", "dev");
 
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     expect(messages.length).toBe(2);
     expect(messages[1].source).toBe("knowledge_cache");
   });
@@ -986,7 +986,7 @@ describe("Triple-Write Verification", () => {
     expect(result.response).toBeTruthy();
 
     // PG rows should still be created
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     expect(messages.length).toBe(2);
   });
 
@@ -996,12 +996,12 @@ describe("Triple-Write Verification", () => {
     expect(result.source).toBe("fallback");
 
     // PG messages should still be persisted
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     expect(messages.length).toBe(2);
     expect(messages[1].source).toBe("fallback");
 
     // Conversation should be persisted
-    const conversations = mockDb.selectAll("apex_conversations");
+    const conversations = mockDb.selectAll("instinct_conversations");
     expect(conversations.length).toBe(1);
   });
 
@@ -1111,7 +1111,7 @@ describe("Modular Component Data Flow", () => {
   test("pageContext is included in message metadata stored in DB", async () => {
     await chat("What reports are available?", "u1", "dev", undefined, "User is viewing the reports page");
 
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     const userMsg = messages.find((m) => m.role === "user");
     expect(userMsg).toBeDefined();
 
@@ -1126,7 +1126,7 @@ describe("Modular Component Data Flow", () => {
 
     const r2 = await chat("Question 2", "u1", "dev", undefined, "analytics page");
 
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     const userMessages = messages.filter((m) => m.role === "user");
     expect(userMessages.length).toBe(2);
 
@@ -1144,7 +1144,7 @@ describe("Modular Component Data Flow", () => {
   test("message without pageContext has no pageContext in metadata", async () => {
     await chat("Simple question", "u1", "dev");
 
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     const userMsg = messages.find((m) => m.role === "user");
 
     const metadata = typeof userMsg!.metadata === "string"
@@ -1156,7 +1156,7 @@ describe("Modular Component Data Flow", () => {
   test("contextData from detected topics flows into metadata", async () => {
     await chat("How do I manage inventory and leads?", "u1", "dev");
 
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     const userMsg = messages.find((m) => m.role === "user");
 
     const metadata = typeof userMsg!.metadata === "string"
@@ -1176,7 +1176,7 @@ describe("Modular Component Data Flow", () => {
     // All messages are fallback (0 tokens) since no AI key set
     await chat("World", "u1", "dev", convId);
 
-    const conversations = mockDb.selectAll("apex_conversations");
+    const conversations = mockDb.selectAll("instinct_conversations");
     const conv = conversations.find((c) => c.id === convId);
     expect(conv).toBeDefined();
     // All tokens should be 0 for non-AI responses
@@ -1196,7 +1196,7 @@ describe("Round-Trip Data Integrity", () => {
     await chat("Second", "u1", "dev", convId);
 
     // All messages should reference the same conversation
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     const convMessages = messages.filter((m) => m.conversation_id === convId);
     expect(convMessages.length).toBe(4); // 2 user + 2 assistant
   });
@@ -1205,7 +1205,7 @@ describe("Round-Trip Data Integrity", () => {
     await chat("User 1 question", "u1", "dev");
     await chat("User 2 question", "u2", "cto");
 
-    const conversations = mockDb.selectAll("apex_conversations");
+    const conversations = mockDb.selectAll("instinct_conversations");
     expect(conversations.length).toBe(2);
     expect(conversations[0].user_id).toBe("u1");
     expect(conversations[1].user_id).toBe("u2");
@@ -1216,7 +1216,7 @@ describe("Round-Trip Data Integrity", () => {
     await chat("Second", "u1", "dev");
     await chat("Third", "u2", "dev");
 
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     const ids = messages.map((m) => m.id);
     const uniqueIds = new Set(ids);
     expect(uniqueIds.size).toBe(ids.length);
@@ -1229,10 +1229,10 @@ describe("Round-Trip Data Integrity", () => {
     const msgId = r1.messageId!;
 
     // 2. Verify data landed in DB
-    const messages = mockDb.selectAll("apex_messages");
+    const messages = mockDb.selectAll("instinct_messages");
     expect(messages.length).toBe(2);
 
-    const conversations = mockDb.selectAll("apex_conversations");
+    const conversations = mockDb.selectAll("instinct_conversations");
     expect(conversations.length).toBe(1);
     expect(conversations[0].id).toBe(convId);
 

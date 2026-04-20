@@ -4,7 +4,7 @@
  *
  * Flow:
  *   1. Designer calls `issueShareToken` → a nonce UUID is persisted in
- *      `apex_share_tokens`, and a signed base64url token is returned.
+ *      `instinct_share_tokens`, and a signed base64url token is returned.
  *      The signed blob encodes { siteId, exp, nonce } + HMAC-SHA256(sig).
  *   2. Client opens /share/<token> → we `verifyShareToken` (format,
  *      signature, expiry). `loadActiveTokenRow` then checks the DB row
@@ -35,7 +35,7 @@ import { safeQuery } from "@/lib/db";
 
 export interface ShareTokenClaims {
   siteId: string;
-  nonce: string; // UUID mirrored in apex_share_tokens
+  nonce: string; // UUID mirrored in instinct_share_tokens
   exp: number; // Unix seconds
 }
 
@@ -214,7 +214,7 @@ export interface ShareTokenRow {
 }
 
 /**
- * Issue a new share token: INSERTs a row in apex_share_tokens with a
+ * Issue a new share token: INSERTs a row in instinct_share_tokens with a
  * fresh nonce, then returns the signed blob. Clamps TTL to MAX_TTL.
  */
 export async function issueShareToken(opts: {
@@ -235,7 +235,7 @@ export async function issueShareToken(opts: {
   const secret = opts.secret ?? getShareSecret();
 
   const result = await safeQuery<{ id: string }>(
-    `INSERT INTO apex_share_tokens (site_id, nonce, created_by, expires_at)
+    `INSERT INTO instinct_share_tokens (site_id, nonce, created_by, expires_at)
      VALUES ($1, $2, $3, $4)
      RETURNING id`,
     [opts.siteId, nonce, opts.createdBy ?? null, expiresAt.toISOString()],
@@ -258,7 +258,7 @@ export async function issueShareToken(opts: {
  * second call). */
 export async function revokeShareToken(tokenRowId: string): Promise<void> {
   await safeQuery(
-    `UPDATE apex_share_tokens
+    `UPDATE instinct_share_tokens
         SET revoked_at = NOW()
       WHERE id = $1 AND revoked_at IS NULL`,
     [tokenRowId],
@@ -269,7 +269,7 @@ export async function revokeShareToken(tokenRowId: string): Promise<void> {
  * fires after verifyShareToken confirms signature + expiry. */
 export async function touchShareTokenAccess(tokenRowId: string): Promise<void> {
   await safeQuery(
-    `UPDATE apex_share_tokens
+    `UPDATE instinct_share_tokens
         SET last_accessed_at = NOW(),
             access_count = access_count + 1
       WHERE id = $1`,
@@ -289,7 +289,7 @@ export async function loadActiveTokenRow(
   const { rows } = await safeQuery<ShareTokenRow>(
     `SELECT id, site_id, nonce, created_by, created_at, expires_at,
             revoked_at, last_accessed_at, access_count
-       FROM apex_share_tokens
+       FROM instinct_share_tokens
       WHERE nonce = $1`,
     [nonce],
   );
@@ -309,7 +309,7 @@ export async function listShareTokensForSite(
   const { rows } = await safeQuery<ShareTokenRow>(
     `SELECT id, site_id, nonce, created_by, created_at, expires_at,
             revoked_at, last_accessed_at, access_count
-       FROM apex_share_tokens
+       FROM instinct_share_tokens
       WHERE site_id = $1
       ORDER BY created_at DESC`,
     [siteId],

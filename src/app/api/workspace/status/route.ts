@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
 
   // Check team member count
   const team = await safeQuery<{ count: number }>(
-    "SELECT COUNT(*)::int AS count FROM apex_team_members WHERE is_active = true",
+    "SELECT COUNT(*)::int AS count FROM instinct_team_members WHERE is_active = true",
   );
 
   // Check integrations (Microsoft, QuickBooks, Plaud)

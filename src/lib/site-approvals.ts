@@ -1,5 +1,5 @@
 /**
- * site-approvals.ts — orchestration over `apex_site_approvals`.
+ * site-approvals.ts — orchestration over `instinct_site_approvals`.
  *
  * Responsibilities:
  *   - Persist every client approval / "request changes" event as a
@@ -29,7 +29,7 @@ export interface ApprovalRecord {
   comment: string | null;
   createdAt: string;
   viaShareToken: boolean;
-  /** The UUID in apex_share_tokens.id when this approval came from a
+  /** The UUID in instinct_share_tokens.id when this approval came from a
    * public /share link. null for authed-Instinct-user approvals. */
   shareTokenId: string | null;
 }
@@ -55,7 +55,7 @@ export interface RecordApprovalOpts {
   actorName?: string;
   actorEmail?: string;
   comment?: string;
-  /** UUID from apex_share_tokens — set when approval came via /share/[token]. */
+  /** UUID from instinct_share_tokens — set when approval came via /share/[token]. */
   shareTokenRowId?: string;
   /** Present when an authed Instinct user recorded the approval directly.
    * Used purely for analytics attribution. */
@@ -79,7 +79,7 @@ export async function recordApproval(
   const comment = (opts.comment ?? "").trim().slice(0, 4000) || null;
 
   const result = await safeQuery<Record<string, unknown>>(
-    `INSERT INTO apex_site_approvals
+    `INSERT INTO instinct_site_approvals
        (site_id, share_token_id, state, actor_name, actor_email, comment)
      VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING *`,
@@ -138,7 +138,7 @@ export async function listApprovalsForSite(
   const { rows } = await safeQuery<Record<string, unknown>>(
     `SELECT id, site_id, share_token_id, state, actor_name, actor_email,
             comment, created_at
-       FROM apex_site_approvals
+       FROM instinct_site_approvals
       WHERE site_id = $1
       ORDER BY created_at DESC`,
     [siteId],
@@ -156,7 +156,7 @@ export async function latestApprovalState(
   const { rows } = await safeQuery<Record<string, unknown>>(
     `SELECT id, site_id, share_token_id, state, actor_name, actor_email,
             comment, created_at
-       FROM apex_site_approvals
+       FROM instinct_site_approvals
       WHERE site_id = $1
       ORDER BY created_at DESC
       LIMIT 1`,

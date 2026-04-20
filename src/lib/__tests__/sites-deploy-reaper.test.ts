@@ -5,7 +5,7 @@
  * stuck at status=building forever. Root cause: the canary-deploy
  * workflow on the client repo either got cancelled (concurrent
  * dispatches) or died mid-run before the "Notify Instinct" webhook step
- * fired. Without a webhook callback, apex_site_deploys stayed at
+ * fired. Without a webhook callback, instinct_site_deploys stayed at
  * building and the UI spun on "Deploying…" indefinitely.
  *
  * Fix: getSiteProject() now calls reapStuckDeploys() which marks any
@@ -46,13 +46,13 @@ jest.mock("@/lib/db", () => ({
   safeQuery: jest.fn(async (sql: string, params: unknown[] = []) => {
     queries.push({ sql, params });
     const compact = sql.replace(/\s+/g, " ").trim();
-    if (compact.startsWith("UPDATE apex_site_deploys")) {
+    if (compact.startsWith("UPDATE instinct_site_deploys")) {
       return nextUpdateResult;
     }
-    if (compact.startsWith("UPDATE apex_site_projects")) {
+    if (compact.startsWith("UPDATE instinct_site_projects")) {
       return { rows: [], fromCache: false };
     }
-    if (compact.startsWith("SELECT * FROM apex_site_projects")) {
+    if (compact.startsWith("SELECT * FROM instinct_site_projects")) {
       return {
         rows: projectRow ? [projectRow] : [],
         fromCache: false,
@@ -91,10 +91,10 @@ describe("reapStuckDeploys (via getSiteProject)", () => {
     };
   });
 
-  it("calls UPDATE on apex_site_deploys with WHERE status IN (pending, building) before reading the project", async () => {
+  it("calls UPDATE on instinct_site_deploys with WHERE status IN (pending, building) before reading the project", async () => {
     await getSiteProject("site_x");
     const reaperCall = queries.find((q) =>
-      q.sql.replace(/\s+/g, " ").includes("UPDATE apex_site_deploys"),
+      q.sql.replace(/\s+/g, " ").includes("UPDATE instinct_site_deploys"),
     );
     expect(reaperCall).toBeDefined();
     const compact = reaperCall!.sql.replace(/\s+/g, " ");
@@ -104,10 +104,10 @@ describe("reapStuckDeploys (via getSiteProject)", () => {
     // The project read must happen AFTER the reaper so stale state
     // never leaks into the response.
     const reaperIdx = queries.findIndex((q) =>
-      q.sql.includes("UPDATE apex_site_deploys"),
+      q.sql.includes("UPDATE instinct_site_deploys"),
     );
     const readIdx = queries.findIndex((q) =>
-      q.sql.includes("SELECT * FROM apex_site_projects"),
+      q.sql.includes("SELECT * FROM instinct_site_projects"),
     );
     expect(reaperIdx).toBeGreaterThanOrEqual(0);
     expect(readIdx).toBeGreaterThan(reaperIdx);
@@ -116,7 +116,7 @@ describe("reapStuckDeploys (via getSiteProject)", () => {
   it("passes the project id + a positive timeout as SQL params", async () => {
     await getSiteProject("site_abc");
     const reaperCall = queries.find((q) =>
-      q.sql.includes("UPDATE apex_site_deploys"),
+      q.sql.includes("UPDATE instinct_site_deploys"),
     );
     expect(reaperCall!.params[0]).toBe("site_abc");
     expect(typeof reaperCall!.params[1]).toBe("number");
@@ -131,7 +131,7 @@ describe("reapStuckDeploys (via getSiteProject)", () => {
     await getSiteProject("site_x");
     const projectUpdate = queries.find(
       (q) =>
-        q.sql.replace(/\s+/g, " ").includes("UPDATE apex_site_projects") &&
+        q.sql.replace(/\s+/g, " ").includes("UPDATE instinct_site_projects") &&
         q.sql.includes("status = 'failed'"),
     );
     expect(projectUpdate).toBeDefined();
@@ -145,7 +145,7 @@ describe("reapStuckDeploys (via getSiteProject)", () => {
     await getSiteProject("site_x");
     const projectUpdate = queries.find(
       (q) =>
-        q.sql.replace(/\s+/g, " ").includes("UPDATE apex_site_projects") &&
+        q.sql.replace(/\s+/g, " ").includes("UPDATE instinct_site_projects") &&
         q.sql.includes("status = 'failed'"),
     );
     expect(projectUpdate).toBeUndefined();
@@ -156,7 +156,7 @@ describe("reapStuckDeploys (via getSiteProject)", () => {
     const dbMod = await import("@/lib/db");
     const original = dbMod.safeQuery as unknown as jest.Mock;
     (original.mockImplementationOnce as (fn: (sql: string) => Promise<{rows: unknown[]; fromCache: boolean}>) => unknown)(async (sql: string) => {
-      if (sql.includes("UPDATE apex_site_deploys")) {
+      if (sql.includes("UPDATE instinct_site_deploys")) {
         throw new Error("simulated db blip");
       }
       return { rows: [], fromCache: false };

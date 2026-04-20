@@ -227,17 +227,17 @@ describe("persistent conversations", () => {
 
     expect(result.conversationId).toBeTruthy();
 
-    // Should have inserted into apex_conversations
-    const createCalls = queryLog.filter((q) => q.text.includes("INSERT INTO apex_conversations"));
+    // Should have inserted into instinct_conversations
+    const createCalls = queryLog.filter((q) => q.text.includes("INSERT INTO instinct_conversations"));
     expect(createCalls.length).toBe(1);
     expect(createCalls[0].params).toContain("u1");
   });
 
-  test("saves messages to apex_messages", async () => {
+  test("saves messages to instinct_messages", async () => {
     await chat("Hello world", "u1", "dev");
 
     // Should have 2 inserts: user message + assistant response
-    const msgInserts = queryLog.filter((q) => q.text.includes("INSERT INTO apex_messages"));
+    const msgInserts = queryLog.filter((q) => q.text.includes("INSERT INTO instinct_messages"));
     expect(msgInserts.length).toBe(2);
 
     // First insert is user message
@@ -256,7 +256,7 @@ describe("persistent conversations", () => {
     await chat("Second message", "u1", "dev", convId);
 
     // Should NOT create a new conversation
-    const createCalls = queryLog.filter((q) => q.text.includes("INSERT INTO apex_conversations"));
+    const createCalls = queryLog.filter((q) => q.text.includes("INSERT INTO instinct_conversations"));
     expect(createCalls.length).toBe(0);
   });
 
@@ -267,7 +267,7 @@ describe("persistent conversations", () => {
     };
 
     // When looking for recent conversation, return one
-    queryResponses.set("SELECT id, last_message_at FROM apex_conversations", {
+    queryResponses.set("SELECT id, last_message_at FROM instinct_conversations", {
       rows: [recentConv],
       fromCache: false,
     });
@@ -284,7 +284,7 @@ describe("persistent conversations", () => {
       last_message_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(), // 3 hours ago
     };
 
-    queryResponses.set("SELECT id, last_message_at FROM apex_conversations", {
+    queryResponses.set("SELECT id, last_message_at FROM instinct_conversations", {
       rows: [staleConv],
       fromCache: false,
     });
@@ -298,7 +298,7 @@ describe("persistent conversations", () => {
   test("updates conversation stats after each message", async () => {
     await chat("Test message", "u1", "dev");
 
-    const updateCalls = queryLog.filter((q) => q.text.includes("UPDATE apex_conversations"));
+    const updateCalls = queryLog.filter((q) => q.text.includes("UPDATE instinct_conversations"));
     // At least 2 updates: one for user message, one for assistant response
     expect(updateCalls.length).toBeGreaterThanOrEqual(2);
   });
@@ -307,7 +307,7 @@ describe("persistent conversations", () => {
     await chat("How do I configure the payment gateway?", "u1", "dev");
 
     const titleCalls = queryLog.filter((q) =>
-      q.text.includes("UPDATE apex_conversations SET title"),
+      q.text.includes("UPDATE instinct_conversations SET title"),
     );
     expect(titleCalls.length).toBe(1);
     expect(titleCalls[0].params[1]).toContain("payment gateway");
@@ -318,7 +318,7 @@ describe("persistent conversations", () => {
     await chat(longMsg, "u1", "dev");
 
     const titleCalls = queryLog.filter((q) =>
-      q.text.includes("UPDATE apex_conversations SET title"),
+      q.text.includes("UPDATE instinct_conversations SET title"),
     );
     expect(titleCalls.length).toBe(1);
     const title = titleCalls[0].params[1] as string;
@@ -368,7 +368,7 @@ describe("getConversations", () => {
     await getConversations("u1");
 
     const selectCalls = queryLog.filter((q) =>
-      q.text.includes("FROM apex_conversations") && q.text.includes("WHERE user_id"),
+      q.text.includes("FROM instinct_conversations") && q.text.includes("WHERE user_id"),
     );
     expect(selectCalls.length).toBe(1);
     expect(selectCalls[0].params).toContain("u1");
@@ -382,7 +382,7 @@ describe("getConversations", () => {
 describe("getConversationMessages", () => {
   test("verifies ownership before returning messages", async () => {
     // Ownership check returns empty -- not the user's conversation
-    queryResponses.set("SELECT id FROM apex_conversations WHERE id", {
+    queryResponses.set("SELECT id FROM instinct_conversations WHERE id", {
       rows: [],
       fromCache: false,
     });
@@ -399,7 +399,7 @@ describe("getConversationMessages", () => {
       callCount++;
 
       // First call: ownership check
-      if (text.includes("SELECT id FROM apex_conversations WHERE id")) {
+      if (text.includes("SELECT id FROM instinct_conversations WHERE id")) {
         return Promise.resolve({ rows: [{ id: "conv-1" }], fromCache: false });
       }
 
@@ -448,7 +448,7 @@ describe("getConversationMessages", () => {
 
 describe("rateMessage", () => {
   test("updates rating in DB and tracks event", async () => {
-    queryResponses.set("UPDATE apex_messages SET rating", {
+    queryResponses.set("UPDATE instinct_messages SET rating", {
       rows: [{ id: "msg-1", source: "knowledge_cache" }],
       fromCache: false,
     });
@@ -486,7 +486,7 @@ describe("rateMessage", () => {
 describe("archiveConversation", () => {
   test("sets status to archived with summary", async () => {
     // getConversationMessages needs ownership check + messages
-    queryResponses.set("SELECT id FROM apex_conversations WHERE id", {
+    queryResponses.set("SELECT id FROM instinct_conversations WHERE id", {
       rows: [{ id: "conv-1" }],
       fromCache: false,
     });
@@ -517,7 +517,7 @@ describe("archiveConversation", () => {
       fromCache: false,
     });
 
-    queryResponses.set("UPDATE apex_conversations", {
+    queryResponses.set("UPDATE instinct_conversations", {
       rows: [{ id: "conv-1" }],
       fromCache: false,
     });
@@ -722,7 +722,7 @@ describe("page context", () => {
 
     // Check the user message insert has metadata with pageContext
     const msgInserts = queryLog.filter(
-      (q) => q.text.includes("INSERT INTO apex_messages") && q.params.includes("user"),
+      (q) => q.text.includes("INSERT INTO instinct_messages") && q.params.includes("user"),
     );
     expect(msgInserts.length).toBeGreaterThanOrEqual(1);
 

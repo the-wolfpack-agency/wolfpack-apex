@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
   const name = body.name || inv.email.split("@")[0];
 
   await safeQuery(
-    `INSERT INTO apex_team_members (id, email, name, role, password_hash, is_active)
+    `INSERT INTO instinct_team_members (id, email, name, role, password_hash, is_active)
      VALUES ($1, $2, $3, $4, $5, true)`,
     [memberId, inv.email, name, inv.role, passwordHash],
   );

@@ -6,7 +6,7 @@
  * so the downstream learning loop can decide whether to auto-downgrade
  * noisy categories or promote categories a user actually acts on.
  *
- * All data is pulled from apex_events (analytics) so per-user category
+ * All data is pulled from instinct_events (analytics) so per-user category
  * engagement is measured from real behavior, not from notification
  * metadata that could drift.
  */
@@ -37,7 +37,7 @@ export interface CategoryPriorityScore {
  * Engagement across all notifications created for this user in a time
  * window. Joins on notification_id in event metadata.
  *
- * Because apex_events metadata is JSONB and notification_id is stored as
+ * Because instinct_events metadata is JSONB and notification_id is stored as
  * metadata.notification_id, we count unique notification_ids per event
  * type.
  */
@@ -50,7 +50,7 @@ export async function getEngagementRate(
     count: string;
   }>(
     `SELECT event_type, COUNT(DISTINCT metadata->>'notification_id')::text AS count
-       FROM apex_events
+       FROM instinct_events
        WHERE user_id = $1
          AND event_type IN (
            'system.notification_created',
@@ -118,7 +118,7 @@ export async function getCategoryPriorityScore(
   // is in that set.
   const counts = await safeQuery<{ event_type: string; count: string }>(
     `SELECT event_type, COUNT(DISTINCT metadata->>'notification_id')::text AS count
-       FROM apex_events
+       FROM instinct_events
        WHERE user_id = $1
          AND event_type IN (
            'system.notification_read',

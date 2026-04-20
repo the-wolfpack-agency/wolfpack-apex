@@ -52,7 +52,7 @@ export async function PUT(req: NextRequest) {
   // Use a placeholder password_hash since this user already has a valid JWT.
   const memberId = `tm_${randomUUID().slice(0, 12)}`;
   await safeQuery(
-    `INSERT INTO apex_team_members (id, email, name, role, password_hash, is_active)
+    `INSERT INTO instinct_team_members (id, email, name, role, password_hash, is_active)
      VALUES ($1, $2, $3, $4, '', true)
      ON CONFLICT (email) DO UPDATE SET is_active = true`,
     [memberId, user.email, user.name, user.role],

@@ -135,7 +135,7 @@ describe("github-client", () => {
   // Regression: the 2026-04-17 workflow_dispatch was firing without the
   // deploy_id input, so the canary's "Notify Instinct" step hit its
   // early-exit branch and preview_url never propagated back to the
-  // apex_site_deploys row.
+  // instinct_site_deploys row.
   it("triggerWorkflow includes inputs in the dispatch body when provided", async () => {
     const { client, calls } = makeClient([{ status: 204 }]);
     await triggerWorkflow(

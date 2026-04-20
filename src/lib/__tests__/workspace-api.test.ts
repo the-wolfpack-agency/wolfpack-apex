@@ -138,7 +138,7 @@ describe("PUT /api/workspace", () => {
     expect(wparams).toContain("Wolfpack");
     // Third call: team member upsert
     const [tsql, tparams] = mockSafeQuery.mock.calls[2] as [string, string[]];
-    expect(tsql).toContain("apex_team_members");
+    expect(tsql).toContain("instinct_team_members");
     expect(tparams).toContain(DEMO_USER.email);
   });
 
@@ -282,7 +282,7 @@ describe("PUT /api/workspace → GET /api/workspace/status round-trip", () => {
         db.workspaceName = "CAPTURED"; // actual value comes from PUT handler logic
         return { rows: [], fromCache: false };
       }
-      if (s.includes("insert") && s.includes("apex_team_members")) {
+      if (s.includes("insert") && s.includes("instinct_team_members")) {
         db.teamCount = Math.max(db.teamCount, 1);
         return { rows: [], fromCache: false };
       }
@@ -294,7 +294,7 @@ describe("PUT /api/workspace → GET /api/workspace/status round-trip", () => {
           fromCache: false,
         };
       }
-      if (s.includes("from apex_team_members")) {
+      if (s.includes("from instinct_team_members")) {
         return { rows: [{ count: db.teamCount }], fromCache: false };
       }
       if (s.includes("apex_integrations")) {

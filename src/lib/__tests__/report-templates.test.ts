@@ -353,7 +353,7 @@ describe("generateReport", () => {
     expect(report.markdown).toContain("API Routes");
   });
 
-  test("report is saved to apex_documents when DATABASE_URL is set", async () => {
+  test("report is saved to instinct_documents when DATABASE_URL is set", async () => {
     setDatabaseUrl("postgresql://test");
 
     mockQuery.mockResolvedValue({
@@ -381,7 +381,7 @@ describe("generateReport", () => {
 
     // saveDocument should have called query with INSERT
     expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining("INSERT INTO apex_documents"),
+      expect.stringContaining("INSERT INTO instinct_documents"),
       expect.arrayContaining(["report"]),
     );
   });

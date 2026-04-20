@@ -306,7 +306,7 @@ describe("createSiteProject", () => {
 
     expect(project.id).toBe("site_1");
     expect(project.status).toBe("draft");
-    expect(mockSafeQuery.mock.calls[0][0]).toContain("INSERT INTO apex_site_projects");
+    expect(mockSafeQuery.mock.calls[0][0]).toContain("INSERT INTO instinct_site_projects");
     expect(mockTrackEvent).toHaveBeenCalledWith(
       "site.created",
       "user_1",
@@ -344,7 +344,7 @@ describe("updateBrief", () => {
       ],
     });
     await updateBrief("site_1", VALID_BRIEF, "user_1", "sales");
-    expect(mockSafeQuery.mock.calls[0][0]).toContain("UPDATE apex_site_projects");
+    expect(mockSafeQuery.mock.calls[0][0]).toContain("UPDATE instinct_site_projects");
     expect(mockTrackEvent).toHaveBeenCalledWith(
       "site.brief_updated",
       "user_1",
@@ -370,7 +370,7 @@ describe("triggerDeploy", () => {
 
   function mockProjectFetch(extra: Partial<Record<string, unknown>> = {}) {
     // getSiteProject now calls reapStuckDeploys first (an UPDATE on
-    // apex_site_deploys) before the SELECT on apex_site_projects. Add
+    // instinct_site_deploys) before the SELECT on instinct_site_projects. Add
     // a no-op UPDATE result at the head of the queue so the real
     // SELECT still lands on the project row below.
     mockSafeQuery.mockResolvedValueOnce({ rows: [] });
@@ -573,7 +573,7 @@ describe("deleteSiteProject slug freeing", () => {
     // getSiteProject: reaper UPDATE + SELECT
     mockSafeQuery.mockResolvedValueOnce({ rows: [] });
     mockSafeQuery.mockResolvedValueOnce({ rows: [BASE_PROJECT_ROW] });
-    // UPDATE apex_site_projects SET status='archived', client_slug=$2 ...
+    // UPDATE instinct_site_projects SET status='archived', client_slug=$2 ...
     mockSafeQuery.mockResolvedValueOnce({
       rows: [{ ...BASE_PROJECT_ROW, status: "archived", client_slug: "test5--deleted-abc12345" }],
     });

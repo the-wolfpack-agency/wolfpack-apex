@@ -1,6 +1,6 @@
 /**
  * Per-user capability overrides — persisted in the
- * `apex_team_members.capability_overrides` JSONB column (migration 021).
+ * `instinct_team_members.capability_overrides` JSONB column (migration 021).
  *
  * Shape stored in the DB:
  *
@@ -151,7 +151,7 @@ export async function loadUserOverrides(
   if (!process.env.DATABASE_URL) return null;
   const { rows } = await safeQuery<{ role: string; capability_overrides: unknown }>(
     `SELECT role, capability_overrides
-       FROM apex_team_members
+       FROM instinct_team_members
       WHERE id = $1 AND is_active = true`,
     [userId],
   );
@@ -173,7 +173,7 @@ export async function saveUserOverrides(
 ): Promise<boolean> {
   if (!process.env.DATABASE_URL) return false;
   const result = await query(
-    `UPDATE apex_team_members
+    `UPDATE instinct_team_members
         SET capability_overrides = $2::jsonb
       WHERE id = $1 AND is_active = true`,
     [userId, JSON.stringify(overrides)],

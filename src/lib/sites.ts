@@ -93,7 +93,7 @@ export async function createSiteProject(
   validateBrief(brief);
   const id = `site_${randomUUID()}`;
   const result = await safeQuery<Record<string, unknown>>(
-    `INSERT INTO apex_site_projects
+    `INSERT INTO instinct_site_projects
        (id, client_slug, display_name, brief, status, created_by)
      VALUES ($1, $2, $3, $4, 'draft', $5)
      RETURNING *`,
@@ -111,7 +111,7 @@ export async function createSiteProject(
 
 export async function listSiteProjects(): Promise<SiteProject[]> {
   const result = await safeQuery<Record<string, unknown>>(
-    `SELECT * FROM apex_site_projects
+    `SELECT * FROM instinct_site_projects
        WHERE status != 'archived'
        ORDER BY updated_at DESC`,
   );
@@ -158,7 +158,7 @@ export async function deleteSiteProject(
       : before.client_slug;
 
   const result = await safeQuery<Record<string, unknown>>(
-    `UPDATE apex_site_projects
+    `UPDATE instinct_site_projects
        SET status = 'archived', client_slug = $2, updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -339,7 +339,7 @@ export function deployEnvPreflight(): { ok: boolean; missing: string[] } {
 async function reapStuckDeploys(projectId: string): Promise<void> {
   const cutoffMs = DEPLOY_TIMEOUT_MS;
   const { rows } = await safeQuery<{ id: string }>(
-    `UPDATE apex_site_deploys
+    `UPDATE instinct_site_deploys
         SET status = 'failed',
             log_excerpt = COALESCE(log_excerpt, '') ||
               '[reaped] no webhook callback within ' || $2 || ' ms',
@@ -353,7 +353,7 @@ async function reapStuckDeploys(projectId: string): Promise<void> {
   if (rows.length > 0) {
     // Flip the project if its status still reflects an in-flight deploy.
     await safeQuery(
-      `UPDATE apex_site_projects
+      `UPDATE instinct_site_projects
           SET status = 'failed', updated_at = NOW()
         WHERE id = $1
           AND status IN ('provisioning','deploying')`,
@@ -370,7 +370,7 @@ export async function getSiteProject(id: string): Promise<SiteProject | null> {
     // project data so the page loads.
   });
   const result = await safeQuery<Record<string, unknown>>(
-    `SELECT * FROM apex_site_projects WHERE id = $1`,
+    `SELECT * FROM instinct_site_projects WHERE id = $1`,
     [id],
   );
   if (result.rows.length === 0) return null;
@@ -385,7 +385,7 @@ export async function updateBrief(
 ): Promise<SiteProject> {
   validateBrief(brief);
   const result = await safeQuery<Record<string, unknown>>(
-    `UPDATE apex_site_projects
+    `UPDATE instinct_site_projects
         SET brief = $2, display_name = $3, updated_at = NOW()
       WHERE id = $1
   RETURNING *`,
@@ -410,7 +410,7 @@ export async function recordAssetUpload(
 ): Promise<void> {
   const id = `asset_${randomUUID()}`;
   await safeQuery(
-    `INSERT INTO apex_site_assets (id, project_id, filename, mime_type, size_bytes, storage_url, uploaded_by)
+    `INSERT INTO instinct_site_assets (id, project_id, filename, mime_type, size_bytes, storage_url, uploaded_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [id, projectId, filename, mimeType, sizeBytes, storageUrl, uploadedBy],
   );
@@ -603,7 +603,7 @@ export async function triggerDeploy(
 
   const deployId = `deploy_${randomUUID()}`;
   await safeQuery(
-    `INSERT INTO apex_site_deploys (id, project_id, triggered_by, status)
+    `INSERT INTO instinct_site_deploys (id, project_id, triggered_by, status)
      VALUES ($1, $2, $3, 'pending')`,
     [deployId, projectId, triggeredBy],
   );
@@ -619,13 +619,13 @@ export async function triggerDeploy(
       `Deploy aborted: Instinct is missing required env vars (${pf.missing.join(", ")}). ` +
       `Set them in Vercel → Instinct → Settings → Environment Variables, then redeploy.`;
     await safeQuery(
-      `UPDATE apex_site_deploys
+      `UPDATE instinct_site_deploys
           SET status = 'failed', log_excerpt = $2, finished_at = NOW()
         WHERE id = $1`,
       [deployId, msg],
     );
     await safeQuery(
-      `UPDATE apex_site_projects
+      `UPDATE instinct_site_projects
           SET status = 'failed', updated_at = NOW()
         WHERE id = $1`,
       [projectId],
@@ -670,7 +670,7 @@ export async function triggerDeploy(
         );
       }
       await safeQuery(
-        `UPDATE apex_site_projects
+        `UPDATE instinct_site_projects
             SET github_repo = $2, github_repo_url = $3, status = 'provisioning', updated_at = NOW()
           WHERE id = $1`,
         [projectId, repoFullName, repoUrl],
@@ -744,13 +744,13 @@ export async function triggerDeploy(
     );
 
     await safeQuery(
-      `UPDATE apex_site_deploys
+      `UPDATE instinct_site_deploys
           SET workflow_run = $2, status = 'building'
         WHERE id = $1`,
       [deployId, run?.run_id ?? null],
     );
     await safeQuery(
-      `UPDATE apex_site_projects
+      `UPDATE instinct_site_projects
           SET status = 'deploying', last_deploy_id = $2, updated_at = NOW()
         WHERE id = $1`,
       [projectId, deployId],
@@ -765,13 +765,13 @@ export async function triggerDeploy(
     return { deployId, workflowRun: run?.run_id ?? null };
   } catch (err) {
     await safeQuery(
-      `UPDATE apex_site_deploys
+      `UPDATE instinct_site_deploys
           SET status = 'failed', log_excerpt = $2, finished_at = NOW()
         WHERE id = $1`,
       [deployId, (err as Error).message.slice(0, 1000)],
     );
     await safeQuery(
-      `UPDATE apex_site_projects SET status = 'failed', updated_at = NOW() WHERE id = $1`,
+      `UPDATE instinct_site_projects SET status = 'failed', updated_at = NOW() WHERE id = $1`,
       [projectId],
     );
     trackEvent("site.deploy_failed", triggeredBy, userRole, {
@@ -800,7 +800,7 @@ export async function recordDeployResult(
   },
 ): Promise<void> {
   const deploy = await safeQuery<{ project_id: string; triggered_by: string }>(
-    `UPDATE apex_site_deploys
+    `UPDATE instinct_site_deploys
         SET status = $2, preview_url = $3, canary_passed = $4, log_excerpt = $5, finished_at = NOW()
       WHERE id = $1
   RETURNING project_id, triggered_by`,
@@ -817,7 +817,7 @@ export async function recordDeployResult(
 
   const projectStatus: SiteStatus = result.status === "success" ? "ready" : "failed";
   await safeQuery(
-    `UPDATE apex_site_projects
+    `UPDATE instinct_site_projects
         SET status = $2,
             preview_url = COALESCE($3, preview_url),
             last_canary_passed = $4,
@@ -878,7 +878,7 @@ export async function listSiteDeploys(
     `SELECT id, project_id, triggered_by, workflow_run, status,
             preview_url, canary_passed, log_excerpt,
             started_at, finished_at
-       FROM apex_site_deploys
+       FROM instinct_site_deploys
       WHERE project_id = $1
       ORDER BY started_at DESC
       LIMIT $2`,

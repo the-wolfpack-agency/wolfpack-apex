@@ -1,7 +1,7 @@
 /**
  * GET /api/sites/[id]/deploys — admin diagnostic for deploy history.
  *
- * Returns recent rows from apex_site_deploys including log_excerpt so
+ * Returns recent rows from instinct_site_deploys including log_excerpt so
  * operators can see WHY a deploy failed instead of staring at the
  * generic "Internal server error" the PATCH route returns.
  *

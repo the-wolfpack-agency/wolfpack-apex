@@ -1,5 +1,5 @@
 /**
- * Brief Edit Learning Loop — aggregator over apex_site_brief_edits.
+ * Brief Edit Learning Loop — aggregator over instinct_site_brief_edits.
  *
  * Purpose: turn the raw audit log (migration 029) into structured,
  * actionable insights that surface in the admin dashboard and feed
@@ -21,7 +21,7 @@
  *     TYPE (hero/text/cards/...). The audit row stores a JSON-Patch +
  *     brief_before_hash, not the dereferenced brief, so we cannot
  *     recover the section type without joining back to
- *     apex_site_projects.brief (which has already moved on). Index is
+ *     instinct_site_projects.brief (which has already moved on). Index is
  *     a usable proxy: the dashboard tells us "section #2 is edited
  *     the most" which is enough to know "people keep tweaking the
  *     third slot on the homepage". A future migration can store
@@ -66,7 +66,7 @@ export interface BriefEditInsights {
   // site.deploy_triggered event they caused. Current heuristic
   // (user_id + timestamp proximity against instinct_analytics_events)
   // is too noisy to ship — ambiguous when multiple edits are accepted
-  // back-to-back. Add deploy_triggered_by_edit_id to apex_site_deploys
+  // back-to-back. Add deploy_triggered_by_edit_id to instinct_site_deploys
   // and recompute. Holding this here so the schema is stable for the
   // snapshots table.
 }
@@ -74,7 +74,7 @@ export interface BriefEditInsights {
 /* ------------------------- Row shape ---------------------------------- */
 
 /**
- * Shape of a row pulled from apex_site_brief_edits. Exported so the
+ * Shape of a row pulled from instinct_site_brief_edits. Exported so the
  * nightly script + tests can share the type.
  */
 export interface BriefEditRow {
@@ -361,7 +361,7 @@ export function aggregateInsights(
 /* --------------------- DB-backed entry point -------------------------- */
 
 /**
- * Fetch rows from apex_site_brief_edits in the given window and
+ * Fetch rows from instinct_site_brief_edits in the given window and
  * aggregate. Shadow-mode safe: if DATABASE_URL is unset, safeQuery
  * returns [] and we emit an empty-but-valid insights object.
  */
@@ -376,7 +376,7 @@ export async function computeBriefEditInsights(
     `SELECT id, user_id, user_role, instruction, patch, accepted,
             rejection_reason, latency_ms, tokens_in, tokens_out,
             cost_usd, model, created_at
-       FROM apex_site_brief_edits
+       FROM instinct_site_brief_edits
       WHERE created_at >= $1 AND created_at <= $2
       ORDER BY created_at ASC`,
     [start.toISOString(), end.toISOString()],

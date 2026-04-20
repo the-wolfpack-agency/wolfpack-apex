@@ -176,7 +176,7 @@ export async function triggerWorkflow(
   //
   // `inputs` maps to the workflow_dispatch `inputs` block. canary-deploy.yml
   // exposes a `deploy_id` input that the "Notify Instinct" step uses to
-  // correlate the webhook callback with the apex_site_deploys row; without
+  // correlate the webhook callback with the instinct_site_deploys row; without
   // it, the webhook fires the early-exit branch and preview_url never
   // propagates back to the project.
   const body: Record<string, unknown> = { ref };

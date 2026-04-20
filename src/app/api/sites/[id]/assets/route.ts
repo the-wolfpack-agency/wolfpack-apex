@@ -3,7 +3,7 @@
  *
  * Multipart form: "file" + optional "altText". On upload:
  *   1. Validate type (image/*) + size cap
- *   2. Store row in apex_site_assets with a data URI in storage_url (v1)
+ *   2. Store row in instinct_site_assets with a data URI in storage_url (v1)
  *   3. If the project already has a github_repo, commit the bytes to
  *      public/{filename} so the deployed site can reference it
  *   4. trackEvent('site.asset_uploaded')

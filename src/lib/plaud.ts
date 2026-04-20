@@ -7,7 +7,7 @@
  * through the doc quality gate, and write to:
  *   - Postgres (instinct_meeting_transcripts) — system of record
  *   - Qdrant   (via tripleWriteKnowledge)  — semantic search
- *   - Analytics (apex_events)              — learning loop
+ *   - Analytics (instinct_events)              — learning loop
  *
  * Org-level scope (one shared connection for the team), but every
  * transcript is tagged with owner_user_id so we can switch to
@@ -176,7 +176,7 @@ export async function resolveOwnerUserId(ownerEmail?: string): Promise<string | 
 
   if (ownerEmail) {
     const { rows } = await safeQuery<{ id: string }>(
-      `SELECT id FROM apex_team_members WHERE email = $1 LIMIT 1`,
+      `SELECT id FROM instinct_team_members WHERE email = $1 LIMIT 1`,
       [ownerEmail],
     );
     if (rows.length > 0) return rows[0].id;
@@ -408,7 +408,7 @@ export async function listMeetingTranscripts(limit = 50): Promise<MeetingTranscr
             t.title, t.summary, t.recorded_at, t.duration_seconds,
             t.quality_status, t.ingested_at
      FROM instinct_meeting_transcripts t
-     LEFT JOIN apex_team_members m ON m.id = t.owner_user_id
+     LEFT JOIN instinct_team_members m ON m.id = t.owner_user_id
      WHERE t.quality_status <> 'reject'
      ORDER BY COALESCE(t.recorded_at, t.ingested_at) DESC
      LIMIT $1`,
@@ -453,7 +453,7 @@ export async function getMeetingTranscript(id: string): Promise<MeetingTranscrip
             t.title, t.summary, t.transcript_text,
             t.recorded_at, t.duration_seconds, t.quality_status, t.ingested_at
      FROM instinct_meeting_transcripts t
-     LEFT JOIN apex_team_members m ON m.id = t.owner_user_id
+     LEFT JOIN instinct_team_members m ON m.id = t.owner_user_id
      WHERE t.id = $1 AND t.quality_status <> 'reject'
      LIMIT 1`,
     [id],
@@ -528,7 +528,7 @@ export async function searchMeetingTranscripts(
             t.title, t.summary, t.transcript_text,
             t.recorded_at, t.duration_seconds, t.quality_status, t.ingested_at
      FROM instinct_meeting_transcripts t
-     LEFT JOIN apex_team_members m ON m.id = t.owner_user_id
+     LEFT JOIN instinct_team_members m ON m.id = t.owner_user_id
      WHERE t.quality_status <> 'reject' AND (${conditions.join(" OR ")})
      ORDER BY COALESCE(t.recorded_at, t.ingested_at) DESC
      LIMIT 50`,

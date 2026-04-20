@@ -341,7 +341,7 @@ describe("computeBriefEditInsights — DB layer", () => {
     expect(mockSafeQuery).toHaveBeenCalledTimes(1);
     const call = mockSafeQuery.mock.calls[0];
     const [sql, params] = call;
-    expect(String(sql)).toMatch(/apex_site_brief_edits/);
+    expect(String(sql)).toMatch(/instinct_site_brief_edits/);
     expect(params[0]).toBe(new Date(now.getTime() - 7 * 864e5).toISOString());
     expect(params[1]).toBe(now.toISOString());
 

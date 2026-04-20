@@ -306,10 +306,10 @@ describe("CTO Workflow", () => {
       .mockResolvedValueOnce({ rows: [{ count: 5 }], fromCache: false });   // team members
 
     const [knowledge, features, discussions, team] = await Promise.all([
-      mockSafeQuery("SELECT COUNT(*) FROM apex_knowledge"),
+      mockSafeQuery("SELECT COUNT(*) FROM instinct_knowledge"),
       mockSafeQuery("SELECT COUNT(*) FROM instinct_feature_requests WHERE status != 'completed'"),
       mockSafeQuery("SELECT COUNT(*) FROM instinct_discussions WHERE status = 'open'"),
-      mockSafeQuery("SELECT COUNT(*) FROM apex_team_members WHERE is_active = true"),
+      mockSafeQuery("SELECT COUNT(*) FROM instinct_team_members WHERE is_active = true"),
     ]);
 
     expect(knowledge.rows[0].count).toBe(42);
@@ -599,7 +599,7 @@ describe("Dev Workflow", () => {
     expect(saved).not.toBeNull();
     expect(saved!.tokens_used).toBe(150);
     expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining("INSERT INTO apex_knowledge"),
+      expect.stringContaining("INSERT INTO instinct_knowledge"),
       expect.arrayContaining(["How does the caching layer work?", 150]),
     );
   });

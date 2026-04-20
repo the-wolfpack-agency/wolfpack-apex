@@ -282,7 +282,7 @@ describe("provisionClientRepoSecrets (direct)", () => {
 describe("triggerDeploy → provisionClientRepoSecrets wiring", () => {
   function mockProjectFetch(extra: Partial<Record<string, unknown>> = {}) {
     // getSiteProject reaps stuck deploys FIRST (an UPDATE on
-    // apex_site_deploys) before the SELECT on apex_site_projects.
+    // instinct_site_deploys) before the SELECT on instinct_site_projects.
     // Queue a no-op UPDATE result so the SELECT still lands on the
     // project row.
     mockSafeQuery.mockResolvedValueOnce({ rows: [] });

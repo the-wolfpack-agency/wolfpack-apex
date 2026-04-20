@@ -239,7 +239,7 @@ describe("generateBriefEdit", () => {
     // Audit row inserted with accepted=NULL
     expect(mockSafeQuery).toHaveBeenCalledTimes(1);
     const [sql, params] = mockSafeQuery.mock.calls[0];
-    expect(sql).toContain("INSERT INTO apex_site_brief_edits");
+    expect(sql).toContain("INSERT INTO instinct_site_brief_edits");
     // accepted is the 9th param
     expect(params[8]).toBeNull();
 
@@ -454,7 +454,7 @@ describe("recordBriefEditDecision", () => {
     expect(result.projectId).toBe("site_1");
 
     const [sql, params] = mockSafeQuery.mock.calls[0];
-    expect(sql).toContain("UPDATE apex_site_brief_edits");
+    expect(sql).toContain("UPDATE instinct_site_brief_edits");
     expect(sql).toContain("SET accepted");
     expect(params[0]).toBe("brief_edit_abc");
     expect(params[1]).toBe(true);

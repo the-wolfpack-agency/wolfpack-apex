@@ -5,10 +5,10 @@
  *   - Resolve the underlying Vercel project id for a given site by
  *     looking up `wolfpack-{client_slug}` (matches the naming used
  *     everywhere else in sites.ts — we intentionally do NOT persist the
- *     Vercel project id on `apex_site_projects` because hard-delete
+ *     Vercel project id on `instinct_site_projects` because hard-delete
  *     already uses name-based lookup, and naming remains the single
  *     source of truth).
- *   - Persist every domain add/refresh/remove into `apex_site_domains`.
+ *   - Persist every domain add/refresh/remove into `instinct_site_domains`.
  *   - Fire analytics on every lifecycle transition so the learning loop
  *     sees which clients need custom domains most, which domains fail
  *     verification, which designers are the power users.
@@ -61,7 +61,7 @@ export async function resolveVercelProjectId(
   siteId: string,
 ): Promise<{ projectId: string | null; clientSlug: string | null }> {
   const { rows } = await safeQuery<{ client_slug: string }>(
-    `SELECT client_slug FROM apex_site_projects WHERE id = $1`,
+    `SELECT client_slug FROM instinct_site_projects WHERE id = $1`,
     [siteId],
   );
   if (rows.length === 0) return { projectId: null, clientSlug: null };
@@ -176,7 +176,7 @@ export async function registerDomain(opts: {
     if (e.code !== "domain_in_use") {
       const id = `domain_${randomUUID()}`;
       await safeQuery(
-        `INSERT INTO apex_site_domains
+        `INSERT INTO instinct_site_domains
            (id, site_id, domain, status, verification_records, added_by, last_error)
          VALUES ($1, $2, $3, 'failed', $4, $5, $6)
          ON CONFLICT (domain) DO UPDATE
@@ -198,7 +198,7 @@ export async function registerDomain(opts: {
   const id = `domain_${randomUUID()}`;
   const status = statusFromVercel(record);
   const result = await safeQuery<Record<string, unknown>>(
-    `INSERT INTO apex_site_domains
+    `INSERT INTO instinct_site_domains
        (id, site_id, domain, status, verification_records, added_by)
      VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING *`,
@@ -290,7 +290,7 @@ export async function refreshDomainStatus(opts: {
   }
 
   const prior = await safeQuery<Record<string, unknown>>(
-    `SELECT * FROM apex_site_domains WHERE site_id = $1 AND domain = $2`,
+    `SELECT * FROM instinct_site_domains WHERE site_id = $1 AND domain = $2`,
     [opts.siteId, domain],
   );
   const wasVerifiedBefore =
@@ -301,7 +301,7 @@ export async function refreshDomainStatus(opts: {
   if (!record) {
     // Vercel no longer knows about this domain → mark removed.
     const result = await safeQuery<Record<string, unknown>>(
-      `UPDATE apex_site_domains
+      `UPDATE instinct_site_domains
           SET status = 'removed', removed_at = NOW()
         WHERE site_id = $1 AND domain = $2
       RETURNING *`,
@@ -319,7 +319,7 @@ export async function refreshDomainStatus(opts: {
 
   const status = statusFromVercel(record);
   const result = await safeQuery<Record<string, unknown>>(
-    `UPDATE apex_site_domains
+    `UPDATE instinct_site_domains
         SET status = $3,
             verification_records = $4,
             verified_at = CASE WHEN $3 = 'verified' AND verified_at IS NULL
@@ -403,7 +403,7 @@ export async function unregisterDomain(opts: {
   }
 
   await safeQuery(
-    `UPDATE apex_site_domains
+    `UPDATE instinct_site_domains
         SET status = 'removed', removed_at = NOW()
       WHERE site_id = $1 AND domain = $2`,
     [opts.siteId, domain],
@@ -424,7 +424,7 @@ export async function listDomainsForSite(
   siteId: string,
 ): Promise<DomainRecord[]> {
   const { rows } = await safeQuery<Record<string, unknown>>(
-    `SELECT * FROM apex_site_domains
+    `SELECT * FROM instinct_site_domains
        WHERE site_id = $1
        ORDER BY added_at DESC`,
     [siteId],

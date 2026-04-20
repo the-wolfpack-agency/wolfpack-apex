@@ -5,7 +5,7 @@
  * for the requested window (default 7 days, max 90). Pure read path —
  * the nightly script (scripts/brief-edit-insights-nightly.ts) writes
  * snapshots; this endpoint recomputes live so the dashboard always
- * reflects the current state of apex_site_brief_edits.
+ * reflects the current state of instinct_site_brief_edits.
  *
  * Role gate: hasRole(user.role, "hr") — ceo / cto / hr only. Sales + ops
  * have no business seeing per-user acceptance rates.

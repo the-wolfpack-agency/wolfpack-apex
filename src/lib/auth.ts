@@ -105,7 +105,7 @@ export async function authenticate(email: string, password: string): Promise<Aut
   try {
     const result = await query(
       `SELECT id, email, name, role, password_hash, avatar_url, created_at
-       FROM apex_team_members
+       FROM instinct_team_members
        WHERE email = $1 AND is_active = true`,
       [email],
     );

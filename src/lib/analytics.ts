@@ -168,7 +168,7 @@ export type InstinctEventType =
   | "site.domain_add_failed"
   // Sites — unauthenticated share links + client approval workflow
   // (035_share_and_approvals). `token_nonce` is the UUID stored in
-  // apex_share_tokens — never the signed blob, never the secret.
+  // instinct_share_tokens — never the signed blob, never the secret.
   | "site.share_link_issued"
   | "site.share_link_accessed"
   | "site.share_link_revoked"
@@ -457,8 +457,8 @@ export type InstinctEventType =
   | "figma_import_failed"
   | "figma_import_applied"
   // Sites — version history (Path C Phase 3)
-  // Unified timeline over apex_site_brief_generations +
-  // apex_site_brief_edits. Restore is the strong signal: clients whose
+  // Unified timeline over instinct_site_brief_generations +
+  // instinct_site_brief_edits. Restore is the strong signal: clients whose
   // designers roll back often = brittle edit / extraction patterns that
   // the learning loop flags for tuning.
   //   site.version_history_viewed: { site_id, version_count }
@@ -524,7 +524,7 @@ export function trackEvent(
 
   const ts = new Date().toISOString();
   query(
-    `INSERT INTO apex_events (event_type, user_id, user_role, metadata, timestamp)
+    `INSERT INTO instinct_events (event_type, user_id, user_role, metadata, timestamp)
      VALUES ($1, $2, $3, $4, $5)`,
     [event, userId, userRole, JSON.stringify({ ...metadata, ts }), ts],
   ).catch((err) => {
@@ -550,7 +550,7 @@ export async function getEventCounts(
   try {
     const result = await query(
       `SELECT event_type, COUNT(*)::int AS count
-       FROM apex_events
+       FROM instinct_events
        WHERE timestamp > NOW() - INTERVAL '1 hour' * $1
        GROUP BY event_type
        ORDER BY count DESC`,
