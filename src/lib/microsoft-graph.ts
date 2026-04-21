@@ -638,36 +638,55 @@ async function fetchLiveEmailsFromContact(userId: string, email: string, count: 
   const token = await getValidToken(userId);
   if (!token) return [];
 
-  // Sanitize the email for the OData filter — single quotes must be
-  // doubled per OData spec; strip anything non-printable that could
-  // break the filter or risk injection.
+  // Sanitize the email for OData — double single quotes; strip
+  // non-printable. Graph's email-address `eq` is case-insensitive.
   const safe = email.replace(/'/g, "''").replace(/[^\x20-\x7E]/g, "");
-  // Widen the search beyond "FROM in Inbox only." Include:
-  //   - messages FROM the contact (classic inbox replies)
-  //   - messages WE sent TO the contact (sent items + threads we kicked off)
-  //   - messages CCing the contact (kept in the loop)
-  // Graph's email-address `eq` is case-insensitive by default, so we
-  // don't need to lowercase either side.
-  const filter = encodeURIComponent(
-    `from/emailAddress/address eq '${safe}'` +
-      ` or toRecipients/any(r:r/emailAddress/address eq '${safe}')` +
-      ` or ccRecipients/any(r:r/emailAddress/address eq '${safe}')`,
+  const select = "id,subject,from,receivedDateTime,bodyPreview,isRead,importance";
+  const order = "receivedDateTime desc";
+
+  // Graph's /me/messages rejects OR'd `any()` filters with
+  // InefficientFilter for many tenants, which is why the widened
+  // single-query version silently returned []. Split into three
+  // simple filters and merge.
+  const filters = [
+    `from/emailAddress/address eq '${safe}'`,
+    `toRecipients/any(r:r/emailAddress/address eq '${safe}')`,
+    `ccRecipients/any(r:r/emailAddress/address eq '${safe}')`,
+  ];
+
+  type RawMsg = {
+    id: string;
+    subject: string;
+    from: { emailAddress: { name: string; address: string } } | null;
+    receivedDateTime: string;
+    bodyPreview: string;
+    isRead: boolean;
+    importance: string;
+  };
+
+  const perFilter = await Promise.all(
+    filters.map((f) =>
+      graphFetch<{ value?: RawMsg[] }>(
+        `me/messages?$filter=${encodeURIComponent(f)}&$top=${count}&$orderby=${encodeURIComponent(order)}&$select=${encodeURIComponent(select)}`,
+        token.accessToken,
+        userId,
+      ).catch(() => ({ value: [] as RawMsg[] })),
+    ),
   );
-  const data = await graphFetch<{
-    value?: {
-      id: string;
-      subject: string;
-      from: { emailAddress: { name: string; address: string } } | null;
-      receivedDateTime: string;
-      bodyPreview: string;
-      isRead: boolean;
-      importance: string;
-    }[];
-  }>(
-    `me/messages?$filter=${filter}&$top=${count}&$orderby=receivedDateTime desc&$select=id,subject,from,receivedDateTime,bodyPreview,isRead,importance`,
-    token.accessToken,
-    userId,
+  const merged: RawMsg[] = [];
+  const seen = new Set<string>();
+  for (const page of perFilter) {
+    for (const m of page?.value ?? []) {
+      if (seen.has(m.id)) continue;
+      seen.add(m.id);
+      merged.push(m);
+    }
+  }
+  // Sort merged list newest-first and cap.
+  merged.sort((a, b) =>
+    a.receivedDateTime < b.receivedDateTime ? 1 : a.receivedDateTime > b.receivedDateTime ? -1 : 0,
   );
+  const data = { value: merged.slice(0, count) };
 
   if (!data?.value) return [];
 
@@ -1174,7 +1193,9 @@ function demoUserProfile(): UserProfile {
  * Returns today's and upcoming meetings with subjects, times, and attendees.
  */
 export async function fetchCalendarEvents(userId: string, startDate: string, endDate: string): Promise<CalendarEvent[]> {
-  const cacheKey = `${userId}:ms-calendar:${startDate}:${endDate}`;
+  // v2: bumped when CalendarEvent gained the attendeeEmails field.
+  // Old cached entries lack it → empty email lookups.
+  const cacheKey = `${userId}:ms-calendar-v2:${startDate}:${endDate}`;
   const cached = getCached<CalendarEvent[]>(cacheKey);
   if (cached) return cached;
 
@@ -1207,7 +1228,10 @@ export async function fetchRecentEmails(userId: string, count: number = 15, fold
  * Fetch emails exchanged with a specific contact by email address.
  */
 export async function fetchEmailsFromContact(userId: string, email: string, count: number = 10): Promise<Email[]> {
-  const cacheKey = `${userId}:ms-emails-from:${email}:${count}`;
+  // v2: cache key bumped when we switched from a single OR'd filter
+  // (which Graph rejected as InefficientFilter) to three merged
+  // queries. Old "empty" cache entries need to be invalidated.
+  const cacheKey = `${userId}:ms-emails-from-v2:${email}:${count}`;
   const cached = getCached<Email[]>(cacheKey);
   if (cached) return cached;
 
