@@ -7,6 +7,7 @@ import {
 } from "@/lib/microsoft-graph";
 import { listCachedTasks } from "@/lib/integrations/microsoft-tasks";
 import { computeInsights, sortBySeverity } from "@/lib/ms-insights/insights";
+import { ingestInsightsToBrain } from "@/lib/brain/ingest-insights";
 
 /**
  * GET /api/ms/insights
@@ -65,6 +66,10 @@ export async function GET(req: NextRequest) {
     risk_count: insights.filter((i) => i.severity === "risk").length,
     warn_count: insights.filter((i) => i.severity === "warn").length,
   });
+
+  // Fire-and-forget Brain write so insight snapshots feed into the
+  // central RAG store alongside uploaded docs and discussions.
+  void ingestInsightsToBrain(user.id, user.role, insights, nowMs);
 
   return NextResponse.json({ insights });
 }

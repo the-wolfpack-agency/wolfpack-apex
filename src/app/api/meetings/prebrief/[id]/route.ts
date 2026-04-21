@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
 import { computePrebrief } from "@/lib/meetings/prebrief";
+import { ingestPrebriefToBrain } from "@/lib/brain/ingest-insights";
 
 /**
  * GET /api/meetings/prebrief/[id]
@@ -37,6 +38,18 @@ export async function GET(
     thread_count: result.recentThreads.length,
     open_task_count: result.openTasks.length,
     has_linked_goal: result.linkedGoal !== null,
+  });
+
+  // Fire-and-forget Brain write — so the assistant can later recall
+  // "what was the prebrief for meeting X?" from RAG.
+  void ingestPrebriefToBrain(user.id, {
+    meetingId: id,
+    subject: result.meeting.subject,
+    start: result.meeting.start,
+    attendeeEmails: result.attendeeEmails,
+    threadSubjects: result.recentThreads.map((t) => t.subject),
+    openTaskTitles: result.openTasks.map((t) => t.title),
+    linkedGoalTitle: result.linkedGoal?.title ?? null,
   });
 
   return NextResponse.json(result);

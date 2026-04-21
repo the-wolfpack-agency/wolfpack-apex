@@ -586,15 +586,21 @@ export async function listEvents(
 
   if (!res.ok || !res.data?.value) return [];
 
-  return res.data.value.map((ev) => ({
-    id: ev.id,
-    subject: ev.subject,
-    start: ev.start.dateTime,
-    end: ev.end.dateTime,
-    location: ev.location?.displayName || "",
-    attendees: (ev.attendees || []).map((a) => a.emailAddress.name || a.emailAddress.address),
-    isOnlineMeeting: ev.isOnlineMeeting || false,
-  }));
+  return res.data.value.map((ev) => {
+    const rawAttendees = ev.attendees || [];
+    return {
+      id: ev.id,
+      subject: ev.subject,
+      start: ev.start.dateTime,
+      end: ev.end.dateTime,
+      location: ev.location?.displayName || "",
+      attendees: rawAttendees.map((a) => a.emailAddress.name || a.emailAddress.address),
+      attendeeEmails: rawAttendees
+        .map((a) => (a.emailAddress.address || "").trim().toLowerCase())
+        .filter((addr) => addr.includes("@")),
+      isOnlineMeeting: ev.isOnlineMeeting || false,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

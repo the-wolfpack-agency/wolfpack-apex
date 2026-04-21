@@ -297,9 +297,32 @@ function Section({
         onClick={onToggle}
         style={toggleStyle}
       >
-        <span>{label}</span>
-        <span style={{ color: "var(--wp-text-dim)", fontSize: 12 }}>
-          {count} {expanded ? "−" : "+"}
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span
+            aria-hidden="true"
+            style={{
+              display: "inline-block",
+              transition: "transform 120ms",
+              transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+              color: "var(--wp-text-dim)",
+              fontSize: 10,
+            }}
+          >
+            ▶
+          </span>
+          <span>{label}</span>
+        </span>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            padding: "2px 8px",
+            borderRadius: 999,
+            background: "var(--wp-dark-surface2)",
+            color: "var(--wp-text-dim)",
+          }}
+        >
+          {count}
         </span>
       </button>
       {expanded ? <div style={{ marginTop: 8 }}>{children}</div> : null}

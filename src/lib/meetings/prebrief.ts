@@ -58,17 +58,30 @@ function calendarWindow(): { start: string; end: string } {
 }
 
 /**
- * Extract email-looking tokens from the CalendarEvent.attendees list.
- * Graph hands us either display names or raw addresses depending on
- * which mailbox the invitee is on — the shape is "one-or-the-other
- * per entry." We keep anything containing an "@".
+ * Extract email addresses from a CalendarEvent. Prefers the dedicated
+ * `attendeeEmails` field (populated by fetchLiveCalendarEvents from
+ * Graph's a.emailAddress.address); falls back to @-scanning `attendees`
+ * so historical events (pre-field) and shadow-mode demos still work.
+ *
+ * Regression context: the prior version only scanned `attendees`, but
+ * Graph maps those to display NAMES first — so "Nick Hoxsie" never
+ * produced a match and prebrief reported "No recent email" even when
+ * threads existed.
  */
-function extractEmails(attendees: string[]): string[] {
+function extractEmails(
+  event: { attendees?: string[]; attendeeEmails?: string[] },
+): string[] {
   const out: string[] = [];
-  for (const a of attendees) {
-    if (typeof a === "string" && a.includes("@")) {
-      const trimmed = a.trim().toLowerCase();
-      if (trimmed && !out.includes(trimmed)) out.push(trimmed);
+  const push = (value: string) => {
+    const trimmed = value.trim().toLowerCase();
+    if (trimmed && !out.includes(trimmed)) out.push(trimmed);
+  };
+  for (const a of event.attendeeEmails ?? []) {
+    if (typeof a === "string" && a.includes("@")) push(a);
+  }
+  if (out.length === 0) {
+    for (const a of event.attendees ?? []) {
+      if (typeof a === "string" && a.includes("@")) push(a);
     }
   }
   return out;
@@ -128,7 +141,7 @@ export async function computePrebrief(
   const meeting = events.find((e) => e.id === meetingId) || null;
   if (!meeting) return null;
 
-  const attendeeEmails = extractEmails(meeting.attendees);
+  const attendeeEmails = extractEmails(meeting);
 
   const threadPromises = attendeeEmails.slice(0, 5).map((email) =>
     fetchEmailsFromContact(userId, email, 3).catch(() => [] as Email[]),

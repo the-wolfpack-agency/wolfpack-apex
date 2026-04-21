@@ -30,7 +30,12 @@ export interface CalendarEvent {
   start: string;
   end: string;
   location: string;
+  /** Display-friendly names (fall back to email if name unavailable). */
   attendees: string[];
+  /** Raw email addresses, always lowercased. Empty when mailbox hides it.
+   *  Consumers doing lookups (prebrief threads, directory joins) should
+   *  use this field — `attendees` is for display only. */
+  attendeeEmails: string[];
   isOnlineMeeting: boolean;
 }
 
@@ -577,15 +582,21 @@ async function fetchLiveCalendarEvents(userId: string, startDate: string, endDat
 
   if (!data?.value) return [];
 
-  return data.value.map((ev) => ({
-    id: ev.id,
-    subject: ev.subject,
-    start: normalizeGraphDateTime(ev.start.dateTime, ev.start.timeZone),
-    end: normalizeGraphDateTime(ev.end.dateTime, ev.end.timeZone),
-    location: ev.location?.displayName || "",
-    attendees: (ev.attendees || []).map((a) => a.emailAddress.name || a.emailAddress.address),
-    isOnlineMeeting: ev.isOnlineMeeting || false,
-  }));
+  return data.value.map((ev) => {
+    const rawAttendees = ev.attendees || [];
+    return {
+      id: ev.id,
+      subject: ev.subject,
+      start: normalizeGraphDateTime(ev.start.dateTime, ev.start.timeZone),
+      end: normalizeGraphDateTime(ev.end.dateTime, ev.end.timeZone),
+      location: ev.location?.displayName || "",
+      attendees: rawAttendees.map((a) => a.emailAddress.name || a.emailAddress.address),
+      attendeeEmails: rawAttendees
+        .map((a) => (a.emailAddress.address || "").trim().toLowerCase())
+        .filter((addr) => addr.includes("@")),
+      isOnlineMeeting: ev.isOnlineMeeting || false,
+    };
+  });
 }
 
 async function fetchLiveRecentEmails(userId: string, count: number, folderId?: string): Promise<Email[]> {
@@ -770,6 +781,7 @@ function demoCalendarEvents(): CalendarEvent[] {
       end: todayAt(10, 0),
       location: "Teams",
       attendees: ["Sarah Chen", "Mark Rivera", "James Greenfield"],
+      attendeeEmails: ["sarah@wolfpack.dev", "mark@wolfpack.dev", "james@greenfieldcorp.com"],
       isOnlineMeeting: true,
     },
     {
@@ -779,6 +791,7 @@ function demoCalendarEvents(): CalendarEvent[] {
       end: todayAt(10, 30),
       location: "Slack Huddle",
       attendees: ["Dev Team", "Sarah Chen", "Alex Park"],
+      attendeeEmails: ["sarah@wolfpack.dev", "alex@wolfpack.dev"],
       isOnlineMeeting: true,
     },
     {
@@ -788,6 +801,7 @@ function demoCalendarEvents(): CalendarEvent[] {
       end: todayAt(11, 45),
       location: "Zoom",
       attendees: ["Dr. Lisa Tran", "Mike Owens"],
+      attendeeEmails: ["lisa.tran@meridianhealth.org", "mike@wolfpack.dev"],
       isOnlineMeeting: true,
     },
     {
@@ -797,6 +811,7 @@ function demoCalendarEvents(): CalendarEvent[] {
       end: todayAt(13, 30),
       location: "Bistro 44, Downtown",
       attendees: ["Rachel Stone"],
+      attendeeEmails: ["rachel@cedarstone.co"],
       isOnlineMeeting: false,
     },
     {
@@ -806,6 +821,7 @@ function demoCalendarEvents(): CalendarEvent[] {
       end: todayAt(15, 0),
       location: "Google Meet",
       attendees: ["Emily Watts", "Carlos Mendez", "Sarah Chen"],
+      attendeeEmails: ["emily@horizondigital.com", "carlos@horizondigital.com", "sarah@wolfpack.dev"],
       isOnlineMeeting: true,
     },
     {
@@ -815,6 +831,7 @@ function demoCalendarEvents(): CalendarEvent[] {
       end: todayAt(17, 0),
       location: "Conference Room A",
       attendees: ["Sarah Chen", "Alex Park", "Jordan Lee"],
+      attendeeEmails: ["sarah@wolfpack.dev", "alex@wolfpack.dev", "jordan@wolfpack.dev"],
       isOnlineMeeting: false,
     },
   ];

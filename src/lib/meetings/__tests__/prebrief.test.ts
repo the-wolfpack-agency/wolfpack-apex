@@ -189,4 +189,37 @@ describe("computePrebrief", () => {
     const result = await computePrebrief("u1", "evt-1");
     expect(result!.attendeeEmails).toEqual(["james@greenfield.com"]);
   });
+
+  // Regression: fetchLiveCalendarEvents maps attendees to display NAMES
+  // first, falling back to address. An earlier extractEmails required
+  // @-in-token and dropped every name-only attendee, producing "No
+  // recent email with attendees" even when threads existed. The fix
+  // adds a dedicated `attendeeEmails` field we read from first.
+  test("uses attendeeEmails field when attendees are display-name-only", async () => {
+    mockFetchCalendarEvents.mockResolvedValue([
+      {
+        ...MEETING,
+        attendees: ["Nick Hoxsie", "Nick Homyk"], // display names only
+        attendeeEmails: ["nick.h@wolfpack.dev", "nick.homyk@wolfpack.dev"],
+      },
+    ]);
+    mockFetchEmailsFromContact.mockResolvedValue([
+      { ...EMAIL_NEWER, fromEmail: "nick.h@wolfpack.dev" },
+    ]);
+    mockListCachedTasks.mockResolvedValue({ tasks: [], nextCursor: null });
+    mockSafeQuery.mockResolvedValue({ rows: [], fromCache: false });
+
+    const result = await computePrebrief("u1", "evt-1");
+    expect(result!.attendeeEmails).toEqual([
+      "nick.h@wolfpack.dev",
+      "nick.homyk@wolfpack.dev",
+    ]);
+    // And the thread fetch fires — the fix that makes email threads
+    // actually populate on live calendars.
+    expect(mockFetchEmailsFromContact).toHaveBeenCalledWith(
+      "u1",
+      "nick.h@wolfpack.dev",
+      3,
+    );
+  });
 });
