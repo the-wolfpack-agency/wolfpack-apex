@@ -65,6 +65,56 @@ interface InsightSnapshot {
   metric: number | null;
 }
 
+interface CalendarRangeSnapshot {
+  view: "week" | "month" | "year";
+  startMs: number;
+  endMs: number;
+  insights: {
+    totalMeetingHours: number;
+    meetingCount: number;
+    averageDurationMinutes: number | null;
+    backToBackPct: number;
+    topAttendees: Array<{ display: string; count: number }>;
+  };
+  suggestions: Array<{ id: string; severity: string; headline: string; detail: string }>;
+}
+
+export async function ingestCalendarRangeToBrain(
+  userId: string,
+  userRole: string,
+  snap: CalendarRangeSnapshot,
+): Promise<void> {
+  try {
+    const startIso = new Date(snap.startMs).toISOString().split("T")[0];
+    const endIso = new Date(snap.endMs).toISOString().split("T")[0];
+    const top = snap.insights.topAttendees
+      .map((a) => `${a.display} (${a.count})`)
+      .join(", ");
+    const suggestionText = snap.suggestions
+      .map((s) => `[${s.severity.toUpperCase()}] ${s.id}: ${s.headline}`)
+      .join("\n");
+    const answer = [
+      `View: ${snap.view} (${startIso} → ${endIso})`,
+      `Meetings: ${snap.insights.meetingCount} · ${snap.insights.totalMeetingHours}h total`,
+      snap.insights.averageDurationMinutes !== null
+        ? `Avg duration: ${snap.insights.averageDurationMinutes} min`
+        : "Avg duration: n/a",
+      `Back-to-back: ${snap.insights.backToBackPct}%`,
+      top ? `Top contacts: ${top}` : "Top contacts: n/a",
+      suggestionText ? `Suggestions:\n${suggestionText}` : "Suggestions: none",
+    ].join("\n");
+    await upsertKnowledgePoint(
+      `calendar-range:${userId}:${snap.view}:${startIso}`,
+      `Calendar ${snap.view} — ${startIso}`,
+      answer,
+      "calendar.range",
+      ["calendar", snap.view, userRole, startIso],
+    );
+  } catch {
+    /* fire-and-forget */
+  }
+}
+
 export async function ingestInsightsToBrain(
   userId: string,
   userRole: string,

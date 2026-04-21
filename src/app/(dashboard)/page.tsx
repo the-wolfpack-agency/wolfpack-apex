@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import FinancialsCard from "@/components/FinancialsCard";
 import IntegrationStatusBanner from "@/components/IntegrationStatusBanner";
 import MorningBriefing from "@/components/MorningBriefing";
 import MsInsightsPanel from "@/components/MsInsightsPanel";
@@ -252,10 +251,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Financials (CEO/CTO only) */}
-      <FinancialsCard />
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Quick Actions */}
         <div
           className="rounded-lg p-5 border"

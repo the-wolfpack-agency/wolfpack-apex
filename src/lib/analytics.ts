@@ -153,6 +153,12 @@ export type InstinctEventType =
   // email threads with them, their open tasks, linked goal, last
   // decision). View events feed the learning loop so we can grade
   // which prebrief signals actually got clicked.
+  // Calendar page — week/month/year views + suggestion engagement.
+  | "calendar.page_viewed"
+  | "calendar.view_changed"
+  | "calendar.range_computed"
+  | "calendar.suggestion_viewed"
+  | "calendar.suggestion_acted_on"
   | "meeting.prebrief_computed"
   | "meeting.prebrief_viewed"
   | "meeting.prebrief_section_expanded"
