@@ -12,12 +12,17 @@
 
 const mockFetchCalendarEvents = jest.fn();
 const mockFetchEmailsFromContact = jest.fn();
+const mockFindThreads = jest.fn();
 const mockListCachedTasks = jest.fn();
 const mockSafeQuery = jest.fn();
 
 jest.mock("@/lib/microsoft-graph", () => ({
   fetchCalendarEvents: (...a: any[]) => mockFetchCalendarEvents(...a),
   fetchEmailsFromContact: (...a: any[]) => mockFetchEmailsFromContact(...a),
+}));
+
+jest.mock("@/lib/meetings/email-matcher", () => ({
+  findThreadsInvolvingAttendees: (...a: any[]) => mockFindThreads(...a),
 }));
 
 jest.mock("@/lib/integrations/microsoft-tasks", () => ({
@@ -81,6 +86,8 @@ const TASK_A = {
 const TASK_B = { ...TASK_A, id: "t-b", msTaskId: "ms-t-b", status: "notStarted", title: "Prep slides" };
 
 beforeEach(() => {
+  mockFindThreads.mockReset();
+  mockFindThreads.mockResolvedValue([]);
   mockFetchCalendarEvents.mockReset();
   mockFetchEmailsFromContact.mockReset();
   mockListCachedTasks.mockReset();
@@ -90,11 +97,8 @@ beforeEach(() => {
 describe("computePrebrief", () => {
   test("happy path: composes meeting, attendees, threads, tasks, linked goal", async () => {
     mockFetchCalendarEvents.mockResolvedValue([MEETING]);
-    mockFetchEmailsFromContact.mockImplementation((_u: string, email: string) => {
-      if (email === "james@greenfield.com") return Promise.resolve([EMAIL_OLDER, EMAIL_NEWER]);
-      if (email === "sarah@wolfpack.dev") return Promise.resolve([]);
-      return Promise.resolve([]);
-    });
+    // Matcher now returns merged, newest-first results directly.
+    mockFindThreads.mockResolvedValue([EMAIL_NEWER, EMAIL_OLDER]);
     mockListCachedTasks.mockImplementation((_u: string, opts: any) => {
       if (opts.status === "inProgress") return Promise.resolve({ tasks: [TASK_A], nextCursor: null });
       if (opts.status === "notStarted") return Promise.resolve({ tasks: [TASK_B], nextCursor: null });
@@ -203,7 +207,7 @@ describe("computePrebrief", () => {
         attendeeEmails: ["nick.h@wolfpack.dev", "nick.homyk@wolfpack.dev"],
       },
     ]);
-    mockFetchEmailsFromContact.mockResolvedValue([
+    mockFindThreads.mockResolvedValue([
       { ...EMAIL_NEWER, fromEmail: "nick.h@wolfpack.dev" },
     ]);
     mockListCachedTasks.mockResolvedValue({ tasks: [], nextCursor: null });
@@ -214,12 +218,16 @@ describe("computePrebrief", () => {
       "nick.h@wolfpack.dev",
       "nick.homyk@wolfpack.dev",
     ]);
-    // And the thread fetch fires — the fix that makes email threads
-    // actually populate on live calendars.
-    expect(mockFetchEmailsFromContact).toHaveBeenCalledWith(
+    // findThreadsInvolvingAttendees receives BOTH the display names
+    // (for name-based matching when Graph omits addresses) AND the
+    // extracted emails — the robust path that finally makes threads
+    // appear on live tenants.
+    expect(mockFindThreads).toHaveBeenCalledWith(
       "u1",
-      "nick.h@wolfpack.dev",
+      ["Nick Hoxsie", "Nick Homyk"],
+      ["nick.h@wolfpack.dev", "nick.homyk@wolfpack.dev"],
       3,
     );
+    expect(result!.recentThreads).toHaveLength(1);
   });
 });

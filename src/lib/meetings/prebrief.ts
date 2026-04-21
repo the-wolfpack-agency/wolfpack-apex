@@ -19,10 +19,10 @@
 
 import {
   fetchCalendarEvents,
-  fetchEmailsFromContact,
   type CalendarEvent,
   type Email,
 } from "@/lib/microsoft-graph";
+import { findThreadsInvolvingAttendees } from "@/lib/meetings/email-matcher";
 import {
   listCachedTasks,
   type MsTask,
@@ -143,14 +143,16 @@ export async function computePrebrief(
 
   const attendeeEmails = extractEmails(meeting);
 
-  const threadPromises = attendeeEmails.slice(0, 5).map((email) =>
-    fetchEmailsFromContact(userId, email, 3).catch(() => [] as Email[]),
-  );
-  const threadLists = await Promise.all(threadPromises);
-  const allThreads = threadLists.flat();
-  // Sort newest-first, keep top 3.
-  allThreads.sort((a, b) => (a.receivedDateTime < b.receivedDateTime ? 1 : -1));
-  const recentThreads = allThreads.slice(0, 3);
+  // Robust path: pull a bulk slice of recent inbox + sent and match by
+  // any attendee name OR email appearing in any participant. Works
+  // when Graph returns attendees without addresses (happens on many
+  // tenants) and when OR'd $filter expressions are rejected.
+  const recentThreads: Email[] = await findThreadsInvolvingAttendees(
+    userId,
+    meeting.attendees ?? [],
+    attendeeEmails,
+    3,
+  ).catch(() => [] as Email[]);
 
   const [openTasks, linkedGoal] = await Promise.all([
     fetchOpenTasks(userId),
