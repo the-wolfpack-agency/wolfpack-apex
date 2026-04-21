@@ -210,6 +210,10 @@ export default function GoalsPage() {
       data-testid="goals-page"
       data-user-role={userRole}
     >
+      <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>
+        Goals
+      </h1>
+
       {/* North Star — top-center */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="md:col-start-2">
