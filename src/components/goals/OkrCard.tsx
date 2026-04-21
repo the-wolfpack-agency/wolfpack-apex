@@ -12,6 +12,7 @@ import ContributionStream from "./ContributionStream";
 import AddKrForm from "./AddKrForm";
 import UpdateKrProgressForm from "./UpdateKrProgressForm";
 import ArchiveOkrButton from "./ArchiveOkrButton";
+import EditOkrButton from "./EditOkrButton";
 import { krList, type OkrView, type ContributionView } from "./types";
 
 export interface OkrCardProps {
@@ -66,7 +67,14 @@ export default function OkrCard({
             {okr.objective}
           </h3>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <EditOkrButton
+            okrId={okr.id}
+            currentObjective={okr.objective}
+            currentQuarter={okr.quarter}
+            userRole={userRole}
+            onSaved={onArchived ?? (() => {})}
+          />
           <ArchiveOkrButton
             okrId={okr.id}
             userRole={userRole}
