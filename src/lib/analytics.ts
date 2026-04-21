@@ -227,6 +227,11 @@ export type InstinctEventType =
   | "assistant.doc_quality_checked"
   | "assistant.doc_rejected"
   | "assistant.doc_ingested"
+  // Token-free intent router + tool-use pipeline.
+  | "assistant.intent_classified"
+  | "assistant.tool_invoked"
+  | "assistant.fallback_to_rag"
+  | "assistant.fallback_to_ai"
   // QuickBooks
   | "quickbooks.api_called"
   | "quickbooks.connected"

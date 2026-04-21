@@ -9,6 +9,7 @@ import {
   archiveConversation,
 } from "@/lib/assistant";
 import { checkDocQuality, trackGateResult, type GateResult } from "@/lib/doc-quality-gate";
+import { tryToolAnswer, classifyIntent } from "@/lib/assistant/orchestrator";
 
 /**
  * POST /api/assistant -- Send a message, rate, or archive.
@@ -115,6 +116,34 @@ export async function POST(req: NextRequest) {
           verdict: r.gate.verdict,
           flags: r.gate.flags,
         })),
+      });
+    }
+
+    // Token-free fast path: try the deterministic tool router before
+    // burning any AI tokens on RAG / LLM generation.
+    const intentMatch = classifyIntent(message);
+    trackEvent("assistant.intent_classified", user.id, user.role, {
+      intent: intentMatch.intent,
+      confidence: intentMatch.confidence,
+    });
+    if (intentMatch.intent !== "unknown") {
+      const toolAnswer = await tryToolAnswer(message);
+      if (toolAnswer) {
+        trackEvent("assistant.tool_invoked", user.id, user.role, {
+          intent: toolAnswer.intent,
+        });
+        return NextResponse.json({
+          answer: toolAnswer.answer,
+          source: "tool",
+          intent: toolAnswer.intent,
+          data: toolAnswer.data,
+          conversationId: conversationId ?? null,
+        });
+      }
+      // Tool returned null — record the fallback so the learning loop
+      // can see which intents frequently miss their tool path.
+      trackEvent("assistant.fallback_to_rag", user.id, user.role, {
+        intent: intentMatch.intent,
       });
     }
 
