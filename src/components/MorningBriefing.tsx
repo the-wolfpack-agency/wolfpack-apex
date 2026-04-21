@@ -296,42 +296,7 @@ export default function MorningBriefing() {
         </button>
       </div>
 
-      {/* Action Items */}
-      {briefing.actionItems.length > 0 && (
-        <Section title="Action Items" badge={briefing.actionItems.length}>
-          <div className="space-y-2">
-            {briefing.actionItems.map((item, i) => {
-              const style = PRIORITY_STYLES[item.priority];
-              return (
-                <div
-                  key={i}
-                  className="flex items-start gap-3 rounded-lg p-3 border"
-                  style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
-                >
-                  <span
-                    className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full mt-0.5"
-                    style={{ background: style.bg, color: style.text }}
-                  >
-                    {style.label}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium" style={{ color: "var(--wp-text)" }}>
-                      {item.text}
-                    </p>
-                    <p className="text-xs mt-0.5" style={{ color: "var(--wp-text-muted)" }}>
-                      {item.context}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Section>
-      )}
-
-      {/* Meeting Pre-Brief — embedded between Action Items and Today's Schedule */}
-      <MeetingPreBriefPanel />
-
+      {/* Today's Schedule (left) + Action Items (right) half-width pair */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Today's Schedule */}
         <Section
@@ -374,43 +339,85 @@ export default function MorningBriefing() {
           )}
         </Section>
 
-        {/* Inbox */}
-        <Section
-          title="Inbox"
-          badge={briefing.email.unreadCount > 0 ? `${briefing.email.unreadCount} unread` : undefined}
-        >
-          {briefing.email.importantEmails.length === 0 ? (
-            <p className="text-sm" style={{ color: "var(--wp-text-muted)" }}>
-              No important emails.
-            </p>
-          ) : (
+        {/* Action Items (right column) */}
+        {briefing.actionItems.length > 0 ? (
+          <Section title="Action Items" badge={briefing.actionItems.length}>
             <div className="space-y-2">
-              {briefing.email.importantEmails.map((email, i) => (
-                <div
-                  key={i}
-                  className="rounded-lg p-3 border"
-                  style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium truncate" style={{ color: "var(--wp-text)" }}>
-                      {email.from}
-                    </p>
-                    <span className="text-xs shrink-0" style={{ color: "var(--wp-text-muted)" }}>
-                      {formatTime(email.receivedAt)}
+              {briefing.actionItems.map((item, i) => {
+                const style = PRIORITY_STYLES[item.priority];
+                return (
+                  <div
+                    key={i}
+                    className="flex items-start gap-3 rounded-lg p-3 border"
+                    style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+                  >
+                    <span
+                      className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full mt-0.5"
+                      style={{ background: style.bg, color: style.text }}
+                    >
+                      {style.label}
                     </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium" style={{ color: "var(--wp-text)" }}>
+                        {item.text}
+                      </p>
+                      <p className="text-xs mt-0.5" style={{ color: "var(--wp-text-muted)" }}>
+                        {item.context}
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-xs font-medium mt-1" style={{ color: "var(--wp-text-dim)" }}>
-                    {email.subject}
-                  </p>
-                  <p className="text-xs mt-0.5 line-clamp-2" style={{ color: "var(--wp-text-muted)" }}>
-                    {email.preview}
-                  </p>
-                </div>
-              ))}
+                );
+              })}
             </div>
-          )}
-        </Section>
+          </Section>
+        ) : (
+          <Section title="Action Items">
+            <p className="text-sm" style={{ color: "var(--wp-text-muted)" }}>
+              Nothing urgent — you&apos;re clear.
+            </p>
+          </Section>
+        )}
       </div>
+
+      {/* Meeting Pre-Brief — below the schedule/actions pair */}
+      <MeetingPreBriefPanel />
+
+      {/* Inbox — full width below pre-brief */}
+      <Section
+        title="Inbox"
+        badge={briefing.email.unreadCount > 0 ? `${briefing.email.unreadCount} unread` : undefined}
+      >
+        {briefing.email.importantEmails.length === 0 ? (
+          <p className="text-sm" style={{ color: "var(--wp-text-muted)" }}>
+            No important emails.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {briefing.email.importantEmails.map((email, i) => (
+              <div
+                key={i}
+                className="rounded-lg p-3 border"
+                style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium truncate" style={{ color: "var(--wp-text)" }}>
+                    {email.from}
+                  </p>
+                  <span className="text-xs shrink-0" style={{ color: "var(--wp-text-muted)" }}>
+                    {formatTime(email.receivedAt)}
+                  </span>
+                </div>
+                <p className="text-xs font-medium mt-1" style={{ color: "var(--wp-text-dim)" }}>
+                  {email.subject}
+                </p>
+                <p className="text-xs mt-0.5 line-clamp-2" style={{ color: "var(--wp-text-muted)" }}>
+                  {email.preview}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
 
       {/* Financial Pulse (only when financial data exists) */}
       {(briefing.financial.revenueThisMonth > 0 || briefing.financial.cashPosition > 0 || briefing.financial.unpaidInvoiceCount > 0) && (
