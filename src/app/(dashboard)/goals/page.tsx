@@ -219,11 +219,11 @@ export default function GoalsPage() {
         <div className="flex items-center gap-2">
           <CaptureNorthStarForm
             userRole={userRole}
-            onCaptured={() => goals.reload()}
+            onCaptured={() => goals.refetch()}
           />
           <CreateOkrForm
             userRole={userRole}
-            onCreated={() => goals.reload()}
+            onCreated={() => goals.refetch()}
           />
         </div>
       </div>
