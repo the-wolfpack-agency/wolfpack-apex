@@ -10,6 +10,7 @@ import { trackEvent } from "@/lib/analytics";
 import {
   getCachedTaskById,
   updateTask,
+  deleteTask,
   GraphTasksError,
   TaskStatus,
   TaskImportance,
@@ -84,6 +85,32 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           headers: err.retryAfter ? { "Retry-After": String(err.retryAfter) } : undefined,
         });
       }
+      return NextResponse.json({ error: err.message }, { status: err.status >= 500 ? 502 : err.status });
+    }
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const user = getUserFromRequest(req.headers.get("authorization"));
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { id } = await params;
+  const existing = await getCachedTaskById(user.id, id);
+  if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  try {
+    await deleteTask(
+      user.id,
+      await lookupMsListId(existing.listId),
+      existing.msTaskId,
+    );
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    if (err instanceof GraphTasksError) {
+      if (err.status === 401) return NextResponse.json({ error: "Microsoft not connected" }, { status: 401 });
       return NextResponse.json({ error: err.message }, { status: err.status >= 500 ? 502 : err.status });
     }
     return NextResponse.json({ error: "Internal error" }, { status: 500 });

@@ -526,6 +526,32 @@ export async function getConnectionStatus(userId: string): Promise<MsConnectionS
 // Data Fetchers — Live Mode
 // ---------------------------------------------------------------------------
 
+/**
+ * Microsoft Graph returns calendar `start.dateTime` / `end.dateTime`
+ * as a naive string (`"2026-04-21T14:30:00.0000000"`) with an
+ * accompanying `timeZone` field (defaults to `"UTC"`). JS `new Date()`
+ * parses a naive ISO string as LOCAL time — so a UTC value gets shown
+ * at the wrong wall-clock offset (UTC 14:30 → 14:30 local, hiding a
+ * 4h shift for EDT callers).
+ *
+ * Coerce into a TZ-designated ISO so Date() interprets it correctly.
+ * We only handle the Graph default ("UTC") here; if Graph starts
+ * returning a non-UTC zone the naive path stays and the caller sees
+ * the same behavior as before (no regression).
+ */
+export function normalizeGraphDateTime(
+  dateTime: string,
+  timeZone: string | undefined,
+): string {
+  if (/[Zz]$/.test(dateTime) || /[+-]\d{2}:\d{2}$/.test(dateTime)) {
+    return dateTime;
+  }
+  if ((timeZone || "").toUpperCase() === "UTC") {
+    return dateTime + "Z";
+  }
+  return dateTime;
+}
+
 async function fetchLiveCalendarEvents(userId: string, startDate: string, endDate: string): Promise<CalendarEvent[]> {
   const token = await getValidToken(userId);
   if (!token) return [];
@@ -554,8 +580,8 @@ async function fetchLiveCalendarEvents(userId: string, startDate: string, endDat
   return data.value.map((ev) => ({
     id: ev.id,
     subject: ev.subject,
-    start: ev.start.dateTime,
-    end: ev.end.dateTime,
+    start: normalizeGraphDateTime(ev.start.dateTime, ev.start.timeZone),
+    end: normalizeGraphDateTime(ev.end.dateTime, ev.end.timeZone),
     location: ev.location?.displayName || "",
     attendees: (ev.attendees || []).map((a) => a.emailAddress.name || a.emailAddress.address),
     isOnlineMeeting: ev.isOnlineMeeting || false,

@@ -392,6 +392,35 @@ export async function completeTask(
 }
 
 /**
+ * DELETE a task — Graph DELETE + local cache delete.
+ * Write-through: Graph first; on success, drop the cached row so
+ * the UI reflects reality even if a subsequent sync is delayed.
+ */
+export async function deleteTask(
+  userId: string,
+  msListId: string,
+  msTaskId: string,
+): Promise<void> {
+  const token = await resolveToken(userId);
+  const start = Date.now();
+  await graphCall<void>(
+    "DELETE",
+    `me/todo/lists/${encodeURIComponent(msListId)}/tasks/${encodeURIComponent(msTaskId)}`,
+    token,
+  );
+  const { query } = await import("@/lib/db");
+  await query(
+    `DELETE FROM instinct_tasks WHERE user_id = $1 AND ms_task_id = $2`,
+    [userId, msTaskId],
+  );
+  trackEvent("system.task_deleted" as never, userId, "system", {
+    task_id: msTaskId,
+    list_id: msListId,
+    duration_ms: Date.now() - start,
+  });
+}
+
+/**
  * Full sync — pulls every list + every task for the user and upserts
  * into local cache. Intended for first login, webhook refresh, and a
  * future periodic scheduler. Idempotent — calling twice is safe.

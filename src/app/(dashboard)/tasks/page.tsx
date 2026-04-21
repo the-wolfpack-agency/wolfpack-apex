@@ -113,12 +113,19 @@ export default function TasksPage() {
     }
   }
 
-  async function handleComplete(task: Task) {
+  async function handleToggleComplete(task: Task) {
+    const nextStatus: TaskStatus =
+      task.status === "completed" ? "notStarted" : "completed";
     // Optimistic update
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: "completed" } : t)));
-    const res = await fetchWithRefresh(`/api/tasks/${task.id}/complete`, {
-      method: "POST",
-      headers: authHeaders(),
+    setTasks((prev) =>
+      prev.map((t) => (t.id === task.id ? { ...t, status: nextStatus } : t)),
+    );
+    // Use PATCH for the general case (completed → open needs an arbitrary
+    // status change; the /complete endpoint only one-ways to completed).
+    const res = await fetchWithRefresh(`/api/tasks/${task.id}`, {
+      method: "PATCH",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ status: nextStatus }),
     });
     if (!res.ok) {
       // Revert
@@ -228,9 +235,13 @@ export default function TasksPage() {
             >
               <input
                 type="checkbox"
-                aria-label={`Complete ${task.title}`}
+                aria-label={
+                  task.status === "completed"
+                    ? `Reopen ${task.title}`
+                    : `Complete ${task.title}`
+                }
                 checked={task.status === "completed"}
-                onChange={() => handleComplete(task)}
+                onChange={() => handleToggleComplete(task)}
               />
               <button
                 className="flex-1 text-left"
@@ -282,10 +293,13 @@ function TaskDrawer({
   const [dueAt, setDueAt] = useState(task.dueAt ? task.dueAt.slice(0, 10) : "");
   const [importance, setImportance] = useState<TaskImportance>(task.importance);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const listName = lists.find((l) => l.id === task.listId)?.displayName ?? "—";
 
   async function handleSave() {
+    setError(null);
     setSaving(true);
     const res = await fetchWithRefresh(`/api/tasks/${task.id}`, {
       method: "PATCH",
@@ -298,7 +312,23 @@ function TaskDrawer({
       }),
     });
     setSaving(false);
-    if (res.ok) onSaved();
+    if (res.ok) return onSaved();
+    const b = await res.json().catch(() => ({}));
+    setError((b as { error?: string }).error || `Save failed (HTTP ${res.status})`);
+  }
+
+  async function handleDelete() {
+    if (!window.confirm(`Delete "${task.title}"? This removes it from Microsoft To Do too.`)) return;
+    setError(null);
+    setDeleting(true);
+    const res = await fetchWithRefresh(`/api/tasks/${task.id}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    setDeleting(false);
+    if (res.ok) return onSaved();
+    const b = await res.json().catch(() => ({}));
+    setError((b as { error?: string }).error || `Delete failed (HTTP ${res.status})`);
   }
 
   return (
@@ -349,28 +379,67 @@ function TaskDrawer({
           <option value="normal">Normal</option>
           <option value="high">High</option>
         </select>
+        {error && (
+          <p
+            data-testid="task-drawer-error"
+            className="text-xs mb-3"
+            style={{ color: "var(--wp-error, #ef4444)" }}
+          >
+            {error}
+          </p>
+        )}
         <button
           onClick={handleSave}
-          disabled={saving}
-          className="w-full px-3 py-2 rounded-md text-sm font-medium"
+          disabled={saving || deleting}
+          className="w-full px-3 py-2 rounded-md text-sm font-medium mb-2"
           style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
         >
           {saving ? "Saving…" : "Save"}
+        </button>
+        <button
+          onClick={handleDelete}
+          disabled={saving || deleting}
+          data-testid="task-drawer-delete"
+          className="w-full px-3 py-2 rounded-md text-sm font-medium border"
+          style={{
+            background: "transparent",
+            borderColor: "var(--wp-error, #ef4444)",
+            color: "var(--wp-error, #ef4444)",
+          }}
+        >
+          {deleting ? "Deleting…" : "Delete task"}
         </button>
       </div>
     </div>
   );
 }
 
+// Microsoft To Do special lists that Graph accepts writes for but do
+// not show up in the user's normal To Do UI (populated from email
+// flags, etc.). Filter from the "New task" target dropdown so users
+// don't think their task vanished.
+const READ_ONLY_LIST_NAMES = new Set<string>([
+  "Flagged Emails",
+  "Flagged emails",
+  "flaggedEmails",
+]);
+
+function isWritableList(l: TaskList): boolean {
+  return !READ_ONLY_LIST_NAMES.has(l.displayName);
+}
+
 function NewTaskModal({
   lists, onClose, onCreated,
 }: { lists: TaskList[]; onClose: () => void; onCreated: () => void }) {
+  const writableLists = useMemo(() => lists.filter(isWritableList), [lists]);
   const [title, setTitle] = useState("");
-  const [listId, setListId] = useState(lists[0]?.msListId ?? "");
+  const [listId, setListId] = useState(writableLists[0]?.msListId ?? "");
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleCreate() {
     if (!title.trim() || !listId) return;
+    setError(null);
     setCreating(true);
     const res = await fetchWithRefresh("/api/tasks", {
       method: "POST",
@@ -378,7 +447,12 @@ function NewTaskModal({
       body: JSON.stringify({ title, listId }),
     });
     setCreating(false);
-    if (res.ok) onCreated();
+    if (res.ok) return onCreated();
+    const b = await res.json().catch(() => ({}));
+    setError(
+      (b as { error?: string }).error ||
+        `Create failed (HTTP ${res.status}). The task was NOT written to Microsoft To Do.`,
+    );
   }
 
   return (
@@ -405,10 +479,19 @@ function NewTaskModal({
           className="w-full px-3 py-2 rounded-md text-sm border mb-4"
           style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
         >
-          {lists.map((l) => (
+          {writableLists.map((l) => (
             <option key={l.id} value={l.msListId}>{l.displayName}</option>
           ))}
         </select>
+        {error && (
+          <p
+            data-testid="new-task-error"
+            className="text-xs mb-3"
+            style={{ color: "var(--wp-error, #ef4444)" }}
+          >
+            {error}
+          </p>
+        )}
         <div className="flex gap-2">
           <button
             onClick={onClose}

@@ -54,10 +54,11 @@ function defaultFetch(url: string, init?: RequestInit) {
     return mkRes({ task: { ...TASKS[0], status: "completed" } });
   }
   if (url.startsWith("/api/tasks")) {
-    // GET list
-    if (!init || init.method === undefined || init.method === "GET") {
-      return mkRes({ tasks: TASKS, nextCursor: null });
-    }
+    const m = init?.method;
+    if (!m || m === "GET") return mkRes({ tasks: TASKS, nextCursor: null });
+    if (m === "PATCH") return mkRes({ task: TASKS[0] });
+    if (m === "DELETE") return mkRes({ ok: true });
+    if (m === "POST") return mkRes({ task: TASKS[0] }, 201);
   }
   return Promise.reject(new Error(`Unmocked fetch: ${url}`));
 }
@@ -109,7 +110,7 @@ describe("Tasks page", () => {
     expect(screen.getByText("Done item")).toBeInTheDocument();
   });
 
-  it("optimistically completes a task via checkbox + calls complete API", async () => {
+  it("optimistically completes a task via checkbox + PATCHes status=completed", async () => {
     await act(async () => {
       render(<TasksPage />);
     });
@@ -121,12 +122,47 @@ describe("Tasks page", () => {
     await act(async () => {
       fireEvent.click(checkbox);
     });
-    // Optimistic update fires the complete call
+    // Complete-toggle now uses PATCH /api/tasks/:id with status body so
+    // the same code path can un-complete too (see next test).
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringMatching(/^\/api\/tasks\/t1\/complete$/),
-        expect.objectContaining({ method: "POST" }),
+      const patch = fetchMock.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === "string" &&
+          /^\/api\/tasks\/t1$/.test(c[0] as string) &&
+          (c[1] as RequestInit)?.method === "PATCH",
       );
+      expect(patch).toBeTruthy();
+      const body = JSON.parse((patch![1] as RequestInit).body as string);
+      expect(body.status).toBe("completed");
+    });
+  });
+
+  it("unchecks a completed task to re-open it (Outlook parity)", async () => {
+    // The checkbox on the Completed tab must PATCH status=notStarted
+    // so Outlook-style re-open behavior works.
+    await act(async () => {
+      render(<TasksPage />);
+    });
+    await waitFor(() => expect(screen.getByText("Open item")).toBeInTheDocument());
+    // Switch to Completed tab so the "Done item" renders.
+    fireEvent.click(screen.getByRole("tab", { name: "Completed" }));
+    await waitFor(() => expect(screen.getByText("Done item")).toBeInTheDocument());
+
+    const reopen = screen.getByLabelText("Reopen Done item") as HTMLInputElement;
+    expect(reopen.checked).toBe(true);
+    await act(async () => {
+      fireEvent.click(reopen);
+    });
+    await waitFor(() => {
+      const patch = fetchMock.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === "string" &&
+          /^\/api\/tasks\/t3$/.test(c[0] as string) &&
+          (c[1] as RequestInit)?.method === "PATCH",
+      );
+      expect(patch).toBeTruthy();
+      const body = JSON.parse((patch![1] as RequestInit).body as string);
+      expect(body.status).toBe("notStarted");
     });
   });
 
@@ -169,5 +205,44 @@ describe("Tasks page", () => {
       );
       expect(listCall).toBeTruthy();
     });
+  });
+
+  it("New Task modal hides read-only lists (Flagged Emails) from the target dropdown", async () => {
+    // The read-only "Flagged Emails" list Graph accepts writes for but
+    // does not show in Microsoft To Do — users picked it and thought
+    // their tasks disappeared. The modal must filter it out.
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/integrations/status")) {
+        return mkRes({ microsoft: { connected: true } });
+      }
+      if (url.startsWith("/api/tasks/lists")) {
+        return mkRes({
+          lists: [
+            { id: "l1", msListId: "ms-1", displayName: "Flagged Emails" },
+            { id: "l2", msListId: "ms-2", displayName: "Tasks" },
+          ],
+        });
+      }
+      if (url.startsWith("/api/tasks")) {
+        if (!init || init.method === undefined || init.method === "GET") {
+          return mkRes({ tasks: [], nextCursor: null });
+        }
+      }
+      return mkRes({}, 404);
+    });
+
+    const { default: TasksPage } = await import("@/app/(dashboard)/tasks/page");
+    render(<TasksPage />);
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some((c: unknown[]) => String(c[0]).startsWith("/api/tasks/lists"))).toBe(true),
+    );
+    fireEvent.click(screen.getByText("+ New task"));
+    const modalDialog = await screen.findByRole("dialog", { name: "New task" });
+    // Dropdown under the modal should not list "Flagged Emails" as an option
+    const options = Array.from(modalDialog.querySelectorAll("option")).map(
+      (o) => o.textContent,
+    );
+    expect(options).toContain("Tasks");
+    expect(options).not.toContain("Flagged Emails");
   });
 });
