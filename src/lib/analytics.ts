@@ -147,6 +147,20 @@ export type InstinctEventType =
   | "ms_sync.scope_missing"
   | "ms_sync.error"
   | "ms_sync.rate_limited"
+  // Meeting pre-brief (5-min-before context panel: attendees, recent
+  // email threads with them, their open tasks, linked goal, last
+  // decision). View events feed the learning loop so we can grade
+  // which prebrief signals actually got clicked.
+  | "meeting.prebrief_computed"
+  | "meeting.prebrief_viewed"
+  | "meeting.prebrief_section_expanded"
+  // Weekly review + slip detector (Mon-Sun retrospective tile with
+  // meeting load, task churn, email volume, goal-progress delta;
+  // slip detector surfaces tasks carried forward 3+ days).
+  | "review.weekly_computed"
+  | "review.weekly_viewed"
+  | "review.slip_detected"
+  | "review.slip_resolved"
   // Feature requests
   | "feature.request_submitted"
   | "feature.request_write_failed"
