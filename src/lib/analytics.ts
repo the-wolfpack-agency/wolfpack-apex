@@ -154,6 +154,15 @@ export type InstinctEventType =
   | "meeting.prebrief_computed"
   | "meeting.prebrief_viewed"
   | "meeting.prebrief_section_expanded"
+  | "meeting.prebrief_meeting_selected"
+  | "meeting.upcoming_fetched"
+  // MS 365 Insights panel — patterns computed from calendar + tasks + email.
+  // `ms_insight.computed` fires server-side per request; `_viewed` /
+  // `_cta_clicked` fire client-side so the learning loop can grade which
+  // patterns the user actually engages with.
+  | "ms_insight.computed"
+  | "ms_insight.viewed"
+  | "ms_insight.cta_clicked"
   // Weekly review + slip detector (Mon-Sun retrospective tile with
   // meeting load, task churn, email volume, goal-progress delta;
   // slip detector surfaces tasks carried forward 3+ days).

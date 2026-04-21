@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import FinancialsCard from "@/components/FinancialsCard";
 import IntegrationStatusBanner from "@/components/IntegrationStatusBanner";
 import MorningBriefing from "@/components/MorningBriefing";
+import MeetingPreBriefPanel from "@/components/MeetingPreBriefPanel";
+import MsInsightsPanel from "@/components/MsInsightsPanel";
 import { getInstinctToken, authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface DashboardData {
@@ -189,6 +191,12 @@ export default function DashboardPage() {
 
       {/* Morning Briefing (CEO/CTO only) */}
       {showBriefing && <MorningBriefing />}
+
+      {/* Meeting Pre-Brief — 48h window, not 15m-before gate */}
+      <MeetingPreBriefPanel />
+
+      {/* MS 365 Insights — patterns from calendar/email/tasks */}
+      <MsInsightsPanel />
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
