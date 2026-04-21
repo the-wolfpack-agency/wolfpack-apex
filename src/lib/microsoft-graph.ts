@@ -95,9 +95,13 @@ const MS_SCOPES: string[] = [
   // Tier 2 · Stream D (Planner + Groups)
   "Tasks.ReadWrite.Shared",
   "Group.Read.All",
-  // Tier 2 · Stream E (Teams channels + online meetings)
+  // Tier 2 · Stream E (Teams channels + online meetings).
+  // NOTE: OnlineMeetings.ReadWrite.All is an APPLICATION-only permission
+  // — it cannot be requested in the delegated authorization-code flow
+  // we use here (Azure returns AADSTS650053 "scope doesn't exist on the
+  // resource"). Use the delegated OnlineMeetings.ReadWrite instead.
   "ChannelMessage.Read.All",
-  "OnlineMeetings.ReadWrite.All",
+  "OnlineMeetings.ReadWrite",
   // Tier 2 · Stream F (tenant directory + mailbox settings)
   "User.Read.All",
   "MailboxSettings.Read",
