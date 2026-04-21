@@ -117,6 +117,36 @@ const CONTRIBUTION_COLS = `
  * Range filters `since` / `until` bound `committed_at`. A missing
  * value is equivalent to "unbounded on that side."
  */
+/**
+ * Admin-only hard delete of a contribution. Returns the deleted row
+ * id or null when missing.
+ */
+export async function deleteContribution(id: string): Promise<{ id: string } | null> {
+  const res = await writeQuery<{ id: string }>(
+    `DELETE FROM instinct_goal_contributions WHERE id = $1 RETURNING id`,
+    [id],
+  );
+  return res.rows.length === 0 ? null : res.rows[0];
+}
+
+/**
+ * Edit the description of a contribution.
+ */
+export async function updateContributionDescription(
+  id: string,
+  description: string,
+): Promise<{ id: string; description: string } | null> {
+  const trimmed = description.trim();
+  if (!trimmed) return null;
+  const res = await writeQuery<{ id: string; description: string }>(
+    `UPDATE instinct_goal_contributions SET description = $2
+      WHERE id = $1
+      RETURNING id, description`,
+    [id, trimmed],
+  );
+  return res.rows.length === 0 ? null : res.rows[0];
+}
+
 export async function getContributionsForKR(
   kr_id: string,
   opts: { since?: string | Date; until?: string | Date } = {},

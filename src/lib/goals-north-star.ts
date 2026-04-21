@@ -7,7 +7,7 @@
  * helpers.
  */
 
-import { safeQuery } from "@/lib/db";
+import { safeQuery, writeQuery } from "@/lib/db";
 
 export interface NorthStarSnapshot {
   id: string;
@@ -33,6 +33,64 @@ function mapRow(row: Record<string, unknown>): NorthStarSnapshot {
     label: String(row.label),
     captured_at: iso(row.captured_at) ?? new Date().toISOString(),
   };
+}
+
+/**
+ * Delete a single North Star snapshot by id. Admin-gated at the route
+ * level. Returns the deleted snapshot or null if missing.
+ */
+export async function deleteNorthStar(id: string): Promise<NorthStarSnapshot | null> {
+  const res = await writeQuery<Record<string, unknown>>(
+    `DELETE FROM instinct_north_star_snapshots WHERE id = $1
+     RETURNING id, value, unit, label, captured_at`,
+    [id],
+  );
+  if (res.rows.length === 0) return null;
+  return mapRow(res.rows[0]);
+}
+
+/**
+ * Update the value / label / unit on an existing snapshot. Convenience
+ * for fixing a mis-entered number without appending a new row.
+ */
+export interface UpdateNorthStarInput {
+  value?: number;
+  label?: string;
+  unit?: string | null;
+}
+export async function updateNorthStar(
+  id: string,
+  input: UpdateNorthStarInput,
+): Promise<NorthStarSnapshot | null> {
+  const sets: string[] = [];
+  const params: unknown[] = [id];
+  if (typeof input.value === "number" && Number.isFinite(input.value)) {
+    params.push(input.value);
+    sets.push(`value = $${params.length}`);
+  }
+  if (typeof input.label === "string" && input.label.trim().length > 0) {
+    params.push(input.label.trim());
+    sets.push(`label = $${params.length}`);
+  }
+  if (input.unit !== undefined) {
+    params.push(input.unit);
+    sets.push(`unit = $${params.length}`);
+  }
+  if (sets.length === 0) {
+    const res = await safeQuery<Record<string, unknown>>(
+      `SELECT id, value, unit, label, captured_at FROM instinct_north_star_snapshots WHERE id = $1`,
+      [id],
+    );
+    return res.rows.length === 0 ? null : mapRow(res.rows[0]);
+  }
+  const res = await writeQuery<Record<string, unknown>>(
+    `UPDATE instinct_north_star_snapshots SET ${sets.join(", ")}
+      WHERE id = $1
+      RETURNING id, value, unit, label, captured_at`,
+    params,
+  );
+  if (res.rows.length === 0) return null;
+  return mapRow(res.rows[0]);
 }
 
 export async function captureNorthStar(

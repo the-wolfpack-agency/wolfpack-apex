@@ -363,6 +363,61 @@ export async function updateKRCurrent(
  * Returns the hydrated archived OKR (including its KR list) on
  * success, or null when the id doesn't exist.
  */
+/**
+ * Admin-only edit of an OKR's top-line fields (objective + quarter).
+ * KR edits go through addKRToOKR / updateKRCurrent. Returns the
+ * hydrated OKR or null when the id is missing.
+ */
+export interface UpdateOKRInput {
+  objective?: string;
+  quarter?: string;
+}
+export async function updateOKR(
+  okr_id: string,
+  input: UpdateOKRInput,
+  userId: string,
+): Promise<CompanyOKR | null> {
+  const { rows: peek } = await safeQuery<{ id: string }>(
+    `SELECT id FROM instinct_company_okrs WHERE id = $1`,
+    [okr_id],
+  );
+  if (peek.length === 0) return null;
+
+  const sets: string[] = [];
+  const params: unknown[] = [okr_id];
+  if (typeof input.objective === "string" && input.objective.trim().length > 0) {
+    params.push(input.objective.trim());
+    sets.push(`objective = $${params.length}`);
+  }
+  if (typeof input.quarter === "string" && /^\d{4}-Q[1-4]$/.test(input.quarter)) {
+    params.push(input.quarter);
+    sets.push(`quarter = $${params.length}`);
+  }
+  if (sets.length === 0) {
+    // Nothing to change — return current shape.
+    const current = await getActiveOKRs();
+    return current.find((o) => o.id === okr_id) ?? null;
+  }
+
+  const { rows } = await writeQuery<OKRRow>(
+    `UPDATE instinct_company_okrs SET ${sets.join(", ")}
+      WHERE id = $1
+      RETURNING id, quarter, objective, status, created_at, created_by_user_id`,
+    params,
+    { expectRows: 1 },
+  );
+  const { rows: krRows } = await safeQuery<KRRow>(
+    `SELECT id, okr_id, metric, target_value, current_value, unit,
+            cadence, display_order, created_at
+       FROM instinct_company_krs
+      WHERE okr_id = $1
+      ORDER BY display_order ASC, created_at ASC`,
+    [okr_id],
+  );
+  trackEvent("goal.okr_edited", userId, "unknown", { okr_id });
+  return hydrateOKR(rows[0], krRows.map(hydrateKR));
+}
+
 export async function archiveOKR(okr_id: string): Promise<CompanyOKR | null> {
   // Peek first — if the row is missing, writeQuery with expectRows:1
   // would throw; safeQuery gives us a clean null return instead.
