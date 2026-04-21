@@ -127,7 +127,10 @@ export async function POST(req: NextRequest) {
       confidence: intentMatch.confidence,
     });
     if (intentMatch.intent !== "unknown") {
-      const toolAnswer = await tryToolAnswer(message);
+      const toolAnswer = await tryToolAnswer(message, {
+        userId: user.email || user.id,
+        userRole: user.role,
+      });
       if (toolAnswer) {
         trackEvent("assistant.tool_invoked", user.id, user.role, {
           intent: toolAnswer.intent,

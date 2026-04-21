@@ -15,6 +15,11 @@
 
 import { classifyIntent, type IntentMatch } from "@/lib/assistant/intent-router";
 import { runCalendarAvailability } from "@/lib/assistant/tools/calendar-availability";
+import { runBrainHistory } from "@/lib/assistant/tools/brain-history";
+import { runMailSearch } from "@/lib/assistant/tools/mail-search";
+import { runGoalsLookup } from "@/lib/assistant/tools/goals-lookup";
+import { runFinancialsMetric } from "@/lib/assistant/tools/financials-metric";
+import { resolveTimeframe } from "@/lib/assistant/timeframe";
 
 export interface ToolAnswer {
   intent: IntentMatch["intent"];
@@ -24,9 +29,18 @@ export interface ToolAnswer {
   source: "tool";
 }
 
+export interface ToolContext {
+  /** Caller's MS Graph userId (their email in practice) — needed by
+   *  mail_search since it reads the caller's mailbox. */
+  userId: string;
+  /** Caller's role — used to gate financials to ceo/cto only. */
+  userRole: string;
+  nowMs?: number;
+}
+
 export async function tryToolAnswer(
   question: string,
-  opts: { nowMs?: number } = {},
+  ctx: ToolContext,
 ): Promise<ToolAnswer | null> {
   const match = classifyIntent(question);
 
@@ -36,20 +50,51 @@ export async function tryToolAnswer(
     const result = await runCalendarAvailability({
       personName: person,
       timeframeToken: match.slots.timeframe,
-      nowMs: opts.nowMs,
+      nowMs: ctx.nowMs,
     });
     if (!result) return null;
-    return {
-      intent: match.intent,
-      answer: result.answer,
-      data: result,
-      source: "tool",
-    };
+    return { intent: match.intent, answer: result.answer, data: result, source: "tool" };
   }
 
-  // Other intents (mail_search, financials_metric, goals_lookup,
-  // brain_history) get wired in follow-up commits — returning null
-  // means the caller falls through to the existing RAG path.
+  if (match.intent === "goals_lookup") {
+    const result = await runGoalsLookup();
+    if (!result) return null;
+    return { intent: match.intent, answer: result.answer, data: result, source: "tool" };
+  }
+
+  if (match.intent === "financials_metric") {
+    const result = await runFinancialsMetric({
+      question,
+      timeframeToken: match.slots.timeframe,
+      nowMs: ctx.nowMs,
+      userRole: ctx.userRole,
+    });
+    if (!result) return null;
+    return { intent: match.intent, answer: result.answer, data: result, source: "tool" };
+  }
+
+  if (match.intent === "mail_search") {
+    const result = await runMailSearch({
+      userId: ctx.userId,
+      from: match.slots.from,
+      topic: match.slots.topic,
+    });
+    if (!result) return null;
+    return { intent: match.intent, answer: result.answer, data: result, source: "tool" };
+  }
+
+  if (match.intent === "brain_history") {
+    const tfLabel = match.slots.timeframe
+      ? resolveTimeframe(match.slots.timeframe, ctx.nowMs).label
+      : undefined;
+    const result = await runBrainHistory({
+      subject: match.slots.subject ?? question,
+      timeframeLabel: tfLabel,
+    });
+    if (!result) return null;
+    return { intent: match.intent, answer: result.answer, data: result, source: "tool" };
+  }
+
   return null;
 }
 
