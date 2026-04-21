@@ -87,17 +87,12 @@ export default function NorthStarTile({
         <>
           <div className="flex items-baseline gap-2 mt-1">
             <span className={valueClass} style={{ color: "var(--wp-gold)" }}>
-              {formatValue(value!)}
+              {formatValueWithUnit(value!, unit ?? null)}
             </span>
-            {unit && (
-              <span className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
-                {unit}
-              </span>
-            )}
           </div>
           <p className={`${labelClass} mt-0.5`} style={{ color: "var(--wp-text-dim)" }}>
             {label}
-            {target != null && ` — target ${formatValue(target)}`}
+            {target != null && ` — target ${formatValueWithUnit(target, unit ?? null)}`}
           </p>
           {spark && (
             <svg
@@ -127,11 +122,25 @@ export default function NorthStarTile({
   );
 }
 
-function formatValue(v: number): string {
-  if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(v) >= 1_000) return `${(v / 1_000).toFixed(1)}k`;
+export function formatValue(v: number): string {
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000_000_000) return `${(v / 1_000_000_000_000).toFixed(1)}T`;
+  if (abs >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(1)}B`;
+  if (abs >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${(v / 1_000).toFixed(1)}k`;
   if (Number.isInteger(v)) return `${v}`;
   return v.toFixed(1);
+}
+
+const CURRENCY_PREFIXES = new Set(["$", "€", "£", "¥", "₹", "USD", "EUR", "GBP", "JPY", "INR"]);
+
+/** Render "$1.0B" when the unit is a currency, "1.0B qps" otherwise. */
+export function formatValueWithUnit(v: number, unit: string | null): string {
+  const formatted = formatValue(v);
+  if (!unit) return formatted;
+  const trimmed = unit.trim();
+  if (CURRENCY_PREFIXES.has(trimmed)) return `${trimmed}${formatted}`;
+  return `${formatted} ${trimmed}`;
 }
 
 function buildSparkline(
