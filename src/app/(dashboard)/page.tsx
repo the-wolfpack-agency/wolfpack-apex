@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import FinancialsCard from "@/components/FinancialsCard";
+import IntegrationStatusBanner from "@/components/IntegrationStatusBanner";
 import MorningBriefing from "@/components/MorningBriefing";
 import { getInstinctToken, authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
@@ -156,6 +157,9 @@ export default function DashboardPage() {
       <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>
         Dashboard
       </h1>
+
+      {/* OAuth callback status banner (Microsoft / QuickBooks) */}
+      <IntegrationStatusBanner />
 
       {/* First-run setup banner */}
       {!setupComplete && (

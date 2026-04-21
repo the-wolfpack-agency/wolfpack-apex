@@ -25,11 +25,21 @@ export async function GET(req: NextRequest) {
   const error = url.searchParams.get("error");
   const errorDescription = url.searchParams.get("error_description");
 
-  // Azure AD sends error param if user denies access or something goes wrong
+  // Azure AD sends error param if user denies access or something goes wrong.
+  // Forward the Azure error code + the first line of error_description to the
+  // dashboard so the user can see WHY (e.g. AADSTS65001 = admin consent
+  // required for .All scopes, AADSTS50011 = redirect_uri mismatch).
   if (error) {
     console.warn("[microsoft-graph] OAuth denied:", error, errorDescription);
     const redirectUrl = new URL("/", req.url);
     redirectUrl.searchParams.set("ms", "denied");
+    redirectUrl.searchParams.set("error_code", error);
+    if (errorDescription) {
+      // Azure description is multiline + very long — keep the first line
+      // for the banner; full text stays in the server log above.
+      const firstLine = errorDescription.split(/\r?\n/)[0].slice(0, 240);
+      redirectUrl.searchParams.set("detail", firstLine);
+    }
     return NextResponse.redirect(redirectUrl);
   }
 

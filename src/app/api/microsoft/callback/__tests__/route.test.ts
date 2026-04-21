@@ -46,6 +46,22 @@ describe("microsoft callback redirects to / (dashboard route group root)", () =>
     expect(new URL(loc).searchParams.get("ms")).toBe("denied");
   });
 
+  test("error= forwards error_code + first line of error_description so the banner can show why", async () => {
+    const desc =
+      "AADSTS65001: The user or administrator has not consented to use the application with ID 'xxx'.\nTrace ID: abc";
+    const res = await GET(
+      get(
+        `https://x.test/api/microsoft/callback?error=consent_required&error_description=${encodeURIComponent(desc)}`,
+      ),
+    );
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.searchParams.get("ms")).toBe("denied");
+    expect(loc.searchParams.get("error_code")).toBe("consent_required");
+    expect(loc.searchParams.get("detail")).toContain("AADSTS65001");
+    // Multi-line description is truncated to first line
+    expect(loc.searchParams.get("detail")).not.toContain("Trace ID");
+  });
+
   test("missing code redirects to /?ms=error", async () => {
     const res = await GET(get("https://x.test/api/microsoft/callback"));
     expect(new URL(res.headers.get("location")!).pathname).toBe("/");
