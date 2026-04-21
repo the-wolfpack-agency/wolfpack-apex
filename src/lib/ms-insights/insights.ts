@@ -293,21 +293,22 @@ export function recurringAttendeesInsight(
   lookbackDays: number,
 ): Insight {
   const cutoff = nowMs - lookbackDays * MS_PER_DAY;
-  const counts = new Map<string, number>();
+  const counts = new Map<string, { display: string; count: number }>();
   for (const e of events) {
     const s = parseMs(e.start);
     if (s === null || s < cutoff || s > nowMs + 7 * MS_PER_DAY) continue;
     for (const a of e.attendees) {
-      // Graph may hand us display names OR email addresses depending on
-      // the invitee's mailbox. Count either; skip only blanks.
       if (!a || typeof a !== "string") continue;
-      const key = a.trim().toLowerCase();
-      if (!key) continue;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+      const trimmed = a.trim();
+      if (!trimmed) continue;
+      const key = trimmed.toLowerCase();
+      const existing = counts.get(key);
+      if (existing) existing.count += 1;
+      else counts.set(key, { display: trimmed, count: 1 });
     }
   }
-  const top = [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
+  const top = [...counts.values()]
+    .sort((a, b) => b.count - a.count)
     .slice(0, 3);
   if (top.length === 0) {
     return {
@@ -319,14 +320,14 @@ export function recurringAttendeesInsight(
       metric: 0,
     };
   }
-  const list = top.map(([email, n]) => `${email} (${n})`).join(", ");
+  const list = top.map((t) => `${t.display} (${t.count})`).join(", ");
   return {
     id: "recurring_attendees",
     kind: "calendar",
     severity: "info",
-    headline: `Top contacts: ${top[0][0]}`,
+    headline: `Top contacts: ${top[0].display}`,
     detail: `Most-seen this ${lookbackDays === 7 ? "week" : `${lookbackDays}d`}: ${list}.`,
-    metric: top[0][1],
+    metric: top[0].count,
   };
 }
 
