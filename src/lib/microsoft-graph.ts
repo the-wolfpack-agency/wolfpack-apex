@@ -638,12 +638,26 @@ async function fetchLiveEmailsFromContact(userId: string, email: string, count: 
   const token = await getValidToken(userId);
   if (!token) return [];
 
-  const filter = encodeURIComponent(`from/emailAddress/address eq '${email}'`);
+  // Sanitize the email for the OData filter — single quotes must be
+  // doubled per OData spec; strip anything non-printable that could
+  // break the filter or risk injection.
+  const safe = email.replace(/'/g, "''").replace(/[^\x20-\x7E]/g, "");
+  // Widen the search beyond "FROM in Inbox only." Include:
+  //   - messages FROM the contact (classic inbox replies)
+  //   - messages WE sent TO the contact (sent items + threads we kicked off)
+  //   - messages CCing the contact (kept in the loop)
+  // Graph's email-address `eq` is case-insensitive by default, so we
+  // don't need to lowercase either side.
+  const filter = encodeURIComponent(
+    `from/emailAddress/address eq '${safe}'` +
+      ` or toRecipients/any(r:r/emailAddress/address eq '${safe}')` +
+      ` or ccRecipients/any(r:r/emailAddress/address eq '${safe}')`,
+  );
   const data = await graphFetch<{
     value?: {
       id: string;
       subject: string;
-      from: { emailAddress: { name: string; address: string } };
+      from: { emailAddress: { name: string; address: string } } | null;
       receivedDateTime: string;
       bodyPreview: string;
       isRead: boolean;
@@ -660,8 +674,13 @@ async function fetchLiveEmailsFromContact(userId: string, email: string, count: 
   return data.value.map((msg) => ({
     id: msg.id,
     subject: msg.subject,
-    from: msg.from.emailAddress.name || msg.from.emailAddress.address,
-    fromEmail: msg.from.emailAddress.address,
+    // Sent items can omit `from`; fall back to "You" so the thread
+    // still renders meaningfully.
+    from:
+      msg.from?.emailAddress?.name ||
+      msg.from?.emailAddress?.address ||
+      "You",
+    fromEmail: msg.from?.emailAddress?.address ?? "",
     receivedDateTime: msg.receivedDateTime,
     bodyPreview: msg.bodyPreview,
     isRead: msg.isRead,
