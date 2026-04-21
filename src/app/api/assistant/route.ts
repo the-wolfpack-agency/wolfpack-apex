@@ -136,11 +136,16 @@ export async function POST(req: NextRequest) {
         trackEvent("assistant.tool_invoked", user.id, user.role, {
           intent: toolAnswer.intent,
         });
+        // Align with the RAG path shape (`response` + `tokensUsed`) so
+        // InstinctChat renders the answer text. Previously we returned
+        // `answer` which the UI silently dropped.
         return NextResponse.json({
+          response: toolAnswer.answer,
           answer: toolAnswer.answer,
           source: "tool",
           intent: toolAnswer.intent,
           data: toolAnswer.data,
+          tokensUsed: 0,
           conversationId: conversationId ?? null,
         });
       }
