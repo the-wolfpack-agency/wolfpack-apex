@@ -651,7 +651,7 @@ export async function generateBriefing(
         : null,
       events: calendar,
     },
-    email: { unreadCount, importantEmails: emails },
+    email: { unreadCount, importantEmails: emails.slice(0, 5) },
     financial,
     clients,
     team,

@@ -218,14 +218,17 @@ export default function MeetingPreBriefPanel({ lookaheadHours = 48 }: Props) {
       className="rounded-lg p-5 border space-y-3"
       style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
     >
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <h2 className="text-lg font-semibold" style={{ color: "var(--wp-gold)" }}>
+      <div className="flex flex-col gap-3">
+        <h2
+          className="text-lg font-semibold whitespace-nowrap"
+          style={{ color: "var(--wp-gold)" }}
+        >
           Meeting Pre-Brief
         </h2>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 w-full">
           <label
             htmlFor="prebrief-meeting-picker"
-            className="text-xs"
+            className="text-xs shrink-0"
             style={{ color: "var(--wp-text-dim)" }}
           >
             Meeting
@@ -235,7 +238,7 @@ export default function MeetingPreBriefPanel({ lookaheadHours = 48 }: Props) {
             data-testid="prebrief-meeting-picker"
             value={selectedId ?? ""}
             onChange={(e) => handleSelect(e.target.value)}
-            className="text-sm rounded-md border px-2 py-1"
+            className="text-sm rounded-md border px-2 py-1 flex-1 min-w-0"
             style={{
               background: "var(--wp-dark-surface2)",
               borderColor: "var(--wp-dark-border)",
