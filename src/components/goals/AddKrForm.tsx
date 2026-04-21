@@ -92,16 +92,16 @@ export default function AddKrForm({ okrId, onAdded }: Props) {
     <form
       onSubmit={handleSubmit}
       data-testid={`add-kr-form-${okrId}`}
-      className="rounded-md border p-2 space-y-2"
+      className="rounded-md border p-2 space-y-2 w-full overflow-hidden"
       style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
     >
-      <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_1fr_1fr] gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <input
           data-testid={`add-kr-metric-${okrId}`}
           value={metric}
           onChange={(e) => setMetric(e.target.value)}
           placeholder="Metric"
-          className="text-sm rounded-md border px-2 py-1"
+          className="text-sm rounded-md border px-2 py-1 col-span-2 min-w-0 w-full"
           style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)", color: "var(--wp-text)" }}
         />
         <input
@@ -110,7 +110,7 @@ export default function AddKrForm({ okrId, onAdded }: Props) {
           onChange={(e) => setTarget(e.target.value)}
           placeholder="Target"
           inputMode="decimal"
-          className="text-sm rounded-md border px-2 py-1"
+          className="text-sm rounded-md border px-2 py-1 min-w-0 w-full"
           style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)", color: "var(--wp-text)" }}
         />
         <input
@@ -118,14 +118,14 @@ export default function AddKrForm({ okrId, onAdded }: Props) {
           value={unit}
           onChange={(e) => setUnit(e.target.value)}
           placeholder="Unit"
-          className="text-sm rounded-md border px-2 py-1"
+          className="text-sm rounded-md border px-2 py-1 min-w-0 w-full"
           style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)", color: "var(--wp-text)" }}
         />
         <select
           data-testid={`add-kr-cadence-${okrId}`}
           value={cadence}
           onChange={(e) => setCadence(e.target.value as Cadence)}
-          className="text-sm rounded-md border px-2 py-1"
+          className="text-sm rounded-md border px-2 py-1 col-span-2 min-w-0 w-full"
           style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)", color: "var(--wp-text)" }}
         >
           <option value="daily">daily</option>
