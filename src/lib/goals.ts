@@ -250,6 +250,68 @@ export async function createOKR(input: CreateOKRInput): Promise<CompanyOKR> {
 }
 
 /**
+ * Append a new KR to an existing OKR. Any authenticated teammate may
+ * call this (not just admins) — it's the "supplement the company OKR"
+ * path. The new KR lands at display_order = (max + 1) so the OKR card
+ * preserves its original order.
+ *
+ * Fires `goal.kr_added` so the learning loop can see who supplemented
+ * which OKR.
+ */
+export async function addKRToOKR(
+  okr_id: string,
+  input: KRInput,
+  userId: string,
+): Promise<CompanyKR | null> {
+  if (!okr_id) throw new Error("addKRToOKR: okr_id is required");
+  if (!input.metric) throw new Error("addKRToOKR: metric is required");
+  if (typeof input.target !== "number" || !Number.isFinite(input.target)) {
+    throw new Error("addKRToOKR: target must be a finite number");
+  }
+
+  // Confirm the OKR exists (and isn't archived) before appending.
+  const { rows: okrRows } = await safeQuery<{ id: string; status: OKRStatus }>(
+    `SELECT id, status FROM instinct_company_okrs WHERE id = $1`,
+    [okr_id],
+  );
+  if (okrRows.length === 0) return null;
+  if (okrRows[0].status === "archived") return null;
+
+  const { rows: maxRows } = await safeQuery<{ max_order: number | null }>(
+    `SELECT MAX(display_order) AS max_order
+     FROM instinct_company_krs WHERE okr_id = $1`,
+    [okr_id],
+  );
+  const nextOrder = (maxRows[0]?.max_order ?? -1) + 1;
+
+  const { rows } = await writeQuery<KRRow>(
+    `INSERT INTO instinct_company_krs
+       (okr_id, metric, target_value, current_value, unit, cadence, display_order)
+     VALUES ($1, $2, $3, 0, $4, $5, $6)
+     RETURNING id, okr_id, metric, target_value, current_value, unit,
+               cadence, display_order, created_at`,
+    [
+      okr_id,
+      input.metric,
+      input.target,
+      input.unit ?? null,
+      input.cadence ?? "quarterly",
+      nextOrder,
+    ],
+    { expectRows: 1 },
+  );
+  const kr = hydrateKR(rows[0]);
+
+  trackEvent("goal.kr_added", userId, "unknown", {
+    okr_id,
+    kr_id: kr.id,
+    cadence: kr.cadence,
+  });
+
+  return kr;
+}
+
+/**
  * Update a KR's current_value. Fires `goal.kr_updated` with the
  * signed delta (new - old) so the learning loop sees KR velocity.
  * Returns the fresh KR row, or null when the id doesn't exist.

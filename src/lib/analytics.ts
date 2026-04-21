@@ -128,6 +128,7 @@ export type InstinctEventType =
   | "goal.page_viewed"
   | "goal.okr_created"
   | "goal.okr_created_ui"
+  | "goal.kr_added"
   | "goal.kr_updated"
   | "goal.contribution_created"
   | "goal.contribution_graded"

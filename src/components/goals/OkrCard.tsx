@@ -9,6 +9,7 @@
 import { useState } from "react";
 import KrProgress from "./KrProgress";
 import ContributionStream from "./ContributionStream";
+import AddKrForm from "./AddKrForm";
 import { krList, type OkrView, type ContributionView } from "./types";
 
 export interface OkrCardProps {
@@ -18,6 +19,8 @@ export interface OkrCardProps {
   userNames?: Record<string, string>;
   onCommit?: (kr_id: string) => void;
   defaultOpen?: boolean;
+  /** Called after a KR is successfully appended so the page can refetch. */
+  onKrAdded?: () => void;
 }
 
 export default function OkrCard({
@@ -26,6 +29,7 @@ export default function OkrCard({
   userNames,
   onCommit,
   defaultOpen,
+  onKrAdded,
 }: OkrCardProps) {
   const [open, setOpen] = useState(Boolean(defaultOpen));
   const krs = krList(okr);
@@ -109,6 +113,10 @@ export default function OkrCard({
             This OKR has no key results yet.
           </p>
         )}
+        {/* Any teammate can supplement the OKR with a new KR. */}
+        <div className="pt-2">
+          <AddKrForm okrId={okr.id} onAdded={onKrAdded ?? (() => {})} />
+        </div>
       </div>
     </div>
   );

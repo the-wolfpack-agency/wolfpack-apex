@@ -283,6 +283,7 @@ export default function GoalsPage() {
                 streams={streamsByKr}
                 userNames={userNames}
                 defaultOpen={i === 0}
+                onKrAdded={() => goals.refetch()}
               />
             ))
           )}
