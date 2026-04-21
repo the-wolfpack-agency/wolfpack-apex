@@ -184,6 +184,45 @@ describe("recurringAttendeesInsight", () => {
     const i = recurringAttendeesInsight([], NOW, 7);
     expect(i.metric).toBe(0);
   });
+  // Regression: fetchLiveCalendarEvents maps attendees to display NAMES
+  // first, falling back to address. An earlier filter required
+  // a.includes("@") and silently dropped every name-only attendee,
+  // producing "No recurring meeting contacts" on live calendars.
+  test("counts name-only attendees (no @) — live Graph shape", () => {
+    const events = [
+      ev(-DAY / 60_000, 30, ["Nick Hoxsie", "Sarah Chen"]),
+      ev(-2 * DAY / 60_000, 30, ["Nick Hoxsie"]),
+      ev(-3 * DAY / 60_000, 30, ["Nick Hoxsie", "Jorge Colon"]),
+    ];
+    const i = recurringAttendeesInsight(events, NOW, 7);
+    expect(i.headline).toContain("Nick Hoxsie");
+    expect(i.metric).toBe(3);
+    expect(i.detail).toMatch(/Nick Hoxsie \(3\)/);
+  });
+  // Regression: dedupe key was lowercased, then displayed verbatim.
+  // The UI showed "nick hoxsie" instead of "Nick Hoxsie".
+  test("preserves original casing for display while deduping case-insensitively", () => {
+    const events = [
+      ev(-DAY / 60_000, 30, ["Nick Hoxsie"]),
+      ev(-2 * DAY / 60_000, 30, ["nick hoxsie"]), // same person, different case
+      ev(-3 * DAY / 60_000, 30, ["NICK HOXSIE"]),
+    ];
+    const i = recurringAttendeesInsight(events, NOW, 7);
+    expect(i.metric).toBe(3);
+    // Display keeps the first-seen casing, not the lowercased key.
+    expect(i.headline).toBe("Top contacts: Nick Hoxsie");
+    expect(i.headline).not.toMatch(/nick hoxsie/);
+  });
+  test("ignores blank / non-string attendee entries defensively", () => {
+    const events = [
+      ev(-DAY / 60_000, 30, ["Nick Hoxsie", "", "  "]),
+      // @ts-expect-error — emulate a malformed payload
+      ev(-2 * DAY / 60_000, 30, ["Nick Hoxsie", null, undefined, 42 as any]),
+    ];
+    const i = recurringAttendeesInsight(events, NOW, 7);
+    expect(i.metric).toBe(2);
+    expect(i.headline).toBe("Top contacts: Nick Hoxsie");
+  });
 });
 
 describe("computeInsights + sortBySeverity", () => {

@@ -5,6 +5,7 @@ import FinancialsCard from "@/components/FinancialsCard";
 import IntegrationStatusBanner from "@/components/IntegrationStatusBanner";
 import MorningBriefing from "@/components/MorningBriefing";
 import MsInsightsPanel from "@/components/MsInsightsPanel";
+import GoalsDashboardTile from "@/components/goals/GoalsDashboardTile";
 import { getInstinctToken, authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 interface DashboardData {
@@ -191,6 +192,12 @@ export default function DashboardPage() {
       {/* Morning Briefing (CEO/CTO only) — now embeds Meeting Pre-Brief
           between Action Items and Today's Schedule. */}
       {showBriefing && <MorningBriefing />}
+
+      {/* Company Goals — read-only summary for every teammate. Editing
+          lives on /goals and is role-gated (ceo/cto). */}
+      <div className="max-w-sm">
+        <GoalsDashboardTile />
+      </div>
 
       {/* MS 365 Insights — patterns from calendar/email/tasks */}
       <MsInsightsPanel />

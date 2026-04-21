@@ -23,6 +23,8 @@ import NorthStarTile from "@/components/goals/NorthStarTile";
 import OkrCard from "@/components/goals/OkrCard";
 import CommitmentsSidebar from "@/components/goals/CommitmentsSidebar";
 import FridaySyncView from "@/components/goals/FridaySyncView";
+import CreateOkrForm from "@/components/goals/CreateOkrForm";
+import CaptureNorthStarForm from "@/components/goals/CaptureNorthStarForm";
 import {
   krList,
   type ContributionView,
@@ -210,9 +212,21 @@ export default function GoalsPage() {
       data-testid="goals-page"
       data-user-role={userRole}
     >
-      <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>
-        Goals
-      </h1>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>
+          Goals
+        </h1>
+        <div className="flex items-center gap-2">
+          <CaptureNorthStarForm
+            userRole={userRole}
+            onCaptured={() => goals.reload()}
+          />
+          <CreateOkrForm
+            userRole={userRole}
+            onCreated={() => goals.reload()}
+          />
+        </div>
+      </div>
 
       {/* North Star — top-center */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -256,7 +270,9 @@ export default function GoalsPage() {
               }}
             >
               <p style={{ color: "var(--wp-text-muted)" }}>
-                No active OKRs yet. Admins can seed them via the API.
+                {userRole === "ceo" || userRole === "cto"
+                  ? "No active OKRs yet. Click “+ New OKR” above to create one."
+                  : "No active OKRs yet. An admin needs to create them."}
               </p>
             </div>
           ) : (
