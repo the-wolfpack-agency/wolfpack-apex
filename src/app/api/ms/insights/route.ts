@@ -23,17 +23,32 @@ export async function GET(req: NextRequest) {
 
   const nowMs = Date.now();
   const dayMs = 24 * 60 * 60_000;
-  // fetchCalendarEvents caps at $top=50 ordered by start/dateTime ASC,
-  // so a wide window on a busy calendar returns only the OLDEST 50 and
-  // buries today. Keep the window narrow (yesterday → +3 days).
-  const startIso = new Date(nowMs - 1 * dayMs).toISOString();
-  const endIso = new Date(nowMs + 3 * dayMs).toISOString();
+  // fetchCalendarEvents caps at $top=50 ordered by start/dateTime ASC
+  // per call, so we fan out into narrow windows that each stay under
+  // the cap, then merge. Covers -7d → +3d which is what the insights
+  // (meeting_load, focus_time, recurring_attendees) actually need.
+  const windows: Array<[string, string]> = [
+    [new Date(nowMs - 7 * dayMs).toISOString(), new Date(nowMs - 4 * dayMs).toISOString()],
+    [new Date(nowMs - 4 * dayMs).toISOString(), new Date(nowMs - 1 * dayMs).toISOString()],
+    [new Date(nowMs - 1 * dayMs).toISOString(), new Date(nowMs + 3 * dayMs).toISOString()],
+  ];
 
-  const [events, emails, tasksPage] = await Promise.all([
-    fetchCalendarEvents(user.id, startIso, endIso).catch(() => []),
+  const [eventBatches, emails, tasksPage] = await Promise.all([
+    Promise.all(
+      windows.map(([s, e]) => fetchCalendarEvents(user.id, s, e).catch(() => [])),
+    ),
     fetchRecentEmails(user.id, 25).catch(() => []),
     listCachedTasks(user.id, { limit: 200 }).catch(() => ({ tasks: [], total: 0 })),
   ]);
+
+  // Dedupe across windows (calendarview may re-emit events that straddle
+  // boundaries, especially recurring series).
+  const seen = new Set<string>();
+  const events = eventBatches.flat().filter((e) => {
+    if (seen.has(e.id)) return false;
+    seen.add(e.id);
+    return true;
+  });
 
   const insights = sortBySeverity(
     computeInsights({
