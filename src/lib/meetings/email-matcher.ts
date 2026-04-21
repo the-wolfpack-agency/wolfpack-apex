@@ -32,6 +32,7 @@ interface RawMessage {
   bodyPreview: string;
   isRead: boolean;
   importance: string;
+  webLink?: string;
 }
 
 const SELECT = [
@@ -44,7 +45,43 @@ const SELECT = [
   "bodyPreview",
   "isRead",
   "importance",
+  "webLink",
 ].join(",");
+
+// Calendar auto-generated response emails ("Accepted: X meeting",
+// "Declined: Y", "Tentative: Z") are noise for the prebrief — they
+// flood recent threads without carrying conversation content.
+const CALENDAR_RESPONSE_PREFIX = /^\s*(accepted|declined|tentative|canceled|cancelled):\s/i;
+function isCalendarResponseNoise(subject: string | undefined | null): boolean {
+  return !!subject && CALENDAR_RESPONSE_PREFIX.test(subject);
+}
+
+// Per-user bulk-fetch cache. The bulk pull (100 messages across
+// inbox + sent) is the slow part of the prebrief — caching it for a
+// couple minutes means the 2nd, 3rd, Nth meeting in the dropdown
+// reuses the same fetch instead of re-pulling each time.
+interface BulkCacheEntry {
+  messages: RawMessage[];
+  expiresAt: number;
+}
+const BULK_TTL_MS = 2 * 60 * 1000;
+const bulkCache = new Map<string, BulkCacheEntry>();
+function bulkCacheGet(key: string): RawMessage[] | null {
+  const hit = bulkCache.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt < Date.now()) {
+    bulkCache.delete(key);
+    return null;
+  }
+  return hit.messages;
+}
+function bulkCacheSet(key: string, messages: RawMessage[]): void {
+  bulkCache.set(key, { messages, expiresAt: Date.now() + BULK_TTL_MS });
+}
+/** Test-only: reset between specs. */
+export function __resetBulkCache(): void {
+  bulkCache.clear();
+}
 
 async function fetchFolderPage(
   userId: string,
@@ -107,6 +144,9 @@ export function matchMessagesToAttendees(
   const hits: RawMessage[] = [];
   for (const m of messages) {
     if (seen.has(m.id)) continue;
+    // Drop calendar-response auto-emails — they match on subject
+    // (organizer/attendee name) but add no real thread context.
+    if (isCalendarResponseNoise(m.subject)) continue;
     const hay = messageHaystack(m);
     if (needles.some((n) => n && hay.includes(n))) {
       seen.add(m.id);
@@ -132,7 +172,10 @@ function toEmail(msg: RawMessage): Email {
     bodyPreview: msg.bodyPreview,
     isRead: msg.isRead,
     importance,
-  };
+    // Optional — Email type doesn't require webLink, so we attach it
+    // via cast so the UI can render <a href={webLink}>.
+    ...(msg.webLink ? { webLink: msg.webLink } : {}),
+  } as Email & { webLink?: string };
 }
 
 /**
@@ -149,15 +192,22 @@ export async function findThreadsInvolvingAttendees(
   poolSize = 50,
 ): Promise<Email[]> {
   if (attendees.length === 0 && attendeeEmails.length === 0) return [];
-  const token = await getValidToken(userId).catch(() => null);
-  if (!token) return [];
 
-  const [inbox, sent] = await Promise.all([
-    fetchFolderPage(userId, "inbox", poolSize, token.accessToken),
-    fetchFolderPage(userId, "sentitems", poolSize, token.accessToken),
-  ]);
+  // Reuse the bulk pull across all meetings in a single prebrief
+  // session — huge latency win on dashboards with multiple meetings.
+  const cacheKey = `${userId}:${poolSize}`;
+  let combined = bulkCacheGet(cacheKey);
+  if (!combined) {
+    const token = await getValidToken(userId).catch(() => null);
+    if (!token) return [];
+    const [inbox, sent] = await Promise.all([
+      fetchFolderPage(userId, "inbox", poolSize, token.accessToken),
+      fetchFolderPage(userId, "sentitems", poolSize, token.accessToken),
+    ]);
+    combined = [...inbox, ...sent];
+    bulkCacheSet(cacheKey, combined);
+  }
 
-  const combined = [...inbox, ...sent];
   const hits = matchMessagesToAttendees(combined, attendees, attendeeEmails);
   hits.sort((a, b) =>
     a.receivedDateTime < b.receivedDateTime

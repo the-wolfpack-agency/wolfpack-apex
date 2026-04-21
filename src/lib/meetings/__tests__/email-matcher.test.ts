@@ -118,4 +118,31 @@ describe("matchMessagesToAttendees", () => {
     );
     expect(hits).toHaveLength(1);
   });
+
+  // Regression: auto-generated calendar response emails ("Accepted:",
+  // "Declined:", "Tentative:") were flooding Recent Threads with
+  // noise. They match on name (organizer/attendee appears in
+  // from/to) but carry no real conversation context.
+  test("filters out calendar-response noise (Accepted / Declined / Tentative)", () => {
+    const messages = [
+      msg("real", {
+        subject: "Q2 pricing questions",
+        from: { emailAddress: { name: "Nick Hoxsie", address: "nick@wolfpack.dev" } },
+      }),
+      msg("accepted", {
+        subject: "Accepted: Admin Access",
+        from: { emailAddress: { name: "Nick Homyk", address: "nick.h@wolfpack.dev" } },
+      }),
+      msg("declined", {
+        subject: "Declined: Weekly sync",
+        from: { emailAddress: { name: "Nick Hoxsie", address: "nick@wolfpack.dev" } },
+      }),
+      msg("tentative", {
+        subject: "Tentative: Tech review",
+        from: { emailAddress: { name: "Nick Hoxsie", address: "nick@wolfpack.dev" } },
+      }),
+    ];
+    const hits = matchMessagesToAttendees(messages, ["Nick Hoxsie", "Nick Homyk"], []);
+    expect(hits.map((h) => h.id)).toEqual(["real"]);
+  });
 });

@@ -14,6 +14,7 @@ interface Thread {
   fromEmail: string;
   receivedDateTime: string;
   bodyPreview: string;
+  webLink?: string;
 }
 
 interface Task {
@@ -198,15 +199,34 @@ export default function MeetingPreBrief({ meetingId }: Props) {
             <div style={emptyStyle}>No recent email with attendees</div>
           ) : (
             <ul style={listStyle}>
-              {recentThreads.map((t) => (
-                <li key={t.id} style={itemStyle}>
-                  <div style={{ fontWeight: 600 }}>{t.subject}</div>
-                  <div style={{ fontSize: 12, color: "var(--wp-text-dim)" }}>
-                    {t.from} · {new Date(t.receivedDateTime).toLocaleDateString()}
-                  </div>
-                  <div style={{ fontSize: 12, marginTop: 2 }}>{t.bodyPreview}</div>
-                </li>
-              ))}
+              {recentThreads.map((t) => {
+                const inner = (
+                  <>
+                    <div style={{ fontWeight: 600 }}>{t.subject}</div>
+                    <div style={{ fontSize: 12, color: "var(--wp-text-dim)" }}>
+                      {t.from} · {new Date(t.receivedDateTime).toLocaleDateString()}
+                    </div>
+                    <div style={{ fontSize: 12, marginTop: 2 }}>{t.bodyPreview}</div>
+                  </>
+                );
+                return (
+                  <li key={t.id} style={itemStyle}>
+                    {t.webLink ? (
+                      <a
+                        href={t.webLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        data-testid={`prebrief-thread-link-${t.id}`}
+                        style={{ color: "inherit", textDecoration: "none", display: "block" }}
+                      >
+                        {inner}
+                      </a>
+                    ) : (
+                      inner
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
