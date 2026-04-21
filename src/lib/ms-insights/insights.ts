@@ -42,6 +42,10 @@ export interface ComputeInsightsInput {
   nowMs?: number;
   /** How many days back to consider for trend insights. Default 7. */
   lookbackDays?: number;
+  /** Tokens identifying the current user (name + email, any case).
+   *  Excluded from recurring-attendee counts so the user never sees
+   *  themselves as their own top contact. */
+  selfTokens?: string[];
 }
 
 const MS_PER_MIN = 60_000;
@@ -291,8 +295,12 @@ export function recurringAttendeesInsight(
   events: CalendarEvent[],
   nowMs: number,
   lookbackDays: number,
+  selfTokens: string[] = [],
 ): Insight {
   const cutoff = nowMs - lookbackDays * MS_PER_DAY;
+  const selfSet = new Set(
+    selfTokens.map((t) => t.trim().toLowerCase()).filter(Boolean),
+  );
   const counts = new Map<string, { display: string; count: number }>();
   for (const e of events) {
     const s = parseMs(e.start);
@@ -302,6 +310,7 @@ export function recurringAttendeesInsight(
       const trimmed = a.trim();
       if (!trimmed) continue;
       const key = trimmed.toLowerCase();
+      if (selfSet.has(key)) continue; // exclude the user themselves
       const existing = counts.get(key);
       if (existing) existing.count += 1;
       else counts.set(key, { display: trimmed, count: 1 });
@@ -349,7 +358,7 @@ export function computeInsights(input: ComputeInsightsInput): Insight[] {
     taskChurnInsight(input.tasks, nowMs, lookbackDays),
     overdueTasksInsight(input.tasks, nowMs),
     followUpGapInsight(input.emails, nowMs),
-    recurringAttendeesInsight(input.events, nowMs, lookbackDays),
+    recurringAttendeesInsight(input.events, nowMs, lookbackDays, input.selfTokens ?? []),
   ];
 }
 

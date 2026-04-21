@@ -71,6 +71,7 @@ export async function GET(req: NextRequest) {
     events,
     rangeStartMs: startMs,
     rangeEndMs: endMs,
+    selfTokens: [user.name, user.email].filter((x): x is string => typeof x === "string" && x.length > 0),
   });
   const suggestions = generateCalendarSuggestions({ insights, view });
 

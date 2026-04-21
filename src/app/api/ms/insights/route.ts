@@ -58,6 +58,9 @@ export async function GET(req: NextRequest) {
       tasks: tasksPage.tasks ?? [],
       nowMs,
       lookbackDays: 7,
+      selfTokens: [user.name, user.email].filter(
+        (x): x is string => typeof x === "string" && x.length > 0,
+      ),
     }),
   );
 

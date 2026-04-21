@@ -132,6 +132,25 @@ describe("computeHistoricalInsights", () => {
     expect(out.meetingCount).toBe(0);
   });
 
+  // Regression: user (Nick Homyk) was appearing as his own #1
+  // "top contact" because he's on every meeting he schedules.
+  test("excludes selfTokens (user's own name + email) from topAttendees", () => {
+    const bounds = rangeBoundsFor("year", WEEK_REF);
+    const out = computeHistoricalInsights({
+      events: [
+        ev("2026-04-01T10:00:00Z", 1, ["Nick Homyk", "Sarah Chen"]),
+        ev("2026-04-08T10:00:00Z", 1, ["nick homyk", "Sarah Chen"]),
+        ev("2026-04-15T10:00:00Z", 1, ["nick.homyk@wolfpack.dev", "Jorge"]),
+      ],
+      rangeStartMs: bounds.startMs,
+      rangeEndMs: bounds.endMs,
+      selfTokens: ["Nick Homyk", "nick.homyk@wolfpack.dev"],
+    });
+    // Self-tokens are filtered out — Nick Homyk should not appear.
+    expect(out.topAttendees.map((a) => a.display.toLowerCase())).not.toContain("nick homyk");
+    expect(out.topAttendees[0].display).toBe("Sarah Chen");
+  });
+
   test("day-of-week distribution tallies per UTC weekday", () => {
     const bounds = rangeBoundsFor("year", WEEK_REF);
     const out = computeHistoricalInsights({

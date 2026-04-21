@@ -213,6 +213,22 @@ describe("recurringAttendeesInsight", () => {
     expect(i.headline).toBe("Top contacts: Nick Hoxsie");
     expect(i.headline).not.toMatch(/nick hoxsie/);
   });
+  // Regression: the CTO (Nick Homyk) appeared as his own "top
+  // contact" because he attends every meeting he schedules.
+  test("excludes selfTokens (name + email) from recurring-attendee counts", () => {
+    const events = [
+      ev(-DAY / 60_000, 30, ["Nick Homyk", "Sarah Chen"]),
+      ev(-2 * DAY / 60_000, 30, ["nick homyk", "Sarah Chen"]),
+      ev(-3 * DAY / 60_000, 30, ["nick.homyk@wolfpack.dev", "Jorge"]),
+    ];
+    const i = recurringAttendeesInsight(events, NOW, 7, [
+      "Nick Homyk",
+      "nick.homyk@wolfpack.dev",
+    ]);
+    expect(i.headline).not.toMatch(/nick homyk/i);
+    expect(i.headline).toContain("Sarah Chen");
+  });
+
   test("ignores blank / non-string attendee entries defensively", () => {
     const events = [
       ev(-DAY / 60_000, 30, ["Nick Hoxsie", "", "  "]),

@@ -61,6 +61,10 @@ export interface ComputeHistoricalInput {
   events: CalendarEvent[];
   rangeStartMs: number;
   rangeEndMs: number;
+  /** Tokens identifying the current user (name + email, any case).
+   *  These are excluded from topAttendees so the user never sees
+   *  themselves as their own "top contact". */
+  selfTokens?: string[];
 }
 
 export function computeHistoricalInsights(
@@ -84,6 +88,9 @@ export function computeHistoricalInsights(
   const dow = [0, 0, 0, 0, 0, 0, 0];
   let backToBack = 0;
   let prevEnd: number | null = null;
+  const selfSet = new Set(
+    (input.selfTokens ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean),
+  );
 
   for (const { ev, s, en } of inRange) {
     const dur = Math.max(0, en - s);
@@ -95,6 +102,7 @@ export function computeHistoricalInsights(
       const trimmed = a.trim();
       if (!trimmed) continue;
       const key = trimmed.toLowerCase();
+      if (selfSet.has(key)) continue; // never count the user as their own contact
       const existing = attendeeCounts.get(key);
       if (existing) existing.count += 1;
       else attendeeCounts.set(key, { display: trimmed, count: 1 });
