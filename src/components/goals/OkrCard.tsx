@@ -13,6 +13,7 @@ import AddKrForm from "./AddKrForm";
 import UpdateKrProgressForm from "./UpdateKrProgressForm";
 import ArchiveOkrButton from "./ArchiveOkrButton";
 import EditOkrButton from "./EditOkrButton";
+import ManageKrButton from "./ManageKrButton";
 import { krList, type OkrView, type ContributionView } from "./types";
 
 export interface OkrCardProps {
@@ -105,13 +106,24 @@ export default function OkrCard({
               target_value={kr.target_value}
               unit={kr.unit}
             />
-            <UpdateKrProgressForm
-              krId={kr.id}
-              currentValue={kr.current_value}
-              targetValue={kr.target_value}
-              unit={kr.unit}
-              onUpdated={onKrAdded ?? (() => {})}
-            />
+            <div className="flex items-center gap-3 flex-wrap">
+              <UpdateKrProgressForm
+                krId={kr.id}
+                currentValue={kr.current_value}
+                targetValue={kr.target_value}
+                unit={kr.unit}
+                onUpdated={onKrAdded ?? (() => {})}
+              />
+              <ManageKrButton
+                krId={kr.id}
+                currentMetric={kr.metric}
+                currentTarget={kr.target_value}
+                currentUnit={kr.unit}
+                currentCadence={(kr.cadence ?? "quarterly") as "daily" | "weekly" | "monthly" | "quarterly"}
+                userRole={userRole}
+                onChanged={onKrAdded ?? (() => {})}
+              />
+            </div>
             {open && (
               <>
                 <ContributionStream

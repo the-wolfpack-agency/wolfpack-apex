@@ -320,6 +320,81 @@ export async function addKRToOKR(
  * — the learning loop cares that "someone refreshed but nothing
  * moved" as distinct from "no refresh at all."
  */
+/**
+ * Admin-only edit of a KR's definition fields (metric, target_value,
+ * unit, cadence). Returns the fresh KR or null when missing.
+ */
+export interface UpdateKRInput {
+  metric?: string;
+  target?: number;
+  unit?: string | null;
+  cadence?: KRCadence;
+}
+export async function updateKR(
+  kr_id: string,
+  input: UpdateKRInput,
+  userId: string,
+): Promise<CompanyKR | null> {
+  const sets: string[] = [];
+  const params: unknown[] = [kr_id];
+  if (typeof input.metric === "string" && input.metric.trim().length > 0) {
+    params.push(input.metric.trim());
+    sets.push(`metric = $${params.length}`);
+  }
+  if (typeof input.target === "number" && Number.isFinite(input.target)) {
+    params.push(input.target);
+    sets.push(`target_value = $${params.length}`);
+  }
+  if (input.unit !== undefined) {
+    params.push(input.unit);
+    sets.push(`unit = $${params.length}`);
+  }
+  if (typeof input.cadence === "string") {
+    params.push(input.cadence);
+    sets.push(`cadence = $${params.length}`);
+  }
+  if (sets.length === 0) {
+    const { rows } = await safeQuery<KRRow>(
+      `SELECT id, okr_id, metric, target_value, current_value, unit,
+              cadence, display_order, created_at
+         FROM instinct_company_krs WHERE id = $1`,
+      [kr_id],
+    );
+    return rows.length === 0 ? null : hydrateKR(rows[0]);
+  }
+  const { rows: peek } = await safeQuery<{ id: string }>(
+    `SELECT id FROM instinct_company_krs WHERE id = $1`,
+    [kr_id],
+  );
+  if (peek.length === 0) return null;
+  const { rows } = await writeQuery<KRRow>(
+    `UPDATE instinct_company_krs SET ${sets.join(", ")}
+      WHERE id = $1
+      RETURNING id, okr_id, metric, target_value, current_value, unit,
+                cadence, display_order, created_at`,
+    params,
+    { expectRows: 1 },
+  );
+  trackEvent("goal.kr_edited", userId, "unknown", { kr_id });
+  return hydrateKR(rows[0]);
+}
+
+/**
+ * Admin-only hard delete of a KR. Returns the deleted id or null.
+ */
+export async function deleteKR(
+  kr_id: string,
+  userId: string,
+): Promise<{ id: string } | null> {
+  const { rows } = await writeQuery<{ id: string }>(
+    `DELETE FROM instinct_company_krs WHERE id = $1 RETURNING id`,
+    [kr_id],
+  );
+  if (rows.length === 0) return null;
+  trackEvent("goal.kr_deleted", userId, "unknown", { kr_id });
+  return rows[0];
+}
+
 export async function updateKRCurrent(
   kr_id: string,
   value: number,
