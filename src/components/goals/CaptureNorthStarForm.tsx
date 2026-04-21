@@ -15,9 +15,15 @@ import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 interface Props {
   userRole: string | null;
   onCaptured: () => void;
+  /** Label for the trigger button. Defaults to "Update North Star". */
+  triggerLabel?: string;
 }
 
-export default function CaptureNorthStarForm({ userRole, onCaptured }: Props) {
+export default function CaptureNorthStarForm({
+  userRole,
+  onCaptured,
+  triggerLabel = "Update North Star",
+}: Props) {
   const isAdmin = userRole === "ceo" || userRole === "cto";
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState("");
@@ -75,10 +81,10 @@ export default function CaptureNorthStarForm({ userRole, onCaptured }: Props) {
         type="button"
         data-testid="capture-north-star-open"
         onClick={() => setOpen(true)}
-        className="text-xs"
-        style={{ color: "var(--wp-gold)" }}
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-sm font-semibold transition-colors"
+        style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
       >
-        Update North Star
+        {triggerLabel}
       </button>
     );
   }

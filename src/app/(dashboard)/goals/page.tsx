@@ -220,6 +220,7 @@ export default function GoalsPage() {
           <CaptureNorthStarForm
             userRole={userRole}
             onCaptured={() => goals.refetch()}
+            triggerLabel={northStar ? "Update North Star" : "Set North Star"}
           />
           <CreateOkrForm
             userRole={userRole}
@@ -284,6 +285,8 @@ export default function GoalsPage() {
                 userNames={userNames}
                 defaultOpen={i === 0}
                 onKrAdded={() => goals.refetch()}
+                onArchived={() => goals.refetch()}
+                userRole={userRole}
               />
             ))
           )}

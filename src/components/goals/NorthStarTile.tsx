@@ -119,7 +119,8 @@ export default function NorthStarTile({
         </>
       ) : (
         <div className={`${labelClass} mt-2`} style={{ color: "var(--wp-text-muted)" }}>
-          No snapshot yet. Admins can capture one via the API.
+          No North Star yet. An admin can set one from the “Update North Star”
+          button on /goals.
         </div>
       )}
     </div>

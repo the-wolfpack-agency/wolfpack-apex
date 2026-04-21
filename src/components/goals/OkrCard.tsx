@@ -10,6 +10,8 @@ import { useState } from "react";
 import KrProgress from "./KrProgress";
 import ContributionStream from "./ContributionStream";
 import AddKrForm from "./AddKrForm";
+import UpdateKrProgressForm from "./UpdateKrProgressForm";
+import ArchiveOkrButton from "./ArchiveOkrButton";
 import { krList, type OkrView, type ContributionView } from "./types";
 
 export interface OkrCardProps {
@@ -19,8 +21,12 @@ export interface OkrCardProps {
   userNames?: Record<string, string>;
   onCommit?: (kr_id: string) => void;
   defaultOpen?: boolean;
-  /** Called after a KR is successfully appended so the page can refetch. */
+  /** Called after a KR is successfully appended / progress updated. */
   onKrAdded?: () => void;
+  /** Called after an admin archives this OKR. */
+  onArchived?: () => void;
+  /** Current user role — used by the admin-only archive control. */
+  userRole?: string | null;
 }
 
 export default function OkrCard({
@@ -30,6 +36,8 @@ export default function OkrCard({
   onCommit,
   defaultOpen,
   onKrAdded,
+  onArchived,
+  userRole = null,
 }: OkrCardProps) {
   const [open, setOpen] = useState(Boolean(defaultOpen));
   const krs = krList(okr);
@@ -58,18 +66,25 @@ export default function OkrCard({
             {okr.objective}
           </h3>
         </div>
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="text-xs px-2 py-1 rounded"
-          style={{
-            background: "var(--wp-dark-surface2)",
-            color: "var(--wp-text-dim)",
-          }}
-          aria-expanded={open}
-          aria-controls={`okr-${okr.id}-body`}
-        >
-          {open ? "Collapse" : "Expand"}
-        </button>
+        <div className="flex items-center gap-3">
+          <ArchiveOkrButton
+            okrId={okr.id}
+            userRole={userRole}
+            onArchived={onArchived ?? (() => {})}
+          />
+          <button
+            onClick={() => setOpen((o) => !o)}
+            className="text-xs px-2 py-1 rounded"
+            style={{
+              background: "var(--wp-dark-surface2)",
+              color: "var(--wp-text-dim)",
+            }}
+            aria-expanded={open}
+            aria-controls={`okr-${okr.id}-body`}
+          >
+            {open ? "Collapse" : "Expand"}
+          </button>
+        </div>
       </div>
 
       <div id={`okr-${okr.id}-body`} className="mt-3 space-y-4">
@@ -81,6 +96,13 @@ export default function OkrCard({
               current_value={kr.current_value}
               target_value={kr.target_value}
               unit={kr.unit}
+            />
+            <UpdateKrProgressForm
+              krId={kr.id}
+              currentValue={kr.current_value}
+              targetValue={kr.target_value}
+              unit={kr.unit}
+              onUpdated={onKrAdded ?? (() => {})}
             />
             {open && (
               <>
