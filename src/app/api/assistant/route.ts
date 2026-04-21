@@ -130,6 +130,7 @@ export async function POST(req: NextRequest) {
       const toolAnswer = await tryToolAnswer(message, {
         userId: user.email || user.id,
         userRole: user.role,
+        userDisplayName: user.name,
       });
       if (toolAnswer) {
         trackEvent("assistant.tool_invoked", user.id, user.role, {

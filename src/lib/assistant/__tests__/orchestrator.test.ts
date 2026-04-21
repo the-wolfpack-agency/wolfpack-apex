@@ -45,6 +45,66 @@ describe("tryToolAnswer — intent dispatch", () => {
     const out = await tryToolAnswer("Is Hoxsie busy this afternoon?", CTX);
     expect(out?.intent).toBe("calendar_availability");
     expect(out?.source).toBe("tool");
+    // Third-person queries do NOT pass a selfUser.
+    expect(mockCalendar).toHaveBeenCalledWith(
+      expect.objectContaining({ personName: "Hoxsie", selfUser: undefined }),
+    );
+  });
+
+  test("first-person 'am I free today' → calendar tool with selfUser from ctx", async () => {
+    mockCalendar.mockResolvedValue({
+      person: "You",
+      timeframeLabel: "today",
+      busy: false,
+      events: [],
+      answer: "You look free today.",
+    });
+    const out = await tryToolAnswer("am I free today?", {
+      ...CTX,
+      userDisplayName: "Nick Homyk",
+    });
+    expect(out?.intent).toBe("calendar_availability");
+    expect(mockCalendar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selfUser: { userId: "nick@wolfpack.dev", displayName: "Nick Homyk" },
+      }),
+    );
+  });
+
+  test("first-person 'what's on my calendar' → calendar_schedule with selfUser", async () => {
+    mockCalendar.mockResolvedValue({
+      person: "You",
+      timeframeLabel: "today",
+      busy: true,
+      events: [],
+      answer: "You have 1 meeting today: Standup (9:00–9:30).",
+    });
+    const out = await tryToolAnswer("what's on my calendar today", {
+      ...CTX,
+      userDisplayName: "Nick Homyk",
+    });
+    expect(out?.intent).toBe("calendar_schedule");
+    expect(mockCalendar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selfUser: { userId: "nick@wolfpack.dev", displayName: "Nick Homyk" },
+      }),
+    );
+  });
+
+  test("first-person query without a display name falls back to userId as name", async () => {
+    mockCalendar.mockResolvedValue({
+      person: "You",
+      timeframeLabel: "tomorrow",
+      busy: false,
+      events: [],
+      answer: "You look free tomorrow.",
+    });
+    await tryToolAnswer("am I busy tomorrow?", CTX); // no userDisplayName
+    expect(mockCalendar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selfUser: { userId: "nick@wolfpack.dev", displayName: "nick@wolfpack.dev" },
+      }),
+    );
   });
 
   test("goals_lookup → goals tool", async () => {

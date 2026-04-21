@@ -62,9 +62,15 @@ export async function runCalendarAvailability(params: {
   personName: string;
   timeframeToken: string | undefined;
   nowMs?: number;
+  // When set, skip the directory resolve and treat this as the caller's
+  // own calendar (first-person queries: "am I busy", "what's on my calendar").
+  selfUser?: { userId: string; displayName: string };
 }): Promise<CalendarAvailabilityResult | null> {
-  const resolved = await resolvePersonToGraphUser(params.personName);
+  const resolved = params.selfUser
+    ? params.selfUser
+    : await resolvePersonToGraphUser(params.personName);
   if (!resolved) return null;
+  const isSelf = Boolean(params.selfUser);
   const range = resolveTimeframe(params.timeframeToken, params.nowMs);
 
   let events: CalendarEvent[] = [];
@@ -91,9 +97,12 @@ export async function runCalendarAvailability(params: {
     .map((e) => `${e.subject} (${formatTime(e.start)}–${formatTime(e.end)})`)
     .join(", ");
 
+  const subject = isSelf ? "You" : resolved.displayName;
+  const haveVerb = isSelf ? "have" : "has";
+  const freeVerb = isSelf ? "look" : "looks";
   const answer = busy
-    ? `${resolved.displayName} has ${overlapping.length} meeting${overlapping.length === 1 ? "" : "s"} ${range.label}: ${summary}${overlapping.length > 3 ? ", …" : "."}`
-    : `${resolved.displayName} looks free ${range.label}.`;
+    ? `${subject} ${haveVerb} ${overlapping.length} meeting${overlapping.length === 1 ? "" : "s"} ${range.label}: ${summary}${overlapping.length > 3 ? ", …" : "."}`
+    : `${subject} ${freeVerb} free ${range.label}.`;
 
   return {
     person: resolved.displayName,

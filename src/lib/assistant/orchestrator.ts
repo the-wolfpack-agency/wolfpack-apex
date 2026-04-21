@@ -13,7 +13,7 @@
  * invoked downstream of `tryToolAnswer() === null`.
  */
 
-import { classifyIntent, type IntentMatch } from "@/lib/assistant/intent-router";
+import { classifyIntent, SELF_TOKEN, type IntentMatch } from "@/lib/assistant/intent-router";
 import { runCalendarAvailability } from "@/lib/assistant/tools/calendar-availability";
 import { runBrainHistory } from "@/lib/assistant/tools/brain-history";
 import { runMailSearch } from "@/lib/assistant/tools/mail-search";
@@ -35,6 +35,9 @@ export interface ToolContext {
   userId: string;
   /** Caller's role — used to gate financials to ceo/cto only. */
   userRole: string;
+  /** Caller's display name — used by first-person calendar queries so
+   *  the answer reads "You have 2 meetings…" instead of the email. */
+  userDisplayName?: string;
   nowMs?: number;
 }
 
@@ -47,10 +50,15 @@ export async function tryToolAnswer(
   if (match.intent === "calendar_availability" || match.intent === "calendar_schedule") {
     const person = match.slots.person;
     if (!person) return null;
+    const selfUser =
+      person === SELF_TOKEN
+        ? { userId: ctx.userId, displayName: ctx.userDisplayName || ctx.userId }
+        : undefined;
     const result = await runCalendarAvailability({
       personName: person,
       timeframeToken: match.slots.timeframe,
       nowMs: ctx.nowMs,
+      selfUser,
     });
     if (!result) return null;
     return { intent: match.intent, answer: result.answer, data: result, source: "tool" };

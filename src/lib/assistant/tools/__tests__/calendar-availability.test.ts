@@ -93,6 +93,48 @@ describe("runCalendarAvailability", () => {
     expect(out?.answer.toLowerCase()).toContain("q2 review");
   });
 
+  test("selfUser short-circuits directory lookup and renders first-person answer", async () => {
+    mockFetchCalendarEvents.mockResolvedValue([
+      {
+        id: "m1",
+        subject: "Q2 Review",
+        start: "2026-04-21T14:30:00Z",
+        end: "2026-04-21T15:30:00Z",
+        location: "",
+        attendees: [],
+        attendeeEmails: [],
+        isOnlineMeeting: false,
+      },
+    ]);
+    const out = await runCalendarAvailability({
+      personName: "__self__",
+      timeframeToken: "afternoon_today",
+      nowMs: NOW,
+      selfUser: { userId: "nick@wolfpack.dev", displayName: "Nick Homyk" },
+    });
+    expect(mockSafeQuery).not.toHaveBeenCalled();
+    expect(mockFetchCalendarEvents).toHaveBeenCalledWith(
+      "nick@wolfpack.dev",
+      expect.any(String),
+      expect.any(String),
+    );
+    expect(out?.busy).toBe(true);
+    expect(out?.answer).toMatch(/^You have 1 meeting /);
+    expect(out?.answer.toLowerCase()).toContain("q2 review");
+  });
+
+  test("selfUser renders first-person 'free' answer when empty", async () => {
+    mockFetchCalendarEvents.mockResolvedValue([]);
+    const out = await runCalendarAvailability({
+      personName: "__self__",
+      timeframeToken: "afternoon_today",
+      nowMs: NOW,
+      selfUser: { userId: "nick@wolfpack.dev", displayName: "Nick Homyk" },
+    });
+    expect(out?.busy).toBe(false);
+    expect(out?.answer).toBe("You look free this afternoon.");
+  });
+
   test("tolerates Graph failure by returning null (orchestrator will fall back)", async () => {
     mockSafeQuery.mockResolvedValue({
       rows: [{ user_id: "u1", display_name: "Hoxsie", mail: "hoxsie@wolfpack.dev" }],

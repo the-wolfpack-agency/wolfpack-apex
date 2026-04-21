@@ -1,4 +1,4 @@
-import { classifyIntent } from "@/lib/assistant/intent-router";
+import { classifyIntent, SELF_TOKEN } from "@/lib/assistant/intent-router";
 
 describe("classifyIntent (token-free)", () => {
   test.each([
@@ -17,6 +17,33 @@ describe("classifyIntent (token-free)", () => {
     const m = classifyIntent("what's on Hoxsie's calendar tomorrow");
     expect(m.intent).toBe("calendar_schedule");
     expect(m.slots.person.toLowerCase()).toContain("hoxsie");
+  });
+
+  test.each([
+    ["am I available this afternoon?", "afternoon_today"],
+    ["am i free tomorrow", "tomorrow"],
+    ["am I busy this morning?", "morning_today"],
+    ["do I have any meetings today", "today"],
+    ["do I have anything this afternoon", "afternoon_today"],
+  ])("first-person availability: %s", (q, timeframe) => {
+    const m = classifyIntent(q);
+    expect(m.intent).toBe("calendar_availability");
+    expect(m.slots.person).toBe(SELF_TOKEN);
+    expect(m.slots.timeframe).toBe(timeframe);
+    expect(m.confidence).toBeGreaterThanOrEqual(0.85);
+  });
+
+  test.each([
+    ["what's on my calendar today", "today"],
+    ["what is on my schedule tomorrow", "tomorrow"],
+    ["whats on my agenda this week", "this_week"],
+    ["what's my day look like today", "today"],
+    ["what does my day look like tomorrow", "tomorrow"],
+  ])("first-person schedule: %s", (q, timeframe) => {
+    const m = classifyIntent(q);
+    expect(m.intent).toBe("calendar_schedule");
+    expect(m.slots.person).toBe(SELF_TOKEN);
+    expect(m.slots.timeframe).toBe(timeframe);
   });
 
   test("financials keywords route to financials_metric", () => {

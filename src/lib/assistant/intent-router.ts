@@ -30,6 +30,13 @@ export interface IntentMatch {
 
 const BUSY_RE = /\bis\s+([a-z][\w\s.'-]{0,40}?)\s+(busy|free|available)\b/i;
 const SCHEDULE_RE = /\b(what'?s|whats|what is)\s+(on|in)\s+([a-z][\w\s.'-]{0,40}?)(?:'s|s')?\s+(calendar|schedule|agenda)\b/i;
+// First-person variants — the caller asking about their OWN schedule.
+// Person slot is filled with the SELF_TOKEN sentinel; the orchestrator
+// substitutes the caller's userId/displayName from ToolContext.
+const SELF_BUSY_RE = /\bam\s+i\s+(busy|free|available)\b/i;
+const SELF_HAVE_RE = /\bdo\s+i\s+have\s+(?:any|anything|a\s+meeting|meetings|time|stuff|plans)\b/i;
+const SELF_SCHEDULE_RE = /\b(?:(?:what'?s|whats|what is)\s+(?:on|in)\s+my\s+(?:calendar|schedule|agenda)|what'?s\s+my\s+(?:day|schedule|agenda)|what\s+does\s+my\s+day\s+look\s+like|my\s+(?:calendar|schedule|agenda)\s+(?:today|tomorrow|this|next))\b/i;
+export const SELF_TOKEN = "__self__";
 const FINANCIAL_RE = /\b(mrr|arr|cash|revenue|net profit|unpaid|invoice|expense|burn|runway)\b/i;
 const GOALS_RE = /\b(okr|okrs|north star|kr\b|key result|goals?)\b/i;
 const MAIL_RE = /\bemail\b.*\b(from|about|regarding)\b|\bfind\s+(the\s+)?email\b/i;
@@ -64,6 +71,24 @@ export function classifyIntent(text: string): IntentMatch {
   const slots: Record<string, string> = {};
   const tf = extractTimeframe(q);
   if (tf) slots.timeframe = tf;
+
+  const selfBusy = SELF_BUSY_RE.exec(q);
+  if (selfBusy) {
+    slots.person = SELF_TOKEN;
+    slots.mode = selfBusy[1].toLowerCase();
+    return { intent: "calendar_availability", slots, confidence: 0.9 };
+  }
+
+  if (SELF_HAVE_RE.test(q)) {
+    slots.person = SELF_TOKEN;
+    slots.mode = "busy";
+    return { intent: "calendar_availability", slots, confidence: 0.85 };
+  }
+
+  if (SELF_SCHEDULE_RE.test(q)) {
+    slots.person = SELF_TOKEN;
+    return { intent: "calendar_schedule", slots, confidence: 0.85 };
+  }
 
   const busy = BUSY_RE.exec(q);
   if (busy) {
