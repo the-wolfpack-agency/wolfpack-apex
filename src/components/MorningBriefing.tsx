@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getInstinctToken, authHeaders } from "@/lib/client-auth";
+import MeetingPreBriefPanel from "@/components/MeetingPreBriefPanel";
 
 // ---------------------------------------------------------------------------
 // Types (mirrors MorningBriefing from lib/morning-briefing.ts)
@@ -327,6 +328,9 @@ export default function MorningBriefing() {
           </div>
         </Section>
       )}
+
+      {/* Meeting Pre-Brief — embedded between Action Items and Today's Schedule */}
+      <MeetingPreBriefPanel />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Today's Schedule */}

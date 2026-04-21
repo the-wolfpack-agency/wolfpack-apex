@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import FinancialsCard from "@/components/FinancialsCard";
 import IntegrationStatusBanner from "@/components/IntegrationStatusBanner";
 import MorningBriefing from "@/components/MorningBriefing";
-import MeetingPreBriefPanel from "@/components/MeetingPreBriefPanel";
 import MsInsightsPanel from "@/components/MsInsightsPanel";
 import { getInstinctToken, authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
@@ -189,11 +188,9 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Morning Briefing (CEO/CTO only) */}
+      {/* Morning Briefing (CEO/CTO only) — now embeds Meeting Pre-Brief
+          between Action Items and Today's Schedule. */}
       {showBriefing && <MorningBriefing />}
-
-      {/* Meeting Pre-Brief — renders below Morning Briefing */}
-      <MeetingPreBriefPanel />
 
       {/* MS 365 Insights — patterns from calendar/email/tasks */}
       <MsInsightsPanel />
