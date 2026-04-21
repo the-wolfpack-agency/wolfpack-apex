@@ -121,6 +121,32 @@ export type InstinctEventType =
   | "meeting.draft_created_offline"
   | "journal.entry_created_offline"
   | "knowledge.entry_created_offline"
+  // Goals (company OKRs / KRs / contributions — migration 079).
+  // Fires from Goals dashboard tile, OKR cards, Friday-sync commitment
+  // flow, auto-linker, and offline queue. All are consumed by the
+  // learning loop to grade forecast accuracy and surface stalled KRs.
+  | "goal.page_viewed"
+  | "goal.okr_created"
+  | "goal.okr_created_ui"
+  | "goal.kr_updated"
+  | "goal.contribution_created"
+  | "goal.contribution_graded"
+  | "goal.commitment_ui_submitted"
+  | "goal.commitment_ui_graded"
+  | "goal.commitment_queued_offline"
+  | "goal.north_star_ui_updated"
+  | "goal.digest_sent"
+  // Polymorphic entity tag/link layer (migration 078).
+  | "entity.tag_applied"
+  | "entity.tag_removed"
+  | "entity.link_created"
+  | "entity.link_removed"
+  | "entity.auto_tag_run"
+  // MS Graph canonical-mirror sync (migration 077 L1).
+  | "ms_sync.user_synced"
+  | "ms_sync.scope_missing"
+  | "ms_sync.error"
+  | "ms_sync.rate_limited"
   // Feature requests
   | "feature.request_submitted"
   | "feature.request_write_failed"
