@@ -23,8 +23,11 @@ export async function GET(req: NextRequest) {
 
   const nowMs = Date.now();
   const dayMs = 24 * 60 * 60_000;
-  const startIso = new Date(nowMs - 7 * dayMs).toISOString();
-  const endIso = new Date(nowMs + 7 * dayMs).toISOString();
+  // fetchCalendarEvents caps at $top=50 ordered by start/dateTime ASC,
+  // so a wide window on a busy calendar returns only the OLDEST 50 and
+  // buries today. Keep the window narrow (yesterday → +3 days).
+  const startIso = new Date(nowMs - 1 * dayMs).toISOString();
+  const endIso = new Date(nowMs + 3 * dayMs).toISOString();
 
   const [events, emails, tasksPage] = await Promise.all([
     fetchCalendarEvents(user.id, startIso, endIso).catch(() => []),
