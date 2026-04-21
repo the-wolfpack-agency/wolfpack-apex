@@ -192,10 +192,12 @@ export default function OfflineStatusPill({
       aria-live="polite"
       data-testid="offline-status-pill"
       data-mode={tone}
+      // Position owned by .wp-offline-pill in globals.css so the
+      // responsive breakpoint can shift it clear of the mobile
+      // NotificationBell (they shared the top-right corner and
+      // covered each other on <lg viewports).
+      className="wp-offline-pill"
       style={{
-        position: "fixed",
-        top: 12,
-        right: 12,
         zIndex: 60,
         display: "inline-flex",
         alignItems: "center",

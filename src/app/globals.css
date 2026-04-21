@@ -73,3 +73,26 @@ body {
 /* Gold accent link */
 a { color: var(--wp-gold); text-decoration: none; transition: color 0.15s; }
 a:hover { color: var(--wp-gold-hover); }
+
+/*
+ * Persistent online/offline pill.
+ *
+ * Desktop: top-right of the viewport. Mobile: sits BELOW the mobile
+ * header so it doesn't cover the NotificationBell (same top-right
+ * corner). Bottom-right on very narrow viewports keeps the bell
+ * fully visible.
+ */
+.wp-offline-pill {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+}
+
+@media (max-width: 1023px) {
+  .wp-offline-pill {
+    /* Drop below the 48-56px mobile header + a little breathing room */
+    top: auto;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    right: 12px;
+  }
+}

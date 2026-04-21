@@ -67,6 +67,11 @@ export default function SetupPage() {
   // Step 3 state — tracked for summary
   const [integrationsSkipped, setIntegrationsSkipped] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [integrationStatus, setIntegrationStatus] = useState<{
+    microsoft: boolean;
+    quickbooks: boolean;
+    plaud: boolean;
+  }>({ microsoft: false, quickbooks: false, plaud: false });
 
   const stepViewedAtRef = useRef<number>(Date.now());
   const prevIntegrationsRef = useRef<boolean | null>(null);
@@ -150,6 +155,19 @@ export default function SetupPage() {
     }
 
     fetchStatus();
+    // Per-integration live status so step 3 doesn't re-prompt someone
+    // who already connected Microsoft / QuickBooks / Plaud.
+    fetchWithRefresh("/api/integrations/status", { headers: jsonHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        setIntegrationStatus({
+          microsoft: !!(d?.microsoft?.connected ?? d?.microsoft),
+          quickbooks: !!(d?.quickbooks?.connected ?? d?.quickbooks),
+          plaud: !!(d?.plaud?.connected ?? d?.plaud),
+        });
+      })
+      .catch(() => {});
 
     // Track setup started
     fetchWithRefresh("/api/analytics", {
@@ -536,13 +554,19 @@ export default function SetupPage() {
                   { key: "quickbooks", name: "QuickBooks", desc: "Financial reports and dashboards" },
                   { key: "plaud", name: "Plaud", desc: "Meeting recordings and transcripts" },
                 ] as const
-              ).map((integration) => (
+              ).map((integration) => {
+                const connected = integrationStatus[integration.key];
+                return (
                 <div
                   key={integration.key}
+                  data-testid={`setup-integration-card-${integration.key}`}
+                  data-connected={connected ? "true" : "false"}
                   className="rounded-lg border p-4 flex flex-col items-center text-center gap-3"
                   style={{
                     background: "var(--wp-dark-surface2, var(--wp-dark))",
-                    borderColor: "var(--wp-border, var(--wp-dark-border))",
+                    borderColor: connected
+                      ? "var(--wp-success, rgb(34, 197, 94))"
+                      : "var(--wp-border, var(--wp-dark-border))",
                   }}
                 >
                   <p className="text-sm font-medium" style={{ color: "var(--wp-text)" }}>
@@ -551,15 +575,33 @@ export default function SetupPage() {
                   <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
                     {integration.desc}
                   </p>
-                  <button
-                    onClick={() => handleConnect(integration.key)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border"
-                    style={{ borderColor: "var(--wp-gold)", color: "var(--wp-gold)" }}
-                  >
-                    Connect
-                  </button>
+                  {connected ? (
+                    <span
+                      data-testid={`setup-integration-connected-${integration.key}`}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium"
+                      style={{
+                        background: "rgba(34, 197, 94, 0.12)",
+                        color: "rgb(74, 222, 128)",
+                        border: "1px solid rgba(34, 197, 94, 0.35)",
+                      }}
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                      Connected
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => handleConnect(integration.key)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border"
+                      style={{ borderColor: "var(--wp-gold)", color: "var(--wp-gold)" }}
+                    >
+                      Connect
+                    </button>
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
             {connectError && (
               <p className="text-sm" style={{ color: "var(--wp-warning, #f59e0b)" }}>{connectError}</p>

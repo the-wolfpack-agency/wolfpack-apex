@@ -156,13 +156,13 @@ export default function TasksPage() {
             View team tasks →
           </a>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search"
-            className="px-3 py-1.5 rounded-md text-sm border"
+            className="px-3 py-1.5 rounded-md text-sm border flex-1 min-w-[8rem] sm:flex-none sm:w-auto"
             style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
           />
           <select
