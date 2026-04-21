@@ -298,8 +298,11 @@ export function recurringAttendeesInsight(
     const s = parseMs(e.start);
     if (s === null || s < cutoff || s > nowMs + 7 * MS_PER_DAY) continue;
     for (const a of e.attendees) {
-      if (!a.includes("@")) continue;
+      // Graph may hand us display names OR email addresses depending on
+      // the invitee's mailbox. Count either; skip only blanks.
+      if (!a || typeof a !== "string") continue;
       const key = a.trim().toLowerCase();
+      if (!key) continue;
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
   }
