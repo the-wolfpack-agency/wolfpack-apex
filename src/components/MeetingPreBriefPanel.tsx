@@ -55,14 +55,39 @@ function fireAnalytics(
 }
 
 /**
- * Pretty-print minutesUntil as "in 3h 12m" / "in 45m" / "in progress" /
- * "ended 12m ago". Same helper on the server would be fine, but keeping
- * it here keeps the API response shape minimal.
+ * Recompute minutesUntil + inProgress live from the ISO start/end + the
+ * current client clock. The server sets these once when the request is
+ * served; if the user leaves the tab open the server value goes stale
+ * (a meeting that's "in 20m" at 3:10 PM still renders as "in 1h 11m"
+ * an hour later). Computing locally ticks forward correctly without
+ * needing to refetch.
  */
-function formatCountdown(m: UpcomingMeeting): string {
-  if (m.inProgress) return "In progress";
-  if (m.minutesUntil === null) return "";
-  const mins = m.minutesUntil;
+function liveStatus(
+  m: UpcomingMeeting,
+  nowMs: number,
+): { minutesUntil: number | null; inProgress: boolean } {
+  const startMs = Date.parse(m.start);
+  const endMs = Date.parse(m.end);
+  if (Number.isNaN(startMs)) {
+    return { minutesUntil: m.minutesUntil, inProgress: m.inProgress };
+  }
+  const minutesUntil = Math.round((startMs - nowMs) / 60_000);
+  const inProgress =
+    !Number.isNaN(endMs) && startMs <= nowMs && endMs > nowMs;
+  return { minutesUntil, inProgress };
+}
+
+/**
+ * Pretty-print minutesUntil as "in 3h 12m" / "in 45m" / "in progress" /
+ * "ended 12m ago". Takes the live minutesUntil (computed from Date.now())
+ * rather than the frozen server value, so the panel ticks forward without
+ * a refetch.
+ */
+function formatCountdown(m: UpcomingMeeting, nowMs: number): string {
+  const { minutesUntil, inProgress } = liveStatus(m, nowMs);
+  if (inProgress) return "In progress";
+  if (minutesUntil === null) return "";
+  const mins = minutesUntil;
   if (mins < 0) {
     const ago = -mins;
     if (ago < 60) return `Ended ${ago}m ago`;
@@ -109,6 +134,13 @@ export default function MeetingPreBriefPanel({ lookaheadHours = 48 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Tick the client clock every 30s so the countdown label stays live
+  // without needing to refetch. 30s is fine for a minute-granularity label.
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -247,7 +279,7 @@ export default function MeetingPreBriefPanel({ lookaheadHours = 48 }: Props) {
           >
             {meetings.map((m) => (
               <option key={m.id} value={m.id}>
-                {formatWhen(m.start)} — {m.subject} ({formatCountdown(m)})
+                {formatWhen(m.start)} — {m.subject} ({formatCountdown(m, nowMs)})
               </option>
             ))}
           </select>
@@ -256,7 +288,7 @@ export default function MeetingPreBriefPanel({ lookaheadHours = 48 }: Props) {
 
       {selected && (
         <div className="text-xs" data-testid="prebrief-countdown" style={{ color: "var(--wp-text-dim)" }}>
-          {formatCountdown(selected)}
+          {formatCountdown(selected, nowMs)}
           {selected.location ? ` · ${selected.location}` : ""}
         </div>
       )}

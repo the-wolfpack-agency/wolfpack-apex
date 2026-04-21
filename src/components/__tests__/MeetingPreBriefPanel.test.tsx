@@ -172,6 +172,46 @@ describe("MeetingPreBriefPanel", () => {
     expect(container.innerHTML).toBe("");
   });
 
+  test("countdown ticks forward from client clock — ignores stale server minutesUntil", async () => {
+    // Fix "now" to 3:10 PM UTC. Meeting starts at 3:30 PM UTC → 20m away.
+    // Server sent minutesUntil=71 (stale — was captured at 2:19 PM). We
+    // expect the UI to show "in 20m", not "in 1h 11m".
+    jest.useFakeTimers();
+    jest.setSystemTime(Date.parse("2026-04-21T15:10:00Z"));
+    mockUpcoming([
+      meeting({
+        id: "stale",
+        subject: "PCBA",
+        start: "2026-04-21T15:30:00Z",
+        end: "2026-04-21T16:45:00Z",
+        minutesUntil: 71, // frozen stale server value
+        inProgress: false,
+      }),
+    ]);
+
+    render(<MeetingPreBriefPanel />);
+    await waitFor(() =>
+      expect(screen.getByTestId("meeting-prebrief-panel")).toBeInTheDocument(),
+    );
+
+    expect(screen.getByTestId("prebrief-countdown")).toHaveTextContent(/in 20m/);
+
+    // Advance 10 real minutes → countdown should tick to "in 10m"
+    jest.setSystemTime(Date.parse("2026-04-21T15:20:00Z"));
+    jest.advanceTimersByTime(30_000);
+    await waitFor(() =>
+      expect(screen.getByTestId("prebrief-countdown")).toHaveTextContent(/in 10m/),
+    );
+
+    // Cross the start boundary → "In progress"
+    jest.setSystemTime(Date.parse("2026-04-21T15:35:00Z"));
+    jest.advanceTimersByTime(30_000);
+    await waitFor(() =>
+      expect(screen.getByTestId("prebrief-countdown")).toHaveTextContent(/In progress/),
+    );
+    jest.useRealTimers();
+  });
+
   test("respects custom lookaheadHours in the request URL", async () => {
     mockUpcoming([]);
     render(<MeetingPreBriefPanel lookaheadHours={24} />);
