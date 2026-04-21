@@ -10,7 +10,6 @@ import {
   migrateLegacyApexKeys,
 } from "@/lib/client-auth";
 import NotificationBell from "@/components/NotificationBell";
-import GoalsDashboardTile from "@/components/goals/GoalsDashboardTile";
 import { useAmbientRefresh } from "@/lib/hooks/useAmbientRefresh";
 
 interface User {
@@ -279,14 +278,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </header>
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 lg:p-8">
-          {/* Goals tile — pinned to the MAIN dashboard only (not /goals,
-              not any other route). Mounted here so every dashboard page
-              doesn't need to know the tile exists. */}
-          {pathname === "/" && (
-            <div className="mb-4 max-w-sm">
-              <GoalsDashboardTile />
-            </div>
-          )}
           {children}
         </main>
       </div>
