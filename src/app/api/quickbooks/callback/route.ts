@@ -21,13 +21,13 @@ export async function GET(req: NextRequest) {
   // Intuit sends error param if user denies access
   if (error) {
     console.warn("[quickbooks] OAuth denied:", error);
-    const redirectUrl = new URL("/dashboard", req.url);
+    const redirectUrl = new URL("/", req.url);
     redirectUrl.searchParams.set("qbo", "denied");
     return NextResponse.redirect(redirectUrl);
   }
 
   if (!code || !realmId) {
-    const redirectUrl = new URL("/dashboard", req.url);
+    const redirectUrl = new URL("/", req.url);
     redirectUrl.searchParams.set("qbo", "error");
     redirectUrl.searchParams.set("detail", "Missing code or realmId");
     return NextResponse.redirect(redirectUrl);
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
   // Exchange code for tokens
   const tokens = await exchangeCode(code, realmId);
   if (!tokens) {
-    const redirectUrl = new URL("/dashboard", req.url);
+    const redirectUrl = new URL("/", req.url);
     redirectUrl.searchParams.set("qbo", "error");
     redirectUrl.searchParams.set("detail", "Token exchange failed");
     return NextResponse.redirect(redirectUrl);
@@ -77,7 +77,7 @@ export async function GET(req: NextRequest) {
     rawReturnTo.startsWith("/") &&
     !rawReturnTo.startsWith("//")
       ? rawReturnTo
-      : "/dashboard";
+      : "/";
 
   const redirectUrl = new URL(safePath, req.url);
   redirectUrl.searchParams.set("qbo", "connected");

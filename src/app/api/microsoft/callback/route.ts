@@ -28,13 +28,13 @@ export async function GET(req: NextRequest) {
   // Azure AD sends error param if user denies access or something goes wrong
   if (error) {
     console.warn("[microsoft-graph] OAuth denied:", error, errorDescription);
-    const redirectUrl = new URL("/dashboard", req.url);
+    const redirectUrl = new URL("/", req.url);
     redirectUrl.searchParams.set("ms", "denied");
     return NextResponse.redirect(redirectUrl);
   }
 
   if (!code) {
-    const redirectUrl = new URL("/dashboard", req.url);
+    const redirectUrl = new URL("/", req.url);
     redirectUrl.searchParams.set("ms", "error");
     redirectUrl.searchParams.set("detail", "Missing authorization code");
     return NextResponse.redirect(redirectUrl);
@@ -47,14 +47,14 @@ export async function GET(req: NextRequest) {
   // user, refuse to write anything.
   const stateUserId = verifyState(state);
   if (!stateUserId) {
-    const redirectUrl = new URL("/dashboard", req.url);
+    const redirectUrl = new URL("/", req.url);
     redirectUrl.searchParams.set("ms", "error");
     redirectUrl.searchParams.set("detail", "Invalid OAuth state");
     return NextResponse.redirect(redirectUrl);
   }
   if (user && user.id !== stateUserId) {
     // Session user disagrees with state — possible CSRF / link sharing.
-    const redirectUrl = new URL("/dashboard", req.url);
+    const redirectUrl = new URL("/", req.url);
     redirectUrl.searchParams.set("ms", "error");
     redirectUrl.searchParams.set("detail", "OAuth state mismatch");
     return NextResponse.redirect(redirectUrl);
@@ -64,7 +64,7 @@ export async function GET(req: NextRequest) {
   // Exchange code for tokens
   const tokens = await exchangeCode(code);
   if (!tokens) {
-    const redirectUrl = new URL("/dashboard", req.url);
+    const redirectUrl = new URL("/", req.url);
     redirectUrl.searchParams.set("ms", "error");
     redirectUrl.searchParams.set("detail", "Token exchange failed");
     return NextResponse.redirect(redirectUrl);
@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
     rawReturnTo.startsWith("/") &&
     !rawReturnTo.startsWith("//")
       ? rawReturnTo
-      : "/dashboard";
+      : "/";
 
   const redirectUrl = new URL(safePath, req.url);
   redirectUrl.searchParams.set("ms", "connected");
