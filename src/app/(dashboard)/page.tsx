@@ -189,12 +189,11 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Meeting Pre-Brief — surfaces above Morning Briefing so prep
-          context is the first thing a busy user sees. */}
-      <MeetingPreBriefPanel />
-
       {/* Morning Briefing (CEO/CTO only) */}
       {showBriefing && <MorningBriefing />}
+
+      {/* Meeting Pre-Brief — renders below Morning Briefing */}
+      <MeetingPreBriefPanel />
 
       {/* MS 365 Insights — patterns from calendar/email/tasks */}
       <MsInsightsPanel />
