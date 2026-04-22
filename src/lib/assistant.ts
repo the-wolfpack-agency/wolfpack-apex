@@ -661,9 +661,14 @@ export async function getConversationHistory(
 
 async function tryKnowledgeBase(message: string): Promise<string | null> {
   try {
-    const results = await searchKnowledge(message, 1);
-    if (results.length > 0 && results[0].rating !== null && results[0].rating >= 3) {
-      return results[0].answer;
+    const results = await searchKnowledge(message, 5);
+    // Unrated entries (rating === null) are KEPT — they represent fresh
+    // knowledge the team just added. Only entries explicitly graded low
+    // (rating <= 2) are skipped. Walk the top matches so a slightly
+    // different phrasing still lands on a good entry.
+    for (const hit of results) {
+      if (hit.rating !== null && hit.rating <= 2) continue;
+      return hit.answer;
     }
     return null;
   } catch {
