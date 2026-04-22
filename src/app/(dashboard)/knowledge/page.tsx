@@ -1,12 +1,16 @@
 "use client";
 
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect, FormEvent, MouseEvent as ReactMouseEvent } from "react";
 import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 import {
   queryKnowledgeWithCache,
   RagOfflineMissError,
 } from "@/lib/knowledge-rag-offline";
-import { saveKnowledgeEntryOffline } from "@/lib/knowledge-capture-offline";
+import {
+  saveKnowledgeEntryOffline,
+  updateKnowledgeEntryOffline,
+  deleteKnowledgeEntryOffline,
+} from "@/lib/knowledge-capture-offline";
 import { RagSnapshotBadge } from "@/components/RagSnapshotBadge";
 
 interface KnowledgeEntry {
@@ -70,6 +74,14 @@ export default function KnowledgePage() {
   const [captureTags, setCaptureTags] = useState("");
   const [capturing, setCapturing] = useState(false);
   const [captureMsg, setCaptureMsg] = useState("");
+  // Edit-in-place state — keyed by entry id so only one row is editable
+  // at a time. Clicking Edit on another row collapses the current one.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editQuestion, setEditQuestion] = useState("");
+  const [editAnswer, setEditAnswer] = useState("");
+  const [editTags, setEditTags] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [editMsg, setEditMsg] = useState("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -217,6 +229,105 @@ export default function KnowledgePage() {
       setCaptureMsg((err as Error).message || "Failed to save");
     }
     setCapturing(false);
+  }
+
+  function startEdit(entry: KnowledgeEntry, e?: ReactMouseEvent) {
+    e?.stopPropagation();
+    setEditingId(entry.id);
+    setEditQuestion(entry.question);
+    setEditAnswer(entry.answer);
+    setEditTags((entry.tags || []).join(", "));
+    setEditMsg("");
+    fetchWithRefresh("/api/analytics", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        event: "knowledge.entry_edit_clicked",
+        metadata: { knowledge_id: entry.id },
+      }),
+    }).catch(() => {});
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditQuestion("");
+    setEditAnswer("");
+    setEditTags("");
+    setEditMsg("");
+  }
+
+  async function handleEditSave(e: FormEvent, entryId: string) {
+    e.preventDefault();
+    const q = editQuestion.trim();
+    const a = editAnswer.trim();
+    if (!q || !a) {
+      setEditMsg("Both question and answer are required");
+      return;
+    }
+    setEditing(true);
+    setEditMsg("");
+    try {
+      const tags = editTags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      const result = await updateKnowledgeEntryOffline({
+        entry_id: entryId,
+        question: q,
+        answer: a,
+        tags,
+        source: "human",
+        updated_at: Date.now(),
+      });
+      if (result.status === "created") {
+        setEditMsg("Saved");
+        // Online path — refetch so the list reflects the server truth.
+        fetchEntries();
+        cancelEdit();
+      } else {
+        setEditMsg("Saved locally — will sync when online");
+        // Optimistic local update for the queued path so the UI reflects
+        // the user's edit even before replay lands.
+        setEntries((prev) =>
+          prev.map((it) =>
+            it.id === entryId ? { ...it, question: q, answer: a, tags } : it,
+          ),
+        );
+        setTimeout(() => {
+          setEditMsg("");
+          cancelEdit();
+        }, 1500);
+      }
+    } catch (err) {
+      setEditMsg((err as Error).message || "Failed to save");
+    }
+    setEditing(false);
+  }
+
+  async function handleDelete(entry: KnowledgeEntry, e: ReactMouseEvent) {
+    e.stopPropagation();
+    fetchWithRefresh("/api/analytics", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        event: "knowledge.entry_delete_clicked",
+        metadata: { knowledge_id: entry.id },
+      }),
+    }).catch(() => {});
+    const ok = typeof window !== "undefined"
+      ? window.confirm(`Delete this knowledge entry?\n\n"${entry.question}"`)
+      : false;
+    if (!ok) return;
+    try {
+      await deleteKnowledgeEntryOffline(entry.id);
+      // Optimistic local removal in either branch — on the queued path
+      // the server write replays on reconnect.
+      setEntries((prev) => prev.filter((it) => it.id !== entry.id));
+      if (selected?.id === entry.id) setSelected(null);
+      if (editingId === entry.id) cancelEdit();
+    } catch {
+      // best-effort — if it fails we leave the row so the user can retry.
+    }
   }
 
   async function handleRate(entryId: string, rating: number) {
@@ -518,11 +629,131 @@ export default function KnowledgePage() {
                     </span>
                   </div>
                 </div>
-                {renderStars(entry)}
+                <div className="flex items-center gap-2">
+                  {renderStars(entry)}
+                  <button
+                    type="button"
+                    onClick={(e) => startEdit(entry, e)}
+                    aria-label={`Edit ${entry.question}`}
+                    data-testid={`knowledge-edit-btn-${entry.id}`}
+                    className="text-xs px-2 py-1 rounded border transition-colors"
+                    style={{
+                      background: "var(--wp-dark-surface2)",
+                      borderColor: "var(--wp-dark-border)",
+                      color: "var(--wp-text)",
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => handleDelete(entry, e)}
+                    aria-label={`Delete ${entry.question}`}
+                    data-testid={`knowledge-delete-btn-${entry.id}`}
+                    className="text-xs px-2 py-1 rounded border transition-colors"
+                    style={{
+                      background: "var(--wp-dark-surface2)",
+                      borderColor: "var(--wp-dark-border)",
+                      color: "var(--wp-error)",
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
 
+              {/* Inline edit form — only one at a time; keyed by entry id */}
+              {editingId === entry.id && (
+                <div
+                  className="mt-4 pt-4 border-t space-y-3"
+                  style={{ borderColor: "var(--wp-dark-border)" }}
+                  data-testid={`knowledge-edit-form-${entry.id}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h4 className="text-sm font-semibold" style={{ color: "var(--wp-gold)" }}>
+                    Edit entry
+                  </h4>
+                  <form onSubmit={(e) => handleEditSave(e, entry.id)} className="space-y-3">
+                    <input
+                      type="text"
+                      value={editQuestion}
+                      onChange={(e) => setEditQuestion(e.target.value)}
+                      placeholder="Question"
+                      aria-label="Edit question"
+                      className="w-full rounded-lg border px-4 py-2 text-sm outline-none"
+                      style={{
+                        background: "var(--wp-dark-surface2)",
+                        borderColor: "var(--wp-dark-border)",
+                        color: "var(--wp-text)",
+                      }}
+                    />
+                    <textarea
+                      value={editAnswer}
+                      onChange={(e) => setEditAnswer(e.target.value)}
+                      placeholder="Answer"
+                      aria-label="Edit answer"
+                      rows={4}
+                      className="w-full rounded-lg border px-4 py-3 text-sm outline-none resize-none"
+                      style={{
+                        background: "var(--wp-dark-surface2)",
+                        borderColor: "var(--wp-dark-border)",
+                        color: "var(--wp-text)",
+                      }}
+                    />
+                    <input
+                      type="text"
+                      value={editTags}
+                      onChange={(e) => setEditTags(e.target.value)}
+                      placeholder="Tags, comma-separated"
+                      aria-label="Edit tags"
+                      className="w-full rounded-lg border px-4 py-2 text-sm outline-none"
+                      style={{
+                        background: "var(--wp-dark-surface2)",
+                        borderColor: "var(--wp-dark-border)",
+                        color: "var(--wp-text)",
+                      }}
+                    />
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="submit"
+                        disabled={editing}
+                        className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                        style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+                      >
+                        {editing ? "Saving..." : "Save changes"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelEdit}
+                        className="px-4 py-2 rounded-lg text-sm font-medium transition-colors border"
+                        style={{
+                          background: "var(--wp-dark-surface2)",
+                          borderColor: "var(--wp-dark-border)",
+                          color: "var(--wp-text)",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      {editMsg && (
+                        <span
+                          className="text-sm"
+                          data-testid={`knowledge-edit-msg-${entry.id}`}
+                          style={{
+                            color: editMsg.startsWith("Saved")
+                              ? "var(--wp-success)"
+                              : "var(--wp-error)",
+                          }}
+                        >
+                          {editMsg}
+                        </span>
+                      )}
+                    </div>
+                  </form>
+                </div>
+              )}
+
               {/* Expanded */}
-              {selected?.id === entry.id && (
+              {selected?.id === entry.id && editingId !== entry.id && (
                 <div className="mt-4 pt-4 border-t" style={{ borderColor: "var(--wp-dark-border)" }}>
                   <p className="text-sm whitespace-pre-wrap" style={{ color: "var(--wp-text-dim)" }}>
                     {entry.answer}

@@ -206,6 +206,104 @@ export async function saveAnswer(
 }
 
 // ---------------------------------------------------------------------------
+// updateAnswer — correct an existing entry and re-trigger triple-write.
+//
+// SQL uses COALESCE on source + tags so callers can pass undefined/null and
+// leave those columns alone. Returns null when the WHERE clause matches no
+// row, so the route layer can send a 404. Analytics fires
+// `knowledge.entry_updated` with `{ knowledge_id, source }` on every real
+// update — shadow mode fires the same event so the learning loop still
+// picks it up in demo environments.
+// ---------------------------------------------------------------------------
+export async function updateAnswer(
+  id: string,
+  question: string,
+  answer: string,
+  userId: string,
+  tags?: string[],
+  source?: string,
+): Promise<KnowledgeEntry | null> {
+  if (!process.env.DATABASE_URL) {
+    const entry: KnowledgeEntry = {
+      id,
+      question,
+      answer,
+      source: source ?? "human",
+      asked_by: userId,
+      confidence: 0,
+      rating: null,
+      view_count: 0,
+      tokens_used: 0,
+      tags: tags ?? [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    trackEvent("knowledge.entry_updated", userId, "dev", {
+      knowledge_id: id,
+      source: entry.source,
+    });
+    return entry;
+  }
+
+  try {
+    const result = await query<Record<string, unknown>>(
+      `UPDATE instinct_knowledge
+          SET question   = $2,
+              answer     = $3,
+              source     = COALESCE($4, source),
+              tags       = COALESCE($5, tags),
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [id, question, answer, source ?? null, tags ?? null],
+    );
+
+    if (result.rows.length === 0) return null;
+
+    const entry = rowToKnowledge(result.rows[0]);
+    trackEvent("knowledge.entry_updated", userId, "dev", {
+      knowledge_id: entry.id,
+      source: entry.source,
+    });
+    return entry;
+  } catch (err) {
+    console.error("[knowledge] updateAnswer error:", (err as Error).message);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// deleteAnswer — hard delete. Soft-delete column doesn't exist on
+// instinct_knowledge yet; if/when it does, swap to UPDATE SET deleted_at.
+// Fires `knowledge.entry_deleted`. Returns true when a row was removed.
+// ---------------------------------------------------------------------------
+export async function deleteAnswer(
+  id: string,
+  userId: string,
+): Promise<boolean> {
+  if (!process.env.DATABASE_URL) {
+    trackEvent("knowledge.entry_deleted", userId, "dev", { knowledge_id: id });
+    return true;
+  }
+
+  try {
+    const result = await query(
+      `DELETE FROM instinct_knowledge WHERE id = $1`,
+      [id],
+    );
+    const affected = (result as unknown as { rowCount?: number }).rowCount ?? 0;
+    if (affected > 0) {
+      trackEvent("knowledge.entry_deleted", userId, "dev", { knowledge_id: id });
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error("[knowledge] deleteAnswer error:", (err as Error).message);
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // rateAnswer
 // ---------------------------------------------------------------------------
 export async function rateAnswer(

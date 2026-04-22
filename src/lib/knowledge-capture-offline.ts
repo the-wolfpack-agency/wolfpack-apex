@@ -152,6 +152,146 @@ export async function saveKnowledgeEntryOffline(
 }
 
 // ---------------------------------------------------------------------------
+// Edit path — PUT /api/knowledge/{id} with offline-queue fallback
+// ---------------------------------------------------------------------------
+
+/**
+ * Draft shape for an EDIT of an existing knowledge entry. Mirrors
+ * `KnowledgeCaptureDraft` but keys on `entry_id` of an already-persisted
+ * row and carries an `updated_at` client stamp for UI freshness hinting.
+ */
+export interface KnowledgeEditDraft {
+  entry_id: string;
+  question: string;
+  answer: string;
+  tags?: string[];
+  source?: string;
+  repo?: string;
+  updated_at: number;
+}
+
+/**
+ * Update an existing knowledge entry. Online path PUTs inline; offline
+ * or failure path enqueues for replay and fires
+ * `knowledge.entry_updated_offline` for the learning loop.
+ */
+export async function updateKnowledgeEntryOffline(
+  draft: KnowledgeEditDraft,
+  opts: { fetchImpl?: typeof fetch } = {},
+): Promise<SaveKnowledgeEntryResult> {
+  if (!draft.entry_id) {
+    throw new Error("entry_id is required");
+  }
+  if (!draft.question || typeof draft.question !== "string") {
+    throw new Error("question is required");
+  }
+  if (!draft.answer || typeof draft.answer !== "string") {
+    throw new Error("answer is required");
+  }
+
+  // Cache the edited snapshot so a subsequent offline cold-load still
+  // renders the user's pending change even if the tab restarts before
+  // replay lands.
+  await cacheResource(KNOWLEDGE_ENTRY_RESOURCE, draft.entry_id, draft);
+
+  const endpoint = `${KNOWLEDGE_ENTRY_ENDPOINT}/${encodeURIComponent(draft.entry_id)}`;
+  const online = typeof navigator === "undefined" ? true : navigator.onLine;
+  const fetchImpl = opts.fetchImpl ?? ((...args) => fetchWithRefresh(...args));
+
+  if (online) {
+    try {
+      const res = await fetchImpl(endpoint, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      if (res.ok) {
+        return { status: "created", id: draft.entry_id, queueId: null };
+      }
+      // Non-ok → fall through to queue so the write isn't silently lost.
+    } catch {
+      // Network error mid-flight — fall through to the queue path.
+    }
+  }
+
+  const entry = await enqueueMutation({
+    endpoint,
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Instinct-Resource-Type": KNOWLEDGE_ENTRY_RESOURCE,
+    },
+    body: draft,
+  });
+  notifyQueueChanged();
+  void emitOfflineCreateEvent("knowledge.entry_updated_offline", {
+    resource_type: KNOWLEDGE_ENTRY_RESOURCE,
+    entry_id: draft.entry_id,
+  });
+  return {
+    status: "queued",
+    id: draft.entry_id,
+    queueId: entry.id,
+  };
+}
+
+/**
+ * Delete an existing knowledge entry. Online path DELETEs inline; offline
+ * or failure path enqueues for replay and fires
+ * `knowledge.entry_deleted_offline`. Returns the local cache is also
+ * cleared so the UI state stays consistent either way.
+ *
+ * 404 is treated as terminal success: the server already agrees the row
+ * is gone. 5xx / network errors fall through to the queue.
+ */
+export async function deleteKnowledgeEntryOffline(
+  entryId: string,
+  opts: { fetchImpl?: typeof fetch } = {},
+): Promise<{ status: "deleted" | "queued"; id: string; queueId: string | null }> {
+  if (!entryId) {
+    throw new Error("entry_id is required");
+  }
+
+  const endpoint = `${KNOWLEDGE_ENTRY_ENDPOINT}/${encodeURIComponent(entryId)}`;
+  const online = typeof navigator === "undefined" ? true : navigator.onLine;
+  const fetchImpl = opts.fetchImpl ?? ((...args) => fetchWithRefresh(...args));
+
+  if (online) {
+    try {
+      const res = await fetchImpl(endpoint, { method: "DELETE" });
+      if (res.ok || res.status === 404) {
+        await clearResource(KNOWLEDGE_ENTRY_RESOURCE, entryId);
+        return { status: "deleted", id: entryId, queueId: null };
+      }
+      // Non-ok (5xx, 4xx other than 404) → fall through to queue.
+    } catch {
+      // Network error — fall through to the queue path.
+    }
+  }
+
+  const entry = await enqueueMutation({
+    endpoint,
+    method: "DELETE",
+    headers: {
+      "X-Instinct-Resource-Type": KNOWLEDGE_ENTRY_RESOURCE,
+    },
+  });
+  notifyQueueChanged();
+  // Local cache cleared eagerly so the UI hides the row immediately;
+  // the queued DELETE will reconcile the server side on reconnect.
+  await clearResource(KNOWLEDGE_ENTRY_RESOURCE, entryId);
+  void emitOfflineCreateEvent("knowledge.entry_deleted_offline", {
+    resource_type: KNOWLEDGE_ENTRY_RESOURCE,
+    entry_id: entryId,
+  });
+  return {
+    status: "queued",
+    id: entryId,
+    queueId: entry.id,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Read path
 // ---------------------------------------------------------------------------
 
@@ -183,7 +323,10 @@ export async function deleteOfflineKnowledgeEntry(entryId: string): Promise<void
 // ---------------------------------------------------------------------------
 
 async function emitOfflineCreateEvent(
-  event: "knowledge.entry_created_offline",
+  event:
+    | "knowledge.entry_created_offline"
+    | "knowledge.entry_updated_offline"
+    | "knowledge.entry_deleted_offline",
   metadata: Record<string, string | number | boolean>,
 ): Promise<void> {
   if (typeof window === "undefined") return;
