@@ -209,16 +209,20 @@ export default function SettingsPage() {
 
   async function disconnectMicrosoft() {
     setDisconnecting("microsoft");
+    setConnectError(null);
     try {
       const res = await fetchWithRefresh("/api/microsoft?action=disconnect", {
         method: "POST",
-        headers: authHeaders(),
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "disconnect" }),
       });
       if (res.ok) {
         setMicrosoftStatus({ connected: false });
+      } else {
+        setConnectError("Failed to disconnect Microsoft. Please try again.");
       }
     } catch {
-      // Non-fatal
+      setConnectError("Network error while disconnecting Microsoft.");
     }
     setDisconnecting(null);
   }

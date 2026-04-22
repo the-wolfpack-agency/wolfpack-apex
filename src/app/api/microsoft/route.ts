@@ -107,9 +107,20 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = await req.json();
+    // Client sends ?action=disconnect on the URL and no body. Read from
+    // either source — body first (future-compat), query param as fallback.
+    let action: string | undefined;
+    try {
+      const body = await req.json();
+      action = body?.action;
+    } catch {
+      action = undefined;
+    }
+    if (!action) {
+      action = new URL(req.url).searchParams.get("action") ?? undefined;
+    }
 
-    if (body.action === "disconnect") {
+    if (action === "disconnect") {
       await deleteTokens(user.id);
 
       trackEvent("microsoft.disconnected", user.id, user.role, {
