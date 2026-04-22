@@ -156,10 +156,16 @@ describe("PUT /api/workspace", () => {
 /* ─────────────────── GET /api/workspace/status — nextStep ─────────────────── */
 
 describe("GET /api/workspace/status nextStep derivation", () => {
+  // The status route emits 5 safeQuery calls when setup_complete is
+  // false: workspace, team, then (ms_tokens | qbo_tokens | plaud)
+  // in parallel. Tests queue 5 mockResolvedValueOnce results in that
+  // order. Integration total = ms + qbo + plaud.
   test("nextStep=profile when nothing is done (default workspace name, 0 members)", async () => {
     mockGetUser.mockReturnValue(DEMO_USER);
     mockSafeQuery
       .mockResolvedValueOnce({ rows: [{ name: "My Workspace", setup_complete: false }], fromCache: false })
+      .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false })
+      .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false })
       .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false })
       .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false });
 
@@ -174,6 +180,8 @@ describe("GET /api/workspace/status nextStep derivation", () => {
     mockSafeQuery
       .mockResolvedValueOnce({ rows: [{ name: "Wolfpack", setup_complete: false }], fromCache: false })
       .mockResolvedValueOnce({ rows: [{ count: 1 }], fromCache: false })
+      .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false })
+      .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false })
       .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false });
 
     const res = await GET(makeGetRequest("Bearer token"));
@@ -188,6 +196,8 @@ describe("GET /api/workspace/status nextStep derivation", () => {
     mockSafeQuery
       .mockResolvedValueOnce({ rows: [{ name: "Wolfpack", setup_complete: false }], fromCache: false })
       .mockResolvedValueOnce({ rows: [{ count: 3 }], fromCache: false })
+      .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false })
+      .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false })
       .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false });
 
     const res = await GET(makeGetRequest("Bearer token"));
@@ -203,12 +213,52 @@ describe("GET /api/workspace/status nextStep derivation", () => {
     mockSafeQuery
       .mockResolvedValueOnce({ rows: [{ name: "Wolfpack", setup_complete: false }], fromCache: false })
       .mockResolvedValueOnce({ rows: [{ count: 3 }], fromCache: false })
-      .mockResolvedValueOnce({ rows: [{ count: 1 }], fromCache: false });
+      .mockResolvedValueOnce({ rows: [{ count: 1 }], fromCache: false })
+      .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false })
+      .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false });
 
     const res = await GET(makeGetRequest("Bearer token"));
     const data = await res.json();
     expect(data.nextStep).toBe("complete");
     expect(data.complete).toBe(true);
+  });
+
+  // Regression 2026-04-22: the route used to query a phantom
+  // `apex_integrations` table — safeQuery silently returned 0 rows,
+  // so the banner stuck around forever even with MS connected.
+  // Integration tables are per-provider; writing to instinct_ms_tokens
+  // during OAuth must flip integrationsComplete to true.
+  test("integrationsComplete=true when any per-provider token table has rows (MS only)", async () => {
+    mockGetUser.mockReturnValue(DEMO_USER);
+    mockSafeQuery
+      .mockResolvedValueOnce({ rows: [{ name: "Wolfpack", setup_complete: false }], fromCache: false })
+      .mockResolvedValueOnce({ rows: [{ count: 3 }], fromCache: false })
+      .mockResolvedValueOnce({ rows: [{ count: 1 }], fromCache: false }) // ms_tokens
+      .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false }) // qbo_tokens
+      .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false }); // plaud
+
+    const res = await GET(makeGetRequest("Bearer token"));
+    const data = await res.json();
+    expect(data.steps.integrations).toBe(true);
+    expect(data.complete).toBe(true);
+  });
+
+  test("queries the real per-provider token tables, not a phantom apex_integrations", async () => {
+    mockGetUser.mockReturnValue(DEMO_USER);
+    mockSafeQuery
+      .mockResolvedValueOnce({ rows: [{ name: "Wolfpack", setup_complete: false }], fromCache: false })
+      .mockResolvedValueOnce({ rows: [{ count: 1 }], fromCache: false })
+      .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false })
+      .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false })
+      .mockResolvedValueOnce({ rows: [{ count: 0 }], fromCache: false });
+
+    await GET(makeGetRequest("Bearer token"));
+
+    const sqls = mockSafeQuery.mock.calls.map((c) => (c[0] as string).toLowerCase());
+    expect(sqls.some((s) => s.includes("apex_integrations"))).toBe(false);
+    expect(sqls.some((s) => s.includes("instinct_ms_tokens"))).toBe(true);
+    expect(sqls.some((s) => s.includes("instinct_qbo_tokens"))).toBe(true);
+    expect(sqls.some((s) => s.includes("instinct_plaud_connections"))).toBe(true);
   });
 
   test("nextStep=complete when setup_complete flag is set (short-circuit path)", async () => {
@@ -297,8 +347,11 @@ describe("PUT /api/workspace → GET /api/workspace/status round-trip", () => {
       if (s.includes("from instinct_team_members")) {
         return { rows: [{ count: db.teamCount }], fromCache: false };
       }
-      if (s.includes("apex_integrations")) {
+      if (s.includes("from instinct_ms_tokens")) {
         return { rows: [{ count: db.integrationsCount }], fromCache: false };
+      }
+      if (s.includes("from instinct_qbo_tokens") || s.includes("from instinct_plaud_connections")) {
+        return { rows: [{ count: 0 }], fromCache: false };
       }
       return { rows: [], fromCache: false };
     });
