@@ -866,7 +866,59 @@ export type InstinctEventType =
   | "studio.section_deleted"
   | "studio.section_added"
   | "studio.inspector_field_edited"
-  | "studio.publish_clicked";
+  | "studio.publish_clicked"
+  // RAG provider abstraction — vector/graph/embedding telemetry.
+  //
+  // Every event is fired fire-and-forget by the provider-abstraction
+  // layer (`src/lib/rag-providers/*`). These feed the learning loop so
+  // the ML pipeline can learn from every RAG operation and every
+  // divergence between stores during the Azure migration.
+  //
+  //   rag.vector_provider_selected    { provider }
+  //     — boot-time: which vector backend the factory resolved to.
+  //   rag.vector_upsert_ok / failed   { target, side, written?, error? }
+  //   rag.vector_query_ok  / failed   { target, side, hits?, error? }
+  //   rag.vector_delete_ok / failed   { target, deleted?, error? }
+  //   rag.vector_health_ok / failed   { target, latency_ms, detail? }
+  //   rag.embedding_ok     / failed   { provider, model, dims?, error? }
+  //   rag.graph_upsert_ok  / failed   { target, node_id, error? }
+  //   rag.graph_query_ok   / failed   { target, rows?, error? }
+  //   rag.graph_health_ok  / failed   { target, latency_ms, detail? }
+  //   rag.dual_write_started          { primary, secondary, mode, docs }
+  //   rag.dual_write_completed        { primary, secondary, mode,
+  //                                      primary_written, secondary_written,
+  //                                      divergence }
+  //   rag.dual_write_failed           { target, side, error, mode }
+  //   rag.dual_write_divergence       { primary, secondary,
+  //                                      primary_written, secondary_written,
+  //                                      mode }
+  //   rag.dual_read_divergence        { primary, secondary, primary_ids,
+  //                                      secondary_ids, intersection,
+  //                                      primary_only, secondary_only }
+  //   rag.provider_fallback_triggered { from, to, reason }
+  | "rag.vector_provider_selected"
+  | "rag.vector_upsert_ok"
+  | "rag.vector_upsert_failed"
+  | "rag.vector_query_ok"
+  | "rag.vector_query_failed"
+  | "rag.vector_delete_ok"
+  | "rag.vector_delete_failed"
+  | "rag.vector_health_ok"
+  | "rag.vector_health_failed"
+  | "rag.embedding_ok"
+  | "rag.embedding_failed"
+  | "rag.graph_upsert_ok"
+  | "rag.graph_upsert_failed"
+  | "rag.graph_query_ok"
+  | "rag.graph_query_failed"
+  | "rag.graph_health_ok"
+  | "rag.graph_health_failed"
+  | "rag.dual_write_started"
+  | "rag.dual_write_completed"
+  | "rag.dual_write_failed"
+  | "rag.dual_write_divergence"
+  | "rag.dual_read_divergence"
+  | "rag.provider_fallback_triggered";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;
