@@ -62,12 +62,13 @@ export async function POST(req: NextRequest) {
     }
 
     // --- Chat message ---
-    const { message, conversationId, pageContext, attachments, fileContents } = body as {
+    const { message, conversationId, pageContext, attachments, fileContents, timeZone } = body as {
       message?: string;
       conversationId?: string;
       pageContext?: string;
       attachments?: { name: string; type: string; size: number }[];
       fileContents?: { name: string; content: string }[];
+      timeZone?: string;
     };
 
     if (!message || typeof message !== "string") {
@@ -134,6 +135,7 @@ export async function POST(req: NextRequest) {
         userId: user.id,
         userRole: user.role,
         userDisplayName: user.name,
+        timeZone,
       });
       if (toolAnswer) {
         trackEvent("assistant.tool_invoked", user.id, user.role, {

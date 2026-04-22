@@ -54,8 +54,12 @@ export async function resolvePersonToGraphUser(
   };
 }
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+function formatTime(iso: string, timeZone?: string): string {
+  return new Date(iso).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+    ...(timeZone ? { timeZone } : {}),
+  });
 }
 
 export async function runCalendarAvailability(params: {
@@ -65,6 +69,8 @@ export async function runCalendarAvailability(params: {
   // When set, skip the directory resolve and treat this as the caller's
   // own calendar (first-person queries: "am I busy", "what's on my calendar").
   selfUser?: { userId: string; displayName: string };
+  // IANA zone (e.g. "America/New_York"); when unset, server zone is used.
+  timeZone?: string;
 }): Promise<CalendarAvailabilityResult | null> {
   const resolved = params.selfUser
     ? params.selfUser
@@ -94,7 +100,7 @@ export async function runCalendarAvailability(params: {
   const busy = overlapping.length > 0;
   const summary = overlapping
     .slice(0, 3)
-    .map((e) => `${e.subject} (${formatTime(e.start)}–${formatTime(e.end)})`)
+    .map((e) => `${e.subject} (${formatTime(e.start, params.timeZone)}–${formatTime(e.end, params.timeZone)})`)
     .join(", ");
 
   const subject = isSelf ? "You" : resolved.displayName;

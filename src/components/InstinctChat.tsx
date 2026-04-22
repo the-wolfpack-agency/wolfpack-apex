@@ -477,6 +477,8 @@ export default function InstinctChat({
       const body: Record<string, unknown> = {
         message: fullMessage,
         conversationId,
+        // Let server-rendered times format in the user's local zone.
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       };
       if (pageContext) body.pageContext = pageContext;
       if (contextData) body.contextData = contextData;

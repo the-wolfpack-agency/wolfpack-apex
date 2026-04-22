@@ -39,6 +39,10 @@ export interface ToolContext {
    *  the answer reads "You have 2 meetings…" instead of the email. */
   userDisplayName?: string;
   nowMs?: number;
+  /** IANA zone from the browser (e.g. "America/New_York"). Used when
+   *  formatting server-rendered times so the answer reads in the
+   *  caller's local zone, not the server's UTC. */
+  timeZone?: string;
 }
 
 export async function tryToolAnswer(
@@ -59,6 +63,7 @@ export async function tryToolAnswer(
       timeframeToken: match.slots.timeframe,
       nowMs: ctx.nowMs,
       selfUser,
+      timeZone: ctx.timeZone,
     });
     if (!result) return null;
     return { intent: match.intent, answer: result.answer, data: result, source: "tool" };
