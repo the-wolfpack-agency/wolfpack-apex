@@ -11,10 +11,15 @@ import {
   REFRESH_TOKEN_TTL_SECONDS,
 } from "@/lib/crypto/cookies";
 
-// Rate limit: 5 attempts per IP per 5 minutes
+// Rate limit: lenient by design so a legitimate user mistyping their
+// password on shared Wi-Fi (client site, co-working space) isn't locked
+// out of every account on that IP. 20 attempts per IP per 60 seconds,
+// and the counter is cleared on any successful login so one good auth
+// resets the slate — devastating scenarios like "I need to log in right
+// now to help a client" stay recoverable.
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
-const MAX_ATTEMPTS = 5;
-const WINDOW_MS = 5 * 60 * 1000;
+const MAX_ATTEMPTS = 20;
+const WINDOW_MS = 60 * 1000;
 
 function isRateLimited(ip: string): { limited: boolean; retryAfter: number } {
   const now = Date.now();
@@ -28,6 +33,10 @@ function isRateLimited(ip: string): { limited: boolean; retryAfter: number } {
     return { limited: true, retryAfter: Math.ceil((entry.resetAt - now) / 1000) };
   }
   return { limited: false, retryAfter: 0 };
+}
+
+function clearRateLimit(ip: string): void {
+  loginAttempts.delete(ip);
 }
 
 export async function POST(req: NextRequest) {
@@ -65,6 +74,10 @@ export async function POST(req: NextRequest) {
     }).catch((err) => console.warn("[audit]", (err as Error).message));
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
+
+  // Successful login clears the rate-limit slate for this IP so one
+  // correct auth recovers the user from any prior mistyped attempts.
+  clearRateLimit(ip);
 
   await recordAudit({
     actor: { user_id: result.user.id, role: result.user.role },
