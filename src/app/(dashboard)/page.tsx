@@ -124,7 +124,13 @@ export default function DashboardPage() {
       .then((r) => r.json())
       .then((data) => {
         if (data.journal?.auto_context?.events) {
-          setEvents(data.journal.auto_context.events);
+          // Drop internal plumbing (ambient.*, token rotation, page views).
+          // EVENT_LABELS is the allowlist of user-meaningful events.
+          setEvents(
+            (data.journal.auto_context.events as RecentEvent[]).filter(
+              (e) => EVENT_LABELS[e.event_type],
+            ),
+          );
         }
       })
       .catch(() => {});
