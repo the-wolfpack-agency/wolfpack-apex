@@ -128,7 +128,10 @@ export async function POST(req: NextRequest) {
     });
     if (intentMatch.intent !== "unknown") {
       const toolAnswer = await tryToolAnswer(message, {
-        userId: user.email || user.id,
+        // MS token lookup keys on connected_by = Instinct user id, NOT email.
+        // Passing email here made getValidToken return null → empty calendar
+        // → "you look free today" even when the user has meetings.
+        userId: user.id,
         userRole: user.role,
         userDisplayName: user.name,
       });
