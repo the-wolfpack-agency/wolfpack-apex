@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
-import { askQuestion, saveAnswer, searchKnowledge, getPopularQuestions, getKnowledgeGaps } from "@/lib/knowledge";
+import { askQuestion, saveAnswer, searchKnowledge, getPopularQuestions, getRecentKnowledge, getKnowledgeGaps } from "@/lib/knowledge";
 import { tripleWriteKnowledge } from "@/lib/triple-write";
 
 /**
@@ -41,7 +41,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ entries: data, query: q });
     }
 
-    const data = await getPopularQuestions(limit);
+    // Default: most recent first so a freshly-captured entry is visible
+    // without needing to wait for views to accumulate. Popular view is
+    // still available via ?popular=true.
+    const data = await getRecentKnowledge(Math.max(limit, 50));
     return NextResponse.json({ entries: data });
   } catch (err) {
     return NextResponse.json(
