@@ -28,6 +28,7 @@ import {
   type MsTask,
 } from "@/lib/integrations/microsoft-tasks";
 import { safeQuery } from "@/lib/db";
+import { cleanMailSnippet } from "@/lib/mail/snippet";
 
 export interface PrebriefLinkedGoal {
   id: string;
@@ -147,12 +148,18 @@ export async function computePrebrief(
   // any attendee name OR email appearing in any participant. Works
   // when Graph returns attendees without addresses (happens on many
   // tenants) and when OR'd $filter expressions are rejected.
-  const recentThreads: Email[] = await findThreadsInvolvingAttendees(
+  const rawThreads: Email[] = await findThreadsInvolvingAttendees(
     userId,
     meeting.attendees ?? [],
     attendeeEmails,
     3,
   ).catch(() => [] as Email[]);
+  // Scrub bodyPreview so the UI shows the actual message, not Teams
+  // invite boilerplate + quoted reply headers + "Get Outlook for iOS".
+  const recentThreads: Email[] = rawThreads.map((t) => ({
+    ...t,
+    bodyPreview: cleanMailSnippet(t.bodyPreview),
+  }));
 
   const [openTasks, linkedGoal] = await Promise.all([
     fetchOpenTasks(userId),

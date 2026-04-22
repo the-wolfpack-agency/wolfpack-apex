@@ -230,4 +230,28 @@ describe("computePrebrief", () => {
     );
     expect(result!.recentThreads).toHaveLength(1);
   });
+
+  // Regression 2026-04-22: bodyPreview from MS Graph leaks Teams invite
+  // boilerplate, "Get Outlook for iOS", and quoted-reply From:/Sent:
+  // headers straight into the mobile dashboard tile. Fixture mirrors
+  // the exact string seen on wolfpack-instinct.vercel.app.
+  test("scrubs bodyPreview noise before returning to UI", async () => {
+    mockFetchCalendarEvents.mockResolvedValue([MEETING]);
+    mockFindThreads.mockResolvedValue([
+      {
+        ...EMAIL_NEWER,
+        bodyPreview:
+          "Those look great, thank you! 9159778936 Get Outlook for iOS " +
+          "________________________________ From: Alicia Zulker " +
+          "<alicia@thewolfpack.agency> Sent: Tuesday, April 21, 2026",
+      },
+    ]);
+    mockListCachedTasks.mockResolvedValue({ tasks: [], nextCursor: null });
+    mockSafeQuery.mockResolvedValue({ rows: [], fromCache: false });
+
+    const result = await computePrebrief("u1", "evt-1");
+    expect(result!.recentThreads[0].bodyPreview).toBe(
+      "Those look great, thank you! 9159778936",
+    );
+  });
 });

@@ -8,6 +8,7 @@
 
 import { findThreadsInvolvingAttendees } from "@/lib/meetings/email-matcher";
 import type { Email } from "@/lib/microsoft-graph";
+import { cleanMailSnippet } from "@/lib/mail/snippet";
 
 export interface MailSearchResult {
   from?: string;
@@ -47,11 +48,13 @@ export async function runMailSearch(params: {
     return null;
   }
 
-  // Topic filter (substring on subject + bodyPreview, case-insensitive).
+  // Topic filter (substring on subject + cleaned body, case-insensitive).
+  // Matching against the scrubbed preview keeps us from false-positive
+  // matching on Teams invite URLs, signatures, or quoted-reply headers.
   const topicNeedle = topic?.toLowerCase();
   const filtered = topicNeedle
     ? threads.filter((t) => {
-        const hay = `${t.subject} ${t.bodyPreview}`.toLowerCase();
+        const hay = `${t.subject} ${cleanMailSnippet(t.bodyPreview)}`.toLowerCase();
         return hay.includes(topicNeedle);
       })
     : threads;
@@ -63,7 +66,7 @@ export async function runMailSearch(params: {
     subject: t.subject,
     from: t.from,
     receivedDateTime: t.receivedDateTime,
-    preview: t.bodyPreview.slice(0, 200),
+    preview: cleanMailSnippet(t.bodyPreview, 200),
     webLink: (t as Email & { webLink?: string }).webLink,
   }));
 
