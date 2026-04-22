@@ -121,6 +121,8 @@ export type InstinctEventType =
   | "meeting.draft_created_offline"
   | "journal.entry_created_offline"
   | "knowledge.entry_created_offline"
+  | "knowledge.entry_created"
+  | "knowledge.entry_updated"
   // Goals (company OKRs / KRs / contributions — migration 079).
   // Fires from Goals dashboard tile, OKR cards, Friday-sync commitment
   // flow, auto-linker, and offline queue. All are consumed by the
