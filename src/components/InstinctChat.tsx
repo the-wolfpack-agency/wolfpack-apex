@@ -308,15 +308,21 @@ export default function InstinctChat({
     loadConversations();
   }, [loadConversations]);
 
-  // Auto-scroll on new messages
+  // Auto-scroll on new messages — but NOT on empty mount. With zero
+  // messages the sentinel sits below the welcome card, so scrolling it
+  // into view pushes the welcome text off-screen. `block: "nearest"`
+  // also keeps the scroll local to the message list instead of moving
+  // the whole page.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messages.length === 0) return;
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages]);
 
-  // Focus input on load
+  // Focus input on load — preventScroll so the browser doesn't jump
+  // the page to reveal the textarea on mount.
   useEffect(() => {
     if (position === "inline" || floatingOpen) {
-      inputRef.current?.focus();
+      inputRef.current?.focus({ preventScroll: true });
     }
   }, [position, floatingOpen]);
 
