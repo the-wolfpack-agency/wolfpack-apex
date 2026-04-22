@@ -348,12 +348,17 @@ export async function getPopularQuestions(limit: number = 10): Promise<Knowledge
  * This is the default feed for the Knowledge page so an entry the
  * user just captured surfaces immediately, regardless of view_count.
  */
-export async function getRecentKnowledge(limit: number = 50): Promise<KnowledgeEntry[]> {
+export async function getRecentKnowledge(
+  limit: number = 50,
+  offset: number = 0,
+): Promise<KnowledgeEntry[]> {
   if (!process.env.DATABASE_URL) return DEMO_ENTRIES;
 
   const { rows } = await safeQuery<Record<string, unknown>>(
-    `SELECT * FROM instinct_knowledge ORDER BY COALESCE(updated_at, created_at) DESC LIMIT $1`,
-    [limit],
+    `SELECT * FROM instinct_knowledge
+     ORDER BY COALESCE(updated_at, created_at) DESC
+     LIMIT $1 OFFSET $2`,
+    [limit, Math.max(0, offset)],
   );
   return rows.map(rowToKnowledge);
 }

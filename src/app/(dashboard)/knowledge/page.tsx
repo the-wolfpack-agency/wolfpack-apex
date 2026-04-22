@@ -82,6 +82,11 @@ export default function KnowledgePage() {
   const [editTags, setEditTags] = useState("");
   const [editing, setEditing] = useState(false);
   const [editMsg, setEditMsg] = useState("");
+  // Pagination — Load More appends the next page without blowing away
+  // the already-rendered list.
+  const PAGE_SIZE = 50;
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -112,14 +117,43 @@ export default function KnowledgePage() {
   async function fetchEntries(q?: string) {
     setLoading(true);
     try {
-      const url = q ? `/api/knowledge?q=${encodeURIComponent(q)}` : "/api/knowledge?popular=true";
+      // Default view = most-recent-first with paging. Search bypasses paging
+      // (server returns match list) and popular is reachable via its own UI
+      // if we add a toggle later.
+      const url = q
+        ? `/api/knowledge?q=${encodeURIComponent(q)}&limit=${PAGE_SIZE}`
+        : `/api/knowledge?limit=${PAGE_SIZE}&offset=0`;
       const res = await fetch(url, { headers: authHeaders() });
       const data = await res.json();
-      setEntries(data.entries || []);
+      const page = data.entries || [];
+      setEntries(page);
+      setHasMore(!q && page.length === PAGE_SIZE);
     } catch {
       setEntries([]);
+      setHasMore(false);
     }
     setLoading(false);
+  }
+
+  async function loadMore() {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const url = `/api/knowledge?limit=${PAGE_SIZE}&offset=${entries.length}`;
+      const res = await fetch(url, { headers: authHeaders() });
+      const data = await res.json();
+      const page: KnowledgeEntry[] = data.entries || [];
+      // Merge without duplicating ids — edits or concurrent writes can
+      // surface an entry we already have.
+      setEntries((prev) => {
+        const seen = new Set(prev.map((e) => e.id));
+        return [...prev, ...page.filter((e) => !seen.has(e.id))];
+      });
+      setHasMore(page.length === PAGE_SIZE);
+    } catch {
+      setHasMore(false);
+    }
+    setLoadingMore(false);
   }
 
   function handleSearch(e: FormEvent) {
@@ -775,6 +809,22 @@ export default function KnowledgePage() {
               )}
             </div>
           ))}
+          {hasMore && (
+            <button
+              type="button"
+              data-testid="knowledge-load-more"
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="w-full rounded-lg border px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50"
+              style={{
+                background: "var(--wp-dark-surface2)",
+                borderColor: "var(--wp-dark-border)",
+                color: "var(--wp-text)",
+              }}
+            >
+              {loadingMore ? "Loading…" : "Load more"}
+            </button>
+          )}
         </div>
       )}
     </div>

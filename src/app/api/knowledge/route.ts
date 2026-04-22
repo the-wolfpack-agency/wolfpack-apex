@@ -21,7 +21,8 @@ export async function GET(req: NextRequest) {
   const q = url.searchParams.get("q");
   const popular = url.searchParams.get("popular");
   const gaps = url.searchParams.get("gaps");
-  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 10), 1), 100);
+  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 50), 1), 200);
+  const offset = Math.max(Number(url.searchParams.get("offset") ?? 0), 0);
 
   trackEvent("system.search_performed", user.id, user.role, { module: "knowledge" });
 
@@ -43,9 +44,9 @@ export async function GET(req: NextRequest) {
 
     // Default: most recent first so a freshly-captured entry is visible
     // without needing to wait for views to accumulate. Popular view is
-    // still available via ?popular=true.
-    const data = await getRecentKnowledge(Math.max(limit, 50));
-    return NextResponse.json({ entries: data });
+    // still available via ?popular=true. Supports ?offset= for paging.
+    const data = await getRecentKnowledge(limit, offset);
+    return NextResponse.json({ entries: data, limit, offset });
   } catch (err) {
     return NextResponse.json(
       { error: "Internal server error" },
