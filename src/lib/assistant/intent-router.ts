@@ -36,6 +36,10 @@ const SCHEDULE_RE = /\b(what'?s|whats|what is)\s+(on|in)\s+([a-z][\w\s.'-]{0,40}
 const SELF_BUSY_RE = /\bam\s+i\s+(busy|free|available)\b/i;
 const SELF_HAVE_RE = /\bdo\s+i\s+have\s+(?:any|anything|a\s+meeting|meetings|time|stuff|plans)\b/i;
 const SELF_SCHEDULE_RE = /\b(?:(?:what'?s|whats|what is)\s+(?:on|in)\s+my\s+(?:calendar|schedule|agenda)|what'?s\s+my\s+(?:day|schedule|agenda)|what\s+does\s+my\s+day\s+look\s+like|my\s+(?:calendar|schedule|agenda)\s+(?:today|tomorrow|this|next))\b/i;
+// Meeting-centric first-person variants the SELF_SCHEDULE_RE misses.
+// "when are my meetings today", "when is my next meeting",
+// "what meetings do I have", "any meetings today", "my meetings today".
+const SELF_MEETINGS_RE = /\b(?:when\s+(?:are|is)\s+my|when'?s\s+my|what\s+meetings?\s+(?:do\s+)?i\s+have|any\s+meetings?\s+(?:today|tomorrow|this\s+week)|my\s+(?:next\s+)?meetings?)\b/i;
 export const SELF_TOKEN = "__self__";
 const FINANCIAL_RE = /\b(mrr|arr|cash|revenue|net profit|unpaid|invoice|expense|burn|runway)\b/i;
 const GOALS_RE = /\b(okr|okrs|north star|kr\b|key result|goals?)\b/i;
@@ -85,7 +89,7 @@ export function classifyIntent(text: string): IntentMatch {
     return { intent: "calendar_availability", slots, confidence: 0.85 };
   }
 
-  if (SELF_SCHEDULE_RE.test(q)) {
+  if (SELF_SCHEDULE_RE.test(q) || SELF_MEETINGS_RE.test(q)) {
     slots.person = SELF_TOKEN;
     return { intent: "calendar_schedule", slots, confidence: 0.85 };
   }

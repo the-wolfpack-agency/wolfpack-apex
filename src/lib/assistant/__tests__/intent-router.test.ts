@@ -81,4 +81,19 @@ describe("classifyIntent (token-free)", () => {
     const b = classifyIntent("Is Hoxsie busy this afternoon?");
     expect(a).toEqual(b);
   });
+
+  // Regression 2026-04-22: the live dashboard got "Action items are..."
+  // (RAG on help docs) when a user asked "when are my meetings today?"
+  // because none of the self-schedule regexes matched that phrasing.
+  test.each([
+    "when are my meetings today?",
+    "when is my next meeting?",
+    "what meetings do I have today?",
+    "any meetings today?",
+    "my meetings today",
+  ])("first-person meeting phrasing %p routes to calendar_schedule", (q) => {
+    const m = classifyIntent(q);
+    expect(m.intent).toBe("calendar_schedule");
+    expect(m.slots.person).toBeDefined();
+  });
 });
