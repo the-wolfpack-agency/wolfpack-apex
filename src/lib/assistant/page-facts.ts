@@ -48,7 +48,7 @@ export interface PageFact {
 export const PAGE_FACTS: Record<string, PageFact> = {
   dashboard: {
     domain: "dashboard",
-    route: "/dashboard",
+    route: "/",
     title: "Dashboard",
     purpose: "Your morning landing page — a briefing of what matters across Instinct right now.",
     what_you_can_do: [
@@ -410,7 +410,7 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     related_pages: ["clients", "tasks", "settings"],
   },
   mailbox: {
-    domain: "emails",
+    domain: "mailbox",
     route: "/emails",
     title: "Mailbox",
     purpose: "Your Microsoft 365 mailbox inside Instinct — same page as Emails, just another word for it.",

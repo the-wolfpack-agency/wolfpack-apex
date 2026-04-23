@@ -159,13 +159,13 @@ const DOMAIN_MAP: DomainEntry[] = [
   {
     domain: "admin",
     label: "Admin",
-    href: "/admin",
-    keywords: ["admin", "admin panel", "workspace admin"],
+    href: "/admin/audit",
+    keywords: ["admin", "admin panel", "workspace admin", "audit log"],
   },
   {
     domain: "dashboard",
     label: "Dashboard",
-    href: "/dashboard",
+    href: "/",
     keywords: ["dashboard", "morning briefing", "briefing", "home screen"],
   },
   {
