@@ -103,10 +103,12 @@ describe("every non-dynamic (dashboard)/<route> folder has a PAGE_FACTS entry", 
     // surface onboarding/dev-internals. Allowlist them explicitly.
     const allowlist = new Set(["setup", "tools", "admin"]);
     for (const name of entries) {
-      // Skip layout/page/metadata files and dynamic routes.
+      // Skip layout/page/metadata files, dynamic routes, parallel
+      // routes, and co-located test folders.
       if (
         name === "layout.tsx" ||
         name === "page.tsx" ||
+        name === "__tests__" ||
         name.startsWith("[") ||
         name.startsWith("(")
       )

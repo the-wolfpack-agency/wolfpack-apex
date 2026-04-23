@@ -679,10 +679,24 @@ export default function InstinctChat({
   if (position === "floating" && !floatingOpen) {
     return (
       <button
-        onClick={() => setFloatingOpen(true)}
+        onClick={() => {
+          setFloatingOpen(true);
+          void fetchWithRefresh("/api/analytics", {
+            method: "POST",
+            headers: canonicalJsonHeaders(),
+            body: JSON.stringify({
+              event: "assistant.floating_opened",
+              metadata: {
+                pathname:
+                  typeof window !== "undefined" ? window.location.pathname : "",
+              },
+            }),
+          }).catch(() => {});
+        }}
         className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-transform hover:scale-110"
         style={{ background: "var(--wp-gold, #eab308)" }}
         aria-label="Open assistant"
+        data-testid="floating-assistant-fab"
       >
         <svg
           className="w-7 h-7"

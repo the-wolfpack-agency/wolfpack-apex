@@ -317,6 +317,11 @@ export type InstinctEventType =
   // which pages the team actually asks about and whether the bare-name
   // and verb-phrase heuristics fire with high confidence.
   | "assistant.page_facts_hit"
+  // Floating FAB — user opened the bottom-right collapsed assistant
+  // from any Instinct page. Metadata carries pathname so the learning
+  // loop can see where users invoke the assistant most.
+  //   assistant.floating_opened: { pathname }
+  | "assistant.floating_opened"
   // QuickBooks
   | "quickbooks.api_called"
   | "quickbooks.connected"

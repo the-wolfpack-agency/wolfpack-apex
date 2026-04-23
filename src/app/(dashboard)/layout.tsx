@@ -10,6 +10,7 @@ import {
   migrateLegacyApexKeys,
 } from "@/lib/client-auth";
 import NotificationBell from "@/components/NotificationBell";
+import InstinctChat from "@/components/InstinctChat";
 import { useAmbientRefresh } from "@/lib/hooks/useAmbientRefresh";
 
 interface User {
@@ -284,6 +285,15 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </main>
       </div>
 
+      {/* Global floating assistant — collapsible bottom-right FAB.
+          Hidden on /assistant where the full-page version renders to
+          avoid a double mount (two conversation state machines, two
+          fetches). The floating variant manages its own open/closed
+          state internally; closed state shows only a small circular
+          button so it never blocks page content. */}
+      {pathname !== "/assistant" && (
+        <InstinctChat position="floating" />
+      )}
     </div>
   );
 }
