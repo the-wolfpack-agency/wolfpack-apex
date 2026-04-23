@@ -9,6 +9,8 @@ import {
 import { sendAssistantMessageOffline } from "@/lib/assistant-drafts-offline";
 import { RagSnapshotBadge } from "@/components/RagSnapshotBadge";
 
+import { renderMessageContent } from "@/lib/assistant/render-markdown";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -984,8 +986,11 @@ export default function InstinctChat({
                       />
                     </div>
                   )}
-                  <div className="text-sm whitespace-pre-wrap leading-relaxed break-words overflow-hidden">
-                    {msg.content}
+                  <div
+                    className="text-sm whitespace-pre-wrap leading-relaxed break-words overflow-hidden"
+                    data-testid={`assistant-msg-content-${idx}`}
+                  >
+                    {renderMessageContent(msg.content)}
                   </div>
 
                   {msg.role === "assistant" &&

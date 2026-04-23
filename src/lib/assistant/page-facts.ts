@@ -552,7 +552,7 @@ export function formatPageFactsAnswer(fact: PageFact): string {
     })
     .filter((s): s is string => !!s);
 
-  const openLink = `Open it: [${fact.route}](${fact.route})`;
+  const openLink = `Open it: [${fact.title}](${fact.route})`;
   const relatedLine =
     relatedLinks.length > 0 ? ` · Related: ${relatedLinks.join(" · ")}` : "";
   lines.push(openLink + relatedLine);
