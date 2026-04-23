@@ -1121,7 +1121,36 @@ export type InstinctEventType =
   //       can distinguish "zero-badge tap" (shouldn't happen, badge is
   //       hidden) from "dismissed N unread".
   | "messages.unread_count_polled"
-  | "messages.unread_badge_clicked";
+  | "messages.unread_badge_clicked"
+  // /messages left-panel structure — collapsible Chats section + new
+  // Teams-and-channels section. Lets the learning loop see which
+  // surface users actually use, and which teams/channels are hot.
+  //
+  //   messages.section_toggled   { section, expanded }
+  //     section ∈ "chats" | "teams"
+  //     expanded: true when opening, false when collapsing
+  //
+  //   messages.team_toggled      { team_id, expanded }
+  //     fires when a user clicks the chevron next to a team to
+  //     reveal/hide its channels list.
+  //
+  //   messages.channel_selected  { team_id, channel_id }
+  //     fires when a user clicks a channel row to load its messages.
+  | "messages.section_toggled"
+  | "messages.team_toggled"
+  | "messages.channel_selected"
+  // Server-side Graph proxy for the Teams-and-channels surface.
+  // Mirror of the ms_chats.* family so the learning loop can size
+  // Graph quota and detect scope drops symmetrically.
+  //
+  //   ms_teams.listed                    { count }
+  //   ms_teams.channels_listed           { team_id, count }
+  //   ms_teams.channel_messages_loaded   { team_id, channel_id, count }
+  //   ms_teams.scope_missing             { surface, team_id?, channel_id? }
+  | "ms_teams.listed"
+  | "ms_teams.channels_listed"
+  | "ms_teams.channel_messages_loaded"
+  | "ms_teams.scope_missing";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

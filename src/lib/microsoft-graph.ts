@@ -115,6 +115,12 @@ const MS_SCOPES: string[] = [
   // we use here (Azure returns AADSTS650053 "scope doesn't exist on the
   // resource"). Use the delegated OnlineMeetings.ReadWrite instead.
   "ChannelMessage.Read.All",
+  // Tier 2 · Stream E (Teams collaboration: list teams + channels).
+  // Required for /me/joinedTeams and /teams/{id}/channels — together
+  // with ChannelMessage.Read.All they unlock the Teams-and-channels
+  // section in /messages.
+  "Team.ReadBasic.All",
+  "Channel.ReadBasic.All",
   "OnlineMeetings.ReadWrite",
   // Tier 2 · Stream F (tenant directory + mailbox settings)
   "User.Read.All",

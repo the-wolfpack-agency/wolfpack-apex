@@ -1043,3 +1043,246 @@ describe("MessagesPage — inline compose", () => {
     expect(within(more).getByTestId("deep-link-video")).toBeInTheDocument();
   });
 });
+
+// ===========================================================================
+// LEFT panel — collapsible Chats section + Teams & channels section
+// ===========================================================================
+
+describe("MessagesPage — collapsible sections + Teams & channels", () => {
+  beforeEach(() => {
+    mockFetchWithRefresh.mockReset();
+    try {
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        "instinct_user",
+        JSON.stringify({ email: "me@wolfpack.test" }),
+      );
+    } catch {
+      /* noop */
+    }
+  });
+
+  function wireSimpleGraph() {
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/teams")
+        return ok({
+          teams: [
+            { id: "team-wolf", displayName: "Wolfpack Internal" },
+            { id: "team-cftr", displayName: "CFTR" },
+          ],
+        });
+      if (url === "/api/ms/teams/team-wolf/channels")
+        return ok({
+          channels: [
+            { id: "ch-general", displayName: "General" },
+            { id: "ch-eng", displayName: "Engineering" },
+          ],
+        });
+      if (url === "/api/ms/teams/team-wolf/channels/ch-eng/messages")
+        return ok({
+          messages: [
+            {
+              id: "cm-old",
+              createdDateTime: "2026-04-23T10:00:00Z",
+              from: { displayName: "Max" },
+              body: { contentType: "text", content: "first" },
+              bodyText: "first",
+            },
+            {
+              id: "cm-new",
+              createdDateTime: "2026-04-23T11:00:00Z",
+              from: { displayName: "Nick" },
+              body: { contentType: "text", content: "second" },
+              bodyText: "second",
+            },
+          ],
+        });
+      return ok({});
+    });
+  }
+
+  test("Chats section header is present and toggles the chat list visibility", async () => {
+    wireSimpleGraph();
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("messages-page"));
+
+    // Chats section is visible by default.
+    expect(screen.getByTestId("messages-section-chats-list")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("messages-section-chats-toggle"),
+    ).toHaveAttribute("data-open", "true");
+
+    // Click to collapse — chat list disappears.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-section-chats-toggle"));
+    });
+    expect(screen.queryByTestId("messages-section-chats-list")).toBeNull();
+    expect(
+      screen.getByTestId("messages-section-chats-toggle"),
+    ).toHaveAttribute("data-open", "false");
+
+    // Persisted to localStorage.
+    expect(window.localStorage.getItem("instinct.messages.chats_open")).toBe("0");
+
+    // Toggle fires analytics.
+    const fired = mockFetchWithRefresh.mock.calls
+      .filter((c) => c[0] === "/api/analytics")
+      .map((c) => JSON.parse(c[1]?.body ?? "{}"));
+    expect(fired.find((b) => b.event === "messages.section_toggled")).toEqual(
+      expect.objectContaining({
+        event: "messages.section_toggled",
+        metadata: { section: "chats", expanded: false },
+      }),
+    );
+  });
+
+  test("Teams section lazy-loads /api/ms/teams when first expanded", async () => {
+    wireSimpleGraph();
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("messages-page"));
+
+    // Section is open by default → /api/ms/teams should fire on mount.
+    await waitFor(() => {
+      expect(
+        mockFetchWithRefresh.mock.calls.some((c) => c[0] === "/api/ms/teams"),
+      ).toBe(true);
+    });
+
+    // Both teams render under the Teams section.
+    await waitFor(() => {
+      expect(screen.getByTestId("team-row-team-wolf")).toBeInTheDocument();
+      expect(screen.getByTestId("team-row-team-cftr")).toBeInTheDocument();
+    });
+    // Sorted alphabetically — CFTR comes before Wolfpack Internal.
+    const rows = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-testid^="team-row-"]'),
+    ).map((el) => el.getAttribute("data-testid"));
+    expect(rows.indexOf("team-row-team-cftr")).toBeLessThan(
+      rows.indexOf("team-row-team-wolf"),
+    );
+  });
+
+  test("expanding a team loads its channels and persists the expansion state", async () => {
+    wireSimpleGraph();
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("team-row-team-wolf"));
+
+    // Channels not loaded yet.
+    expect(screen.queryByTestId("channel-row-ch-eng")).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("team-toggle-team-wolf"));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("channel-row-ch-general")).toBeInTheDocument();
+      expect(screen.getByTestId("channel-row-ch-eng")).toBeInTheDocument();
+    });
+
+    // "General" first by Teams convention, then alpha.
+    const channels = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-testid^="channel-row-"]'),
+    ).map((el) => el.getAttribute("data-testid"));
+    expect(channels[0]).toBe("channel-row-ch-general");
+
+    // Persisted.
+    const persisted = JSON.parse(
+      window.localStorage.getItem("instinct.messages.expanded_teams") ?? "{}",
+    );
+    expect(persisted["team-wolf"]).toBe(true);
+
+    // Analytics.
+    const fired = mockFetchWithRefresh.mock.calls
+      .filter((c) => c[0] === "/api/analytics")
+      .map((c) => JSON.parse(c[1]?.body ?? "{}"));
+    expect(fired.find((b) => b.event === "messages.team_toggled")).toEqual(
+      expect.objectContaining({
+        metadata: { team_id: "team-wolf", expanded: true },
+      }),
+    );
+  });
+
+  test("clicking a channel loads its messages, renders ascending, fires analytics", async () => {
+    wireSimpleGraph();
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("team-row-team-wolf"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("team-toggle-team-wolf"));
+    });
+    await waitFor(() => screen.getByTestId("channel-row-ch-eng"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("channel-row-ch-eng"));
+    });
+
+    // Channel header + thread present.
+    await waitFor(() => {
+      expect(screen.getByTestId("channel-title").textContent).toMatch(
+        /Wolfpack Internal · #Engineering/,
+      );
+      expect(screen.getByTestId("channel-message-cm-old")).toBeInTheDocument();
+      expect(screen.getByTestId("channel-message-cm-new")).toBeInTheDocument();
+    });
+
+    // Ascending DOM order — newest at the bottom.
+    const ids = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '[data-testid^="channel-message-"]',
+      ),
+    ).map((el) => el.getAttribute("data-testid"));
+    expect(ids).toEqual(["channel-message-cm-old", "channel-message-cm-new"]);
+
+    // Analytics: channel_selected.
+    const fired = mockFetchWithRefresh.mock.calls
+      .filter((c) => c[0] === "/api/analytics")
+      .map((c) => JSON.parse(c[1]?.body ?? "{}"));
+    expect(fired.find((b) => b.event === "messages.channel_selected")).toEqual(
+      expect.objectContaining({
+        metadata: { team_id: "team-wolf", channel_id: "ch-eng" },
+      }),
+    );
+
+    // Back button restores no-selection state.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("channel-back"));
+    });
+    expect(screen.queryByTestId("channel-thread-body")).toBeNull();
+  });
+
+  test("scope_missing on /api/ms/teams shows the grant-permission card", async () => {
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/teams")
+        return ok({ teams: [], scope_missing: true });
+      return ok({});
+    });
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("messages-page"));
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("messages-teams-scope-missing"),
+      ).toBeInTheDocument();
+    });
+  });
+
+  test("selecting a chat clears any active channel selection (right pane is single-target)", async () => {
+    wireSimpleGraph();
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("team-row-team-wolf"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("team-toggle-team-wolf"));
+    });
+    await waitFor(() => screen.getByTestId("channel-row-ch-eng"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("channel-row-ch-eng"));
+    });
+    await waitFor(() => screen.getByTestId("channel-thread-body"));
+
+    // Now pick a chat — channel pane should disappear.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("chat-row-chat-1"));
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("channel-thread-body")).toBeNull();
+    });
+  });
+});

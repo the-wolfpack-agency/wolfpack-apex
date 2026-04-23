@@ -95,6 +95,29 @@ export function effectiveChatTimestamp(chat: {
   return previewTimeOf(chat.lastMessagePreview) || chat.lastUpdatedDateTime;
 }
 
+// Teams collaboration surface — list of joined teams, lazily expand
+// to channels, then click a channel to load its messages on the right
+// pane (read-only for now). Mirrors the Teams desktop "Teams &
+// channels" tree.
+export interface JoinedTeamSummary {
+  id: string;
+  displayName: string;
+  description?: string;
+}
+export interface TeamChannelSummary {
+  id: string;
+  displayName: string;
+  description?: string;
+  membershipType?: string;
+}
+export interface ChannelMessageSummary {
+  id: string;
+  createdDateTime: string;
+  from?: { displayName?: string };
+  body?: { contentType?: "text" | "html"; content?: string };
+  bodyText?: string;
+}
+
 export interface ChatSummary {
   id: string;
   topic?: string | null;
@@ -252,7 +275,10 @@ function fireAnalytics(
     | "messages.compose_sent"
     | "messages.compose_failed"
     | "messages.scope_prompt_shown"
-    | "messages.write_disabled_shown",
+    | "messages.write_disabled_shown"
+    | "messages.section_toggled"
+    | "messages.team_toggled"
+    | "messages.channel_selected",
   metadata: Record<string, string | number | boolean>,
 ): void {
   fetchWithRefresh("/api/analytics", {
@@ -313,6 +339,76 @@ export default function MessagesPage() {
   const [sending, setSending] = useState(false);
   const [composeHint, setComposeHint] = useState<ComposeHint>(null);
   const [toast, setToast] = useState<{ key: number; text: string } | null>(null);
+
+  // Collapsible LEFT-panel sections. Persisted to localStorage so the
+  // user's preference survives reloads. Default both open on first
+  // load — discoverability beats tidiness for new users.
+  const [chatsOpen, setChatsOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    return window.localStorage.getItem("instinct.messages.chats_open") !== "0";
+  });
+  const [teamsOpen, setTeamsOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    return window.localStorage.getItem("instinct.messages.teams_open") !== "0";
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      "instinct.messages.chats_open",
+      chatsOpen ? "1" : "0",
+    );
+  }, [chatsOpen]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      "instinct.messages.teams_open",
+      teamsOpen ? "1" : "0",
+    );
+  }, [teamsOpen]);
+
+  // Teams + channels state. `teams` lazily loads on first expansion.
+  // `channelsByTeam[teamId]` caches channel lists so re-expanding
+  // doesn't re-hit Graph. `expandedTeams[teamId]` tracks per-team
+  // expand/collapse — also persisted.
+  const [teams, setTeams] = useState<JoinedTeamSummary[] | null>(null);
+  const [teamsScopeMissing, setTeamsScopeMissing] = useState(false);
+  const [channelsByTeam, setChannelsByTeam] = useState<
+    Record<string, TeamChannelSummary[] | "loading" | "scope_missing">
+  >({});
+  const [expandedTeams, setExpandedTeams] = useState<Record<string, boolean>>(
+    () => {
+      if (typeof window === "undefined") return {};
+      try {
+        return JSON.parse(
+          window.localStorage.getItem("instinct.messages.expanded_teams") ?? "{}",
+        ) as Record<string, boolean>;
+      } catch {
+        return {};
+      }
+    },
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      "instinct.messages.expanded_teams",
+      JSON.stringify(expandedTeams),
+    );
+  }, [expandedTeams]);
+
+  // Channel selection — independent of chat selection. When a channel
+  // is selected we render its messages on the RIGHT pane in read-only
+  // mode (compose to channels is a separate scope of work).
+  const [selectedChannel, setSelectedChannel] = useState<{
+    teamId: string;
+    channelId: string;
+    teamName: string;
+    channelName: string;
+  } | null>(null);
+  const [channelMessages, setChannelMessages] =
+    useState<ChannelMessageSummary[] | null>(null);
+  const [loadingChannelMessages, setLoadingChannelMessages] = useState(false);
+  const [channelMessagesScopeMissing, setChannelMessagesScopeMissing] =
+    useState(false);
 
   // Thread auto-scroll: every chat app pins the newest message at the
   // bottom of the thread and snaps the viewport down on send / new
@@ -403,6 +499,156 @@ export default function MessagesPage() {
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "messages" } }),
     }).catch(() => undefined);
   }, [loadChatList]);
+
+  // ---- Teams + channels loaders --------------------------------------
+
+  const loadTeams = useCallback(async () => {
+    try {
+      const res = await fetchWithRefresh("/api/ms/teams", { method: "GET" });
+      const data = (await res.json().catch(() => ({}))) as {
+        teams?: JoinedTeamSummary[];
+        scope_missing?: boolean;
+        connected?: boolean;
+      };
+      if (data.scope_missing) {
+        setTeamsScopeMissing(true);
+        setTeams([]);
+        return;
+      }
+      if (!res.ok || data.connected === false) {
+        setTeams([]);
+        return;
+      }
+      const sorted = (data.teams ?? []).slice().sort((a, b) =>
+        a.displayName.localeCompare(b.displayName),
+      );
+      setTeams(sorted);
+    } catch {
+      setTeams([]);
+    }
+  }, []);
+
+  const loadChannelsForTeam = useCallback(
+    async (teamId: string) => {
+      setChannelsByTeam((prev) => ({ ...prev, [teamId]: "loading" }));
+      try {
+        const res = await fetchWithRefresh(
+          `/api/ms/teams/${encodeURIComponent(teamId)}/channels`,
+          { method: "GET" },
+        );
+        const data = (await res.json().catch(() => ({}))) as {
+          channels?: TeamChannelSummary[];
+          scope_missing?: boolean;
+        };
+        if (data.scope_missing) {
+          setChannelsByTeam((prev) => ({ ...prev, [teamId]: "scope_missing" }));
+          return;
+        }
+        const sorted = (data.channels ?? []).slice().sort((a, b) => {
+          // "General" first (Teams convention), then alpha.
+          if (a.displayName === "General") return -1;
+          if (b.displayName === "General") return 1;
+          return a.displayName.localeCompare(b.displayName);
+        });
+        setChannelsByTeam((prev) => ({ ...prev, [teamId]: sorted }));
+      } catch {
+        setChannelsByTeam((prev) => ({ ...prev, [teamId]: [] }));
+      }
+    },
+    [],
+  );
+
+  // First-load of teams: fire only when the section is expanded AND
+  // we've never fetched. Subsequent toggles just show/hide the
+  // already-loaded list.
+  useEffect(() => {
+    if (!teamsOpen) return;
+    if (teams !== null) return;
+    void loadTeams();
+  }, [teamsOpen, teams, loadTeams]);
+
+  function toggleSection(section: "chats" | "teams") {
+    if (section === "chats") {
+      const next = !chatsOpen;
+      setChatsOpen(next);
+      fireAnalytics("messages.section_toggled", {
+        section: "chats",
+        expanded: next,
+      });
+    } else {
+      const next = !teamsOpen;
+      setTeamsOpen(next);
+      fireAnalytics("messages.section_toggled", {
+        section: "teams",
+        expanded: next,
+      });
+    }
+  }
+
+  function toggleTeam(teamId: string) {
+    const next = !expandedTeams[teamId];
+    setExpandedTeams((prev) => ({ ...prev, [teamId]: next }));
+    fireAnalytics("messages.team_toggled", { team_id: teamId, expanded: next });
+    if (next && !channelsByTeam[teamId]) {
+      void loadChannelsForTeam(teamId);
+    }
+  }
+
+  const loadChannelMessages = useCallback(
+    async (teamId: string, channelId: string) => {
+      setLoadingChannelMessages(true);
+      setChannelMessagesScopeMissing(false);
+      setChannelMessages(null);
+      try {
+        const res = await fetchWithRefresh(
+          `/api/ms/teams/${encodeURIComponent(teamId)}/channels/${encodeURIComponent(channelId)}/messages`,
+          { method: "GET" },
+        );
+        const data = (await res.json().catch(() => ({}))) as {
+          messages?: ChannelMessageSummary[];
+          scope_missing?: boolean;
+        };
+        if (data.scope_missing) {
+          setChannelMessagesScopeMissing(true);
+          setChannelMessages([]);
+          return;
+        }
+        // Graph returns channel messages descending; mirror the chat
+        // thread fix: sort ascending so newest sits at the bottom.
+        const sorted = (data.messages ?? [])
+          .slice()
+          .sort(
+            (a, b) =>
+              new Date(a.createdDateTime ?? 0).getTime() -
+              new Date(b.createdDateTime ?? 0).getTime(),
+          );
+        setChannelMessages(sorted);
+      } catch {
+        setChannelMessages([]);
+      } finally {
+        setLoadingChannelMessages(false);
+      }
+    },
+    [],
+  );
+
+  function selectChannel(
+    teamId: string,
+    channelId: string,
+    teamName: string,
+    channelName: string,
+  ) {
+    // Selecting a channel clears any chat selection (right pane is
+    // single-target).
+    setSelectedId(null);
+    setMessages(null);
+    setSelectedChannel({ teamId, channelId, teamName, channelName });
+    fireAnalytics("messages.channel_selected", {
+      team_id: teamId,
+      channel_id: channelId,
+    });
+    void loadChannelMessages(teamId, channelId);
+  }
 
   // Refresh on window focus (user came back from Teams desktop) and
   // on a 30s poll while the page is visible. Don't show the spinner
@@ -513,6 +759,8 @@ export default function MessagesPage() {
 
   function selectChat(chat: ChatSummary) {
     setSelectedId(chat.id);
+    setSelectedChannel(null);
+    setChannelMessages(null);
     void loadThread(chat);
   }
 
@@ -719,7 +967,7 @@ export default function MessagesPage() {
     );
   }
 
-  const isMobileThreadView = selectedChat !== null;
+  const isMobileThreadView = selectedChat !== null || selectedChannel !== null;
   const canSend = draft.trim().length > 0 && !sending;
   const hasNoMessages =
     selectedChat !== null && !loadingThread && !threadScopeMissing && (messages ?? []).length === 0;
@@ -755,8 +1003,20 @@ export default function MessagesPage() {
             display: isMobile && isMobileThreadView ? "none" : "block",
           }}
         >
-          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-            {(chats ?? []).map((chat) => {
+          {/* Section: Chats — collapsible. */}
+          <SectionHeader
+            label="Chats"
+            count={(chats ?? []).length}
+            open={chatsOpen}
+            onToggle={() => toggleSection("chats")}
+            testId="messages-section-chats-toggle"
+          />
+          {chatsOpen ? (
+            <ul
+              data-testid="messages-section-chats-list"
+              style={{ listStyle: "none", margin: 0, padding: 0 }}
+            >
+              {(chats ?? []).map((chat) => {
               const title = getChatTitle(chat, selfEmail, selfName, selfId);
               const otherUserId = getOtherMemberUserId(chat, selfEmail, selfName, selfId);
               const isSelected = chat.id === selectedId;
@@ -868,8 +1128,183 @@ export default function MessagesPage() {
                   </button>
                 </li>
               );
-            })}
-          </ul>
+              })}
+            </ul>
+          ) : null}
+
+          {/* Section: Teams & channels — collapsible, lazy-loaded. */}
+          <SectionHeader
+            label="Teams & channels"
+            count={teams === null ? undefined : teams.length}
+            open={teamsOpen}
+            onToggle={() => toggleSection("teams")}
+            testId="messages-section-teams-toggle"
+          />
+          {teamsOpen ? (
+            <div
+              data-testid="messages-section-teams-list"
+              style={{ padding: "4px 0 12px" }}
+            >
+              {teamsScopeMissing ? (
+                <div
+                  data-testid="messages-teams-scope-missing"
+                  style={{
+                    padding: "8px 16px",
+                    fontSize: 12,
+                    color: "var(--wp-text-muted, #9ca3af)",
+                  }}
+                >
+                  Grant <code>Team.ReadBasic.All</code> in{" "}
+                  <Link
+                    href="/settings"
+                    style={{ color: "var(--wp-gold, #eab308)" }}
+                  >
+                    settings
+                  </Link>{" "}
+                  to see Teams here.
+                </div>
+              ) : teams === null ? (
+                <div
+                  style={{
+                    padding: "8px 16px",
+                    fontSize: 12,
+                    color: "var(--wp-text-muted, #9ca3af)",
+                  }}
+                >
+                  Loading…
+                </div>
+              ) : teams.length === 0 ? (
+                <div
+                  data-testid="messages-teams-empty"
+                  style={{
+                    padding: "8px 16px",
+                    fontSize: 12,
+                    color: "var(--wp-text-muted, #9ca3af)",
+                  }}
+                >
+                  You haven&apos;t joined any teams.
+                </div>
+              ) : (
+                teams.map((team) => {
+                  const expanded = !!expandedTeams[team.id];
+                  const channels = channelsByTeam[team.id];
+                  return (
+                    <div key={team.id} data-testid={`team-row-${team.id}`}>
+                      <button
+                        type="button"
+                        onClick={() => toggleTeam(team.id)}
+                        data-testid={`team-toggle-${team.id}`}
+                        data-expanded={expanded ? "true" : "false"}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          width: "100%",
+                          textAlign: "left",
+                          padding: "6px 16px",
+                          border: "none",
+                          background: "transparent",
+                          cursor: "pointer",
+                          color: "var(--wp-text, #eee)",
+                          fontSize: 13,
+                          fontWeight: 600,
+                        }}
+                      >
+                        <span style={{ width: 12, fontSize: 10 }}>
+                          {expanded ? "▾" : "▸"}
+                        </span>
+                        <span
+                          style={{
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                          data-testid={`team-name-${team.id}`}
+                        >
+                          {team.displayName}
+                        </span>
+                      </button>
+                      {expanded ? (
+                        <div data-testid={`team-channels-${team.id}`}>
+                          {channels === "loading" ? (
+                            <div
+                              style={{
+                                padding: "4px 16px 4px 36px",
+                                fontSize: 12,
+                                color: "var(--wp-text-muted, #9ca3af)",
+                              }}
+                            >
+                              Loading channels…
+                            </div>
+                          ) : channels === "scope_missing" ? (
+                            <div
+                              data-testid={`team-channels-scope-missing-${team.id}`}
+                              style={{
+                                padding: "4px 16px 4px 36px",
+                                fontSize: 12,
+                                color: "var(--wp-text-muted, #9ca3af)",
+                              }}
+                            >
+                              Channel.ReadBasic.All not granted.
+                            </div>
+                          ) : !channels || channels.length === 0 ? (
+                            <div
+                              style={{
+                                padding: "4px 16px 4px 36px",
+                                fontSize: 12,
+                                color: "var(--wp-text-muted, #9ca3af)",
+                              }}
+                            >
+                              No channels.
+                            </div>
+                          ) : (
+                            channels.map((channel) => {
+                              const isSelected =
+                                selectedChannel?.teamId === team.id &&
+                                selectedChannel?.channelId === channel.id;
+                              return (
+                                <button
+                                  type="button"
+                                  key={channel.id}
+                                  onClick={() =>
+                                    selectChannel(
+                                      team.id,
+                                      channel.id,
+                                      team.displayName,
+                                      channel.displayName,
+                                    )
+                                  }
+                                  data-testid={`channel-row-${channel.id}`}
+                                  data-selected={isSelected ? "true" : "false"}
+                                  style={{
+                                    display: "block",
+                                    width: "100%",
+                                    textAlign: "left",
+                                    padding: "4px 16px 4px 36px",
+                                    border: "none",
+                                    background: isSelected
+                                      ? "rgba(234,179,8,0.12)"
+                                      : "transparent",
+                                    cursor: "pointer",
+                                    color: isSelected
+                                      ? "var(--wp-gold, #eab308)"
+                                      : "var(--wp-text-dim, #aaa)",
+                                    fontSize: 13,
+                                  }}
+                                >
+                                  # {channel.displayName}
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : null}
         </aside>
 
         {/* Thread column */}
@@ -882,7 +1317,19 @@ export default function MessagesPage() {
             minWidth: 0,
           }}
         >
-          {!selectedChat ? (
+          {selectedChannel ? (
+            <ChannelThreadPane
+              teamName={selectedChannel.teamName}
+              channelName={selectedChannel.channelName}
+              loading={loadingChannelMessages}
+              scopeMissing={channelMessagesScopeMissing}
+              messages={channelMessages}
+              onBack={() => {
+                setSelectedChannel(null);
+                setChannelMessages(null);
+              }}
+            />
+          ) : !selectedChat ? (
             <div
               data-testid="messages-no-selection"
               style={{
@@ -895,7 +1342,7 @@ export default function MessagesPage() {
                 textAlign: "center",
               }}
             >
-              Select a chat to read and reply.
+              Select a chat or a channel to read.
             </div>
           ) : (
             <>
@@ -1195,6 +1642,193 @@ export default function MessagesPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Read-only Teams *channel* thread pane — used when the user picks a
+ * channel from the LEFT panel. Compose to channels is intentionally
+ * NOT included yet (different scope: ChannelMessage.Send + a route
+ * that posts to /teams/{id}/channels/{id}/messages). Mirrors the
+ * 1:1 chat pane's loading / scope-missing / empty / list states.
+ */
+function ChannelThreadPane(props: {
+  teamName: string;
+  channelName: string;
+  loading: boolean;
+  scopeMissing: boolean;
+  messages: ChannelMessageSummary[] | null;
+  onBack: () => void;
+}) {
+  const endRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!props.messages || props.messages.length === 0) return;
+    endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [props.messages]);
+
+  return (
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "12px 16px",
+          borderBottom: "1px solid var(--wp-dark-border, #333)",
+          background: "var(--wp-dark-surface2, #222)",
+        }}
+      >
+        <button
+          type="button"
+          onClick={props.onBack}
+          data-testid="channel-back"
+          style={{
+            border: "1px solid var(--wp-dark-border, #333)",
+            background: "var(--wp-dark-surface, #1a1a1a)",
+            borderRadius: 6,
+            padding: "4px 10px",
+            cursor: "pointer",
+            fontSize: 13,
+            color: "var(--wp-text, #eee)",
+          }}
+        >
+          ← Back
+        </button>
+        <span style={{ fontWeight: 600 }} data-testid="channel-title">
+          {props.teamName} · #{props.channelName}
+        </span>
+      </div>
+      <div
+        data-testid="channel-thread-body"
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: 16,
+          background: "var(--wp-dark-surface, #1a1a1a)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        {props.loading ? (
+          <div
+            data-testid="channel-thread-loading"
+            style={{ color: "var(--wp-text-muted, #9ca3af)" }}
+          >
+            Loading…
+          </div>
+        ) : props.scopeMissing ? (
+          <div data-testid="channel-thread-scope-missing" style={cardStyle}>
+            <p style={{ marginTop: 0 }}>
+              Grant <code>ChannelMessage.Read.All</code> to read this channel.
+            </p>
+            <Link href="/settings" style={linkButtonStyle}>
+              Open settings
+            </Link>
+          </div>
+        ) : !props.messages || props.messages.length === 0 ? (
+          <div
+            data-testid="channel-thread-empty"
+            style={{ color: "var(--wp-text-muted, #9ca3af)" }}
+          >
+            No messages in this channel yet.
+          </div>
+        ) : (
+          props.messages.map((m) => (
+            <div
+              key={m.id}
+              data-testid={`channel-message-${m.id}`}
+              style={{
+                background: "var(--wp-dark-surface2, #222)",
+                border: "1px solid var(--wp-dark-border, #333)",
+                borderRadius: 8,
+                padding: "8px 12px",
+                maxWidth: "80%",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--wp-text-muted, #9ca3af)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 8,
+                }}
+              >
+                <span>{m.from?.displayName ?? "Unknown"}</span>
+                <span>{formatRelativeTime(m.createdDateTime)}</span>
+              </div>
+              <div
+                style={{
+                  fontSize: 14,
+                  whiteSpace: "pre-wrap",
+                  marginTop: 4,
+                  color: "var(--wp-text, #eee)",
+                }}
+              >
+                {m.bodyText ?? m.body?.content ?? ""}
+              </div>
+            </div>
+          ))
+        )}
+        <div ref={endRef} data-testid="channel-thread-end" />
+      </div>
+    </>
+  );
+}
+
+/**
+ * Reusable section header for the LEFT panel — chevron + label +
+ * optional count. Click toggles. Used by Chats and Teams & channels.
+ */
+function SectionHeader(props: {
+  label: string;
+  count?: number;
+  open: boolean;
+  onToggle: () => void;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={props.onToggle}
+      data-testid={props.testId}
+      data-open={props.open ? "true" : "false"}
+      aria-expanded={props.open}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        width: "100%",
+        textAlign: "left",
+        padding: "10px 16px 6px",
+        border: "none",
+        background: "transparent",
+        cursor: "pointer",
+        color: "var(--wp-text, #eee)",
+        fontSize: 12,
+        fontWeight: 700,
+        letterSpacing: 0.4,
+        textTransform: "uppercase",
+      }}
+    >
+      <span style={{ width: 12, fontSize: 10 }}>{props.open ? "▾" : "▸"}</span>
+      <span>{props.label}</span>
+      {typeof props.count === "number" ? (
+        <span
+          style={{
+            marginLeft: 4,
+            fontSize: 11,
+            fontWeight: 500,
+            color: "var(--wp-text-muted, #9ca3af)",
+            letterSpacing: 0,
+            textTransform: "none",
+          }}
+        >
+          ({props.count})
+        </span>
+      ) : null}
+    </button>
   );
 }
 
