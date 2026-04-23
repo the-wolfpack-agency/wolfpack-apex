@@ -52,12 +52,55 @@ export interface ChatMember {
   userId?: string;
 }
 
+/**
+ * Shape of `lastMessagePreview` as it actually arrives from
+ * /api/ms/chats (which proxies Microsoft Graph). Graph returns this
+ * as an object whose `createdDateTime` is the *real* "last activity"
+ * timestamp — `chat.lastUpdatedDateTime` only changes on member /
+ * topic edits and does NOT bump per-message.
+ *
+ * We accept the legacy string form too so existing test fixtures
+ * (and any cached JSON in users' Service Worker) keep working — the
+ * `previewTextOf` / `previewTimeOf` helpers below normalise.
+ */
+export type ChatLastMessagePreview =
+  | string
+  | {
+      body?: { contentType?: string; content?: string };
+      bodyText?: string;
+      from?: { displayName?: string; userId?: string; email?: string };
+      createdDateTime?: string;
+    };
+
+export function previewTextOf(p: ChatLastMessagePreview | undefined): string {
+  if (!p) return "";
+  if (typeof p === "string") return p;
+  return p.bodyText ?? p.body?.content ?? "";
+}
+
+export function previewTimeOf(p: ChatLastMessagePreview | undefined): string {
+  if (!p || typeof p === "string") return "";
+  return p.createdDateTime ?? "";
+}
+
+/**
+ * The timestamp users actually want to see in the LEFT panel: when
+ * was the last message in this chat? Falls back to lastUpdatedDateTime
+ * only if the preview is missing or string-shaped (legacy).
+ */
+export function effectiveChatTimestamp(chat: {
+  lastUpdatedDateTime: string;
+  lastMessagePreview?: ChatLastMessagePreview;
+}): string {
+  return previewTimeOf(chat.lastMessagePreview) || chat.lastUpdatedDateTime;
+}
+
 export interface ChatSummary {
   id: string;
   topic?: string | null;
   chatType: "oneOnOne" | "group" | "meeting" | string;
   lastUpdatedDateTime: string;
-  lastMessagePreview?: string;
+  lastMessagePreview?: ChatLastMessagePreview;
   unreadCount?: number;
   members: ChatMember[];
   webUrl?: string;
@@ -336,8 +379,8 @@ export default function MessagesPage() {
         if (data.self_id) setSelfId(data.self_id);
         const sorted = (data.chats ?? []).slice().sort(
           (a, b) =>
-            new Date(b.lastUpdatedDateTime).getTime() -
-            new Date(a.lastUpdatedDateTime).getTime(),
+            new Date(effectiveChatTimestamp(b)).getTime() -
+            new Date(effectiveChatTimestamp(a)).getTime(),
         );
         setChats(sorted);
       } catch {
@@ -569,11 +612,11 @@ export default function MessagesPage() {
       );
 
       // Bump this chat's row in the LEFT list so the timestamp +
-      // preview match what we just sent. Without this the list still
-      // shows whatever lastUpdatedDateTime was when the page loaded
-      // — Nick caught this showing "1d" for a chat he'd just messaged
-      // a minute earlier. Re-sort so the freshly-bumped row floats to
-      // the top.
+      // preview match what we just sent. We update BOTH the legacy
+      // lastUpdatedDateTime (so old code paths see fresh data) AND
+      // the lastMessagePreview object — the latter is what
+      // `effectiveChatTimestamp` actually reads. Re-sort so the
+      // freshly-bumped row floats to the top.
       const sentAt = server.createdDateTime ?? new Date().toISOString();
       setChats((prev) =>
         (prev ?? [])
@@ -582,15 +625,20 @@ export default function MessagesPage() {
               ? {
                   ...c,
                   lastUpdatedDateTime: sentAt,
-                  lastMessagePreview: trimmed.slice(0, 140),
+                  lastMessagePreview: {
+                    bodyText: trimmed.slice(0, 140),
+                    body: { contentType: "text", content: trimmed },
+                    from: { displayName: "You" },
+                    createdDateTime: sentAt,
+                  },
                 }
               : c,
           )
           .slice()
           .sort(
             (a, b) =>
-              new Date(b.lastUpdatedDateTime).getTime() -
-              new Date(a.lastUpdatedDateTime).getTime(),
+              new Date(effectiveChatTimestamp(b)).getTime() -
+              new Date(effectiveChatTimestamp(a)).getTime(),
           ),
       );
       fireAnalytics("messages.compose_sent", {
@@ -774,7 +822,7 @@ export default function MessagesPage() {
                           </span>
                         </span>
                         <span style={{ fontSize: 11, color: "var(--wp-text-muted, #9ca3af)", flex: "0 0 auto" }}>
-                          {formatRelativeTime(chat.lastUpdatedDateTime)}
+                          {formatRelativeTime(effectiveChatTimestamp(chat))}
                         </span>
                       </div>
                       <div
@@ -796,7 +844,7 @@ export default function MessagesPage() {
                           }}
                           data-testid={`chat-preview-${chat.id}`}
                         >
-                          {chat.lastMessagePreview ?? ""}
+                          {previewTextOf(chat.lastMessagePreview)}
                         </span>
                         {chat.unreadCount && chat.unreadCount > 0 ? (
                           <span

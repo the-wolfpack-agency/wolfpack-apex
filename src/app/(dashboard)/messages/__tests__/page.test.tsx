@@ -334,6 +334,56 @@ describe("MessagesPage", () => {
     expect(threadCall).toBeDefined();
   });
 
+  test("regression: row timestamp uses lastMessagePreview.createdDateTime, not lastUpdatedDateTime", async () => {
+    // Bug: Nick messaged Max via Teams a minute ago but the row still
+    // said "1d". Cause: the page was reading chat.lastUpdatedDateTime,
+    // which Microsoft Graph only updates on member/topic changes —
+    // NOT on each new message. The right field is
+    // lastMessagePreview.createdDateTime.
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats")
+        return ok({
+          chats: [
+            {
+              id: "chat-stale-meta",
+              chatType: "oneOnOne",
+              // Membership last changed 1 day ago
+              lastUpdatedDateTime: yesterday,
+              // ...but a new message was just sent 1 minute ago
+              lastMessagePreview: {
+                bodyText: "fresh ping",
+                createdDateTime: oneMinuteAgo,
+                from: { displayName: "Max" },
+              },
+              members: [
+                { id: "self", displayName: "Me", email: "me@wolfpack.test" },
+                { id: "max", displayName: "Max", email: "max@wolfpack.test" },
+              ],
+            },
+          ],
+        });
+      return ok({});
+    });
+
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("chat-row-chat-stale-meta"));
+
+    // formatRelativeTime("1m ago") returns something matching /m$/.
+    // If the bug regresses, we'd see "1d" instead.
+    const row = screen.getByTestId("chat-row-chat-stale-meta");
+    const timestampText = row.textContent ?? "";
+    // Relative time renders as e.g. "1m" right before the preview
+    // text. Assert we see m/s units and explicitly NOT a "d" unit.
+    expect(timestampText).toMatch(/\d+m(?!s)/);
+    expect(timestampText).not.toMatch(/\d+d/);
+    // And the preview text comes through from the object form.
+    expect(
+      screen.getByTestId("chat-preview-chat-stale-meta").textContent,
+    ).toMatch(/fresh ping/);
+  });
+
   test("regression: thread renders messages oldest-first (newest at bottom) regardless of API order", async () => {
     // Microsoft Graph returns chat messages newest-first. The previous
     // code did `slice(-30)` which preserved that descending order, so
