@@ -271,6 +271,17 @@ export default function MessagesPage() {
   const [composeHint, setComposeHint] = useState<ComposeHint>(null);
   const [toast, setToast] = useState<{ key: number; text: string } | null>(null);
 
+  // Thread auto-scroll: every chat app pins the newest message at the
+  // bottom of the thread and snaps the viewport down on send / new
+  // arrival. We do the same — ref points at a sentinel after the last
+  // message and an effect scrolls it into view whenever `messages`
+  // changes.
+  const threadEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!messages || messages.length === 0) return;
+    threadEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [messages]);
+
   // Belt-and-suspenders: re-read identity after mount in case the
   // initializer ran before the session was hydrated (rare but possible
   // during SSR → CSR handoff).
@@ -287,13 +298,15 @@ export default function MessagesPage() {
     return () => window.clearTimeout(h);
   }, [toast]);
 
-  // Load chat list.
-  useEffect(() => {
-    let active = true;
-    setLoadingList(true);
-    fetchWithRefresh("/api/ms/chats", { method: "GET" })
-      .then(async (res) => {
-        if (!active) return;
+  // Load chat list — extracted into a callback so it can run on
+  // mount, on window focus (returning from Teams desktop), and on a
+  // 30s poll. Without these the LEFT panel timestamps go stale: we
+  // saw "1d" on a chat that had been messaged a minute before.
+  const loadChatList = useCallback(
+    async (opts: { showSpinner?: boolean } = {}) => {
+      if (opts.showSpinner) setLoadingList(true);
+      try {
+        const res = await fetchWithRefresh("/api/ms/chats", { method: "GET" });
         const data = (await res.json().catch(() => ({}))) as {
           chats?: ChatSummary[];
           scope_missing?: boolean;
@@ -327,16 +340,18 @@ export default function MessagesPage() {
             new Date(a.lastUpdatedDateTime).getTime(),
         );
         setChats(sorted);
-      })
-      .catch(() => {
-        if (active) {
-          setListError("Failed to load chats");
-          setChats([]);
-        }
-      })
-      .finally(() => {
-        if (active) setLoadingList(false);
-      });
+      } catch {
+        setListError("Failed to load chats");
+        setChats([]);
+      } finally {
+        if (opts.showSpinner) setLoadingList(false);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    void loadChatList({ showSpinner: true });
 
     // Page-viewed analytics.
     fetchWithRefresh("/api/analytics", {
@@ -344,11 +359,25 @@ export default function MessagesPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "messages" } }),
     }).catch(() => undefined);
+  }, [loadChatList]);
 
+  // Refresh on window focus (user came back from Teams desktop) and
+  // on a 30s poll while the page is visible. Don't show the spinner
+  // for these — they should feel ambient, not like a reload.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onFocus = () => void loadChatList();
+    window.addEventListener("focus", onFocus);
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void loadChatList();
+      }
+    }, 30_000);
     return () => {
-      active = false;
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(id);
     };
-  }, []);
+  }, [loadChatList]);
 
   const selectedChat = useMemo(
     () => (chats ?? []).find((c) => c.id === selectedId) ?? null,
@@ -398,7 +427,20 @@ export default function MessagesPage() {
         } else if (!res.ok) {
           setMessages([]);
         } else {
-          const msgs = (data.messages ?? []).slice(-30);
+          // Microsoft Graph returns chat messages newest-first
+          // (descending by createdDateTime). Sort ASCENDING so the
+          // oldest sits at the top of the thread and newest at the
+          // bottom — matching every chat app users know (Teams,
+          // iMessage, Slack, WhatsApp). Then slice the most-recent
+          // 30 off the END, which preserves chronological order.
+          const msgs = (data.messages ?? [])
+            .slice()
+            .sort(
+              (a, b) =>
+                new Date(a.createdDateTime ?? 0).getTime() -
+                new Date(b.createdDateTime ?? 0).getTime(),
+            )
+            .slice(-30);
           setMessages(msgs);
         }
       } catch {
@@ -524,6 +566,32 @@ export default function MessagesPage() {
       };
       setMessages((prev) =>
         (prev ?? []).map((m) => (m.id === optimisticId ? server : m)),
+      );
+
+      // Bump this chat's row in the LEFT list so the timestamp +
+      // preview match what we just sent. Without this the list still
+      // shows whatever lastUpdatedDateTime was when the page loaded
+      // — Nick caught this showing "1d" for a chat he'd just messaged
+      // a minute earlier. Re-sort so the freshly-bumped row floats to
+      // the top.
+      const sentAt = server.createdDateTime ?? new Date().toISOString();
+      setChats((prev) =>
+        (prev ?? [])
+          .map((c) =>
+            c.id === chatId
+              ? {
+                  ...c,
+                  lastUpdatedDateTime: sentAt,
+                  lastMessagePreview: trimmed.slice(0, 140),
+                }
+              : c,
+          )
+          .slice()
+          .sort(
+            (a, b) =>
+              new Date(b.lastUpdatedDateTime).getTime() -
+              new Date(a.lastUpdatedDateTime).getTime(),
+          ),
       );
       fireAnalytics("messages.compose_sent", {
         chat_id: chatId,
@@ -895,6 +963,7 @@ export default function MessagesPage() {
                     );
                   })
                 )}
+                <div ref={threadEndRef} data-testid="messages-thread-end" />
               </div>
 
               {/* Compose area + more-actions row */}

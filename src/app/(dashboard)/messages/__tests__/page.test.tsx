@@ -2,6 +2,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import "@testing-library/jest-dom";
 
+// jsdom doesn't implement scrollIntoView; the thread auto-scroll on
+// new messages calls it. No-op polyfill keeps tests focused on
+// behavior, not on jsdom's quirks.
+beforeAll(() => {
+  (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {};
+});
+
 const mockFetchWithRefresh = jest.fn();
 const mockGetInstinctUser = jest.fn(() => ({ email: "me@x", name: "Tester" }));
 jest.mock("@/lib/client-auth", () => ({
@@ -327,6 +334,67 @@ describe("MessagesPage", () => {
     expect(threadCall).toBeDefined();
   });
 
+  test("regression: thread renders messages oldest-first (newest at bottom) regardless of API order", async () => {
+    // Microsoft Graph returns chat messages newest-first. The previous
+    // code did `slice(-30)` which preserved that descending order, so
+    // the newest message rendered at the TOP of the thread — opposite
+    // of every chat app users know. Fix: sort ascending by
+    // createdDateTime, then slice the last 30. Here we feed the API a
+    // descending list and assert the DOM order is ascending.
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1")
+        return ok({
+          messages: [
+            // newest first — the order Graph actually uses
+            {
+              id: "newest",
+              from: { displayName: "Jane" },
+              createdDateTime: "2026-04-23T12:00:00Z",
+              body: { contentType: "text", content: "C" },
+            },
+            {
+              id: "middle",
+              from: { displayName: "Jane" },
+              createdDateTime: "2026-04-23T11:00:00Z",
+              body: { contentType: "text", content: "B" },
+            },
+            {
+              id: "oldest",
+              from: { displayName: "Jane" },
+              createdDateTime: "2026-04-23T10:00:00Z",
+              body: { contentType: "text", content: "A" },
+            },
+          ],
+        });
+      return ok({});
+    });
+
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("messages-page"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("chat-row-chat-1"));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("message-oldest")).toBeInTheDocument();
+    });
+
+    // Ascending DOM order: oldest first, newest last.
+    const body = screen.getByTestId("messages-thread-body");
+    const ids = Array.from(
+      body.querySelectorAll('[data-testid^="message-"]'),
+    ).map((el) => el.getAttribute("data-testid"));
+    expect(ids).toEqual([
+      "message-oldest",
+      "message-middle",
+      "message-newest",
+    ]);
+
+    // And the auto-scroll sentinel is the very last child of the
+    // thread body, so scrollIntoView lands at the bottom.
+    expect(screen.getByTestId("messages-thread-end")).toBeInTheDocument();
+  });
+
   test("back button clears selection", async () => {
     wireApiRouter((url) => {
       if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
@@ -605,6 +673,64 @@ describe("MessagesPage — inline compose", () => {
       chat_id: "chat-1",
       length: "optimistic hello".length,
     });
+  });
+
+  test("regression: successful send bumps the chat row's timestamp + preview in the LEFT list", async () => {
+    // Bug: Nick messaged Max a minute ago but the LEFT panel still
+    // showed "1d" because the chats array's lastUpdatedDateTime is
+    // baked in at fetch time and never updated when we send. Fix:
+    // mutate the matching chat row + re-sort on successful POST.
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-old" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (url === "/api/ms/chats/chat-old/messages" && init?.method === "POST") {
+        return ok({
+          id: "srv-bump",
+          createdDateTime: "2026-04-23T13:00:00Z", // newest of all sample chats
+          from: { displayName: "You" },
+          body: { contentType: "text", content: "fresh ping" },
+        });
+      }
+      return ok({});
+    });
+
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("messages-page"));
+
+    // chat-old is dated 2026-04-01, so it lands at the BOTTOM of the
+    // initial list ordering. Confirm that's where it starts.
+    let rows = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-testid^="chat-row-"]'),
+    ).map((el) => el.getAttribute("data-testid"));
+    expect(rows[rows.length - 1]).toBe("chat-row-chat-old");
+
+    // Open chat-old and send a message dated NOW.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("chat-row-chat-old"));
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("messages-compose-input")).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByTestId("messages-compose-input"), {
+      target: { value: "fresh ping" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-compose-send"));
+      await Promise.resolve();
+    });
+
+    // After the send resolves, chat-old should have floated to the
+    // TOP of the list and its preview should match what we sent.
+    await waitFor(() => {
+      rows = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-testid^="chat-row-"]'),
+      ).map((el) => el.getAttribute("data-testid"));
+      expect(rows[0]).toBe("chat-row-chat-old");
+    });
+    expect(
+      screen.getByTestId("chat-preview-chat-old").textContent,
+    ).toMatch(/fresh ping/);
   });
 
   test("scope_missing response shows inline prompt, removes optimistic, no error toast", async () => {

@@ -216,4 +216,81 @@ describe("<TeamsUnreadBadge />", () => {
     });
     expect(mockFetchWithRefresh).not.toHaveBeenCalled();
   });
+
+  test("tags document.title with (N) prefix when count > 0 and restores it at zero", async () => {
+    document.title = "Instinct";
+    let response = mkJsonResponse({ count: 3, total_chats: 5 });
+    mockFetchWithRefresh.mockImplementation(() => Promise.resolve(response));
+
+    render(<TeamsUnreadBadge />);
+    await waitFor(() => expect(document.title).toBe("(3) Instinct"));
+
+    // Drop the count to zero on next poll → title restores.
+    response = mkJsonResponse({ count: 0, total_chats: 5 });
+    await act(async () => {
+      jest.advanceTimersByTime(45_000);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(document.title).toBe("Instinct"));
+  });
+
+  test("fires a browser notification when count increases between polls", async () => {
+    // Stub the Notification API. jsdom doesn't implement it.
+    const notificationCtor = jest.fn();
+    (notificationCtor as unknown as { permission: NotificationPermission }).permission =
+      "granted";
+    (notificationCtor as unknown as {
+      requestPermission: () => Promise<NotificationPermission>;
+    }).requestPermission = () => Promise.resolve("granted");
+    (window as unknown as { Notification: unknown }).Notification = notificationCtor;
+
+    // Pretend we're not on /messages so the gate allows notification.
+    window.history.pushState({}, "", "/dashboard");
+
+    let response = mkJsonResponse({ count: 1, total_chats: 5 });
+    mockFetchWithRefresh.mockImplementation(() => Promise.resolve(response));
+
+    render(<TeamsUnreadBadge />);
+    await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalled());
+    // First mount: count goes 0 → 1, that IS an increase, notification fires once.
+    await waitFor(() => expect(notificationCtor).toHaveBeenCalledTimes(1));
+    expect(notificationCtor.mock.calls[0][0]).toBe("New Teams message");
+
+    // Same count on next poll: NO new notification (no increase).
+    await act(async () => {
+      jest.advanceTimersByTime(45_000);
+      await Promise.resolve();
+    });
+    expect(notificationCtor).toHaveBeenCalledTimes(1);
+
+    // Bump to 4: delta is 3, plural copy fires.
+    response = mkJsonResponse({ count: 4, total_chats: 5 });
+    await act(async () => {
+      jest.advanceTimersByTime(45_000);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(notificationCtor).toHaveBeenCalledTimes(2));
+    expect(notificationCtor.mock.calls[1][0]).toBe("3 new Teams messages");
+  });
+
+  test("does NOT fire a browser notification when user is already on /messages", async () => {
+    const notificationCtor = jest.fn();
+    (notificationCtor as unknown as { permission: NotificationPermission }).permission =
+      "granted";
+    (window as unknown as { Notification: unknown }).Notification = notificationCtor;
+
+    window.history.pushState({}, "", "/messages");
+
+    mockFetchWithRefresh.mockResolvedValue(
+      mkJsonResponse({ count: 5, total_chats: 5 }),
+    );
+
+    render(<TeamsUnreadBadge />);
+    await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalled());
+    // Give effects time to settle.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(notificationCtor).not.toHaveBeenCalled();
+  });
 });

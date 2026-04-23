@@ -78,6 +78,13 @@ export default function TeamsUnreadBadge() {
   // AND stop polling aggressively. The poll still runs, but a silent
   // hide is the whole contract per the ticket.
   const silencedRef = useRef(false);
+  // Track previous count so we can detect *new* messages between polls
+  // and fire a browser notification + title-bar tag. Without this we'd
+  // notify on every poll where count > 0, including the initial mount.
+  const lastCountRef = useRef(0);
+  // Cache the original document.title so we can restore it when the
+  // unread count drops to zero. Captured once on mount.
+  const originalTitleRef = useRef<string>("");
 
   const fetchCount = useCallback(async () => {
     if (typeof window === "undefined") return;
@@ -102,12 +109,72 @@ export default function TeamsUnreadBadge() {
         return;
       }
       silencedRef.current = false;
-      setCount(typeof data.count === "number" ? data.count : 0);
+      const next = typeof data.count === "number" ? data.count : 0;
+      setCount(next);
     } catch {
       // Network / parse error — stay stale rather than failing.
       setCount(0);
     }
   }, []);
+
+  // React to count changes: fire a browser notification if the count
+  // *grew* (new messages arrived since the last poll), and tag the
+  // document.title so users with the tab in the background see "(N)
+  // Instinct" — same affordance Gmail / Slack use. Only fires when the
+  // user isn't already on /messages (no point notifying about a
+  // message they're staring at).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!originalTitleRef.current) {
+      originalTitleRef.current = document.title.replace(/^\(\d+\)\s*/, "");
+    }
+    const prev = lastCountRef.current;
+    lastCountRef.current = count;
+
+    // Title prefix.
+    const base = originalTitleRef.current || "Instinct";
+    document.title = count > 0 ? `(${count > 99 ? "99+" : count}) ${base}` : base;
+
+    // Notification gate.
+    if (count <= prev) return;
+    if (window.location.pathname === "/messages") return;
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "denied") return;
+
+    const fire = () => {
+      try {
+        const delta = count - prev;
+        const n = new Notification(
+          delta === 1 ? "New Teams message" : `${delta} new Teams messages`,
+          {
+            body: "Open Instinct to read and reply.",
+            icon: "/wolfpack-logo.png",
+            tag: "instinct-teams-unread",
+            // Renotify on each new arrival rather than silently
+            // collapsing into the previous notification.
+            renotify: true,
+          } as NotificationOptions,
+        );
+        n.onclick = () => {
+          window.focus();
+          router.push("/messages");
+          n.close();
+        };
+      } catch {
+        /* notification API failure is non-fatal */
+      }
+    };
+
+    if (Notification.permission === "granted") {
+      fire();
+    } else if (Notification.permission === "default") {
+      // Lazy permission ask — only when there's actually something to
+      // notify about. No nagging on first page load with zero unread.
+      void Notification.requestPermission().then((p) => {
+        if (p === "granted") fire();
+      });
+    }
+  }, [count, router]);
 
   // Poll on mount + every POLL_INTERVAL_MS.
   useEffect(() => {
