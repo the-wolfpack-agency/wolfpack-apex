@@ -99,9 +99,11 @@ describe("every non-dynamic (dashboard)/<route> folder has a PAGE_FACTS entry", 
     );
     // The root `(dashboard)/page.tsx` maps to "/" — covered via dashboard.
     knownRoutes.add("/");
-    // `setup`, `tools`, `admin/*` — the assistant doesn't need to
-    // surface onboarding/dev-internals. Allowlist them explicitly.
-    const allowlist = new Set(["setup", "tools", "admin"]);
+    // `admin/*` has nested routes (/admin/audit etc.) so PAGE_FACTS
+    // points at a subroute — allowlist the bare folder. `setup` and
+    // `tools` now have their own PAGE_FACTS entries (added 2026-04-23
+    // after user-reported gaps), so they no longer need to be here.
+    const allowlist = new Set(["admin"]);
     for (const name of entries) {
       // Skip layout/page/metadata files, dynamic routes, parallel
       // routes, and co-located test folders.

@@ -517,6 +517,42 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["settings", "directory", "analytics"],
   },
+  tools: {
+    domain: "tools",
+    route: "/tools",
+    title: "Tools",
+    purpose: "One-click utilities built into Instinct — run browser probes, trigger Vibium smoke tests, and invoke the zero-token scanner suite without leaving the app.",
+    what_you_can_do: [
+      "Run a browser probe against any allowlisted domain and see the result inline.",
+      "Invoke the Instinct scanner suite against the current workspace.",
+      "Trigger a Vibium smoke test for any connected integration.",
+      "View recent tool runs + their outcomes in the history panel.",
+    ],
+    how_to: [
+      "Open Tools from the left nav.",
+      "Pick the tool you want (Browser Probe, Scanner, Smoke Test).",
+      "Fill in the target, click Run, and review the result in the output panel.",
+    ],
+    related_pages: ["admin", "analytics", "dashboard"],
+  },
+  setup: {
+    domain: "setup",
+    route: "/setup",
+    title: "Setup",
+    purpose: "First-run workspace setup — connect Microsoft 365, invite teammates, and provision the defaults that let Instinct work for your org.",
+    what_you_can_do: [
+      "Connect your Microsoft 365 workspace so the assistant can read your calendar, mail, and people.",
+      "Invite teammates and assign starter roles.",
+      "Pick which optional integrations your team needs (QuickBooks, Teams meetings, etc).",
+      "Review a quick walkthrough of where key pages live.",
+    ],
+    how_to: [
+      "Open Setup from the left nav (new workspaces see it at the top).",
+      "Work through the stages in order — each one saves as you go.",
+      "Come back any time to re-run a step you skipped.",
+    ],
+    related_pages: ["settings", "directory", "dashboard"],
+  },
 };
 
 /** Alphabetical list of every known domain key. Stable across runs. */

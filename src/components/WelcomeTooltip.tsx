@@ -18,10 +18,27 @@ import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 
 type State = "loading" | "hidden" | "expanded" | "collapsed";
 
+const LOCAL_FLAG = "instinct.welcome_tooltip_done";
+
 export default function WelcomeTooltip() {
   const [state, setState] = useState<State>("loading");
 
   useEffect(() => {
+    // Fast-path: if the user has already dismissed or clicked-through
+    // on THIS device, respect it immediately so the card doesn't
+    // flash-in during the network round-trip. Server-side event is
+    // still the source of truth across devices.
+    try {
+      if (
+        typeof window !== "undefined" &&
+        window.localStorage.getItem(LOCAL_FLAG) === "1"
+      ) {
+        setState("hidden");
+        return;
+      }
+    } catch {
+      /* localStorage disabled — fall through to server check */
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -32,6 +49,15 @@ export default function WelcomeTooltip() {
         }
         const data = (await res.json()) as { should_show?: boolean };
         if (cancelled) return;
+        if (!data.should_show) {
+          // Mirror to local so future loads short-circuit without a
+          // network round-trip.
+          try {
+            window.localStorage.setItem(LOCAL_FLAG, "1");
+          } catch {
+            /* ignore */
+          }
+        }
         setState(data.should_show ? "expanded" : "hidden");
       } catch {
         if (!cancelled) setState("hidden");
@@ -43,6 +69,14 @@ export default function WelcomeTooltip() {
   }, []);
 
   async function post(action: "dismissed" | "knowledge_clicked") {
+    // Set the local flag BEFORE awaiting the POST so a fast refresh
+    // can't resurrect the tooltip if the network call hasn't landed
+    // the analytics row yet.
+    try {
+      window.localStorage.setItem(LOCAL_FLAG, "1");
+    } catch {
+      /* ignore */
+    }
     try {
       await fetchWithRefresh("/api/me/welcome-tooltip", {
         method: "POST",
@@ -133,10 +167,10 @@ export default function WelcomeTooltip() {
             void post("dismissed");
             setState("hidden");
           }}
-          className="text-xs rounded-md px-2 py-1"
+          className="text-xs font-semibold rounded-md px-3 py-1 transition-colors hover:brightness-110"
           style={{
-            background: "var(--wp-dark-surface, #1a1a1a)",
-            color: "var(--wp-text-muted, #9ca3af)",
+            background: "var(--wp-gold, #eab308)",
+            color: "var(--wp-dark, #111)",
           }}
           data-testid="welcome-tooltip-dismiss"
         >

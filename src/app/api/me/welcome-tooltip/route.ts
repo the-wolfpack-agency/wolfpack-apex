@@ -27,9 +27,13 @@ export async function GET(req: NextRequest) {
 
   // Has the user ever dismissed the welcome tooltip OR clicked into
   // the knowledge CTA? Either counts as "done".
+  // Note: trackEvent writes to `instinct_events` (see src/lib/analytics.ts),
+  // so we query that table here — not `instinct_analytics_events`.
+  // Regression: the earlier mismatch made dismissals un-sticky and the
+  // tooltip re-emerged on every refresh.
   const { rows } = await safeQuery<{ any: string }>(
     `SELECT '1' AS any
-       FROM instinct_analytics_events
+       FROM instinct_events
       WHERE user_id = $1
         AND event_type IN ('welcome_tooltip.dismissed', 'welcome_tooltip.knowledge_clicked')
       LIMIT 1`,

@@ -54,6 +54,20 @@ describe("GET /api/me/welcome-tooltip", () => {
     );
   });
 
+  it("queries the SAME table trackEvent writes to — instinct_events", async () => {
+    // Regression: we initially queried instinct_analytics_events while
+    // trackEvent writes to instinct_events, so dismissals never read
+    // back and the tooltip re-emerged on every refresh.
+    getUserFromRequest.mockReturnValue(user);
+    safeQuery.mockResolvedValue({ rows: [] });
+    const { GET } = await import("../route");
+    await GET(req("GET"));
+    expect(safeQuery).toHaveBeenCalledTimes(1);
+    const sql = (safeQuery.mock.calls[0][0] as string).replace(/\s+/g, " ").trim();
+    expect(sql).toContain("FROM instinct_events");
+    expect(sql).not.toContain("instinct_analytics_events");
+  });
+
   it("should_show=false when dismissal exists — does NOT fire shown event", async () => {
     getUserFromRequest.mockReturnValue(user);
     safeQuery.mockResolvedValue({ rows: [{ any: "1" }] });

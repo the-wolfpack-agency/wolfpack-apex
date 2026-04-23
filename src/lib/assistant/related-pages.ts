@@ -198,6 +198,18 @@ const DOMAIN_MAP: DomainEntry[] = [
     href: "/directory",
     keywords: ["directory", "team directory", "org chart"],
   },
+  {
+    domain: "tools",
+    label: "Tools",
+    href: "/tools",
+    keywords: ["tools", "utility", "utilities", "browser probe", "smoke test"],
+  },
+  {
+    domain: "setup",
+    label: "Setup",
+    href: "/setup",
+    keywords: ["setup", "set up", "first run", "workspace setup", "onboarding wizard"],
+  },
 ];
 
 /**

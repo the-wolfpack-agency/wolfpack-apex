@@ -16,7 +16,14 @@ jest.mock("@/lib/client-auth", () => ({
 
 import WelcomeTooltip from "@/components/WelcomeTooltip";
 
-beforeEach(() => fetchMock.mockReset());
+beforeEach(() => {
+  fetchMock.mockReset();
+  try {
+    window.localStorage.clear();
+  } catch {
+    /* ignore */
+  }
+});
 
 function mockShouldShow(value: boolean) {
   fetchMock.mockImplementation((url: string, init?: RequestInit) => {
@@ -96,6 +103,41 @@ describe("<WelcomeTooltip />", () => {
       expect(body.action).toBe("dismissed");
     });
     expect(screen.queryByTestId("welcome-tooltip")).toBeNull();
+  });
+
+  it("after dismiss — localStorage flag is set so a refresh won't resurrect the card", async () => {
+    mockShouldShow(true);
+    render(<WelcomeTooltip />);
+    await waitFor(() => {
+      expect(screen.getByTestId("welcome-tooltip-dismiss")).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("welcome-tooltip-dismiss"));
+    });
+    expect(window.localStorage.getItem("instinct.welcome_tooltip_done")).toBe("1");
+  });
+
+  it("with the localStorage flag already set, the card never renders even if the server says show", async () => {
+    // Simulate a racy refresh: localStorage was set on this device on
+    // a prior session but the server-side INSERT hasn't landed yet.
+    window.localStorage.setItem("instinct.welcome_tooltip_done", "1");
+    mockShouldShow(true);
+    render(<WelcomeTooltip />);
+    // The card MUST stay hidden. Wait a tick to be sure the effect ran.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByTestId("welcome-tooltip")).toBeNull();
+  });
+
+  it("Got it button is styled with the gold background (active, not muted)", async () => {
+    mockShouldShow(true);
+    render(<WelcomeTooltip />);
+    await waitFor(() => {
+      expect(screen.getByTestId("welcome-tooltip-dismiss")).toBeInTheDocument();
+    });
+    const btn = screen.getByTestId("welcome-tooltip-dismiss");
+    // Use the literal CSS custom property — jsdom does not resolve
+    // the fallback value for us.
+    expect(btn.getAttribute("style")).toMatch(/--wp-gold/);
   });
 
   it("Open Knowledge → POSTs knowledge_clicked BEFORE the navigation", async () => {

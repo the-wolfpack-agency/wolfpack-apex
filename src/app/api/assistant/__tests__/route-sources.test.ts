@@ -81,7 +81,13 @@ describe("POST /api/assistant — sources + relatedPages", () => {
     const res = await POST(postMessage("do I have meetings on my calendar today?"));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.response).toBe("You have 2 meetings today.");
+    // The original tool answer is preserved — we append a trailing
+    // "See more: [Page](/route)" footer so the markdown renderer
+    // produces an inline clickable link even when the chip row is
+    // scrolled off-screen. The original sentence must still be there
+    // verbatim at the start.
+    expect(body.response).toMatch(/^You have 2 meetings today\./);
+    expect(body.response).toMatch(/See more: \[[^\]]+\]\(\/[a-z]+\)/);
     expect(Array.isArray(body.sources)).toBe(true);
     expect(body.sources.length).toBe(1);
     expect(body.sources[0].type).toBe("tool");

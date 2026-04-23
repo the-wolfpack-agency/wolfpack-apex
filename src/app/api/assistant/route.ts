@@ -151,9 +151,23 @@ export async function POST(req: NextRequest) {
         // `answer` which the UI silently dropped.
         const toolSourceLabel = sourceLabelForIntent(toolAnswer.intent);
         const toolRelated = detectRelatedPagesFromExchange(message, toolAnswer.answer);
+        // Append a trailing "See more: [Page](/route)" line so the
+        // markdown renderer produces a clickable link inline, not just
+        // as a floating chip row. Resilient to screens where the chip
+        // row is scrolled off. Only append when we have a primary
+        // related page AND the answer doesn't already name it with an
+        // embedded link (don't double-link).
+        const primary = toolRelated[0];
+        const alreadyLinked = primary
+          ? toolAnswer.answer.includes(`(${primary.href})`)
+          : true;
+        const answerWithLink =
+          primary && !alreadyLinked
+            ? `${toolAnswer.answer}\n\nSee more: [${primary.label}](${primary.href})`
+            : toolAnswer.answer;
         return NextResponse.json({
-          response: toolAnswer.answer,
-          answer: toolAnswer.answer,
+          response: answerWithLink,
+          answer: answerWithLink,
           source: "tool",
           intent: toolAnswer.intent,
           data: toolAnswer.data,
