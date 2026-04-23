@@ -41,7 +41,7 @@ import {
   ChangeEvent,
 } from "react";
 import Link from "next/link";
-import { fetchWithRefresh } from "@/lib/client-auth";
+import { fetchWithRefresh, getInstinctUser } from "@/lib/client-auth";
 import PresenceDot from "@/components/PresenceDot";
 import DeepLinkButton from "@/components/DeepLinkButton";
 
@@ -127,21 +127,53 @@ export function formatRelativeTime(iso: string, now: number = Date.now()): strin
   return new Date(iso).toLocaleDateString();
 }
 
-export function getChatTitle(chat: ChatSummary, selfEmail?: string): string {
-  if (chat.topic && chat.topic.trim().length > 0) return chat.topic;
-  if (chat.chatType === "oneOnOne" || chat.members.length === 2) {
-    const other =
-      chat.members.find((m) => m.email && selfEmail && m.email.toLowerCase() !== selfEmail.toLowerCase()) ??
-      chat.members[0];
-    return other?.displayName ?? "Unknown";
+function isSelfMember(
+  m: { email?: string; displayName?: string },
+  selfEmail?: string,
+  selfName?: string,
+): boolean {
+  if (selfEmail && m.email && m.email.toLowerCase() === selfEmail.toLowerCase()) {
+    return true;
   }
-  return chat.members.map((m) => m.displayName).join(", ") || "Group chat";
+  if (selfName && m.displayName && m.displayName.toLowerCase() === selfName.toLowerCase()) {
+    return true;
+  }
+  return false;
 }
 
-export function getOtherMemberUserId(chat: ChatSummary, selfEmail?: string): string | null {
-  const other = chat.members.find(
-    (m) => m.email && selfEmail && m.email.toLowerCase() !== selfEmail.toLowerCase(),
-  );
+export function getChatTitle(
+  chat: ChatSummary,
+  selfEmail?: string,
+  selfName?: string,
+): string {
+  if (chat.topic && chat.topic.trim().length > 0) return chat.topic;
+  const knowSelf = Boolean(selfEmail || selfName);
+  if (chat.chatType === "oneOnOne" || chat.members.length === 2) {
+    // Prefer the member that isn't us. Match on email OR display name,
+    // so the title is still correct when Graph returns members without
+    // an email (group chats, guests).
+    // When we don't yet know who "self" is (hydration gap), DON'T run
+    // the filter — it would match every member (isSelfMember false for
+    // all) and return members[0], which Graph lists caller-first. Pick
+    // the LAST member instead as a better-than-nothing guess.
+    const other = knowSelf
+      ? (chat.members.find((m) => !isSelfMember(m, selfEmail, selfName)) ??
+          chat.members[chat.members.length - 1])
+      : chat.members[chat.members.length - 1];
+    return other?.displayName ?? "Unknown";
+  }
+  const others = chat.members.filter((m) => !isSelfMember(m, selfEmail, selfName));
+  return (others.length > 0 ? others : chat.members)
+    .map((m) => m.displayName)
+    .join(", ") || "Group chat";
+}
+
+export function getOtherMemberUserId(
+  chat: ChatSummary,
+  selfEmail?: string,
+  selfName?: string,
+): string | null {
+  const other = chat.members.find((m) => !isSelfMember(m, selfEmail, selfName));
   return other?.userId ?? null;
 }
 
@@ -199,7 +231,20 @@ export default function MessagesPage() {
   const [listScopeMissing, setListScopeMissing] = useState(false);
   const [threadScopeMissing, setThreadScopeMissing] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
-  const [selfEmail, setSelfEmail] = useState<string | undefined>(undefined);
+  // Resolve self identity synchronously so the first render already
+  // knows which member of each 1:1 chat is "the other person".
+  // Previously this was loaded in a useEffect after mount, so every
+  // chat briefly (and in some cases permanently) rendered the caller's
+  // own name as the title.
+  const selfUserInit = (() => {
+    const u = getInstinctUser<{ email?: string; name?: string }>();
+    return {
+      email: u?.email,
+      name: u?.name,
+    };
+  })();
+  const [selfEmail, setSelfEmail] = useState<string | undefined>(selfUserInit.email);
+  const [selfName, setSelfName] = useState<string | undefined>(selfUserInit.name);
 
   // Deep links — loaded when a chat is selected.
   const [chatDeepLink, setChatDeepLink] = useState<string | null>(null);
@@ -212,18 +257,14 @@ export default function MessagesPage() {
   const [composeHint, setComposeHint] = useState<ComposeHint>(null);
   const [toast, setToast] = useState<{ key: number; text: string } | null>(null);
 
-  // Load signed-in user email so we can identify "the other member".
+  // Belt-and-suspenders: re-read identity after mount in case the
+  // initializer ran before the session was hydrated (rare but possible
+  // during SSR → CSR handoff).
   useEffect(() => {
-    try {
-      const raw = typeof window !== "undefined" ? localStorage.getItem("instinct_user") : null;
-      if (raw) {
-        const parsed = JSON.parse(raw) as { email?: string };
-        if (parsed?.email) setSelfEmail(parsed.email);
-      }
-    } catch {
-      /* noop */
-    }
-  }, []);
+    const u = getInstinctUser<{ email?: string; name?: string }>();
+    if (u?.email && u.email !== selfEmail) setSelfEmail(u.email);
+    if (u?.name && u.name !== selfName) setSelfName(u.name);
+  }, [selfEmail, selfName]);
 
   // Auto-dismiss the transient error toast after 4s.
   useEffect(() => {
@@ -573,8 +614,8 @@ export default function MessagesPage() {
         >
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {(chats ?? []).map((chat) => {
-              const title = getChatTitle(chat, selfEmail);
-              const otherUserId = getOtherMemberUserId(chat, selfEmail);
+              const title = getChatTitle(chat, selfEmail, selfName);
+              const otherUserId = getOtherMemberUserId(chat, selfEmail, selfName);
               const isSelected = chat.id === selectedId;
               return (
                 <li key={chat.id}>
@@ -739,7 +780,7 @@ export default function MessagesPage() {
                     ← Back
                   </button>
                   <span style={{ fontWeight: 600 }}>
-                    {getChatTitle(selectedChat, selfEmail)}
+                    {getChatTitle(selectedChat, selfEmail, selfName)}
                   </span>
                 </div>
               </div>

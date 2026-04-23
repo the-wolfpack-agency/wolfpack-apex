@@ -3,10 +3,12 @@
 import "@testing-library/jest-dom";
 
 const mockFetchWithRefresh = jest.fn();
+const mockGetInstinctUser = jest.fn(() => ({ email: "me@x", name: "Tester" }));
 jest.mock("@/lib/client-auth", () => ({
   fetchWithRefresh: (...a: any[]) => mockFetchWithRefresh(...a),
   authHeaders: () => ({ Authorization: "Bearer x" }),
   jsonHeaders: () => ({ "Content-Type": "application/json", Authorization: "Bearer x" }),
+  getInstinctUser: () => mockGetInstinctUser(),
 }));
 
 // Stub PresenceDot so its batcher is not exercised here — it has its
@@ -158,6 +160,64 @@ describe("getChatTitle", () => {
           ],
         },
         "me@x",
+      ),
+    ).toBe("Jane");
+  });
+
+  test("regression: when selfEmail is missing, uses selfName to identify self", () => {
+    // Bug 2026-04-23: selfEmail loaded in a useEffect, first render had
+    // undefined. The filter returned nothing and chat.members[0] (the
+    // caller) was picked — so every 1:1 chat showed "Nick Homyk".
+    expect(
+      getChatTitle(
+        {
+          id: "x",
+          chatType: "oneOnOne",
+          lastUpdatedDateTime: "",
+          members: [
+            { id: "1", displayName: "Nick Homyk", email: "nick@x", userId: "u1" },
+            { id: "2", displayName: "Max Fuerst", email: "max@x", userId: "u2" },
+          ],
+        },
+        undefined, // selfEmail not yet loaded
+        "Nick Homyk", // but we know the caller's display name
+      ),
+    ).toBe("Max Fuerst");
+  });
+
+  test("regression: when BOTH selfEmail and selfName are missing, prefer the LAST member (Graph lists caller first)", () => {
+    // Worst case: neither selfEmail nor selfName resolved. The old
+    // fallback picked members[0] which is almost always the caller.
+    // Pick LAST instead — biased toward the other party.
+    expect(
+      getChatTitle(
+        {
+          id: "x",
+          chatType: "oneOnOne",
+          lastUpdatedDateTime: "",
+          members: [
+            { id: "1", displayName: "Nick Homyk", email: "nick@x", userId: "u1" },
+            { id: "2", displayName: "Max Fuerst", email: "max@x", userId: "u2" },
+          ],
+        },
+      ),
+    ).toBe("Max Fuerst");
+  });
+
+  test("selfName match is case-insensitive", () => {
+    expect(
+      getChatTitle(
+        {
+          id: "x",
+          chatType: "oneOnOne",
+          lastUpdatedDateTime: "",
+          members: [
+            { id: "1", displayName: "nick homyk", email: "", userId: "u1" },
+            { id: "2", displayName: "Jane", email: "jane@x", userId: "u2" },
+          ],
+        },
+        undefined,
+        "Nick Homyk",
       ),
     ).toBe("Jane");
   });
