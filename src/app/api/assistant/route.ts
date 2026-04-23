@@ -209,7 +209,7 @@ export async function POST(req: NextRequest) {
     // the user should navigate to (e.g. "go to Settings"), even when
     // the question didn't. The union + dedupe is handled in
     // detectRelatedPagesFromExchange.
-    const responseText = typeof result?.response === "string" ? result.response : "";
+    let responseText = typeof result?.response === "string" ? result.response : "";
     const relatedPages: RelatedPage[] = detectRelatedPagesFromExchange(
       message,
       responseText,
@@ -218,16 +218,33 @@ export async function POST(req: NextRequest) {
       response.relatedPages = relatedPages;
     }
 
+    // If the answer names a page by word ("go to Settings") but has
+    // no embedded markdown link the renderer can make clickable,
+    // append "Go to: [Page](/route)" so the user gets a one-click
+    // path. The chip row is a nice secondary cue; the inline link is
+    // what actually closes the loop. Skip when an embedded link is
+    // already present (page-facts path embeds its own link).
+    const hasMarkdownLink = /\(\/[a-z][a-z0-9/-]*\)/i.test(responseText);
+    if (!hasMarkdownLink && relatedPages.length > 0) {
+      const primary = relatedPages[0];
+      const amended = `${responseText}\n\nGo to: [${primary.label}](${primary.href})`;
+      responseText = amended;
+      response.response = amended;
+      if (typeof response.answer === "string") {
+        response.answer = amended;
+      }
+    }
+
     // If the answer contains embedded markdown links like "(/goals)" but
     // chat() didn't attach any sources (page-facts + zero-token paths),
     // synthesize source rows from the detected relatedPages. That way
     // the UI's Sources block always renders a citation for an answer
     // that told the user "go to X" — even when no RAG/KB row was cited.
-    const hasMarkdownLink = /\(\/[a-z][a-z0-9/-]*\)/i.test(responseText);
+    const hasMarkdownLinkNow = /\(\/[a-z][a-z0-9/-]*\)/i.test(responseText);
     const existingSources = Array.isArray(response.sources)
       ? (response.sources as unknown[])
       : [];
-    if (hasMarkdownLink && existingSources.length === 0 && relatedPages.length > 0) {
+    if (hasMarkdownLinkNow && existingSources.length === 0 && relatedPages.length > 0) {
       response.sources = relatedPages.map((p) => ({
         id: `page:${p.domain}`,
         title: p.label,

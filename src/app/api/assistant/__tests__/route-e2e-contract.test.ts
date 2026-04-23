@@ -177,6 +177,44 @@ describe("POST /api/assistant — page-facts contracts (PENDING Agent A)", () =>
       expect(domains).toContain("settings");
     });
 
+    test("(d2) response that names a page without a link gets a 'Go to: [Page](/route)' footer appended", async () => {
+      // This is the bug the user screenshotted: "how do I connect my
+      // account to MS 365?" answer mentioned Settings repeatedly but
+      // had no clickable link. The route MUST append a footer so the
+      // markdown renderer produces an inline anchor.
+      mockChat.mockResolvedValue({
+        response:
+          "Go to Settings in the sidebar. Under Integrations, you can connect your Microsoft 365 account.",
+        source: "ai",
+        tokensUsed: 40,
+        conversationId: "c-d2",
+        messageId: "m-d2",
+      });
+      const res = await POST(postMessage("how do I connect my account to MS 365?"));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      // Original text is still there.
+      expect(body.response).toMatch(/^Go to Settings in the sidebar/);
+      // AND a trailing markdown link to /settings is now embedded.
+      expect(body.response).toMatch(/\[Settings\]\(\/settings\)/);
+    });
+
+    test("(d3) if chat's own response already embeds a markdown link, do NOT double-append", async () => {
+      mockChat.mockResolvedValue({
+        response: "Open the [Goals page](/goals) to see OKRs.",
+        source: "page_facts",
+        tokensUsed: 0,
+        conversationId: "c-d3",
+        messageId: "m-d3",
+      });
+      const res = await POST(postMessage("where are OKRs"));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      // Should NOT have an appended "Go to:" footer because the
+      // answer already contains a /goals link.
+      expect(body.response).not.toMatch(/\n\nGo to: /);
+    });
+
     test("(f) sources include at least one entry when answer contains an embedded link", async () => {
       // Post-Agent-A contract: if response.response contains a
       // markdown (/somepage) link, sources[] must have at least one
