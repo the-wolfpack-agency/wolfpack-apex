@@ -283,6 +283,7 @@ export default function MessagesPage() {
         const data = (await res.json().catch(() => ({}))) as {
           chats?: ChatSummary[];
           scope_missing?: boolean;
+          self_email?: string;
         };
         if (res.status === 401 || data?.scope_missing) {
           setListScopeMissing(true);
@@ -293,6 +294,14 @@ export default function MessagesPage() {
           setListError("Failed to load chats");
           setChats([]);
           return;
+        }
+        // The MS identity from instinct_ms_tokens is authoritative for
+        // "who is the caller in Graph terms" — the Instinct session
+        // email can differ (e.g. login = cto@wolfpack.dev, MS email =
+        // nick@thewolfpack.agency). Overwrite selfEmail with whichever
+        // the server tells us, which is the one Graph uses.
+        if (data.self_email) {
+          setSelfEmail(data.self_email);
         }
         const sorted = (data.chats ?? []).slice().sort(
           (a, b) =>

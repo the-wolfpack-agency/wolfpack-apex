@@ -73,6 +73,26 @@ describe("GET /api/ms/chats", () => {
     expect(body.chats).toHaveLength(1);
   });
 
+  it("includes self_email from the MS token so the UI can identify the caller in Graph terms", async () => {
+    // Regression: Instinct session email (e.g. cto@wolfpack.dev) often
+    // differs from the MS identity (nick@thewolfpack.agency). The UI
+    // needs the MS identity to filter "self" out of each chat's
+    // members array; otherwise every 1:1 chat renders the caller's
+    // own name as the title.
+    mockGetUser.mockReturnValue({ id: "u1", email: "cto@wolfpack.dev", role: "cto" });
+    mockGetValidToken.mockResolvedValue({
+      accessToken: "T",
+      userEmail: "nick@thewolfpack.agency",
+    });
+    mockListChatsResult.mockResolvedValue({ ok: true, chats: [] });
+
+    const { GET } = await import("@/app/api/ms/chats/route");
+    const res = await GET(mkReq("/api/ms/chats", "Bearer token"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.self_email).toBe("nick@thewolfpack.agency");
+  });
+
   it("200 { scope_missing: true } when lib returns scope_missing", async () => {
     mockGetUser.mockReturnValue({ id: "u1", email: "a@x.com", role: "dev" });
     mockGetValidToken.mockResolvedValue({ accessToken: "T", userEmail: "a@x.com" });
