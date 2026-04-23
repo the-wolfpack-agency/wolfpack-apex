@@ -265,6 +265,39 @@ export function handleInlineEditMessage(args: {
   };
 }
 
+/**
+ * Pure selector for the editor iframe URL. Editor-vs-live parity fix
+ * (Agent C, 2026-04-23): when there's no pending draft divergence AND
+ * the site has a deployed preview_url, we want /sites/[id]/preview to
+ * take its "deployed" branch (no ?draft=) so the iframe renders the
+ * live Vercel URL pixel-for-pixel. With pending edits we fall back to
+ * the in-memory synthetic renderer via ?draft=.
+ */
+export function selectEditorPreviewUrl(args: {
+  siteId: string;
+  dirty: boolean;
+  previewUrl: string | null | undefined;
+  draft: unknown;
+  iframeNonce: number;
+}): string {
+  const base = `/sites/${args.siteId}/preview?t=${args.iframeNonce}`;
+  if (!args.dirty && args.previewUrl) {
+    return base;
+  }
+  let encoded: string;
+  try {
+    const json = JSON.stringify(args.draft);
+    encoded =
+      typeof btoa === "function"
+        ? btoa(unescape(encodeURIComponent(json)))
+        : Buffer.from(json, "utf-8").toString("base64");
+  } catch {
+    return base;
+  }
+  if (encoded.length > 256 * 1024) return base;
+  return `/sites/${args.siteId}/preview?draft=${encodeURIComponent(encoded)}&t=${args.iframeNonce}`;
+}
+
 export function readFieldValue(
   brief: SiteBrief,
   msg: Extract<InlineEditMessage, { type: "text.edit" }>,
@@ -763,25 +796,41 @@ export default function SiteEditPage({
     );
   }
 
-  // Preview URL: encode the current draft as base64 so the iframe renders
-  // the in-memory state without a save/deploy round-trip. Falls back to
-  // the saved brief if the payload is too large (>256KB cap on the
-  // preview page); for realistic briefs this never hits.
-  const previewUrl = (() => {
-    try {
-      const encoded =
-        typeof btoa === "function"
-          ? btoa(unescape(encodeURIComponent(JSON.stringify(draft))))
-          : Buffer.from(JSON.stringify(draft), "utf-8").toString("base64");
-      if (encoded.length > 256 * 1024) {
-        // Draft is enormous — fall back to saved brief.
-        return `/sites/${id}/preview?t=${iframeNonce}`;
-      }
-      return `/sites/${id}/preview?draft=${encodeURIComponent(encoded)}&t=${iframeNonce}`;
-    } catch {
-      return `/sites/${id}/preview?t=${iframeNonce}`;
-    }
-  })();
+  // Preview URL selection — editor-vs-live parity fix (Agent C, 2026-04-23):
+  //
+  // Previously we *always* passed ?draft=<base64> which forced the internal
+  // RenderBrief renderer, even when the designer had published no pending
+  // edits. That synthetic renderer omits template-side assets (images
+  // uploaded via wolfpack-site-template that don't live in SiteBrief), so
+  // the editor preview looked materially different from the real deployed
+  // URL a client would see at site_a3106... — the exact "editor shows
+  // different than URL" drift the user reported.
+  //
+  // Fix: delegated to `selectEditorPreviewUrl` so the behavior is unit-
+  // testable without mounting the full edit page (which suspends under
+  // use(params: Promise) in jsdom).
+  const previewUrl = selectEditorPreviewUrl({
+    siteId: id,
+    dirty,
+    previewUrl: project?.preview_url ?? null,
+    draft,
+    iframeNonce,
+  });
+
+  // Parity diagnostic — fires once per load when the editor is displaying
+  // a draft divergent from the live site. Lets the learning loop grade
+  // how often designers see content drift between the two surfaces.
+  useEffect(() => {
+    if (!project) return;
+    const hasPreview = !!project.preview_url;
+    const source = !dirty && hasPreview ? "deployed" : "draft";
+    trackClient("sites.editor_preview_parity_check", {
+      site_id: id,
+      source,
+      has_preview_url: hasPreview,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.id, project?.preview_url, dirty]);
 
   return (
     <main

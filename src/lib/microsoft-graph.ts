@@ -37,6 +37,15 @@ export interface CalendarEvent {
    *  use this field — `attendees` is for display only. */
   attendeeEmails: string[];
   isOnlineMeeting: boolean;
+  /** Outlook web deeplink (opens the event in outlook.office.com). Null
+   *  when Graph didn't return it (shadow mode / older mailbox policies).
+   *  Optional for backward-compat with callers that still build synthetic
+   *  CalendarEvent fixtures — treat `undefined` as "unknown". */
+  webLink?: string | null;
+  /** Teams/Skype join URL when the event is an online meeting. Null for
+   *  in-person events and when Graph elides the field. Distinct from
+   *  webLink — clicking joinUrl jumps straight into the call. */
+  joinUrl?: string | null;
 }
 
 export interface Email {
@@ -573,9 +582,11 @@ async function fetchLiveCalendarEvents(userId: string, startDate: string, endDat
       location?: { displayName?: string };
       attendees?: { emailAddress: { name: string; address: string } }[];
       isOnlineMeeting?: boolean;
+      webLink?: string | null;
+      onlineMeeting?: { joinUrl?: string | null } | null;
     }[];
   }>(
-    `me/calendarview?startDateTime=${encodeURIComponent(start)}&endDateTime=${encodeURIComponent(end)}&$orderby=start/dateTime&$top=50&$select=id,subject,start,end,location,attendees,isOnlineMeeting`,
+    `me/calendarview?startDateTime=${encodeURIComponent(start)}&endDateTime=${encodeURIComponent(end)}&$orderby=start/dateTime&$top=50&$select=id,subject,start,end,location,attendees,isOnlineMeeting,webLink,onlineMeeting`,
     token.accessToken,
     userId,
   );
@@ -595,6 +606,11 @@ async function fetchLiveCalendarEvents(userId: string, startDate: string, endDat
         .map((a) => (a.emailAddress.address || "").trim().toLowerCase())
         .filter((addr) => addr.includes("@")),
       isOnlineMeeting: ev.isOnlineMeeting || false,
+      webLink: typeof ev.webLink === "string" && ev.webLink.length > 0 ? ev.webLink : null,
+      joinUrl:
+        ev.onlineMeeting && typeof ev.onlineMeeting.joinUrl === "string" && ev.onlineMeeting.joinUrl.length > 0
+          ? ev.onlineMeeting.joinUrl
+          : null,
     };
   });
 }
@@ -811,6 +827,8 @@ function pastDateTime(daysAgo: number, hours: number, minutes: number): string {
 }
 
 function demoCalendarEvents(): CalendarEvent[] {
+  const DEMO_WEBLINK = "https://outlook.office.com/calendar/item/demo";
+  const DEMO_JOINURL = "https://teams.microsoft.com/l/meetup-join/demo";
   return [
     {
       id: "evt-001",
@@ -821,6 +839,8 @@ function demoCalendarEvents(): CalendarEvent[] {
       attendees: ["Sarah Chen", "Mark Rivera", "James Greenfield"],
       attendeeEmails: ["sarah@wolfpack.dev", "mark@wolfpack.dev", "james@greenfieldcorp.com"],
       isOnlineMeeting: true,
+      webLink: DEMO_WEBLINK,
+      joinUrl: DEMO_JOINURL,
     },
     {
       id: "evt-002",
@@ -831,6 +851,8 @@ function demoCalendarEvents(): CalendarEvent[] {
       attendees: ["Dev Team", "Sarah Chen", "Alex Park"],
       attendeeEmails: ["sarah@wolfpack.dev", "alex@wolfpack.dev"],
       isOnlineMeeting: true,
+      webLink: DEMO_WEBLINK,
+      joinUrl: DEMO_JOINURL,
     },
     {
       id: "evt-003",
@@ -841,6 +863,8 @@ function demoCalendarEvents(): CalendarEvent[] {
       attendees: ["Dr. Lisa Tran", "Mike Owens"],
       attendeeEmails: ["lisa.tran@meridianhealth.org", "mike@wolfpack.dev"],
       isOnlineMeeting: true,
+      webLink: DEMO_WEBLINK,
+      joinUrl: null,
     },
     {
       id: "evt-004",
@@ -851,6 +875,8 @@ function demoCalendarEvents(): CalendarEvent[] {
       attendees: ["Rachel Stone"],
       attendeeEmails: ["rachel@cedarstone.co"],
       isOnlineMeeting: false,
+      webLink: DEMO_WEBLINK,
+      joinUrl: null,
     },
     {
       id: "evt-005",
@@ -861,6 +887,8 @@ function demoCalendarEvents(): CalendarEvent[] {
       attendees: ["Emily Watts", "Carlos Mendez", "Sarah Chen"],
       attendeeEmails: ["emily@horizondigital.com", "carlos@horizondigital.com", "sarah@wolfpack.dev"],
       isOnlineMeeting: true,
+      webLink: DEMO_WEBLINK,
+      joinUrl: DEMO_JOINURL,
     },
     {
       id: "evt-006",
@@ -871,6 +899,8 @@ function demoCalendarEvents(): CalendarEvent[] {
       attendees: ["Sarah Chen", "Alex Park", "Jordan Lee"],
       attendeeEmails: ["sarah@wolfpack.dev", "alex@wolfpack.dev", "jordan@wolfpack.dev"],
       isOnlineMeeting: false,
+      webLink: DEMO_WEBLINK,
+      joinUrl: null,
     },
   ];
 }

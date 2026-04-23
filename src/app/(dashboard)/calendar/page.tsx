@@ -22,6 +22,10 @@ interface CalendarEvent {
   end: string;
   location: string;
   attendees: string[];
+  /** Outlook web deeplink — subject click-through target. */
+  webLink?: string | null;
+  /** Teams join URL — "Join" button target when present. */
+  joinUrl?: string | null;
 }
 
 interface HistoricalInsights {
@@ -300,26 +304,69 @@ export default function CalendarPage() {
               </p>
             ) : (
               <ul className="space-y-2">
-                {data.events.slice(0, 50).map((e) => (
-                  <li
-                    key={e.id}
-                    className="flex justify-between gap-3 border-b pb-2"
-                    style={{ borderColor: "var(--wp-dark-border)" }}
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate" style={{ color: "var(--wp-text)" }}>
-                        {e.subject}
-                      </p>
-                      <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
-                        {new Date(e.start).toLocaleString()}
-                        {e.location ? ` · ${e.location}` : ""}
-                      </p>
-                    </div>
-                    <span className="text-xs shrink-0" style={{ color: "var(--wp-text-muted)" }}>
-                      {e.attendees.length} attendee{e.attendees.length === 1 ? "" : "s"}
-                    </span>
-                  </li>
-                ))}
+                {data.events.slice(0, 50).map((e) => {
+                  const hasWeb = !!e.webLink;
+                  const hasJoin = !!e.joinUrl;
+                  const onOpenExternal = (target: "web" | "join") => {
+                    fireAnalytics("calendar.meeting_opened_external", {
+                      event_id: e.id,
+                      target,
+                    });
+                  };
+                  return (
+                    <li
+                      key={e.id}
+                      data-testid={`calendar-event-${e.id}`}
+                      className="flex justify-between gap-3 border-b pb-2"
+                      style={{ borderColor: "var(--wp-dark-border)" }}
+                    >
+                      <div className="min-w-0">
+                        {hasWeb ? (
+                          <a
+                            href={e.webLink as string}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            data-testid={`calendar-event-weblink-${e.id}`}
+                            onClick={() => onOpenExternal("web")}
+                            className="text-sm font-medium truncate block hover:underline"
+                            style={{ color: "var(--wp-gold)" }}
+                          >
+                            {e.subject}
+                          </a>
+                        ) : (
+                          <p className="text-sm font-medium truncate" style={{ color: "var(--wp-text)" }}>
+                            {e.subject}
+                          </p>
+                        )}
+                        <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                          {new Date(e.start).toLocaleString()}
+                          {e.location ? ` · ${e.location}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {hasJoin && (
+                          <a
+                            href={e.joinUrl as string}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            data-testid={`calendar-event-joinurl-${e.id}`}
+                            onClick={() => onOpenExternal("join")}
+                            className="text-xs font-semibold px-2 py-1 rounded"
+                            style={{
+                              background: "var(--wp-gold)",
+                              color: "var(--wp-dark)",
+                            }}
+                          >
+                            Join
+                          </a>
+                        )}
+                        <span className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
+                          {e.attendees.length} attendee{e.attendees.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </Section>

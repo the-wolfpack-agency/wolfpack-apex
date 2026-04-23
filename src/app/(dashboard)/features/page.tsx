@@ -41,6 +41,14 @@ export default function FeaturesPage() {
   const [formType, setFormType] = useState<"feature" | "automation">("feature");
   const [selected, setSelected] = useState<FeatureRequest | null>(null);
 
+  // Edit-in-place state: only one row editable at a time.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editPriority, setEditPriority] = useState<string>("medium");
+  const [editTargetProduct, setEditTargetProduct] = useState("");
+  const [saving, setSaving] = useState(false);
+
   // Form fields
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -139,6 +147,80 @@ export default function FeaturesPage() {
       setSubmitMsg("Failed to submit");
     }
     setSubmitting(false);
+  }
+
+  function startEdit(f: FeatureRequest) {
+    setEditingId(f.id);
+    setEditTitle(f.title);
+    setEditDescription(f.description);
+    setEditPriority(f.priority || "medium");
+    setEditTargetProduct(f.target_product || "");
+    setSubmitMsg("");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditTitle("");
+    setEditDescription("");
+    setEditPriority("medium");
+    setEditTargetProduct("");
+  }
+
+  async function handleSaveEdit(e: FormEvent, featureId: string) {
+    e.preventDefault();
+    setSaving(true);
+    setSubmitMsg("");
+    try {
+      const res = await fetchWithRefresh(`/api/features/${featureId}`, {
+        method: "PUT",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          title: editTitle,
+          description: editDescription,
+          priority: editPriority,
+          target_product: editTargetProduct || null,
+        }),
+      });
+      if (res.status === 200) {
+        setSubmitMsg("Feature request submitted!"); // reuse positive banner copy
+        cancelEdit();
+        fetchFeatures();
+      } else if (res.status === 403) {
+        setSubmitMsg("Only the submitter or an admin can edit this request.");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setSubmitMsg((data as { error?: string }).error || "Failed to save");
+      }
+    } catch {
+      setSubmitMsg("Failed to save");
+    }
+    setSaving(false);
+  }
+
+  async function handleDelete(featureId: string) {
+    if (!window.confirm("Delete this feature request? This cannot be undone.")) {
+      return;
+    }
+    // Optimistic removal so the UI feels instant.
+    setFeatures((prev) => prev.filter((f) => f.id !== featureId));
+    try {
+      const res = await fetchWithRefresh(`/api/features/${featureId}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (res.status === 200) {
+        setSubmitMsg("Feature request submitted!"); // reuse positive banner copy
+      } else if (res.status === 403) {
+        setSubmitMsg("Only the submitter or an admin can delete this request.");
+        fetchFeatures();
+      } else {
+        setSubmitMsg("Failed to delete");
+        fetchFeatures();
+      }
+    } catch {
+      setSubmitMsg("Failed to delete");
+      fetchFeatures();
+    }
   }
 
   async function handleVote(featureId: string) {
@@ -421,9 +503,145 @@ export default function FeaturesPage() {
               {/* Expanded */}
               {selected?.id === f.id && (
                 <div className="mt-4 pt-4 border-t space-y-3" style={{ borderColor: "var(--wp-dark-border)" }}>
-                  <p className="text-sm whitespace-pre-wrap" style={{ color: "var(--wp-text-dim)" }}>
-                    {f.description}
-                  </p>
+                  {editingId === f.id ? (
+                    <form
+                      data-testid={`feature-edit-form-${f.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      onSubmit={(e) => handleSaveEdit(e, f.id)}
+                      className="space-y-3"
+                    >
+                      <label className="block text-xs" style={{ color: "var(--wp-text-muted)" }}>
+                        Title
+                        <input
+                          aria-label="edit title"
+                          type="text"
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          required
+                          className="w-full rounded-lg border px-3 py-2 text-sm outline-none mt-1"
+                          style={{
+                            background: "var(--wp-dark-surface2)",
+                            borderColor: "var(--wp-dark-border)",
+                            color: "var(--wp-text)",
+                          }}
+                        />
+                      </label>
+                      <label className="block text-xs" style={{ color: "var(--wp-text-muted)" }}>
+                        Description
+                        <textarea
+                          aria-label="edit description"
+                          value={editDescription}
+                          onChange={(e) => setEditDescription(e.target.value)}
+                          required
+                          rows={4}
+                          className="w-full rounded-lg border px-3 py-2 text-sm outline-none resize-none mt-1"
+                          style={{
+                            background: "var(--wp-dark-surface2)",
+                            borderColor: "var(--wp-dark-border)",
+                            color: "var(--wp-text)",
+                          }}
+                        />
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <label className="block text-xs" style={{ color: "var(--wp-text-muted)" }}>
+                          Priority
+                          <select
+                            aria-label="edit priority"
+                            value={editPriority}
+                            onChange={(e) => setEditPriority(e.target.value)}
+                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none mt-1"
+                            style={{
+                              background: "var(--wp-dark-surface2)",
+                              borderColor: "var(--wp-dark-border)",
+                              color: "var(--wp-text)",
+                            }}
+                          >
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                            <option value="critical">Critical</option>
+                          </select>
+                        </label>
+                        <label className="block text-xs" style={{ color: "var(--wp-text-muted)" }}>
+                          Target product
+                          <input
+                            aria-label="edit target product"
+                            type="text"
+                            value={editTargetProduct}
+                            onChange={(e) => setEditTargetProduct(e.target.value)}
+                            className="w-full rounded-lg border px-3 py-2 text-sm outline-none mt-1"
+                            style={{
+                              background: "var(--wp-dark-surface2)",
+                              borderColor: "var(--wp-dark-border)",
+                              color: "var(--wp-text)",
+                            }}
+                          />
+                        </label>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="submit"
+                          disabled={saving}
+                          className="px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                          style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+                        >
+                          {saving ? "Saving..." : "Save changes"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            cancelEdit();
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                          style={{ color: "var(--wp-text-dim)" }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <p className="text-sm whitespace-pre-wrap" style={{ color: "var(--wp-text-dim)" }}>
+                      {f.description}
+                    </p>
+                  )}
+
+                  {editingId !== f.id && (
+                    <div className="flex gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        data-testid={`feature-edit-btn-${f.id}`}
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          startEdit(f);
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:border-[var(--wp-gold)]"
+                        style={{
+                          background: "var(--wp-dark-surface2)",
+                          borderColor: "var(--wp-dark-border)",
+                          color: "var(--wp-text-dim)",
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        data-testid={`feature-delete-btn-${f.id}`}
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          handleDelete(f.id);
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+                        style={{
+                          background: "transparent",
+                          borderColor: "var(--wp-error)",
+                          color: "var(--wp-error)",
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
 
                   {f.estimated_hours != null && (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

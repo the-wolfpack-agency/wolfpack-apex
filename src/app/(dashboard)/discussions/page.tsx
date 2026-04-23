@@ -63,6 +63,118 @@ export default function DiscussionsPage() {
   const [replyContent, setReplyContent] = useState("");
   const [replying, setReplying] = useState(false);
 
+  // Edit / delete state for the thread itself and for individual replies.
+  // Keyed by id so only one editor opens at a time. Routed through
+  // fetchWithRefresh to avoid the April 16 raw-fetch blank-dashboard bug.
+  const [editingThread, setEditingThread] = useState(false);
+  const [threadTitle, setThreadTitle] = useState("");
+  const [threadCategory, setThreadCategory] = useState("general");
+  const [editingReplyId, setEditingReplyId] = useState<string | null>(null);
+  const [editReplyContent, setEditReplyContent] = useState("");
+  const [editMsg, setEditMsg] = useState("");
+
+  async function saveThreadEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedThread) return;
+    setEditMsg("");
+    try {
+      const r = await fetchWithRefresh(
+        `/api/discussions/${selectedThread.discussion.id}`,
+        {
+          method: "PUT",
+          headers: jsonHeaders(),
+          body: JSON.stringify({ title: threadTitle, category: threadCategory }),
+        },
+      );
+      if (r.ok) {
+        setEditMsg("Saved");
+        setEditingThread(false);
+        openThread(selectedThread.discussion.id);
+        fetchThreads();
+      } else {
+        const data = await r.json().catch(() => ({}));
+        setEditMsg(data.error ?? "Save failed");
+      }
+    } catch {
+      setEditMsg("Save failed");
+    }
+  }
+
+  async function deleteThread() {
+    if (!selectedThread) return;
+    const ok =
+      typeof window !== "undefined"
+        ? window.confirm(
+            `Delete discussion "${selectedThread.discussion.title}"?`,
+          )
+        : false;
+    if (!ok) return;
+    const r = await fetchWithRefresh(
+      `/api/discussions/${selectedThread.discussion.id}`,
+      { method: "DELETE" },
+    );
+    if (r.ok) {
+      setSelectedThread(null);
+      fetchThreads();
+    }
+  }
+
+  function startEditReply(reply: Reply) {
+    setEditingReplyId(reply.id);
+    setEditReplyContent(reply.content);
+    setEditMsg("");
+  }
+
+  function cancelReplyEdit() {
+    setEditingReplyId(null);
+    setEditReplyContent("");
+    setEditMsg("");
+  }
+
+  async function saveReplyEdit(e: FormEvent, replyId: string) {
+    e.preventDefault();
+    if (!selectedThread) return;
+    if (!editReplyContent.trim()) {
+      setEditMsg("Content required");
+      return;
+    }
+    try {
+      const r = await fetchWithRefresh(
+        `/api/discussions/${selectedThread.discussion.id}/comments/${replyId}`,
+        {
+          method: "PUT",
+          headers: jsonHeaders(),
+          body: JSON.stringify({ content: editReplyContent }),
+        },
+      );
+      if (r.ok) {
+        cancelReplyEdit();
+        openThread(selectedThread.discussion.id);
+      } else {
+        const data = await r.json().catch(() => ({}));
+        setEditMsg(data.error ?? "Save failed");
+      }
+    } catch {
+      setEditMsg("Save failed");
+    }
+  }
+
+  async function deleteReply(replyId: string) {
+    if (!selectedThread) return;
+    const ok =
+      typeof window !== "undefined"
+        ? window.confirm("Delete this comment?")
+        : false;
+    if (!ok) return;
+    const r = await fetchWithRefresh(
+      `/api/discussions/${selectedThread.discussion.id}/comments/${replyId}`,
+      { method: "DELETE" },
+    );
+    if (r.ok) {
+      openThread(selectedThread.discussion.id);
+    }
+  }
+
   function authHeaders(): HeadersInit {
     return jsonHeaders();
   }
@@ -173,28 +285,133 @@ export default function DiscussionsPage() {
           className="rounded-lg border p-5"
           style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
         >
-          <div className="flex items-start justify-between gap-4 mb-3">
-            <h1 className="text-xl font-bold">{d.title}</h1>
-            <div className="flex items-center gap-2">
-              {d.pinned && (
-                <span className="text-xs px-2 py-0.5 rounded font-medium" style={{ background: "var(--wp-gold)20", color: "var(--wp-gold)" }}>
-                  Pinned
-                </span>
-              )}
-              <span
-                className="text-xs px-2 py-0.5 rounded font-medium"
+          {editingThread ? (
+            <form
+              onSubmit={saveThreadEdit}
+              className="space-y-3"
+              data-testid="thread-edit-form"
+            >
+              <input
+                type="text"
+                value={threadTitle}
+                onChange={(e) => setThreadTitle(e.target.value)}
+                placeholder="Title"
+                aria-label="Edit thread title"
+                required
+                className="w-full rounded-lg border px-4 py-2.5 text-sm outline-none"
                 style={{
-                  background: `${CATEGORY_COLORS[d.category] || "var(--wp-text-dim)"}20`,
-                  color: CATEGORY_COLORS[d.category] || "var(--wp-text-dim)",
+                  background: "var(--wp-dark-surface2)",
+                  borderColor: "var(--wp-dark-border)",
+                  color: "var(--wp-text)",
+                }}
+              />
+              <select
+                value={threadCategory}
+                onChange={(e) => setThreadCategory(e.target.value)}
+                aria-label="Edit thread category"
+                className="w-full rounded-lg border px-4 py-2.5 text-sm outline-none"
+                style={{
+                  background: "var(--wp-dark-surface2)",
+                  borderColor: "var(--wp-dark-border)",
+                  color: "var(--wp-text)",
                 }}
               >
-                {d.category}
-              </span>
-            </div>
-          </div>
-          <p className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
-            By {d.created_by} on {new Date(d.created_at).toLocaleDateString()} -- {d.status}
-          </p>
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c.charAt(0).toUpperCase() + c.slice(1)}
+                  </option>
+                ))}
+              </select>
+              <div className="flex gap-2 items-center">
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg text-sm font-semibold"
+                  style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingThread(false)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium"
+                  style={{ color: "var(--wp-text-dim)" }}
+                >
+                  Cancel
+                </button>
+                {editMsg && (
+                  <span
+                    className="text-sm"
+                    data-testid="thread-edit-msg"
+                    style={{
+                      color:
+                        editMsg === "Saved" ? "var(--wp-success)" : "var(--wp-error)",
+                    }}
+                  >
+                    {editMsg}
+                  </span>
+                )}
+              </div>
+            </form>
+          ) : (
+            <>
+              <div className="flex items-start justify-between gap-4 mb-3">
+                <h1 className="text-xl font-bold">{d.title}</h1>
+                <div className="flex items-center gap-2">
+                  {d.pinned && (
+                    <span className="text-xs px-2 py-0.5 rounded font-medium" style={{ background: "var(--wp-gold)20", color: "var(--wp-gold)" }}>
+                      Pinned
+                    </span>
+                  )}
+                  <span
+                    className="text-xs px-2 py-0.5 rounded font-medium"
+                    style={{
+                      background: `${CATEGORY_COLORS[d.category] || "var(--wp-text-dim)"}20`,
+                      color: CATEGORY_COLORS[d.category] || "var(--wp-text-dim)",
+                    }}
+                  >
+                    {d.category}
+                  </span>
+                </div>
+              </div>
+              <p className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
+                By {d.created_by} on {new Date(d.created_at).toLocaleDateString()} -- {d.status}
+              </p>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingThread(true);
+                    setThreadTitle(d.title);
+                    setThreadCategory(d.category);
+                  }}
+                  aria-label="Edit thread"
+                  data-testid="thread-edit-btn"
+                  className="text-xs px-2 py-1 rounded border"
+                  style={{
+                    background: "var(--wp-dark-surface2)",
+                    borderColor: "var(--wp-dark-border)",
+                    color: "var(--wp-text)",
+                  }}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={deleteThread}
+                  aria-label="Delete thread"
+                  data-testid="thread-delete-btn"
+                  className="text-xs px-2 py-1 rounded border"
+                  style={{
+                    background: "var(--wp-dark-surface2)",
+                    borderColor: "var(--wp-dark-border)",
+                    color: "var(--wp-error)",
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Replies */}
@@ -202,6 +419,7 @@ export default function DiscussionsPage() {
           {selectedThread.replies.map((r) => (
             <div
               key={r.id}
+              data-testid={`reply-${r.id}`}
               className="rounded-lg border p-4"
               style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
             >
@@ -217,8 +435,81 @@ export default function DiscussionsPage() {
                 <span className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
                   {new Date(r.created_at).toLocaleString()}
                 </span>
+                <div className="ml-auto flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => startEditReply(r)}
+                    aria-label={`Edit comment ${r.id}`}
+                    data-testid={`reply-edit-btn-${r.id}`}
+                    className="text-xs px-2 py-0.5 rounded border"
+                    style={{
+                      background: "var(--wp-dark-surface2)",
+                      borderColor: "var(--wp-dark-border)",
+                      color: "var(--wp-text)",
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteReply(r.id)}
+                    aria-label={`Delete comment ${r.id}`}
+                    data-testid={`reply-delete-btn-${r.id}`}
+                    className="text-xs px-2 py-0.5 rounded border"
+                    style={{
+                      background: "var(--wp-dark-surface2)",
+                      borderColor: "var(--wp-dark-border)",
+                      color: "var(--wp-error)",
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
-              <p className="text-sm whitespace-pre-wrap">{r.content}</p>
+              {editingReplyId === r.id ? (
+                <form
+                  onSubmit={(e) => saveReplyEdit(e, r.id)}
+                  className="space-y-2"
+                  data-testid={`reply-edit-form-${r.id}`}
+                >
+                  <textarea
+                    value={editReplyContent}
+                    onChange={(e) => setEditReplyContent(e.target.value)}
+                    aria-label="Edit comment content"
+                    rows={3}
+                    className="w-full rounded-lg border px-3 py-2 text-sm outline-none resize-none"
+                    style={{
+                      background: "var(--wp-dark-surface2)",
+                      borderColor: "var(--wp-dark-border)",
+                      color: "var(--wp-text)",
+                    }}
+                  />
+                  <div className="flex gap-2 items-center">
+                    <button
+                      type="submit"
+                      className="px-3 py-1 rounded text-xs font-semibold"
+                      style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelReplyEdit}
+                      className="px-3 py-1 rounded text-xs"
+                      style={{ color: "var(--wp-text-dim)" }}
+                    >
+                      Cancel
+                    </button>
+                    {editMsg && (
+                      <span className="text-xs" style={{ color: "var(--wp-error)" }}>
+                        {editMsg}
+                      </span>
+                    )}
+                  </div>
+                </form>
+              ) : (
+                <p className="text-sm whitespace-pre-wrap">{r.content}</p>
+              )}
             </div>
           ))}
         </div>

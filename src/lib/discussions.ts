@@ -227,6 +227,135 @@ export async function getThread(discussionId: string): Promise<ThreadDetail | nu
 }
 
 /**
+ * updateDiscussion — edit title/category/tags on an existing thread.
+ *
+ * Auth is enforced at the route layer (owner OR capability holder). This
+ * function only performs the write + event. Returns null when no row matched.
+ */
+export async function updateDiscussion(
+  discussionId: string,
+  userId: string,
+  userRole: string,
+  updates: { title?: string; category?: DiscussionCategory; tags?: string[] },
+): Promise<Discussion | null> {
+  const { rows } = await safeQuery<Discussion>(
+    `UPDATE instinct_discussions
+        SET title      = COALESCE($2, title),
+            category   = COALESCE($3, category),
+            tags       = COALESCE($4, tags),
+            updated_at = NOW()
+      WHERE id = $1
+      RETURNING *`,
+    [
+      discussionId,
+      updates.title ?? null,
+      updates.category ?? null,
+      updates.tags ?? null,
+    ],
+  );
+  if (rows.length === 0) return null;
+  trackEvent("discussions.discussion.edited", userId, userRole, {
+    discussion_id: discussionId,
+  });
+  return rows[0];
+}
+
+/**
+ * deleteDiscussion — hard delete of the thread + cascading replies.
+ *
+ * Replies FK cascade is configured in migration 021. Fires
+ * `discussions.discussion.deleted`. Returns true when the row was removed.
+ */
+export async function deleteDiscussion(
+  discussionId: string,
+  userId: string,
+  userRole: string,
+): Promise<boolean> {
+  // Delete replies first in case the schema doesn't ON DELETE CASCADE.
+  await safeQuery(
+    `DELETE FROM instinct_discussion_replies WHERE discussion_id = $1`,
+    [discussionId],
+  );
+  const result = await safeQuery(
+    `DELETE FROM instinct_discussions WHERE id = $1`,
+    [discussionId],
+  );
+  const affected = (result as unknown as { rowCount?: number }).rowCount ?? 0;
+  if (affected > 0) {
+    trackEvent("discussions.discussion.deleted", userId, userRole, {
+      discussion_id: discussionId,
+    });
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Get a single reply with its discussion + author_id for authorization
+ * decisions at the route layer. Null when the id doesn't match.
+ */
+export async function getReply(
+  replyId: string,
+): Promise<DiscussionReply | null> {
+  const { rows } = await safeQuery<DiscussionReply>(
+    `SELECT * FROM instinct_discussion_replies WHERE id = $1`,
+    [replyId],
+  );
+  return rows.length > 0 ? rows[0] : null;
+}
+
+/**
+ * updateReply — edit the content of an existing comment. Auth is enforced
+ * at the route layer. Null when no row matched.
+ */
+export async function updateReply(
+  replyId: string,
+  userId: string,
+  userRole: string,
+  content: string,
+): Promise<DiscussionReply | null> {
+  const { rows } = await safeQuery<DiscussionReply>(
+    `UPDATE instinct_discussion_replies
+        SET content = $2
+      WHERE id = $1
+      RETURNING *`,
+    [replyId, content],
+  );
+  if (rows.length === 0) return null;
+  // Bump the parent discussion's updated_at so ordering stays fresh.
+  await safeQuery(
+    `UPDATE instinct_discussions SET updated_at = NOW() WHERE id = $1`,
+    [rows[0].discussion_id],
+  );
+  trackEvent("discussions.comment.edited", userId, userRole, {
+    reply_id: replyId,
+    discussion_id: rows[0].discussion_id,
+  });
+  return rows[0];
+}
+
+/**
+ * deleteReply — hard delete of a comment. Returns true if a row was removed.
+ */
+export async function deleteReply(
+  replyId: string,
+  userId: string,
+  userRole: string,
+): Promise<boolean> {
+  const { rows } = await safeQuery<{ discussion_id: string }>(
+    `DELETE FROM instinct_discussion_replies WHERE id = $1
+     RETURNING discussion_id`,
+    [replyId],
+  );
+  if (rows.length === 0) return false;
+  trackEvent("discussions.comment.deleted", userId, userRole, {
+    reply_id: replyId,
+    discussion_id: rows[0].discussion_id,
+  });
+  return true;
+}
+
+/**
  * Toggle pinned status. Requires cto or dev role.
  */
 export async function pinThread(

@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 import { saveJournalEntryOffline } from "@/lib/journals-offline";
 
 interface TimelineEvent {
   time: string;
+  /** ISO timestamp we preserve so we can group by day. */
+  timestampIso: string;
   description: string;
   type: string;
 }
@@ -28,12 +30,61 @@ const MOOD_OPTIONS = [
   { value: "creative", label: "Creative", color: "var(--wp-gold)" },
 ];
 
+type Density = "compact" | "comfortable";
+const DENSITY_KEY = "instinct_journal_density";
+const DEFAULT_DENSITY: Density = "comfortable";
+/** Cap visible events to keep the DOM bounded. The "Load more" affordance
+ *  expands this on demand so the footer stays reachable after ~2 page-downs
+ *  regardless of how active the user was. */
+const PAGE_SIZE = 50;
+
 function formatTime(ts: string): string {
   try {
     return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   } catch {
     return ts;
   }
+}
+
+function dayKey(ts: string): string {
+  try {
+    return new Date(ts).toISOString().slice(0, 10);
+  } catch {
+    return ts.slice(0, 10);
+  }
+}
+
+function formatDayLabel(key: string): string {
+  try {
+    const d = new Date(`${key}T12:00:00Z`);
+    return d.toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "short",
+      day: "numeric",
+    });
+  } catch {
+    return key;
+  }
+}
+
+function todayKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function groupEventsByDay(
+  events: TimelineEvent[],
+): Array<{ date: string; items: TimelineEvent[] }> {
+  const byDay = new Map<string, TimelineEvent[]>();
+  for (const ev of events) {
+    const k = dayKey(ev.timestampIso);
+    const list = byDay.get(k);
+    if (list) list.push(ev);
+    else byDay.set(k, [ev]);
+  }
+  // Newest day first — matches how users scan a journal.
+  return Array.from(byDay.entries())
+    .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+    .map(([date, items]) => ({ date, items }));
 }
 
 // Events that should be visible to users (everything else is hidden)
@@ -79,10 +130,26 @@ export default function JournalPage() {
   const [mood, setMood] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
+  const [density, setDensity] = useState<Density>(DEFAULT_DENSITY);
+  const [collapsedDays, setCollapsedDays] = useState<Record<string, boolean>>({});
+  const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
 
   function authHeaders(): HeadersInit {
     return jsonHeaders();
   }
+
+  // Hydrate density from localStorage on mount.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = window.localStorage.getItem(DENSITY_KEY);
+      if (stored === "compact" || stored === "comfortable") {
+        setDensity(stored);
+      }
+    } catch {
+      // non-fatal — default density already applied
+    }
+  }, []);
 
   useEffect(() => {
     fetchJournal();
@@ -121,9 +188,10 @@ export default function JournalPage() {
           const meta = ev.metadata || {};
           return {
             time: formatTime(ev.timestamp),
+            timestampIso: ev.timestamp,
             description: descFn(meta),
             type: ev.event_type,
-          };
+          } satisfies TimelineEvent;
         });
 
       // Deduplicate consecutive identical events (e.g. multiple logins)
@@ -139,30 +207,40 @@ export default function JournalPage() {
       // If no auto events, show demo timeline in shadow mode
       if (timeline.length === 0 && data.journal) {
         const now = new Date();
+        const ts = (offsetMs: number) => new Date(now.getTime() - offsetMs).toISOString();
         timeline.push(
+          { time: formatTime(ts(3600_000)), timestampIso: ts(3600_000), description: "Logged in", type: "system.login" },
           {
-            time: new Date(now.getTime() - 3600_000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-            description: "Logged in",
-            type: "system.login",
-          },
-          {
-            time: new Date(now.getTime() - 2400_000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            time: formatTime(ts(2400_000)),
+            timestampIso: ts(2400_000),
             description: "Asked: How does the pricing engine work?",
             type: "knowledge.question_asked",
           },
           {
-            time: new Date(now.getTime() - 1200_000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            time: formatTime(ts(1200_000)),
+            timestampIso: ts(1200_000),
             description: "Generated API doc for auth.ts",
             type: "knowledge.doc_generated",
           },
           {
-            time: new Date(now.getTime() - 600_000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            time: formatTime(ts(600_000)),
+            timestampIso: ts(600_000),
             description: "Submitted feature request: Add bulk import",
             type: "feature.request_submitted",
           },
         );
       }
       setEvents(timeline);
+      // Reset day-group collapse to the default (today open, older days
+      // collapsed) whenever the dataset changes.
+      const today = todayKey();
+      const groups = groupEventsByDay(timeline);
+      const nextCollapse: Record<string, boolean> = {};
+      for (const g of groups) {
+        nextCollapse[g.date] = g.date < today;
+      }
+      setCollapsedDays(nextCollapse);
+      setVisibleCount(PAGE_SIZE);
     } catch {
       setJournal(null);
       setEvents([]);
@@ -194,6 +272,39 @@ export default function JournalPage() {
     setSaving(false);
   }
 
+  function toggleDensity(next: Density) {
+    if (next === density) return;
+    setDensity(next);
+    try {
+      window.localStorage.setItem(DENSITY_KEY, next);
+    } catch {
+      // non-fatal
+    }
+    fetchWithRefresh("/api/analytics", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        event: "journal.density_toggled",
+        metadata: { density: next },
+      }),
+    }).catch(() => {});
+  }
+
+  function toggleDay(date: string) {
+    setCollapsedDays((prev) => {
+      const nextCollapsed = !prev[date];
+      fetchWithRefresh("/api/analytics", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          event: "journal.group_collapsed",
+          metadata: { date, collapsed: nextCollapsed },
+        }),
+      }).catch(() => {});
+      return { ...prev, [date]: nextCollapsed };
+    });
+  }
+
   const TYPE_COLORS: Record<string, string> = {
     "knowledge.question_asked": "var(--wp-info)",
     "knowledge.answer_found": "var(--wp-success)",
@@ -217,24 +328,60 @@ export default function JournalPage() {
     "system.search_performed": "var(--wp-info)",
   };
 
+  // Pagination cap applied on the flat timeline so the DOM size is bounded
+  // regardless of activity. "Load more" reveals the next page.
+  const visibleEvents = useMemo(() => events.slice(0, visibleCount), [events, visibleCount]);
+  const groups = useMemo(() => groupEventsByDay(visibleEvents), [visibleEvents]);
+  const hasMore = events.length > visibleCount;
+
+  // Density-dependent spacing tokens so compact users see significantly
+  // less whitespace (and therefore less scroll).
+  const rowPad = density === "compact" ? "pb-1.5" : "pb-4";
+  const rowGap = density === "compact" ? "gap-2" : "gap-4";
+  const dotMt = density === "compact" ? "mt-1" : "mt-1.5";
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6" data-testid="journal-page" data-density={density}>
       <div className="flex items-center justify-between flex-wrap gap-4">
         <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>
           Journal
         </h1>
-        <input
-          type="date"
-          value={selectedDate}
-          onChange={(e) => setSelectedDate(e.target.value)}
-          className="rounded-lg border px-3 py-2 text-sm outline-none"
-          style={{
-            background: "var(--wp-dark-surface)",
-            borderColor: "var(--wp-dark-border)",
-            color: "var(--wp-text)",
-            colorScheme: "dark",
-          }}
-        />
+        <div className="flex items-center gap-2 flex-wrap">
+          <div
+            className="flex items-center gap-1 rounded-lg border p-1"
+            data-testid="journal-density-toggle"
+            style={{ borderColor: "var(--wp-dark-border)", background: "var(--wp-dark-surface2)" }}
+          >
+            {(["compact", "comfortable"] as Density[]).map((d) => (
+              <button
+                key={d}
+                type="button"
+                data-testid={`journal-density-${d}`}
+                aria-pressed={density === d}
+                onClick={() => toggleDensity(d)}
+                className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+                style={{
+                  background: density === d ? "var(--wp-gold)" : "transparent",
+                  color: density === d ? "var(--wp-dark)" : "var(--wp-text-dim)",
+                }}
+              >
+                {d[0].toUpperCase() + d.slice(1)}
+              </button>
+            ))}
+          </div>
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            className="rounded-lg border px-3 py-2 text-sm outline-none"
+            style={{
+              background: "var(--wp-dark-surface)",
+              borderColor: "var(--wp-dark-border)",
+              color: "var(--wp-text)",
+              colorScheme: "dark",
+            }}
+          />
+        </div>
       </div>
 
       {/* Mood Selector */}
@@ -279,30 +426,79 @@ export default function JournalPage() {
               No activity recorded for this date.
             </p>
           ) : (
-            <div className="space-y-0">
-              {events.map((ev, i) => (
-                <div key={i} className="flex gap-4 relative">
-                  {/* Timeline line */}
-                  <div className="flex flex-col items-center">
-                    <div
-                      className="w-2.5 h-2.5 rounded-full shrink-0 mt-1.5"
-                      style={{ background: TYPE_COLORS[ev.type] || "var(--wp-text-dim)" }}
-                    />
-                    {i < events.length - 1 && (
-                      <div
-                        className="w-px flex-1 min-h-[24px]"
-                        style={{ background: "var(--wp-dark-border)" }}
-                      />
+            <div className="space-y-4">
+              {groups.map((group) => {
+                const collapsed = !!collapsedDays[group.date];
+                return (
+                  <div key={group.date} data-testid={`journal-day-${group.date}`}>
+                    <button
+                      type="button"
+                      data-testid={`journal-day-toggle-${group.date}`}
+                      aria-expanded={!collapsed}
+                      onClick={() => toggleDay(group.date)}
+                      className="w-full flex items-center justify-between rounded-md px-2 py-1 text-xs font-semibold uppercase tracking-wide transition-colors"
+                      style={{
+                        color: "var(--wp-text-dim)",
+                        background: "transparent",
+                      }}
+                    >
+                      <span>
+                        {collapsed ? "▸" : "▾"} {formatDayLabel(group.date)} ({group.items.length})
+                      </span>
+                      <span style={{ color: "var(--wp-text-muted)" }}>
+                        {collapsed ? "Show" : "Hide"}
+                      </span>
+                    </button>
+                    {!collapsed && (
+                      <div className="mt-2 space-y-0">
+                        {group.items.map((ev, i) => (
+                          <div key={`${group.date}-${i}`} className={`flex ${rowGap} relative`}>
+                            <div className="flex flex-col items-center">
+                              <div
+                                className={`w-2 h-2 rounded-full shrink-0 ${dotMt}`}
+                                style={{ background: TYPE_COLORS[ev.type] || "var(--wp-text-dim)" }}
+                              />
+                              {i < group.items.length - 1 && (
+                                <div
+                                  className="w-px flex-1"
+                                  style={{
+                                    background: "var(--wp-dark-border)",
+                                    minHeight: density === "compact" ? 8 : 24,
+                                  }}
+                                />
+                              )}
+                            </div>
+                            <div className={rowPad}>
+                              <span
+                                className="text-xs font-mono"
+                                style={{ color: "var(--wp-text-muted)" }}
+                              >
+                                {ev.time}
+                              </span>
+                              <p className="text-sm mt-0.5">{ev.description}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
-                  <div className="pb-4">
-                    <span className="text-xs font-mono" style={{ color: "var(--wp-text-muted)" }}>
-                      {ev.time}
-                    </span>
-                    <p className="text-sm mt-0.5">{ev.description}</p>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
+              {hasMore && (
+                <button
+                  type="button"
+                  data-testid="journal-load-more"
+                  onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+                  className="w-full rounded-lg border px-4 py-2 text-sm font-medium transition-colors"
+                  style={{
+                    background: "var(--wp-dark-surface2)",
+                    borderColor: "var(--wp-dark-border)",
+                    color: "var(--wp-text)",
+                  }}
+                >
+                  Load more ({events.length - visibleCount} remaining)
+                </button>
+              )}
             </div>
           )}
         </div>

@@ -21,6 +21,13 @@ export type InstinctEventType =
   | "knowledge.doc_generated"
   | "knowledge.doc_downloaded"
   | "knowledge.doc_revised"
+  // Documents (generated docs page) — edit/delete. Separate from the legacy
+  // knowledge.doc_* events so the learning loop can distinguish generator
+  // churn from human curation.
+  //   docs.edited   { doc_id }
+  //   docs.deleted  { doc_id }
+  | "docs.edited"
+  | "docs.deleted"
   | "knowledge.codebase_searched"
   // Central Brain — team-wide document ingestion + RAG
   | "brain.upload_started"
@@ -104,6 +111,13 @@ export type InstinctEventType =
   | "journal.entry_created"
   | "journal.entry_updated"
   | "journal.context_added"
+  // Journal UX — density toggle + day-group collapse so the learning loop
+  // can see which density users prefer and whether default-collapsing old
+  // days actually shortens the scroll as designed.
+  //   journal.density_toggled: { density: "compact"|"comfortable" }
+  //   journal.group_collapsed: { date: "YYYY-MM-DD", collapsed: boolean }
+  | "journal.density_toggled"
+  | "journal.group_collapsed"
   // Offline draft creation (Path C · Stream U1 — text-draft offline)
   //
   // Fires ONLY on the queue path (i.e. the user created the draft
@@ -128,6 +142,12 @@ export type InstinctEventType =
   | "knowledge.entry_created"
   | "knowledge.entry_updated"
   | "knowledge.entry_deleted"
+  // Simplified "quick add" path — one textarea + optional title. Fires on
+  // submit so the learning loop can grade how often users reach for the
+  // simple path vs the Advanced structured form.
+  //   knowledge.quick_add: { used_title: boolean, content_length: number,
+  //                           classified_as: "qa"|"note" }
+  | "knowledge.quick_add"
   // Goals (company OKRs / KRs / contributions — migration 079).
   // Fires from Goals dashboard tile, OKR cards, Friday-sync commitment
   // flow, auto-linker, and offline queue. All are consumed by the
@@ -173,6 +193,13 @@ export type InstinctEventType =
   | "calendar.range_computed"
   | "calendar.suggestion_viewed"
   | "calendar.suggestion_acted_on"
+  // Calendar meeting link click-through — fired when the user clicks the
+  // subject link (webLink → Outlook) OR the explicit "Join" button
+  // (onlineMeeting.joinUrl → Teams). Metadata distinguishes which surface
+  // was used so the learning loop can see whether designers prefer to
+  // open the full Outlook context or jump straight into the Teams call.
+  //   calendar.meeting_opened_external: { event_id, target: "web"|"join" }
+  | "calendar.meeting_opened_external"
   | "meeting.prebrief_computed"
   | "meeting.prebrief_viewed"
   | "meeting.prebrief_section_expanded"
@@ -199,11 +226,27 @@ export type InstinctEventType =
   | "feature.request_approved"
   | "feature.request_rejected"
   | "feature.cost_estimated"
+  // Features board — owner/admin CRUD (PUT + DELETE on /api/features/[id]).
+  // Distinct from `feature.request_submitted` (initial POST); edits and
+  // deletes fire as separate namespaces so the learning loop can grade
+  // which features attract churn vs. get abandoned.
+  | "features.edited"
+  | "features.deleted"
   // Discussions
   | "discussion.thread_created"
   | "discussion.reply_posted"
   | "discussion.resolved"
   | "discussion.doc_attached"
+  // Discussions — edit/delete (thread + comment). Fires on every mutation
+  // so the learning loop sees churn rate per discussion + per author.
+  //   discussions.discussion.edited   { discussion_id }
+  //   discussions.discussion.deleted  { discussion_id }
+  //   discussions.comment.edited      { reply_id, discussion_id }
+  //   discussions.comment.deleted     { reply_id, discussion_id }
+  | "discussions.discussion.edited"
+  | "discussions.discussion.deleted"
+  | "discussions.comment.edited"
+  | "discussions.comment.deleted"
   // Discussions — offline queueing (Stream U2 templated offline rollout).
   // Fired ONLY on the queue path: navigator.onLine===false, or an inline
   // POST that returned non-ok / threw mid-flight. Inline 2xx writes keep
@@ -222,6 +265,11 @@ export type InstinctEventType =
   | "client.doc_generated"
   | "client.email_drafted"
   | "client.proposal_created"
+  // Client records — owner/admin CRUD (PUT + DELETE on /api/clients/[id]).
+  // Split out so analytics dashboards can slice "sales churn on client
+  // records" independently from doc/email activity.
+  | "clients.edited"
+  | "clients.deleted"
   // System
   | "system.login"
   | "system.page_viewed"
@@ -397,6 +445,13 @@ export type InstinctEventType =
   | "site.image_gen_dismissed"
   // People (HR) — benefits, employees, onboarding, insights
   | "hr.employee_added"
+  // HR employee edit/delete — dotted namespace per the 2026-04 edit/delete
+  // product launch. Paired with the legacy `hr.employee_updated` /
+  // `hr.employee_removed` events for backwards compat.
+  //   hr.employee.updated  { employee_id }
+  //   hr.employee.deleted  { employee_id }
+  | "hr.employee.updated"
+  | "hr.employee.deleted"
   | "hr.employee_updated"
   | "hr.employee_removed"
   | "hr.benefit_document_uploaded"
@@ -410,6 +465,14 @@ export type InstinctEventType =
   | "hr.insight_generated"
   | "hr.insight_viewed"
   | "hr.insight_dismissed"
+  // HR insights — grouped view (2026-04-23). Alicia asked for the
+  // compilation to be bucketed by category and collapsible, default
+  // collapsed after the first group. Every load + expand fires so the
+  // brain can learn which buckets get opened most.
+  //   hr.insights.grouped_view  { group_count, insight_count }
+  //   hr.insights.group_expanded { category, count }
+  | "hr.insights.grouped_view"
+  | "hr.insights.group_expanded"
   // HR benefits carrier detection
   | "hr.benefit_carrier_detected"
   | "hr.benefit_carrier_fallback"
@@ -636,6 +699,12 @@ export type InstinctEventType =
   | "site.version_history_viewed"
   | "site.version_diff_viewed"
   | "site.version_restored"
+  // Sites — editor-vs-live parity diagnostic. Fired by the editor detail
+  // page right after the preview iframe mounts with both a deployed URL
+  // and an in-memory draft, so the learning loop can track how often
+  // designers are likely seeing a drift between the two surfaces.
+  //   sites.editor_preview_parity_check: { site_id, source, has_preview_url }
+  | "sites.editor_preview_parity_check"
   // Sites — section comments (Path C Phase 3 · Stream R3)
   //
   // Threaded per-section review comments. Two posting paths: unauth

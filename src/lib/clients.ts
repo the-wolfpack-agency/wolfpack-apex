@@ -109,7 +109,17 @@ export async function updateClient(
     params,
   );
 
-  return rows[0] || null;
+  if (rows.length > 0) {
+    // Fire a generic edit event so the learning loop can grade which
+    // fields sales tweaks most often. Keep the event tight — no
+    // before/after values, just the column names.
+    trackEvent("clients.edited", clientId, "unknown", {
+      client_id: clientId,
+      fields: Object.keys(updates).join(","),
+    });
+    return rows[0];
+  }
+  return null;
 }
 
 /**
@@ -131,6 +141,31 @@ export async function getClient(clientId: string): Promise<Client | null> {
     [clientId],
   );
   return rows[0] || null;
+}
+
+/**
+ * Delete a client record. Hard delete — instinct_clients has no
+ * soft-delete column yet; if/when it does, swap to UPDATE SET deleted_at.
+ * Fires `clients.deleted`. Returns true when a row was removed.
+ */
+export async function deleteClient(
+  clientId: string,
+  userId: string,
+): Promise<boolean> {
+  if (!process.env.DATABASE_URL) {
+    trackEvent("clients.deleted", userId, "unknown", { client_id: clientId });
+    return true;
+  }
+  const result = await safeQuery(
+    `DELETE FROM instinct_clients WHERE id = $1`,
+    [clientId],
+  );
+  const affected = (result as unknown as { rowCount?: number }).rowCount ?? 0;
+  if (affected > 0) {
+    trackEvent("clients.deleted", userId, "unknown", { client_id: clientId });
+    return true;
+  }
+  return false;
 }
 
 /**

@@ -29,6 +29,15 @@ export default function ClientsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState("");
 
+  // Inline edit state (one row at a time, mirrors /knowledge pattern).
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editIndustry, setEditIndustry] = useState("");
+  const [editContactEmail, setEditContactEmail] = useState("");
+  const [editContactName, setEditContactName] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+
   function authHeaders(): HeadersInit {
     return jsonHeaders();
   }
@@ -88,6 +97,83 @@ export default function ClientsPage() {
       setSubmitMsg("Failed to create client");
     }
     setSubmitting(false);
+  }
+
+  function startEdit(c: Client) {
+    setEditingId(c.id);
+    setEditName(c.name);
+    setEditIndustry(c.industry || "");
+    setEditContactEmail(c.contact_email || "");
+    setEditContactName(c.contact_name || "");
+    setEditNotes(c.notes || "");
+    setSubmitMsg("");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditName("");
+    setEditIndustry("");
+    setEditContactEmail("");
+    setEditContactName("");
+    setEditNotes("");
+  }
+
+  async function handleSaveEdit(e: FormEvent, clientId: string) {
+    e.preventDefault();
+    setSaving(true);
+    setSubmitMsg("");
+    try {
+      const res = await fetchWithRefresh(`/api/clients/${clientId}`, {
+        method: "PUT",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          name: editName,
+          industry: editIndustry,
+          contact_email: editContactEmail,
+          contact_name: editContactName,
+          notes: editNotes,
+        }),
+      });
+      if (res.status === 200) {
+        setSubmitMsg("Client created!"); // reuse positive banner copy
+        cancelEdit();
+        fetchClients();
+      } else if (res.status === 403) {
+        setSubmitMsg("You don't have permission to edit this client.");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setSubmitMsg((data as { error?: string }).error || "Failed to save");
+      }
+    } catch {
+      setSubmitMsg("Failed to save");
+    }
+    setSaving(false);
+  }
+
+  async function handleDelete(clientId: string) {
+    if (!window.confirm("Delete this client? This cannot be undone.")) {
+      return;
+    }
+    setClients((prev) => prev.filter((c) => c.id !== clientId));
+    if (selected?.id === clientId) setSelected(null);
+    try {
+      const res = await fetchWithRefresh(`/api/clients/${clientId}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (res.status === 200) {
+        setSubmitMsg("Client created!"); // reuse banner
+      } else if (res.status === 403) {
+        setSubmitMsg("You don't have permission to delete this client.");
+        fetchClients();
+      } else {
+        setSubmitMsg("Failed to delete");
+        fetchClients();
+      }
+    } catch {
+      setSubmitMsg("Failed to delete");
+      fetchClients();
+    }
   }
 
   return (
@@ -252,21 +338,156 @@ export default function ClientsPage() {
               </div>
 
               {selected?.id === client.id && (
-                <div className="mt-3 pt-3 border-t space-y-1" style={{ borderColor: "var(--wp-dark-border)" }}>
-                  {client.contact_name && (
-                    <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
-                      Contact: {client.contact_name}
-                    </p>
-                  )}
-                  {client.contact_email && (
-                    <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
-                      Email: {client.contact_email}
-                    </p>
-                  )}
-                  {client.notes && (
-                    <p className="text-xs mt-2" style={{ color: "var(--wp-text-muted)" }}>
-                      {client.notes}
-                    </p>
+                <div className="mt-3 pt-3 border-t space-y-2" style={{ borderColor: "var(--wp-dark-border)" }}>
+                  {editingId === client.id ? (
+                    <form
+                      data-testid={`client-edit-form-${client.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      onSubmit={(e) => handleSaveEdit(e, client.id)}
+                      className="space-y-2"
+                    >
+                      <input
+                        aria-label="edit name"
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        placeholder="Name"
+                        required
+                        className="w-full rounded border px-2 py-1.5 text-xs outline-none"
+                        style={{
+                          background: "var(--wp-dark-surface2)",
+                          borderColor: "var(--wp-dark-border)",
+                          color: "var(--wp-text)",
+                        }}
+                      />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input
+                          aria-label="edit industry"
+                          type="text"
+                          value={editIndustry}
+                          onChange={(e) => setEditIndustry(e.target.value)}
+                          placeholder="Industry"
+                          className="w-full rounded border px-2 py-1.5 text-xs outline-none"
+                          style={{
+                            background: "var(--wp-dark-surface2)",
+                            borderColor: "var(--wp-dark-border)",
+                            color: "var(--wp-text)",
+                          }}
+                        />
+                        <input
+                          aria-label="edit contact name"
+                          type="text"
+                          value={editContactName}
+                          onChange={(e) => setEditContactName(e.target.value)}
+                          placeholder="Contact name"
+                          className="w-full rounded border px-2 py-1.5 text-xs outline-none"
+                          style={{
+                            background: "var(--wp-dark-surface2)",
+                            borderColor: "var(--wp-dark-border)",
+                            color: "var(--wp-text)",
+                          }}
+                        />
+                      </div>
+                      <input
+                        aria-label="edit contact email"
+                        type="email"
+                        value={editContactEmail}
+                        onChange={(e) => setEditContactEmail(e.target.value)}
+                        placeholder="Contact email"
+                        className="w-full rounded border px-2 py-1.5 text-xs outline-none"
+                        style={{
+                          background: "var(--wp-dark-surface2)",
+                          borderColor: "var(--wp-dark-border)",
+                          color: "var(--wp-text)",
+                        }}
+                      />
+                      <textarea
+                        aria-label="edit notes"
+                        value={editNotes}
+                        onChange={(e) => setEditNotes(e.target.value)}
+                        rows={2}
+                        placeholder="Notes"
+                        className="w-full rounded border px-2 py-1.5 text-xs outline-none resize-none"
+                        style={{
+                          background: "var(--wp-dark-surface2)",
+                          borderColor: "var(--wp-dark-border)",
+                          color: "var(--wp-text)",
+                        }}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="submit"
+                          disabled={saving}
+                          className="px-3 py-1.5 rounded text-xs font-semibold disabled:opacity-50"
+                          style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+                        >
+                          {saving ? "Saving..." : "Save changes"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            cancelEdit();
+                          }}
+                          className="px-3 py-1.5 rounded text-xs font-medium"
+                          style={{ color: "var(--wp-text-dim)" }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <>
+                      {client.contact_name && (
+                        <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                          Contact: {client.contact_name}
+                        </p>
+                      )}
+                      {client.contact_email && (
+                        <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                          Email: {client.contact_email}
+                        </p>
+                      )}
+                      {client.notes && (
+                        <p className="text-xs mt-2" style={{ color: "var(--wp-text-muted)" }}>
+                          {client.notes}
+                        </p>
+                      )}
+                      <div className="flex gap-2 flex-wrap pt-2">
+                        <button
+                          type="button"
+                          data-testid={`client-edit-btn-${client.id}`}
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            startEdit(client);
+                          }}
+                          className="px-2.5 py-1 rounded text-xs font-medium border hover:border-[var(--wp-gold)]"
+                          style={{
+                            background: "var(--wp-dark-surface2)",
+                            borderColor: "var(--wp-dark-border)",
+                            color: "var(--wp-text-dim)",
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`client-delete-btn-${client.id}`}
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            handleDelete(client.id);
+                          }}
+                          className="px-2.5 py-1 rounded text-xs font-medium border"
+                          style={{
+                            background: "transparent",
+                            borderColor: "var(--wp-error)",
+                            color: "var(--wp-error)",
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </>
                   )}
                 </div>
               )}

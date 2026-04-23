@@ -326,6 +326,133 @@ export async function updateFeatureStatus(
 }
 
 /**
+ * Update an existing feature request (title / description / priority /
+ * target_product). Separate from updateFeatureStatus — this is the
+ * content-edit path used by owners and admins from the /features UI.
+ *
+ * Returns null when the id doesn't match a row so the route layer can
+ * send a 404. Authorization is enforced by the caller (owner or admin);
+ * this library function is intentionally permissive so jobs / migrations
+ * can reuse it.
+ */
+export interface FeatureUpdate {
+  title?: string;
+  description?: string;
+  priority?: FeaturePriority;
+  target_product?: string | null;
+}
+
+export async function updateFeatureRequest(
+  id: string,
+  updates: FeatureUpdate,
+  userId: string,
+): Promise<FeatureRequest | null> {
+  const setClauses: string[] = [];
+  const params: unknown[] = [];
+  let idx = 1;
+
+  if (updates.title !== undefined) {
+    setClauses.push(`title = $${idx++}`);
+    params.push(updates.title);
+  }
+  if (updates.description !== undefined) {
+    setClauses.push(`description = $${idx++}`);
+    params.push(updates.description);
+  }
+  if (updates.priority !== undefined) {
+    setClauses.push(`priority = $${idx++}`);
+    params.push(updates.priority);
+  }
+  if (updates.target_product !== undefined) {
+    setClauses.push(`target_product = $${idx++}`);
+    params.push(updates.target_product);
+  }
+
+  if (setClauses.length === 0) return null;
+
+  setClauses.push("updated_at = NOW()");
+  params.push(id);
+
+  if (!process.env.DATABASE_URL) {
+    trackEvent("features.edited", userId, "unknown", {
+      feature_id: id,
+      fields: Object.keys(updates).join(","),
+    });
+    const demo: FeatureRequest = {
+      id,
+      title: updates.title ?? "demo title",
+      description: updates.description ?? "demo description",
+      submitted_by: userId,
+      status: "submitted",
+      priority: updates.priority ?? "medium",
+      target_product: updates.target_product ?? null,
+      analysis: {},
+      comparisons: [],
+      votes: 0,
+      comments: [],
+      estimated_hours: null,
+      estimated_cost: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    return demo;
+  }
+
+  const { rows } = await safeQuery<FeatureRequest>(
+    `UPDATE instinct_feature_requests
+        SET ${setClauses.join(", ")}
+      WHERE id = $${idx}
+      RETURNING *`,
+    params,
+  );
+  if (rows.length === 0) return null;
+  trackEvent("features.edited", userId, "unknown", {
+    feature_id: id,
+    fields: Object.keys(updates).join(","),
+  });
+  return rows[0];
+}
+
+/**
+ * Delete a feature request. Hard delete — instinct_feature_requests has
+ * no soft-delete column yet. Fires `features.deleted`. Returns true when
+ * a row was removed.
+ */
+export async function deleteFeatureRequest(
+  id: string,
+  userId: string,
+): Promise<boolean> {
+  if (!process.env.DATABASE_URL) {
+    trackEvent("features.deleted", userId, "unknown", { feature_id: id });
+    return true;
+  }
+  const result = await safeQuery(
+    `DELETE FROM instinct_feature_requests WHERE id = $1`,
+    [id],
+  );
+  const affected = (result as unknown as { rowCount?: number }).rowCount ?? 0;
+  if (affected > 0) {
+    trackEvent("features.deleted", userId, "unknown", { feature_id: id });
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Load a single feature request (used by route-level ownership checks so
+ * we don't need to duplicate the SELECT * pattern in every caller).
+ */
+export async function getFeatureRequest(
+  id: string,
+): Promise<FeatureRequest | null> {
+  const { rows } = await safeQuery<FeatureRequest>(
+    `SELECT * FROM instinct_feature_requests WHERE id = $1`,
+    [id],
+  );
+  return rows[0] ?? null;
+}
+
+/**
  * List feature requests with optional filters.
  */
 export async function getFeatureRequests(

@@ -74,6 +74,15 @@ export default function KnowledgePage() {
   const [captureTags, setCaptureTags] = useState("");
   const [capturing, setCapturing] = useState(false);
   const [captureMsg, setCaptureMsg] = useState("");
+  // Quick-add path: a single "paste or type anything" textarea + optional
+  // title. Simpler than the structured Q/A form so users reach for it as
+  // their first instinct. The same triple-write backed POST handles both.
+  const [quickContent, setQuickContent] = useState("");
+  const [quickTitle, setQuickTitle] = useState("");
+  const [quickSaving, setQuickSaving] = useState(false);
+  const [quickMsg, setQuickMsg] = useState("");
+  // Advanced structured form sits behind a disclosure for power users.
+  const [showAdvanced, setShowAdvanced] = useState(false);
   // Edit-in-place state — keyed by entry id so only one row is editable
   // at a time. Clicking Edit on another row collapses the current one.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -221,6 +230,85 @@ export default function KnowledgePage() {
       }
     }
     setAsking(false);
+  }
+
+  /**
+   * Auto-classify a free-form dump into (question, answer) so the
+   * assistant's existing retrieval path still works without a dedicated
+   * "note" source column. Returns one of:
+   *   - { kind: "qa", question, answer } when the content clearly looks
+   *     like a Q&A (contains a line ending in "?" followed by an answer),
+   *   - { kind: "note", question, answer } otherwise — question is the
+   *     explicit title or the first 60 chars, answer is the full content.
+   * Exported-free so the unit test imports via the page module.
+   */
+  function classifyQuickContent(
+    content: string,
+    title: string | undefined,
+  ): { kind: "qa" | "note"; question: string; answer: string } {
+    const trimmed = content.trim();
+    const firstLine = trimmed.split(/\r?\n/, 1)[0] ?? "";
+    const looksLikeQA =
+      !title &&
+      firstLine.endsWith("?") &&
+      trimmed.length > firstLine.length + 1;
+    if (looksLikeQA) {
+      const rest = trimmed.slice(firstLine.length).trim();
+      return { kind: "qa", question: firstLine, answer: rest };
+    }
+    const q =
+      (title && title.trim().length > 0
+        ? title.trim()
+        : trimmed.slice(0, 60).replace(/\s+\S*$/, "")) || "Note";
+    return { kind: "note", question: q, answer: trimmed };
+  }
+
+  async function handleQuickAdd(e: FormEvent) {
+    e.preventDefault();
+    const content = quickContent.trim();
+    if (!content) {
+      setQuickMsg("Paste or type something to save");
+      return;
+    }
+    setQuickSaving(true);
+    setQuickMsg("");
+    try {
+      const classified = classifyQuickContent(content, quickTitle);
+      const result = await saveKnowledgeEntryOffline({
+        entry_id: mkEntryId(),
+        question: classified.question,
+        answer: classified.answer,
+        source: "human",
+        tags: classified.kind === "note" ? ["note"] : [],
+        created_at: Date.now(),
+      });
+      // Analytics — feeds learning loop so we can see what % of users
+      // reach for the simple path vs the structured form.
+      fetchWithRefresh("/api/analytics", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          event: "knowledge.quick_add",
+          metadata: {
+            used_title: quickTitle.trim().length > 0,
+            content_length: content.length,
+            classified_as: classified.kind,
+          },
+        }),
+      }).catch(() => {});
+      if (result.status === "created") {
+        setQuickMsg("Saved");
+        fetchEntries();
+      } else {
+        setQuickMsg("Saved locally — will sync when online");
+      }
+      setQuickContent("");
+      setQuickTitle("");
+      setTimeout(() => setQuickMsg(""), 3000);
+    } catch (err) {
+      setQuickMsg((err as Error).message || "Failed to save");
+    }
+    setQuickSaving(false);
   }
 
   async function handleCapture(e: FormEvent) {
@@ -419,21 +507,107 @@ export default function KnowledgePage() {
             Ask a Question
           </button>
           <button
-            onClick={() => { setShowCapture(!showCapture); setCaptureMsg(""); }}
+            onClick={() => { setShowCapture(!showCapture); setCaptureMsg(""); setQuickMsg(""); }}
             className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors border"
             style={{
               background: "var(--wp-dark-surface2)",
               borderColor: "var(--wp-dark-border)",
               color: "var(--wp-text)",
             }}
+            data-testid="knowledge-add-toggle"
           >
-            {showCapture ? "Close capture" : "Capture knowledge"}
+            {showCapture ? "Close add" : "Add info"}
           </button>
         </div>
       </div>
 
-      {/* Capture Knowledge Panel — offline-first CREATE path */}
+      {/* Quick Add Panel — one textarea + optional title. Lives at the
+          top so "dump any relevant docs/messages/info" is the first thing
+          a user sees when they click "Add info". Power users get the
+          structured Q/A form via the Advanced disclosure below. */}
       {showCapture && (
+        <div
+          className="rounded-lg border p-5 space-y-3"
+          style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+          data-testid="knowledge-quick-add-panel"
+        >
+          <div>
+            <h3 className="text-sm font-semibold" style={{ color: "var(--wp-gold)" }}>
+              Add info
+            </h3>
+            <p className="text-xs mt-1" style={{ color: "var(--wp-text-dim)" }}>
+              Dump any relevant docs, messages, or info here. The assistant will be able to reference it.
+            </p>
+          </div>
+          <form onSubmit={handleQuickAdd} className="space-y-3">
+            <input
+              type="text"
+              value={quickTitle}
+              onChange={(e) => setQuickTitle(e.target.value)}
+              placeholder="Title (optional)"
+              aria-label="Title (optional)"
+              data-testid="knowledge-quick-add-title"
+              className="w-full rounded-lg border px-4 py-2 text-sm outline-none"
+              style={{
+                background: "var(--wp-dark-surface2)",
+                borderColor: "var(--wp-dark-border)",
+                color: "var(--wp-text)",
+              }}
+            />
+            <textarea
+              value={quickContent}
+              onChange={(e) => setQuickContent(e.target.value)}
+              placeholder="Paste or type anything here..."
+              aria-label="Content"
+              rows={6}
+              data-testid="knowledge-quick-add-content"
+              className="w-full rounded-lg border px-4 py-3 text-sm outline-none resize-none"
+              style={{
+                background: "var(--wp-dark-surface2)",
+                borderColor: "var(--wp-dark-border)",
+                color: "var(--wp-text)",
+              }}
+            />
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                type="submit"
+                disabled={quickSaving}
+                data-testid="knowledge-quick-add-save"
+                className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+              >
+                {quickSaving ? "Saving..." : "Save"}
+              </button>
+              {quickMsg && (
+                <span
+                  className="text-sm"
+                  data-testid="knowledge-quick-add-msg"
+                  style={{
+                    color: quickMsg.startsWith("Saved")
+                      ? "var(--wp-success)"
+                      : "var(--wp-error)",
+                  }}
+                >
+                  {quickMsg}
+                </span>
+              )}
+            </div>
+          </form>
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((s) => !s)}
+            data-testid="knowledge-advanced-toggle"
+            className="text-xs underline"
+            style={{ color: "var(--wp-text-dim)" }}
+          >
+            {showAdvanced ? "Hide advanced add (Q / A / tags)" : "Advanced — add a structured Q/A entry"}
+          </button>
+        </div>
+      )}
+
+      {/* Structured capture form — preserved for power users behind the
+          Advanced disclosure. Same offline-first CREATE path as before. */}
+      {showCapture && showAdvanced && (
         <div
           className="rounded-lg border p-5 space-y-3"
           style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}

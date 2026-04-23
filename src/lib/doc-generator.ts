@@ -337,6 +337,100 @@ export async function getDocuments(
 }
 
 // ---------------------------------------------------------------------------
+// updateDocument — edit title/content/doc_type. Fires `docs.edited`.
+// Increments revision on every edit so the UI shows progression.
+// Returns null on shadow mode (no DATABASE_URL) or when no row matched.
+// ---------------------------------------------------------------------------
+export async function updateDocument(
+  docId: string,
+  userId: string,
+  userRole: string,
+  updates: { title?: string; content?: string; doc_type?: string },
+): Promise<GeneratedDocument | null> {
+  trackEvent("docs.edited", userId, userRole, { doc_id: docId });
+
+  if (!process.env.DATABASE_URL) {
+    const demo = DEMO_DOCS.find((d) => d.id === docId);
+    if (!demo) return null;
+    return {
+      ...demo,
+      title: updates.title ?? demo.title,
+      content: updates.content ?? demo.content,
+      doc_type: updates.doc_type ?? demo.doc_type,
+      revision: demo.revision + 1,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  try {
+    const result = await query<Record<string, unknown>>(
+      `UPDATE instinct_documents
+          SET title    = COALESCE($2, title),
+              content  = COALESCE($3, content),
+              doc_type = COALESCE($4, doc_type),
+              revision = revision + 1,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [docId, updates.title ?? null, updates.content ?? null, updates.doc_type ?? null],
+    );
+    if (result.rows.length === 0) return null;
+    return rowToDocument(result.rows[0]);
+  } catch (err) {
+    console.error("[doc-gen] updateDocument error:", (err as Error).message);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// deleteDocument — hard delete. Fires `docs.deleted`.
+// Returns true when a row was removed.
+// ---------------------------------------------------------------------------
+export async function deleteDocument(
+  docId: string,
+  userId: string,
+  userRole: string,
+): Promise<boolean> {
+  trackEvent("docs.deleted", userId, userRole, { doc_id: docId });
+
+  if (!process.env.DATABASE_URL) {
+    return DEMO_DOCS.some((d) => d.id === docId);
+  }
+
+  try {
+    const result = await query(
+      `DELETE FROM instinct_documents WHERE id = $1`,
+      [docId],
+    );
+    const affected = (result as unknown as { rowCount?: number }).rowCount ?? 0;
+    return affected > 0;
+  } catch (err) {
+    console.error("[doc-gen] deleteDocument error:", (err as Error).message);
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// getDocumentById — fetch one document without mutating downloads counter.
+// Used by route-layer authorization (ownership check).
+// ---------------------------------------------------------------------------
+export async function getDocumentById(docId: string): Promise<GeneratedDocument | null> {
+  if (!process.env.DATABASE_URL) {
+    return DEMO_DOCS.find((d) => d.id === docId) ?? null;
+  }
+  try {
+    const result = await query<Record<string, unknown>>(
+      `SELECT * FROM instinct_documents WHERE id = $1`,
+      [docId],
+    );
+    return result.rows.length > 0 ? rowToDocument(result.rows[0]) : null;
+  } catch (err) {
+    console.error("[doc-gen] getDocumentById error:", (err as Error).message);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // downloadDocument — Increment download count
 // ---------------------------------------------------------------------------
 export async function downloadDocument(

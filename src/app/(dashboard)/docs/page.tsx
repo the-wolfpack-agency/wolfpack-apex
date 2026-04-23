@@ -46,6 +46,59 @@ export default function DocsPage() {
   const [generating, setGenerating] = useState(false);
   const [genMsg, setGenMsg] = useState("");
 
+  // Edit state for the currently-viewed doc. Routed through
+  // fetchWithRefresh to avoid the April 16 raw-fetch bug pattern.
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [editMsg, setEditMsg] = useState("");
+
+  async function saveDocEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!selected) return;
+    setEditMsg("");
+    try {
+      const res = await fetchWithRefresh(`/api/docs/${selected.id}`, {
+        method: "PUT",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ title: editTitle, content: editContent }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEditMsg("Saved");
+        setSelected(data.document);
+        setEditing(false);
+        fetchDocs();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setEditMsg(data.error ?? "Save failed");
+      }
+    } catch {
+      setEditMsg("Save failed");
+    }
+  }
+
+  async function deleteDoc() {
+    if (!selected) return;
+    const ok =
+      typeof window !== "undefined"
+        ? window.confirm(`Delete document "${selected.title}"?`)
+        : false;
+    if (!ok) return;
+    try {
+      const res = await fetchWithRefresh(`/api/docs/${selected.id}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (res.ok) {
+        setSelected(null);
+        fetchDocs();
+      }
+    } catch {
+      // silent
+    }
+  }
+
   function authHeaders(): HeadersInit {
     return jsonHeaders();
   }
@@ -175,18 +228,116 @@ export default function DocsPage() {
                 </span>
               </div>
             </div>
-            <button
-              onClick={() => handleDownload(selected)}
-              className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
-              style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
-            >
-              Download
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleDownload(selected)}
+                className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+                style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+              >
+                Download
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditing(true);
+                  setEditTitle(selected.title);
+                  setEditContent(selected.content);
+                  setEditMsg("");
+                }}
+                aria-label="Edit document"
+                data-testid="doc-edit-btn"
+                className="px-3 py-2 rounded-lg text-sm font-medium border"
+                style={{
+                  background: "var(--wp-dark-surface2)",
+                  borderColor: "var(--wp-dark-border)",
+                  color: "var(--wp-text)",
+                }}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={deleteDoc}
+                aria-label="Delete document"
+                data-testid="doc-delete-btn"
+                className="px-3 py-2 rounded-lg text-sm font-medium border"
+                style={{
+                  background: "var(--wp-dark-surface2)",
+                  borderColor: "var(--wp-dark-border)",
+                  color: "var(--wp-error)",
+                }}
+              >
+                Delete
+              </button>
+            </div>
           </div>
-          <div
-            className="prose prose-invert max-w-none text-sm"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(selected.content) }}
-          />
+          {editing ? (
+            <form
+              onSubmit={saveDocEdit}
+              className="space-y-3"
+              data-testid="doc-edit-form"
+            >
+              <input
+                type="text"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                aria-label="Edit document title"
+                placeholder="Title"
+                required
+                className="w-full rounded-lg border px-4 py-2.5 text-sm outline-none"
+                style={{
+                  background: "var(--wp-dark-surface2)",
+                  borderColor: "var(--wp-dark-border)",
+                  color: "var(--wp-text)",
+                }}
+              />
+              <textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                aria-label="Edit document content"
+                rows={16}
+                className="w-full rounded-lg border px-4 py-3 text-sm outline-none resize-y font-mono"
+                style={{
+                  background: "var(--wp-dark-surface2)",
+                  borderColor: "var(--wp-dark-border)",
+                  color: "var(--wp-text)",
+                }}
+              />
+              <div className="flex gap-2 items-center">
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg text-sm font-semibold"
+                  style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditing(false)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium"
+                  style={{ color: "var(--wp-text-dim)" }}
+                >
+                  Cancel
+                </button>
+                {editMsg && (
+                  <span
+                    className="text-sm"
+                    data-testid="doc-edit-msg"
+                    style={{
+                      color: editMsg === "Saved" ? "var(--wp-success)" : "var(--wp-error)",
+                    }}
+                  >
+                    {editMsg}
+                  </span>
+                )}
+              </div>
+            </form>
+          ) : (
+            <div
+              className="prose prose-invert max-w-none text-sm"
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(selected.content) }}
+            />
+          )}
         </div>
       </div>
     );
