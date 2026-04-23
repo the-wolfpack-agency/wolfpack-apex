@@ -382,3 +382,428 @@ describe("MessagesPage", () => {
     expect(inline).not.toMatch(/background:\s*#fff/i);
   });
 });
+
+// ---------------------------------------------------------------- compose
+
+describe("MessagesPage — inline compose", () => {
+  /**
+   * Thin helper: select chat-1 and wait until the composer is mounted.
+   * Every compose test goes through this so the setup boilerplate is
+   * captured in one place.
+   */
+  async function selectChat1AndWaitForComposer() {
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("messages-page"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("chat-row-chat-1"));
+    });
+    await waitFor(() => screen.getByTestId("messages-compose-input"));
+  }
+
+  /**
+   * Pull out the JSON bodies of every /api/analytics POST fired so
+   * far. Lets assertions focus on events-of-interest without having
+   * to filter call-by-call.
+   */
+  function analyticsBodies(): Array<{ event: string; metadata: Record<string, unknown> }> {
+    return mockFetchWithRefresh.mock.calls
+      .filter((c) => c[0] === "/api/analytics")
+      .map((c) => JSON.parse(c[1].body));
+  }
+
+  test("compose textarea + send button render when a chat is selected", async () => {
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1") return ok({ messages: [] });
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    const textarea = screen.getByTestId("messages-compose-input") as HTMLTextAreaElement;
+    expect(textarea).toBeInTheDocument();
+    expect(textarea.tagName).toBe("TEXTAREA");
+    expect(screen.getByTestId("messages-compose-send")).toBeInTheDocument();
+  });
+
+  test("send button is disabled with empty input, enabled when typed", async () => {
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1") return ok({ messages: [] });
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    const send = screen.getByTestId("messages-compose-send");
+    expect(send).toBeDisabled();
+    const textarea = screen.getByTestId("messages-compose-input");
+    fireEvent.change(textarea, { target: { value: "hello" } });
+    expect(send).not.toBeDisabled();
+    // Whitespace-only still disabled.
+    fireEvent.change(textarea, { target: { value: "   " } });
+    expect(send).toBeDisabled();
+  });
+
+  test("empty-thread hint shows above the composer when messages=[]", async () => {
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1") return ok({ messages: [] });
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    expect(screen.getByTestId("messages-empty-thread-hint")).toBeInTheDocument();
+  });
+
+  test("submit POSTs to /api/ms/chats/[id]/messages with correct body", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (url === "/api/ms/chats/chat-1/messages" && init?.method === "POST") {
+        return ok({
+          id: "srv-1",
+          createdDateTime: "2026-04-23T12:00:00Z",
+          from: { displayName: "You" },
+          body: { contentType: "text", content: "hi" },
+        });
+      }
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    fireEvent.change(screen.getByTestId("messages-compose-input"), {
+      target: { value: "hi" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-compose-send"));
+    });
+    const postCall = mockFetchWithRefresh.mock.calls.find(
+      (c) => c[0] === "/api/ms/chats/chat-1/messages" && c[1]?.method === "POST",
+    );
+    expect(postCall).toBeDefined();
+    const body = JSON.parse(postCall![1].body);
+    expect(body).toEqual({ content: "hi", contentType: "text" });
+  });
+
+  test("optimistic message appears immediately and resolves to server shape on success", async () => {
+    // Gate the POST so we can observe optimistic state before resolution.
+    let resolvePost!: (v: any) => void;
+    const postPromise = new Promise((res) => {
+      resolvePost = res;
+    });
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (url === "/api/ms/chats/chat-1/messages" && init?.method === "POST") {
+        return postPromise as any;
+      }
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    fireEvent.change(screen.getByTestId("messages-compose-input"), {
+      target: { value: "optimistic hello" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-compose-send"));
+    });
+
+    // Optimistic row present.
+    await waitFor(() => {
+      const pending = document.querySelector(
+        '[data-testid^="message-optimistic-"][data-pending="true"]',
+      );
+      expect(pending).not.toBeNull();
+      expect((pending as HTMLElement).textContent).toMatch(/optimistic hello/);
+    });
+
+    // Resolve the POST.
+    await act(async () => {
+      resolvePost(
+        ok({
+          id: "srv-42",
+          createdDateTime: "2026-04-23T12:00:00Z",
+          from: { displayName: "You" },
+          body: { contentType: "text", content: "optimistic hello" },
+        }),
+      );
+      // Yield a microtask.
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("message-srv-42")).toBeInTheDocument();
+    });
+    const serverNode = screen.getByTestId("message-srv-42");
+    expect(serverNode.getAttribute("data-pending")).toBe("false");
+    expect(serverNode.textContent).toMatch(/optimistic hello/);
+    // Optimistic row gone.
+    expect(
+      document.querySelector('[data-testid^="message-optimistic-"]'),
+    ).toBeNull();
+
+    // Analytics: compose_sent fired with length.
+    const sent = analyticsBodies().find((b) => b.event === "messages.compose_sent");
+    expect(sent).toBeDefined();
+    expect(sent!.metadata).toEqual({
+      chat_id: "chat-1",
+      length: "optimistic hello".length,
+    });
+  });
+
+  test("scope_missing response shows inline prompt, removes optimistic, no error toast", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (url === "/api/ms/chats/chat-1/messages" && init?.method === "POST") {
+        return ok({ scope_missing: true });
+      }
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    fireEvent.change(screen.getByTestId("messages-compose-input"), {
+      target: { value: "hello" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-compose-send"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("messages-compose-scope-hint")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("messages-compose-scope-cta")).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    // No error toast.
+    expect(screen.queryByTestId("messages-toast")).toBeNull();
+    // Optimistic removed.
+    expect(
+      document.querySelector('[data-testid^="message-optimistic-"]'),
+    ).toBeNull();
+    // Analytics.
+    const bodies = analyticsBodies();
+    expect(
+      bodies.find(
+        (b) =>
+          b.event === "messages.compose_failed" &&
+          b.metadata.reason === "scope_missing",
+      ),
+    ).toBeDefined();
+    expect(
+      bodies.find((b) => b.event === "messages.scope_prompt_shown"),
+    ).toBeDefined();
+  });
+
+  test("write_disabled response shows inline write-disabled hint + removes optimistic", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (url === "/api/ms/chats/chat-1/messages" && init?.method === "POST") {
+        return ok({ write_disabled: true });
+      }
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    fireEvent.change(screen.getByTestId("messages-compose-input"), {
+      target: { value: "hello" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-compose-send"));
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("messages-compose-write-disabled-hint"),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("messages-toast")).toBeNull();
+    expect(
+      document.querySelector('[data-testid^="message-optimistic-"]'),
+    ).toBeNull();
+    const bodies = analyticsBodies();
+    expect(
+      bodies.find(
+        (b) =>
+          b.event === "messages.compose_failed" &&
+          b.metadata.reason === "write_disabled",
+      ),
+    ).toBeDefined();
+    expect(
+      bodies.find((b) => b.event === "messages.write_disabled_shown"),
+    ).toBeDefined();
+  });
+
+  test("500 response shows error toast + rolls back optimistic", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (url === "/api/ms/chats/chat-1/messages" && init?.method === "POST") {
+        return ok({ error: "boom" }, 500);
+      }
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    fireEvent.change(screen.getByTestId("messages-compose-input"), {
+      target: { value: "bomb" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-compose-send"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("messages-toast")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("messages-toast").textContent).toMatch(/couldn'?t send/i);
+    expect(
+      document.querySelector('[data-testid^="message-optimistic-"]'),
+    ).toBeNull();
+    // Draft restored so the user can retry.
+    expect(
+      (screen.getByTestId("messages-compose-input") as HTMLTextAreaElement).value,
+    ).toBe("bomb");
+    const bodies = analyticsBodies();
+    expect(
+      bodies.find(
+        (b) =>
+          b.event === "messages.compose_failed" &&
+          String(b.metadata.reason).startsWith("http_500"),
+      ),
+    ).toBeDefined();
+  });
+
+  test("network error shows error toast + rolls back optimistic + fires compose_failed:network", async () => {
+    mockFetchWithRefresh.mockImplementation((url: string, init: any) => {
+      if (url === "/api/ms/chats")
+        return Promise.resolve(ok({ chats: SAMPLE_CHATS }));
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return Promise.resolve(ok({ messages: [] }));
+      if (url === "/api/ms/chats/chat-1/messages" && init?.method === "POST") {
+        return Promise.reject(new Error("network down"));
+      }
+      return Promise.resolve(ok({}));
+    });
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("messages-page"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("chat-row-chat-1"));
+    });
+    await waitFor(() => screen.getByTestId("messages-compose-input"));
+    fireEvent.change(screen.getByTestId("messages-compose-input"), {
+      target: { value: "offline" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-compose-send"));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("messages-toast")).toBeInTheDocument();
+    });
+    const bodies = mockFetchWithRefresh.mock.calls
+      .filter((c) => c[0] === "/api/analytics")
+      .map((c) => JSON.parse(c[1].body));
+    expect(
+      bodies.find(
+        (b) =>
+          b.event === "messages.compose_failed" && b.metadata.reason === "network",
+      ),
+    ).toBeDefined();
+  });
+
+  test("Cmd+Enter submits the composer", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (url === "/api/ms/chats/chat-1/messages" && init?.method === "POST") {
+        return ok({
+          id: "srv-cmd",
+          createdDateTime: "2026-04-23T12:00:00Z",
+          from: { displayName: "You" },
+          body: { contentType: "text", content: "cmd-enter" },
+        });
+      }
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    const textarea = screen.getByTestId("messages-compose-input");
+    fireEvent.change(textarea, { target: { value: "cmd-enter" } });
+    await act(async () => {
+      fireEvent.keyDown(textarea, {
+        key: "Enter",
+        code: "Enter",
+        metaKey: true,
+      });
+    });
+    const postCall = mockFetchWithRefresh.mock.calls.find(
+      (c) => c[0] === "/api/ms/chats/chat-1/messages" && c[1]?.method === "POST",
+    );
+    expect(postCall).toBeDefined();
+  });
+
+  test("Ctrl+Enter also submits (windows/linux)", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (url === "/api/ms/chats/chat-1/messages" && init?.method === "POST") {
+        return ok({
+          id: "srv-ctrl",
+          createdDateTime: "2026-04-23T12:00:00Z",
+          from: { displayName: "You" },
+          body: { contentType: "text", content: "ctrl-enter" },
+        });
+      }
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    const textarea = screen.getByTestId("messages-compose-input");
+    fireEvent.change(textarea, { target: { value: "ctrl-enter" } });
+    await act(async () => {
+      fireEvent.keyDown(textarea, {
+        key: "Enter",
+        code: "Enter",
+        ctrlKey: true,
+      });
+    });
+    const postCall = mockFetchWithRefresh.mock.calls.find(
+      (c) => c[0] === "/api/ms/chats/chat-1/messages" && c[1]?.method === "POST",
+    );
+    expect(postCall).toBeDefined();
+  });
+
+  test("plain Enter does NOT submit (multiline)", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    const textarea = screen.getByTestId("messages-compose-input");
+    fireEvent.change(textarea, { target: { value: "line one" } });
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
+    });
+    const postCall = mockFetchWithRefresh.mock.calls.find(
+      (c) => c[0] === "/api/ms/chats/chat-1/messages" && c[1]?.method === "POST",
+    );
+    expect(postCall).toBeUndefined();
+  });
+
+  test("More actions row (deep-links) renders BELOW the compose box", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (url === "/api/ms/deep-links") return ok({ url: "msteams://foo" });
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    const compose = screen.getByTestId("messages-compose");
+    const more = screen.getByTestId("messages-more-actions");
+    expect(compose.contains(more)).toBe(true);
+    // DeepLinkButtons are present inside More actions.
+    expect(within(more).getByTestId("deep-link-reply")).toBeInTheDocument();
+    expect(within(more).getByTestId("deep-link-call")).toBeInTheDocument();
+    expect(within(more).getByTestId("deep-link-video")).toBeInTheDocument();
+  });
+});

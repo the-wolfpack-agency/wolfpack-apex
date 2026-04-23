@@ -206,7 +206,7 @@ function normalizeMessage(raw: RawChatMessage): ChatMessage {
 export type ScopeMissingResult = {
   ok: false;
   code: "scope_missing";
-  scope: "Chat.Read";
+  scope: "Chat.Read" | "Chat.ReadWrite";
 };
 
 export type ListChatsResult =
@@ -221,6 +221,11 @@ export type GetChatResult =
 
 export type ListChatMessagesResult =
   | { ok: true; messages: ChatMessage[] }
+  | ScopeMissingResult;
+
+export type SendChatMessageResult =
+  | { ok: true; message: ChatMessage }
+  | { ok: false; code: "error"; status: number }
   | ScopeMissingResult;
 
 // ---------------------------------------------------------------------------
@@ -370,4 +375,121 @@ export async function getChatMessagesResult(
     count: messages.length,
   });
   return { ok: true, messages };
+}
+
+// ---------------------------------------------------------------------------
+// sendChatMessage — write path (Phase 1.5 internal deployment)
+// ---------------------------------------------------------------------------
+
+/**
+ * Conservative HTML sanitizer for Teams compose bodies. Strips anything
+ * that could execute in a Teams web-client context:
+ *   - <script> / <style> blocks
+ *   - event-handler attributes (`onclick=...`, etc.)
+ *   - `javascript:` URLs
+ *   - `<iframe>` / `<object>` / `<embed>` / `<link>` / `<meta>` tags
+ *
+ * This is intentionally narrower than a general sanitizer — Teams
+ * itself will also sanitize server-side, but we must never forward a
+ * payload that could round-trip back into Instinct's own UI with a
+ * live handler attached.
+ */
+export function sanitizeComposeHtml(input: string): string {
+  if (!input) return "";
+  let out = String(input);
+  // Remove dangerous blocks entirely, including their contents.
+  out = out
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
+    .replace(/<iframe\b[^>]*\/?\s*>/gi, "")
+    .replace(/<object[\s\S]*?<\/object>/gi, "")
+    .replace(/<embed\b[^>]*\/?\s*>/gi, "")
+    .replace(/<link\b[^>]*\/?\s*>/gi, "")
+    .replace(/<meta\b[^>]*\/?\s*>/gi, "");
+  // Strip event handlers: on<word>=... (quoted or unquoted value).
+  out = out.replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, "");
+  out = out.replace(/\son[a-z]+\s*=\s*'[^']*'/gi, "");
+  out = out.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, "");
+  // Neutralize javascript: / data:text/html URLs inside attributes.
+  out = out.replace(/(href|src)\s*=\s*"(\s*javascript:[^"]*)"/gi, '$1="#"');
+  out = out.replace(/(href|src)\s*=\s*'(\s*javascript:[^']*)'/gi, "$1='#'");
+  out = out.replace(/(href|src)\s*=\s*(javascript:[^\s>]+)/gi, '$1="#"');
+  return out;
+}
+
+/**
+ * Send a message to a Teams chat on behalf of the signed-in user.
+ *
+ * Contract:
+ *   - Default contentType is "text"; any incoming HTML is passed
+ *     through `sanitizeComposeHtml` before POSTing.
+ *   - 401 / 403 → `{ok:false, code:"scope_missing", scope:"Chat.ReadWrite"}`
+ *     + analytics `ms_chats.scope_missing`. Caller must surface a
+ *     re-consent prompt; never throws.
+ *   - Network / 5xx → `{ok:false, code:"error", status}` + console.warn.
+ *   - 2xx → `{ok:true, message}` with the normalized Graph response and
+ *     analytics `ms_chats.message_sent` { chat_id, length }.
+ *
+ * Membership is NOT enforced here — callers (the route handler) must
+ * verify the signed-in user is a member of `chatId` before invoking.
+ */
+export async function sendChatMessage(
+  userMsToken: string,
+  chatId: string,
+  content: string,
+  contentType: "text" | "html" = "text",
+  userId: string = "system",
+): Promise<SendChatMessageResult> {
+  const safeContent =
+    contentType === "html" ? sanitizeComposeHtml(content) : String(content || "");
+  const path = `/me/chats/${encodeURIComponent(chatId)}/messages`;
+
+  try {
+    const res = await fetch(`${GRAPH_BASE_URL}${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${userMsToken}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        body: { content: safeContent, contentType },
+      }),
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      trackEvent("ms_chats.scope_missing", userId, "system", {});
+      return { ok: false, code: "scope_missing", scope: "Chat.ReadWrite" };
+    }
+
+    if (!res.ok) {
+      let errBody = "";
+      try {
+        errBody = await res.text();
+      } catch {
+        // ignore
+      }
+      console.warn(
+        `[ms-graph-chats] sendChatMessage ${chatId} returned ${res.status}: ${errBody.slice(0, 200)}`,
+      );
+      return { ok: false, code: "error", status: res.status };
+    }
+
+    const data = (await res.json()) as RawChatMessage;
+    const message = normalizeMessage(data);
+
+    trackEvent("ms_chats.message_sent", userId, "system", {
+      chat_id: chatId,
+      length: safeContent.length,
+    });
+
+    return { ok: true, message };
+  } catch (err) {
+    console.warn(
+      `[ms-graph-chats] sendChatMessage ${chatId} fetch error:`,
+      (err as Error).message,
+    );
+    return { ok: false, code: "error", status: 0 };
+  }
 }

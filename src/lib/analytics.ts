@@ -1057,12 +1057,54 @@ export type InstinctEventType =
   //   ms_deep_link.generated       { type }
   //     — a Teams deep-link URL was generated. `type` ∈
   //       "chat" | "call" | "meet_now".
+  //   ms_chats.message_sent        { chat_id, length }
+  //     — inline compose succeeded against `/me/chats/{id}/messages`.
+  //       `length` is the final body character count POSTed (post-
+  //       sanitization). Fired from the server-side lib on Graph 201.
+  //   ms_chats.write_disabled      { user_id }
+  //     — POST /api/ms/chats/[id]/messages rejected because the
+  //       INSTINCT_TEAMS_WRITE_ENABLED env flag is off (compliance-light
+  //       client deployment). No Graph call was made.
   | "ms_chats.listed"
   | "ms_chats.messages_loaded"
   | "ms_chats.scope_missing"
+  | "ms_chats.message_sent"
+  | "ms_chats.write_disabled"
   | "ms_presence.batch_fetched"
   | "ms_presence.scope_missing"
-  | "ms_deep_link.generated";
+  | "ms_deep_link.generated"
+  // Messages inline-compose (Phase 1.5 — Teams write path).
+  //
+  // The /messages page now hosts an inline composer that POSTs to
+  // /api/ms/chats/[id]/messages instead of punting every user to the
+  // Teams desktop client via deep-link. These events let the learning
+  // loop grade inline-compose adoption, failure mode distribution, and
+  // permission-gate friction.
+  //
+  //   messages.compose_sent          { chat_id, length }
+  //     — fires on a 200 server response. `length` is the trimmed body
+  //       length so the brain can distil typical message size per user
+  //       / per chat without storing the body itself (privacy).
+  //
+  //   messages.compose_failed        { chat_id, reason }
+  //     — every non-success path. `reason` ∈ {"scope_missing",
+  //       "write_disabled","network","http_<status>"}. Distinct from
+  //       compose_sent so the failure rate is trivially computable.
+  //
+  //   messages.scope_prompt_shown    { chat_id }
+  //     — the inline "Grant Chat.ReadWrite to send from here" hint was
+  //       surfaced. Fires once per render of the prompt. High rate ⇒
+  //       too many users have Read-only scope; nudge the settings flow.
+  //
+  //   messages.write_disabled_shown  { chat_id }
+  //     — the workspace flag `inline_teams_write` is off. Fires when
+  //       the inline hint surfaces pointing users at the Reply-in-Teams
+  //       deep-link. High rate ⇒ a workspace owner disabled the flag;
+  //       lets Agent A's flag roll-out track churn.
+  | "messages.compose_sent"
+  | "messages.compose_failed"
+  | "messages.scope_prompt_shown"
+  | "messages.write_disabled_shown";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

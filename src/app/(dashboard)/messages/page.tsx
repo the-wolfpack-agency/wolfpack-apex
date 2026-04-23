@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Messages — compliance-light read-only Teams chat preview.
+ * Messages — Teams chat preview + inline compose.
  *
  * Left column: the user's 1:1 and group chats sorted by last-updated
  * desc, each row shows the other member's name (or topic for groups),
@@ -10,22 +10,36 @@
  *
  * Right column: the selected chat thread — last 30 messages rendered
  * from HTML body with an allow-list strip (no new deps; there is no
- * DOMPurify in package.json).
- *
- * Above the thread: three Teams deep-link actions — "Reply in Teams",
- * "Call", "Video call". Clicking any fires an analytics event and
- * opens the Teams client in a new tab (compliance: zero write scopes
- * consumed on our side).
+ * DOMPurify in package.json). Below the thread sits the inline
+ * composer that POSTs to /api/ms/chats/[id]/messages. Reply-in-Teams /
+ * Call / Video deep-links are tucked into a small "More actions" row
+ * below the composer — secondary, no longer primary.
  *
  * All data fetches go through fetchWithRefresh — never raw fetch —
  * per the April-16 blank-dashboard memory.
  *
- * Scope-missing: the API returns { scope_missing: true } when the
- * user hasn't granted Chat.Read; we render a card linking to /settings.
- * Empty-state: zero chats and M365 not connected → same settings CTA.
+ * Permission handling:
+ *   - Read scope missing on list → `messages-scope-missing` card.
+ *   - Read scope missing on thread → `messages-thread-scope-missing`.
+ *   - Write scope missing (Chat.ReadWrite) → inline hint under the
+ *     composer linking to /settings. Optimistic message is removed.
+ *   - Write disabled by workspace flag → inline hint pointing at the
+ *     "Reply in Teams" deep-link. Optimistic removed.
+ *   - 5xx / network → transient error toast, optimistic rolled back.
+ *
+ * Analytics fired: messages.compose_sent, messages.compose_failed,
+ * messages.scope_prompt_shown, messages.write_disabled_shown.
  */
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  useRef,
+  KeyboardEvent,
+  ChangeEvent,
+} from "react";
 import Link from "next/link";
 import { fetchWithRefresh } from "@/lib/client-auth";
 import PresenceDot from "@/components/PresenceDot";
@@ -54,6 +68,17 @@ export interface ChatMessage {
   from?: { displayName?: string };
   createdDateTime: string;
   body?: { content?: string; contentType?: "text" | "html" };
+  /**
+   * Set to "me" on optimistic messages appended by the composer before
+   * the server round-trip resolves. Allows the UI to distinguish
+   * pending local writes from server-confirmed ones.
+   */
+  role?: "me" | "other";
+  /**
+   * True while the optimistic POST is inflight. Flipped false (or the
+   * whole message is swapped for the server response) on resolution.
+   */
+  pending?: boolean;
 }
 
 interface DeepLinkPayload {
@@ -143,6 +168,28 @@ async function fetchDeepLink(
   }
 }
 
+/**
+ * Fire-and-forget analytics helper — never blocks the UI, never throws.
+ * Centralised so every compose call-site stays consistent with the
+ * event-registry comments in `src/lib/analytics.ts`.
+ */
+function fireAnalytics(
+  event:
+    | "messages.compose_sent"
+    | "messages.compose_failed"
+    | "messages.scope_prompt_shown"
+    | "messages.write_disabled_shown",
+  metadata: Record<string, string | number | boolean>,
+): void {
+  fetchWithRefresh("/api/analytics", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event, metadata }),
+  }).catch(() => undefined);
+}
+
+type ComposeHint = "scope_missing" | "write_disabled" | null;
+
 export default function MessagesPage() {
   const [chats, setChats] = useState<ChatSummary[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -159,6 +206,12 @@ export default function MessagesPage() {
   const [callDeepLink, setCallDeepLink] = useState<string | null>(null);
   const [videoDeepLink, setVideoDeepLink] = useState<string | null>(null);
 
+  // Compose state — scoped per selected chat.
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [composeHint, setComposeHint] = useState<ComposeHint>(null);
+  const [toast, setToast] = useState<{ key: number; text: string } | null>(null);
+
   // Load signed-in user email so we can identify "the other member".
   useEffect(() => {
     try {
@@ -171,6 +224,13 @@ export default function MessagesPage() {
       /* noop */
     }
   }, []);
+
+  // Auto-dismiss the transient error toast after 4s.
+  useEffect(() => {
+    if (!toast) return;
+    const h = window.setTimeout(() => setToast(null), 4000);
+    return () => window.clearTimeout(h);
+  }, [toast]);
 
   // Load chat list.
   useEffect(() => {
@@ -227,6 +287,22 @@ export default function MessagesPage() {
     [chats, selectedId],
   );
 
+  // Fire scope_prompt_shown / write_disabled_shown exactly when the
+  // corresponding hint surfaces. Keeps the per-render fire dedup'd via
+  // the (hint, chat) pair.
+  const lastHintFiredRef = useRef<{ chatId: string; hint: ComposeHint } | null>(null);
+  useEffect(() => {
+    if (!selectedChat || !composeHint) return;
+    const last = lastHintFiredRef.current;
+    if (last && last.chatId === selectedChat.id && last.hint === composeHint) return;
+    lastHintFiredRef.current = { chatId: selectedChat.id, hint: composeHint };
+    if (composeHint === "scope_missing") {
+      fireAnalytics("messages.scope_prompt_shown", { chat_id: selectedChat.id });
+    } else if (composeHint === "write_disabled") {
+      fireAnalytics("messages.write_disabled_shown", { chat_id: selectedChat.id });
+    }
+  }, [composeHint, selectedChat]);
+
   // Load thread + deep links when selection changes.
   const loadThread = useCallback(
     async (chat: ChatSummary) => {
@@ -236,6 +312,9 @@ export default function MessagesPage() {
       setChatDeepLink(null);
       setCallDeepLink(null);
       setVideoDeepLink(null);
+      setDraft("");
+      setComposeHint(null);
+      setSending(false);
 
       try {
         const res = await fetchWithRefresh(`/api/ms/chats/${encodeURIComponent(chat.id)}`, {
@@ -287,6 +366,125 @@ export default function MessagesPage() {
   function clearSelection() {
     setSelectedId(null);
     setMessages(null);
+    setDraft("");
+    setComposeHint(null);
+  }
+
+  // Compose --------------------------------------------------------------
+
+  const sendCompose = useCallback(async () => {
+    if (!selectedChat) return;
+    const trimmed = draft.trim();
+    if (trimmed.length === 0 || sending) return;
+
+    const chatId = selectedChat.id;
+    const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimistic: ChatMessage = {
+      id: optimisticId,
+      from: { displayName: "You" },
+      createdDateTime: new Date().toISOString(),
+      body: { contentType: "text", content: trimmed },
+      role: "me",
+      pending: true,
+    };
+
+    setSending(true);
+    setComposeHint(null);
+    setMessages((prev) => [...(prev ?? []), optimistic]);
+    setDraft("");
+
+    try {
+      const res = await fetchWithRefresh(
+        `/api/ms/chats/${encodeURIComponent(chatId)}/messages`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: trimmed, contentType: "text" }),
+        },
+      );
+      const data = (await res.json().catch(() => ({}))) as {
+        id?: string;
+        createdDateTime?: string;
+        body?: { content?: string; contentType?: "text" | "html" };
+        from?: { displayName?: string };
+        scope_missing?: boolean;
+        write_disabled?: boolean;
+      };
+
+      if (data?.scope_missing) {
+        setMessages((prev) => (prev ?? []).filter((m) => m.id !== optimisticId));
+        setComposeHint("scope_missing");
+        setDraft(trimmed);
+        fireAnalytics("messages.compose_failed", {
+          chat_id: chatId,
+          reason: "scope_missing",
+        });
+        return;
+      }
+      if (data?.write_disabled) {
+        setMessages((prev) => (prev ?? []).filter((m) => m.id !== optimisticId));
+        setComposeHint("write_disabled");
+        setDraft(trimmed);
+        fireAnalytics("messages.compose_failed", {
+          chat_id: chatId,
+          reason: "write_disabled",
+        });
+        return;
+      }
+      if (!res.ok) {
+        setMessages((prev) => (prev ?? []).filter((m) => m.id !== optimisticId));
+        setDraft(trimmed);
+        setToast({ key: Date.now(), text: "Couldn't send. Try again." });
+        fireAnalytics("messages.compose_failed", {
+          chat_id: chatId,
+          reason: `http_${res.status ?? 0}`,
+        });
+        return;
+      }
+
+      // Success: swap optimistic → server response.
+      const server: ChatMessage = {
+        id: data.id ?? optimisticId,
+        from: data.from ?? { displayName: "You" },
+        createdDateTime: data.createdDateTime ?? optimistic.createdDateTime,
+        body:
+          data.body && (data.body.content ?? "").length > 0
+            ? data.body
+            : { contentType: "text", content: trimmed },
+        role: "me",
+        pending: false,
+      };
+      setMessages((prev) =>
+        (prev ?? []).map((m) => (m.id === optimisticId ? server : m)),
+      );
+      fireAnalytics("messages.compose_sent", {
+        chat_id: chatId,
+        length: trimmed.length,
+      });
+    } catch {
+      setMessages((prev) => (prev ?? []).filter((m) => m.id !== optimisticId));
+      setDraft(trimmed);
+      setToast({ key: Date.now(), text: "Couldn't send. Try again." });
+      fireAnalytics("messages.compose_failed", {
+        chat_id: chatId,
+        reason: "network",
+      });
+    } finally {
+      setSending(false);
+    }
+  }, [draft, selectedChat, sending]);
+
+  function onComposeChange(e: ChangeEvent<HTMLTextAreaElement>) {
+    setDraft(e.target.value);
+    if (composeHint) setComposeHint(null);
+  }
+
+  function onComposeKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    // Cmd+Enter (mac) / Ctrl+Enter (win/linux) submits.
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      void sendCompose();
+    }
   }
 
   // Render --------------------------------------------------------------
@@ -325,7 +523,10 @@ export default function MessagesPage() {
             Open settings
           </Link>
           {listError ? (
-            <p style={{ color: "#b91c1c", marginTop: 12 }} data-testid="messages-list-error">
+            <p
+              style={{ color: "var(--wp-error, #ef4444)", marginTop: 12 }}
+              data-testid="messages-list-error"
+            >
               {listError}
             </p>
           ) : null}
@@ -335,13 +536,16 @@ export default function MessagesPage() {
   }
 
   const isMobileThreadView = selectedChat !== null;
+  const canSend = draft.trim().length > 0 && !sending;
+  const hasNoMessages =
+    selectedChat !== null && !loadingThread && !threadScopeMissing && (messages ?? []).length === 0;
 
   return (
     <div data-testid="messages-page" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div style={{ padding: "16px 24px 8px" }}>
         <h1 style={{ margin: 0, fontSize: 22 }}>Messages</h1>
         <p style={{ margin: "4px 0 0", color: "var(--wp-text-muted, #9ca3af)", fontSize: 13 }}>
-          Read-only preview of your Teams chats. Reply, call, and video call open Teams.
+          Teams chats — reply inline, or hand off to the Teams client for calls.
         </p>
       </div>
 
@@ -445,8 +649,8 @@ export default function MessagesPage() {
                           <span
                             data-testid={`chat-unread-${chat.id}`}
                             style={{
-                              background: "#2563eb",
-                              color: "#fff",
+                              background: "var(--wp-gold, #eab308)",
+                              color: "var(--wp-dark-surface, #1a1a1a)",
                               fontSize: 11,
                               fontWeight: 600,
                               borderRadius: 999,
@@ -512,6 +716,7 @@ export default function MessagesPage() {
                       padding: "4px 10px",
                       cursor: "pointer",
                       fontSize: 13,
+                      color: "var(--wp-text, #eee)",
                     }}
                   >
                     ← Back
@@ -519,35 +724,6 @@ export default function MessagesPage() {
                   <span style={{ fontWeight: 600 }}>
                     {getChatTitle(selectedChat, selfEmail)}
                   </span>
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <DeepLinkButton
-                    url={chatDeepLink ?? ""}
-                    analyticsType="reply"
-                    disabled={!chatDeepLink}
-                    testId="deep-link-reply"
-                    className="dl-btn dl-btn-primary"
-                  >
-                    Reply in Teams
-                  </DeepLinkButton>
-                  <DeepLinkButton
-                    url={callDeepLink ?? ""}
-                    analyticsType="call"
-                    disabled={!callDeepLink}
-                    testId="deep-link-call"
-                    className="dl-btn"
-                  >
-                    Call
-                  </DeepLinkButton>
-                  <DeepLinkButton
-                    url={videoDeepLink ?? ""}
-                    analyticsType="video"
-                    disabled={!videoDeepLink}
-                    testId="deep-link-video"
-                    className="dl-btn"
-                  >
-                    Video call
-                  </DeepLinkButton>
                 </div>
               </div>
 
@@ -576,23 +752,29 @@ export default function MessagesPage() {
                       Open settings
                     </Link>
                   </div>
-                ) : (messages ?? []).length === 0 ? (
-                  <div style={{ color: "var(--wp-text-muted, #9ca3af)" }}>No messages in this chat.</div>
-                ) : (
+                ) : (messages ?? []).length === 0 ? null : (
                   (messages ?? []).map((m) => {
                     const text =
                       m.body?.contentType === "text"
                         ? m.body?.content ?? ""
                         : stripHtmlToText(m.body?.content);
+                    const isMe = m.role === "me";
                     return (
                       <div
                         key={m.id}
                         data-testid={`message-${m.id}`}
+                        data-pending={m.pending ? "true" : "false"}
+                        data-role={m.role ?? "other"}
                         style={{
-                          background: "var(--wp-dark-surface2, #222)",
+                          background: isMe
+                            ? "rgba(234,179,8,0.10)"
+                            : "var(--wp-dark-surface2, #222)",
                           border: "1px solid var(--wp-dark-border, #333)",
                           borderRadius: 8,
                           padding: "8px 12px",
+                          alignSelf: isMe ? "flex-end" : "flex-start",
+                          maxWidth: "80%",
+                          opacity: m.pending ? 0.7 : 1,
                         }}
                       >
                         <div
@@ -605,9 +787,18 @@ export default function MessagesPage() {
                           }}
                         >
                           <span>{m.from?.displayName ?? "Unknown"}</span>
-                          <span>{formatRelativeTime(m.createdDateTime)}</span>
+                          <span>
+                            {m.pending ? "Sending…" : formatRelativeTime(m.createdDateTime)}
+                          </span>
                         </div>
-                        <div style={{ fontSize: 14, whiteSpace: "pre-wrap", marginTop: 4 }}>
+                        <div
+                          style={{
+                            fontSize: 14,
+                            whiteSpace: "pre-wrap",
+                            marginTop: 4,
+                            color: "var(--wp-text, #eee)",
+                          }}
+                        >
                           {text}
                         </div>
                       </div>
@@ -615,10 +806,187 @@ export default function MessagesPage() {
                   })
                 )}
               </div>
+
+              {/* Compose area + more-actions row */}
+              <div
+                data-testid="messages-compose"
+                style={{
+                  borderTop: "1px solid var(--wp-dark-border, #333)",
+                  background: "var(--wp-dark-surface2, #222)",
+                  padding: "12px 16px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                {hasNoMessages ? (
+                  <div
+                    data-testid="messages-empty-thread-hint"
+                    style={{ color: "var(--wp-text-muted, #9ca3af)", fontSize: 13 }}
+                  >
+                    No messages yet — write the first one below.
+                  </div>
+                ) : null}
+
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+                  <textarea
+                    data-testid="messages-compose-input"
+                    aria-label="Send a Teams message"
+                    value={draft}
+                    onChange={onComposeChange}
+                    onKeyDown={onComposeKeyDown}
+                    placeholder="Send a Teams message…"
+                    rows={2}
+                    style={{
+                      flex: 1,
+                      resize: "none",
+                      minHeight: 44,
+                      maxHeight: 150, // ~6 rows at 14px line-height.
+                      overflowY: "auto",
+                      padding: "8px 10px",
+                      borderRadius: 6,
+                      border: "1px solid var(--wp-dark-border, #333)",
+                      background: "var(--wp-dark-surface, #1a1a1a)",
+                      color: "var(--wp-text, #eee)",
+                      fontSize: 14,
+                      fontFamily: "inherit",
+                      lineHeight: 1.4,
+                    }}
+                  />
+                  <button
+                    type="button"
+                    data-testid="messages-compose-send"
+                    onClick={() => void sendCompose()}
+                    disabled={!canSend}
+                    aria-label="Send message"
+                    style={{
+                      padding: "8px 16px",
+                      borderRadius: 6,
+                      border: "1px solid var(--wp-gold, #eab308)",
+                      background: canSend
+                        ? "var(--wp-gold, #eab308)"
+                        : "var(--wp-dark-surface, #1a1a1a)",
+                      color: canSend
+                        ? "var(--wp-dark-surface, #1a1a1a)"
+                        : "var(--wp-text-muted, #9ca3af)",
+                      fontWeight: 600,
+                      fontSize: 13,
+                      cursor: canSend ? "pointer" : "not-allowed",
+                      opacity: canSend ? 1 : 0.6,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {sending ? "Sending…" : "Send"}
+                  </button>
+                </div>
+
+                {composeHint === "scope_missing" ? (
+                  <div
+                    data-testid="messages-compose-scope-hint"
+                    style={{
+                      fontSize: 12,
+                      color: "var(--wp-text-muted, #9ca3af)",
+                      padding: "6px 8px",
+                      borderRadius: 6,
+                      background: "var(--wp-dark-surface, #1a1a1a)",
+                      border: "1px solid var(--wp-dark-border, #333)",
+                    }}
+                  >
+                    Grant <code>Chat.ReadWrite</code> to send from here —{" "}
+                    <Link
+                      href="/settings"
+                      data-testid="messages-compose-scope-cta"
+                      style={{ color: "var(--wp-gold, #eab308)" }}
+                    >
+                      Open settings
+                    </Link>
+                  </div>
+                ) : null}
+
+                {composeHint === "write_disabled" ? (
+                  <div
+                    data-testid="messages-compose-write-disabled-hint"
+                    style={{
+                      fontSize: 12,
+                      color: "var(--wp-text-muted, #9ca3af)",
+                      padding: "6px 8px",
+                      borderRadius: 6,
+                      background: "var(--wp-dark-surface, #1a1a1a)",
+                      border: "1px solid var(--wp-dark-border, #333)",
+                    }}
+                  >
+                    Inline send is disabled for this workspace. Use{" "}
+                    <span style={{ color: "var(--wp-gold, #eab308)" }}>Reply in Teams →</span>
+                  </div>
+                ) : null}
+
+                {/* Secondary "More actions" — deep-links tucked below compose. */}
+                <div
+                  data-testid="messages-more-actions"
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 6,
+                    paddingTop: 4,
+                    borderTop: "1px dashed var(--wp-dark-border, #333)",
+                    marginTop: 4,
+                  }}
+                >
+                  <DeepLinkButton
+                    url={chatDeepLink ?? ""}
+                    analyticsType="reply"
+                    disabled={!chatDeepLink}
+                    testId="deep-link-reply"
+                    ariaLabel="Reply in Teams"
+                  >
+                    Reply in Teams
+                  </DeepLinkButton>
+                  <DeepLinkButton
+                    url={callDeepLink ?? ""}
+                    analyticsType="call"
+                    disabled={!callDeepLink}
+                    testId="deep-link-call"
+                    ariaLabel="Start audio call in Teams"
+                  >
+                    Call
+                  </DeepLinkButton>
+                  <DeepLinkButton
+                    url={videoDeepLink ?? ""}
+                    analyticsType="video"
+                    disabled={!videoDeepLink}
+                    testId="deep-link-video"
+                    ariaLabel="Start video call in Teams"
+                  >
+                    Video call
+                  </DeepLinkButton>
+                </div>
+              </div>
             </>
           )}
         </section>
       </div>
+
+      {toast ? (
+        <div
+          key={toast.key}
+          role="status"
+          data-testid="messages-toast"
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            padding: "10px 14px",
+            borderRadius: 6,
+            background: "var(--wp-error, #ef4444)",
+            color: "var(--wp-text, #fff)",
+            fontSize: 13,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+            zIndex: 90,
+          }}
+        >
+          {toast.text}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -629,14 +997,16 @@ const cardStyle: React.CSSProperties = {
   padding: 20,
   background: "var(--wp-dark-surface, #1a1a1a)",
   maxWidth: 520,
+  color: "var(--wp-text, #eee)",
 };
 
 const linkButtonStyle: React.CSSProperties = {
   display: "inline-block",
   padding: "8px 14px",
-  background: "#2563eb",
-  color: "#fff",
+  background: "var(--wp-gold, #eab308)",
+  color: "var(--wp-dark-surface, #1a1a1a)",
   borderRadius: 6,
   textDecoration: "none",
   fontSize: 14,
+  fontWeight: 600,
 };

@@ -85,4 +85,74 @@ describe("DeepLinkButton", () => {
     expect(JSON.parse(call![1].body).metadata.type).toBe("video");
     spy.mockRestore();
   });
+
+  // -------------------------------------------------------------- styling
+  // Regression guard: before April-23 the three fallback actions
+  // rendered as unstyled text. Assert the rendered <button> carries an
+  // actual border + non-empty padding so the "plain text" regression
+  // cannot sneak back in.
+
+  test("styling regression — rendered button carries border + padding", () => {
+    render(
+      <DeepLinkButton url="msteams://foo" analyticsType="reply">
+        Reply in Teams
+      </DeepLinkButton>,
+    );
+    const btn = screen.getByRole("button", { name: /reply in teams/i }) as HTMLElement;
+    const style = btn.getAttribute("style") ?? "";
+    // Border must be present (any color) — this is the "not plain text" assertion.
+    expect(style).toMatch(/border:\s*1px\s+solid/);
+    expect(style).toMatch(/border-radius/);
+    // Padding must be non-empty.
+    expect(style).toMatch(/padding:\s*[^0].*/);
+  });
+
+  test("disabled styling applies reduced opacity + not-allowed cursor", () => {
+    render(
+      <DeepLinkButton url="" analyticsType="call">
+        Call
+      </DeepLinkButton>,
+    );
+    const btn = screen.getByRole("button", { name: /call/i }) as HTMLElement;
+    const style = btn.getAttribute("style") ?? "";
+    expect(style).toMatch(/opacity:\s*0\.5/);
+    expect(style).toMatch(/cursor:\s*not-allowed/);
+  });
+
+  test("aria-label is forwarded to the rendered button", () => {
+    render(
+      <DeepLinkButton
+        url="msteams://v"
+        analyticsType="video"
+        ariaLabel="Start video call in Teams"
+      >
+        Video
+      </DeepLinkButton>,
+    );
+    const btn = screen.getByRole("button", { name: /start video call in teams/i });
+    expect(btn).toHaveAttribute("aria-label", "Start video call in Teams");
+  });
+
+  test("uses dark theme CSS variables (no hardcoded light background)", () => {
+    render(
+      <DeepLinkButton url="msteams://x" analyticsType="reply">
+        Reply
+      </DeepLinkButton>,
+    );
+    const btn = screen.getByRole("button", { name: /reply/i }) as HTMLElement;
+    const style = btn.getAttribute("style") ?? "";
+    expect(style).toMatch(/var\(--wp-(dark-surface2|dark-border|text-muted)/);
+    expect(style).not.toMatch(/background:\s*#fff/i);
+    expect(style).not.toMatch(/background:\s*#eef2ff/i);
+  });
+
+  test("default leading icon is rendered (inline SVG, no icon-lib dep)", () => {
+    const { container } = render(
+      <DeepLinkButton url="msteams://foo" analyticsType="reply">
+        Reply
+      </DeepLinkButton>,
+    );
+    const svg = container.querySelector("svg");
+    expect(svg).not.toBeNull();
+  });
 });

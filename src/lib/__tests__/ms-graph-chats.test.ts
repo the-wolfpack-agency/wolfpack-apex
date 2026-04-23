@@ -27,6 +27,8 @@ import {
   getChat,
   getChatMessages,
   getChatMessagesResult,
+  sendChatMessage,
+  sanitizeComposeHtml,
   stripHtml,
 } from "@/lib/ms-graph-chats";
 
@@ -204,6 +206,158 @@ describe("getChatMessages", () => {
     const res = await getChatMessagesResult("T", "c", 10, "u");
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.code).toBe("scope_missing");
+  });
+});
+
+describe("sanitizeComposeHtml", () => {
+  it("removes <script> blocks with contents", () => {
+    expect(sanitizeComposeHtml("hello<script>alert(1)</script> world")).toBe(
+      "hello world",
+    );
+  });
+  it("removes <style> blocks with contents", () => {
+    expect(sanitizeComposeHtml("<style>.x{}</style>hi")).toBe("hi");
+  });
+  it("strips event handlers on attributes", () => {
+    const out = sanitizeComposeHtml(`<a href="/x" onclick="steal()">click</a>`);
+    expect(out).not.toContain("onclick");
+    expect(out).toContain("href=");
+  });
+  it("strips unquoted event handlers", () => {
+    const out = sanitizeComposeHtml(`<a onmouseover=x()>y</a>`);
+    expect(out).not.toContain("onmouseover");
+  });
+  it("neutralizes javascript: URLs", () => {
+    const out = sanitizeComposeHtml(`<a href="javascript:alert(1)">x</a>`);
+    expect(out).not.toContain("javascript:");
+    expect(out).toContain(`href="#"`);
+  });
+  it("strips <iframe>", () => {
+    const out = sanitizeComposeHtml(`hello<iframe src="//evil"></iframe>!`);
+    expect(out).not.toContain("iframe");
+  });
+  it("leaves benign markup intact", () => {
+    const out = sanitizeComposeHtml("<p>Hi <b>Nick</b></p>");
+    expect(out).toBe("<p>Hi <b>Nick</b></p>");
+  });
+});
+
+describe("sendChatMessage", () => {
+  const SENT_MSG = {
+    id: "m-new",
+    from: {
+      user: { id: "u-caller", displayName: "Caller", email: "caller@x.com" },
+    },
+    body: { content: "hi", contentType: "text" },
+    createdDateTime: "2026-04-22T12:00:00Z",
+  };
+
+  it("POSTs to /me/chats/{id}/messages with the correct body + fires message_sent on 200", async () => {
+    fetchMock.mockResolvedValueOnce(okJson(SENT_MSG));
+    const res = await sendChatMessage("TOKEN", "chat-1", "hi", "text", "u1");
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.message.id).toBe("m-new");
+      expect(res.message.bodyText).toBe("hi");
+      expect(res.message.body.contentType).toBe("text");
+    }
+
+    const call = fetchMock.mock.calls[0];
+    const url = call[0] as string;
+    const init = call[1] as RequestInit;
+    expect(url).toContain("/me/chats/chat-1/messages");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer TOKEN");
+    const sentBody = JSON.parse(init.body as string);
+    expect(sentBody).toEqual({ body: { content: "hi", contentType: "text" } });
+
+    expect(mockTrack).toHaveBeenCalledWith(
+      "ms_chats.message_sent",
+      "u1",
+      "system",
+      { chat_id: "chat-1", length: 2 },
+    );
+  });
+
+  it("sanitizes HTML content BEFORE POSTing to Graph", async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJson({
+        ...SENT_MSG,
+        body: { content: "<p>hi</p>", contentType: "html" },
+      }),
+    );
+    const malicious = `<script>alert(1)</script>hi<a href="javascript:evil()">x</a>`;
+    const res = await sendChatMessage("TOKEN", "c1", malicious, "html", "u1");
+    expect(res.ok).toBe(true);
+
+    const sentBody = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    );
+    // script tag + contents stripped
+    expect(sentBody.body.content).not.toContain("<script");
+    expect(sentBody.body.content).not.toContain("alert(1)");
+    // javascript: URL neutralized
+    expect(sentBody.body.content).not.toContain("javascript:");
+    // benign content preserved
+    expect(sentBody.body.content).toContain("hi");
+    expect(sentBody.body.contentType).toBe("html");
+  });
+
+  it("returns scope_missing on 401 (no throw, no analytics for message_sent)", async () => {
+    fetchMock.mockResolvedValueOnce(errResp(401));
+    const res = await sendChatMessage("TOKEN", "c1", "hi", "text", "u1");
+    expect(res.ok).toBe(false);
+    if (!res.ok && res.code === "scope_missing") {
+      expect(res.scope).toBe("Chat.ReadWrite");
+    }
+    expect(mockTrack).toHaveBeenCalledWith(
+      "ms_chats.scope_missing",
+      "u1",
+      "system",
+      {},
+    );
+    expect(mockTrack).not.toHaveBeenCalledWith(
+      "ms_chats.message_sent",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("returns scope_missing on 403", async () => {
+    fetchMock.mockResolvedValueOnce(errResp(403));
+    const res = await sendChatMessage("TOKEN", "c1", "hi", "text", "u1");
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.code).toBe("scope_missing");
+  });
+
+  it("returns {ok:false, code:'error'} on 500 and does NOT throw", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    fetchMock.mockResolvedValueOnce(errResp(500));
+    const res = await sendChatMessage("TOKEN", "c1", "hi", "text", "u1");
+    expect(res.ok).toBe(false);
+    if (!res.ok && res.code === "error") {
+      expect(res.status).toBe(500);
+    }
+    warn.mockRestore();
+  });
+
+  it("returns {ok:false, code:'error', status:0} on network failure", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
+    const res = await sendChatMessage("TOKEN", "c1", "hi", "text", "u1");
+    expect(res.ok).toBe(false);
+    if (!res.ok && res.code === "error") {
+      expect(res.status).toBe(0);
+    }
+    warn.mockRestore();
+  });
+
+  it("defaults contentType to 'text' when not provided", async () => {
+    fetchMock.mockResolvedValueOnce(okJson(SENT_MSG));
+    await sendChatMessage("TOKEN", "c1", "plain message");
+    const sent = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(sent.body.contentType).toBe("text");
   });
 });
 
