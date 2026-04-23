@@ -7,7 +7,11 @@
  * calendar" style attribution line stays wired to the right intent.
  */
 
-import { detectRelatedPages, sourceLabelForIntent } from "../related-pages";
+import {
+  detectRelatedPages,
+  detectRelatedPagesFromExchange,
+  sourceLabelForIntent,
+} from "../related-pages";
 
 describe("detectRelatedPages", () => {
   test("returns [] for empty input", () => {
@@ -72,6 +76,45 @@ describe("detectRelatedPages", () => {
 
   test("returns [] when nothing matches the app domains", () => {
     expect(detectRelatedPages("Tell me a joke about ducks")).toEqual([]);
+  });
+});
+
+describe("detectRelatedPagesFromExchange — hit-count scoring", () => {
+  test("settings wins over calendar when the response is about Settings (regression from 2026-04-23 screenshot)", () => {
+    // User asked about MS 365. Answer mentions Settings + Integrations
+    // repeatedly, calendar only in passing ("calendar events"). The
+    // primary link MUST be Settings, not Calendar.
+    const q = "how do I connect my account to MS 365?";
+    const r =
+      "Go to Settings in the sidebar. Under Integrations, you can connect your Microsoft 365 account to get calendar events, email highlights, and meeting prep in your Morning Briefing. Click Connect Microsoft 365 and sign in. You can disconnect at any time from the same Settings page.";
+    const ordered = detectRelatedPagesFromExchange(q, r);
+    expect(ordered[0]?.domain).toBe("settings");
+    // Settings ahead of calendar regardless of where they live in the
+    // DOMAIN_MAP source order.
+    const settingsIdx = ordered.findIndex((p) => p.domain === "settings");
+    const calendarIdx = ordered.findIndex((p) => p.domain === "calendar");
+    if (settingsIdx !== -1 && calendarIdx !== -1) {
+      expect(settingsIdx).toBeLessThan(calendarIdx);
+    }
+  });
+
+  test("response hits count 3x more than question hits (so answer's subject wins)", () => {
+    // Question names Calendar once; response names Settings many
+    // times. Settings should still top the list.
+    const q = "calendar question";
+    const r = "settings settings settings settings";
+    const ordered = detectRelatedPagesFromExchange(q, r);
+    expect(ordered[0]?.domain).toBe("settings");
+  });
+
+  test("unrelated domains are excluded, only matching domains returned", () => {
+    const ordered = detectRelatedPagesFromExchange(
+      "Tell me about Calendar",
+      "Calendar shows meetings.",
+    );
+    const domains = ordered.map((p) => p.domain);
+    expect(domains).toContain("calendar");
+    expect(domains).not.toContain("settings");
   });
 });
 

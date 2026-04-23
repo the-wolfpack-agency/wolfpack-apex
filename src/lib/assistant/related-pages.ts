@@ -282,11 +282,56 @@ export function detectRelatedPages(question: string): RelatedPage[] {
 }
 
 /**
+ * Count how many times ANY of a domain's keywords appear in the text.
+ * A keyword that appears 3x contributes 3; multiple keywords for the
+ * same domain compound. Word-boundary semantics from matchesKeyword.
+ */
+function countKeywordHits(text: string, keywords: string[]): number {
+  const lower = text.toLowerCase();
+  let hits = 0;
+  for (const kw of keywords) {
+    // Count non-overlapping occurrences honoring word boundaries for
+    // single-word keywords, raw substrings for multi-word ones.
+    if (kw.includes(" ")) {
+      let start = 0;
+      while (true) {
+        const idx = lower.indexOf(kw, start);
+        if (idx === -1) break;
+        hits += 1;
+        start = idx + kw.length;
+      }
+    } else {
+      let start = 0;
+      while (true) {
+        const idx = lower.indexOf(kw, start);
+        if (idx === -1) break;
+        const left = idx === 0 ? " " : lower[idx - 1];
+        const rightIdx = idx + kw.length;
+        const right = rightIdx >= lower.length ? " " : lower[rightIdx];
+        const isWordChar = (c: string) => /[a-z0-9]/.test(c);
+        if (!isWordChar(left) && !isWordChar(right)) hits += 1;
+        start = idx + kw.length;
+      }
+    }
+  }
+  return hits;
+}
+
+/**
  * Same as detectRelatedPages, but unions the hits from the user's
- * question AND the assistant's response text. The response is the
- * richer signal: it often names the exact page the user needs ("go to
- * Settings", "open the Integrations panel"), even when the user's
- * question didn't mention the page by name.
+ * question AND the assistant's response text, ORDERED by how strongly
+ * each page is referenced overall.
+ *
+ * Order rule: by descending (response_hits * 3 + question_hits).
+ * Response hits are weighted 3x because a page named in the answer
+ * is almost always the page the user should actually navigate to,
+ * while question mentions are often passing references. Ties break
+ * by DOMAIN_MAP index (stable).
+ *
+ * Regression: previously the function used DOMAIN_MAP order directly,
+ * which meant "Calendar" (early in the map) won over "Settings" (late)
+ * for a response that mentioned Settings 6x and Calendar 1x. The
+ * footer link ended up going to the wrong page.
  */
 export function detectRelatedPagesFromExchange(
   question: string,
@@ -296,8 +341,7 @@ export function detectRelatedPagesFromExchange(
   const fromResponse = detectRelatedPages(responseText);
   const seen = new Set<string>();
   const merged: RelatedPage[] = [];
-  // Response first — when the assistant literally names the page,
-  // that's the highest-signal chip, so it leads the row.
+  // Union first (response-first only mattered for tie-break before).
   for (const p of fromResponse) {
     if (seen.has(p.href)) continue;
     merged.push(p);
@@ -308,7 +352,23 @@ export function detectRelatedPagesFromExchange(
     merged.push(p);
     seen.add(p.href);
   }
-  return merged;
+  // Sort by (response_hits * 3 + question_hits) descending.
+  // Stable so ties preserve DOMAIN_MAP order.
+  const keywordsByDomain: Record<string, string[]> = {};
+  for (const entry of DOMAIN_MAP) {
+    keywordsByDomain[entry.domain] = entry.keywords;
+  }
+  const scored = merged.map((p, origIdx) => {
+    const kws = keywordsByDomain[p.domain] ?? [];
+    const responseHits = countKeywordHits(responseText, kws);
+    const questionHits = countKeywordHits(question, kws);
+    return { p, score: responseHits * 3 + questionHits, origIdx };
+  });
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.origIdx - b.origIdx;
+  });
+  return scored.map((s) => s.p);
 }
 
 /**
