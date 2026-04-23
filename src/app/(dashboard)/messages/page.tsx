@@ -298,8 +298,8 @@ export default function MessagesPage() {
         // The MS identity from instinct_ms_tokens is authoritative for
         // "who is the caller in Graph terms" — the Instinct session
         // email can differ (e.g. login = cto@wolfpack.dev, MS email =
-        // nick@thewolfpack.agency). Overwrite selfEmail with whichever
-        // the server tells us, which is the one Graph uses.
+        // homyk@wolfpack.agency for the CTO). Overwrite selfEmail with
+        // whichever the server tells us, which is the one Graph uses.
         if (data.self_email) {
           setSelfEmail(data.self_email);
         }

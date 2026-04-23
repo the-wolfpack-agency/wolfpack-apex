@@ -74,15 +74,15 @@ describe("GET /api/ms/chats", () => {
   });
 
   it("includes self_email from the MS token so the UI can identify the caller in Graph terms", async () => {
-    // Regression: Instinct session email (e.g. cto@wolfpack.dev) often
-    // differs from the MS identity (nick@thewolfpack.agency). The UI
-    // needs the MS identity to filter "self" out of each chat's
-    // members array; otherwise every 1:1 chat renders the caller's
-    // own name as the title.
+    // Regression: Instinct session email (e.g. cto@wolfpack.dev)
+    // differs from the MS identity (e.g. homyk@wolfpack.agency — the
+    // CTO's real Graph login). The UI needs the MS identity to filter
+    // "self" out of each chat's members array; otherwise every 1:1
+    // chat renders the caller's own name as the title.
     mockGetUser.mockReturnValue({ id: "u1", email: "cto@wolfpack.dev", role: "cto" });
     mockGetValidToken.mockResolvedValue({
       accessToken: "T",
-      userEmail: "nick@thewolfpack.agency",
+      userEmail: "homyk@wolfpack.agency",
     });
     mockListChatsResult.mockResolvedValue({ ok: true, chats: [] });
 
@@ -90,7 +90,7 @@ describe("GET /api/ms/chats", () => {
     const res = await GET(mkReq("/api/ms/chats", "Bearer token"));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.self_email).toBe("nick@thewolfpack.agency");
+    expect(body.self_email).toBe("homyk@wolfpack.agency");
   });
 
   it("200 { scope_missing: true } when lib returns scope_missing", async () => {
