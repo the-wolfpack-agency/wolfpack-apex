@@ -65,6 +65,10 @@ describe("dashboard layout — floating assistant mount rules", () => {
     // Match either pathname !== "/assistant" or pathname !== '/assistant'.
     expect(layout).toMatch(/pathname\s*!==?\s*["']\/assistant["']/);
   });
+
+  it("suppresses the FAB on /messages so the Teams compose input isn't covered (mobile regression)", () => {
+    expect(layout).toMatch(/pathname\s*!==?\s*["']\/messages["']/);
+  });
 });
 
 describe("floating FAB — closed state is unobtrusive, open works, analytics fire", () => {

@@ -10,6 +10,7 @@ import {
   migrateLegacyApexKeys,
 } from "@/lib/client-auth";
 import NotificationBell from "@/components/NotificationBell";
+import TeamsUnreadBadge from "@/components/TeamsUnreadBadge";
 import InstinctChat from "@/components/InstinctChat";
 import WelcomeTooltip from "@/components/WelcomeTooltip";
 import { useAmbientRefresh } from "@/lib/hooks/useAmbientRefresh";
@@ -269,7 +270,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </button>
           <img src="/wolfpack-logo.png" alt="Wolfpack" className="h-6 w-auto" />
           <span className="text-lg font-bold" style={{ color: "var(--wp-gold)" }}>Instinct</span>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <TeamsUnreadBadge />
             <NotificationBell />
           </div>
         </header>
@@ -279,6 +281,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           className="hidden lg:flex items-center justify-end gap-2 px-6 py-2 border-b"
           style={{ borderColor: "var(--wp-dark-border)" }}
         >
+          <TeamsUnreadBadge />
           <NotificationBell />
         </header>
 
@@ -290,10 +293,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       {/* Global floating assistant — collapsible bottom-right FAB.
           Hidden on /assistant where the full-page version renders to
           avoid a double mount (two conversation state machines, two
-          fetches). The floating variant manages its own open/closed
-          state internally; closed state shows only a small circular
-          button so it never blocks page content. */}
-      {pathname !== "/assistant" && (
+          fetches). Also suppressed on /messages: that page already
+          carries a dedicated Teams compose textarea at the bottom and
+          the floating panel was covering the input on mobile, making
+          it impossible to tap. Keep this gate in sync as more compose
+          pages ship. */}
+      {pathname !== "/assistant" && pathname !== "/messages" && (
         <>
           <InstinctChat position="floating" />
           <WelcomeTooltip />
