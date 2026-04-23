@@ -597,28 +597,45 @@ export default function MessagesPage() {
                       color: "var(--wp-text, #eee)",
                     }}
                   >
-                    <div style={{ paddingTop: 4 }}>
-                      {otherUserId ? <PresenceDot userId={otherUserId} /> : null}
-                    </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div
                         style={{
                           display: "flex",
                           justifyContent: "space-between",
                           gap: 8,
-                          alignItems: "baseline",
+                          alignItems: "center",
                         }}
                       >
                         <span
                           style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 8,
                             fontWeight: 600,
                             fontSize: 14,
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                             whiteSpace: "nowrap",
+                            minWidth: 0,
+                            flex: "1 1 auto",
                           }}
                         >
-                          {title}
+                          {otherUserId ? (
+                            <span style={{ flex: "0 0 auto", display: "inline-flex" }}>
+                              <PresenceDot userId={otherUserId} />
+                            </span>
+                          ) : null}
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              minWidth: 0,
+                            }}
+                            data-testid={`chat-title-${chat.id}`}
+                          >
+                            {title}
+                          </span>
                         </span>
                         <span style={{ fontSize: 11, color: "var(--wp-text-muted, #9ca3af)", flex: "0 0 auto" }}>
                           {formatRelativeTime(chat.lastUpdatedDateTime)}
