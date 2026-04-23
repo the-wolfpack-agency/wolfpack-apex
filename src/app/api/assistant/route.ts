@@ -11,7 +11,7 @@ import {
 import { checkDocQuality, trackGateResult, type GateResult } from "@/lib/doc-quality-gate";
 import { tryToolAnswer, classifyIntent } from "@/lib/assistant/orchestrator";
 import {
-  detectRelatedPages,
+  detectRelatedPagesFromExchange,
   sourceLabelForIntent,
   type RelatedPage,
 } from "@/lib/assistant/related-pages";
@@ -150,7 +150,7 @@ export async function POST(req: NextRequest) {
         // InstinctChat renders the answer text. Previously we returned
         // `answer` which the UI silently dropped.
         const toolSourceLabel = sourceLabelForIntent(toolAnswer.intent);
-        const toolRelated = detectRelatedPages(message);
+        const toolRelated = detectRelatedPagesFromExchange(message, toolAnswer.answer);
         return NextResponse.json({
           response: toolAnswer.answer,
           answer: toolAnswer.answer,
@@ -189,10 +189,17 @@ export async function POST(req: NextRequest) {
       }));
     }
 
-    // Related pages are zero-token keyword matches against the user's
-    // question, so the UI can render chip-links regardless of which
-    // priority (knowledge/analytics/brain/AI) answered the question.
-    const relatedPages: RelatedPage[] = detectRelatedPages(message);
+    // Related-page chips are zero-token keyword matches run over BOTH
+    // the user's question AND the assistant's response — the response
+    // is the richer signal because it often literally names the page
+    // the user should navigate to (e.g. "go to Settings"), even when
+    // the question didn't. The union + dedupe is handled in
+    // detectRelatedPagesFromExchange.
+    const responseText = typeof result?.response === "string" ? result.response : "";
+    const relatedPages: RelatedPage[] = detectRelatedPagesFromExchange(
+      message,
+      responseText,
+    );
     if (relatedPages.length > 0) {
       response.relatedPages = relatedPages;
     }

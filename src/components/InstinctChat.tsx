@@ -19,6 +19,19 @@ interface AttachedFile {
   content: string; // text content or base64 for images
 }
 
+interface RelatedPage {
+  domain: string;
+  label: string;
+  href: string;
+}
+
+interface AssistantSource {
+  id: string;
+  title: string;
+  url: string;
+  type: string;
+}
+
 interface Message {
   id?: string;
   role: "user" | "assistant";
@@ -34,6 +47,10 @@ interface Message {
   cachedAtMs?: number;
   isFuzzy?: boolean;
   similarity?: number;
+  /** Chip-links into Instinct pages the answer touches. */
+  relatedPages?: RelatedPage[];
+  /** Citations for the answer. Rendered as a collapsible "Sources" block. */
+  sources?: AssistantSource[];
 }
 
 interface Conversation {
@@ -101,6 +118,7 @@ export default function InstinctChat({
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
   const [isOnline, setIsOnline] = useState<boolean>(
     typeof navigator !== "undefined" ? navigator.onLine : true,
   );
@@ -578,6 +596,8 @@ export default function InstinctChat({
         source: data.source,
         tokensUsed: data.tokensUsed,
         timestamp: new Date().toISOString(),
+        relatedPages: Array.isArray(data.relatedPages) ? data.relatedPages : undefined,
+        sources: Array.isArray(data.sources) ? data.sources : undefined,
       };
 
       setMessages((prev) => [...prev, assistantMsg]);
@@ -967,6 +987,117 @@ export default function InstinctChat({
                   <div className="text-sm whitespace-pre-wrap leading-relaxed break-words overflow-hidden">
                     {msg.content}
                   </div>
+
+                  {msg.role === "assistant" &&
+                    msg.relatedPages &&
+                    msg.relatedPages.length > 0 && (
+                      <div
+                        className="mt-2 flex flex-wrap gap-2"
+                        data-testid={`related-pages-${idx}`}
+                      >
+                        <span
+                          className="text-xs"
+                          style={{ color: "var(--wp-text-muted, #6b7280)" }}
+                        >
+                          Related pages:
+                        </span>
+                        {msg.relatedPages.map((rp) => (
+                          <a
+                            key={rp.href}
+                            href={rp.href}
+                            onClick={() => {
+                              void fetchWithRefresh("/api/analytics", {
+                                method: "POST",
+                                headers: canonicalJsonHeaders(),
+                                body: JSON.stringify({
+                                  event: "assistant.link_clicked",
+                                  metadata: { domain: rp.domain },
+                                }),
+                              }).catch(() => {});
+                            }}
+                            className="text-xs px-2 py-1 rounded-full border transition-colors"
+                            data-testid={`related-chip-${rp.domain}`}
+                            style={{
+                              background: "var(--wp-dark-surface2, #222)",
+                              borderColor: "var(--wp-dark-border, #333)",
+                              color: "var(--wp-gold, #eab308)",
+                              textDecoration: "none",
+                            }}
+                          >
+                            {rp.label}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+
+                  {msg.role === "assistant" &&
+                    msg.sources &&
+                    msg.sources.length > 0 && (
+                      <div className="mt-2" data-testid={`sources-block-${idx}`}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const key = String(idx);
+                            const nextOpen = !expandedSources[key];
+                            setExpandedSources((prev) => ({ ...prev, [key]: nextOpen }));
+                            if (nextOpen && msg.sources && msg.sources.length > 0) {
+                              void fetchWithRefresh("/api/analytics", {
+                                method: "POST",
+                                headers: canonicalJsonHeaders(),
+                                body: JSON.stringify({
+                                  event: "assistant.source_viewed",
+                                  metadata: {
+                                    source_type: msg.sources[0]?.type ?? "unknown",
+                                  },
+                                }),
+                              }).catch(() => {});
+                            }
+                          }}
+                          className="text-xs underline"
+                          style={{ color: "var(--wp-text-muted, #6b7280)" }}
+                          data-testid={`sources-toggle-${idx}`}
+                        >
+                          {expandedSources[String(idx)] ? "Hide" : "Show"}{" "}
+                          {msg.sources.length} source
+                          {msg.sources.length === 1 ? "" : "s"}
+                        </button>
+                        {expandedSources[String(idx)] && (
+                          <ul
+                            className="mt-2 space-y-1"
+                            data-testid={`sources-list-${idx}`}
+                          >
+                            {msg.sources.map((s) => (
+                              <li key={s.id} className="text-xs">
+                                <a
+                                  href={s.url}
+                                  onClick={() => {
+                                    void fetchWithRefresh("/api/analytics", {
+                                      method: "POST",
+                                      headers: canonicalJsonHeaders(),
+                                      body: JSON.stringify({
+                                        event: "assistant.source_viewed",
+                                        metadata: { source_type: s.type },
+                                      }),
+                                    }).catch(() => {});
+                                  }}
+                                  className="underline"
+                                  style={{
+                                    color: "var(--wp-gold, #eab308)",
+                                    textDecoration: "underline",
+                                  }}
+                                  data-testid={`source-link-${s.id}`}
+                                >
+                                  {s.title}
+                                </a>{" "}
+                                <span style={{ color: "var(--wp-text-muted, #6b7280)" }}>
+                                  · {s.type}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
 
                   {/* Assistant metadata */}
                   {msg.role === "assistant" && (showSource || showRating) && (

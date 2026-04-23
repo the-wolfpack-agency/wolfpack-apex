@@ -139,7 +139,64 @@ const DOMAIN_MAP: DomainEntry[] = [
     domain: "emails",
     label: "Emails",
     href: "/emails",
-    keywords: ["email", "emails", "inbox", "mail"],
+    keywords: ["email", "emails", "inbox", "mail", "mailbox"],
+  },
+  {
+    domain: "settings",
+    label: "Settings",
+    href: "/settings",
+    keywords: [
+      "settings",
+      "setting",
+      "integrations",
+      "integration",
+      "connect microsoft",
+      "connect quickbooks",
+      "disconnect",
+      "preferences",
+    ],
+  },
+  {
+    domain: "admin",
+    label: "Admin",
+    href: "/admin",
+    keywords: ["admin", "admin panel", "workspace admin"],
+  },
+  {
+    domain: "dashboard",
+    label: "Dashboard",
+    href: "/dashboard",
+    keywords: ["dashboard", "morning briefing", "briefing", "home screen"],
+  },
+  {
+    domain: "notifications",
+    label: "Notifications",
+    href: "/notifications",
+    keywords: ["notification", "notifications", "alerts", "alert"],
+  },
+  {
+    domain: "planner",
+    label: "Planner",
+    href: "/planner",
+    keywords: ["planner", "weekly plan", "week plan"],
+  },
+  {
+    domain: "reports",
+    label: "Reports",
+    href: "/reports",
+    keywords: ["report", "reports", "weekly report"],
+  },
+  {
+    domain: "analytics",
+    label: "Analytics",
+    href: "/analytics",
+    keywords: ["analytics", "metrics dashboard", "learning loop"],
+  },
+  {
+    domain: "directory",
+    label: "Directory",
+    href: "/directory",
+    keywords: ["directory", "team directory", "org chart"],
   },
 ];
 
@@ -184,6 +241,36 @@ export function detectRelatedPages(question: string): RelatedPage[] {
     }
   }
   return hits;
+}
+
+/**
+ * Same as detectRelatedPages, but unions the hits from the user's
+ * question AND the assistant's response text. The response is the
+ * richer signal: it often names the exact page the user needs ("go to
+ * Settings", "open the Integrations panel"), even when the user's
+ * question didn't mention the page by name.
+ */
+export function detectRelatedPagesFromExchange(
+  question: string,
+  responseText: string,
+): RelatedPage[] {
+  const fromQuestion = detectRelatedPages(question);
+  const fromResponse = detectRelatedPages(responseText);
+  const seen = new Set<string>();
+  const merged: RelatedPage[] = [];
+  // Response first — when the assistant literally names the page,
+  // that's the highest-signal chip, so it leads the row.
+  for (const p of fromResponse) {
+    if (seen.has(p.href)) continue;
+    merged.push(p);
+    seen.add(p.href);
+  }
+  for (const p of fromQuestion) {
+    if (seen.has(p.href)) continue;
+    merged.push(p);
+    seen.add(p.href);
+  }
+  return merged;
 }
 
 /**
