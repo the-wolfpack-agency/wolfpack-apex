@@ -365,4 +365,20 @@ describe("MessagesPage", () => {
 
     openSpy.mockRestore();
   });
+
+  test("chat rows use the dark theme CSS variables (no hardcoded light background/text)", async () => {
+    // Regression: initial build used hardcoded #fff backgrounds +
+    // inherited text colors, rendering chat names invisible (white on
+    // white) on the dark dashboard. Assert theme variables are used.
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      return ok({});
+    });
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("chat-row-chat-1"));
+    const row = screen.getByTestId("chat-row-chat-1") as HTMLElement;
+    const inline = row.getAttribute("style") ?? "";
+    expect(inline).toMatch(/color:\s*var\(--wp-text/);
+    expect(inline).not.toMatch(/background:\s*#fff/i);
+  });
 });

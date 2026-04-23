@@ -340,7 +340,7 @@ export default function MessagesPage() {
     <div data-testid="messages-page" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div style={{ padding: "16px 24px 8px" }}>
         <h1 style={{ margin: 0, fontSize: 22 }}>Messages</h1>
-        <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: 13 }}>
+        <p style={{ margin: "4px 0 0", color: "var(--wp-text-muted, #9ca3af)", fontSize: 13 }}>
           Read-only preview of your Teams chats. Reply, call, and video call open Teams.
         </p>
       </div>
@@ -352,7 +352,7 @@ export default function MessagesPage() {
           flexDirection: "row",
           flex: 1,
           minHeight: 0,
-          borderTop: "1px solid #e5e7eb",
+          borderTop: "1px solid var(--wp-dark-border, #333)",
         }}
       >
         {/* Chat list column. On mobile, hidden when a chat is selected. */}
@@ -361,9 +361,9 @@ export default function MessagesPage() {
           data-mobile-hidden={isMobileThreadView ? "true" : "false"}
           style={{
             width: 320,
-            borderRight: "1px solid #e5e7eb",
+            borderRight: "1px solid var(--wp-dark-border, #333)",
             overflowY: "auto",
-            background: "#fff",
+            background: "var(--wp-dark-surface, #1a1a1a)",
           }}
           className={isMobileThreadView ? "msg-list-hidden-mobile" : "msg-list-shown-mobile"}
         >
@@ -385,11 +385,12 @@ export default function MessagesPage() {
                       textAlign: "left",
                       padding: "12px 16px",
                       border: "none",
-                      borderBottom: "1px solid #f3f4f6",
-                      background: isSelected ? "#eef2ff" : "transparent",
+                      borderBottom: "1px solid var(--wp-dark-border, #333)",
+                      background: isSelected ? "rgba(234,179,8,0.12)" : "transparent",
                       cursor: "pointer",
                       gap: 10,
                       alignItems: "flex-start",
+                      color: "var(--wp-text, #eee)",
                     }}
                   >
                     <div style={{ paddingTop: 4 }}>
@@ -415,7 +416,7 @@ export default function MessagesPage() {
                         >
                           {title}
                         </span>
-                        <span style={{ fontSize: 11, color: "#6b7280", flex: "0 0 auto" }}>
+                        <span style={{ fontSize: 11, color: "var(--wp-text-muted, #9ca3af)", flex: "0 0 auto" }}>
                           {formatRelativeTime(chat.lastUpdatedDateTime)}
                         </span>
                       </div>
@@ -429,7 +430,7 @@ export default function MessagesPage() {
                       >
                         <span
                           style={{
-                            color: "#4b5563",
+                            color: "var(--wp-text-muted, #9ca3af)",
                             fontSize: 13,
                             overflow: "hidden",
                             textOverflow: "ellipsis",
@@ -479,7 +480,7 @@ export default function MessagesPage() {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                color: "#6b7280",
+                color: "var(--wp-text-muted, #9ca3af)",
                 padding: 24,
                 textAlign: "center",
               }}
@@ -495,8 +496,8 @@ export default function MessagesPage() {
                   justifyContent: "space-between",
                   gap: 12,
                   padding: "12px 16px",
-                  borderBottom: "1px solid #e5e7eb",
-                  background: "#fafafa",
+                  borderBottom: "1px solid var(--wp-dark-border, #333)",
+                  background: "var(--wp-dark-surface2, #222)",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -505,8 +506,8 @@ export default function MessagesPage() {
                     onClick={clearSelection}
                     data-testid="messages-back"
                     style={{
-                      border: "1px solid #d1d5db",
-                      background: "#fff",
+                      border: "1px solid var(--wp-dark-border, #333)",
+                      background: "var(--wp-dark-surface, #1a1a1a)",
                       borderRadius: 6,
                       padding: "4px 10px",
                       cursor: "pointer",
@@ -556,14 +557,14 @@ export default function MessagesPage() {
                   flex: 1,
                   overflowY: "auto",
                   padding: 16,
-                  background: "#fff",
+                  background: "var(--wp-dark-surface, #1a1a1a)",
                   display: "flex",
                   flexDirection: "column",
                   gap: 12,
                 }}
               >
                 {loadingThread ? (
-                  <div data-testid="messages-thread-loading" style={{ color: "#6b7280" }}>
+                  <div data-testid="messages-thread-loading" style={{ color: "var(--wp-text-muted, #9ca3af)" }}>
                     Loading…
                   </div>
                 ) : threadScopeMissing ? (
@@ -576,7 +577,7 @@ export default function MessagesPage() {
                     </Link>
                   </div>
                 ) : (messages ?? []).length === 0 ? (
-                  <div style={{ color: "#6b7280" }}>No messages in this chat.</div>
+                  <div style={{ color: "var(--wp-text-muted, #9ca3af)" }}>No messages in this chat.</div>
                 ) : (
                   (messages ?? []).map((m) => {
                     const text =
@@ -588,8 +589,8 @@ export default function MessagesPage() {
                         key={m.id}
                         data-testid={`message-${m.id}`}
                         style={{
-                          background: "#f9fafb",
-                          border: "1px solid #e5e7eb",
+                          background: "var(--wp-dark-surface2, #222)",
+                          border: "1px solid var(--wp-dark-border, #333)",
                           borderRadius: 8,
                           padding: "8px 12px",
                         }}
@@ -597,7 +598,7 @@ export default function MessagesPage() {
                         <div
                           style={{
                             fontSize: 12,
-                            color: "#6b7280",
+                            color: "var(--wp-text-muted, #9ca3af)",
                             display: "flex",
                             justifyContent: "space-between",
                             gap: 8,
@@ -623,10 +624,10 @@ export default function MessagesPage() {
 }
 
 const cardStyle: React.CSSProperties = {
-  border: "1px solid #e5e7eb",
+  border: "1px solid var(--wp-dark-border, #333)",
   borderRadius: 10,
   padding: 20,
-  background: "#fff",
+  background: "var(--wp-dark-surface, #1a1a1a)",
   maxWidth: 520,
 };
 
