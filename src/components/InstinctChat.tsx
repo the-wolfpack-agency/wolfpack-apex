@@ -701,10 +701,16 @@ export default function InstinctChat({
         <svg
           className="w-7 h-7"
           fill="none"
-          viewBox="0 0 24 24"
+          // The sparkle path is drawn with its center-of-mass at x=9 in
+          // a 24-wide viewBox, so rendering at 0 0 24 24 lands the
+          // icon 3 units left of the button's geometric center. We
+          // shift the viewport left by 3 so the star sits at visual
+          // center without touching the shared Heroicons path data.
+          viewBox="-3 0 24 24"
           stroke="currentColor"
           strokeWidth={1.5}
           style={{ color: "var(--wp-dark, #111)" }}
+          data-testid="floating-assistant-fab-icon"
         >
           <path
             strokeLinecap="round"

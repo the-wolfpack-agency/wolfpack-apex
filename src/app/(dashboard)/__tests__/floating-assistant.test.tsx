@@ -86,6 +86,18 @@ describe("floating FAB — closed state is unobtrusive, open works, analytics fi
     expect(screen.queryByText(/Wolfpack Assistant/i)).toBeNull();
   });
 
+  it("FAB icon is visually centered — viewBox compensates for the asymmetric star path", () => {
+    // Regression: the Heroicons sparkle path is drawn with its
+    // center-of-mass at x=9 in a 24-unit viewBox. A naive
+    // viewBox="0 0 24 24" pushes the icon 3 units left of center.
+    // The fix shifts the viewport via viewBox="-3 0 24 24" so the
+    // star sits at visual center of the 56x56 FAB. This test locks
+    // in that compensation.
+    render(<InstinctChat position="floating" />);
+    const icon = screen.getByTestId("floating-assistant-fab-icon");
+    expect(icon.getAttribute("viewBox")).toBe("-3 0 24 24");
+  });
+
   it("bubble is positioned fixed bottom-right with z-50 so it never blocks page content", () => {
     render(<InstinctChat position="floating" />);
     const fab = screen.getByTestId("floating-assistant-fab");
