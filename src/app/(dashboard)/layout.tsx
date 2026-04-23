@@ -293,12 +293,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       {/* Global floating assistant — collapsible bottom-right FAB.
           Hidden on /assistant where the full-page version renders to
           avoid a double mount (two conversation state machines, two
-          fetches). Also suppressed on /messages: that page already
-          carries a dedicated Teams compose textarea at the bottom and
-          the floating panel was covering the input on mobile, making
-          it impossible to tap. Keep this gate in sync as more compose
-          pages ship. */}
-      {pathname !== "/assistant" && pathname !== "/messages" && (
+          fetches). The floating variant manages its own open/closed
+          state internally; closed state is a small 56x56 bubble that
+          doesn't block page content. On /messages (which has its own
+          Teams compose) the panel's mobile-keyboard coverage was
+          previously a problem; that's now fixed at the panel level
+          (min(32rem, calc(100dvh - 2rem)) + onFocus scrollIntoView)
+          so the FAB can appear on every page again. */}
+      {pathname !== "/assistant" && (
         <>
           <InstinctChat position="floating" />
           <WelcomeTooltip />
