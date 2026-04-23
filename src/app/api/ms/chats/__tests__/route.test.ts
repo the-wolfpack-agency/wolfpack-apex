@@ -20,8 +20,10 @@ jest.mock("@/lib/microsoft-graph", () => ({
 const mockListChatsResult = jest.fn();
 const mockGetChat = jest.fn();
 const mockGetChatMessagesResult = jest.fn();
+const mockGetGraphMe = jest.fn();
 jest.mock("@/lib/ms-graph-chats", () => ({
   listChatsResult: (...a: any[]) => mockListChatsResult(...a),
+  getGraphMe: (...a: any[]) => mockGetGraphMe(...a),
   getChat: (...a: any[]) => mockGetChat(...a),
   getChatMessagesResult: (...a: any[]) => mockGetChatMessagesResult(...a),
 }));
@@ -34,6 +36,15 @@ function mkReq(path: string, auth?: string): any {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // Default: getGraphMe returns a benign identity. Individual tests
+  // can override. This prevents every test that happens to call
+  // GET /api/ms/chats from making a real fetch to graph.microsoft.com.
+  mockGetGraphMe.mockResolvedValue({
+    id: "me-id",
+    mail: "a@x.com",
+    userPrincipalName: "a@x.com",
+    displayName: "A",
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -84,6 +95,31 @@ describe("GET /api/ms/chats", () => {
       accessToken: "T",
       userEmail: "homyk@thewolfpack.agency",
     });
+    // Graph /me is authoritative — overrides the stored token email.
+    mockGetGraphMe.mockResolvedValue({
+      id: "homyk-id",
+      mail: "homyk@thewolfpack.agency",
+      userPrincipalName: "homyk@thewolfpack.agency",
+      displayName: "Nick Homyk",
+    });
+    mockListChatsResult.mockResolvedValue({ ok: true, chats: [] });
+
+    const { GET } = await import("@/app/api/ms/chats/route");
+    const res = await GET(mkReq("/api/ms/chats", "Bearer token"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.self_email).toBe("homyk@thewolfpack.agency");
+    expect(body.self_id).toBe("homyk-id");
+    expect(body.self_name).toBe("Nick Homyk");
+  });
+
+  it("falls back to stored token email when Graph /me fails (rare)", async () => {
+    mockGetUser.mockReturnValue({ id: "u1", email: "cto@wolfpack.dev", role: "cto" });
+    mockGetValidToken.mockResolvedValue({
+      accessToken: "T",
+      userEmail: "homyk@thewolfpack.agency",
+    });
+    mockGetGraphMe.mockResolvedValue(null);
     mockListChatsResult.mockResolvedValue({ ok: true, chats: [] });
 
     const { GET } = await import("@/app/api/ms/chats/route");

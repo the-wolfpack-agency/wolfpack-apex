@@ -293,6 +293,52 @@ export async function listChats(
   return result.ok ? result.chats : [];
 }
 
+/**
+ * Fetch the caller's canonical Graph identity. This is authoritative
+ * for "who is self" when filtering chat.members arrays — the stored
+ * instinct_ms_tokens.user_email can drift (blank after re-consent,
+ * UPN vs SMTP mismatch, or linked to a different account than the
+ * one the user actually authenticates as).
+ *
+ * Returns { id, mail, userPrincipalName, displayName } on success,
+ * null on any error (401/network/etc.). Caller falls back to the
+ * stored token email on null.
+ */
+export interface GraphMeIdentity {
+  id: string;
+  mail: string | null;
+  userPrincipalName: string | null;
+  displayName: string | null;
+}
+
+export async function getGraphMe(
+  userMsToken: string,
+): Promise<GraphMeIdentity | null> {
+  try {
+    const res = await fetch(
+      "https://graph.microsoft.com/v1.0/me?$select=id,mail,userPrincipalName,displayName",
+      { headers: { Authorization: `Bearer ${userMsToken}` } },
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      id?: unknown;
+      mail?: unknown;
+      userPrincipalName?: unknown;
+      displayName?: unknown;
+    };
+    return {
+      id: typeof data.id === "string" ? data.id : "",
+      mail: typeof data.mail === "string" ? data.mail : null,
+      userPrincipalName:
+        typeof data.userPrincipalName === "string" ? data.userPrincipalName : null,
+      displayName: typeof data.displayName === "string" ? data.displayName : null,
+    };
+  } catch (err) {
+    console.warn("[graph /me] failed:", (err as Error).message);
+    return null;
+  }
+}
+
 /** Discriminated variant of `listChats` — lets the route expose scope_missing. */
 export async function listChatsResult(
   userMsToken: string,

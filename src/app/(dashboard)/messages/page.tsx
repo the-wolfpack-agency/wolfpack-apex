@@ -128,10 +128,14 @@ export function formatRelativeTime(iso: string, now: number = Date.now()): strin
 }
 
 function isSelfMember(
-  m: { email?: string; displayName?: string },
+  m: { email?: string; displayName?: string; userId?: string },
   selfEmail?: string,
   selfName?: string,
+  selfId?: string,
 ): boolean {
+  // userId (Graph object id) is the strongest identity — stable across
+  // email/UPN changes. Match on it first.
+  if (selfId && m.userId && m.userId === selfId) return true;
   if (selfEmail && m.email && m.email.toLowerCase() === selfEmail.toLowerCase()) {
     return true;
   }
@@ -145,24 +149,18 @@ export function getChatTitle(
   chat: ChatSummary,
   selfEmail?: string,
   selfName?: string,
+  selfId?: string,
 ): string {
   if (chat.topic && chat.topic.trim().length > 0) return chat.topic;
-  const knowSelf = Boolean(selfEmail || selfName);
+  const knowSelf = Boolean(selfId || selfEmail || selfName);
   if (chat.chatType === "oneOnOne" || chat.members.length === 2) {
-    // Prefer the member that isn't us. Match on email OR display name,
-    // so the title is still correct when Graph returns members without
-    // an email (group chats, guests).
-    // When we don't yet know who "self" is (hydration gap), DON'T run
-    // the filter — it would match every member (isSelfMember false for
-    // all) and return members[0], which Graph lists caller-first. Pick
-    // the LAST member instead as a better-than-nothing guess.
     const other = knowSelf
-      ? (chat.members.find((m) => !isSelfMember(m, selfEmail, selfName)) ??
+      ? (chat.members.find((m) => !isSelfMember(m, selfEmail, selfName, selfId)) ??
           chat.members[chat.members.length - 1])
       : chat.members[chat.members.length - 1];
     return other?.displayName ?? "Unknown";
   }
-  const others = chat.members.filter((m) => !isSelfMember(m, selfEmail, selfName));
+  const others = chat.members.filter((m) => !isSelfMember(m, selfEmail, selfName, selfId));
   return (others.length > 0 ? others : chat.members)
     .map((m) => m.displayName)
     .join(", ") || "Group chat";
@@ -172,8 +170,9 @@ export function getOtherMemberUserId(
   chat: ChatSummary,
   selfEmail?: string,
   selfName?: string,
+  selfId?: string,
 ): string | null {
-  const other = chat.members.find((m) => !isSelfMember(m, selfEmail, selfName));
+  const other = chat.members.find((m) => !isSelfMember(m, selfEmail, selfName, selfId));
   return other?.userId ?? null;
 }
 
@@ -245,6 +244,21 @@ export default function MessagesPage() {
   })();
   const [selfEmail, setSelfEmail] = useState<string | undefined>(selfUserInit.email);
   const [selfName, setSelfName] = useState<string | undefined>(selfUserInit.name);
+  const [selfId, setSelfId] = useState<string | undefined>(undefined);
+
+  // Mobile responsive: at <640px widths, show either the list OR the
+  // thread, not both. Desktop (>=640px) keeps the split view.
+  const [isMobile, setIsMobile] = useState<boolean>(
+    typeof window !== "undefined" ? window.innerWidth < 640 : false,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    function onResize() {
+      setIsMobile(window.innerWidth < 640);
+    }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   // Deep links — loaded when a chat is selected.
   const [chatDeepLink, setChatDeepLink] = useState<string | null>(null);
@@ -284,6 +298,8 @@ export default function MessagesPage() {
           chats?: ChatSummary[];
           scope_missing?: boolean;
           self_email?: string;
+          self_name?: string;
+          self_id?: string;
         };
         if (res.status === 401 || data?.scope_missing) {
           setListScopeMissing(true);
@@ -300,9 +316,11 @@ export default function MessagesPage() {
         // email can differ (e.g. login = cto@wolfpack.dev, MS email =
         // homyk@thewolfpack.agency for the CTO). Overwrite selfEmail with
         // whichever the server tells us, which is the one Graph uses.
-        if (data.self_email) {
-          setSelfEmail(data.self_email);
-        }
+        // Graph /me values are authoritative. userId is the strongest
+        // signal (stable across email/UPN changes).
+        if (data.self_email) setSelfEmail(data.self_email);
+        if (data.self_name) setSelfName(data.self_name);
+        if (data.self_id) setSelfId(data.self_id);
         const sorted = (data.chats ?? []).slice().sort(
           (a, b) =>
             new Date(b.lastUpdatedDateTime).getTime() -
@@ -595,7 +613,7 @@ export default function MessagesPage() {
       <div style={{ padding: "16px 24px 8px" }}>
         <h1 style={{ margin: 0, fontSize: 22 }}>Messages</h1>
         <p style={{ margin: "4px 0 0", color: "var(--wp-text-muted, #9ca3af)", fontSize: 13 }}>
-          Teams chats — reply inline, or hand off to the Teams client for calls.
+          Your Teams chats — read, reply, and start calls without leaving Instinct.
         </p>
       </div>
 
@@ -609,22 +627,22 @@ export default function MessagesPage() {
           borderTop: "1px solid var(--wp-dark-border, #333)",
         }}
       >
-        {/* Chat list column. On mobile, hidden when a chat is selected. */}
+        {/* Chat list column. On mobile: hidden when a chat is open. */}
         <aside
           data-testid="messages-list"
-          data-mobile-hidden={isMobileThreadView ? "true" : "false"}
+          data-mobile-hidden={isMobile && isMobileThreadView ? "true" : "false"}
           style={{
-            width: 320,
-            borderRight: "1px solid var(--wp-dark-border, #333)",
+            width: isMobile ? "100%" : 320,
+            borderRight: isMobile ? "none" : "1px solid var(--wp-dark-border, #333)",
             overflowY: "auto",
             background: "var(--wp-dark-surface, #1a1a1a)",
+            display: isMobile && isMobileThreadView ? "none" : "block",
           }}
-          className={isMobileThreadView ? "msg-list-hidden-mobile" : "msg-list-shown-mobile"}
         >
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {(chats ?? []).map((chat) => {
-              const title = getChatTitle(chat, selfEmail, selfName);
-              const otherUserId = getOtherMemberUserId(chat, selfEmail, selfName);
+              const title = getChatTitle(chat, selfEmail, selfName, selfId);
+              const otherUserId = getOtherMemberUserId(chat, selfEmail, selfName, selfId);
               const isSelected = chat.id === selectedId;
               return (
                 <li key={chat.id}>
@@ -741,7 +759,12 @@ export default function MessagesPage() {
         {/* Thread column */}
         <section
           data-testid="messages-thread"
-          style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}
+          style={{
+            flex: 1,
+            display: isMobile && !isMobileThreadView ? "none" : "flex",
+            flexDirection: "column",
+            minWidth: 0,
+          }}
         >
           {!selectedChat ? (
             <div
@@ -756,7 +779,7 @@ export default function MessagesPage() {
                 textAlign: "center",
               }}
             >
-              Select a chat to preview the conversation.
+              Select a chat to read and reply.
             </div>
           ) : (
             <>
@@ -789,7 +812,7 @@ export default function MessagesPage() {
                     ← Back
                   </button>
                   <span style={{ fontWeight: 600 }}>
-                    {getChatTitle(selectedChat, selfEmail, selfName)}
+                    {getChatTitle(selectedChat, selfEmail, selfName, selfId)}
                   </span>
                 </div>
               </div>

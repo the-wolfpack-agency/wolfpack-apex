@@ -1104,7 +1104,24 @@ export type InstinctEventType =
   | "messages.compose_sent"
   | "messages.compose_failed"
   | "messages.scope_prompt_shown"
-  | "messages.write_disabled_shown";
+  | "messages.write_disabled_shown"
+  // Cross-page Teams unread badge (top-nav) — lets the learning loop
+  // size how often the badge polls, how often users engage with it,
+  // and how "fresh" Teams activity maps to user attention.
+  //
+  //   messages.unread_count_polled   { count }
+  //     — fires server-side on every GET /api/ms/chats/unread-count
+  //       that resolves (including scope_missing and not-connected
+  //       paths). `count` is the number of chats newer than the
+  //       client-provided `since` timestamp; 0 when absent or none.
+  //
+  //   messages.unread_badge_clicked  { count }
+  //     — fires client-side when the user clicks the badge to jump to
+  //       /messages. `count` is the value shown at click time so we
+  //       can distinguish "zero-badge tap" (shouldn't happen, badge is
+  //       hidden) from "dismissed N unread".
+  | "messages.unread_count_polled"
+  | "messages.unread_badge_clicked";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

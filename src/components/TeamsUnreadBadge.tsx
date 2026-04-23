@@ -1,0 +1,173 @@
+"use client";
+
+/**
+ * Cross-page Teams unread indicator for the top nav.
+ *
+ * Polls GET /api/ms/chats/unread-count?since=<last_seen> every
+ * `POLL_INTERVAL_MS` (45s) and whenever the window regains focus. The
+ * server returns `{ count, connected?, scope_missing?, total_chats }`;
+ * we only render when `count > 0`. scope_missing + connected:false are
+ * treated as silent hides so the badge never nags users who haven't
+ * linked MS yet.
+ *
+ * Click flow:
+ *   1. Fire `messages.unread_badge_clicked` analytics with the current
+ *      count so the learning loop can see real engagement.
+ *   2. Write `Date.now()` ISO string into localStorage under
+ *      `instinct.messages.last_seen` so the next poll zeroes out.
+ *   3. Navigate to /messages.
+ *
+ * Non-negotiables followed:
+ *   - All fetches via `fetchWithRefresh` (no raw fetch to an
+ *     authenticated route from a "use client" component).
+ *   - Dark-theme CSS vars only; no hard-coded colors.
+ *   - Graceful degradation: every non-ok response, throw, or
+ *     degraded shape hides the badge silently.
+ */
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { fetchWithRefresh, getInstinctToken } from "@/lib/client-auth";
+
+const POLL_INTERVAL_MS = 45_000;
+const LAST_SEEN_KEY = "instinct.messages.last_seen";
+
+interface UnreadCountResponse {
+  count?: number;
+  connected?: boolean;
+  scope_missing?: boolean;
+}
+
+function readLastSeen(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(LAST_SEEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeLastSeen(iso: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(LAST_SEEN_KEY, iso);
+  } catch {
+    /* ignore — private mode / quota */
+  }
+}
+
+/**
+ * Fire-and-forget analytics helper. Never blocks, never throws.
+ * Mirrors the shape used by messages/page.tsx.
+ */
+function fireAnalytics(
+  event: "messages.unread_badge_clicked",
+  metadata: Record<string, string | number | boolean>,
+): void {
+  fetchWithRefresh("/api/analytics", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event, metadata }),
+  }).catch(() => undefined);
+}
+
+export default function TeamsUnreadBadge() {
+  const router = useRouter();
+  const [count, setCount] = useState(0);
+  // Tracks scope_missing / connected:false so we keep the badge hidden
+  // AND stop polling aggressively. The poll still runs, but a silent
+  // hide is the whole contract per the ticket.
+  const silencedRef = useRef(false);
+
+  const fetchCount = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    if (!getInstinctToken()) return;
+
+    const since = readLastSeen();
+    const qs = since ? `?since=${encodeURIComponent(since)}` : "";
+
+    try {
+      const res = await fetchWithRefresh(`/api/ms/chats/unread-count${qs}`);
+      if (!res.ok) {
+        // 401 will already have triggered the refresh/redirect flow
+        // inside fetchWithRefresh. Any other non-200 hides the badge
+        // to avoid flashing a broken state.
+        setCount(0);
+        return;
+      }
+      const data = (await res.json()) as UnreadCountResponse;
+      if (data.scope_missing || data.connected === false) {
+        silencedRef.current = true;
+        setCount(0);
+        return;
+      }
+      silencedRef.current = false;
+      setCount(typeof data.count === "number" ? data.count : 0);
+    } catch {
+      // Network / parse error — stay stale rather than failing.
+      setCount(0);
+    }
+  }, []);
+
+  // Poll on mount + every POLL_INTERVAL_MS.
+  useEffect(() => {
+    fetchCount();
+    const id = setInterval(fetchCount, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [fetchCount]);
+
+  // Refresh on window focus so users returning from the Teams desktop
+  // client see the zero-out immediately.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    function onFocus() {
+      fetchCount();
+    }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [fetchCount]);
+
+  function handleClick(ev: React.MouseEvent<HTMLAnchorElement>) {
+    ev.preventDefault();
+    const now = new Date().toISOString();
+    fireAnalytics("messages.unread_badge_clicked", { count });
+    writeLastSeen(now);
+    setCount(0);
+    router.push("/messages");
+  }
+
+  if (count <= 0 || silencedRef.current) return null;
+
+  return (
+    <a
+      href="/messages"
+      data-testid="teams-unread-badge"
+      aria-label={`Teams: ${count} new message${count === 1 ? "" : "s"}`}
+      onClick={handleClick}
+      className="relative inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold transition-colors"
+      style={{
+        color: "var(--wp-dark)",
+        background: "var(--wp-gold)",
+        border: "1px solid var(--wp-dark-border)",
+      }}
+    >
+      <svg
+        className="w-4 h-4"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2}
+        aria-hidden
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+        />
+      </svg>
+      <span data-testid="teams-unread-badge-count">
+        {count > 99 ? "99+" : count}
+      </span>
+    </a>
+  );
+}

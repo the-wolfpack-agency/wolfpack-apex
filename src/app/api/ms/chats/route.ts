@@ -20,7 +20,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { getValidToken } from "@/lib/microsoft-graph";
-import { listChatsResult } from "@/lib/ms-graph-chats";
+import { listChatsResult, getGraphMe } from "@/lib/ms-graph-chats";
 
 export async function GET(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
@@ -38,11 +38,26 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ chats: [], connected: false });
     }
 
-    const result = await listChatsResult(token.accessToken, limit, user.id);
+    // Pull self identity + chat list in parallel. The /me call is the
+    // authoritative source — instinct_ms_tokens.user_email can drift.
+    const [me, result] = await Promise.all([
+      getGraphMe(token.accessToken),
+      listChatsResult(token.accessToken, limit, user.id),
+    ]);
     if (!result.ok) {
       return NextResponse.json({ chats: [], scope_missing: true });
     }
-    return NextResponse.json({ chats: result.chats, self_email: token.userEmail });
+    // Prefer Graph /me values; fall back to stored token email if /me
+    // failed (rare — only when the scope granted doesn't cover /me).
+    const selfEmail = me?.mail || me?.userPrincipalName || token.userEmail || "";
+    const selfName = me?.displayName || "";
+    const selfId = me?.id || "";
+    return NextResponse.json({
+      chats: result.chats,
+      self_email: selfEmail,
+      self_name: selfName,
+      self_id: selfId,
+    });
   } catch (err) {
     console.error("[api/ms/chats] error:", (err as Error).message);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
