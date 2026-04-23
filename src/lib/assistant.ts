@@ -17,12 +17,15 @@ import { searchMeetingTranscripts } from "@/lib/plaud";
 
 import { trackEvent } from "@/lib/analytics";
 import { safeQuery } from "@/lib/db";
+import { matchPageFacts } from "@/lib/assistant/page-facts-matcher";
+import { formatPageFactsAnswer } from "@/lib/assistant/page-facts";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export type AssistantSource =
+  | "page_facts"
   | "knowledge_cache"
   | "analytics"
   | "meeting_transcripts"
@@ -286,6 +289,46 @@ export async function chat(
     module: "assistant",
     topics: topics.join(","),
   });
+
+  // --- Priority 0: Page facts (zero-token, static page descriptions) ---
+  // Users constantly ask "what is the Calendar page?" or "how do I use
+  // Goals?". Historically these fell into the Knowledge Base priority
+  // and matched an unrelated entry. The page-facts registry returns a
+  // rich description of the actual Instinct page — plus an embedded
+  // markdown link so detectRelatedPagesFromExchange picks up the route
+  // and renders the chip naturally.
+  const pageFactsMatch = matchPageFacts(message);
+  if (pageFactsMatch && pageFactsMatch.confidence >= 0.6) {
+    const answer = formatPageFactsAnswer(pageFactsMatch.page);
+    trackEvent("assistant.page_facts_hit", userId, userRole, {
+      module: "assistant",
+      domain: pageFactsMatch.page.domain,
+      confidence: pageFactsMatch.confidence,
+    });
+    trackEvent("knowledge.answer_found", userId, userRole, {
+      source: "page_facts",
+      tokens_used: 0,
+      module: "assistant",
+    });
+    trackEvent("system.ai_call_skipped", userId, userRole, {
+      reason: "page_facts_hit",
+      module: "assistant",
+    });
+
+    const msgId = await dbSaveMessage(convId, "assistant", answer, "page_facts", 0, {
+      domain: pageFactsMatch.page.domain,
+      confidence: pageFactsMatch.confidence,
+    });
+    await dbUpdateConversationStats(convId, 0);
+
+    return {
+      response: answer,
+      source: "page_facts",
+      tokensUsed: 0,
+      conversationId: convId,
+      messageId: msgId,
+    };
+  }
 
   // --- Priority 1: Knowledge base ---
   const knowledgeResult = await tryKnowledgeBase(message);

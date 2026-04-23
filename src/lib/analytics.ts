@@ -310,6 +310,13 @@ export type InstinctEventType =
   //       {"knowledge","brain","tool","meeting","analytics"}.
   | "assistant.link_clicked"
   | "assistant.source_viewed"
+  // Zero-token page-facts priority hit. Fires when the assistant answers
+  // a "what is / how do I use <page>" question directly from the static
+  // page-facts registry, before the knowledge base or RAG priorities
+  // run. Metadata: { domain, confidence }. Lets the learning loop grade
+  // which pages the team actually asks about and whether the bare-name
+  // and verb-phrase heuristics fire with high confidence.
+  | "assistant.page_facts_hit"
   // QuickBooks
   | "quickbooks.api_called"
   | "quickbooks.connected"

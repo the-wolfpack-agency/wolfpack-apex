@@ -201,6 +201,32 @@ const DOMAIN_MAP: DomainEntry[] = [
 ];
 
 /**
+ * Read-only view of the domain → keywords mapping. Exposed so sibling
+ * modules (page-facts matcher, documentation generators) can reuse the
+ * exact same keyword set without duplicating the source of truth.
+ * Returns a NEW object each call so callers can't mutate DOMAIN_MAP.
+ */
+export function getDomainKeywords(): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const entry of DOMAIN_MAP) {
+    out[entry.domain] = [...entry.keywords];
+  }
+  return out;
+}
+
+/**
+ * Lookup of (domain → route + label) derived from DOMAIN_MAP. Same
+ * deduping guarantee as the main map: one entry per domain key.
+ */
+export function getDomainRoutes(): Record<string, { href: string; label: string }> {
+  const out: Record<string, { href: string; label: string }> = {};
+  for (const entry of DOMAIN_MAP) {
+    out[entry.domain] = { href: entry.href, label: entry.label };
+  }
+  return out;
+}
+
+/**
  * True when `keyword` appears as a whole-token fragment inside `text`.
  * Both are assumed lowercased. "task" matches "task list" but NOT
  * "tasksquad"; multi-word keywords match straight substrings so

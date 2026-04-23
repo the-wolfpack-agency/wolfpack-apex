@@ -204,6 +204,24 @@ export async function POST(req: NextRequest) {
       response.relatedPages = relatedPages;
     }
 
+    // If the answer contains embedded markdown links like "(/goals)" but
+    // chat() didn't attach any sources (page-facts + zero-token paths),
+    // synthesize source rows from the detected relatedPages. That way
+    // the UI's Sources block always renders a citation for an answer
+    // that told the user "go to X" — even when no RAG/KB row was cited.
+    const hasMarkdownLink = /\(\/[a-z][a-z0-9/-]*\)/i.test(responseText);
+    const existingSources = Array.isArray(response.sources)
+      ? (response.sources as unknown[])
+      : [];
+    if (hasMarkdownLink && existingSources.length === 0 && relatedPages.length > 0) {
+      response.sources = relatedPages.map((p) => ({
+        id: `page:${p.domain}`,
+        title: p.label,
+        url: p.href,
+        type: "page",
+      }));
+    }
+
     return NextResponse.json(response);
   } catch (err) {
     return NextResponse.json(
