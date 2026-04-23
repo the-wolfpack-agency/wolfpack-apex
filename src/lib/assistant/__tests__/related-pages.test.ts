@@ -1,0 +1,97 @@
+/**
+ * related-pages — keyword → Instinct route map.
+ *
+ * These tests pin the contract the /api/assistant route ships to the
+ * client: every domain the user's question mentions surfaces as a
+ * chip-link, deduped by href, and the "From Microsoft 365 · your
+ * calendar" style attribution line stays wired to the right intent.
+ */
+
+import { detectRelatedPages, sourceLabelForIntent } from "../related-pages";
+
+describe("detectRelatedPages", () => {
+  test("returns [] for empty input", () => {
+    expect(detectRelatedPages("")).toEqual([]);
+    expect(detectRelatedPages("   ")).toEqual([]);
+  });
+
+  test("detects calendar + meetings together", () => {
+    const hits = detectRelatedPages("Do I have any meetings on my calendar tomorrow?");
+    const domains = hits.map((h) => h.domain);
+    expect(domains).toContain("calendar");
+    expect(domains).toContain("meetings");
+  });
+
+  test("detects contacts/people from either phrasing", () => {
+    expect(detectRelatedPages("show me my contacts").map((h) => h.domain)).toContain("people");
+    expect(detectRelatedPages("who are the people on my team").map((h) => h.domain)).toContain(
+      "people",
+    );
+  });
+
+  test("detects OKRs + goals as the same /goals chip", () => {
+    const hits = detectRelatedPages("What is the status of our OKRs and goals?");
+    const goalsHits = hits.filter((h) => h.domain === "goals");
+    // Dedup by href: at most one /goals chip regardless of how many
+    // keywords matched.
+    expect(goalsHits.length).toBe(1);
+    expect(goalsHits[0].href).toBe("/goals");
+  });
+
+  test("detects HR/employees domain", () => {
+    const hits = detectRelatedPages("Which employees have benefits enrollment pending?");
+    const domains = hits.map((h) => h.domain);
+    expect(domains).toContain("hr");
+  });
+
+  test("detects financials + features + clients in one query", () => {
+    const hits = detectRelatedPages(
+      "What revenue did we book from clients who filed feature requests?",
+    );
+    const domains = hits.map((h) => h.domain);
+    expect(domains).toContain("financials");
+    expect(domains).toContain("clients");
+    expect(domains).toContain("features");
+  });
+
+  test("word-boundary: 'emailserver' does NOT trigger emails", () => {
+    const hits = detectRelatedPages("emailserver configuration for the team");
+    const domains = hits.map((h) => h.domain);
+    expect(domains).not.toContain("emails");
+  });
+
+  test("returns chips with absolute href + non-empty label", () => {
+    const hits = detectRelatedPages("check my calendar today");
+    expect(hits.length).toBeGreaterThan(0);
+    for (const h of hits) {
+      expect(h.href.startsWith("/")).toBe(true);
+      expect(h.label.length).toBeGreaterThan(0);
+      expect(h.domain.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("returns [] when nothing matches the app domains", () => {
+    expect(detectRelatedPages("Tell me a joke about ducks")).toEqual([]);
+  });
+});
+
+describe("sourceLabelForIntent", () => {
+  test("calendar intents attribute to Microsoft 365", () => {
+    expect(sourceLabelForIntent("calendar_availability")).toContain("Microsoft 365");
+    expect(sourceLabelForIntent("calendar_schedule")).toContain("Microsoft 365");
+  });
+
+  test("mail search attributes to mailbox", () => {
+    expect(sourceLabelForIntent("mail_search")).toContain("mailbox");
+  });
+
+  test("goals / financials / brain stay inside Instinct", () => {
+    expect(sourceLabelForIntent("goals_lookup")).toContain("Instinct");
+    expect(sourceLabelForIntent("financials_metric")).toContain("Instinct");
+    expect(sourceLabelForIntent("brain_history")).toContain("Brain");
+  });
+
+  test("unknown intent falls back to Instinct", () => {
+    expect(sourceLabelForIntent("totally-not-a-real-intent")).toBe("From Instinct");
+  });
+});

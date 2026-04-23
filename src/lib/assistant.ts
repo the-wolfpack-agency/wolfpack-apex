@@ -41,12 +41,27 @@ export interface AssistantMessage {
   metadata?: Record<string, unknown>;
 }
 
+export interface AssistantSourceRef {
+  /** Stable identifier for the underlying record (knowledge row id, brain
+   *  chunk id, transcript id, …). Never a free-text blob. */
+  id: string;
+  /** Human-readable title — rendered on the chip. */
+  title: string;
+  /** Best-effort absolute route users can click to see the source. */
+  url: string;
+  /** Categorical bucket: "knowledge" | "brain" | "meeting" | "analytics" | "ai_cache". */
+  type: string;
+}
+
 export interface AssistantResponse {
   response: string;
   source: AssistantSource;
   tokensUsed: number;
   conversationId: string;
   messageId?: string;
+  /** Source attributions surfaced to the UI. Empty array when the answer
+   *  is generic (fallback / pure AI / etc.). */
+  sources?: AssistantSourceRef[];
 }
 
 export interface ConversationSummary {
@@ -285,15 +300,23 @@ export async function chat(
       module: "assistant",
     });
 
-    const msgId = await dbSaveMessage(convId, "assistant", knowledgeResult, "knowledge_cache", 0);
+    const msgId = await dbSaveMessage(
+      convId,
+      "assistant",
+      knowledgeResult.answer,
+      "knowledge_cache",
+      0,
+      { source_ids: knowledgeResult.sources.map((s) => s.id) },
+    );
     await dbUpdateConversationStats(convId, 0);
 
     return {
-      response: knowledgeResult,
+      response: knowledgeResult.answer,
       source: "knowledge_cache",
       tokensUsed: 0,
       conversationId: convId,
       messageId: msgId,
+      sources: knowledgeResult.sources,
     };
   }
 
@@ -375,6 +398,7 @@ export async function chat(
       tokensUsed: brainResult.tokensUsed,
       conversationId: convId,
       messageId: msgId,
+      sources: brainResult.sources,
     };
   }
 
@@ -659,18 +683,31 @@ export async function getConversationHistory(
 // Priority 1: Knowledge base search
 // ---------------------------------------------------------------------------
 
-async function tryKnowledgeBase(message: string): Promise<string | null> {
+interface KnowledgeMatch {
+  answer: string;
+  sources: AssistantSourceRef[];
+}
+
+async function tryKnowledgeBase(message: string): Promise<KnowledgeMatch | null> {
   try {
     const results = await searchKnowledge(message, 5);
     // Unrated entries (rating === null) are KEPT — they represent fresh
     // knowledge the team just added. Only entries explicitly graded low
     // (rating <= 2) are skipped. Walk the top matches so a slightly
     // different phrasing still lands on a good entry.
-    for (const hit of results) {
-      if (hit.rating !== null && hit.rating <= 2) continue;
-      return hit.answer;
-    }
-    return null;
+    const usable = results.filter((r) => r.rating === null || r.rating > 2);
+    if (usable.length === 0) return null;
+    const top = usable[0];
+    // Surface up to 3 sources so the user can click through to the
+    // underlying KB entries. Each source carries a stable id + a
+    // deep link into /knowledge so the UI chip is clickable.
+    const sources: AssistantSourceRef[] = usable.slice(0, 3).map((hit) => ({
+      id: hit.id,
+      title: hit.question,
+      url: `/knowledge?entry=${encodeURIComponent(hit.id)}`,
+      type: "knowledge",
+    }));
+    return { answer: top.answer, sources };
   } catch {
     return null;
   }
@@ -779,6 +816,7 @@ interface BrainHitAnswer {
   answer: string;
   tokensUsed: number;
   queryLogId: number;
+  sources: AssistantSourceRef[];
 }
 
 /**
@@ -844,10 +882,26 @@ async function tryBrain(
       (allMatchedLabels.size > 0 ? ` · filtered: ${[...allMatchedLabels].join(",")}` : "") +
       "*";
     lines.push(sourcesLine);
+    // Dedupe source entries by document_id so the UI doesn't render 3
+    // chips that all point at the same doc when multiple chunks hit.
+    const srcSeen = new Set<string>();
+    const sources: AssistantSourceRef[] = [];
+    for (const h of strong.slice(0, 5)) {
+      const docId = String(h.document_id);
+      if (srcSeen.has(docId)) continue;
+      srcSeen.add(docId);
+      sources.push({
+        id: docId,
+        title: h.document_filename,
+        url: `/brain?doc=${encodeURIComponent(docId)}`,
+        type: "brain",
+      });
+    }
     return {
       answer: lines.join("\n"),
       tokensUsed: result.tokens_used,
       queryLogId: result.query_log_id,
+      sources,
     };
   } catch {
     return null;

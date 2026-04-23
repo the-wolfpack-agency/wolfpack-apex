@@ -172,6 +172,11 @@ export type InstinctEventType =
   | "goal.commitment_queued_offline"
   | "goal.north_star_ui_updated"
   | "goal.digest_sent"
+  // Team fanout when an admin (ceo|cto) creates/edits a company goal.
+  // Feeds the learning loop with { goal_type, action, recipient_count,
+  // actor_role } so we can see which admins drive the most team
+  // attention + whether certain goal types get ignored.
+  | "goals.team_notified"
   // Polymorphic entity tag/link layer (migration 078).
   | "entity.tag_applied"
   | "entity.tag_removed"
@@ -256,6 +261,12 @@ export type InstinctEventType =
   // from offline-queue itself — no new replay-side events needed.
   | "discussion.reply_queued_offline"
   | "discussion.thread_queued_offline"
+  // Fires when the thread creator opts into "Notify all Wolfpack team members"
+  // and the server finishes fanning notifications out to instinct_team_members.
+  // Metadata: { discussion_id, recipient_count }. Skipped rows (dedup, errors)
+  // are not subtracted; the count is the number of active team members the
+  // fanout was attempted against.
+  | "discussions.notify_all_fanout"
   // Prototypes
   | "prototype.created"
   | "prototype.deployed"
@@ -287,6 +298,18 @@ export type InstinctEventType =
   | "assistant.tool_invoked"
   | "assistant.fallback_to_rag"
   | "assistant.fallback_to_ai"
+  // Related-pages chip + source chip click-through. Every response now
+  // ships with `relatedPages[]` (domain → route map) and `sources[]`
+  // (knowledge / brain / tool attributions). The two events below let
+  // the learning loop grade which chips actually drive navigation vs.
+  // which are cosmetic.
+  //   assistant.link_clicked:   { domain }       — user clicked a
+  //       "Related pages" chip that deep-links into /calendar etc.
+  //   assistant.source_viewed:  { source_type }  — user expanded or
+  //       clicked a source. `source_type` ∈
+  //       {"knowledge","brain","tool","meeting","analytics"}.
+  | "assistant.link_clicked"
+  | "assistant.source_viewed"
   // QuickBooks
   | "quickbooks.api_called"
   | "quickbooks.connected"

@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { captureNorthStar } from "@/lib/goals-north-star";
 import { trackEvent } from "@/lib/analytics";
+import { fanoutToTeam, actorLabel } from "@/lib/notifications/team-fanout";
 
 export async function POST(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
@@ -49,6 +50,21 @@ export async function POST(req: NextRequest) {
 
   trackEvent("goal.north_star_ui_updated", user.id, user.role, {
     label: snapshot.label,
+  });
+
+  await fanoutToTeam({
+    actor: user,
+    title: `North star updated: ${snapshot.label}`,
+    body: `${actorLabel(user)} (${user.role.toUpperCase()}) captured a new north-star snapshot for ${snapshot.label}: ${snapshot.value}${snapshot.unit ? " " + snapshot.unit : ""}`,
+    actionUrl: "/goals",
+    actionLabel: "View goals",
+    category: "goals",
+    source: "instinct.goals.north_star",
+    sourceId: String(snapshot.id ?? snapshot.label),
+    metadata: { goal_type: "north_star", action: "created", label: snapshot.label },
+    analyticsEvent: "goals.team_notified",
+    analyticsPayload: { goal_type: "north_star", action: "created", label: snapshot.label },
+    excludeActor: true,
   });
 
   return NextResponse.json({ snapshot }, { status: 201 });

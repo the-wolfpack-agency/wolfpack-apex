@@ -208,7 +208,12 @@ export default function FeaturesPage() {
         method: "DELETE",
         headers: authHeaders(),
       });
-      if (res.status === 200) {
+      // Root cause of the "Failed to delete appears even though it worked"
+      // false-negative: this branch previously checked `res.status === 200`,
+      // which fails the moment the API returns 204 No Content (common for
+      // DELETE) or goes through any proxy that rewrites the success code.
+      // `res.ok` covers 200..299 uniformly — no body parsing required.
+      if (res.ok) {
         setSubmitMsg("Feature request submitted!"); // reuse positive banner copy
       } else if (res.status === 403) {
         setSubmitMsg("Only the submitter or an admin can delete this request.");

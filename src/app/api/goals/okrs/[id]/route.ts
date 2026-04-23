@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { archiveOKR, updateOKR } from "@/lib/goals";
 import { trackEvent } from "@/lib/analytics";
+import { fanoutToTeam, actorLabel } from "@/lib/notifications/team-fanout";
 
 export async function DELETE(
   req: NextRequest,
@@ -65,6 +66,21 @@ export async function PATCH(
 
   const okr = await updateOKR(id, patch, user.id);
   if (!okr) return NextResponse.json({ error: "okr_not_found" }, { status: 404 });
+
+  await fanoutToTeam({
+    actor: user,
+    title: `OKR updated: ${okr.objective}`,
+    body: `${actorLabel(user)} (${user.role.toUpperCase()}) updated the OKR for ${okr.quarter}: ${okr.objective}`,
+    actionUrl: "/goals",
+    actionLabel: "View goals",
+    category: "goals",
+    source: "instinct.goals",
+    sourceId: okr.id,
+    metadata: { goal_type: "okr", action: "updated", okr_id: okr.id },
+    analyticsEvent: "goals.team_notified",
+    analyticsPayload: { goal_type: "okr", action: "updated", okr_id: okr.id },
+    excludeActor: true,
+  });
 
   return NextResponse.json({ okr });
 }

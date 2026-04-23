@@ -10,6 +10,11 @@ import {
 } from "@/lib/assistant";
 import { checkDocQuality, trackGateResult, type GateResult } from "@/lib/doc-quality-gate";
 import { tryToolAnswer, classifyIntent } from "@/lib/assistant/orchestrator";
+import {
+  detectRelatedPages,
+  sourceLabelForIntent,
+  type RelatedPage,
+} from "@/lib/assistant/related-pages";
 
 /**
  * POST /api/assistant -- Send a message, rate, or archive.
@@ -144,6 +149,8 @@ export async function POST(req: NextRequest) {
         // Align with the RAG path shape (`response` + `tokensUsed`) so
         // InstinctChat renders the answer text. Previously we returned
         // `answer` which the UI silently dropped.
+        const toolSourceLabel = sourceLabelForIntent(toolAnswer.intent);
+        const toolRelated = detectRelatedPages(message);
         return NextResponse.json({
           response: toolAnswer.answer,
           answer: toolAnswer.answer,
@@ -152,6 +159,15 @@ export async function POST(req: NextRequest) {
           data: toolAnswer.data,
           tokensUsed: 0,
           conversationId: conversationId ?? null,
+          sources: [
+            {
+              id: `tool:${toolAnswer.intent}`,
+              title: toolSourceLabel,
+              url: toolRelated[0]?.href ?? "/",
+              type: "tool",
+            },
+          ],
+          relatedPages: toolRelated,
         });
       }
       // Tool returned null — record the fallback so the learning loop
@@ -171,6 +187,14 @@ export async function POST(req: NextRequest) {
         verdict: r.gate.verdict,
         flags: r.gate.flags,
       }));
+    }
+
+    // Related pages are zero-token keyword matches against the user's
+    // question, so the UI can render chip-links regardless of which
+    // priority (knowledge/analytics/brain/AI) answered the question.
+    const relatedPages: RelatedPage[] = detectRelatedPages(message);
+    if (relatedPages.length > 0) {
+      response.relatedPages = relatedPages;
     }
 
     return NextResponse.json(response);

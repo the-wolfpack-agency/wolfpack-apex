@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { createOKR, type KRInput } from "@/lib/goals";
 import { trackEvent } from "@/lib/analytics";
+import { fanoutToTeam, actorLabel } from "@/lib/notifications/team-fanout";
 
 const QUARTER_RE = /^[0-9]{4}-Q[1-4]$/;
 
@@ -97,6 +98,21 @@ export async function POST(req: NextRequest) {
   trackEvent("goal.okr_created_ui", user.id, user.role, {
     quarter: okr.quarter,
     kr_count: okr.krs.length,
+  });
+
+  await fanoutToTeam({
+    actor: user,
+    title: `New OKR: ${okr.objective}`,
+    body: `${actorLabel(user)} (${user.role.toUpperCase()}) added a new OKR for ${okr.quarter}: ${okr.objective}`,
+    actionUrl: "/goals",
+    actionLabel: "View goals",
+    category: "goals",
+    source: "instinct.goals",
+    sourceId: okr.id,
+    metadata: { goal_type: "okr", action: "created", okr_id: okr.id },
+    analyticsEvent: "goals.team_notified",
+    analyticsPayload: { goal_type: "okr", action: "created", okr_id: okr.id },
+    excludeActor: true,
   });
 
   return NextResponse.json({ okr }, { status: 201 });

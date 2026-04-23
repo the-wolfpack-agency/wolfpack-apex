@@ -122,20 +122,22 @@ test("Clicking thread Edit reveals an edit form pre-filled with values", async (
 
 test("Thread delete confirm-accept calls DELETE /api/discussions/[id]", async () => {
   await renderPageAndOpenThread();
-  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
-  try {
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("thread-delete-btn"));
-    });
-    await waitFor(() => {
-      const call = mockFetchWithRefresh.mock.calls.find(
-        (c) => c[1]?.method === "DELETE" && c[0] === "/api/discussions/d-1",
-      );
-      expect(call).toBeDefined();
-    });
-  } finally {
-    confirmSpy.mockRestore();
-  }
+  await act(async () => {
+    fireEvent.click(screen.getByTestId("thread-delete-btn"));
+  });
+  // Custom ConfirmDialog replaces window.confirm — click the primary button.
+  await waitFor(() => {
+    expect(screen.getByTestId("confirm-dialog")).toBeInTheDocument();
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+  });
+  await waitFor(() => {
+    const call = mockFetchWithRefresh.mock.calls.find(
+      (c) => c[1]?.method === "DELETE" && c[0] === "/api/discussions/d-1",
+    );
+    expect(call).toBeDefined();
+  });
 });
 
 test("Reply edit button reveals a form; save fires PUT to comments/[commentId]", async () => {
@@ -166,20 +168,21 @@ test("Reply edit button reveals a form; save fires PUT to comments/[commentId]",
 
 test("Reply delete confirm-accept fires DELETE to comments/[commentId]", async () => {
   await renderPageAndOpenThread();
-  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
-  try {
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("reply-delete-btn-r-1"));
-    });
-    await waitFor(() => {
-      const call = mockFetchWithRefresh.mock.calls.find(
-        (c) =>
-          c[1]?.method === "DELETE" &&
-          c[0] === "/api/discussions/d-1/comments/r-1",
-      );
-      expect(call).toBeDefined();
-    });
-  } finally {
-    confirmSpy.mockRestore();
-  }
+  await act(async () => {
+    fireEvent.click(screen.getByTestId("reply-delete-btn-r-1"));
+  });
+  await waitFor(() => {
+    expect(screen.getByTestId("confirm-dialog")).toBeInTheDocument();
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+  });
+  await waitFor(() => {
+    const call = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        c[1]?.method === "DELETE" &&
+        c[0] === "/api/discussions/d-1/comments/r-1",
+    );
+    expect(call).toBeDefined();
+  });
 });

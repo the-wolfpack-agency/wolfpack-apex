@@ -6,6 +6,7 @@ import {
   sendDiscussionThreadOffline,
   sendDiscussionReplyOffline,
 } from "@/lib/discussions-offline";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 interface Discussion {
   id: string;
@@ -56,8 +57,29 @@ export default function DiscussionsPage() {
   const [newTitle, setNewTitle] = useState("");
   const [newCategory, setNewCategory] = useState("general");
   const [newContent, setNewContent] = useState("");
+  const [notifyAll, setNotifyAll] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createMsg, setCreateMsg] = useState("");
+
+  // Confirm-delete modal. `kind=thread` targets the currently open thread,
+  // `kind=reply` stores the reply id so the handler knows which row to delete.
+  // Keeping state as a single object + null keeps only one dialog open at a
+  // time and avoids the "two confirmations" bug we've hit on other pages.
+  const [confirmTarget, setConfirmTarget] = useState<
+    | { kind: "thread" }
+    | { kind: "reply"; replyId: string }
+    | null
+  >(null);
+
+  // Transient toast for optimistic-delete rollback. `key` is just a
+  // monotonic tag so repeated same-text toasts re-render.
+  const [toast, setToast] = useState<{ key: number; text: string } | null>(
+    null,
+  );
+  function showToast(text: string) {
+    setToast({ key: Date.now(), text });
+    setTimeout(() => setToast(null), 4000);
+  }
 
   // Reply form
   const [replyContent, setReplyContent] = useState("");
@@ -100,22 +122,42 @@ export default function DiscussionsPage() {
     }
   }
 
+  function requestDeleteThread() {
+    if (!selectedThread) return;
+    setConfirmTarget({ kind: "thread" });
+  }
+
   async function deleteThread() {
     if (!selectedThread) return;
-    const ok =
-      typeof window !== "undefined"
-        ? window.confirm(
-            `Delete discussion "${selectedThread.discussion.title}"?`,
-          )
-        : false;
-    if (!ok) return;
-    const r = await fetchWithRefresh(
-      `/api/discussions/${selectedThread.discussion.id}`,
-      { method: "DELETE" },
-    );
-    if (r.ok) {
-      setSelectedThread(null);
+    const thread = selectedThread;
+    const threadId = thread.discussion.id;
+
+    // Optimistic: close the detail view + drop the row from the list
+    // immediately. On failure we restore both so the user doesn't see a
+    // silent revert on next refresh.
+    const previousThreads = threads;
+    setThreads((prev) => prev.filter((d) => d.id !== threadId));
+    setSelectedThread(null);
+
+    try {
+      const r = await fetchWithRefresh(
+        `/api/discussions/${threadId}`,
+        { method: "DELETE" },
+      );
+      if (!r.ok) {
+        // Roll back
+        setThreads(previousThreads);
+        setSelectedThread(thread);
+        showToast("Failed to delete discussion. Restored.");
+        return;
+      }
+      // Success — sync with server just in case another writer reshuffled
+      // pinned ordering while we were deleting.
       fetchThreads();
+    } catch {
+      setThreads(previousThreads);
+      setSelectedThread(thread);
+      showToast("Failed to delete discussion. Restored.");
     }
   }
 
@@ -159,19 +201,63 @@ export default function DiscussionsPage() {
     }
   }
 
+  function requestDeleteReply(replyId: string) {
+    if (!selectedThread) return;
+    setConfirmTarget({ kind: "reply", replyId });
+  }
+
   async function deleteReply(replyId: string) {
     if (!selectedThread) return;
-    const ok =
-      typeof window !== "undefined"
-        ? window.confirm("Delete this comment?")
-        : false;
-    if (!ok) return;
-    const r = await fetchWithRefresh(
-      `/api/discussions/${selectedThread.discussion.id}/comments/${replyId}`,
-      { method: "DELETE" },
-    );
-    if (r.ok) {
-      openThread(selectedThread.discussion.id);
+    const discussionId = selectedThread.discussion.id;
+
+    // Optimistic: yank the reply row from the currently-open detail view
+    // so it disappears immediately. On failure we splice it back in at the
+    // same index and surface a toast.
+    const previousReplies = selectedThread.replies;
+    const removedIndex = previousReplies.findIndex((r) => r.id === replyId);
+    if (removedIndex < 0) return;
+    const removed = previousReplies[removedIndex];
+
+    setSelectedThread({
+      ...selectedThread,
+      replies: previousReplies.filter((r) => r.id !== replyId),
+    });
+
+    try {
+      const r = await fetchWithRefresh(
+        `/api/discussions/${discussionId}/comments/${replyId}`,
+        { method: "DELETE" },
+      );
+      if (!r.ok) {
+        const restored = [...previousReplies];
+        restored.splice(removedIndex, 0, removed);
+        setSelectedThread((cur) =>
+          cur && cur.discussion.id === discussionId
+            ? { ...cur, replies: restored }
+            : cur,
+        );
+        showToast("Failed to delete comment. Restored.");
+      }
+    } catch {
+      const restored = [...previousReplies];
+      restored.splice(removedIndex, 0, removed);
+      setSelectedThread((cur) =>
+        cur && cur.discussion.id === discussionId
+          ? { ...cur, replies: restored }
+          : cur,
+      );
+      showToast("Failed to delete comment. Restored.");
+    }
+  }
+
+  async function handleConfirm() {
+    const target = confirmTarget;
+    setConfirmTarget(null);
+    if (!target) return;
+    if (target.kind === "thread") {
+      await deleteThread();
+    } else {
+      await deleteReply(target.replyId);
     }
   }
 
@@ -218,21 +304,45 @@ export default function DiscussionsPage() {
     setCreating(true);
     setCreateMsg("");
     try {
-      // Route through the offline-aware wrapper so a network blip queues
-      // the write for replay instead of dropping it on the floor.
-      const result = await sendDiscussionThreadOffline({
-        title: newTitle,
-        category: newCategory,
-        content: newContent,
-      });
-      if (result.status === "sent") {
-        setCreateMsg("Discussion created!");
+      if (notifyAll) {
+        // notify_all triggers a server-side team-wide fanout. We skip the
+        // offline-queue wrapper here because the queue body type doesn't
+        // carry the flag and a queued-then-replayed notify-all could fire
+        // stale notifications long after the fact. Users who really want
+        // that behavior can uncheck the box and resubmit online.
+        const r = await fetchWithRefresh("/api/discussions", {
+          method: "POST",
+          headers: jsonHeaders(),
+          body: JSON.stringify({
+            title: newTitle,
+            category: newCategory,
+            content: newContent,
+            notify_all: true,
+          }),
+        });
+        if (r.ok) {
+          setCreateMsg("Discussion created!");
+        } else {
+          setCreateMsg("Failed to create");
+        }
       } else {
-        setCreateMsg("Offline — will send when online");
+        // Route through the offline-aware wrapper so a network blip queues
+        // the write for replay instead of dropping it on the floor.
+        const result = await sendDiscussionThreadOffline({
+          title: newTitle,
+          category: newCategory,
+          content: newContent,
+        });
+        if (result.status === "sent") {
+          setCreateMsg("Discussion created!");
+        } else {
+          setCreateMsg("Offline — will send when online");
+        }
       }
       setNewTitle("");
       setNewContent("");
       setNewCategory("general");
+      setNotifyAll(false);
       setShowNew(false);
       fetchThreads();
     } catch {
@@ -397,7 +507,7 @@ export default function DiscussionsPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={deleteThread}
+                  onClick={requestDeleteThread}
                   aria-label="Delete thread"
                   data-testid="thread-delete-btn"
                   className="text-xs px-2 py-1 rounded border"
@@ -452,7 +562,7 @@ export default function DiscussionsPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => deleteReply(r.id)}
+                    onClick={() => requestDeleteReply(r.id)}
                     aria-label={`Delete comment ${r.id}`}
                     data-testid={`reply-delete-btn-${r.id}`}
                     className="text-xs px-2 py-0.5 rounded border"
@@ -542,6 +652,7 @@ export default function DiscussionsPage() {
             {replying ? "Posting..." : "Post Reply"}
           </button>
         </form>
+        {renderOverlays()}
       </div>
     );
   }
@@ -627,6 +738,19 @@ export default function DiscussionsPage() {
                 color: "var(--wp-text)",
               }}
             />
+            <label
+              className="flex items-center gap-2 text-sm select-none cursor-pointer"
+              style={{ color: "var(--wp-text-dim)" }}
+            >
+              <input
+                type="checkbox"
+                checked={notifyAll}
+                onChange={(e) => setNotifyAll(e.target.checked)}
+                aria-label="Notify all Wolfpack team members"
+                data-testid="notify-all-checkbox"
+              />
+              Notify all Wolfpack team members
+            </label>
             <div className="flex gap-2">
               <button
                 type="submit"
@@ -673,8 +797,47 @@ export default function DiscussionsPage() {
           <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>Loading thread...</p>
         </div>
       )}
+      {renderOverlays()}
     </div>
   );
+
+  function renderOverlays() {
+    return (
+      <>
+        <ConfirmDialog
+          open={confirmTarget !== null}
+          destructive
+          title={
+            confirmTarget?.kind === "thread"
+              ? "Delete discussion?"
+              : "Delete comment?"
+          }
+          body={
+            confirmTarget?.kind === "thread"
+              ? `This will permanently remove "${selectedThread?.discussion.title ?? ""}" and all of its replies.`
+              : "This comment will be permanently removed."
+          }
+          confirmLabel="Delete"
+          onConfirm={handleConfirm}
+          onCancel={() => setConfirmTarget(null)}
+        />
+        {toast && (
+          <div
+            key={toast.key}
+            role="status"
+            data-testid="discussions-toast"
+            className="fixed bottom-6 right-6 z-[90] rounded-lg px-4 py-2 text-sm shadow-lg"
+            style={{
+              background: "var(--wp-error)",
+              color: "#fff",
+            }}
+          >
+            {toast.text}
+          </div>
+        )}
+      </>
+    );
+  }
 
   function renderThread(t: Discussion, isPinned: boolean) {
     return (

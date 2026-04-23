@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { updateKRCurrent, updateKR, deleteKR } from "@/lib/goals";
+import { fanoutToTeam, actorLabel } from "@/lib/notifications/team-fanout";
 
 function isAdmin(role: string): boolean {
   return role === "ceo" || role === "cto";
@@ -72,6 +73,22 @@ export async function PATCH(
     }
     const kr = await updateKR(id, patch, user.id);
     if (!kr) return NextResponse.json({ error: "KR not found" }, { status: 404 });
+
+    await fanoutToTeam({
+      actor: user,
+      title: `KR updated: ${kr.metric}`,
+      body: `${actorLabel(user)} (${user.role.toUpperCase()}) updated the key result definition for: ${kr.metric}`,
+      actionUrl: "/goals",
+      actionLabel: "View goals",
+      category: "goals",
+      source: "instinct.goals.kr",
+      sourceId: kr.id,
+      metadata: { goal_type: "kr", action: "updated", kr_id: kr.id },
+      analyticsEvent: "goals.team_notified",
+      analyticsPayload: { goal_type: "kr", action: "updated", kr_id: kr.id },
+      excludeActor: true,
+    });
+
     return NextResponse.json({ kr });
   }
 

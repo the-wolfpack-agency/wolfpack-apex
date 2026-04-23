@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { deleteNorthStar, updateNorthStar } from "@/lib/goals-north-star";
 import { trackEvent } from "@/lib/analytics";
+import { fanoutToTeam, actorLabel } from "@/lib/notifications/team-fanout";
 
 function isAdmin(role: string): boolean {
   return role === "ceo" || role === "cto";
@@ -54,5 +55,21 @@ export async function PATCH(
   if (!snap) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   trackEvent("goal.north_star_edited", user.id, user.role, { snapshot_id: id });
+
+  await fanoutToTeam({
+    actor: user,
+    title: `North star updated: ${snap.label}`,
+    body: `${actorLabel(user)} (${user.role.toUpperCase()}) edited the north-star entry for ${snap.label}`,
+    actionUrl: "/goals",
+    actionLabel: "View goals",
+    category: "goals",
+    source: "instinct.goals.north_star",
+    sourceId: id,
+    metadata: { goal_type: "north_star", action: "updated", snapshot_id: id },
+    analyticsEvent: "goals.team_notified",
+    analyticsPayload: { goal_type: "north_star", action: "updated", snapshot_id: id },
+    excludeActor: true,
+  });
+
   return NextResponse.json({ snapshot: snap });
 }
