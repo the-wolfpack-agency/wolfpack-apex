@@ -46,11 +46,12 @@ jest.mock("@/lib/db", () => ({
       }
       return { rows: [rows[idx]] };
     }
-    if (/^DELETE FROM apex_employees WHERE id = \$1$/i.test(normalized)) {
+    if (/DELETE FROM apex_employees WHERE id = \$1(?: RETURNING id)?$/i.test(normalized)) {
       const idx = rows.findIndex((r) => r.id === params[0]);
-      if (idx === -1) return { rows: [], rowCount: 0 };
-      rows.splice(idx, 1);
-      return { rows: [], rowCount: 1 };
+      if (idx === -1) return { rows: [] };
+      const removed = rows.splice(idx, 1)[0];
+      // Lib now uses RETURNING id — return the deleted row.
+      return { rows: [{ id: removed.id }] };
     }
     return { rows: [] };
   }),

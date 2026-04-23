@@ -276,12 +276,15 @@ export async function deleteDiscussion(
     `DELETE FROM instinct_discussion_replies WHERE discussion_id = $1`,
     [discussionId],
   );
-  const result = await safeQuery(
-    `DELETE FROM instinct_discussions WHERE id = $1`,
+  // RETURNING id so `rows.length` tells us whether the row was
+  // actually removed — safeQuery does NOT expose pg's rowCount, so
+  // reading it always produced undefined and the caller saw
+  // every delete as a no-op (toast "Failed to delete. Restored.").
+  const { rows } = await safeQuery<{ id: string }>(
+    `DELETE FROM instinct_discussions WHERE id = $1 RETURNING id`,
     [discussionId],
   );
-  const affected = (result as unknown as { rowCount?: number }).rowCount ?? 0;
-  if (affected > 0) {
+  if (rows.length > 0) {
     trackEvent("discussions.discussion.deleted", userId, userRole, {
       discussion_id: discussionId,
     });

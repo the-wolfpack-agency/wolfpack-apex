@@ -48,9 +48,11 @@ jest.mock("@/lib/db", () => ({
     }
     if (/DELETE FROM instinct_discussions WHERE id/i.test(n)) {
       const idx = discussions.findIndex((d) => d.id === params[0]);
-      if (idx === -1) return { rows: [], rowCount: 0 };
-      discussions.splice(idx, 1);
-      return { rows: [], rowCount: 1 };
+      if (idx === -1) return { rows: [] };
+      const removed = discussions.splice(idx, 1)[0];
+      // The lib now uses DELETE ... RETURNING id, so rows must
+      // contain the deleted row's id when the delete hit.
+      return { rows: [{ id: removed.id }] };
     }
     return { rows: [] };
   }),

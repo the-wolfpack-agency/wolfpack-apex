@@ -426,11 +426,13 @@ export async function deleteFeatureRequest(
     trackEvent("features.deleted", userId, "unknown", { feature_id: id });
     return true;
   }
-  const result = await safeQuery(
-    `DELETE FROM instinct_feature_requests WHERE id = $1`,
+  // RETURNING id so rows.length reflects whether the delete happened —
+  // safeQuery doesn't surface pg's rowCount.
+  const { rows } = await safeQuery<{ id: string }>(
+    `DELETE FROM instinct_feature_requests WHERE id = $1 RETURNING id`,
     [id],
   );
-  const affected = (result as unknown as { rowCount?: number }).rowCount ?? 0;
+  const affected = rows.length;
   if (affected > 0) {
     trackEvent("features.deleted", userId, "unknown", { feature_id: id });
     return true;

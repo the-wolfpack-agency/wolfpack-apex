@@ -135,11 +135,13 @@ export async function deleteEmployee(
   deletedBy: string,
   userRole: string,
 ): Promise<boolean> {
-  const r = await safeQuery(
-    `DELETE FROM apex_employees WHERE id = $1`,
+  // RETURNING id so rows.length reflects whether the delete happened —
+  // safeQuery doesn't surface pg's rowCount.
+  const { rows } = await safeQuery<{ id: string }>(
+    `DELETE FROM apex_employees WHERE id = $1 RETURNING id`,
     [id],
   );
-  const affected = (r as unknown as { rowCount?: number }).rowCount ?? 0;
+  const affected = rows.length;
   if (affected > 0) {
     trackEvent("hr.employee_removed", deletedBy, userRole, { employee_id: id });
     trackEvent("hr.employee.deleted", deletedBy, userRole, { employee_id: id });

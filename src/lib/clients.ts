@@ -156,11 +156,13 @@ export async function deleteClient(
     trackEvent("clients.deleted", userId, "unknown", { client_id: clientId });
     return true;
   }
-  const result = await safeQuery(
-    `DELETE FROM instinct_clients WHERE id = $1`,
+  // RETURNING id so rows.length reflects whether the delete happened —
+  // safeQuery doesn't surface pg's rowCount.
+  const { rows } = await safeQuery<{ id: string }>(
+    `DELETE FROM instinct_clients WHERE id = $1 RETURNING id`,
     [clientId],
   );
-  const affected = (result as unknown as { rowCount?: number }).rowCount ?? 0;
+  const affected = rows.length;
   if (affected > 0) {
     trackEvent("clients.deleted", userId, "unknown", { client_id: clientId });
     return true;
