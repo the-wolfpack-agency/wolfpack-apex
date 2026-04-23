@@ -11,6 +11,7 @@ import {
 } from "@/lib/client-auth";
 import NotificationBell from "@/components/NotificationBell";
 import InstinctChat from "@/components/InstinctChat";
+import WelcomeTooltip from "@/components/WelcomeTooltip";
 import { useAmbientRefresh } from "@/lib/hooks/useAmbientRefresh";
 
 interface User {
@@ -292,7 +293,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           state internally; closed state shows only a small circular
           button so it never blocks page content. */}
       {pathname !== "/assistant" && (
-        <InstinctChat position="floating" />
+        <>
+          <InstinctChat position="floating" />
+          <WelcomeTooltip />
+        </>
       )}
     </div>
   );

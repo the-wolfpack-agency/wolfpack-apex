@@ -322,6 +322,15 @@ export type InstinctEventType =
   // loop can see where users invoke the assistant most.
   //   assistant.floating_opened: { pathname }
   | "assistant.floating_opened"
+  // Welcome tooltip on first dashboard visit — points users at the
+  // floating FAB + the Knowledge Add-info flow. Three events form
+  // the funnel so the learning loop can grade activation:
+  //   welcome_tooltip.shown            — GET /me/welcome-tooltip → true
+  //   welcome_tooltip.dismissed        — user closed without action
+  //   welcome_tooltip.knowledge_clicked — user tapped the Knowledge CTA
+  | "welcome_tooltip.shown"
+  | "welcome_tooltip.dismissed"
+  | "welcome_tooltip.knowledge_clicked"
   // QuickBooks
   | "quickbooks.api_called"
   | "quickbooks.connected"
