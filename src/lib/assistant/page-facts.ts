@@ -535,6 +535,24 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["admin", "analytics", "dashboard"],
   },
+  messages: {
+    domain: "messages",
+    route: "/messages",
+    title: "Messages",
+    purpose: "Your Microsoft Teams 1:1 chats inside Instinct — read recent threads without flipping to the Teams desktop app; reply, call, or video-call via one-click Teams deep-links.",
+    what_you_can_do: [
+      "See your recent 1:1 Teams chats sorted by latest activity.",
+      "Read the full message thread inside Instinct — no more tab-flipping.",
+      "Click Reply in Teams to open the Teams compose window pre-loaded with the chat.",
+      "Click Call or Video call to start a Teams call with the recipient — no calendar step needed.",
+    ],
+    how_to: [
+      "Make sure Microsoft 365 is connected on the Settings page and you have granted Chat.Read + Presence.Read.",
+      "Open Messages from the left nav.",
+      "Pick a chat on the left to see the thread; use the action bar to reply or call.",
+    ],
+    related_pages: ["people", "calendar", "settings"],
+  },
   setup: {
     domain: "setup",
     route: "/setup",

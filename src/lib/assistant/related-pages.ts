@@ -210,6 +210,21 @@ const DOMAIN_MAP: DomainEntry[] = [
     href: "/setup",
     keywords: ["setup", "set up", "first run", "workspace setup", "onboarding wizard"],
   },
+  {
+    domain: "messages",
+    label: "Messages",
+    href: "/messages",
+    keywords: [
+      "messages",
+      "teams chat",
+      "teams chats",
+      "teams message",
+      "teams messages",
+      "1:1 chat",
+      "chat thread",
+      "direct message",
+    ],
+  },
 ];
 
 /**

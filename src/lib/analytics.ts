@@ -1038,7 +1038,31 @@ export type InstinctEventType =
   | "rag.dual_write_failed"
   | "rag.dual_write_divergence"
   | "rag.dual_read_divergence"
-  | "rag.provider_fallback_triggered";
+  | "rag.provider_fallback_triggered"
+  // MS Teams chat / presence / deep-link integration (Phase 1 — read-only).
+  //
+  //   ms_chats.listed              { count }
+  //     — `/me/chats` returned `count` chats.
+  //   ms_chats.messages_loaded     { chat_id, count }
+  //     — `/me/chats/{id}/messages` returned `count` messages.
+  //   ms_chats.scope_missing       {}
+  //     — Graph returned 401/403 for chats; caller should prompt re-consent
+  //       for `Chat.Read`.
+  //   ms_presence.batch_fetched    { count }
+  //     — batched `/me/presences` or per-user presence fetch resolved
+  //       `count` user presences.
+  //   ms_presence.scope_missing    {}
+  //     — Graph returned 401/403 for presence; caller should prompt
+  //       re-consent for `Presence.Read`.
+  //   ms_deep_link.generated       { type }
+  //     — a Teams deep-link URL was generated. `type` ∈
+  //       "chat" | "call" | "meet_now".
+  | "ms_chats.listed"
+  | "ms_chats.messages_loaded"
+  | "ms_chats.scope_missing"
+  | "ms_presence.batch_fetched"
+  | "ms_presence.scope_missing"
+  | "ms_deep_link.generated";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;
