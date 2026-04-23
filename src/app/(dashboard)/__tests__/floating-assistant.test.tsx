@@ -90,6 +90,22 @@ describe("floating FAB — closed state is unobtrusive, open works, analytics fi
     expect(screen.queryByText(/Wolfpack Assistant/i)).toBeNull();
   });
 
+  it("floating panel uses dvh so it shrinks when the mobile keyboard opens", () => {
+    // Regression: the panel was height: "32rem" (512px) which on
+    // ~667px iPhones leaves no room for the mobile keyboard. The
+    // input at the bottom of the panel ended up hidden behind the
+    // keyboard. The fix caps panel height at
+    // `min(32rem, calc(100dvh - 2rem))` — dvh subtracts the keyboard
+    // automatically.
+    const source = readFileSync(
+      resolve(__dirname, "../../../components/InstinctChat.tsx"),
+      "utf8",
+    );
+    expect(source).toMatch(/min\(32rem,\s*calc\(100dvh\s*-\s*2rem\)\)/);
+    // And onFocus fallback scrollIntoView for browsers without dvh.
+    expect(source).toMatch(/scrollIntoView\(\s*\{\s*block:\s*["']nearest["']/);
+  });
+
   it("FAB icon is visually centered — viewBox compensates for the asymmetric star path", () => {
     // Regression: the Heroicons sparkle path is drawn with its
     // center-of-mass at x=9 in a 24-unit viewBox. A naive

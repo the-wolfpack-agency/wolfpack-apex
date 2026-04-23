@@ -734,7 +734,13 @@ export default function InstinctChat({
   const wrapperStyle: React.CSSProperties =
     position === "floating"
       ? {
-          height: "32rem",
+          // Desktop: fixed 32rem. Mobile: shrink to the dynamic viewport
+          // height (100dvh) so the panel doesn't overflow below the
+          // mobile keyboard. dvh subtracts the keyboard automatically
+          // on iOS 15.4+ and Android Chrome 108+. Fallback to 32rem is
+          // the browser's job when dvh isn't supported.
+          height: "min(32rem, calc(100dvh - 2rem))",
+          maxHeight: "100dvh",
           background: "var(--wp-dark, #111)",
           border: "1px solid var(--wp-dark-border, #333)",
         }
@@ -1320,6 +1326,18 @@ export default function InstinctChat({
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
+                onFocus={() => {
+                  // Mobile keyboards cover the bottom of the panel in
+                  // browsers without dvh support. Scroll the textarea
+                  // into view on focus so the user sees what they type.
+                  // Deferred so the keyboard has time to rise first.
+                  setTimeout(() => {
+                    inputRef.current?.scrollIntoView({
+                      block: "nearest",
+                      behavior: "smooth",
+                    });
+                  }, 300);
+                }}
                 placeholder="Ask anything..."
                 rows={1}
                 className="flex-1 min-w-0 resize-none rounded-xl px-3 py-3 text-sm outline-none"
