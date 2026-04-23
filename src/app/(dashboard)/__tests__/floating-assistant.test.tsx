@@ -139,6 +139,42 @@ describe("floating FAB — closed state is unobtrusive, open works, analytics fi
     });
   });
 
+  it("does NOT auto-focus the input on mobile open — keyboard would cover it", async () => {
+    // Regression: opening the FAB on iPhone triggered the on-screen
+    // keyboard, which then covered the very textarea we just focused.
+    // Users saw "Wolfpack Assistant" + welcome card but no input.
+    // Fix: skip auto-focus on coarse-pointer / narrow-viewport devices.
+    // Simulate a touch device via matchMedia + innerWidth.
+    const origMatchMedia = window.matchMedia;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 375 });
+    (window as unknown as { matchMedia: typeof window.matchMedia }).matchMedia =
+      ((q: string) => ({
+        matches: q.includes("pointer: coarse"),
+        media: q,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        onchange: null,
+        dispatchEvent: () => true,
+      })) as unknown as typeof window.matchMedia;
+
+    try {
+      render(<InstinctChat position="floating" />);
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("floating-assistant-fab"));
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/Wolfpack Assistant/i)).toBeInTheDocument();
+      });
+      const textarea = screen.getByPlaceholderText(/Ask anything/i);
+      expect(document.activeElement).not.toBe(textarea);
+    } finally {
+      (window as unknown as { matchMedia: typeof window.matchMedia }).matchMedia =
+        origMatchMedia;
+    }
+  });
+
   it("firing the open event calls POST /api/analytics with assistant.floating_opened", async () => {
     render(<InstinctChat position="floating" />);
     await act(async () => {

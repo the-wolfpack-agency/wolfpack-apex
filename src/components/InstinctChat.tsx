@@ -339,11 +339,26 @@ export default function InstinctChat({
   }, [messages]);
 
   // Focus input on load — preventScroll so the browser doesn't jump
-  // the page to reveal the textarea on mount.
+  // the page to reveal the textarea on mount. Skip auto-focus when
+  // the floating panel opens on a touch device: focusing the textarea
+  // triggers the on-screen keyboard, which then covers the very input
+  // we just focused. Let mobile users tap to reveal the keyboard on
+  // their own terms. Inline mode (/assistant full page) still auto-
+  // focuses because the page is laid out to keep the input visible
+  // above the keyboard.
   useEffect(() => {
-    if (position === "inline" || floatingOpen) {
+    if (position === "inline") {
       inputRef.current?.focus({ preventScroll: true });
+      return;
     }
+    if (!floatingOpen) return;
+    if (typeof window !== "undefined") {
+      const isTouch =
+        window.matchMedia?.("(pointer: coarse)").matches ||
+        window.innerWidth < 640;
+      if (isTouch) return;
+    }
+    inputRef.current?.focus({ preventScroll: true });
   }, [position, floatingOpen]);
 
   /**
