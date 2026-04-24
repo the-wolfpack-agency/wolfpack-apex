@@ -42,6 +42,7 @@ import {
 } from "react";
 import Link from "next/link";
 import { fetchWithRefresh, getInstinctUser } from "@/lib/client-auth";
+import { useAdaptivePoll } from "@/lib/hooks/useAdaptivePoll";
 import PresenceDot from "@/components/PresenceDot";
 import DeepLinkButton from "@/components/DeepLinkButton";
 
@@ -823,23 +824,10 @@ export default function MessagesPage() {
     }
   }
 
-  // Refresh on window focus (user came back from Teams desktop) and
-  // on a 30s poll while the page is visible. Don't show the spinner
-  // for these — they should feel ambient, not like a reload.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const onFocus = () => void loadChatList();
-    window.addEventListener("focus", onFocus);
-    const id = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-        void loadChatList();
-      }
-    }, 30_000);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      window.clearInterval(id);
-    };
-  }, [loadChatList]);
+  // Adaptive ambient refresh — 5s while the user is on this tab,
+  // 45s when blurred. Hook handles visibilitychange + focus, fires
+  // immediately on tab return so users never sit on stale rows.
+  useAdaptivePoll(useCallback(() => void loadChatList(), [loadChatList]));
 
   const selectedChat = useMemo(
     () => (chats ?? []).find((c) => c.id === selectedId) ?? null,

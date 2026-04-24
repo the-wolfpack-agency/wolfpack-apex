@@ -28,8 +28,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { fetchWithRefresh, getInstinctToken } from "@/lib/client-auth";
+import { useAdaptivePoll } from "@/lib/hooks/useAdaptivePoll";
 
-const POLL_INTERVAL_MS = 45_000;
 const LAST_SEEN_KEY = "instinct.messages.last_seen";
 
 interface UnreadCountResponse {
@@ -176,23 +176,9 @@ export default function TeamsUnreadBadge() {
     }
   }, [count, router]);
 
-  // Poll on mount + every POLL_INTERVAL_MS.
-  useEffect(() => {
-    fetchCount();
-    const id = setInterval(fetchCount, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [fetchCount]);
-
-  // Refresh on window focus so users returning from the Teams desktop
-  // client see the zero-out immediately.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    function onFocus() {
-      fetchCount();
-    }
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [fetchCount]);
+  // Adaptive polling: 5s when tab is visible, 45s when hidden.
+  // Hook owns the visibility + focus listeners.
+  useAdaptivePoll(fetchCount);
 
   function handleClick(ev: React.MouseEvent<HTMLAnchorElement>) {
     ev.preventDefault();

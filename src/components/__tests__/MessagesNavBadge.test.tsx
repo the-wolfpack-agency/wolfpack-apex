@@ -92,7 +92,7 @@ describe("<MessagesNavBadge />", () => {
     render(<MessagesNavBadge />);
     await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalledTimes(1));
     await act(async () => {
-      jest.advanceTimersByTime(45_000);
+      jest.advanceTimersByTime(5_000);
       await Promise.resolve();
     });
     expect(mockFetchWithRefresh).toHaveBeenCalledTimes(2);

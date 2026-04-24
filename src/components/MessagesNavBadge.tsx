@@ -12,10 +12,10 @@
  * graceful-degradation contract as TeamsUnreadBadge.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { fetchWithRefresh, getInstinctToken } from "@/lib/client-auth";
+import { useAdaptivePoll } from "@/lib/hooks/useAdaptivePoll";
 
-const POLL_INTERVAL_MS = 45_000;
 const LAST_SEEN_KEY = "instinct.messages.last_seen";
 
 interface UnreadCountResponse {
@@ -61,20 +61,10 @@ export default function MessagesNavBadge() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchCount();
-    const id = setInterval(fetchCount, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [fetchCount]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    function onFocus() {
-      fetchCount();
-    }
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [fetchCount]);
+  // Adaptive polling: 5s when tab is visible, 45s when hidden. Same
+  // battery profile as the old 45s baseline when the user is away,
+  // ~9× faster perceived latency when they're at the screen.
+  useAdaptivePoll(fetchCount);
 
   if (count <= 0 || silencedRef.current) return null;
 
