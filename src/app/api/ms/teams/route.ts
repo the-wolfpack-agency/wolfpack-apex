@@ -40,10 +40,14 @@ export async function GET(req: NextRequest) {
       // Real Graph error — surface so the UI shows "couldn't load"
       // rather than masquerading as "user has 0 teams". Keep status
       // 200 so the client doesn't treat this as an auth failure.
+      // Include Graph's own error code+message when present so the
+      // diagnostic on the page tells you exactly what to fix.
       return NextResponse.json({
         teams: [],
         graph_error: true,
         graph_status: result.status,
+        graph_code: result.graphCode ?? null,
+        graph_message: result.graphMessage ?? null,
       });
     }
     return NextResponse.json({ teams: result.teams });

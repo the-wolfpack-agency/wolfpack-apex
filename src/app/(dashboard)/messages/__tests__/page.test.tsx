@@ -1256,7 +1256,14 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     wireApiRouter((url) => {
       if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
       if (url === "/api/ms/teams")
-        return ok({ teams: [], graph_error: true, graph_status: 400 });
+        return ok({
+          teams: [],
+          graph_error: true,
+          graph_status: 400,
+          graph_code: "BadRequest",
+          graph_message:
+            "Insufficient privileges to complete the operation.",
+        });
       return ok({});
     });
     render(<MessagesPage />);
@@ -1264,10 +1271,16 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     await waitFor(() => {
       const card = screen.getByTestId("messages-teams-graph-error");
       expect(card).toBeInTheDocument();
-      // The actual HTTP status is shown so Nick (or whoever debugs)
-      // can see what Graph said.
+      // Status, Graph error code, and full message all surfaced —
+      // so Nick can act on the actual reason instead of guessing.
       expect(card.textContent).toMatch(/400/);
     });
+    expect(screen.getByTestId("messages-teams-graph-code").textContent).toBe(
+      "BadRequest",
+    );
+    expect(
+      screen.getByTestId("messages-teams-graph-message").textContent,
+    ).toMatch(/Insufficient privileges/);
     // And the "you haven't joined any teams" empty state is NOT
     // shown (would be the wrong message).
     expect(screen.queryByTestId("messages-teams-empty")).toBeNull();

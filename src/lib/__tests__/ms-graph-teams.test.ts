@@ -95,6 +95,28 @@ describe("listJoinedTeams", () => {
     }
   });
 
+  it("parses Graph's error envelope and surfaces graphCode + graphMessage", async () => {
+    // After Nick reconnected MS twice and still got 400, we needed
+    // the actual reason. Graph errors carry { error: { code, message } }
+    // — surface both so the UI can show "BadRequest · Insufficient
+    // privileges to complete the operation." instead of just "400".
+    fetchMock.mockResolvedValue(
+      mkStatus(400, {
+        error: {
+          code: "BadRequest",
+          message: "Insufficient privileges to complete the operation.",
+        },
+      }),
+    );
+    const { listJoinedTeams } = await import("@/lib/ms-graph-teams");
+    const result = await listJoinedTeams("token");
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.code === "error") {
+      expect(result.graphCode).toBe("BadRequest");
+      expect(result.graphMessage).toMatch(/Insufficient privileges/);
+    }
+  });
+
   it("clamps limit to 1..100", async () => {
     fetchMock.mockResolvedValue(mkOk({ value: [] }));
     const { listJoinedTeams } = await import("@/lib/ms-graph-teams");

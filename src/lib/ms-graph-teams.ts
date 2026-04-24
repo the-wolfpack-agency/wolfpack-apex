@@ -70,7 +70,13 @@ interface RawMessage {
 }
 
 type ScopeMissingResult = { ok: false; code: "scope_missing"; scope: string };
-type ErrorResult = { ok: false; code: "error"; status: number };
+type ErrorResult = {
+  ok: false;
+  code: "error";
+  status: number;
+  graphCode?: string;
+  graphMessage?: string;
+};
 type FailureResult = ScopeMissingResult | ErrorResult;
 
 export type ListJoinedTeamsResult =
@@ -87,10 +93,18 @@ export type ListChannelMessagesResult =
 // Internals
 // ---------------------------------------------------------------------------
 
+interface GraphErrorEnvelope {
+  code?: string;
+  message?: string;
+}
 async function graphGet<T>(
   path: string,
   token: string,
-): Promise<{ status: number; data: T | null }> {
+): Promise<{
+  status: number;
+  data: T | null;
+  graphError?: GraphErrorEnvelope;
+}> {
   try {
     const res = await fetch(`${GRAPH_BASE_URL}${path}`, {
       headers: {
@@ -99,17 +113,35 @@ async function graphGet<T>(
       },
     });
     if (!res.ok) {
-      if (res.status !== 401 && res.status !== 403 && res.status !== 404) {
-        try {
-          const errText = await res.text();
+      // Always try to parse Graph's error envelope so the helper can
+      // surface a real reason ("Insufficient privileges to complete
+      // the operation") instead of just an HTTP status code.
+      let graphError: GraphErrorEnvelope | undefined;
+      try {
+        const errText = await res.text();
+        if (res.status !== 401 && res.status !== 403 && res.status !== 404) {
           console.warn(
-            `[ms-graph-teams] Graph ${path} returned ${res.status}: ${errText.slice(0, 200)}`,
+            `[ms-graph-teams] Graph ${path} returned ${res.status}: ${errText.slice(0, 400)}`,
           );
-        } catch {
-          /* ignore */
         }
+        try {
+          const parsed = JSON.parse(errText) as { error?: GraphErrorEnvelope };
+          if (parsed?.error) {
+            graphError = {
+              code: typeof parsed.error.code === "string" ? parsed.error.code : undefined,
+              message:
+                typeof parsed.error.message === "string"
+                  ? parsed.error.message.slice(0, 240)
+                  : undefined,
+            };
+          }
+        } catch {
+          /* not JSON */
+        }
+      } catch {
+        /* couldn't read body */
       }
-      return { status: res.status, data: null };
+      return { status: res.status, data: null, graphError };
     }
     const data = (await res.json()) as T;
     return { status: res.status, data };
@@ -203,7 +235,7 @@ export async function listJoinedTeams(
 ): Promise<ListJoinedTeamsResult> {
   const safeLimit = Math.max(1, Math.min(100, Math.floor(limit || DEFAULT_TEAM_LIMIT)));
   const qs = `/me/joinedTeams?$top=${safeLimit}`;
-  const { status, data } = await graphGet<{ value?: RawTeam[] }>(qs, userMsToken);
+  const { status, data, graphError } = await graphGet<{ value?: RawTeam[] }>(qs, userMsToken);
   if (status === 401 || status === 403) {
     trackEvent("ms_teams.scope_missing", userId, "system", { surface: "list_teams" });
     return { ok: false, code: "scope_missing", scope: "Team.ReadBasic.All" };
@@ -211,12 +243,20 @@ export async function listJoinedTeams(
   if (status < 200 || status >= 300) {
     // Anything else (400, 5xx, network 0) is a real error — don't
     // pretend the user has 0 teams. Surface it so the UI can say
-    // "couldn't load Teams" rather than silently empty.
+    // "couldn't load Teams" rather than silently empty. Include
+    // Graph's own error code/message when present.
     trackEvent("ms_teams.scope_missing", userId, "system", {
       surface: "list_teams",
       error_status: status,
+      graph_code: graphError?.code ?? "",
     });
-    return { ok: false, code: "error", status };
+    return {
+      ok: false,
+      code: "error",
+      status,
+      graphCode: graphError?.code,
+      graphMessage: graphError?.message,
+    };
   }
   const raw = Array.isArray(data?.value) ? data!.value : [];
   const teams = raw

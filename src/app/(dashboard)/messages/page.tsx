@@ -372,7 +372,11 @@ export default function MessagesPage() {
   // expand/collapse — also persisted.
   const [teams, setTeams] = useState<JoinedTeamSummary[] | null>(null);
   const [teamsScopeMissing, setTeamsScopeMissing] = useState(false);
-  const [teamsGraphError, setTeamsGraphError] = useState<number | null>(null);
+  const [teamsGraphError, setTeamsGraphError] = useState<{
+    status: number;
+    code?: string | null;
+    message?: string | null;
+  } | null>(null);
   const [channelsByTeam, setChannelsByTeam] = useState<
     Record<string, TeamChannelSummary[] | "loading" | "scope_missing">
   >({});
@@ -514,6 +518,8 @@ export default function MessagesPage() {
         connected?: boolean;
         graph_error?: boolean;
         graph_status?: number;
+        graph_code?: string | null;
+        graph_message?: string | null;
       };
       if (data.scope_missing) {
         setTeamsScopeMissing(true);
@@ -521,7 +527,11 @@ export default function MessagesPage() {
         return;
       }
       if (data.graph_error) {
-        setTeamsGraphError(data.graph_status ?? 0);
+        setTeamsGraphError({
+          status: data.graph_status ?? 0,
+          code: data.graph_code ?? null,
+          message: data.graph_message ?? null,
+        });
         setTeams([]);
         return;
       }
@@ -534,7 +544,7 @@ export default function MessagesPage() {
       );
       setTeams(sorted);
     } catch {
-      setTeamsGraphError(0);
+      setTeamsGraphError({ status: 0, code: "network", message: "Network error" });
       setTeams([]);
     }
   }, []);
@@ -1214,11 +1224,46 @@ export default function MessagesPage() {
                     Couldn&apos;t load Teams
                   </strong>
                   <p style={{ margin: "4px 0 0" }}>
-                    Microsoft Graph returned status {teamsGraphError || "—"}.
-                    This usually means the Azure AD app hasn&apos;t been
-                    granted <code>Team.ReadBasic.All</code> in the API
-                    permissions panel. Once granted, reconnect MS 365 in
-                    settings.
+                    Microsoft Graph returned status {teamsGraphError.status || "—"}
+                    {teamsGraphError.code ? (
+                      <>
+                        {" · "}
+                        <code data-testid="messages-teams-graph-code">
+                          {teamsGraphError.code}
+                        </code>
+                      </>
+                    ) : null}
+                    .
+                  </p>
+                  {teamsGraphError.message ? (
+                    <p
+                      style={{
+                        margin: "6px 0 0",
+                        padding: "6px 8px",
+                        background: "var(--wp-dark-surface2, #222)",
+                        borderRadius: 4,
+                        fontFamily: "monospace",
+                        fontSize: 11,
+                      }}
+                      data-testid="messages-teams-graph-message"
+                    >
+                      {teamsGraphError.message}
+                    </p>
+                  ) : null}
+                  <p style={{ margin: "8px 0 0" }}>
+                    Most common fix: in the Azure AD portal, open the app
+                    registration → API permissions and add{" "}
+                    <code>Team.ReadBasic.All</code> +{" "}
+                    <code>Channel.ReadBasic.All</code> (delegated). Click{" "}
+                    <strong>Grant admin consent</strong>, then disconnect
+                    and reconnect Microsoft 365 in{" "}
+                    <Link
+                      href="/settings"
+                      style={{ color: "var(--wp-gold, #eab308)" }}
+                    >
+                      settings
+                    </Link>
+                    .
                   </p>
                 </div>
               ) : teams === null ? (
