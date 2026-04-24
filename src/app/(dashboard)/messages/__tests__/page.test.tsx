@@ -273,6 +273,28 @@ describe("MessagesPage", () => {
     expect(within(row2).getByText("Launch team")).toBeInTheDocument();
   });
 
+  // Regression: users were never notified of new Teams messages because
+  // `instinct.messages.last_seen` was only written by the badge's click
+  // handler — and the badge only rendered when count > 0, which required
+  // `last_seen` to be set. Chicken-and-egg. Visiting /messages must
+  // bootstrap the cursor so subsequent unread-count polls return real
+  // counts and fire the browser notification + title-bar tag.
+  test("bootstraps instinct.messages.last_seen on mount (unread badge cycle)", async () => {
+    window.localStorage.removeItem("instinct.messages.last_seen");
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      return ok({});
+    });
+    const beforeMs = Date.now();
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("messages-page"));
+    const stored = window.localStorage.getItem("instinct.messages.last_seen");
+    expect(stored).not.toBeNull();
+    const storedMs = Date.parse(stored as string);
+    expect(storedMs).toBeGreaterThanOrEqual(beforeMs);
+    expect(storedMs).toBeLessThanOrEqual(Date.now());
+  });
+
   test("selecting a chat loads thread messages and action buttons have deep-link URLs", async () => {
     wireApiRouter((url, init) => {
       if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });

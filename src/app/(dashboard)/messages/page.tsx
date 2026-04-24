@@ -514,6 +514,34 @@ export default function MessagesPage() {
     );
   }, [teamsOpen]);
 
+  // Bootstrap the unread-badge cursor. TeamsUnreadBadge /
+  // MessagesNavBadge / document-title notifications all key off
+  // `instinct.messages.last_seen`; the unread-count endpoint returns
+  // 0 when that cursor is absent (see
+  // src/app/api/ms/chats/unread-count/route.ts — first poll always
+  // returns 0 to avoid flashing stale state). Previously that cursor
+  // was only written by the badge's own click handler, but the badge
+  // only renders when count > 0 — chicken-and-egg: no cursor → no
+  // count → no badge → no cursor. Users never got notified of new
+  // Teams messages. Bumping on mount (and again on unmount) means
+  // "this is the baseline; anything newer is unread" every time the
+  // user visits or leaves this surface.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const bump = () => {
+      try {
+        window.localStorage.setItem(
+          "instinct.messages.last_seen",
+          new Date().toISOString(),
+        );
+      } catch {
+        /* private mode / quota — badge silently stays empty */
+      }
+    };
+    bump();
+    return bump;
+  }, []);
+
   // Teams + channels state. `teams` lazily loads on first expansion.
   // `channelsByTeam[teamId]` caches channel lists so re-expanding
   // doesn't re-hit Graph. `expandedTeams[teamId]` tracks per-team
