@@ -278,7 +278,9 @@ function fireAnalytics(
     | "messages.write_disabled_shown"
     | "messages.section_toggled"
     | "messages.team_toggled"
-    | "messages.channel_selected",
+    | "messages.channel_selected"
+    | "messages.channel_compose_sent"
+    | "messages.channel_compose_failed",
   metadata: Record<string, string | number | boolean>,
 ): void {
   fetchWithRefresh("/api/analytics", {
