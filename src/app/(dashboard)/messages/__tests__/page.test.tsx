@@ -27,6 +27,14 @@ jest.mock("@/components/PresenceDot", () => ({
   ),
 }));
 
+// Capture insight events emitted by the mention flow so tests can
+// assert against the canonical {actor, role, surface, action, tier,
+// payload} shape without spinning up the analytics warehouse.
+const mockEmitInsight = jest.fn();
+jest.mock("@/lib/insights/emit", () => ({
+  emitInsight: (e: unknown) => mockEmitInsight(e),
+}));
+
 import {
   act,
   fireEvent,
@@ -1041,6 +1049,228 @@ describe("MessagesPage — inline compose", () => {
     expect(within(more).getByTestId("deep-link-reply")).toBeInTheDocument();
     expect(within(more).getByTestId("deep-link-call")).toBeInTheDocument();
     expect(within(more).getByTestId("deep-link-video")).toBeInTheDocument();
+  });
+});
+
+// ===========================================================================
+// @mentions — autocomplete dropdown + html-wrap on send + insights
+// ===========================================================================
+
+describe("MessagesPage — @mentions", () => {
+  async function selectChat1AndWaitForComposer() {
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("messages-page"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("chat-row-chat-1"));
+    });
+    await waitFor(() => screen.getByTestId("messages-compose-input"));
+  }
+
+  /**
+   * `fireEvent.change` doesn't move the textarea selection — the
+   * mention detector relies on `e.target.selectionStart`. Set the
+   * cursor explicitly to the end of `value` after change.
+   */
+  function changeAndCursor(el: HTMLTextAreaElement, value: string) {
+    fireEvent.change(el, { target: { value } });
+    el.selectionStart = value.length;
+    el.selectionEnd = value.length;
+    // Re-fire change so onChange sees the cursor we just set.
+    fireEvent.change(el, { target: { value } });
+  }
+
+  beforeEach(() => {
+    mockFetchWithRefresh.mockReset();
+    mockEmitInsight.mockReset();
+  });
+
+  test("typing @ opens the mention dropdown and lists non-self chat members", async () => {
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1") return ok({ messages: [] });
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    const ta = screen.getByTestId(
+      "messages-compose-input",
+    ) as HTMLTextAreaElement;
+    changeAndCursor(ta, "@");
+    await waitFor(() =>
+      expect(screen.getByTestId("messages-mention-dropdown")).toBeInTheDocument(),
+    );
+    // chat-1 has Me + Jane Doe; mockGetInstinctUser → me@x which
+    // matches neither, so both render. Both members appear as options.
+    expect(
+      screen.getByTestId("messages-mention-option-user-jane"),
+    ).toBeInTheDocument();
+  });
+
+  test("typing without @ does NOT open the dropdown", async () => {
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1") return ok({ messages: [] });
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    const ta = screen.getByTestId(
+      "messages-compose-input",
+    ) as HTMLTextAreaElement;
+    changeAndCursor(ta, "hello team");
+    expect(screen.queryByTestId("messages-mention-dropdown")).toBeNull();
+  });
+
+  test("Escape closes the dropdown without inserting", async () => {
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1") return ok({ messages: [] });
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    const ta = screen.getByTestId(
+      "messages-compose-input",
+    ) as HTMLTextAreaElement;
+    changeAndCursor(ta, "@J");
+    await waitFor(() =>
+      expect(screen.getByTestId("messages-mention-dropdown")).toBeInTheDocument(),
+    );
+    fireEvent.keyDown(ta, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("messages-mention-dropdown")).toBeNull(),
+    );
+    // Text untouched — no insertion happened.
+    expect(ta.value).toBe("@J");
+  });
+
+  test("clicking a member inserts @DisplayName and emits mention_added insight", async () => {
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1") return ok({ messages: [] });
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    const ta = screen.getByTestId(
+      "messages-compose-input",
+    ) as HTMLTextAreaElement;
+    changeAndCursor(ta, "hi @J");
+    await waitFor(() =>
+      expect(screen.getByTestId("messages-mention-dropdown")).toBeInTheDocument(),
+    );
+    await act(async () => {
+      fireEvent.click(
+        screen.getByTestId("messages-mention-option-user-jane"),
+      );
+    });
+    // Trailing space inserted so the user keeps typing in flow.
+    expect(ta.value).toBe("hi @Jane Doe ");
+    // Dropdown closes.
+    expect(screen.queryByTestId("messages-mention-dropdown")).toBeNull();
+    // Insight emitted with correct canonical shape.
+    const added = mockEmitInsight.mock.calls
+      .map((c) => c[0])
+      .find(
+        (e: { surface: string; action: string }) =>
+          e.surface === "chat" && e.action === "mention_added",
+      );
+    expect(added).toBeDefined();
+    expect(added.tier).toBe("personal");
+    expect(added.target).toBe("chat-1");
+    expect(added.payload.target_user_id).toBe("user-jane");
+  });
+
+  test("sending with mentions POSTs html-wrapped content + mentions array", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (url === "/api/ms/chats/chat-1/messages" && init?.method === "POST") {
+        return ok({
+          id: "srv-mention",
+          createdDateTime: "2026-04-23T13:00:00Z",
+          from: { displayName: "You" },
+          body: { contentType: "html", content: "ok" },
+        });
+      }
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    const ta = screen.getByTestId(
+      "messages-compose-input",
+    ) as HTMLTextAreaElement;
+    // Type "@J", pick Jane, then add trailing text.
+    changeAndCursor(ta, "@J");
+    await waitFor(() =>
+      expect(screen.getByTestId("messages-mention-dropdown")).toBeInTheDocument(),
+    );
+    await act(async () => {
+      fireEvent.click(
+        screen.getByTestId("messages-mention-option-user-jane"),
+      );
+    });
+    // Append a trailing question.
+    changeAndCursor(ta, "@Jane Doe ping?");
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-compose-send"));
+    });
+    const postCall = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        c[0] === "/api/ms/chats/chat-1/messages" && c[1]?.method === "POST",
+    );
+    expect(postCall).toBeDefined();
+    const body = JSON.parse(postCall![1].body);
+    expect(body.contentType).toBe("html");
+    expect(body.content).toBe('<at id="0">Jane Doe</at> ping?');
+    expect(body.mentions).toEqual([
+      {
+        id: 0,
+        mentionText: "Jane Doe",
+        userId: "user-jane",
+        displayName: "Jane Doe",
+      },
+    ]);
+  });
+
+  test("successful send with mentions emits mention_completed insight with mention_count", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (url === "/api/ms/chats/chat-1/messages" && init?.method === "POST") {
+        return ok({
+          id: "srv-c",
+          createdDateTime: "2026-04-23T13:00:00Z",
+          from: { displayName: "You" },
+          body: { contentType: "html", content: "ok" },
+        });
+      }
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    const ta = screen.getByTestId(
+      "messages-compose-input",
+    ) as HTMLTextAreaElement;
+    changeAndCursor(ta, "@J");
+    await waitFor(() =>
+      expect(screen.getByTestId("messages-mention-dropdown")).toBeInTheDocument(),
+    );
+    await act(async () => {
+      fireEvent.click(
+        screen.getByTestId("messages-mention-option-user-jane"),
+      );
+    });
+    changeAndCursor(ta, "@Jane Doe hi");
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-compose-send"));
+    });
+    const completed = mockEmitInsight.mock.calls
+      .map((c) => c[0])
+      .find(
+        (e: { surface: string; action: string }) =>
+          e.surface === "chat" && e.action === "mention_completed",
+      );
+    expect(completed).toBeDefined();
+    expect(completed.tier).toBe("org");
+    expect(completed.target).toBe("chat-1");
+    expect(completed.payload.mention_count).toBe(1);
   });
 });
 

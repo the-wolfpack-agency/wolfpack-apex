@@ -42,6 +42,7 @@ import {
 } from "react";
 import Link from "next/link";
 import { fetchWithRefresh, getInstinctUser } from "@/lib/client-auth";
+import { emitInsight } from "@/lib/insights/emit";
 import { useAdaptivePoll } from "@/lib/hooks/useAdaptivePoll";
 import PresenceDot from "@/components/PresenceDot";
 import DeepLinkButton from "@/components/DeepLinkButton";
@@ -288,6 +289,110 @@ function simpleEditDistance(a: string, b: string): number {
   return lenDelta + overlapPenalty;
 }
 
+/**
+ * Detect whether the textarea cursor is currently inside an `@mention`
+ * token. A token is opened by an `@` that is either at the start of
+ * the input or directly preceded by whitespace, and continues until a
+ * space, newline, or end-of-input. Returns the lowercase prefix
+ * (without the `@`), the absolute cursor position, and the position of
+ * the `@` itself, so the caller can replace the substring on selection.
+ */
+export function detectMentionAtCursor(
+  value: string,
+  cursorPos: number,
+): { prefix: string; cursorPos: number; tokenStart: number } | null {
+  if (cursorPos < 1 || cursorPos > value.length) return null;
+  // Walk backwards from the cursor looking for an `@`. Bail if we hit
+  // whitespace before finding one (the cursor is not inside a mention
+  // token).
+  let i = cursorPos - 1;
+  while (i >= 0) {
+    const ch = value[i];
+    if (ch === "@") {
+      // Must be at start, or preceded by whitespace.
+      if (i === 0 || /\s/.test(value[i - 1] ?? "")) {
+        const prefix = value.slice(i + 1, cursorPos);
+        // Reject if the in-progress prefix already contains whitespace
+        // — once the user has typed a space the token is closed.
+        if (/\s/.test(prefix)) return null;
+        return { prefix, cursorPos, tokenStart: i };
+      }
+      return null;
+    }
+    if (/\s/.test(ch ?? "")) return null;
+    i--;
+  }
+  return null;
+}
+
+/**
+ * Wrap each `@DisplayName` substring in the draft with an
+ * `<at id="N">DisplayName</at>` tag matching the order of the mentions
+ * array. Longest names first so a "Bob Smith" mention isn't accidentally
+ * shadowed by an earlier "Bob" replacement. Returns the final HTML and
+ * the mentions array enriched with the assigned `id` index.
+ */
+export function buildMentionHtml(
+  draft: string,
+  pending: { tagText: string; userId: string; displayName: string }[],
+): {
+  html: string;
+  mentions: {
+    id: number;
+    mentionText: string;
+    userId: string;
+    displayName: string;
+  }[];
+} {
+  // Sort longest-first by tagText so prefix collisions resolve in
+  // favour of the longest match (Bob Smith before Bob).
+  const ordered = [...pending].sort(
+    (a, b) => b.tagText.length - a.tagText.length,
+  );
+  let html = draft;
+  const mentions: {
+    id: number;
+    mentionText: string;
+    userId: string;
+    displayName: string;
+  }[] = [];
+  // Use placeholder tokens so the second pass doesn't re-wrap an
+  // already-wrapped name (avoids `<at id="0"><at id="1">…`).
+  const placeholders: { token: string; html: string }[] = [];
+  let nextId = 0;
+  for (const m of ordered) {
+    const needle = `@${m.tagText}`;
+    if (!html.includes(needle)) continue;
+    const id = nextId++;
+    const token = ` MENTION${id} `;
+    const tagHtml = `<at id="${id}">${escapeHtml(m.displayName)}</at>`;
+    placeholders.push({ token, html: tagHtml });
+    // Replace ALL occurrences of `@DisplayName` for this member.
+    html = html.split(needle).join(token);
+    mentions.push({
+      id,
+      mentionText: m.displayName,
+      userId: m.userId,
+      displayName: m.displayName,
+    });
+  }
+  // Now expand placeholders.
+  for (const p of placeholders) {
+    html = html.split(p.token).join(p.html);
+  }
+  // Sort mentions back to ascending id (already inserted in id order).
+  return { html, mentions };
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function fireAnalytics(
   event:
     | "messages.compose_sent"
@@ -362,6 +467,20 @@ export default function MessagesPage() {
   const [sending, setSending] = useState(false);
   const [composeHint, setComposeHint] = useState<ComposeHint>(null);
   const [toast, setToast] = useState<{ key: number; text: string } | null>(null);
+
+  // @mention state — autocomplete dropdown driven off the textarea
+  // cursor. `mentionMatch` is non-null while the dropdown is open;
+  // `pendingMentions` accumulates each member the user has accepted so
+  // sendCompose can build the Graph `mentions` array + html-wrap the
+  // body. Reset whenever the user switches chats.
+  const [mentionMatch, setMentionMatch] = useState<
+    { prefix: string; cursorPos: number; tokenStart: number } | null
+  >(null);
+  const [pendingMentions, setPendingMentions] = useState<
+    { tagText: string; userId: string; displayName: string }[]
+  >([]);
+  const [mentionHighlight, setMentionHighlight] = useState(0);
+  const composeInputRef = useRef<HTMLTextAreaElement | null>(null);
   // AI smart-compose state — single inflight request guarded by aiDrafting.
   // Captures the most recent suggestion text + a timestamp so we can
   // measure acceptance (sent within 5min of the suggestion + edit
@@ -860,6 +979,28 @@ export default function MessagesPage() {
     [chats, selectedId],
   );
 
+  // Mention candidate list — re-computes when the selected chat or
+  // current `@prefix` changes. Excludes the caller (so users can't
+  // @-mention themselves) and caps at 8 rows so the dropdown stays
+  // scannable in the first paint.
+  const mentionCandidates = useMemo(() => {
+    if (!selectedChat || !mentionMatch) return [];
+    const prefix = mentionMatch.prefix.toLowerCase();
+    return selectedChat.members
+      .filter((m) => !isSelfMember(m, selfEmail, selfName, selfId))
+      .filter((m) => Boolean(m.userId))
+      .filter((m) =>
+        m.displayName.toLowerCase().startsWith(prefix) ||
+        m.displayName.toLowerCase().includes(prefix),
+      )
+      .slice(0, 8);
+  }, [selectedChat, mentionMatch, selfEmail, selfName, selfId]);
+
+  // Reset highlight when the candidate list changes shape.
+  useEffect(() => {
+    setMentionHighlight(0);
+  }, [mentionMatch?.prefix, selectedChat?.id]);
+
   // Fire scope_prompt_shown / write_disabled_shown exactly when the
   // corresponding hint surfaces. Keeps the per-render fire dedup'd via
   // the (hint, chat) pair.
@@ -948,6 +1089,11 @@ export default function MessagesPage() {
     setSelectedId(chat.id);
     setSelectedChannel(null);
     setChannelMessages(null);
+    // Mention state is per-chat — reset whenever the user pivots to a
+    // new conversation so accumulated tags don't leak across.
+    setPendingMentions([]);
+    setMentionMatch(null);
+    setMentionHighlight(0);
     void loadThread(chat);
   }
 
@@ -956,6 +1102,9 @@ export default function MessagesPage() {
     setMessages(null);
     setDraft("");
     setComposeHint(null);
+    setPendingMentions([]);
+    setMentionMatch(null);
+    setMentionHighlight(0);
   }
 
   // Compose --------------------------------------------------------------
@@ -1036,13 +1185,32 @@ export default function MessagesPage() {
     setMessages((prev) => [...(prev ?? []), optimistic]);
     setDraft("");
 
+    // If the user inserted any @mentions, transform the plain-text
+    // draft into Graph-flavored HTML (`<at id="N">Name</at>`) and ship
+    // a `mentions` array alongside. The server-side helper filters
+    // these against chat membership before forwarding to Graph.
+    const activeMentions = pendingMentions.filter((m) =>
+      trimmed.includes(`@${m.tagText}`),
+    );
+    const useHtml = activeMentions.length > 0;
+    const built = useHtml
+      ? buildMentionHtml(trimmed, activeMentions)
+      : { html: trimmed, mentions: [] };
+    const postBody: Record<string, unknown> = useHtml
+      ? {
+          content: built.html,
+          contentType: "html",
+          mentions: built.mentions,
+        }
+      : { content: trimmed, contentType: "text" };
+
     try {
       const res = await fetchWithRefresh(
         `/api/ms/chats/${encodeURIComponent(chatId)}/messages`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: trimmed, contentType: "text" }),
+          body: JSON.stringify(postBody),
         },
       );
       const data = (await res.json().catch(() => ({}))) as {
@@ -1135,6 +1303,31 @@ export default function MessagesPage() {
         chat_id: chatId,
         length: trimmed.length,
       });
+      // Clear pending mentions on successful send and emit the
+      // org-tier completion signal so the warehouse can correlate
+      // mention_added → mention_completed funnels per chat.
+      if (built.mentions.length > 0) {
+        const u = getInstinctUser<{
+          email?: string;
+          name?: string;
+          id?: string;
+          role?: string;
+        }>();
+        emitInsight({
+          actor: u?.id ?? u?.email ?? "anonymous",
+          role: u?.role ?? "user",
+          surface: "chat",
+          action: "mention_completed",
+          target: chatId,
+          tier: "org",
+          payload: {
+            chat_id: chatId,
+            mention_count: built.mentions.length,
+          },
+        });
+      }
+      setPendingMentions([]);
+      setMentionMatch(null);
       // AI draft acceptance signal — if the user just drafted via AI
       // and sent within 5 minutes, log how much they edited it. This
       // is the highest-quality training signal for smart compose:
@@ -1166,14 +1359,116 @@ export default function MessagesPage() {
     } finally {
       setSending(false);
     }
-  }, [draft, selectedChat, sending]);
+  }, [draft, selectedChat, sending, pendingMentions]);
 
   function onComposeChange(e: ChangeEvent<HTMLTextAreaElement>) {
-    setDraft(e.target.value);
+    const value = e.target.value;
+    setDraft(value);
     if (composeHint) setComposeHint(null);
+    // Mention detection — driven off the cursor position so editing
+    // mid-string still opens the dropdown for the in-progress token.
+    const cursor = e.target.selectionStart ?? value.length;
+    const detected = detectMentionAtCursor(value, cursor);
+    setMentionMatch(detected);
+  }
+
+  function selectMention(member: ChatMember) {
+    if (!mentionMatch) return;
+    const before = draft.slice(0, mentionMatch.tokenStart);
+    const after = draft.slice(mentionMatch.cursorPos);
+    // Replace `@prefix` with `@DisplayName ` (trailing space so the
+    // user can keep typing without re-opening the dropdown).
+    const insertion = `@${member.displayName} `;
+    const next = `${before}${insertion}${after}`;
+    setDraft(next);
+    setPendingMentions((prev) => {
+      // De-dupe by userId so accidentally re-selecting the same person
+      // doesn't blow up the mentions array.
+      const filtered = prev.filter((p) => p.userId !== member.userId);
+      return [
+        ...filtered,
+        {
+          tagText: member.displayName,
+          userId: member.userId ?? "",
+          displayName: member.displayName,
+        },
+      ];
+    });
+    setMentionMatch(null);
+    setMentionHighlight(0);
+
+    // Personal-tier signal — the actor is the only audience for their
+    // own "I started a mention" event. Aggregations are emitted at
+    // mention_completed (org tier).
+    const u = getInstinctUser<{
+      email?: string;
+      name?: string;
+      id?: string;
+      role?: string;
+    }>();
+    emitInsight({
+      actor: u?.id ?? u?.email ?? "anonymous",
+      role: u?.role ?? "user",
+      surface: "chat",
+      action: "mention_added",
+      target: selectedChat?.id,
+      tier: "personal",
+      payload: {
+        chat_id: selectedChat?.id ?? "",
+        target_user_id: member.userId ?? "",
+      },
+    });
+
+    // Restore focus + place cursor at the end of the inserted name so
+    // the user can keep typing in flow.
+    requestAnimationFrame(() => {
+      const el = composeInputRef.current;
+      if (el) {
+        el.focus();
+        const pos = before.length + insertion.length;
+        try {
+          el.setSelectionRange(pos, pos);
+        } catch {
+          /* jsdom occasionally throws on setSelectionRange — ignore */
+        }
+      }
+    });
   }
 
   function onComposeKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    // Mention dropdown takes priority over normal compose shortcuts
+    // when it's open — arrow keys / Enter / Escape navigate and
+    // commit instead of typing into the textarea.
+    if (mentionMatch && mentionCandidates.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionHighlight((h) => (h + 1) % mentionCandidates.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionHighlight(
+          (h) => (h - 1 + mentionCandidates.length) % mentionCandidates.length,
+        );
+        return;
+      }
+      if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        const pick = mentionCandidates[mentionHighlight];
+        if (pick) selectMention(pick);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionMatch(null);
+        return;
+      }
+    }
+    if (mentionMatch && e.key === "Escape") {
+      e.preventDefault();
+      setMentionMatch(null);
+      return;
+    }
     // Cmd+Enter (mac) / Ctrl+Enter (win/linux) submits.
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
@@ -1916,30 +2211,109 @@ export default function MessagesPage() {
                   >
                     {aiDrafting ? "…" : "✨ AI"}
                   </button>
-                  <textarea
-                    data-testid="messages-compose-input"
-                    aria-label="Send a Teams message"
-                    value={draft}
-                    onChange={onComposeChange}
-                    onKeyDown={onComposeKeyDown}
-                    placeholder="Send a Teams message…"
-                    rows={2}
-                    style={{
-                      flex: 1,
-                      resize: "none",
-                      minHeight: 44,
-                      maxHeight: 150, // ~6 rows at 14px line-height.
-                      overflowY: "auto",
-                      padding: "8px 10px",
-                      borderRadius: 6,
-                      border: "1px solid var(--wp-dark-border, #333)",
-                      background: "var(--wp-dark-surface, #1a1a1a)",
-                      color: "var(--wp-text, #eee)",
-                      fontSize: 14,
-                      fontFamily: "inherit",
-                      lineHeight: 1.4,
-                    }}
-                  />
+                  <div style={{ flex: 1, position: "relative" }}>
+                    {mentionMatch && mentionCandidates.length > 0 ? (
+                      <div
+                        data-testid="messages-mention-dropdown"
+                        role="listbox"
+                        aria-label="Mention member"
+                        style={{
+                          position: "absolute",
+                          bottom: "100%",
+                          left: 0,
+                          right: 0,
+                          marginBottom: 4,
+                          background: "var(--wp-dark-surface2, #222)",
+                          border: "1px solid var(--wp-dark-border, #333)",
+                          borderRadius: 6,
+                          boxShadow: "0 -4px 12px rgba(0,0,0,0.3)",
+                          zIndex: 20,
+                          maxHeight: 240,
+                          overflowY: "auto",
+                        }}
+                      >
+                        {mentionCandidates.map((m, idx) => {
+                          const active = idx === mentionHighlight;
+                          return (
+                            <button
+                              key={m.id}
+                              type="button"
+                              data-testid={`messages-mention-option-${m.userId ?? m.id}`}
+                              role="option"
+                              aria-selected={active}
+                              onMouseDown={(e) => {
+                                // Prevent the textarea blur — selectMention
+                                // refocuses the textarea synchronously.
+                                e.preventDefault();
+                              }}
+                              onClick={() => selectMention(m)}
+                              onMouseEnter={() => setMentionHighlight(idx)}
+                              style={{
+                                display: "block",
+                                width: "100%",
+                                textAlign: "left",
+                                padding: "8px 10px",
+                                background: active
+                                  ? "var(--wp-gold-soft, #3a3018)"
+                                  : "transparent",
+                                color: "var(--wp-text, #eee)",
+                                border: "none",
+                                fontSize: 13,
+                                cursor: "pointer",
+                              }}
+                            >
+                              <span style={{ fontWeight: 600 }}>
+                                {m.displayName}
+                              </span>
+                              {m.email ? (
+                                <span
+                                  style={{
+                                    marginLeft: 8,
+                                    color: "var(--wp-text-muted, #9ca3af)",
+                                    fontSize: 11,
+                                  }}
+                                >
+                                  {m.email}
+                                </span>
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    <textarea
+                      ref={composeInputRef}
+                      data-testid="messages-compose-input"
+                      aria-label="Send a Teams message"
+                      value={draft}
+                      onChange={onComposeChange}
+                      onKeyDown={onComposeKeyDown}
+                      onBlur={() => {
+                        // Click-away closes the dropdown. Use a short
+                        // delay so onClick on a dropdown row fires
+                        // first.
+                        window.setTimeout(() => setMentionMatch(null), 120);
+                      }}
+                      placeholder="Send a Teams message…"
+                      rows={2}
+                      style={{
+                        width: "100%",
+                        boxSizing: "border-box",
+                        resize: "none",
+                        minHeight: 44,
+                        maxHeight: 150, // ~6 rows at 14px line-height.
+                        overflowY: "auto",
+                        padding: "8px 10px",
+                        borderRadius: 6,
+                        border: "1px solid var(--wp-dark-border, #333)",
+                        background: "var(--wp-dark-surface, #1a1a1a)",
+                        color: "var(--wp-text, #eee)",
+                        fontSize: 14,
+                        fontFamily: "inherit",
+                        lineHeight: 1.4,
+                      }}
+                    />
+                  </div>
                   <button
                     type="button"
                     data-testid="messages-compose-send"
