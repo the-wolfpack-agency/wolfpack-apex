@@ -78,6 +78,23 @@ describe("listJoinedTeams", () => {
     );
   });
 
+  it("returns error (not empty teams) on non-200/401/403 status", async () => {
+    // Regression: Nick saw the LEFT panel show a blank Teams section
+    // when Graph returned an unexpected status (e.g. 400 from a token
+    // missing the new scopes). The helper used to silently coerce
+    // any non-200 into "user has 0 teams" — now it surfaces the real
+    // status so the UI can show "couldn't load Teams" with the HTTP
+    // code, not a misleading empty state.
+    fetchMock.mockResolvedValue(mkStatus(400));
+    const { listJoinedTeams } = await import("@/lib/ms-graph-teams");
+    const result = await listJoinedTeams("token");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("error");
+      if (result.code === "error") expect(result.status).toBe(400);
+    }
+  });
+
   it("clamps limit to 1..100", async () => {
     fetchMock.mockResolvedValue(mkOk({ value: [] }));
     const { listJoinedTeams } = await import("@/lib/ms-graph-teams");

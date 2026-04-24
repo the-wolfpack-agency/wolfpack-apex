@@ -70,16 +70,18 @@ interface RawMessage {
 }
 
 type ScopeMissingResult = { ok: false; code: "scope_missing"; scope: string };
+type ErrorResult = { ok: false; code: "error"; status: number };
+type FailureResult = ScopeMissingResult | ErrorResult;
 
 export type ListJoinedTeamsResult =
   | { ok: true; teams: JoinedTeam[] }
-  | ScopeMissingResult;
+  | FailureResult;
 export type ListTeamChannelsResult =
   | { ok: true; channels: TeamChannel[] }
-  | ScopeMissingResult;
+  | FailureResult;
 export type ListChannelMessagesResult =
   | { ok: true; messages: ChannelMessage[] }
-  | ScopeMissingResult;
+  | FailureResult;
 
 // ---------------------------------------------------------------------------
 // Internals
@@ -205,6 +207,16 @@ export async function listJoinedTeams(
   if (status === 401 || status === 403) {
     trackEvent("ms_teams.scope_missing", userId, "system", { surface: "list_teams" });
     return { ok: false, code: "scope_missing", scope: "Team.ReadBasic.All" };
+  }
+  if (status < 200 || status >= 300) {
+    // Anything else (400, 5xx, network 0) is a real error — don't
+    // pretend the user has 0 teams. Surface it so the UI can say
+    // "couldn't load Teams" rather than silently empty.
+    trackEvent("ms_teams.scope_missing", userId, "system", {
+      surface: "list_teams",
+      error_status: status,
+    });
+    return { ok: false, code: "error", status };
   }
   const raw = Array.isArray(data?.value) ? data!.value : [];
   const teams = raw

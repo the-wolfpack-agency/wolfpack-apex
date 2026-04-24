@@ -372,6 +372,7 @@ export default function MessagesPage() {
   // expand/collapse — also persisted.
   const [teams, setTeams] = useState<JoinedTeamSummary[] | null>(null);
   const [teamsScopeMissing, setTeamsScopeMissing] = useState(false);
+  const [teamsGraphError, setTeamsGraphError] = useState<number | null>(null);
   const [channelsByTeam, setChannelsByTeam] = useState<
     Record<string, TeamChannelSummary[] | "loading" | "scope_missing">
   >({});
@@ -503,15 +504,24 @@ export default function MessagesPage() {
   // ---- Teams + channels loaders --------------------------------------
 
   const loadTeams = useCallback(async () => {
+    setTeamsScopeMissing(false);
+    setTeamsGraphError(null);
     try {
       const res = await fetchWithRefresh("/api/ms/teams", { method: "GET" });
       const data = (await res.json().catch(() => ({}))) as {
         teams?: JoinedTeamSummary[];
         scope_missing?: boolean;
         connected?: boolean;
+        graph_error?: boolean;
+        graph_status?: number;
       };
       if (data.scope_missing) {
         setTeamsScopeMissing(true);
+        setTeams([]);
+        return;
+      }
+      if (data.graph_error) {
+        setTeamsGraphError(data.graph_status ?? 0);
         setTeams([]);
         return;
       }
@@ -524,6 +534,7 @@ export default function MessagesPage() {
       );
       setTeams(sorted);
     } catch {
+      setTeamsGraphError(0);
       setTeams([]);
     }
   }, []);
@@ -1149,19 +1160,66 @@ export default function MessagesPage() {
                 <div
                   data-testid="messages-teams-scope-missing"
                   style={{
-                    padding: "8px 16px",
+                    margin: "8px 12px",
+                    padding: "10px 12px",
                     fontSize: 12,
-                    color: "var(--wp-text-muted, #9ca3af)",
+                    lineHeight: 1.5,
+                    color: "var(--wp-text, #eee)",
+                    background: "rgba(234,179,8,0.10)",
+                    border: "1px solid var(--wp-gold, #eab308)",
+                    borderRadius: 6,
                   }}
                 >
-                  Grant <code>Team.ReadBasic.All</code> in{" "}
+                  <strong style={{ color: "var(--wp-gold, #eab308)" }}>
+                    Reconnect Microsoft 365
+                  </strong>
+                  <p style={{ margin: "4px 0 8px" }}>
+                    Your existing Teams permission doesn&apos;t cover the
+                    Teams &amp; channels list. Disconnect and reconnect MS
+                    365 to grant <code>Team.ReadBasic.All</code> +{" "}
+                    <code>Channel.ReadBasic.All</code>.
+                  </p>
                   <Link
                     href="/settings"
-                    style={{ color: "var(--wp-gold, #eab308)" }}
+                    data-testid="messages-teams-scope-cta"
+                    style={{
+                      display: "inline-block",
+                      padding: "4px 10px",
+                      background: "var(--wp-gold, #eab308)",
+                      color: "var(--wp-dark, #111)",
+                      borderRadius: 4,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      textDecoration: "none",
+                    }}
                   >
-                    settings
-                  </Link>{" "}
-                  to see Teams here.
+                    Open settings
+                  </Link>
+                </div>
+              ) : teamsGraphError !== null ? (
+                <div
+                  data-testid="messages-teams-graph-error"
+                  style={{
+                    margin: "8px 12px",
+                    padding: "10px 12px",
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                    color: "var(--wp-text, #eee)",
+                    background: "rgba(239,68,68,0.10)",
+                    border: "1px solid var(--wp-error, #ef4444)",
+                    borderRadius: 6,
+                  }}
+                >
+                  <strong style={{ color: "var(--wp-error, #ef4444)" }}>
+                    Couldn&apos;t load Teams
+                  </strong>
+                  <p style={{ margin: "4px 0 0" }}>
+                    Microsoft Graph returned status {teamsGraphError || "—"}.
+                    This usually means the Azure AD app hasn&apos;t been
+                    granted <code>Team.ReadBasic.All</code> in the API
+                    permissions panel. Once granted, reconnect MS 365 in
+                    settings.
+                  </p>
                 </div>
               ) : teams === null ? (
                 <div

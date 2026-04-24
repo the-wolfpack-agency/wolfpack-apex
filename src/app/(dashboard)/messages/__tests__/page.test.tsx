@@ -1248,6 +1248,31 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     expect(screen.queryByTestId("channel-thread-body")).toBeNull();
   });
 
+  test("graph_error response shows a loud error card (NOT the silent empty state)", async () => {
+    // Regression: Nick reported the Teams section appearing "blank"
+    // when his existing OAuth token didn't include the new scopes.
+    // The empty card was too subtle; this test locks in the louder
+    // graph-error treatment + the actual HTTP status surfaced.
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/teams")
+        return ok({ teams: [], graph_error: true, graph_status: 400 });
+      return ok({});
+    });
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("messages-page"));
+    await waitFor(() => {
+      const card = screen.getByTestId("messages-teams-graph-error");
+      expect(card).toBeInTheDocument();
+      // The actual HTTP status is shown so Nick (or whoever debugs)
+      // can see what Graph said.
+      expect(card.textContent).toMatch(/400/);
+    });
+    // And the "you haven't joined any teams" empty state is NOT
+    // shown (would be the wrong message).
+    expect(screen.queryByTestId("messages-teams-empty")).toBeNull();
+  });
+
   test("scope_missing on /api/ms/teams shows the grant-permission card", async () => {
     wireApiRouter((url) => {
       if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });

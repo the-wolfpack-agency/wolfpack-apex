@@ -34,7 +34,17 @@ export async function GET(req: NextRequest) {
     }
     const result = await listJoinedTeams(token.accessToken, limit, user.id);
     if (!result.ok) {
-      return NextResponse.json({ teams: [], scope_missing: true });
+      if (result.code === "scope_missing") {
+        return NextResponse.json({ teams: [], scope_missing: true });
+      }
+      // Real Graph error — surface so the UI shows "couldn't load"
+      // rather than masquerading as "user has 0 teams". Keep status
+      // 200 so the client doesn't treat this as an auth failure.
+      return NextResponse.json({
+        teams: [],
+        graph_error: true,
+        graph_status: result.status,
+      });
     }
     return NextResponse.json({ teams: result.teams });
   } catch (err) {

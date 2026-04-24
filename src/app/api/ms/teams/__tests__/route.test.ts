@@ -85,6 +85,22 @@ describe("GET /api/ms/teams", () => {
     expect(body.teams).toEqual([]);
   });
 
+  it("200 graph_error:true when helper returns code=error (e.g. 400 from Graph)", async () => {
+    mockGetUser.mockReturnValue({ id: "u1" });
+    mockGetValidToken.mockResolvedValue({ accessToken: "ms-tok" });
+    mockListJoinedTeams.mockResolvedValue({ ok: false, code: "error", status: 400 });
+    const { GET } = await import("@/app/api/ms/teams/route");
+    const res = await GET(mkReq("/api/ms/teams", "Bearer t"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.graph_error).toBe(true);
+    expect(body.graph_status).toBe(400);
+    expect(body.teams).toEqual([]);
+    // Critically: do NOT impersonate scope_missing, so the UI
+    // doesn't tell the user the wrong corrective action.
+    expect(body.scope_missing).toBeUndefined();
+  });
+
   it("respects limit query param (clamped to 1..100)", async () => {
     mockGetUser.mockReturnValue({ id: "u1" });
     mockGetValidToken.mockResolvedValue({ accessToken: "ms-tok" });
