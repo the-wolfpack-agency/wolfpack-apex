@@ -10,25 +10,30 @@
  *   screens so the composer stays primary.
  * - The composer always renders inline — never a modal/drawer. CC/BCC
  *   sections are togglable via × buttons (chips keep their own ×).
- * - Recipient insights panel fetches recent threads with the first To:
- *   recipient (GET /api/microsoft?action=emails-from) and the last past
- *   meeting with them (GET /api/calendar/range?view=month, then
- *   client-side attendee filter).
+ * - Body is a contentEditable rich-text div with a tiny toolbar
+ *   (Bold/Italic/Underline/UL/OL) wired through document.execCommand.
+ *   Send POSTs both bodyHtml + bodyText. Persisted as HTML in
+ *   sessionStorage.
+ * - Recipient insights panel:
+ *     * 1 recipient  → full panel (recent threads + last meeting).
+ *     * 2-5 recipients → compact stack of per-recipient cards; click
+ *                        a card to expand its full insights inline.
+ *     * 6+ recipients → aggregate summary only (earliest last-meeting,
+ *                        most-recent thread); per-recipient Graph
+ *                        fetches are skipped to protect quota.
+ * - Calendar window for "last meeting with recipient" is a year-wide
+ *   lookup (view=year), client-cached by recipient email so flipping
+ *   between recipients doesn't re-hit the endpoint.
  * - Send wires through POST /api/mail/send.
  * - AI draft via POST /api/assistant/draft-reply (surface: "email").
- * - Draft persistence: sessionStorage key `mail.compose.draft`.
+ *   Model output is HTML-escaped + newlines→<br> before being placed
+ *   into the editable body — never trust raw model output as HTML.
+ * - Draft persistence: sessionStorage key `mail.compose.draft` (HTML).
  * - All authenticated fetches go through fetchWithRefresh.
  * - All actions emit through emitInsight().
  *
  * Honours the dashboard chrome: page itself does not scroll
  * (height:100% + overflow:hidden); inner sections scroll.
- *
- * v1 limitations:
- *   - Body is a plain <textarea> (not contentEditable rich text).
- *   - "AI summary of past correspondence" is a heuristic preview built
- *     from the first thread snippet, not a fresh LLM call. Wiring a
- *     dedicated /api/assistant/summarize-thread is a follow-up.
- *   - Insights panel only inspects the first To: recipient.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -56,6 +61,7 @@ interface DraftState {
   cc: string[];
   bcc: string[];
   subject: string;
+  /** HTML body — contentEditable serialized as innerHTML. */
   body: string;
 }
 
@@ -78,9 +84,8 @@ interface CalendarEventLite {
   attendeeEmails: string[];
 }
 
-interface InsightsState {
+interface RecipientInsight {
   loading: boolean;
-  recipient: string | null;
   recentThreads: RecentEmail[];
   lastMeeting: CalendarEventLite | null;
   summary: string;
@@ -96,6 +101,37 @@ interface AuthedUser {
 
 const DRAFT_KEY = "mail.compose.draft";
 const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const AGGREGATE_THRESHOLD = 6; // ≥ this many To: → aggregate-only mode
+const MULTI_THRESHOLD = 2; // ≥ this and < AGGREGATE_THRESHOLD → per-recipient cards
+
+// ---------------------------------------------------------------------------
+// HTML helpers
+// ---------------------------------------------------------------------------
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!),
+  );
+}
+
+function plainTextToHtml(s: string): string {
+  return escapeHtml(s).split("\n").join("<br>");
+}
+
+function htmlToPlainText(html: string): string {
+  if (!html) return "";
+  if (typeof document === "undefined") {
+    // Server-side fallback: strip tags lossy-but-safe.
+    return html.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "");
+  }
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  // jsdom doesn't compute innerText reliably (returns undefined). Fall
+  // back to textContent + a <br>→\n shim.
+  const text = (tmp as HTMLDivElement).innerText;
+  if (typeof text === "string") return text;
+  return html.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "");
+}
 
 // ---------------------------------------------------------------------------
 // Draft persistence (sessionStorage)
@@ -160,7 +196,9 @@ function formatRelative(iso: string): string {
   if (d === 1) return "1 day ago";
   if (d < 30) return `${d} days ago`;
   const months = Math.round(d / 30);
-  return months <= 1 ? "1 month ago" : `${months} months ago`;
+  if (months < 12) return months <= 1 ? "1 month ago" : `${months} months ago`;
+  const years = Math.round(d / 365);
+  return years <= 1 ? "1 year ago" : `${years} years ago`;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,15 +222,16 @@ export default function EmailsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const [insights, setInsights] = useState<InsightsState>({
-    loading: false,
-    recipient: null,
-    recentThreads: [],
-    lastMeeting: null,
-    summary: "",
-    error: null,
-  });
+  // Per-recipient insights cache. Key: recipient email (lowercase).
+  const [insightsCache, setInsightsCache] = useState<Record<string, RecipientInsight>>({});
+  // Which recipient cards are expanded inline (multi-recipient mode).
+  const [expandedRecipients, setExpandedRecipients] = useState<Set<string>>(() => new Set());
+  // Calendar fetch is shared across recipients within a single load batch —
+  // but we cache the whole event list once per session via this ref.
+  const calendarYearCacheRef = useRef<{ events: CalendarEventLite[]; loadedAtMs: number } | null>(null);
+  const calendarYearInflightRef = useRef<Promise<CalendarEventLite[]> | null>(null);
 
+  const bodyRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(false);
   const insightsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -202,12 +241,17 @@ export default function EmailsPage() {
   }, []);
 
   // -------------------------------------------------------------------------
-  // Mount: load templates + emit compose_opened
+  // Mount: load templates + emit compose_opened, hydrate body
   // -------------------------------------------------------------------------
 
   useEffect(() => {
     if (mountedRef.current) return;
     mountedRef.current = true;
+
+    // Hydrate the contentEditable from the persisted HTML draft.
+    if (bodyRef.current && draft.body && bodyRef.current.innerHTML !== draft.body) {
+      bodyRef.current.innerHTML = draft.body;
+    }
 
     emitInsight({
       actor: user.id,
@@ -234,7 +278,7 @@ export default function EmailsPage() {
         setTemplatesLoading(false);
       }
     })();
-  }, [user.id, user.role]);
+  }, [user.id, user.role, draft.body]);
 
   // -------------------------------------------------------------------------
   // Draft persistence
@@ -245,14 +289,57 @@ export default function EmailsPage() {
   }, [draft]);
 
   // -------------------------------------------------------------------------
-  // Insights load (debounced) — first To: recipient drives the panel
+  // Calendar (year-window) loader — single fetch per session
   // -------------------------------------------------------------------------
 
-  const firstRecipient = draft.to[0] ?? null;
+  const loadCalendarYear = useCallback(async (): Promise<CalendarEventLite[]> => {
+    if (calendarYearCacheRef.current) return calendarYearCacheRef.current.events;
+    if (calendarYearInflightRef.current) return calendarYearInflightRef.current;
+    const p = (async () => {
+      try {
+        const res = await fetchWithRefresh(
+          "/api/calendar/range?view=year",
+          { headers: jsonHeaders() },
+        );
+        if (!res.ok) return [];
+        const data = await res.json();
+        const events: CalendarEventLite[] = Array.isArray(data.events) ? data.events : [];
+        calendarYearCacheRef.current = { events, loadedAtMs: Date.now() };
+        return events;
+      } catch {
+        return [];
+      } finally {
+        calendarYearInflightRef.current = null;
+      }
+    })();
+    calendarYearInflightRef.current = p;
+    return p;
+  }, []);
 
-  const loadInsights = useCallback(
-    async (recipient: string) => {
-      setInsights((s) => ({ ...s, loading: true, recipient, error: null }));
+  // -------------------------------------------------------------------------
+  // Per-recipient insight load (cached)
+  // -------------------------------------------------------------------------
+
+  const loadRecipientInsight = useCallback(
+    async (recipient: string): Promise<RecipientInsight> => {
+      const key = recipient.toLowerCase();
+
+      // Already cached? Return cached entry. Set loading flag only when
+      // we actually need to fetch.
+      const existing = insightsCache[key];
+      if (existing && !existing.loading) return existing;
+      if (existing && existing.loading) return existing;
+
+      setInsightsCache((c) => ({
+        ...c,
+        [key]: {
+          loading: true,
+          recentThreads: [],
+          lastMeeting: null,
+          summary: "",
+          error: null,
+        },
+      }));
 
       let recentThreads: RecentEmail[] = [];
       let lastMeeting: CalendarEventLite | null = null;
@@ -271,87 +358,111 @@ export default function EmailsPage() {
           }
         }
       } catch {
-        /* tolerate — insights are best-effort */
+        /* tolerate */
       }
 
       try {
-        const res = await fetchWithRefresh(
-          "/api/calendar/range?view=month",
-          { headers: jsonHeaders() },
-        );
-        if (res.ok) {
-          const data = await res.json();
-          const events: CalendarEventLite[] = Array.isArray(data.events) ? data.events : [];
-          const recipientLower = recipient.toLowerCase();
-          const past = events
-            .filter((ev) => {
-              const emails = (ev.attendeeEmails ?? []).map((e) => e.toLowerCase());
-              if (!emails.includes(recipientLower)) return false;
-              const startMs = Date.parse(ev.start);
-              return !Number.isNaN(startMs) && startMs <= Date.now();
-            })
-            .sort((a, b) => Date.parse(b.start) - Date.parse(a.start));
-          lastMeeting = past[0] ?? null;
-        }
+        const events = await loadCalendarYear();
+        const recipientLower = recipient.toLowerCase();
+        const past = events
+          .filter((ev) => {
+            const emails = (ev.attendeeEmails ?? []).map((e) => e.toLowerCase());
+            if (!emails.includes(recipientLower)) return false;
+            const startMs = Date.parse(ev.start);
+            return !Number.isNaN(startMs) && startMs <= Date.now();
+          })
+          .sort((a, b) => Date.parse(b.start) - Date.parse(a.start));
+        lastMeeting = past[0] ?? null;
       } catch {
         /* tolerate */
       }
 
-      const lastMeetingDays = lastMeeting ? daysAgo(lastMeeting.start) : -1;
-
-      setInsights({
+      const computed: RecipientInsight = {
         loading: false,
-        recipient,
         recentThreads,
         lastMeeting,
         summary,
         error: null,
-      });
+      };
 
-      emitInsight({
-        actor: user.id,
-        role: user.role,
-        surface: "email",
-        action: "insights_loaded",
-        tier: "personal",
-        payload: {
-          recipient,
-          recent_thread_count: recentThreads.length,
-          last_meeting_days_ago: lastMeetingDays,
-        },
-      });
+      setInsightsCache((c) => ({ ...c, [key]: computed }));
+      return computed;
     },
-    [user.id, user.role],
+    [insightsCache, loadCalendarYear],
   );
+
+  // -------------------------------------------------------------------------
+  // Multi-recipient orchestrator (debounced)
+  // -------------------------------------------------------------------------
 
   useEffect(() => {
     if (insightsTimerRef.current) {
       clearTimeout(insightsTimerRef.current);
       insightsTimerRef.current = null;
     }
-    if (!firstRecipient) {
-      setInsights({
-        loading: false,
-        recipient: null,
-        recentThreads: [],
-        lastMeeting: null,
-        summary: "",
-        error: null,
-      });
-      return;
-    }
-    // Debounce — chip add fires synchronously, but we still want to
-    // coalesce rapid edits.
+    if (draft.to.length === 0) return;
+
     insightsTimerRef.current = setTimeout(() => {
-      void loadInsights(firstRecipient);
+      void (async () => {
+        const recipients = draft.to.slice();
+        const recipientCount = recipients.length;
+        const mode: "single" | "multi" | "aggregate" =
+          recipientCount === 1
+            ? "single"
+            : recipientCount >= AGGREGATE_THRESHOLD
+              ? "aggregate"
+              : "multi";
+
+        let perRecipientFetched = 0;
+
+        if (mode === "aggregate") {
+          // Skip per-recipient fetches entirely; calendar still loaded
+          // once for aggregate "earliest last-meeting" calc.
+          await loadCalendarYear();
+        } else {
+          // single + multi: fetch each recipient (cached so unchanged
+          // recipients are no-ops).
+          const results = await Promise.all(
+            recipients.map((r) => {
+              const key = r.toLowerCase();
+              const cached = insightsCache[key];
+              if (cached && !cached.loading) return Promise.resolve(cached);
+              perRecipientFetched += 1;
+              return loadRecipientInsight(r);
+            }),
+          );
+          // Touch results so the linter knows we used them.
+          void results;
+        }
+
+        emitInsight({
+          actor: user.id,
+          role: user.role,
+          surface: "email",
+          action: "insights_loaded",
+          tier: "personal",
+          payload: {
+            recipient_count: recipientCount,
+            mode,
+            per_recipient_fetched: perRecipientFetched,
+            // Backwards-compat scalars consumers (warehouse) already key off:
+            recipient: recipients[0] ?? "",
+          },
+        });
+      })();
     }, 50);
+
     return () => {
       if (insightsTimerRef.current) {
         clearTimeout(insightsTimerRef.current);
         insightsTimerRef.current = null;
       }
     };
-  }, [firstRecipient, loadInsights]);
+    // We intentionally exclude insightsCache + loadRecipientInsight from
+    // deps — re-running on cache mutations would loop forever. The
+    // recipient list is the canonical trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.to.join("|"), user.id, user.role]);
 
   // -------------------------------------------------------------------------
   // Chip handling
@@ -409,18 +520,63 @@ export default function EmailsPage() {
   }
 
   // -------------------------------------------------------------------------
+  // Body editor
+  // -------------------------------------------------------------------------
+
+  function setBodyHtml(html: string) {
+    if (bodyRef.current) {
+      bodyRef.current.innerHTML = html;
+    }
+    setDraft((prev) => ({ ...prev, body: html }));
+  }
+
+  function applyFormat(format: "bold" | "italic" | "underline" | "ul" | "ol") {
+    if (typeof document === "undefined") return;
+    const cmd =
+      format === "bold"
+        ? "bold"
+        : format === "italic"
+          ? "italic"
+          : format === "underline"
+            ? "underline"
+            : format === "ul"
+              ? "insertUnorderedList"
+              : "insertOrderedList";
+    // Focus the editor first so execCommand operates on the right
+    // selection; otherwise toolbar clicks blur it and the command
+    // becomes a no-op.
+    bodyRef.current?.focus();
+    try {
+      document.execCommand(cmd, false);
+    } catch {
+      /* execCommand is deprecated but supported in every modern browser */
+    }
+    if (bodyRef.current) {
+      setDraft((prev) => ({ ...prev, body: bodyRef.current!.innerHTML }));
+    }
+    emitInsight({
+      actor: user.id,
+      role: user.role,
+      surface: "email",
+      action: "format_applied",
+      tier: "personal",
+      payload: { format },
+    });
+  }
+
+  // -------------------------------------------------------------------------
   // Template insertion
   // -------------------------------------------------------------------------
 
   function applyTemplate(t: EmailTemplate) {
-    // Use the template's name as the subject and a scaffold body listing
-    // its variables — non-LLM, zero-token, immediately editable.
     const variableLines = [
       ...t.requiredVariables.map((v) => `${v}: `),
       ...t.optionalVariables.map((v) => `${v} (optional): `),
-    ].join("\n");
-    const body = `${t.description}\n\n${variableLines}`.trim();
-    setDraft((prev) => ({ ...prev, subject: t.name, body }));
+    ];
+    const plain = `${t.description}\n\n${variableLines.join("\n")}`.trim();
+    const html = plainTextToHtml(plain);
+    setDraft((prev) => ({ ...prev, subject: t.name, body: html }));
+    if (bodyRef.current) bodyRef.current.innerHTML = html;
     emitInsight({
       actor: user.id,
       role: user.role,
@@ -451,7 +607,7 @@ export default function EmailsPage() {
           threadContext: draft.subject
             ? [{ from: "Subject", text: draft.subject }]
             : [],
-          draftSoFar: draft.body,
+          draftSoFar: htmlToPlainText(draft.body),
         }),
       });
       if (!res.ok) {
@@ -461,7 +617,10 @@ export default function EmailsPage() {
       const data = (await res.json()) as { text?: string };
       const suggested = (data.text ?? "").trim();
       if (suggested) {
-        setDraft((prev) => ({ ...prev, body: suggested }));
+        // Escape any HTML in the model output and convert newlines to
+        // <br>. Never trust raw model output as HTML.
+        const html = plainTextToHtml(suggested);
+        setBodyHtml(html);
       }
     } catch {
       setError("Couldn't draft a reply. Try again.");
@@ -478,7 +637,8 @@ export default function EmailsPage() {
     if (busy) return false;
     if (draft.to.length === 0) return false;
     if (!draft.subject.trim()) return false;
-    if (!draft.body.trim()) return false;
+    const text = htmlToPlainText(draft.body).trim();
+    if (!text) return false;
     return true;
   }
 
@@ -488,13 +648,8 @@ export default function EmailsPage() {
     setError(null);
     setSuccess(null);
 
-    const bodyText = draft.body;
-    const bodyHtml = bodyText
-      .split("\n")
-      .map((l) =>
-        l.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]!)),
-      )
-      .join("<br>");
+    const bodyHtml = draft.body || plainTextToHtml(htmlToPlainText(draft.body));
+    const bodyText = htmlToPlainText(bodyHtml);
 
     try {
       const res = await fetchWithRefresh("/api/mail/send", {
@@ -534,6 +689,7 @@ export default function EmailsPage() {
       setSuccess("Sent");
       clearDraft();
       setDraft(emptyDraft());
+      if (bodyRef.current) bodyRef.current.innerHTML = "";
       setShowCc(false);
       setShowBcc(false);
       setTimeout(() => setSuccess(null), 2000);
@@ -551,10 +707,244 @@ export default function EmailsPage() {
   function discard() {
     clearDraft();
     setDraft(emptyDraft());
+    if (bodyRef.current) bodyRef.current.innerHTML = "";
     setShowCc(false);
     setShowBcc(false);
     setError(null);
     setSuccess(null);
+  }
+
+  // -------------------------------------------------------------------------
+  // Recipient card expand/collapse (multi mode)
+  // -------------------------------------------------------------------------
+
+  function toggleRecipientCard(recipient: string) {
+    const key = recipient.toLowerCase();
+    const willExpand = !expandedRecipients.has(key);
+    setExpandedRecipients((prev) => {
+      const next = new Set(prev);
+      if (willExpand) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+    if (willExpand) {
+      // Ensure the card has data even if it was loaded only as a stub.
+      void loadRecipientInsight(recipient);
+      emitInsight({
+        actor: user.id,
+        role: user.role,
+        surface: "email",
+        action: "recipient_card_expanded",
+        tier: "personal",
+        target: recipient,
+        payload: {},
+      });
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Render helpers — recipient panels
+  // -------------------------------------------------------------------------
+
+  const recipientCount = draft.to.length;
+  const mode: "empty" | "single" | "multi" | "aggregate" =
+    recipientCount === 0
+      ? "empty"
+      : recipientCount === 1
+        ? "single"
+        : recipientCount >= AGGREGATE_THRESHOLD
+          ? "aggregate"
+          : "multi";
+
+  function getCachedInsight(email: string): RecipientInsight | undefined {
+    return insightsCache[email.toLowerCase()];
+  }
+
+  function renderSinglePanel(recipient: string) {
+    const ins = getCachedInsight(recipient);
+    if (!ins || ins.loading) {
+      return (
+        <p style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>
+          Loading insights for {recipient}…
+        </p>
+      );
+    }
+    return (
+      <>
+        <div style={insightCell} data-testid="insight-recipient">
+          <span style={cellLabel}>Recipient</span>
+          <span style={cellValue}>{recipient}</span>
+        </div>
+
+        <div style={insightCell} data-testid="insight-recent-threads">
+          <span style={cellLabel}>
+            Recent threads ({ins.recentThreads.length})
+          </span>
+          {ins.recentThreads.length === 0 ? (
+            <span style={{ ...cellValue, color: "var(--wp-text-dim)" }}>
+              No prior emails found.
+            </span>
+          ) : (
+            <ul style={threadList}>
+              {ins.recentThreads.map((t) => (
+                <li key={t.id} style={threadItem}>
+                  <span style={threadSubject}>{t.subject || "(no subject)"}</span>
+                  <span style={threadMeta}>
+                    {formatRelative(t.receivedDateTime)} · {t.from}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div style={insightCell} data-testid="insight-last-meeting">
+          <span style={cellLabel}>Last meeting</span>
+          {ins.lastMeeting ? (
+            <>
+              <span style={cellValue}>{ins.lastMeeting.subject}</span>
+              <span style={{ ...cellValue, color: "var(--wp-text-dim)", fontSize: "0.75rem" }}>
+                {formatRelative(ins.lastMeeting.start)}
+              </span>
+            </>
+          ) : (
+            <span style={{ ...cellValue, color: "var(--wp-text-dim)" }}>
+              No past meeting in the last year.
+            </span>
+          )}
+        </div>
+
+        {ins.summary && (
+          <div style={insightCell} data-testid="insight-summary">
+            <span style={cellLabel}>Last message preview</span>
+            <span style={{ ...cellValue, color: "var(--wp-text-dim)", fontSize: "0.78rem" }}>
+              {ins.summary}
+            </span>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  function renderMultiPanel(recipients: string[]) {
+    return (
+      <div data-testid="insight-multi" style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+        <span style={{ fontSize: "0.72rem", color: "var(--wp-text-dim)" }}>
+          {recipients.length} recipients · click a card to expand
+        </span>
+        {recipients.map((r) => {
+          const key = r.toLowerCase();
+          const ins = getCachedInsight(r);
+          const expanded = expandedRecipients.has(key);
+          const threadCount = ins?.recentThreads.length ?? 0;
+          const lastMtg = ins?.lastMeeting?.start ?? null;
+          return (
+            <div
+              key={r}
+              data-testid={`recipient-card-${r}`}
+              style={{
+                ...insightCell,
+                padding: "0.5rem 0.6rem",
+                cursor: "pointer",
+              }}
+              onClick={() => toggleRecipientCard(r)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggleRecipientCard(r);
+                }
+              }}
+            >
+              <span style={cellValue}>{r}</span>
+              <span style={{ fontSize: "0.7rem", color: "var(--wp-text-dim)" }}>
+                {ins?.loading
+                  ? "loading…"
+                  : `${threadCount} recent thread${threadCount === 1 ? "" : "s"} · last meeting: ${
+                      lastMtg ? formatRelative(lastMtg) : "—"
+                    }`}
+              </span>
+              {expanded && ins && !ins.loading && (
+                <div
+                  data-testid={`recipient-card-expanded-${r}`}
+                  style={{ marginTop: "0.5rem", display: "flex", flexDirection: "column", gap: "0.4rem" }}
+                >
+                  {ins.recentThreads.length > 0 && (
+                    <ul style={threadList}>
+                      {ins.recentThreads.slice(0, 3).map((t) => (
+                        <li key={t.id} style={threadItem}>
+                          <span style={threadSubject}>{t.subject || "(no subject)"}</span>
+                          <span style={threadMeta}>
+                            {formatRelative(t.receivedDateTime)} · {t.from}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {ins.lastMeeting && (
+                    <span style={{ fontSize: "0.75rem", color: "var(--wp-text-dim)" }}>
+                      Last meeting: {ins.lastMeeting.subject} ({formatRelative(ins.lastMeeting.start)})
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderAggregatePanel(recipients: string[]) {
+    // Aggregate uses calendar year-window cache only (no per-recipient
+    // email fetches). Compute earliest last-meeting + most-recent
+    // thread across whatever cache rows already exist.
+    const events = calendarYearCacheRef.current?.events ?? [];
+    const recipLowers = new Set(recipients.map((r) => r.toLowerCase()));
+    const matching = events
+      .filter((ev) => {
+        const emails = (ev.attendeeEmails ?? []).map((e) => e.toLowerCase());
+        return emails.some((e) => recipLowers.has(e));
+      })
+      .filter((ev) => {
+        const t = Date.parse(ev.start);
+        return !Number.isNaN(t) && t <= Date.now();
+      })
+      .sort((a, b) => Date.parse(b.start) - Date.parse(a.start));
+
+    const earliestLastMeeting = matching[matching.length - 1] ?? null;
+    const mostRecentMeeting = matching[0] ?? null;
+
+    return (
+      <div data-testid="insight-aggregate" style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+        <div style={insightCell}>
+          <span style={cellLabel}>Recipients</span>
+          <span style={cellValue}>
+            {recipients.length}+ recipients
+          </span>
+          <span style={{ fontSize: "0.72rem", color: "var(--wp-text-dim)" }}>
+            Per-recipient context skipped to protect Graph quota.
+          </span>
+        </div>
+        <div style={insightCell}>
+          <span style={cellLabel}>Earliest last-meeting</span>
+          <span style={cellValue}>
+            {earliestLastMeeting
+              ? `${earliestLastMeeting.subject} (${formatRelative(earliestLastMeeting.start)})`
+              : "—"}
+          </span>
+        </div>
+        <div style={insightCell}>
+          <span style={cellLabel}>Most recent meeting</span>
+          <span style={cellValue}>
+            {mostRecentMeeting
+              ? `${mostRecentMeeting.subject} (${formatRelative(mostRecentMeeting.start)})`
+              : "—"}
+          </span>
+        </div>
+      </div>
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -737,17 +1127,78 @@ export default function EmailsPage() {
             />
           </label>
 
-          <label style={{ ...fieldLabel, flex: 1, minHeight: 0 }}>
+          <div style={{ ...fieldLabel, flex: 1, minHeight: 0 }}>
             <span style={fieldLabelText}>Body</span>
-            <textarea
-              value={draft.body}
-              onChange={(e) => setDraft((prev) => ({ ...prev, body: e.target.value }))}
+
+            {/* Formatting toolbar */}
+            <div style={toolbarRow} role="toolbar" aria-label="Formatting toolbar">
+              <button
+                type="button"
+                aria-label="Bold"
+                data-testid="format-bold"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => applyFormat("bold")}
+                style={{ ...toolbarBtn, fontWeight: 700 }}
+              >
+                B
+              </button>
+              <button
+                type="button"
+                aria-label="Italic"
+                data-testid="format-italic"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => applyFormat("italic")}
+                style={{ ...toolbarBtn, fontStyle: "italic" }}
+              >
+                I
+              </button>
+              <button
+                type="button"
+                aria-label="Underline"
+                data-testid="format-underline"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => applyFormat("underline")}
+                style={{ ...toolbarBtn, textDecoration: "underline" }}
+              >
+                U
+              </button>
+              <span style={toolbarDivider} />
+              <button
+                type="button"
+                aria-label="Bulleted list"
+                data-testid="format-ul"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => applyFormat("ul")}
+                style={toolbarBtn}
+              >
+                •
+              </button>
+              <button
+                type="button"
+                aria-label="Numbered list"
+                data-testid="format-ol"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => applyFormat("ol")}
+                style={toolbarBtn}
+              >
+                1.
+              </button>
+            </div>
+
+            <div
+              ref={bodyRef}
+              contentEditable
+              role="textbox"
+              aria-multiline="true"
               aria-label="Email body"
               data-testid="compose-body"
-              placeholder="Write your message…"
-              style={bodyTextarea}
+              onInput={() => {
+                setDraft((prev) => ({ ...prev, body: bodyRef.current?.innerHTML ?? "" }));
+              }}
+              suppressContentEditableWarning
+              style={bodyEditor}
             />
-          </label>
+          </div>
 
           {error && (
             <div role="alert" style={errorBox}>
@@ -798,70 +1249,15 @@ export default function EmailsPage() {
           </span>
         </header>
         <div style={insightsBody}>
-          {!firstRecipient ? (
+          {mode === "empty" && (
             <p style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>
               Add a To: recipient to see recent threads, last meeting, and an
               AI-summary of past correspondence.
             </p>
-          ) : insights.loading ? (
-            <p style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>
-              Loading insights for {firstRecipient}…
-            </p>
-          ) : (
-            <>
-              <div style={insightCell} data-testid="insight-recipient">
-                <span style={cellLabel}>Recipient</span>
-                <span style={cellValue}>{firstRecipient}</span>
-              </div>
-
-              <div style={insightCell} data-testid="insight-recent-threads">
-                <span style={cellLabel}>
-                  Recent threads ({insights.recentThreads.length})
-                </span>
-                {insights.recentThreads.length === 0 ? (
-                  <span style={{ ...cellValue, color: "var(--wp-text-dim)" }}>
-                    No prior emails found.
-                  </span>
-                ) : (
-                  <ul style={threadList}>
-                    {insights.recentThreads.map((t) => (
-                      <li key={t.id} style={threadItem}>
-                        <span style={threadSubject}>{t.subject || "(no subject)"}</span>
-                        <span style={threadMeta}>
-                          {formatRelative(t.receivedDateTime)} · {t.from}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              <div style={insightCell} data-testid="insight-last-meeting">
-                <span style={cellLabel}>Last meeting</span>
-                {insights.lastMeeting ? (
-                  <>
-                    <span style={cellValue}>{insights.lastMeeting.subject}</span>
-                    <span style={{ ...cellValue, color: "var(--wp-text-dim)", fontSize: "0.75rem" }}>
-                      {formatRelative(insights.lastMeeting.start)}
-                    </span>
-                  </>
-                ) : (
-                  <span style={{ ...cellValue, color: "var(--wp-text-dim)" }}>
-                    No past meeting in the last month.
-                  </span>
-                )}
-              </div>
-
-              {insights.summary && (
-                <div style={insightCell} data-testid="insight-summary">
-                  <span style={cellLabel}>Last message preview</span>
-                  <span style={{ ...cellValue, color: "var(--wp-text-dim)", fontSize: "0.78rem" }}>
-                    {insights.summary}
-                  </span>
-                </div>
-              )}
-            </>
           )}
+          {mode === "single" && renderSinglePanel(draft.to[0]!)}
+          {mode === "multi" && renderMultiPanel(draft.to)}
+          {mode === "aggregate" && renderAggregatePanel(draft.to)}
         </div>
       </aside>
     </div>
@@ -1068,20 +1464,57 @@ const textInput: React.CSSProperties = {
   outline: "none",
 };
 
-const bodyTextarea: React.CSSProperties = {
+const toolbarRow: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.25rem",
+  padding: "0.3rem 0.4rem",
+  background: "var(--wp-dark-surface2)",
+  border: "1px solid var(--wp-dark-border)",
+  borderTopLeftRadius: "5px",
+  borderTopRightRadius: "5px",
+  borderBottom: "none",
+};
+
+const toolbarBtn: React.CSSProperties = {
+  background: "var(--wp-dark)",
+  border: "1px solid var(--wp-dark-border)",
+  borderRadius: "4px",
+  color: "var(--wp-text)",
+  cursor: "pointer",
+  padding: "0.18rem 0.5rem",
+  fontSize: "0.82rem",
+  lineHeight: 1.1,
+  minWidth: "26px",
+  textAlign: "center",
+};
+
+const toolbarDivider: React.CSSProperties = {
+  display: "inline-block",
+  width: "1px",
+  height: "16px",
+  background: "var(--wp-dark-border)",
+  margin: "0 0.25rem",
+};
+
+const bodyEditor: React.CSSProperties = {
   padding: "0.65rem 0.75rem",
   background: "var(--wp-dark)",
   border: "1px solid var(--wp-dark-border)",
-  borderRadius: "5px",
+  borderTopLeftRadius: 0,
+  borderTopRightRadius: 0,
+  borderBottomLeftRadius: "5px",
+  borderBottomRightRadius: "5px",
   color: "var(--wp-text)",
   fontSize: "0.88rem",
   minHeight: "180px",
-  resize: "vertical",
   outline: "none",
   fontFamily: "inherit",
   width: "100%",
   boxSizing: "border-box",
   flex: 1,
+  overflowY: "auto",
+  whiteSpace: "pre-wrap",
 };
 
 const chipWrap: React.CSSProperties = {

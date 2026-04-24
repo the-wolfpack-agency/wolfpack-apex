@@ -104,6 +104,15 @@ const CALENDAR_RANGE = {
       attendees: ["Bob"],
       attendeeEmails: ["bob@example.com"],
     },
+    // An older meeting > 30 days ago to prove the year-window catches it.
+    {
+      id: "ev3",
+      subject: "Old quarterly review with Jane",
+      start: new Date(Date.now() - 200 * 24 * 3600 * 1000).toISOString(),
+      end: new Date(Date.now() - 200 * 24 * 3600 * 1000 + 30 * 60 * 1000).toISOString(),
+      attendees: ["Jane Doe"],
+      attendeeEmails: ["jane@example.com"],
+    },
   ],
 };
 
@@ -125,6 +134,11 @@ beforeEach(() => {
   );
   // jsdom session storage isolation
   window.sessionStorage.clear();
+  // jsdom does not implement document.execCommand. Stub it so the
+  // toolbar code path runs (and so we can spy on it in individual tests).
+  if (typeof (document as any).execCommand !== "function") {
+    (document as any).execCommand = () => true;
+  }
 });
 
 async function flushPromises() {
@@ -137,6 +151,12 @@ async function addToRecipient(email: string) {
   const input = screen.getByLabelText("To email input") as HTMLInputElement;
   fireEvent.change(input, { target: { value: email } });
   fireEvent.keyDown(input, { key: "Enter" });
+}
+
+function setBodyHtml(html: string) {
+  const body = screen.getByLabelText("Email body") as HTMLDivElement;
+  body.innerHTML = html;
+  fireEvent.input(body);
 }
 
 describe("EmailsPage — inline composer", () => {
@@ -201,9 +221,11 @@ describe("EmailsPage — inline composer", () => {
 
     const subject = screen.getByLabelText("Subject") as HTMLInputElement;
     expect(subject.value).toBe("Intro call follow-up");
-    const body = screen.getByLabelText("Email body") as HTMLTextAreaElement;
-    expect(body.value).toContain("Send after an introductory client call.");
-    expect(body.value).toContain("clientName");
+    const body = screen.getByLabelText("Email body") as HTMLDivElement;
+    // Template body is HTML now (newlines as <br>).
+    expect(body.innerHTML).toContain("Send after an introductory client call.");
+    expect(body.innerHTML).toContain("clientName");
+    expect(body.innerHTML).toContain("<br>");
   });
 
   it("loads recipient insights and renders 'Recent threads (N)' + 'Last meeting' cells", async () => {
@@ -240,8 +262,8 @@ describe("EmailsPage — inline composer", () => {
       );
       expect(loaded).toBeTruthy();
       expect(loaded.payload.recipient).toBe("jane@example.com");
-      expect(loaded.payload.recent_thread_count).toBe(2);
-      expect(typeof loaded.payload.last_meeting_days_ago).toBe("number");
+      expect(loaded.payload.recipient_count).toBe(1);
+      expect(loaded.payload.mode).toBe("single");
     });
   });
 
@@ -277,5 +299,344 @@ describe("EmailsPage — inline composer", () => {
     expect(bg).toMatch(/var\(--wp-/);
     expect(bg.toLowerCase()).not.toMatch(/rgba\([^)]*,\s*0?\.\d+\s*\)/);
     expect(bg.toLowerCase()).not.toContain("transparent");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V1 follow-ups
+// ---------------------------------------------------------------------------
+
+describe("EmailsPage — rich text body editor", () => {
+  it("Bold toolbar button calls execCommand('bold') and emits format_applied", async () => {
+    const execSpy = jest
+      .spyOn(document, "execCommand")
+      .mockImplementation(() => true);
+
+    render(<EmailsPage />);
+    await flushPromises();
+
+    fireEvent.click(screen.getByTestId("format-bold"));
+
+    expect(execSpy).toHaveBeenCalledWith("bold", false);
+
+    const events = mockEmitInsight.mock.calls.map((c) => c[0]);
+    const fmt = events.find(
+      (e: any) => e.surface === "email" && e.action === "format_applied",
+    );
+    expect(fmt).toBeTruthy();
+    expect(fmt.payload.format).toBe("bold");
+    expect(fmt.tier).toBe("personal");
+
+    execSpy.mockRestore();
+  });
+
+  it("Italic / Underline / UL / OL toolbar buttons each fire execCommand + emit", async () => {
+    const execSpy = jest
+      .spyOn(document, "execCommand")
+      .mockImplementation(() => true);
+
+    render(<EmailsPage />);
+    await flushPromises();
+
+    fireEvent.click(screen.getByTestId("format-italic"));
+    fireEvent.click(screen.getByTestId("format-underline"));
+    fireEvent.click(screen.getByTestId("format-ul"));
+    fireEvent.click(screen.getByTestId("format-ol"));
+
+    expect(execSpy).toHaveBeenCalledWith("italic", false);
+    expect(execSpy).toHaveBeenCalledWith("underline", false);
+    expect(execSpy).toHaveBeenCalledWith("insertUnorderedList", false);
+    expect(execSpy).toHaveBeenCalledWith("insertOrderedList", false);
+
+    const formats = mockEmitInsight.mock.calls
+      .map((c) => c[0])
+      .filter((e: any) => e.action === "format_applied")
+      .map((e: any) => e.payload.format);
+    expect(formats).toEqual(["italic", "underline", "ul", "ol"]);
+
+    execSpy.mockRestore();
+  });
+
+  it("AI Draft escapes HTML in the model output and converts \\n to <br>", async () => {
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      if (url.startsWith("/api/assistant/draft-reply")) {
+        return Promise.resolve(
+          ok({ text: "Hi <script>alert(1)</script>\nLine two" }),
+        );
+      }
+      return Promise.resolve(defaultRouter(url));
+    });
+
+    render(<EmailsPage />);
+    await flushPromises();
+
+    fireEvent.click(screen.getByTestId("ai-draft-btn"));
+    await flushPromises();
+    await flushPromises();
+
+    const body = screen.getByLabelText("Email body") as HTMLDivElement;
+    expect(body.innerHTML).toContain("&lt;script&gt;");
+    expect(body.innerHTML).not.toContain("<script>");
+    expect(body.innerHTML).toContain("<br>");
+  });
+
+  it("Send POSTs both bodyHtml AND bodyText", async () => {
+    render(<EmailsPage />);
+    await flushPromises();
+
+    await act(async () => {
+      await addToRecipient("jane@example.com");
+    });
+    await flushPromises();
+
+    const subject = screen.getByLabelText("Subject") as HTMLInputElement;
+    fireEvent.change(subject, { target: { value: "Hello" } });
+
+    setBodyHtml("<b>Hi</b> Jane,<br>Cheers");
+    await flushPromises();
+
+    fireEvent.click(screen.getByTestId("compose-send"));
+    await flushPromises();
+    await flushPromises();
+
+    const sendCall = mockFetchWithRefresh.mock.calls.find(
+      ([url]) => typeof url === "string" && url.startsWith("/api/mail/send"),
+    );
+    expect(sendCall).toBeTruthy();
+    const body = JSON.parse(sendCall![1].body);
+    expect(typeof body.bodyHtml).toBe("string");
+    expect(typeof body.bodyText).toBe("string");
+    expect(body.bodyHtml).toContain("<b>Hi</b>");
+    // bodyText derived via .innerText — strips tags, preserves a newline.
+    expect(body.bodyText).toContain("Hi");
+    expect(body.bodyText).not.toContain("<b>");
+  });
+
+  it("body HTML is persisted to sessionStorage", async () => {
+    render(<EmailsPage />);
+    await flushPromises();
+
+    setBodyHtml("<b>Saved</b>");
+    await flushPromises();
+
+    const raw = window.sessionStorage.getItem("mail.compose.draft");
+    expect(raw).toBeTruthy();
+    const parsed = JSON.parse(raw!);
+    expect(parsed.body).toContain("<b>Saved</b>");
+  });
+});
+
+describe("EmailsPage — multi-recipient insights", () => {
+  it("renders 3 compact recipient cards when there are 3 To: recipients", async () => {
+    render(<EmailsPage />);
+    await flushPromises();
+
+    await act(async () => {
+      await addToRecipient("a@example.com");
+    });
+    await act(async () => {
+      await addToRecipient("b@example.com");
+    });
+    await act(async () => {
+      await addToRecipient("c@example.com");
+    });
+    await flushPromises();
+    await flushPromises();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("insight-multi")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("recipient-card-a@example.com")).toBeInTheDocument();
+    expect(screen.getByTestId("recipient-card-b@example.com")).toBeInTheDocument();
+    expect(screen.getByTestId("recipient-card-c@example.com")).toBeInTheDocument();
+  });
+
+  it("clicking a recipient card emits insight.email.recipient_card_expanded", async () => {
+    render(<EmailsPage />);
+    await flushPromises();
+
+    await act(async () => {
+      await addToRecipient("a@example.com");
+    });
+    await act(async () => {
+      await addToRecipient("b@example.com");
+    });
+    await flushPromises();
+    await flushPromises();
+
+    fireEvent.click(screen.getByTestId("recipient-card-a@example.com"));
+
+    const events = mockEmitInsight.mock.calls.map((c) => c[0]);
+    const expanded = events.find(
+      (e: any) => e.surface === "email" && e.action === "recipient_card_expanded",
+    );
+    expect(expanded).toBeTruthy();
+    expect(expanded.target).toBe("a@example.com");
+  });
+
+  it("renders aggregate summary and skips per-recipient Graph fetches at 6+ recipients", async () => {
+    render(<EmailsPage />);
+    await flushPromises();
+
+    const recipients = ["a", "b", "c", "d", "e", "f"].map(
+      (l) => `${l}@example.com`,
+    );
+    for (const r of recipients) {
+      await act(async () => {
+        await addToRecipient(r);
+      });
+    }
+    await flushPromises();
+    await flushPromises();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("insight-aggregate")).toBeInTheDocument();
+    });
+
+    // No per-recipient `emails-from` fetches should have fired.
+    const emailsFromCalls = mockFetchWithRefresh.mock.calls.filter(
+      ([url]) =>
+        typeof url === "string" && url.startsWith("/api/microsoft?action=emails-from"),
+    );
+    expect(emailsFromCalls.length).toBe(0);
+
+    // insights_loaded should fire once with mode=aggregate + recipient_count=6.
+    const events = mockEmitInsight.mock.calls.map((c) => c[0]);
+    const loaded = events.find(
+      (e: any) => e.surface === "email" && e.action === "insights_loaded",
+    );
+    expect(loaded).toBeTruthy();
+    expect(loaded.payload.mode).toBe("aggregate");
+    expect(loaded.payload.recipient_count).toBe(6);
+    expect(loaded.payload.per_recipient_fetched).toBe(0);
+  });
+
+  it("emits insights_loaded ONCE per insights-load batch with recipient_count", async () => {
+    render(<EmailsPage />);
+    await flushPromises();
+
+    await act(async () => {
+      await addToRecipient("a@example.com");
+    });
+    await act(async () => {
+      await addToRecipient("b@example.com");
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const loadedEvents = mockEmitInsight.mock.calls
+      .map((c) => c[0])
+      .filter(
+        (e: any) => e.surface === "email" && e.action === "insights_loaded",
+      );
+    // The most recent batch should have recipient_count=2.
+    const last = loadedEvents[loadedEvents.length - 1];
+    expect(last).toBeTruthy();
+    expect(last.payload.recipient_count).toBe(2);
+  });
+});
+
+describe("EmailsPage — wider calendar lookup window", () => {
+  it("hits /api/calendar/range with view=year (not view=month)", async () => {
+    render(<EmailsPage />);
+    await flushPromises();
+
+    await act(async () => {
+      await addToRecipient("jane@example.com");
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const calCalls = mockFetchWithRefresh.mock.calls.filter(
+      ([url]) => typeof url === "string" && url.startsWith("/api/calendar/range"),
+    );
+    expect(calCalls.length).toBeGreaterThan(0);
+    for (const [url] of calCalls) {
+      expect(url).toContain("view=year");
+      expect(url).not.toContain("view=month");
+    }
+  });
+
+  it("caches calendar result; switching recipients does not re-hit /api/calendar/range", async () => {
+    render(<EmailsPage />);
+    await flushPromises();
+
+    await act(async () => {
+      await addToRecipient("jane@example.com");
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const callsAfterFirst = mockFetchWithRefresh.mock.calls.filter(
+      ([url]) => typeof url === "string" && url.startsWith("/api/calendar/range"),
+    ).length;
+    expect(callsAfterFirst).toBe(1);
+
+    // Remove + re-add (and add another) — calendar fetch should NOT
+    // fire again.
+    const toInput = screen.getByLabelText("To email input") as HTMLInputElement;
+    fireEvent.keyDown(toInput, { key: "Backspace" });
+    await flushPromises();
+
+    await act(async () => {
+      await addToRecipient("bob@example.com");
+    });
+    await flushPromises();
+    await flushPromises();
+
+    await act(async () => {
+      await addToRecipient("jane@example.com");
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const callsAfterSwap = mockFetchWithRefresh.mock.calls.filter(
+      ([url]) => typeof url === "string" && url.startsWith("/api/calendar/range"),
+    ).length;
+    expect(callsAfterSwap).toBe(1);
+  });
+
+  it("caches per-recipient emails-from: switching back to a known recipient does not re-fetch", async () => {
+    render(<EmailsPage />);
+    await flushPromises();
+
+    await act(async () => {
+      await addToRecipient("jane@example.com");
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const janeCallsFirst = mockFetchWithRefresh.mock.calls.filter(
+      ([url]) =>
+        typeof url === "string" &&
+        url.startsWith("/api/microsoft?action=emails-from") &&
+        url.includes("jane%40example.com"),
+    ).length;
+    expect(janeCallsFirst).toBe(1);
+
+    // Remove jane, add bob, then add jane back.
+    const toInput = screen.getByLabelText("To email input") as HTMLInputElement;
+    fireEvent.keyDown(toInput, { key: "Backspace" });
+    await flushPromises();
+
+    await act(async () => {
+      await addToRecipient("bob@example.com");
+    });
+    await flushPromises();
+    await flushPromises();
+
+    await act(async () => {
+      await addToRecipient("jane@example.com");
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const janeCallsAfter = mockFetchWithRefresh.mock.calls.filter(
+      ([url]) =>
+        typeof url === "string" &&
+        url.startsWith("/api/microsoft?action=emails-from") &&
+        url.includes("jane%40example.com"),
+    ).length;
+    expect(janeCallsAfter).toBe(1);
   });
 });
