@@ -1723,6 +1723,7 @@ export default function MessagesPage() {
             <ChannelThreadPane
               teamName={selectedChannel.teamName}
               channelName={selectedChannel.channelName}
+              channelContextId={`${selectedChannel.teamId}:${selectedChannel.channelId}`}
               loading={loadingChannelMessages}
               scopeMissing={channelMessagesScopeMissing}
               messages={channelMessages}
@@ -2087,6 +2088,7 @@ export default function MessagesPage() {
 function ChannelThreadPane(props: {
   teamName: string;
   channelName: string;
+  channelContextId?: string;
   loading: boolean;
   scopeMissing: boolean;
   messages: ChannelMessageSummary[] | null;
@@ -2107,7 +2109,45 @@ function ChannelThreadPane(props: {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [aiDrafting, setAiDrafting] = useState(false);
+  const lastAiDraftRef = useRef<{ text: string; atMs: number } | null>(null);
   const canSend = draft.trim().length > 0 && !sending && !!props.onSend;
+
+  async function requestAiDraft() {
+    if (aiDrafting) return;
+    setAiDrafting(true);
+    try {
+      const recent = (props.messages ?? []).slice(-12).map((m) => ({
+        from: m.from?.displayName ?? "Other",
+        text: m.bodyText ?? m.body?.content ?? "",
+      }));
+      const res = await fetchWithRefresh("/api/assistant/draft-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          surface: "channel",
+          recipientName: `${props.teamName} · #${props.channelName}`,
+          threadContext: recent,
+          draftSoFar: draft,
+          contextId: props.channelContextId ?? "",
+        }),
+      });
+      if (!res.ok) {
+        setSendError("Couldn't draft a reply. Try again.");
+        return;
+      }
+      const data = (await res.json()) as { text?: string };
+      const suggested = (data.text ?? "").trim();
+      if (suggested) {
+        setDraft(suggested);
+        lastAiDraftRef.current = { text: suggested, atMs: Date.now() };
+      }
+    } catch {
+      setSendError("Couldn't draft a reply. Try again.");
+    } finally {
+      setAiDrafting(false);
+    }
+  }
 
   async function handleSend() {
     if (!props.onSend) return;
@@ -2129,6 +2169,23 @@ function ChannelThreadPane(props: {
       } else {
         setSendError(result.message ?? "Couldn't send. Try again.");
       }
+      return;
+    }
+    // AI acceptance signal — same pattern as the chat composer.
+    const lastDraft = lastAiDraftRef.current;
+    if (lastDraft && Date.now() - lastDraft.atMs < 5 * 60_000) {
+      const editDistance = simpleEditDistance(lastDraft.text, text);
+      const event =
+        editDistance === 0
+          ? "assistant.draft_accepted"
+          : "assistant.draft_modified";
+      fireAnalytics(event, {
+        surface: "channel",
+        context_id: props.channelContextId ?? "",
+        edit_distance: editDistance,
+        sent_length: text.length,
+      });
+      lastAiDraftRef.current = null;
     }
   }
 
@@ -2276,6 +2333,29 @@ function ChannelThreadPane(props: {
             </div>
           ) : null}
           <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+            <button
+              type="button"
+              data-testid="channel-compose-ai-draft"
+              onClick={() => void requestAiDraft()}
+              disabled={aiDrafting}
+              aria-label={`Draft a reply to #${props.channelName} with AI`}
+              title="Draft a reply with AI"
+              style={{
+                padding: "8px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--wp-dark-border, #333)",
+                background: "var(--wp-dark-surface, #1a1a1a)",
+                color: aiDrafting
+                  ? "var(--wp-text-muted, #9ca3af)"
+                  : "var(--wp-gold, #eab308)",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: aiDrafting ? "wait" : "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {aiDrafting ? "…" : "✨ AI"}
+            </button>
             <textarea
               data-testid="channel-compose-input"
               aria-label={`Send a message to #${props.channelName}`}

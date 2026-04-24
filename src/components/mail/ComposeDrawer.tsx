@@ -66,6 +66,23 @@ function clearDraft(): void {
   } catch {}
 }
 
+/**
+ * Cheap edit-distance approximation — same heuristic as the chat
+ * composer. Tells the warehouse "did the user keep the AI draft
+ * verbatim or rewrite it heavily." Doesn't need character-perfect
+ * Levenshtein for an analytics signal.
+ */
+function simpleEmailEditDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  const aSet = new Set(a);
+  const bSet = new Set(b);
+  let overlap = 0;
+  for (const c of aSet) if (bSet.has(c)) overlap++;
+  const lenDelta = Math.abs(a.length - b.length);
+  const overlapPenalty = Math.max(aSet.size, bSet.size) - overlap;
+  return lenDelta + overlapPenalty;
+}
+
 function isPlausibleEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 }
@@ -90,6 +107,10 @@ export function ComposeDrawer({ open, onClose, onSent, initialTo, initialSubject
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  // AI smart-compose state for email — drafts are inserted into
+  // the contentEditable body. Acceptance signal fires on send.
+  const [aiDrafting, setAiDrafting] = useState(false);
+  const lastAiDraftRef = useRef<{ text: string; atMs: number } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -141,6 +162,51 @@ export function ComposeDrawer({ open, onClose, onSent, initialTo, initialSubject
     return true;
   }
 
+  async function requestAiDraft() {
+    if (aiDrafting) return;
+    setAiDrafting(true);
+    setError(null);
+    try {
+      const currentBody = bodyRef.current?.innerText ?? draft.body ?? "";
+      const recipientName = draft.to[0] ?? "";
+      const res = await fetchWithRefresh("/api/assistant/draft-reply", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          surface: "email",
+          recipientName,
+          // No prior thread context yet — ComposeDrawer is a blank
+          // composer for now. When wired into "Reply" flow later,
+          // pass the thread.
+          threadContext: draft.subject
+            ? [{ from: "Subject", text: draft.subject }]
+            : [],
+          draftSoFar: currentBody,
+        }),
+      });
+      if (!res.ok) {
+        setError("Couldn't draft a reply. Try again.");
+        return;
+      }
+      const data = (await res.json()) as { text?: string };
+      const suggested = (data.text ?? "").trim();
+      if (suggested && bodyRef.current) {
+        // Insert as plain text so the contentEditable doesn't get
+        // surprise HTML. Newlines preserved via <br>.
+        bodyRef.current.innerHTML = suggested
+          .split("\n")
+          .map((l) => l.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]!)))
+          .join("<br>");
+        setDraft((prev) => ({ ...prev, body: bodyRef.current!.innerHTML }));
+        lastAiDraftRef.current = { text: suggested, atMs: Date.now() };
+      }
+    } catch {
+      setError("Couldn't draft a reply. Try again.");
+    } finally {
+      setAiDrafting(false);
+    }
+  }
+
   async function send() {
     if (!canSend()) return;
     setBusy(true);
@@ -182,6 +248,30 @@ export function ComposeDrawer({ open, onClose, onSent, initialTo, initialSubject
       }
 
       setSuccess("Sent");
+      // AI acceptance signal — fire BEFORE state reset so we still
+      // have the draft text to compare against.
+      const lastDraft = lastAiDraftRef.current;
+      if (lastDraft && Date.now() - lastDraft.atMs < 5 * 60_000) {
+        const editDistance = simpleEmailEditDistance(lastDraft.text, bodyText);
+        const event =
+          editDistance === 0
+            ? "assistant.draft_accepted"
+            : "assistant.draft_modified";
+        fetchWithRefresh("/api/analytics", {
+          method: "POST",
+          headers: jsonHeaders(),
+          body: JSON.stringify({
+            event,
+            metadata: {
+              surface: "email",
+              context_id: "",
+              edit_distance: editDistance,
+              sent_length: bodyText.length,
+            },
+          }),
+        }).catch(() => undefined);
+        lastAiDraftRef.current = null;
+      }
       clearDraft();
       setDraft(emptyDraft());
       if (bodyRef.current) bodyRef.current.innerHTML = "";
@@ -283,6 +373,21 @@ export function ComposeDrawer({ open, onClose, onSent, initialTo, initialSubject
           <div style={actionsStyle}>
             <button type="button" onClick={onClose} style={btn()}>
               Discard
+            </button>
+            <button
+              type="button"
+              disabled={aiDrafting}
+              onClick={requestAiDraft}
+              data-testid="compose-ai-draft"
+              aria-label="Draft email with AI"
+              title="Draft email with AI"
+              style={{
+                ...btn(),
+                color: aiDrafting ? "var(--wp-text-muted)" : "var(--wp-gold)",
+                cursor: aiDrafting ? "wait" : "pointer",
+              }}
+            >
+              {aiDrafting ? "Drafting…" : "✨ AI Draft"}
             </button>
             <button
               type="button"
