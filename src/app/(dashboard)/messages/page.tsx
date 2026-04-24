@@ -1149,15 +1149,13 @@ export default function MessagesPage() {
     <div
       data-testid="messages-page"
       style={{
-        // Anchor to the dashboard <main> exactly (which is the
-        // positioned parent via overflow-y-auto). Without this the
-        // page grew to fit the chats + teams + channels content and
-        // pushed the whole dashboard into a long scroll. With
-        // position:absolute + inset:0 + overflow:hidden, the page
-        // claims a fixed slot and the inner aside / thread-body do
-        // their own scrolling — same model as Teams desktop.
-        position: "absolute",
-        inset: 0,
+        // h-screen on the dashboard root means <main> now has a
+        // resolved height (100vh - chrome). messages-page taking
+        // height:100% + overflow:hidden then claims that fixed slot
+        // and the inner aside / thread-body do their own scrolling
+        // — same model as Teams desktop. No position:absolute (that
+        // escaped the sidebar's flex slot and overlapped the nav).
+        height: "100%",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",

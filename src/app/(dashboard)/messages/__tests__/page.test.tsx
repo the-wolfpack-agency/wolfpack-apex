@@ -1439,8 +1439,9 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     // dashboard <main> so its inner aside / thread scroll
     // independently. Otherwise users had to scroll the entire
     // dashboard to reach the bottom of the channels list.
-    expect(page.style.position).toBe("absolute");
+    expect(page.style.height).toBe("100%");
     expect(page.style.overflow).toBe("hidden");
+    expect(page.style.flexDirection).toBe("column");
   });
 
   test("selecting a chat clears any active channel selection (right pane is single-target)", async () => {

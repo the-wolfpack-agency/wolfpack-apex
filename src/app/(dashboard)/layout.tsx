@@ -148,7 +148,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen flex" style={{ background: "var(--wp-dark)" }}>
+    <div className="h-screen flex overflow-hidden" style={{ background: "var(--wp-dark)" }}>
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
