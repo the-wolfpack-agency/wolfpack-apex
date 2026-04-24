@@ -686,4 +686,49 @@ describe("EmailsPage — responsive layout", () => {
     await waitFor(() => screen.getByTestId("composer-wrap"));
     expect(screen.getByTestId("composer-wrap").style.width).toBe("100%");
   });
+
+  // Regression: on mobile the composer rendered BELOW the templates rail,
+  // so users had to scroll past every template before reaching the form.
+  it("mobile layout puts composer before templates and insights", async () => {
+    setViewport(400);
+    render(<EmailsPage />);
+    await waitFor(() => screen.getByTestId("composer-wrap"));
+    const composerOrder = Number(screen.getByTestId("composer-wrap").style.order);
+    const insightsOrder = Number(screen.getByTestId("insights-panel").style.order);
+    // Templates aside is the only <aside aria-label="Email templates">.
+    const sidebar = document.querySelector('[aria-label="Email templates"]') as HTMLElement;
+    const sidebarOrder = Number(sidebar.style.order);
+    expect(composerOrder).toBeLessThan(insightsOrder);
+    expect(insightsOrder).toBeLessThan(sidebarOrder);
+  });
+
+  // Regression: the global floating assistant FAB (fixed bottom-6 right-6)
+  // sat directly on top of the Send button on mobile. Reserve scroll tail
+  // so Send is reachable above the FAB.
+  it("mobile layout reserves bottom padding so the FAB does not cover Send", async () => {
+    setViewport(400);
+    render(<EmailsPage />);
+    await waitFor(() => screen.getByTestId("emails-page"));
+    const page = screen.getByTestId("emails-page");
+    // 6rem = enough clearance for the 56px FAB + 24px offset.
+    expect(page.style.paddingBottom).toBe("6rem");
+  });
+
+  it("wide viewport does NOT add the mobile bottom padding", async () => {
+    setViewport(1400);
+    render(<EmailsPage />);
+    await waitFor(() => screen.getByTestId("emails-page"));
+    const page = screen.getByTestId("emails-page");
+    expect(page.style.paddingBottom).not.toBe("6rem");
+  });
+
+  // Regression: "✨ AI Draft" wrapped onto two lines inside the action
+  // button on narrow viewports, breaking the action row's rhythm.
+  it("action buttons never wrap their label text", async () => {
+    setViewport(400);
+    render(<EmailsPage />);
+    await waitFor(() => screen.getByTestId("ai-draft-btn"));
+    expect(screen.getByTestId("ai-draft-btn").style.whiteSpace).toBe("nowrap");
+    expect(screen.getByTestId("compose-send").style.whiteSpace).toBe("nowrap");
+  });
 });

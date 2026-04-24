@@ -978,22 +978,33 @@ export default function EmailsPage() {
   // panes vertically and let the page scroll — the previous fixed
   // 3-column row clipped the insights panel below the fold and made
   // it invisible on mobile entirely.
+  // On mobile the global assistant FAB (bottom-6 right-6, ~56px square)
+  // sits directly on top of the Send button when the page is scrolled to
+  // the bottom of the composer. Reserve ~6rem of scroll tail so Send
+  // stays reachable above the FAB's footprint.
   const responsivePageWrap: React.CSSProperties = {
     ...pageWrap,
     flexDirection: isNarrow ? "column" : "row",
     overflow: isNarrow ? "auto" : "hidden",
     flexWrap: isNarrow ? "nowrap" : "wrap",
+    paddingBottom: isMobile ? "6rem" : pageWrap.padding,
   };
+  // Narrow-viewport pane order: composer first (primary action), then
+  // recipient insights (context), then templates (secondary). Users who
+  // land on /emails expect to compose — templates shouldn't push the
+  // form below the fold.
   const responsiveComposerWrap: React.CSSProperties = {
     ...composerWrap,
     width: isNarrow ? "100%" : undefined,
     minWidth: isNarrow ? "0" : "320px",
     flex: isNarrow ? "1 0 auto" : "1 1 480px",
+    order: isNarrow ? 1 : 0,
   };
   const responsiveInsightsWrap: React.CSSProperties = {
     ...insightsWrap,
     width: isNarrow ? "100%" : "320px",
     flexShrink: isNarrow ? 1 : 0,
+    order: isNarrow ? 2 : 0,
   };
   const responsiveSidebarStyle: React.CSSProperties = {
     ...sidebarStyle,
@@ -1004,6 +1015,7 @@ export default function EmailsPage() {
         : "44px",
     maxHeight: isMobile && templatesOpen ? "260px" : undefined,
     flexShrink: isMobile ? 0 : 0,
+    order: isNarrow ? 3 : 0,
   };
 
   return (
@@ -1656,6 +1668,7 @@ const actionsRow: React.CSSProperties = {
   display: "flex",
   justifyContent: "flex-end",
   gap: "0.5rem",
+  flexWrap: "wrap",
 };
 
 function btn(bg = "var(--wp-dark-surface2)"): React.CSSProperties {
@@ -1668,6 +1681,7 @@ function btn(bg = "var(--wp-dark-surface2)"): React.CSSProperties {
     fontWeight: 600,
     cursor: "pointer",
     fontSize: "0.82rem",
+    whiteSpace: "nowrap",
   };
 }
 
