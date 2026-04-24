@@ -300,7 +300,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           previously a problem; that's now fixed at the panel level
           (min(32rem, calc(100dvh - 2rem)) + onFocus scrollIntoView)
           so the FAB can appear on every page again. */}
-      {pathname !== "/assistant" && (
+      {pathname !== "/assistant" && pathname !== "/messages" && (
         <>
           <InstinctChat position="floating" />
           <WelcomeTooltip />

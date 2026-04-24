@@ -66,6 +66,13 @@ describe("dashboard layout — floating assistant mount rules", () => {
     expect(layout).toMatch(/pathname\s*!==?\s*["']\/assistant["']/);
   });
 
+  it("suppresses the FAB on /messages so it doesn't cover composer Send buttons", () => {
+    // Regression: bottom-right FAB (z-50, fixed) overlapped both the
+    // chat composer Send and the new channel composer Send. Hide the
+    // FAB on /messages — users have inline chat with the assistant
+    // elsewhere; not worth blocking critical UI here.
+    expect(layout).toMatch(/pathname\s*!==?\s*["']\/messages["']/);
+  });
 });
 
 describe("floating FAB — closed state is unobtrusive, open works, analytics fire", () => {
