@@ -117,17 +117,35 @@ describe("listJoinedTeams", () => {
     }
   });
 
-  it("clamps limit to 1..100", async () => {
+  it("does NOT send $top to /me/joinedTeams (Graph rejects it)", async () => {
+    // Regression: Nick saw "The query specified in the URI is not
+    // valid. Query option 'Top' is not allowed." from Graph. The
+    // /me/joinedTeams endpoint specifically rejects $top — unlike
+    // most Graph endpoints. Code now omits the parameter entirely.
     fetchMock.mockResolvedValue(mkOk({ value: [] }));
     const { listJoinedTeams } = await import("@/lib/ms-graph-teams");
-    await listJoinedTeams("token", 999);
-    const url = fetchMock.mock.calls[0][0];
-    expect(url).toContain("$top=100");
-    fetchMock.mockClear();
-    await listJoinedTeams("token", -5);
-    // Negative values clamp to the floor (1), not the default —
-    // either way we never send Graph an out-of-range $top.
-    expect(fetchMock.mock.calls[0][0]).toContain("$top=1");
+    await listJoinedTeams("token", 50);
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).not.toContain("$top");
+    expect(url).toMatch(/\/me\/joinedTeams$/);
+  });
+
+  it("client-side slices the result to honor the caller's limit", async () => {
+    // Since Graph returns all teams unconditionally, the helper has
+    // to slice locally to keep the response bounded for callers that
+    // pass a small limit.
+    fetchMock.mockResolvedValue(
+      mkOk({
+        value: Array.from({ length: 12 }, (_, i) => ({
+          id: `t${i}`,
+          displayName: `Team ${i}`,
+        })),
+      }),
+    );
+    const { listJoinedTeams } = await import("@/lib/ms-graph-teams");
+    const result = await listJoinedTeams("token", 5);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.teams).toHaveLength(5);
   });
 });
 

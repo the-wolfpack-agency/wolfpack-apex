@@ -233,8 +233,12 @@ export async function listJoinedTeams(
   limit: number = DEFAULT_TEAM_LIMIT,
   userId: string = "system",
 ): Promise<ListJoinedTeamsResult> {
+  // /me/joinedTeams does NOT support $top (Graph rejects with
+  // "Query option 'Top' is not allowed"). The endpoint always
+  // returns the full list. We slice client-side to honor the
+  // caller's intent.
   const safeLimit = Math.max(1, Math.min(100, Math.floor(limit || DEFAULT_TEAM_LIMIT)));
-  const qs = `/me/joinedTeams?$top=${safeLimit}`;
+  const qs = `/me/joinedTeams`;
   const { status, data, graphError } = await graphGet<{ value?: RawTeam[] }>(qs, userMsToken);
   if (status === 401 || status === 403) {
     trackEvent("ms_teams.scope_missing", userId, "system", { surface: "list_teams" });
@@ -261,7 +265,8 @@ export async function listJoinedTeams(
   const raw = Array.isArray(data?.value) ? data!.value : [];
   const teams = raw
     .map(normalizeTeam)
-    .filter((t): t is JoinedTeam => t !== null);
+    .filter((t): t is JoinedTeam => t !== null)
+    .slice(0, safeLimit);
   trackEvent("ms_teams.listed", userId, "system", { count: teams.length });
   return { ok: true, teams };
 }
