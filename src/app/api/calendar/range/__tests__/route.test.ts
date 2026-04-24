@@ -114,4 +114,21 @@ describe("GET /api/calendar/range", () => {
     expect(body.events).toEqual([]);
     expect(body.insights.meetingCount).toBe(0);
   });
+
+  test("returns events sorted descending by start (newest first)", async () => {
+    // Regression: Nick called out "User has to scroll to the bottom
+    // to find the latest". Graph returns events in roughly ascending
+    // order; the route must sort descending so the most recent (or
+    // next-up future) event sits at the top of the list.
+    mockRequireCapability.mockResolvedValue({ ok: true, user: USER });
+    mockFetchCalendarEvents.mockResolvedValue([
+      { id: "old", subject: "April 20", start: "2026-04-20T10:00:00Z", end: "2026-04-20T11:00:00Z" },
+      { id: "newest", subject: "April 23", start: "2026-04-23T10:00:00Z", end: "2026-04-23T11:00:00Z" },
+      { id: "middle", subject: "April 21", start: "2026-04-21T10:00:00Z", end: "2026-04-21T11:00:00Z" },
+    ]);
+    const res = await GET(req());
+    const body = await res.json();
+    const ids = (body.events as { id: string }[]).map((e) => e.id);
+    expect(ids).toEqual(["newest", "middle", "old"]);
+  });
 });

@@ -31,7 +31,20 @@ import {
   authHeaders,
   jsonHeaders,
   migrateLegacyApexKeys,
+  fetchWithRefresh,
 } from "@/lib/client-auth";
+
+// Build a minimal JWT (header.payload.signature) where the payload's
+// `exp` is `secsFromNow` seconds from "now". Signature is an empty
+// placeholder — only the payload's exp is read. base64url-encode.
+function fakeJwt(secsFromNow: number): string {
+  const exp = Math.floor(Date.now() / 1000) + secsFromNow;
+  const payload = btoa(JSON.stringify({ exp }))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+  return `eyJhbGciOiJIUzI1NiJ9.${payload}.sig`;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -246,6 +259,107 @@ describe("client-auth", () => {
       ]) {
         expect(store[legacy]).toBeUndefined();
       }
+    });
+  });
+
+  // ---- fetchWithRefresh: pre-refresh on expired JWT --------------------
+  //
+  // Regression: the dashboard logged a wall of "401 Unauthorized" in
+  // the browser console after every long-idle return because every
+  // widget fired a request with the stale JWT, got 401, refreshed,
+  // retried. The 401 was a cosmetic-only browser log (we can't
+  // suppress it) but it scared users. Fix: peek at the JWT's `exp`
+  // and pre-refresh BEFORE sending if it's already expired or within
+  // 30s of expiring. These tests lock in that behavior.
+
+  describe("fetchWithRefresh — JWT pre-refresh", () => {
+    let fetchSpy: jest.Mock;
+
+    beforeEach(() => {
+      resetStore();
+      fetchSpy = jest.fn();
+      (global as unknown as { fetch: typeof fetch }).fetch =
+        fetchSpy as unknown as typeof fetch;
+    });
+
+    it("pre-refreshes when the access token is already expired (no 401 round trip)", async () => {
+      store["instinct_token"] = fakeJwt(-60); // expired 60s ago
+      store["instinct_user"] = JSON.stringify({ id: "u1" });
+
+      // 1st call: POST /api/auth/refresh → 200 with new token.
+      // 2nd call: GET /api/dashboard → 200.
+      const newToken = fakeJwt(900);
+      fetchSpy
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ token: newToken }),
+        } as unknown as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({}),
+        } as unknown as Response);
+
+      const res = await fetchWithRefresh("/api/dashboard");
+      expect(res.status).toBe(200);
+
+      // First fetch was the refresh. Second fetch was the actual
+      // request, with the NEW token in the Authorization header.
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(fetchSpy.mock.calls[0][0]).toBe("/api/auth/refresh");
+      const finalCall = fetchSpy.mock.calls[1];
+      const headers = (finalCall[1] as RequestInit).headers as Headers;
+      expect((headers as Headers).get("Authorization")).toBe(
+        `Bearer ${newToken}`,
+      );
+      // Critically: NO 401 round trip ever happened.
+      expect(
+        fetchSpy.mock.results.some(
+          (r) => (r.value as { status?: number }).status === 401,
+        ),
+      ).toBe(false);
+    });
+
+    it("does NOT pre-refresh when the token has plenty of TTL left", async () => {
+      store["instinct_token"] = fakeJwt(600); // 10 min left
+      fetchSpy.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+      } as unknown as Response);
+
+      await fetchWithRefresh("/api/dashboard");
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(fetchSpy.mock.calls[0][0]).toBe("/api/dashboard");
+    });
+
+    it("falls through to the legacy 401-then-refresh path when the JWT is unparseable", async () => {
+      store["instinct_token"] = "not.a.real.jwt";
+      store["instinct_user"] = JSON.stringify({ id: "u1" });
+
+      // No pre-refresh; original path: request → 401 → refresh → retry.
+      fetchSpy
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          json: async () => ({}),
+        } as unknown as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ token: fakeJwt(900) }),
+        } as unknown as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({}),
+        } as unknown as Response);
+
+      const res = await fetchWithRefresh("/api/dashboard");
+      expect(res.status).toBe(200);
+      // 3 fetches: original (401) → refresh → retry.
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
     });
   });
 });

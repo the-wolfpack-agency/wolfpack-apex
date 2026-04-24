@@ -179,6 +179,35 @@ function redirectToLogin(): void {
 }
 
 /**
+ * Decode a JWT's payload without verifying the signature. Used purely
+ * to read the `exp` claim so we can pre-refresh expired tokens
+ * BEFORE the request fires — server still verifies signature on
+ * every actual call, so this is safe.
+ *
+ * Returns the seconds-until-expiry (negative if already expired) or
+ * null if we can't read a valid `exp`. null means "fall back to the
+ * 401-then-refresh path", same as today.
+ */
+function jwtSecondsUntilExpiry(token: string): number | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    // base64url → base64
+    const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padding = padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
+    const payload = JSON.parse(atob(padded + padding)) as { exp?: number };
+    if (typeof payload.exp !== "number") return null;
+    return payload.exp - Math.floor(Date.now() / 1000);
+  } catch {
+    return null;
+  }
+}
+
+// 30s skew buffer — refresh anything that'll expire in the next 30s
+// so the in-flight request doesn't race the clock.
+const EXP_SKEW_SECONDS = 30;
+
+/**
  * Primary authenticated fetch. Use this instead of raw fetch() for any
  * call that hits an endpoint requiring auth.
  */
@@ -186,7 +215,30 @@ export async function fetchWithRefresh(
   input: RequestInfo | URL,
   init: RequestInit = {},
 ): Promise<Response> {
-  const initialToken = getInstinctToken();
+  let initialToken = getInstinctToken();
+
+  // Pre-refresh if the access token is expired or about to expire.
+  // Avoids the noisy 401 → refresh → retry path on dashboard mount
+  // when the JWT outlived its 15-min TTL while the tab was idle. If
+  // exp is unreadable we silently fall through and let the post-401
+  // path handle it (same as before).
+  if (initialToken) {
+    const ttl = jwtSecondsUntilExpiry(initialToken);
+    if (ttl !== null && ttl <= EXP_SKEW_SECONDS) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        initialToken = refreshed;
+      } else {
+        clearInstinctSession();
+        redirectToLogin();
+        // Even though we're redirecting, return SOMETHING so callers
+        // that await this don't hang. A 401 Response with empty body
+        // is the closest semantic match.
+        return new Response(null, { status: 401 });
+      }
+    }
+  }
+
   const headers = new Headers(init.headers ?? {});
   if (initialToken) headers.set("Authorization", `Bearer ${initialToken}`);
 

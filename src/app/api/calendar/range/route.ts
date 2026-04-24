@@ -61,11 +61,23 @@ export async function GET(req: NextRequest) {
     slices.map(([s, e]) => fetchCalendarEvents(user.id, s, e).catch(() => [])),
   );
   const seen = new Set<string>();
-  const events = batches.flat().filter((ev) => {
-    if (seen.has(ev.id)) return false;
-    seen.add(ev.id);
-    return true;
-  });
+  const events = batches
+    .flat()
+    .filter((ev) => {
+      if (seen.has(ev.id)) return false;
+      seen.add(ev.id);
+      return true;
+    })
+    // Newest first — Nick called out that scrolling to the bottom to
+    // find the latest event was bad UX. Descending by start time
+    // means the most recent (or next-up future) event sits at the
+    // top of the list. Insights below still see all events; ordering
+    // here only affects render order.
+    .sort((a, b) => {
+      const at = new Date(a.start).getTime();
+      const bt = new Date(b.start).getTime();
+      return bt - at;
+    });
 
   const insights = computeHistoricalInsights({
     events,
