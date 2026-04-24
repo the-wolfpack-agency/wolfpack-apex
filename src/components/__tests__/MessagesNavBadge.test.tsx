@@ -12,10 +12,11 @@ import "@testing-library/jest-dom";
  */
 
 const mockFetchWithRefresh = jest.fn();
-const mockGetInstinctToken = jest.fn(() => "fake-token");
+const mockGetInstinctToken = jest.fn<string | null, []>(() => "fake-token");
 jest.mock("@/lib/client-auth", () => ({
-  fetchWithRefresh: (...a: any[]) => mockFetchWithRefresh(...a),
-  getInstinctToken: (...a: any[]) => mockGetInstinctToken(...a),
+  fetchWithRefresh: (...a: unknown[]) =>
+    (mockFetchWithRefresh as unknown as (...args: unknown[]) => unknown)(...a),
+  getInstinctToken: () => mockGetInstinctToken(),
 }));
 
 import { act, render, screen, waitFor } from "@testing-library/react";
