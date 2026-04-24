@@ -346,10 +346,18 @@ export async function listChatsResult(
   userId: string = "system",
 ): Promise<ListChatsResult> {
   const safeLimit = Math.max(1, Math.min(50, Math.floor(limit || DEFAULT_CHAT_LIMIT)));
+  // IMPORTANT: `lastMessagePreview` must be in `$expand`, not just
+  // referenced in `$orderby`. Without the explicit expand, Graph
+  // returns a cached/stale `lastMessagePreview` blob (minutes to
+  // hours behind real activity) AND silently ignores the orderby,
+  // so the left-rail row stays stuck on the chat's original
+  // createdDateTime ("1d" for a thread that just got a reply 7m
+  // ago). Comma-separated expand hydrates both members + a fresh
+  // preview on every call.
   const qs =
     `/me/chats?$top=${safeLimit}` +
     `&$orderby=${encodeURIComponent("lastMessagePreview/createdDateTime desc")}` +
-    `&$expand=members`;
+    `&$expand=members,lastMessagePreview`;
 
   const { status, data } = await graphGet<{ value?: RawChat[] }>(qs, userMsToken);
   if (status === 401 || status === 403) {

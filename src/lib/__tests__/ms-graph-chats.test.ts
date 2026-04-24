@@ -105,11 +105,15 @@ describe("listChats", () => {
     expect(chats[0].lastMessagePreview?.body.contentType).toBe("html");
     expect(chats[0].lastMessagePreview?.from.email).toBe("alice@x.com");
 
-    // Graph URL should include $top, $orderby, $expand=members.
+    // Graph URL should include $top, $orderby, and MUST expand both
+    // `members` AND `lastMessagePreview`. Without lastMessagePreview
+    // in $expand, Graph returns a stale cached preview and ignores
+    // the orderby → the /messages left rail shows "1d" for chats
+    // that got a reply 7m ago (April 2026 regression).
     const url = (fetchMock.mock.calls[0] as any[])[0] as string;
     expect(url).toContain("/me/chats");
     expect(url).toContain("$top=10");
-    expect(url).toContain("$expand=members");
+    expect(url).toContain("$expand=members,lastMessagePreview");
     expect(url).toContain(encodeURIComponent("lastMessagePreview/createdDateTime desc"));
 
     expect(mockTrack).toHaveBeenCalledWith(
