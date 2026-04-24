@@ -1163,6 +1163,26 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     );
   });
 
+  test("regression: hydrated-expanded teams auto-load channels on mount", async () => {
+    // Bug: expandedTeams persists to localStorage, but channelsByTeam
+    // doesn't. After a reload, teams marked expanded sat with no
+    // channel data in state, and the render path showed "No channels."
+    // instead of triggering a fetch. Fix: useEffect on teams arrival
+    // backfills any expanded-but-unloaded team. This test seeds the
+    // localStorage flag and asserts the fetch happens automatically.
+    window.localStorage.setItem(
+      "instinct.messages.expanded_teams",
+      JSON.stringify({ "team-wolf": true }),
+    );
+    wireSimpleGraph();
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("team-row-team-wolf"));
+    // Channels should appear without us clicking the toggle.
+    await waitFor(() => {
+      expect(screen.getByTestId("channel-row-ch-general")).toBeInTheDocument();
+    });
+  });
+
   test("expanding a team loads its channels and persists the expansion state", async () => {
     wireSimpleGraph();
     render(<MessagesPage />);

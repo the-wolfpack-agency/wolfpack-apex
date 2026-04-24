@@ -640,6 +640,29 @@ export default function MessagesPage() {
     }
   }
 
+  // Hydration: `expandedTeams` is persisted to localStorage so the
+  // user's expand/collapse choices survive reloads — but
+  // `channelsByTeam` is intentionally NOT persisted (channel lists
+  // can grow). On page mount, any team that's marked expanded from
+  // last session has no channels in state, so the render falls
+  // through to "No channels." instead of fetching. This effect
+  // closes that gap: for every team where `expandedTeams[id] = true`
+  // but `channelsByTeam[id]` is undefined, kick off a fetch. Runs
+  // when the teams list arrives (so we know which IDs to look at).
+  useEffect(() => {
+    if (!teams || teams.length === 0) return;
+    for (const team of teams) {
+      if (expandedTeams[team.id] && !channelsByTeam[team.id]) {
+        void loadChannelsForTeam(team.id);
+      }
+    }
+    // expandedTeams + channelsByTeam intentionally NOT in deps:
+    // we only want this to fire when the teams list lands. The
+    // toggle path handles per-toggle fetching. eslint-disable for
+    // the dep warning.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teams, loadChannelsForTeam]);
+
   const loadChannelMessages = useCallback(
     async (teamId: string, channelId: string) => {
       setLoadingChannelMessages(true);
