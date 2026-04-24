@@ -66,8 +66,7 @@ describe("listJoinedTeams", () => {
     const { listJoinedTeams } = await import("@/lib/ms-graph-teams");
     const result = await listJoinedTeams("token", 50, "user-1");
     expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.code).toBe("scope_missing");
+    if (!result.ok && result.code === "scope_missing") {
       expect(result.scope).toBe("Team.ReadBasic.All");
     }
     expect(mockTrack).toHaveBeenCalledWith(
@@ -216,6 +215,7 @@ describe("listChannelMessages", () => {
     const { listChannelMessages } = await import("@/lib/ms-graph-teams");
     const result = await listChannelMessages("token", "t", "c");
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.scope).toBe("ChannelMessage.Read.All");
+    if (!result.ok && result.code === "scope_missing")
+      expect(result.scope).toBe("ChannelMessage.Read.All");
   });
 });

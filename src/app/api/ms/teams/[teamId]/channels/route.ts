@@ -46,7 +46,16 @@ export async function GET(
       user.id,
     );
     if (!result.ok) {
-      return NextResponse.json({ channels: [], scope_missing: true });
+      if (result.code === "scope_missing") {
+        return NextResponse.json({ channels: [], scope_missing: true });
+      }
+      return NextResponse.json({
+        channels: [],
+        graph_error: true,
+        graph_status: result.status,
+        graph_code: result.graphCode ?? null,
+        graph_message: result.graphMessage ?? null,
+      });
     }
     return NextResponse.json({ channels: result.channels });
   } catch (err) {

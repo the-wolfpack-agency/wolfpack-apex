@@ -277,9 +277,13 @@ export async function listTeamChannels(
   limit: number = DEFAULT_CHANNEL_LIMIT,
   userId: string = "system",
 ): Promise<ListTeamChannelsResult> {
+  // Like /me/joinedTeams, channels endpoint can also reject $top in
+  // some Graph configurations. Omit it and slice client-side to be
+  // safe — the bug pattern from /me/joinedTeams ate hours of debug
+  // time, no reason to gamble here.
   const safeLimit = Math.max(1, Math.min(100, Math.floor(limit || DEFAULT_CHANNEL_LIMIT)));
-  const qs = `/teams/${encodeURIComponent(teamId)}/channels?$top=${safeLimit}`;
-  const { status, data } = await graphGet<{ value?: RawChannel[] }>(qs, userMsToken);
+  const qs = `/teams/${encodeURIComponent(teamId)}/channels`;
+  const { status, data, graphError } = await graphGet<{ value?: RawChannel[] }>(qs, userMsToken);
   if (status === 401 || status === 403) {
     trackEvent("ms_teams.scope_missing", userId, "system", {
       surface: "list_channels",
@@ -287,10 +291,28 @@ export async function listTeamChannels(
     });
     return { ok: false, code: "scope_missing", scope: "Channel.ReadBasic.All" };
   }
+  if (status < 200 || status >= 300) {
+    // Real Graph error — surface so the UI can show the actual
+    // problem rather than misleading "No channels".
+    trackEvent("ms_teams.scope_missing", userId, "system", {
+      surface: "list_channels",
+      team_id: teamId,
+      error_status: status,
+      graph_code: graphError?.code ?? "",
+    });
+    return {
+      ok: false,
+      code: "error",
+      status,
+      graphCode: graphError?.code,
+      graphMessage: graphError?.message,
+    };
+  }
   const raw = Array.isArray(data?.value) ? data!.value : [];
   const channels = raw
     .map(normalizeChannel)
-    .filter((c): c is TeamChannel => c !== null);
+    .filter((c): c is TeamChannel => c !== null)
+    .slice(0, safeLimit);
   trackEvent("ms_teams.channels_listed", userId, "system", {
     team_id: teamId,
     count: channels.length,
@@ -306,10 +328,14 @@ export async function listChannelMessages(
   userId: string = "system",
 ): Promise<ListChannelMessagesResult> {
   const safeLimit = Math.max(1, Math.min(100, Math.floor(limit || DEFAULT_MESSAGE_LIMIT)));
+  // /teams/{id}/channels/{id}/messages DOES accept $top per Graph
+  // docs and we keep it here for performance — these threads can be
+  // long. If Graph ever rejects this on some tenant, the new error
+  // surface will make it obvious and we'll drop $top here too.
   const qs =
     `/teams/${encodeURIComponent(teamId)}/channels/${encodeURIComponent(channelId)}/messages` +
     `?$top=${safeLimit}`;
-  const { status, data } = await graphGet<{ value?: RawMessage[] }>(qs, userMsToken);
+  const { status, data, graphError } = await graphGet<{ value?: RawMessage[] }>(qs, userMsToken);
   if (status === 401 || status === 403) {
     trackEvent("ms_teams.scope_missing", userId, "system", {
       surface: "channel_messages",
@@ -317,6 +343,22 @@ export async function listChannelMessages(
       channel_id: channelId,
     });
     return { ok: false, code: "scope_missing", scope: "ChannelMessage.Read.All" };
+  }
+  if (status < 200 || status >= 300) {
+    trackEvent("ms_teams.scope_missing", userId, "system", {
+      surface: "channel_messages",
+      team_id: teamId,
+      channel_id: channelId,
+      error_status: status,
+      graph_code: graphError?.code ?? "",
+    });
+    return {
+      ok: false,
+      code: "error",
+      status,
+      graphCode: graphError?.code,
+      graphMessage: graphError?.message,
+    };
   }
   const raw = Array.isArray(data?.value) ? data!.value : [];
   const messages = raw

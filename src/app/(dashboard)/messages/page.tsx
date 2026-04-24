@@ -378,7 +378,13 @@ export default function MessagesPage() {
     message?: string | null;
   } | null>(null);
   const [channelsByTeam, setChannelsByTeam] = useState<
-    Record<string, TeamChannelSummary[] | "loading" | "scope_missing">
+    Record<
+      string,
+      | TeamChannelSummary[]
+      | "loading"
+      | "scope_missing"
+      | { kind: "error"; status: number; code?: string | null; message?: string | null }
+    >
   >({});
   const [expandedTeams, setExpandedTeams] = useState<Record<string, boolean>>(
     () => {
@@ -560,9 +566,25 @@ export default function MessagesPage() {
         const data = (await res.json().catch(() => ({}))) as {
           channels?: TeamChannelSummary[];
           scope_missing?: boolean;
+          graph_error?: boolean;
+          graph_status?: number;
+          graph_code?: string | null;
+          graph_message?: string | null;
         };
         if (data.scope_missing) {
           setChannelsByTeam((prev) => ({ ...prev, [teamId]: "scope_missing" }));
+          return;
+        }
+        if (data.graph_error) {
+          setChannelsByTeam((prev) => ({
+            ...prev,
+            [teamId]: {
+              kind: "error",
+              status: data.graph_status ?? 0,
+              code: data.graph_code ?? null,
+              message: data.graph_message ?? null,
+            },
+          }));
           return;
         }
         const sorted = (data.channels ?? []).slice().sort((a, b) => {
@@ -573,7 +595,10 @@ export default function MessagesPage() {
         });
         setChannelsByTeam((prev) => ({ ...prev, [teamId]: sorted }));
       } catch {
-        setChannelsByTeam((prev) => ({ ...prev, [teamId]: [] }));
+        setChannelsByTeam((prev) => ({
+          ...prev,
+          [teamId]: { kind: "error", status: 0, code: "network", message: "Network error" },
+        }));
       }
     },
     [],
@@ -1350,7 +1375,51 @@ export default function MessagesPage() {
                             >
                               Channel.ReadBasic.All not granted.
                             </div>
-                          ) : !channels || channels.length === 0 ? (
+                          ) : channels && !Array.isArray(channels) && channels.kind === "error" ? (
+                            <div
+                              data-testid={`team-channels-graph-error-${team.id}`}
+                              style={{
+                                margin: "4px 12px 4px 36px",
+                                padding: "8px 10px",
+                                fontSize: 11,
+                                lineHeight: 1.45,
+                                color: "var(--wp-text, #eee)",
+                                background: "rgba(239,68,68,0.10)",
+                                border: "1px solid var(--wp-error, #ef4444)",
+                                borderRadius: 6,
+                              }}
+                            >
+                              <strong style={{ color: "var(--wp-error, #ef4444)" }}>
+                                Couldn&apos;t load channels
+                              </strong>
+                              <p style={{ margin: "2px 0 0" }}>
+                                Status {channels.status || "—"}
+                                {channels.code ? (
+                                  <>
+                                    {" · "}
+                                    <code data-testid={`team-channels-graph-code-${team.id}`}>
+                                      {channels.code}
+                                    </code>
+                                  </>
+                                ) : null}
+                              </p>
+                              {channels.message ? (
+                                <p
+                                  data-testid={`team-channels-graph-message-${team.id}`}
+                                  style={{
+                                    margin: "4px 0 0",
+                                    padding: "4px 6px",
+                                    background: "var(--wp-dark-surface2, #222)",
+                                    borderRadius: 4,
+                                    fontFamily: "monospace",
+                                    fontSize: 10,
+                                  }}
+                                >
+                                  {channels.message}
+                                </p>
+                              ) : null}
+                            </div>
+                          ) : !Array.isArray(channels) || channels.length === 0 ? (
                             <div
                               style={{
                                 padding: "4px 16px 4px 36px",
