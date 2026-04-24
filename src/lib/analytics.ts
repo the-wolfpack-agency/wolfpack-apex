@@ -1153,7 +1153,31 @@ export type InstinctEventType =
   | "ms_teams.channel_message_sent"
   | "ms_teams.scope_missing"
   | "messages.channel_compose_sent"
-  | "messages.channel_compose_failed";
+  | "messages.channel_compose_failed"
+  // AI smart-compose / draft-reply — fires across chat, channel, and
+  // email composers. The acceptance/modification rate per surface is
+  // a high-quality training signal: it tells us where AI drafts land
+  // closest to what the user actually sends, and where they're so
+  // off the user starts from scratch.
+  //
+  //   assistant.draft_requested   { surface, context_id?, had_draft_so_far,
+  //                                 thread_turns, model, prompt_tokens,
+  //                                 completion_tokens }
+  //   assistant.draft_accepted    { surface, context_id?, edit_distance,
+  //                                 sent_length }   — fires on send if
+  //                                 user sent within 5min of the draft
+  //   assistant.draft_modified    { surface, context_id?, edit_distance,
+  //                                 sent_length }   — fires when sent text
+  //                                 differs significantly from draft
+  //   assistant.draft_discarded   { surface, context_id? }
+  //                                 — fires when user clears the draft
+  //                                 without sending
+  //   assistant.draft_failed      { surface, reason }
+  | "assistant.draft_requested"
+  | "assistant.draft_accepted"
+  | "assistant.draft_modified"
+  | "assistant.draft_discarded"
+  | "assistant.draft_failed";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

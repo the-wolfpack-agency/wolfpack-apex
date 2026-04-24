@@ -271,6 +271,23 @@ async function fetchDeepLink(
  * Centralised so every compose call-site stays consistent with the
  * event-registry comments in `src/lib/analytics.ts`.
  */
+/**
+ * Cheap edit-distance approximation — character-level Levenshtein
+ * would be O(n*m) and we just need a coarse "how much did the user
+ * change the draft" signal for analytics. Using length-delta + char
+ * overlap is good enough; cap at the longer string length.
+ */
+function simpleEditDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  const aSet = new Set(a);
+  const bSet = new Set(b);
+  let overlap = 0;
+  for (const c of aSet) if (bSet.has(c)) overlap++;
+  const lenDelta = Math.abs(a.length - b.length);
+  const overlapPenalty = Math.max(aSet.size, bSet.size) - overlap;
+  return lenDelta + overlapPenalty;
+}
+
 function fireAnalytics(
   event:
     | "messages.compose_sent"
@@ -281,7 +298,10 @@ function fireAnalytics(
     | "messages.team_toggled"
     | "messages.channel_selected"
     | "messages.channel_compose_sent"
-    | "messages.channel_compose_failed",
+    | "messages.channel_compose_failed"
+    | "assistant.draft_accepted"
+    | "assistant.draft_modified"
+    | "assistant.draft_discarded",
   metadata: Record<string, string | number | boolean>,
 ): void {
   fetchWithRefresh("/api/analytics", {
@@ -342,6 +362,12 @@ export default function MessagesPage() {
   const [sending, setSending] = useState(false);
   const [composeHint, setComposeHint] = useState<ComposeHint>(null);
   const [toast, setToast] = useState<{ key: number; text: string } | null>(null);
+  // AI smart-compose state — single inflight request guarded by aiDrafting.
+  // Captures the most recent suggestion text + a timestamp so we can
+  // measure acceptance (sent within 5min of the suggestion + edit
+  // distance to the suggestion).
+  const [aiDrafting, setAiDrafting] = useState(false);
+  const lastAiDraftRef = useRef<{ text: string; atMs: number } | null>(null);
 
   // Collapsible LEFT-panel sections. Persisted to localStorage so the
   // user's preference survives reloads. Default both open on first
@@ -934,6 +960,61 @@ export default function MessagesPage() {
 
   // Compose --------------------------------------------------------------
 
+  // Request an AI draft for the currently-selected chat. Builds
+  // thread context from the last 12 visible messages (oldest →
+  // newest) and the user's draft-so-far so the suggestion extends
+  // rather than replaces what they've already typed.
+  const requestAiDraft = useCallback(async () => {
+    if (!selectedChat || aiDrafting) return;
+    setAiDrafting(true);
+    try {
+      const recent = (messages ?? []).slice(-12).map((m) => {
+        const text =
+          m.body?.contentType === "text"
+            ? (m.body?.content ?? "")
+            : stripHtmlToText(m.body?.content);
+        return {
+          from: m.from?.displayName ?? (m.role === "me" ? "You" : "Other"),
+          text,
+        };
+      });
+      const recipientName = getChatTitle(
+        selectedChat,
+        selfEmail,
+        selfName,
+        selfId,
+      );
+      const res = await fetchWithRefresh("/api/assistant/draft-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          surface: "chat",
+          recipientName,
+          threadContext: recent,
+          draftSoFar: draft,
+          contextId: selectedChat.id,
+        }),
+      });
+      if (!res.ok) {
+        setToast({
+          key: Date.now(),
+          text: "Couldn't draft a reply. Try again.",
+        });
+        return;
+      }
+      const data = (await res.json()) as { text?: string };
+      const suggested = (data.text ?? "").trim();
+      if (suggested) {
+        setDraft(suggested);
+        lastAiDraftRef.current = { text: suggested, atMs: Date.now() };
+      }
+    } catch {
+      setToast({ key: Date.now(), text: "Couldn't draft a reply. Try again." });
+    } finally {
+      setAiDrafting(false);
+    }
+  }, [selectedChat, aiDrafting, messages, draft, selfEmail, selfName, selfId]);
+
   const sendCompose = useCallback(async () => {
     if (!selectedChat) return;
     const trimmed = draft.trim();
@@ -1054,6 +1135,26 @@ export default function MessagesPage() {
         chat_id: chatId,
         length: trimmed.length,
       });
+      // AI draft acceptance signal — if the user just drafted via AI
+      // and sent within 5 minutes, log how much they edited it. This
+      // is the highest-quality training signal for smart compose:
+      // edit_distance == 0 → suggestion shipped verbatim; high edit
+      // distance → AI was directionally useful but needed rewording.
+      const lastDraft = lastAiDraftRef.current;
+      if (lastDraft && Date.now() - lastDraft.atMs < 5 * 60_000) {
+        const editDistance = simpleEditDistance(lastDraft.text, trimmed);
+        const event =
+          editDistance === 0
+            ? "assistant.draft_accepted"
+            : "assistant.draft_modified";
+        fireAnalytics(event, {
+          surface: "chat",
+          context_id: chatId,
+          edit_distance: editDistance,
+          sent_length: trimmed.length,
+        });
+        lastAiDraftRef.current = null; // one-shot per draft
+      }
     } catch {
       setMessages((prev) => (prev ?? []).filter((m) => m.id !== optimisticId));
       setDraft(trimmed);
@@ -1791,6 +1892,29 @@ export default function MessagesPage() {
                 ) : null}
 
                 <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+                  <button
+                    type="button"
+                    data-testid="messages-compose-ai-draft"
+                    onClick={() => void requestAiDraft()}
+                    disabled={aiDrafting || !selectedChat}
+                    aria-label="Draft a reply with AI"
+                    title="Draft a reply with AI"
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 6,
+                      border: "1px solid var(--wp-dark-border, #333)",
+                      background: "var(--wp-dark-surface2, #222)",
+                      color: aiDrafting
+                        ? "var(--wp-text-muted, #9ca3af)"
+                        : "var(--wp-gold, #eab308)",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: aiDrafting ? "wait" : "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {aiDrafting ? "…" : "✨ AI"}
+                  </button>
                   <textarea
                     data-testid="messages-compose-input"
                     aria-label="Send a Teams message"

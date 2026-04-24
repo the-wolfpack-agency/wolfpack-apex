@@ -1430,6 +1430,138 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     ).toBeNull();
   });
 
+  test("AI draft button: requests, fills textarea with suggestion, fires acceptance analytics on send", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return ok({
+          messages: [
+            {
+              id: "m-prev",
+              from: { displayName: "Jane" },
+              createdDateTime: "2026-04-24T10:00:00Z",
+              body: { contentType: "text", content: "any update?" },
+            },
+          ],
+        });
+      if (url === "/api/assistant/draft-reply" && init?.method === "POST") {
+        const body = JSON.parse(init.body as string);
+        expect(body.surface).toBe("chat");
+        expect(body.contextId).toBe("chat-1");
+        expect(body.threadContext.length).toBeGreaterThan(0);
+        return ok({
+          text: "Almost there — sending in a few.",
+          model: "test-model",
+          promptTokens: 30,
+          completionTokens: 8,
+        });
+      }
+      if (url === "/api/ms/chats/chat-1/messages" && init?.method === "POST") {
+        return ok({
+          id: "srv-ai",
+          createdDateTime: "2026-04-24T10:01:00Z",
+          from: { displayName: "You" },
+          body: {
+            contentType: "text",
+            content: "Almost there — sending in a few.",
+          },
+        });
+      }
+      return ok({});
+    });
+
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("messages-page"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("chat-row-chat-1"));
+    });
+    await waitFor(() => screen.getByTestId("messages-compose-ai-draft"));
+
+    // Click AI button → suggestion fills the textarea.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-compose-ai-draft"));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      const textarea = screen.getByTestId(
+        "messages-compose-input",
+      ) as HTMLTextAreaElement;
+      expect(textarea.value).toMatch(/Almost there/);
+    });
+
+    // Send unmodified → fires assistant.draft_accepted (edit_distance 0).
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-compose-send"));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      const fired = mockFetchWithRefresh.mock.calls
+        .filter((c) => c[0] === "/api/analytics")
+        .map((c) => JSON.parse(c[1]?.body ?? "{}"));
+      const accepted = fired.find(
+        (b) => b.event === "assistant.draft_accepted",
+      );
+      expect(accepted).toBeDefined();
+      expect(accepted.metadata.surface).toBe("chat");
+      expect(accepted.metadata.context_id).toBe("chat-1");
+      expect(accepted.metadata.edit_distance).toBe(0);
+    });
+  });
+
+  test("AI draft followed by edited send fires assistant.draft_modified", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (url === "/api/assistant/draft-reply" && init?.method === "POST") {
+        return ok({
+          text: "I will send the report tomorrow morning.",
+          model: "m",
+          promptTokens: 1,
+          completionTokens: 1,
+        });
+      }
+      if (url === "/api/ms/chats/chat-1/messages" && init?.method === "POST") {
+        return ok({
+          id: "srv-ai-edit",
+          createdDateTime: "2026-04-24T10:02:00Z",
+          from: { displayName: "You" },
+          body: { contentType: "text", content: "report tonight" },
+        });
+      }
+      return ok({});
+    });
+
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("messages-page"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("chat-row-chat-1"));
+    });
+    await waitFor(() => screen.getByTestId("messages-compose-ai-draft"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-compose-ai-draft"));
+      await Promise.resolve();
+    });
+    // Heavily edit before sending.
+    fireEvent.change(screen.getByTestId("messages-compose-input"), {
+      target: { value: "report tonight" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-compose-send"));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      const fired = mockFetchWithRefresh.mock.calls
+        .filter((c) => c[0] === "/api/analytics")
+        .map((c) => JSON.parse(c[1]?.body ?? "{}"));
+      const modified = fired.find(
+        (b) => b.event === "assistant.draft_modified",
+      );
+      expect(modified).toBeDefined();
+      expect(modified.metadata.edit_distance).toBeGreaterThan(0);
+    });
+  });
+
   test("regression: messages-page constrains its own scroll (overflow:hidden + position:absolute)", async () => {
     wireSimpleGraph();
     render(<MessagesPage />);
