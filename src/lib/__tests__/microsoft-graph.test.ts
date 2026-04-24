@@ -131,6 +131,18 @@ describe("OAuth2 URL Generation", () => {
     expect(url).toContain("callback");
   });
 
+  test("auth URL includes prompt=consent (forces re-consent when scopes change)", () => {
+    // Regression: without prompt=consent, Azure silently reuses the
+    // user's prior consent set when they reconnect MS. Newly-added
+    // scopes (e.g. Channel.ReadBasic.All on 2026-04-24) never make
+    // it into the issued token, and Graph then returns 200 with empty
+    // results for the new endpoints — looks like "no data" but is
+    // really "missing scope". This caused hours of dead-end debugging.
+    // Lock the parameter in.
+    const url = ms.getAuthUrl("user-1");
+    expect(url).toMatch(/[?&]prompt=consent\b/);
+  });
+
   test("auth URL includes a signed state parameter (not raw userId)", () => {
     const url = ms.getAuthUrl("user-1");
     // The state must contain userId.signature, not just the raw id

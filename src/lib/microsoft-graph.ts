@@ -249,6 +249,18 @@ export function getAuthUrl(userId: string): string {
     scope: MS_SCOPES_STRING,
     response_mode: "query",
     state: signState(userId),
+    // CRITICAL: force Azure to re-show the consent screen on every
+    // /authorize call, even if the user has previously consented to
+    // this app. Without `prompt=consent`, Azure silently reuses the
+    // cached consent set — which means any newly-added scopes (e.g.
+    // Channel.ReadBasic.All added on 2026-04-24) NEVER make it into
+    // the issued token. The user disconnects+reconnects expecting
+    // fresh permissions and gets back into a session whose token
+    // still has only the OLD scope set. Graph then returns 200 with
+    // empty results for the new endpoints (silent scope downgrade).
+    // `prompt=consent` is the explicit cure for this and is what
+    // every Microsoft sample uses when scopes change.
+    prompt: "consent",
   });
 
   return `${getAuthBaseUrl()}/authorize?${params.toString()}`;
