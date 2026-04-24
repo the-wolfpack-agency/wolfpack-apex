@@ -209,6 +209,29 @@ export default function EmailsPage() {
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(true);
   const [templatesOpen, setTemplatesOpen] = useState(true);
+  // Responsive breakpoints — narrow = mobile + cramped laptops where the
+  // 3-column row layout doesn't fit. We stack vertically and let the
+  // page scroll instead of clipping the insights panel.
+  const [isNarrow, setIsNarrow] = useState<boolean>(() =>
+    typeof window !== "undefined" ? window.innerWidth < 1100 : false,
+  );
+  const [isMobile, setIsMobile] = useState<boolean>(() =>
+    typeof window !== "undefined" ? window.innerWidth < 640 : false,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    function onResize() {
+      setIsNarrow(window.innerWidth < 1100);
+      setIsMobile(window.innerWidth < 640);
+    }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  // On mobile the templates rail eats too much space — collapse by
+  // default and let the user expand on demand.
+  useEffect(() => {
+    if (isMobile) setTemplatesOpen(false);
+  }, [isMobile]);
 
   const [draft, setDraft] = useState<DraftState>(() => loadDraft());
   const [toInput, setToInput] = useState("");
@@ -951,14 +974,43 @@ export default function EmailsPage() {
   // Render
   // -------------------------------------------------------------------------
 
+  // Build responsive page styles. On narrow screens we stack the 3
+  // panes vertically and let the page scroll — the previous fixed
+  // 3-column row clipped the insights panel below the fold and made
+  // it invisible on mobile entirely.
+  const responsivePageWrap: React.CSSProperties = {
+    ...pageWrap,
+    flexDirection: isNarrow ? "column" : "row",
+    overflow: isNarrow ? "auto" : "hidden",
+    flexWrap: isNarrow ? "nowrap" : "wrap",
+  };
+  const responsiveComposerWrap: React.CSSProperties = {
+    ...composerWrap,
+    width: isNarrow ? "100%" : undefined,
+    minWidth: isNarrow ? "0" : "320px",
+    flex: isNarrow ? "1 0 auto" : "1 1 480px",
+  };
+  const responsiveInsightsWrap: React.CSSProperties = {
+    ...insightsWrap,
+    width: isNarrow ? "100%" : "320px",
+    flexShrink: isNarrow ? 1 : 0,
+  };
+  const responsiveSidebarStyle: React.CSSProperties = {
+    ...sidebarStyle,
+    width: isMobile
+      ? "100%"
+      : templatesOpen
+        ? "260px"
+        : "44px",
+    maxHeight: isMobile && templatesOpen ? "260px" : undefined,
+    flexShrink: isMobile ? 0 : 0,
+  };
+
   return (
-    <div style={pageWrap} data-testid="emails-page">
+    <div style={responsivePageWrap} data-testid="emails-page">
       {/* Templates sidebar */}
       <aside
-        style={{
-          ...sidebarStyle,
-          width: templatesOpen ? "260px" : "44px",
-        }}
+        style={responsiveSidebarStyle}
         aria-label="Email templates"
       >
         <div style={sidebarHeader}>
@@ -1021,7 +1073,7 @@ export default function EmailsPage() {
 
       {/* Composer (main) */}
       <section
-        style={composerWrap}
+        style={responsiveComposerWrap}
         data-testid="composer-wrap"
         aria-label="Email composer"
       >
@@ -1242,7 +1294,7 @@ export default function EmailsPage() {
       </section>
 
       {/* Recipient insights */}
-      <aside style={insightsWrap} aria-label="Recipient insights" data-testid="insights-panel">
+      <aside style={responsiveInsightsWrap} aria-label="Recipient insights" data-testid="insights-panel">
         <header style={insightsHeader}>
           <span style={{ color: "var(--wp-gold)", fontWeight: 600, fontSize: "0.85rem" }}>
             Recipient context

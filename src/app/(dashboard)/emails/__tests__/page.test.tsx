@@ -640,3 +640,50 @@ describe("EmailsPage — wider calendar lookup window", () => {
     expect(janeCallsAfter).toBe(1);
   });
 });
+
+describe("EmailsPage — responsive layout", () => {
+  // Regression: on small laptops the 3-column layout clipped the
+  // insights panel below the fold; on mobile it didn't render at
+  // all because pageWrap had overflow:hidden and the wrapped row
+  // sat outside the viewport. Fix: stack vertically + scroll
+  // when the viewport is narrow.
+
+  function setViewport(w: number) {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: w,
+    });
+    window.dispatchEvent(new Event("resize"));
+  }
+
+  it("stacks the page vertically and enables scroll when narrow", async () => {
+    setViewport(1400); // wide → row layout
+    render(<EmailsPage />);
+    await waitFor(() => screen.getByTestId("emails-page"));
+    const wide = screen.getByTestId("emails-page");
+    expect(wide.style.flexDirection).toBe("row");
+    expect(wide.style.overflow).toBe("hidden");
+
+    await act(async () => {
+      setViewport(700);
+    });
+    const narrow = screen.getByTestId("emails-page");
+    expect(narrow.style.flexDirection).toBe("column");
+    expect(narrow.style.overflow).toBe("auto");
+  });
+
+  it("insights panel takes full width on narrow screens (so it actually shows)", async () => {
+    setViewport(700);
+    render(<EmailsPage />);
+    await waitFor(() => screen.getByTestId("insights-panel"));
+    expect(screen.getByTestId("insights-panel").style.width).toBe("100%");
+  });
+
+  it("composer takes full width on narrow screens", async () => {
+    setViewport(700);
+    render(<EmailsPage />);
+    await waitFor(() => screen.getByTestId("composer-wrap"));
+    expect(screen.getByTestId("composer-wrap").style.width).toBe("100%");
+  });
+});
