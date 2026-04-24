@@ -219,3 +219,59 @@ describe("listChannelMessages", () => {
       expect(result.scope).toBe("ChannelMessage.Read.All");
   });
 });
+
+describe("sendChannelMessage", () => {
+  it("POSTs the right body shape and returns the normalized server message", async () => {
+    fetchMock.mockResolvedValue(
+      mkOk({
+        id: "srv-99",
+        createdDateTime: "2026-04-24T10:00:00Z",
+        body: { contentType: "text", content: "hi team" },
+        from: { user: { id: "u-x", displayName: "Nick" } },
+      }),
+    );
+    const { sendChannelMessage } = await import("@/lib/ms-graph-teams");
+    const result = await sendChannelMessage("token", "t1", "c1", "hi team", "user-1");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.message.id).toBe("srv-99");
+      expect(result.message.bodyText).toBe("hi team");
+    }
+    // Outgoing request shape: POST + JSON body with body.content.
+    const call = fetchMock.mock.calls[0];
+    expect(call[0]).toContain("/teams/t1/channels/c1/messages");
+    expect(call[1].method).toBe("POST");
+    const sent = JSON.parse(call[1].body);
+    expect(sent.body.contentType).toBe("text");
+    expect(sent.body.content).toBe("hi team");
+    // Analytics fired with length.
+    expect(mockTrack).toHaveBeenCalledWith(
+      "ms_teams.channel_message_sent",
+      "user-1",
+      "system",
+      { team_id: "t1", channel_id: "c1", length: 7 },
+    );
+  });
+
+  it("scope_missing on 403", async () => {
+    fetchMock.mockResolvedValue(mkStatus(403));
+    const { sendChannelMessage } = await import("@/lib/ms-graph-teams");
+    const result = await sendChannelMessage("token", "t", "c", "hi");
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.code === "scope_missing")
+      expect(result.scope).toBe("ChannelMessage.Send");
+  });
+
+  it("graph error parses code + message from body", async () => {
+    fetchMock.mockResolvedValue(
+      mkStatus(400, { error: { code: "BadRequest", message: "Channel not found" } }),
+    );
+    const { sendChannelMessage } = await import("@/lib/ms-graph-teams");
+    const result = await sendChannelMessage("token", "t", "c", "hi");
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.code === "error") {
+      expect(result.graphCode).toBe("BadRequest");
+      expect(result.graphMessage).toMatch(/Channel not found/);
+    }
+  });
+});

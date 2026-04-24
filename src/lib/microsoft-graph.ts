@@ -121,6 +121,7 @@ const MS_SCOPES: string[] = [
   // section in /messages.
   "Team.ReadBasic.All",
   "Channel.ReadBasic.All",
+  "ChannelMessage.Send",
   "OnlineMeetings.ReadWrite",
   // Tier 2 · Stream F (tenant directory + mailbox settings)
   "User.Read.All",

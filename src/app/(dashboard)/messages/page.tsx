@@ -719,6 +719,108 @@ export default function MessagesPage() {
     void loadChannelMessages(teamId, channelId);
   }
 
+  // Channel compose handler — POSTs to /api/ms/teams/.../messages,
+  // applies optimistic message immediately, swaps to the server's
+  // version (or rolls back) on response. Returns a result object so
+  // the pane can surface scope_missing / graph_error inline.
+  type ChannelSendResult =
+    | { ok: true }
+    | { ok: false; reason: "scope_missing" | "error" | "network"; message?: string };
+  async function sendChannelCompose(
+    teamId: string,
+    channelId: string,
+    content: string,
+  ): Promise<ChannelSendResult> {
+    const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimistic: ChannelMessageSummary = {
+      id: optimisticId,
+      createdDateTime: new Date().toISOString(),
+      from: { displayName: "You" },
+      body: { contentType: "text", content },
+      bodyText: content,
+    };
+    setChannelMessages((prev) => [...(prev ?? []), optimistic]);
+    try {
+      const res = await fetchWithRefresh(
+        `/api/ms/teams/${encodeURIComponent(teamId)}/channels/${encodeURIComponent(channelId)}/messages`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content }),
+        },
+      );
+      const data = (await res.json().catch(() => ({}))) as {
+        message?: ChannelMessageSummary | null;
+        scope_missing?: boolean;
+        graph_error?: boolean;
+        graph_status?: number;
+        graph_code?: string | null;
+        graph_message?: string | null;
+      };
+      if (data.scope_missing) {
+        setChannelMessages((prev) =>
+          (prev ?? []).filter((m) => m.id !== optimisticId),
+        );
+        fireAnalytics("messages.channel_compose_failed", {
+          team_id: teamId,
+          channel_id: channelId,
+          reason: "scope_missing",
+        });
+        return { ok: false, reason: "scope_missing" };
+      }
+      if (data.graph_error) {
+        setChannelMessages((prev) =>
+          (prev ?? []).filter((m) => m.id !== optimisticId),
+        );
+        fireAnalytics("messages.channel_compose_failed", {
+          team_id: teamId,
+          channel_id: channelId,
+          reason: `graph_${data.graph_status ?? 0}`,
+        });
+        return {
+          ok: false,
+          reason: "error",
+          message:
+            (data.graph_code ? `${data.graph_code}: ` : "") +
+            (data.graph_message ?? `HTTP ${data.graph_status ?? "?"}`),
+        };
+      }
+      if (!res.ok || !data.message) {
+        setChannelMessages((prev) =>
+          (prev ?? []).filter((m) => m.id !== optimisticId),
+        );
+        fireAnalytics("messages.channel_compose_failed", {
+          team_id: teamId,
+          channel_id: channelId,
+          reason: `http_${res.status}`,
+        });
+        return { ok: false, reason: "error" };
+      }
+      // Swap optimistic → server response.
+      setChannelMessages((prev) =>
+        (prev ?? []).map((m) =>
+          m.id === optimisticId ? (data.message as ChannelMessageSummary) : m,
+        ),
+      );
+      fireAnalytics("messages.channel_compose_sent", {
+        team_id: teamId,
+        channel_id: channelId,
+        length: content.length,
+      });
+      return { ok: true };
+    } catch {
+      setChannelMessages((prev) =>
+        (prev ?? []).filter((m) => m.id !== optimisticId),
+      );
+      fireAnalytics("messages.channel_compose_failed", {
+        team_id: teamId,
+        channel_id: channelId,
+        reason: "network",
+      });
+      return { ok: false, reason: "network" };
+    }
+  }
+
   // Refresh on window focus (user came back from Teams desktop) and
   // on a 30s poll while the page is visible. Don't show the spinner
   // for these — they should feel ambient, not like a reload.
@@ -1042,7 +1144,23 @@ export default function MessagesPage() {
     selectedChat !== null && !loadingThread && !threadScopeMissing && (messages ?? []).length === 0;
 
   return (
-    <div data-testid="messages-page" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <div
+      data-testid="messages-page"
+      style={{
+        // Anchor to the dashboard <main> exactly (which is the
+        // positioned parent via overflow-y-auto). Without this the
+        // page grew to fit the chats + teams + channels content and
+        // pushed the whole dashboard into a long scroll. With
+        // position:absolute + inset:0 + overflow:hidden, the page
+        // claims a fixed slot and the inner aside / thread-body do
+        // their own scrolling — same model as Teams desktop.
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
       <div style={{ padding: "16px 24px 8px" }}>
         <h1 style={{ margin: 0, fontSize: 22 }}>Messages</h1>
         <p style={{ margin: "4px 0 0", color: "var(--wp-text-muted, #9ca3af)", fontSize: 13 }}>
@@ -1519,6 +1637,13 @@ export default function MessagesPage() {
               loading={loadingChannelMessages}
               scopeMissing={channelMessagesScopeMissing}
               messages={channelMessages}
+              onSend={(text) =>
+                sendChannelCompose(
+                  selectedChannel.teamId,
+                  selectedChannel.channelId,
+                  text,
+                )
+              }
               onBack={() => {
                 setSelectedChannel(null);
                 setChannelMessages(null);
@@ -1853,6 +1978,12 @@ function ChannelThreadPane(props: {
   loading: boolean;
   scopeMissing: boolean;
   messages: ChannelMessageSummary[] | null;
+  onSend?: (
+    text: string,
+  ) => Promise<
+    | { ok: true }
+    | { ok: false; reason: "scope_missing" | "error" | "network"; message?: string }
+  >;
   onBack: () => void;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
@@ -1860,6 +1991,41 @@ function ChannelThreadPane(props: {
     if (!props.messages || props.messages.length === 0) return;
     endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [props.messages]);
+
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const canSend = draft.trim().length > 0 && !sending && !!props.onSend;
+
+  async function handleSend() {
+    if (!props.onSend) return;
+    const text = draft.trim();
+    if (!text) return;
+    setSending(true);
+    setSendError(null);
+    setDraft("");
+    const result = await props.onSend(text);
+    setSending(false);
+    if (!result.ok) {
+      setDraft(text); // restore so user can edit/retry
+      if (result.reason === "scope_missing") {
+        setSendError(
+          "Send permission missing. Disconnect + reconnect MS in Settings to grant ChannelMessage.Send.",
+        );
+      } else if (result.reason === "network") {
+        setSendError("Network error. Try again.");
+      } else {
+        setSendError(result.message ?? "Couldn't send. Try again.");
+      }
+    }
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      void handleSend();
+    }
+  }
 
   return (
     <>
@@ -1968,6 +2134,88 @@ function ChannelThreadPane(props: {
         )}
         <div ref={endRef} data-testid="channel-thread-end" />
       </div>
+
+      {/* Channel composer — text-only POST to ChannelMessage.Send. */}
+      {props.onSend ? (
+        <div
+          data-testid="channel-compose"
+          style={{
+            borderTop: "1px solid var(--wp-dark-border, #333)",
+            background: "var(--wp-dark-surface2, #222)",
+            padding: "12px 16px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          {sendError ? (
+            <div
+              data-testid="channel-compose-error"
+              style={{
+                fontSize: 12,
+                color: "var(--wp-error, #ef4444)",
+                padding: "6px 8px",
+                borderRadius: 6,
+                background: "rgba(239,68,68,0.10)",
+                border: "1px solid var(--wp-error, #ef4444)",
+              }}
+            >
+              {sendError}
+            </div>
+          ) : null}
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+            <textarea
+              data-testid="channel-compose-input"
+              aria-label={`Send a message to #${props.channelName}`}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder={`Send a message to #${props.channelName}…`}
+              rows={2}
+              style={{
+                flex: 1,
+                resize: "none",
+                minHeight: 44,
+                maxHeight: 150,
+                overflowY: "auto",
+                padding: "8px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--wp-dark-border, #333)",
+                background: "var(--wp-dark-surface, #1a1a1a)",
+                color: "var(--wp-text, #eee)",
+                fontSize: 14,
+                fontFamily: "inherit",
+                lineHeight: 1.4,
+              }}
+            />
+            <button
+              type="button"
+              data-testid="channel-compose-send"
+              onClick={() => void handleSend()}
+              disabled={!canSend}
+              aria-label="Send channel message"
+              style={{
+                padding: "8px 16px",
+                borderRadius: 6,
+                border: "1px solid var(--wp-gold, #eab308)",
+                background: canSend
+                  ? "var(--wp-gold, #eab308)"
+                  : "var(--wp-dark-surface, #1a1a1a)",
+                color: canSend
+                  ? "var(--wp-dark-surface, #1a1a1a)"
+                  : "var(--wp-text-muted, #9ca3af)",
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: canSend ? "pointer" : "not-allowed",
+                opacity: canSend ? 1 : 0.6,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {sending ? "Sending…" : "Send"}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

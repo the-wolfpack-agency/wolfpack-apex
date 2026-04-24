@@ -1322,6 +1322,127 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     });
   });
 
+  test("channel composer: optimistic message + swap to server response on send", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/teams")
+        return ok({
+          teams: [{ id: "team-wolf", displayName: "Wolfpack Internal" }],
+        });
+      if (url === "/api/ms/teams/team-wolf/channels")
+        return ok({ channels: [{ id: "ch-eng", displayName: "Engineering" }] });
+      if (url === "/api/ms/teams/team-wolf/channels/ch-eng/messages" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (
+        url === "/api/ms/teams/team-wolf/channels/ch-eng/messages" &&
+        init?.method === "POST"
+      ) {
+        return ok({
+          message: {
+            id: "srv-42",
+            createdDateTime: "2026-04-24T11:00:00Z",
+            from: { displayName: "You" },
+            body: { contentType: "text", content: "shipped it" },
+            bodyText: "shipped it",
+          },
+        });
+      }
+      return ok({});
+    });
+
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("team-row-team-wolf"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("team-toggle-team-wolf"));
+    });
+    await waitFor(() => screen.getByTestId("channel-row-ch-eng"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("channel-row-ch-eng"));
+    });
+    await waitFor(() => screen.getByTestId("channel-compose-input"));
+
+    fireEvent.change(screen.getByTestId("channel-compose-input"), {
+      target: { value: "shipped it" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("channel-compose-send"));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("channel-message-srv-42")).toBeInTheDocument();
+    });
+    // Analytics: channel_compose_sent fired with length.
+    const fired = mockFetchWithRefresh.mock.calls
+      .filter((c) => c[0] === "/api/analytics")
+      .map((c) => JSON.parse(c[1]?.body ?? "{}"));
+    const sent = fired.find((b) => b.event === "messages.channel_compose_sent");
+    expect(sent).toBeDefined();
+    expect(sent.metadata).toEqual({
+      team_id: "team-wolf",
+      channel_id: "ch-eng",
+      length: "shipped it".length,
+    });
+  });
+
+  test("channel composer: scope_missing response shows hint + rolls back optimistic", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/teams")
+        return ok({ teams: [{ id: "team-wolf", displayName: "Wolfpack Internal" }] });
+      if (url === "/api/ms/teams/team-wolf/channels")
+        return ok({ channels: [{ id: "ch-eng", displayName: "Engineering" }] });
+      if (url === "/api/ms/teams/team-wolf/channels/ch-eng/messages" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (
+        url === "/api/ms/teams/team-wolf/channels/ch-eng/messages" &&
+        init?.method === "POST"
+      )
+        return ok({ message: null, scope_missing: true });
+      return ok({});
+    });
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("team-row-team-wolf"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("team-toggle-team-wolf"));
+    });
+    await waitFor(() => screen.getByTestId("channel-row-ch-eng"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("channel-row-ch-eng"));
+    });
+    await waitFor(() => screen.getByTestId("channel-compose-input"));
+    fireEvent.change(screen.getByTestId("channel-compose-input"), {
+      target: { value: "blocked" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("channel-compose-send"));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("channel-compose-error").textContent).toMatch(
+        /ChannelMessage\.Send/,
+      );
+    });
+    // Optimistic was rolled back — only the inline error remains, no
+    // optimistic-* row in the thread.
+    expect(
+      document.querySelector('[data-testid^="channel-message-optimistic"]'),
+    ).toBeNull();
+  });
+
+  test("regression: messages-page constrains its own scroll (overflow:hidden + position:absolute)", async () => {
+    wireSimpleGraph();
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("messages-page"));
+    const page = screen.getByTestId("messages-page");
+    // Inline style — the page has to claim a fixed slot in the
+    // dashboard <main> so its inner aside / thread scroll
+    // independently. Otherwise users had to scroll the entire
+    // dashboard to reach the bottom of the channels list.
+    expect(page.style.position).toBe("absolute");
+    expect(page.style.overflow).toBe("hidden");
+  });
+
   test("selecting a chat clears any active channel selection (right pane is single-target)", async () => {
     wireSimpleGraph();
     render(<MessagesPage />);

@@ -88,6 +88,9 @@ export type ListTeamChannelsResult =
 export type ListChannelMessagesResult =
   | { ok: true; messages: ChannelMessage[] }
   | FailureResult;
+export type SendChannelMessageResult =
+  | { ok: true; message: ChannelMessage }
+  | FailureResult;
 
 // ---------------------------------------------------------------------------
 // Internals
@@ -381,4 +384,96 @@ export async function listChannelMessages(
     count: messages.length,
   });
   return { ok: true, messages };
+}
+
+/**
+ * POST a message to a Teams channel.
+ *
+ * Required delegated scope: ChannelMessage.Send. The body shape per
+ * Microsoft Graph: { body: { contentType: "text", content: "..." } }.
+ * We only support text content for now — HTML is a follow-up.
+ */
+export async function sendChannelMessage(
+  userMsToken: string,
+  teamId: string,
+  channelId: string,
+  content: string,
+  userId: string = "system",
+): Promise<SendChannelMessageResult> {
+  const path =
+    `/teams/${encodeURIComponent(teamId)}/channels/${encodeURIComponent(channelId)}/messages`;
+  let res: Response;
+  try {
+    res = await fetch(`${GRAPH_BASE_URL}${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${userMsToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        body: { contentType: "text", content },
+      }),
+    });
+  } catch (err) {
+    console.warn(
+      `[ms-graph-teams] POST ${path} fetch error:`,
+      (err as Error).message,
+    );
+    return { ok: false, code: "error", status: 0 };
+  }
+  const status = res.status;
+  if (status === 401 || status === 403) {
+    trackEvent("ms_teams.scope_missing", userId, "system", {
+      surface: "send_channel_message",
+      team_id: teamId,
+      channel_id: channelId,
+    });
+    return { ok: false, code: "scope_missing", scope: "ChannelMessage.Send" };
+  }
+  if (status < 200 || status >= 300) {
+    let graphCode: string | undefined;
+    let graphMessage: string | undefined;
+    try {
+      const text = await res.text();
+      try {
+        const parsed = JSON.parse(text) as { error?: { code?: string; message?: string } };
+        graphCode = parsed?.error?.code;
+        graphMessage =
+          typeof parsed?.error?.message === "string"
+            ? parsed.error.message.slice(0, 240)
+            : undefined;
+      } catch {
+        /* non-json */
+      }
+    } catch {
+      /* couldn't read body */
+    }
+    return { ok: false, code: "error", status, graphCode, graphMessage };
+  }
+  let parsed: RawMessage | null = null;
+  try {
+    parsed = (await res.json()) as RawMessage;
+  } catch {
+    /* parse error — fall through with synthesized message */
+  }
+  const message: ChannelMessage = parsed
+    ? (normalizeMessage(parsed) ?? {
+        id: "",
+        createdDateTime: new Date().toISOString(),
+        body: { contentType: "text", content },
+        bodyText: content,
+      })
+    : {
+        id: "",
+        createdDateTime: new Date().toISOString(),
+        body: { contentType: "text", content },
+        bodyText: content,
+      };
+  trackEvent("ms_teams.channel_message_sent", userId, "system", {
+    team_id: teamId,
+    channel_id: channelId,
+    length: content.length,
+  });
+  return { ok: true, message };
 }

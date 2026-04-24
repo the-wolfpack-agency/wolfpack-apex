@@ -1150,7 +1150,10 @@ export type InstinctEventType =
   | "ms_teams.listed"
   | "ms_teams.channels_listed"
   | "ms_teams.channel_messages_loaded"
-  | "ms_teams.scope_missing";
+  | "ms_teams.channel_message_sent"
+  | "ms_teams.scope_missing"
+  | "messages.channel_compose_sent"
+  | "messages.channel_compose_failed";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;
