@@ -11,6 +11,7 @@ import {
 } from "@/lib/client-auth";
 import NotificationBell from "@/components/NotificationBell";
 import TeamsUnreadBadge from "@/components/TeamsUnreadBadge";
+import MessagesNavBadge from "@/components/MessagesNavBadge";
 import InstinctChat from "@/components/InstinctChat";
 import WelcomeTooltip from "@/components/WelcomeTooltip";
 import { useAmbientRefresh } from "@/lib/hooks/useAmbientRefresh";
@@ -207,6 +208,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                   <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
                 </svg>
                 {item.label}
+                {item.href === "/messages" ? <MessagesNavBadge /> : null}
               </a>
             );
           })}
