@@ -1177,7 +1177,18 @@ export type InstinctEventType =
   | "assistant.draft_accepted"
   | "assistant.draft_modified"
   | "assistant.draft_discarded"
-  | "assistant.draft_failed";
+  | "assistant.draft_failed"
+  // @mentions inside chat composer. Mention-then-action correlation
+  // (was the @mentioned user's reply within N min?) is one of the
+  // best "team responsiveness" signals in the warehouse.
+  //
+  //   ms_chats.mentions_sent       { chat_id, mention_count }
+  //   messages.mention_added       { chat_id, target_user_id }
+  //   messages.mention_completed   { chat_id, mention_count }
+  //     — fires on send when message contained at least one mention
+  | "ms_chats.mentions_sent"
+  | "messages.mention_added"
+  | "messages.mention_completed";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

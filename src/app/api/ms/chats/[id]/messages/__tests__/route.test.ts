@@ -245,13 +245,14 @@ describe("POST /api/ms/chats/[id]/messages", () => {
     const body = await res.json();
     expect(body.message).toEqual(returnedMsg);
 
-    // sendChatMessage called with text default
+    // sendChatMessage called with text default + empty mentions array.
     expect(mockSendChatMessage).toHaveBeenCalledWith(
       "T",
       "c1",
       "hi there",
       "text",
       "u1",
+      [],
     );
 
     // Audit recorded with expected shape
@@ -291,7 +292,44 @@ describe("POST /api/ms/chats/[id]/messages", () => {
       "<p>hi</p>",
       "html",
       "u1",
+      [],
     );
+  });
+
+  it("forwards validated @mentions to the helper + filters out non-members", async () => {
+    mockGetUser.mockReturnValue(CALLER);
+    mockGetValidToken.mockResolvedValue({ accessToken: "T", userEmail: "caller@x.com" });
+    mockGetChat.mockResolvedValue(memberChat());
+    mockSendChatMessage.mockResolvedValue({
+      ok: true,
+      message: {
+        id: "m-mention",
+        from: { displayName: "x", email: "caller@x.com", userId: "u" },
+        body: { content: "Hi <at id=\"0\">Bob</at>", contentType: "html" as const },
+        bodyText: "Hi Bob",
+        createdDateTime: "",
+      },
+    });
+    const { POST } = await import("@/app/api/ms/chats/[id]/messages/route");
+    // memberChat seeds u-caller + u-bob. Send 2 mentions: one valid
+    // (u-bob), one bogus (u-stranger).
+    await POST(
+      mkReq("/api/ms/chats/c1/messages", {
+        content: "Hi <at id=\"0\">Bob</at>",
+        contentType: "html",
+        mentions: [
+          { id: 0, mentionText: "Bob", userId: "u-bob", displayName: "Bob" },
+          { id: 1, mentionText: "Stranger", userId: "u-stranger", displayName: "Stranger" },
+        ],
+      }),
+      ctx("c1"),
+    );
+    // Helper receives ONLY the in-chat mention; the bogus userId
+    // was filtered against memberUserIds.
+    const call = mockSendChatMessage.mock.calls[0];
+    expect(call[5]).toEqual([
+      { id: 0, mentionText: "Bob", userId: "u-bob", displayName: "Bob" },
+    ]);
   });
 
   it("500 on unexpected error", async () => {

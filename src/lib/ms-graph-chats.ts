@@ -480,16 +480,49 @@ export function sanitizeComposeHtml(input: string): string {
  * Membership is NOT enforced here — callers (the route handler) must
  * verify the signed-in user is a member of `chatId` before invoking.
  */
+/**
+ * Per Microsoft Graph: each mention object pairs an `<at id="N">`
+ * inline tag in the message body with the AAD identity of the
+ * user being notified. The id is a 0-based index local to this
+ * single message — it doesn't need to be unique across messages.
+ */
+export interface ChatMentionInput {
+  /** 0-based index that matches `<at id="N">` in the body. */
+  id: number;
+  /** Visible text inside the at-tag. */
+  mentionText: string;
+  /** AAD object id of the mentioned user. */
+  userId: string;
+  /** Display name (helps Graph render fallback). */
+  displayName: string;
+}
+
 export async function sendChatMessage(
   userMsToken: string,
   chatId: string,
   content: string,
   contentType: "text" | "html" = "text",
   userId: string = "system",
+  mentions: ChatMentionInput[] = [],
 ): Promise<SendChatMessageResult> {
   const safeContent =
     contentType === "html" ? sanitizeComposeHtml(content) : String(content || "");
   const path = `/me/chats/${encodeURIComponent(chatId)}/messages`;
+
+  // Graph rejects mentions array on text content type — atomically
+  // promote to html if any mentions are present.
+  const finalContentType = mentions.length > 0 ? "html" : contentType;
+  const graphMentions = mentions.map((m) => ({
+    id: m.id,
+    mentionText: m.mentionText,
+    mentioned: {
+      user: {
+        id: m.userId,
+        displayName: m.displayName,
+        userIdentityType: "aadUser" as const,
+      },
+    },
+  }));
 
   try {
     const res = await fetch(`${GRAPH_BASE_URL}${path}`, {
@@ -499,9 +532,14 @@ export async function sendChatMessage(
         Accept: "application/json",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        body: { content: safeContent, contentType },
-      }),
+      body: JSON.stringify(
+        graphMentions.length > 0
+          ? {
+              body: { content: safeContent, contentType: finalContentType },
+              mentions: graphMentions,
+            }
+          : { body: { content: safeContent, contentType: finalContentType } },
+      ),
     });
 
     if (res.status === 401 || res.status === 403) {

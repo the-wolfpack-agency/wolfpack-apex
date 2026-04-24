@@ -33,6 +33,49 @@ const MAX_CONTENT_LENGTH = 28 * 1024;
 interface PostBody {
   content?: unknown;
   contentType?: unknown;
+  /**
+   * Optional @mentions array. Each entry pairs an `<at id="N">` tag
+   * in `content` with the AAD identity of a chat member. Sending
+   * mentions auto-promotes contentType to "html" server-side.
+   */
+  mentions?: unknown;
+}
+
+interface MentionInput {
+  id: number;
+  mentionText: string;
+  userId: string;
+  displayName: string;
+}
+
+function parseMentions(raw: unknown): MentionInput[] {
+  if (!Array.isArray(raw)) return [];
+  const out: MentionInput[] = [];
+  for (const m of raw) {
+    if (
+      m &&
+      typeof m === "object" &&
+      typeof (m as { id?: unknown }).id === "number" &&
+      typeof (m as { mentionText?: unknown }).mentionText === "string" &&
+      typeof (m as { userId?: unknown }).userId === "string" &&
+      typeof (m as { displayName?: unknown }).displayName === "string"
+    ) {
+      const e = m as MentionInput;
+      // Drop empties + cap length to avoid polluting Graph payload.
+      if (e.userId.length === 0 || e.userId.length > 64) continue;
+      if (e.mentionText.length === 0 || e.mentionText.length > 120) continue;
+      if (e.displayName.length > 200) continue;
+      out.push({
+        id: Math.floor(e.id),
+        mentionText: e.mentionText,
+        userId: e.userId,
+        displayName: e.displayName,
+      });
+    }
+  }
+  // Cap at 20 mentions per message — sane upper bound, well under
+  // any Graph limit, prevents abuse via bulk-tag spam.
+  return out.slice(0, 20);
 }
 
 export async function POST(
@@ -105,6 +148,22 @@ export async function POST(
       );
     }
 
+    // Validate mentions array (if any) — also gate every mentioned
+    // userId against the chat's actual membership so a client can't
+    // tag people outside the conversation.
+    const mentionsParsed = parseMentions(parsed.mentions);
+    const memberUserIds = new Set(
+      meta.chat.members.map((m) => m.userId).filter((x): x is string => !!x),
+    );
+    const mentions = mentionsParsed.filter((m) => memberUserIds.has(m.userId));
+
+    if (mentions.length > 0) {
+      trackEvent("ms_chats.mentions_sent", user.id, user.role || "user", {
+        chat_id: id,
+        mention_count: mentions.length,
+      });
+    }
+
     // Step 2 — send.
     const result = await sendChatMessage(
       token.accessToken,
@@ -112,6 +171,7 @@ export async function POST(
       rawContent,
       contentType,
       user.id,
+      mentions,
     );
 
     if (!result.ok) {
