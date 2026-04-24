@@ -313,6 +313,17 @@ export async function listTeamChannels(
     .map(normalizeChannel)
     .filter((c): c is TeamChannel => c !== null)
     .slice(0, safeLimit);
+  // SERVER-SIDE DIAGNOSTIC: when a successful Graph call returns
+  // zero channels for a team the user IS a member of, that's the
+  // silent-scope-downgrade pattern (200 empty instead of 403).
+  // Log the raw response shape + status so Vercel logs make this
+  // immediately debuggable. Don't log on the happy path — too noisy.
+  if (channels.length === 0) {
+    console.warn(
+      `[ms-graph-teams] /teams/${teamId}/channels returned 200 with empty value. ` +
+        `raw_count=${raw.length} data_keys=${data ? Object.keys(data).join(",") : "null"}`,
+    );
+  }
   trackEvent("ms_teams.channels_listed", userId, "system", {
     team_id: teamId,
     count: channels.length,

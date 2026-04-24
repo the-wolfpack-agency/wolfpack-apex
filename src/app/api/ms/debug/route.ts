@@ -1,5 +1,5 @@
 /**
- * GET /api/ms/_debug
+ * GET /api/ms/debug
  *
  * Diagnostic-only: decodes the user's currently-stored MS access
  * token (no signature verification — Azure already verified it on

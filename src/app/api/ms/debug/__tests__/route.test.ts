@@ -14,7 +14,7 @@ jest.mock("@/lib/microsoft-graph", () => ({
 function mkReq(auth?: string): any {
   const headers = new Headers();
   if (auth) headers.set("authorization", auth);
-  return new Request("http://test/api/ms/_debug", { method: "GET", headers }) as any;
+  return new Request("http://test/api/ms/debug", { method: "GET", headers }) as any;
 }
 
 function fakeJwt(scp: string, exp = Math.floor(Date.now() / 1000) + 600): string {
@@ -30,10 +30,10 @@ function fakeJwt(scp: string, exp = Math.floor(Date.now() / 1000) + 600): string
 
 beforeEach(() => jest.clearAllMocks());
 
-describe("GET /api/ms/_debug", () => {
+describe("GET /api/ms/debug", () => {
   it("401 without auth", async () => {
     mockGetUser.mockReturnValue(null);
-    const { GET } = await import("@/app/api/ms/_debug/route");
+    const { GET } = await import("@/app/api/ms/debug/route");
     const res = await GET(mkReq());
     expect(res.status).toBe(401);
   });
@@ -41,7 +41,7 @@ describe("GET /api/ms/_debug", () => {
   it("connected:false when no MS token stored", async () => {
     mockGetUser.mockReturnValue({ id: "u1" });
     mockGetValidToken.mockResolvedValue(null);
-    const { GET } = await import("@/app/api/ms/_debug/route");
+    const { GET } = await import("@/app/api/ms/debug/route");
     const res = await GET(mkReq("Bearer t"));
     expect(await res.json()).toEqual({ connected: false });
   });
@@ -51,7 +51,7 @@ describe("GET /api/ms/_debug", () => {
     mockGetValidToken.mockResolvedValue({
       accessToken: fakeJwt("Chat.Read Team.ReadBasic.All Mail.Read"),
     });
-    const { GET } = await import("@/app/api/ms/_debug/route");
+    const { GET } = await import("@/app/api/ms/debug/route");
     const body = await (await GET(mkReq("Bearer t"))).json();
     expect(body.scopes).toContain("Team.ReadBasic.All");
     expect(body.scopes).not.toContain("Channel.ReadBasic.All");
@@ -68,7 +68,7 @@ describe("GET /api/ms/_debug", () => {
         "Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Read.All Chat.Read",
       ),
     });
-    const { GET } = await import("@/app/api/ms/_debug/route");
+    const { GET } = await import("@/app/api/ms/debug/route");
     const body = await (await GET(mkReq("Bearer t"))).json();
     expect(body.has_all_teams_scopes).toBe(true);
     expect(body.missing_for_teams).toEqual([]);
@@ -77,7 +77,7 @@ describe("GET /api/ms/_debug", () => {
   it("decodable:false when token isn't a parseable JWS", async () => {
     mockGetUser.mockReturnValue({ id: "u1" });
     mockGetValidToken.mockResolvedValue({ accessToken: "not-a-jwt" });
-    const { GET } = await import("@/app/api/ms/_debug/route");
+    const { GET } = await import("@/app/api/ms/debug/route");
     const body = await (await GET(mkReq("Bearer t"))).json();
     expect(body.decodable).toBe(false);
   });
