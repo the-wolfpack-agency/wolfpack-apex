@@ -1188,7 +1188,43 @@ export type InstinctEventType =
   //     — fires on send when message contained at least one mention
   | "ms_chats.mentions_sent"
   | "messages.mention_added"
-  | "messages.mention_completed";
+  | "messages.mention_completed"
+  // Automations — modular workflow surface. Stream A (porsche-classes)
+  // is the first concrete automation. Every meaningful ingest and human
+  // intervention emits one of these so the learning loop can see how
+  // many manual overrides land per artifact, which automations have the
+  // worst parse precision, and which exception kinds pile up unactioned.
+  //
+  //   automations.artifact_ingested   { automation_id, source_type,
+  //                                      source_message_id, classes }
+  //     — fires after a successful parse + persist. `classes` is the
+  //       count of distinct class_keys observed in this artifact.
+  //
+  //   automations.artifact_quarantined { automation_id, source_message_id,
+  //                                        reason, exception_kind }
+  //     — fires when a parser returns ParseFailure; the artifact moves
+  //       to error_quarantined and an exception row is created.
+  //
+  //   automations.delta_computed       { automation_id, class_key,
+  //                                        added, dropped, is_baseline }
+  //     — fires on every delta row insert (including baselines).
+  //
+  //   automations.override_applied     { automation_id, kind }
+  //     — fires when Alicia (or a teammate) records a manual override.
+  //
+  //   automations.exception_resolved   { automation_id, kind,
+  //                                        outcome }   outcome=resolved|dismissed
+  //
+  //   automations.poll_run             { automation_id, new_artifacts,
+  //                                        duration_ms }
+  //     — one inbox-poller cycle finished; new_artifacts is how many
+  //       fresh items were ingested this tick.
+  | "automations.artifact_ingested"
+  | "automations.artifact_quarantined"
+  | "automations.delta_computed"
+  | "automations.override_applied"
+  | "automations.exception_resolved"
+  | "automations.poll_run";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

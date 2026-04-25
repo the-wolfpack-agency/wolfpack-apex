@@ -81,6 +81,14 @@ const HR: readonly Capability[] = [
   "tasks.edit",
   // Tools (read-only)
   "tools.view",
+  // Automations — Alicia is Program Director (HR-adjacent role); she's
+  // the primary user of porsche-classes. Granting all four caps so the
+  // dashboard, ingest trigger, override form, and exception queue all
+  // light up for her without admin involvement.
+  "automations.view",
+  "automations.run",
+  "automations.override",
+  "automations.resolve_exceptions",
 ];
 
 /** Sales: clients + meetings, read-only on docs/reports, no HR/finance. */
@@ -137,6 +145,11 @@ const OPS: readonly Capability[] = [
   "tasks.view_team",        // ops coordinates team tasks
   "tasks.edit",
   "tools.view",
+  // Ops also coordinates external automation work — full automation set.
+  "automations.view",
+  "automations.run",
+  "automations.override",
+  "automations.resolve_exceptions",
 ];
 
 /** Dev: full dev surface + sites. No HR sensitive, no finance. */
@@ -173,6 +186,11 @@ const DEV: readonly Capability[] = [
   "tasks.edit",
   "tools.view",
   "tools.run",              // dev can run all tools
+  // Dev needs read access to automations for troubleshooting parser
+  // bugs. Override + resolve are intentionally NOT granted — those are
+  // workflow decisions, not engineering decisions.
+  "automations.view",
+  "automations.run",
 ];
 
 /** Designer: docs + knowledge + assistant; no finance, no HR, no deploys. */
