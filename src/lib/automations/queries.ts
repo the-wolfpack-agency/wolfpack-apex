@@ -22,6 +22,10 @@ import type {
 export interface AutomationCounts {
   /** Distinct artifacts received in the last 24h. */
   artifacts_today: number;
+  /** Distinct artifacts received in the last 7 days. */
+  artifacts_this_week: number;
+  /** Total distinct artifacts ever received. */
+  artifacts_total: number;
   /** Open exceptions across the automation. */
   open_exceptions: number;
   /** Distinct class_keys with a captured snapshot inside the active window. */
@@ -35,6 +39,8 @@ export async function getAutomationCounts(args: {
 }): Promise<AutomationCounts> {
   const r = await query<{
     artifacts_today: string;
+    artifacts_this_week: string;
+    artifacts_total: string;
     open_exceptions: string;
     classes_in_window: string;
   }>(
@@ -42,6 +48,11 @@ export async function getAutomationCounts(args: {
        (SELECT COUNT(*)::int FROM instinct_automation_porsche_artifacts
          WHERE automation_id = $1
            AND received_at > NOW() - INTERVAL '24 hours')::text AS artifacts_today,
+       (SELECT COUNT(*)::int FROM instinct_automation_porsche_artifacts
+         WHERE automation_id = $1
+           AND received_at > NOW() - INTERVAL '7 days')::text AS artifacts_this_week,
+       (SELECT COUNT(*)::int FROM instinct_automation_porsche_artifacts
+         WHERE automation_id = $1)::text AS artifacts_total,
        (SELECT COUNT(*)::int FROM instinct_automation_porsche_exceptions
          WHERE automation_id = $1
            AND status = 'open')::text AS open_exceptions,
@@ -55,6 +66,8 @@ export async function getAutomationCounts(args: {
   );
   return {
     artifacts_today: Number(r.rows[0]?.artifacts_today ?? 0),
+    artifacts_this_week: Number(r.rows[0]?.artifacts_this_week ?? 0),
+    artifacts_total: Number(r.rows[0]?.artifacts_total ?? 0),
     open_exceptions: Number(r.rows[0]?.open_exceptions ?? 0),
     classes_in_window: Number(r.rows[0]?.classes_in_window ?? 0),
   };

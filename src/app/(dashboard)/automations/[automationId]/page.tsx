@@ -29,6 +29,8 @@ interface AutomationDetail {
 
 interface CountsView {
   artifacts_today: number;
+  artifacts_this_week: number;
+  artifacts_total: number;
   open_exceptions: number;
   classes_in_window: number;
 }
@@ -306,8 +308,29 @@ export default function AutomationOverviewPage({
         }}
         data-testid="automation-tiles"
       >
-        <Tile label="Classes in window" value={counts.classes_in_window} testid="tile-classes" />
-        <Tile label="Artifacts today" value={counts.artifacts_today} testid="tile-artifacts" />
+        <Tile
+          label="Classes in window"
+          value={counts.classes_in_window}
+          testid="tile-classes"
+        />
+        <Tile
+          label="Artifacts today"
+          value={counts.artifacts_today}
+          testid="tile-artifacts"
+          sub="last 24h"
+        />
+        <Tile
+          label="Artifacts this week"
+          value={counts.artifacts_this_week}
+          testid="tile-artifacts-week"
+          sub="last 7d"
+        />
+        <Tile
+          label="Artifacts total"
+          value={counts.artifacts_total}
+          testid="tile-artifacts-total"
+          sub="all time"
+        />
         <Tile
           label="Open exceptions"
           value={counts.open_exceptions}
@@ -348,11 +371,13 @@ function Tile({
   value,
   accent,
   testid,
+  sub,
 }: {
   label: string;
   value: number;
   accent?: string;
   testid?: string;
+  sub?: string;
 }) {
   return (
     <div
@@ -377,6 +402,18 @@ function Tile({
       >
         {value}
       </div>
+      {sub && (
+        <div
+          style={{
+            fontSize: "0.7rem",
+            color: "var(--wp-text-dim)",
+            marginTop: "0.15rem",
+            letterSpacing: "0.04em",
+          }}
+        >
+          {sub}
+        </div>
+      )}
     </div>
   );
 }
