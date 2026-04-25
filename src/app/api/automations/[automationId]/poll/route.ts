@@ -69,7 +69,11 @@ export async function POST(
   }
   const auth = await requireCapability(req, "automations.run");
   if (!auth.ok) return auth.response;
-  return runPoll(automationId, auth.user.id, auth.user.role);
+  /* Use the user's email as the poll anchor — it survives renames /
+     re-creations of the Instinct user record. getValidToken now does
+     a (connected_by OR user_email) lookup so this resolves either
+     way. */
+  return runPoll(automationId, auth.user.email ?? auth.user.id, auth.user.role);
 }
 
 /**
@@ -89,7 +93,7 @@ export async function GET(
     const auth = await requireCapability(req, "automations.run");
     if (!auth.ok) return auth.response;
     const { automationId } = await ctx.params;
-    return runPoll(automationId, auth.user.id, auth.user.role);
+    return runPoll(automationId, auth.user.email ?? auth.user.id, auth.user.role);
   }
   const userId =
     process.env.AUTOMATION_POLL_USER_ID ?? "automation-cron";

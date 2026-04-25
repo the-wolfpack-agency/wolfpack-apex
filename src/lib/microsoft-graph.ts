@@ -401,6 +401,12 @@ export async function getValidToken(
   if (isShadowMode()) return null;
   if (!userId) return null;
 
+  /* Two-tier lookup so the token follows the human, not the synthetic
+     Instinct user.id. Tier 1: connected_by (the original anchor — what
+     existing callers pass). Tier 2: user_email — the actual Microsoft
+     mailbox. If a caller hands us an email-shaped string OR if no row
+     matches by id (e.g. the Instinct user was renamed / re-created),
+     we fall back to email so the token survives. */
   const { rows } = await safeQuery<{
     access_token: string;
     refresh_token: string;
@@ -410,7 +416,8 @@ export async function getValidToken(
   }>(
     `SELECT access_token, refresh_token, user_email, expires_at, connected_by
      FROM instinct_ms_tokens
-     WHERE connected_by = $1
+     WHERE connected_by = $1 OR user_email = $1
+     ORDER BY (connected_by = $1) DESC, updated_at DESC
      LIMIT 1`,
     [userId],
   );
