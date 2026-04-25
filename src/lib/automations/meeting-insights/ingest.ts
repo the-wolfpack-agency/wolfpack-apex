@@ -248,11 +248,9 @@ async function safeExtractBodyText(input: {
   body_preview: string | null;
 }): Promise<string> {
   try {
-    // Stream B will export `parseEmailBody` from this module. The
-    // path is suppressed because the file doesn't exist yet — we use a
-    // dynamic import inside try/catch so the module-resolution error
-    // becomes the no-op fallback path.
-    // @ts-expect-error — Stream B parser-email-body.ts not yet merged
+    // Stream B's `parseEmailBody` lives at ./parser-email-body. Kept
+     // as a dynamic import for backwards-compat with the seam used
+     // before Stream B merged.
     const mod = (await import("./parser-email-body")) as unknown as {
       parseEmailBody?: (i: {
         body_html: string | null;
@@ -288,8 +286,9 @@ async function safeExtractAttachmentText(att: {
   bytes: Buffer;
 }): Promise<{ text: string | null; status: "extracted" | "unsupported_mime" | "error" }> {
   try {
-    // @ts-expect-error — Stream B parser-attachments.ts not yet merged
-    const mod = (await import("./parser-attachments")) as unknown as {
+    // Stream B's extractors barrel — handles txt/md/csv/html/docx/pdf
+    // and returns unsupported_mime for everything else without throwing.
+    const mod = (await import("./extractors")) as unknown as {
       extractAttachmentText?: (
         bytes: Buffer,
         mime: string,
