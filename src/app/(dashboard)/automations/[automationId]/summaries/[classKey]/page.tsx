@@ -27,6 +27,7 @@
  */
 
 import { useEffect, useState, use } from "react";
+import Link from "next/link";
 import { fetchWithRefresh, getInstinctToken } from "@/lib/client-auth";
 import type {
   AssembledSummary,
@@ -108,21 +109,24 @@ function ExceptionBanner({
       role="alert"
       data-testid="open-exceptions-banner"
       style={{
-        background: "#fff3cd",
-        border: "1px solid #ffeeba",
-        borderRadius: 4,
-        padding: 12,
-        marginBottom: 16,
+        background: "rgba(229,180,69,0.12)",
+        border: "1px solid var(--wp-gold)",
+        borderLeftWidth: 4,
+        borderRadius: 6,
+        padding: "0.7rem 0.9rem",
+        marginTop: "1rem",
+        marginBottom: "1rem",
+        color: "var(--wp-text)",
       }}
     >
       <strong>
-        Heads up — {exceptions.length} unresolved data-quality issue
+        ⚠ Heads up — {exceptions.length} unresolved data-quality issue
         {exceptions.length === 1 ? "" : "s"} touching this class:
       </strong>
-      <ul style={{ marginTop: 8, marginBottom: 0 }}>
+      <ul style={{ marginTop: "0.4rem", marginBottom: 0, paddingLeft: "1.2rem" }}>
         {exceptions.map((exc) => (
           <li key={exc.id}>
-            <code>{exc.kind}</code> — {exc.detail}
+            <code style={{ color: "var(--wp-gold)" }}>{exc.kind}</code> · {exc.detail}
           </li>
         ))}
       </ul>
@@ -239,87 +243,147 @@ export default function PorscheClassSummaryPage({
     <main
       data-testid="summary-page"
       style={{
-        padding: 24,
-        maxWidth: 800,
+        padding: "2rem",
+        maxWidth: 880,
         margin: "0 auto",
-        fontFamily: "Helvetica, Arial, sans-serif",
-        color: "#222",
+        color: "var(--wp-text)",
       }}
     >
+      <Link
+        href={`/automations/${encodeURIComponent(automationId)}/summaries`}
+        data-testid="summary-breadcrumb"
+        style={{
+          fontSize: "0.8rem",
+          color: "var(--wp-text-dim)",
+          textDecoration: "none",
+        }}
+      >
+        ← Back to summaries
+      </Link>
+
       <ExceptionBanner exceptions={summary.open_exceptions} />
 
       <header
         data-testid="summary-header"
-        style={{ marginBottom: 24, borderBottom: "2px solid #ddd", paddingBottom: 12 }}
+        style={{
+          marginTop: "0.4rem",
+          marginBottom: "1.5rem",
+          borderBottom: "1px solid var(--wp-border)",
+          paddingBottom: "0.9rem",
+        }}
       >
-        <h1 style={{ margin: 0 }}>Porsche Academy — Class Summary</h1>
-        <p style={{ marginTop: 8, marginBottom: 0, color: "#666" }}>
-          <strong>{summary.course_type}</strong> · {summary.class_date} ·{" "}
-          {summary.location}
+        <h1 style={{ margin: 0, fontSize: "1.8rem" }}>
+          Porsche Academy · Class summary
+        </h1>
+        <p
+          style={{
+            marginTop: "0.5rem",
+            marginBottom: 0,
+            color: "var(--wp-text-dim)",
+            fontSize: "0.95rem",
+          }}
+        >
+          <strong style={{ color: "var(--wp-text)" }}>
+            {summary.course_type}
+          </strong>{" "}
+          · {summary.class_date} · {summary.location}
         </p>
-        <p style={{ marginTop: 4, color: "#999", fontSize: 12 }}>
-          Generated: {summary.generated_at}
+        <p
+          style={{
+            marginTop: "0.3rem",
+            color: "var(--wp-text-dim)",
+            fontSize: "0.75rem",
+          }}
+        >
+          Generated {new Date(summary.generated_at).toLocaleString()}
         </p>
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: "0.9rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
           <button
             type="button"
             onClick={handleCopyPlainText}
             data-testid="copy-plain-text"
-            style={{ marginRight: 8, padding: "8px 12px" }}
+            style={{
+              background: copied ? "rgba(80,175,110,0.18)" : "var(--wp-gold)",
+              color: copied ? "var(--wp-text)" : "var(--wp-dark)",
+              border: "none",
+              padding: "0.55rem 1rem",
+              borderRadius: 6,
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "background 120ms",
+            }}
           >
-            {copied ? "Copied!" : "Copy as plain text"}
+            {copied ? "✓ Copied" : "Copy as plain text"}
           </button>
           <button
             type="button"
             onClick={handleDownloadJson}
             data-testid="download-json"
-            style={{ padding: "8px 12px" }}
+            style={{
+              background: "transparent",
+              color: "var(--wp-text)",
+              border: "1px solid var(--wp-border)",
+              padding: "0.55rem 1rem",
+              borderRadius: 6,
+              cursor: "pointer",
+            }}
           >
             Download JSON
           </button>
         </div>
       </header>
 
-      <section data-testid="attendance-section" style={{ marginBottom: 24 }}>
-        <h2>Attendance</h2>
-        <p>
+      <section data-testid="attendance-section" style={{ marginBottom: "1.8rem" }}>
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "0.4rem" }}>Attendance</h2>
+        <p style={{ margin: "0 0 0.4rem" }}>
           <strong>Total:</strong> {summary.participants.length}
         </p>
         {summary.participants.length > 0 ? (
-          <ul>
+          <ul style={{ margin: 0, paddingLeft: "1.2rem", lineHeight: 1.6 }}>
             {summary.participants.map((p) => (
               <li key={p}>{p}</li>
             ))}
           </ul>
         ) : (
-          <p style={{ color: "#999" }}>
-            (No registration roster yet — daily xlsx not yet ingested for this
-            class.)
+          <p style={{ color: "var(--wp-text-dim)", fontStyle: "italic" }}>
+            No registration roster yet. The daily Porsche xlsx hasn't been
+            ingested for this class — wait for the next poll, or use Run now
+            on the automation page.
           </p>
         )}
       </section>
 
-      <section data-testid="coordinator-section" style={{ marginBottom: 24 }}>
-        <h2>Coordinator notes</h2>
+      <section data-testid="coordinator-section" style={{ marginBottom: "1.8rem" }}>
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "0.4rem" }}>
+          Coordinator notes
+        </h2>
         {summary.coordinator_notes.length === 0 ? (
-          <p style={{ color: "#999" }}>(No coordinator report received yet.)</p>
+          <p style={{ color: "var(--wp-text-dim)", fontStyle: "italic" }}>
+            No coordinator report received yet.
+          </p>
         ) : (
           summary.coordinator_notes.map((note) => (
             <article
               key={note.author}
               style={{
-                background: "#f7f7f7",
-                padding: 12,
-                marginBottom: 8,
-                borderRadius: 4,
+                background: "var(--wp-card)",
+                border: "1px solid var(--wp-border)",
+                padding: "0.8rem 1rem",
+                marginBottom: "0.6rem",
+                borderRadius: 6,
               }}
             >
-              <h3 style={{ marginTop: 0 }}>{note.author}</h3>
+              <h3 style={{ marginTop: 0, marginBottom: "0.4rem", fontSize: "0.95rem" }}>
+                {note.author}
+              </h3>
               <pre
                 style={{
                   whiteSpace: "pre-wrap",
                   fontFamily: "inherit",
                   margin: 0,
+                  color: "var(--wp-text)",
+                  fontSize: "0.9rem",
+                  lineHeight: 1.55,
                 }}
               >
                 {note.note || "(no free-text answers)"}
@@ -329,27 +393,37 @@ export default function PorscheClassSummaryPage({
         )}
       </section>
 
-      <section data-testid="instructor-section" style={{ marginBottom: 24 }}>
-        <h2>Instructor notes</h2>
+      <section data-testid="instructor-section" style={{ marginBottom: "1.8rem" }}>
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "0.4rem" }}>
+          Instructor notes
+        </h2>
         {summary.instructor_notes.length === 0 ? (
-          <p style={{ color: "#999" }}>(No instructor report received yet.)</p>
+          <p style={{ color: "var(--wp-text-dim)", fontStyle: "italic" }}>
+            No instructor report received yet.
+          </p>
         ) : (
           summary.instructor_notes.map((note) => (
             <article
               key={note.author}
               style={{
-                background: "#f7f7f7",
-                padding: 12,
-                marginBottom: 8,
-                borderRadius: 4,
+                background: "var(--wp-card)",
+                border: "1px solid var(--wp-border)",
+                padding: "0.8rem 1rem",
+                marginBottom: "0.6rem",
+                borderRadius: 6,
               }}
             >
-              <h3 style={{ marginTop: 0 }}>{note.author}</h3>
+              <h3 style={{ marginTop: 0, marginBottom: "0.4rem", fontSize: "0.95rem" }}>
+                {note.author}
+              </h3>
               <pre
                 style={{
                   whiteSpace: "pre-wrap",
                   fontFamily: "inherit",
                   margin: 0,
+                  color: "var(--wp-text)",
+                  fontSize: "0.9rem",
+                  lineHeight: 1.55,
                 }}
               >
                 {note.note || "(no free-text answers)"}
@@ -359,24 +433,25 @@ export default function PorscheClassSummaryPage({
         )}
       </section>
 
-      <section data-testid="survey-section" style={{ marginBottom: 24 }}>
-        <h2>Survey rollup</h2>
+      <section data-testid="survey-section" style={{ marginBottom: "1.8rem" }}>
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "0.4rem" }}>Survey rollup</h2>
         {summary.survey ? (
           <>
-            <p>
+            <p style={{ margin: "0 0 0.3rem" }}>
               <strong>Responses:</strong> {summary.survey.response_count}
             </p>
             {summary.survey.average_score !== null && (
-              <p>
+              <p style={{ margin: 0 }}>
                 <strong>Average:</strong>{" "}
                 {summary.survey.average_score.toFixed(2)} / 5
               </p>
             )}
           </>
         ) : (
-          <p style={{ color: "#999" }}>
-            (Survey integration pending — see open-exceptions banner once
-            survey artifacts begin arriving.)
+          <p style={{ color: "var(--wp-text-dim)", fontStyle: "italic" }}>
+            Survey integration pending. Once survey artifacts arrive, the
+            rollup will appear here and any parse issues will surface in the
+            exception banner above.
           </p>
         )}
       </section>
