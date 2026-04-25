@@ -255,6 +255,67 @@ export function isMessageLevelIngest(automation: AutomationDefinition): boolean 
   return "email" in automation.parsers;
 }
 
+/**
+ * For Cognito-style emails (Entry Details in the body, no attachment),
+ * pick the right parser based on the SUBJECT line. Returns null when
+ * the subject doesn't advertise a known body-source. Pure helper —
+ * exported for tests.
+ */
+export function detectBodySourceType(
+  subject: string,
+  automation: AutomationDefinition,
+): AutomationSourceType | null {
+  const s = (subject ?? "").toLowerCase();
+  if (
+    "cognito_coordinator" in automation.parsers &&
+    /coordinator class report/i.test(s)
+  ) {
+    return "cognito_coordinator";
+  }
+  if (
+    "cognito_instructor" in automation.parsers &&
+    /instructor class report/i.test(s)
+  ) {
+    return "cognito_instructor";
+  }
+  return null;
+}
+
+/**
+ * Build a minimal RFC822-shaped buffer from a Graph mail message that
+ * `extractEmlParts` (cognito-html.ts) can parse. Graph delivers the
+ * body as JSON {contentType, content}; the Cognito parsers expect to
+ * read raw .eml bytes. Synthesizing a simple single-part eml with
+ * `Content-Type: text/html` lets the existing parser pipeline run
+ * unchanged.
+ */
+export function synthesizeEmlFromGraphMessage(msg: GraphMailMessage): Buffer {
+  const ext = msg as unknown as {
+    body?: { contentType?: string | null; content?: string | null };
+  };
+  const subject = (msg.subject ?? "").replace(/[\r\n]/g, " ");
+  const fromAddr = msg.from?.emailAddress?.address ?? "";
+  const fromName = msg.from?.emailAddress?.name ?? "";
+  const fromHeader = fromName
+    ? `${fromName} <${fromAddr}>`
+    : fromAddr;
+  const date = msg.receivedDateTime ?? new Date().toISOString();
+  const messageId = msg.id ?? "";
+  const isHtml = (ext.body?.contentType ?? "").toLowerCase() === "html";
+  const contentTypeHeader = isHtml
+    ? "text/html; charset=UTF-8"
+    : "text/plain; charset=UTF-8";
+  const bodyContent = ext.body?.content ?? msg.bodyPreview ?? "";
+  const headerBlock =
+    `Subject: ${subject}\r\n` +
+    `From: ${fromHeader}\r\n` +
+    `Date: ${date}\r\n` +
+    `Message-Id: <${messageId}>\r\n` +
+    `Content-Type: ${contentTypeHeader}\r\n` +
+    `\r\n`;
+  return Buffer.from(headerBlock + bodyContent, "utf8");
+}
+
 /* ------------------------------------------------------------------ */
 /* Public entry point                                                  */
 /* ------------------------------------------------------------------ */
@@ -441,6 +502,40 @@ export async function pollInbox(args: {
         errors += 1;
         console.warn(
           `[automations/inbox-poller] ingest failed for ${msg.id}/${att.name}: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    /* Body-level Cognito path: when the message subject matches a
+       Cognito form (Coordinator / Instructor Class Report) and the
+       form's "Entry Details" sit in the email body rather than as an
+       attachment, synthesize an .eml-shaped buffer from the Graph
+       message and route it through the same ingestArtifact pipeline.
+       Lets the existing parser-cognito-* parsers run unchanged. Only
+       fires when no attachment-level source_type was detected so we
+       don't double-ingest. */
+    const bodySourceType = detectBodySourceType(msg.subject ?? "", automation);
+    if (bodySourceType && attachments.length === 0) {
+      const emlBytes = synthesizeEmlFromGraphMessage(msg);
+      try {
+        const result: IngestResult = await ingestArtifact({
+          automation,
+          source_type: bodySourceType,
+          source_message_id: msg.id,
+          received_at: msg.receivedDateTime ?? new Date().toISOString(),
+          bytes: emlBytes,
+          hint: msg.subject ?? `${bodySourceType}.eml`,
+          mime: "message/rfc822",
+          user_id: args.userId,
+          user_role: args.userRole,
+        });
+        if (result.was_duplicate) artifactsDuplicate += 1;
+        else if (result.parse_status === "processed") artifactsIngested += 1;
+        else if (result.parse_status === "error_quarantined") artifactsQuarantined += 1;
+      } catch (err) {
+        errors += 1;
+        console.warn(
+          `[automations/inbox-poller] body ingest failed for ${msg.id}: ${(err as Error).message}`,
         );
       }
     }
