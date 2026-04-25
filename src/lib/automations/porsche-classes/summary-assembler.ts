@@ -83,8 +83,26 @@ const LATEST_PER_SOURCE_SQL = `
     captured_at, class_key, course_type, class_date, location,
     participants, source_payload, participant_hash, created_at
   FROM instinct_automation_porsche_snapshots
-  WHERE class_key = $1
+  WHERE class_key = ANY($1::text[])
   ORDER BY source_type, captured_at DESC
+`;
+
+/**
+ * Resolve a class_key into the full set of equivalent keys via
+ * class_match overrides. Two classes referencing the same physical
+ * class week (e.g. survey filename says "Intercontinental", coordinator
+ * report says "Atlanta") get linked once via an override; from then on
+ * every key in the equivalence class returns the same merged summary.
+ *
+ * Walks the class_match graph in BOTH directions (from→to and to→from)
+ * with a small BFS so chains like A→B→C still collapse. The seed key
+ * is always included so empty override tables are a no-op.
+ */
+const CLASS_MATCH_SQL = `
+  SELECT from_value, to_value
+    FROM instinct_automation_porsche_overrides
+   WHERE automation_id = 'porsche-classes'
+     AND kind = 'class_match'
 `;
 
 const OPEN_EXCEPTIONS_SQL = `
@@ -210,8 +228,25 @@ export async function assemblePorscheClassSummary(
   const q: QueryRunner = (opts.query ??
     (defaultQuery as unknown as QueryRunner));
 
-  const snapshotsResult = await q<SnapshotRow>(LATEST_PER_SOURCE_SQL, [class_key]);
-  const snapshots = snapshotsResult.rows;
+  /* Expand the class_key into all merge-equivalent keys via class_match
+     overrides. Keeps backwards compat (a never-merged key resolves to
+     a single-element array) and lets manual merges bring snapshots from
+     different keys (e.g. survey "Intercontinental" + coordinator
+     "Atlanta") into one summary. */
+  const mergeRows = await q<{ from_value: string; to_value: string }>(
+    CLASS_MATCH_SQL,
+  );
+  const equivalentKeys = expandClassKeyEquivalence(class_key, mergeRows.rows);
+
+  const snapshotsResult = await q<SnapshotRow>(
+    LATEST_PER_SOURCE_SQL,
+    [equivalentKeys],
+  );
+  /* DISTINCT ON ran per-source across the equivalence class — but
+     because class_keys differ, two rows for the same source_type from
+     different aliased keys may both come through. Collapse to the
+     latest captured_at per source_type. */
+  const snapshots = collapseLatestPerSource(snapshotsResult.rows);
 
   if (snapshots.length === 0) return null;
 
@@ -308,4 +343,52 @@ export async function assemblePorscheClassSummary(
     open_exceptions,
     generated_at,
   };
+}
+
+/**
+ * Walk the class_match override graph in BOTH directions starting at
+ * `seed`. Returns every class_key that resolves to the same physical
+ * class. Pure — exported for unit tests.
+ */
+export function expandClassKeyEquivalence(
+  seed: ClassKey,
+  rows: ReadonlyArray<{ from_value: string; to_value: string }>,
+): ClassKey[] {
+  const adj = new Map<string, Set<string>>();
+  const link = (a: string, b: string) => {
+    if (!adj.has(a)) adj.set(a, new Set());
+    adj.get(a)!.add(b);
+  };
+  for (const r of rows) {
+    link(r.from_value, r.to_value);
+    link(r.to_value, r.from_value);
+  }
+  const seen = new Set<string>([seed]);
+  const queue = [seed];
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    for (const next of adj.get(cur) ?? []) {
+      if (seen.has(next)) continue;
+      seen.add(next);
+      queue.push(next);
+    }
+  }
+  return [...seen];
+}
+
+/**
+ * When the snapshots query spans multiple class_keys (via merge), the
+ * `DISTINCT ON (source_type)` from a single-key query no longer fully
+ * dedupes — Postgres groups per-key but we want one-per-source overall.
+ * Pick the most-recently captured row per source_type.
+ */
+function collapseLatestPerSource(rows: SnapshotRow[]): SnapshotRow[] {
+  const byType = new Map<AutomationSourceType, SnapshotRow>();
+  for (const r of rows) {
+    const cur = byType.get(r.source_type);
+    if (!cur || r.captured_at > cur.captured_at) {
+      byType.set(r.source_type, r);
+    }
+  }
+  return [...byType.values()];
 }

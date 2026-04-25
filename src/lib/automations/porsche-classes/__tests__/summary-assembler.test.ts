@@ -308,3 +308,130 @@ describe("assemblePorscheClassSummary", () => {
     expect(result!.coordinator_notes).toHaveLength(1);
   });
 });
+
+describe("expandClassKeyEquivalence", () => {
+  it("returns just the seed when the override table is empty", async () => {
+    const { expandClassKeyEquivalence } = await import("../summary-assembler");
+    const out = expandClassKeyEquivalence("BA102|2026-03-16|Atlanta", []);
+    expect(out).toEqual(["BA102|2026-03-16|Atlanta"]);
+  });
+
+  it("walks the merge graph in both directions", async () => {
+    const { expandClassKeyEquivalence } = await import("../summary-assembler");
+    const out = expandClassKeyEquivalence("BA102|2026-03-16|Atlanta", [
+      {
+        from_value: "BA102|2026-03-16|Intercontinental",
+        to_value: "BA102|2026-03-16|Atlanta",
+      },
+    ]);
+    expect(new Set(out)).toEqual(
+      new Set([
+        "BA102|2026-03-16|Atlanta",
+        "BA102|2026-03-16|Intercontinental",
+      ]),
+    );
+  });
+
+  it("collapses A→B→C chains transitively", async () => {
+    const { expandClassKeyEquivalence } = await import("../summary-assembler");
+    const out = expandClassKeyEquivalence("A", [
+      { from_value: "A", to_value: "B" },
+      { from_value: "B", to_value: "C" },
+    ]);
+    expect(new Set(out)).toEqual(new Set(["A", "B", "C"]));
+  });
+
+  it("ignores merges that touch other class_keys (no false expansion)", async () => {
+    const { expandClassKeyEquivalence } = await import("../summary-assembler");
+    const out = expandClassKeyEquivalence("BA101|2026-04-13|Westlake", [
+      {
+        from_value: "BA102|2026-03-16|Intercontinental",
+        to_value: "BA102|2026-03-16|Atlanta",
+      },
+    ]);
+    expect(out).toEqual(["BA101|2026-04-13|Westlake"]);
+  });
+});
+
+describe("assemblePorscheClassSummary · class_match merge", () => {
+  it("pulls snapshots from BOTH keys when class_match links them", async () => {
+    /* Two snapshots each tagged with a different class_key but linked
+       by an override. The query runner is wide enough that both come
+       back when we ask for the equivalence array. */
+    const merged: QueryRunner = (async <T extends Record<string, unknown>>(
+      text: string,
+      params?: unknown[],
+    ) => {
+      if (/instinct_automation_porsche_overrides/.test(text)) {
+        return {
+          rows: [
+            {
+              from_value: "BA102|2026-03-16|Intercontinental",
+              to_value: "BA102|2026-03-16|Atlanta",
+            },
+          ] as unknown as T[],
+        };
+      }
+      if (
+        /instinct_automation_porsche_snapshots/.test(text) &&
+        /DISTINCT ON/.test(text)
+      ) {
+        const keys = (params?.[0] as string[]) ?? [];
+        const all = [
+          {
+            id: "s-survey",
+            source_type: "survey",
+            class_key: "BA102|2026-03-16|Intercontinental",
+            course_type: "BA102",
+            class_date: "2026-03-16",
+            location: "Intercontinental",
+            captured_at: "2026-03-21T18:00:00Z",
+            participants: ["Alicia Zulker"],
+            source_payload: {
+              survey: { response_count: 16, average_score: 4.2, questions: [] },
+            },
+            participant_hash: "h1",
+            source_message_id: null,
+            source_artifact_id: "a1",
+            created_at: "x",
+          },
+          {
+            id: "s-coord",
+            source_type: "cognito_coordinator",
+            class_key: "BA102|2026-03-16|Atlanta",
+            course_type: "BA102",
+            class_date: "2026-03-16",
+            location: "Atlanta",
+            captured_at: "2026-03-23T14:00:00Z",
+            participants: [],
+            source_payload: {
+              coordinator_name: "Shawn Morris",
+              fields: {},
+              sections: [],
+            },
+            participant_hash: "h2",
+            source_message_id: null,
+            source_artifact_id: "a2",
+            created_at: "y",
+          },
+        ];
+        return {
+          rows: all.filter((r) => keys.includes(r.class_key)) as unknown as T[],
+        };
+      }
+      return { rows: [] as T[] };
+    }) as QueryRunner;
+
+    const result = await assemblePorscheClassSummary(
+      "BA102|2026-03-16|Atlanta",
+      { query: merged, now: () => NOW },
+    );
+    expect(result).not.toBeNull();
+    /* Both source types resolved despite snapshots living under
+       different class_keys. */
+    expect(result!.sources.cognito_coordinator).toBe(1);
+    expect(result!.sources.survey).toBe(1);
+    expect(result!.coordinator_notes).toHaveLength(1);
+    expect(result!.survey?.response_count).toBe(16);
+  });
+});

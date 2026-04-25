@@ -238,6 +238,76 @@ export default function PorscheClassSummaryPage({
     | { kind: "error"; message: string }
   >({ kind: "idle" });
 
+  interface MergeSuggestion {
+    class_key: string;
+    course_type: string;
+    class_date: string;
+    location: string;
+    source_count: number;
+  }
+  const [mergeSuggestions, setMergeSuggestions] = useState<MergeSuggestion[]>(
+    [],
+  );
+  const [mergeBusy, setMergeBusy] = useState<string | null>(null);
+  const [mergeError, setMergeError] = useState<string | null>(null);
+
+  /* Pull merge suggestions on every successful summary load. Fire-and-
+     forget; the banner just doesn't render if the call fails. */
+  useEffect(() => {
+    if (!summary) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetchWithRefresh(
+          `/api/automations/${encodeURIComponent(
+            automationId,
+          )}/summaries/${encodeURIComponent(rawClassKey)}/merge-suggestions`,
+        );
+        if (cancelled || !res.ok) return;
+        const body = (await res.json()) as { suggestions?: MergeSuggestion[] };
+        setMergeSuggestions(body.suggestions ?? []);
+      } catch {
+        /* non-blocking — skip the banner. */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [summary, automationId, rawClassKey]);
+
+  async function handleMergeWith(otherClassKey: string) {
+    setMergeBusy(otherClassKey);
+    setMergeError(null);
+    try {
+      const res = await fetchWithRefresh(
+        `/api/automations/${encodeURIComponent(automationId)}/override`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            kind: "class_match",
+            from: otherClassKey,
+            to: classKey,
+            reason: `Merged via summary UI by ${
+              new Date().toISOString().slice(0, 10)
+            }`,
+          }),
+        },
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setMergeError(body.error ?? `HTTP ${res.status}`);
+        return;
+      }
+      /* Reload the summary so merged snapshots show up. */
+      window.location.reload();
+    } catch (err) {
+      setMergeError((err as Error).message);
+    } finally {
+      setMergeBusy(null);
+    }
+  }
+
   async function handleUploadToSharePoint() {
     if (!summary) return;
     setUploadState({ kind: "uploading" });
@@ -317,6 +387,64 @@ export default function PorscheClassSummaryPage({
       </Link>
 
       <ExceptionBanner exceptions={summary.open_exceptions} />
+
+      {mergeSuggestions.length > 0 && (
+        <div
+          data-testid="merge-suggestions-banner"
+          role="region"
+          aria-label="Possible duplicate classes"
+          style={{
+            background: "rgba(85,150,255,0.10)",
+            border: "1px solid rgba(85,150,255,0.45)",
+            borderLeftWidth: 4,
+            borderRadius: 6,
+            padding: "0.7rem 0.9rem",
+            marginTop: "0.6rem",
+            marginBottom: "1rem",
+            color: "var(--wp-text)",
+          }}
+        >
+          <strong>Possible duplicate {mergeSuggestions.length === 1 ? "class" : "classes"}:</strong>{" "}
+          same course + class date but different location.
+          <ul style={{ marginTop: "0.4rem", marginBottom: 0, paddingLeft: "1.2rem" }}>
+            {mergeSuggestions.map((s) => (
+              <li key={s.class_key} style={{ marginBottom: "0.3rem" }}>
+                <code style={{ color: "var(--wp-gold)" }}>{s.class_key}</code>{" "}
+                <span style={{ color: "var(--wp-text-dim)", fontSize: "0.85rem" }}>
+                  ({s.source_count} source{s.source_count === 1 ? "" : "s"})
+                </span>{" "}
+                <button
+                  type="button"
+                  onClick={() => handleMergeWith(s.class_key)}
+                  disabled={mergeBusy === s.class_key}
+                  data-testid={`merge-with-${s.class_key}`}
+                  style={{
+                    background: "transparent",
+                    color: "var(--wp-text)",
+                    border: "1px solid var(--wp-border)",
+                    padding: "0.25rem 0.6rem",
+                    borderRadius: 4,
+                    fontSize: "0.8rem",
+                    cursor: mergeBusy === s.class_key ? "not-allowed" : "pointer",
+                    marginLeft: "0.4rem",
+                  }}
+                >
+                  {mergeBusy === s.class_key ? "Merging…" : "Merge with this class"}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {mergeError && (
+            <p
+              role="alert"
+              data-testid="merge-error"
+              style={{ marginTop: "0.4rem", marginBottom: 0, color: "var(--wp-error, #e87b7b)", fontSize: "0.85rem" }}
+            >
+              Merge failed: {mergeError}
+            </p>
+          )}
+        </div>
+      )}
 
       <header
         data-testid="summary-header"
