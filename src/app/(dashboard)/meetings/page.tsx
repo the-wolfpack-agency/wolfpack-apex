@@ -155,18 +155,6 @@ export default function MeetingsPage() {
           style={{ borderColor: "var(--wp-dark-border)" }}
           data-testid="meetings-tab-strip"
         >
-          <span
-            className="px-4 py-2 text-sm font-medium border-b-2"
-            style={{
-              color: "var(--wp-gold)",
-              borderColor: "var(--wp-gold)",
-              marginBottom: "-1px",
-            }}
-            aria-current="page"
-            data-testid="meetings-tab-plaud"
-          >
-            Plaud transcripts
-          </span>
           <a
             href="/meetings/feeds"
             className="px-4 py-2 text-sm font-medium border-b-2 hover:opacity-80"
@@ -179,6 +167,18 @@ export default function MeetingsPage() {
           >
             Email feeds
           </a>
+          <span
+            className="px-4 py-2 text-sm font-medium border-b-2"
+            style={{
+              color: "var(--wp-gold)",
+              borderColor: "var(--wp-gold)",
+              marginBottom: "-1px",
+            }}
+            aria-current="page"
+            data-testid="meetings-tab-plaud"
+          >
+            Plaud transcripts
+          </span>
         </nav>
       </div>
 

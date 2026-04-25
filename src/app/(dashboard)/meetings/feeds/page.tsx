@@ -156,6 +156,20 @@ export default function MeetingFeedsPage() {
           marginBottom: "1.5rem",
         }}
       >
+        <span
+          data-testid="meetings-tab-feeds"
+          aria-current="page"
+          style={{
+            padding: "0.5rem 1rem",
+            fontSize: "0.875rem",
+            fontWeight: 500,
+            color: "var(--wp-gold)",
+            borderBottom: "2px solid var(--wp-gold)",
+            marginBottom: "-1px",
+          }}
+        >
+          Email feeds
+        </span>
         <a
           href="/meetings"
           data-testid="meetings-tab-plaud"
@@ -171,20 +185,6 @@ export default function MeetingFeedsPage() {
         >
           Plaud transcripts
         </a>
-        <span
-          data-testid="meetings-tab-feeds"
-          aria-current="page"
-          style={{
-            padding: "0.5rem 1rem",
-            fontSize: "0.875rem",
-            fontWeight: 500,
-            color: "var(--wp-gold)",
-            borderBottom: "2px solid var(--wp-gold)",
-            marginBottom: "-1px",
-          }}
-        >
-          Email feeds
-        </span>
       </nav>
 
       <div
