@@ -61,6 +61,10 @@ export interface MeetingIngestRequest {
   attachments: Array<{ name: string; contentType: string; bytes: Buffer }>;
   user_id: string;
   user_role: string;
+  /** Pin routing to a specific feed (bypasses router first-match-wins).
+   *  Set by Run-now from a single feed page so the click ingests into
+   *  THAT feed, not the oldest one with matching filters. */
+  pinned_feed?: { id: string; slug: string };
 }
 
 export interface MeetingIngestResult {
@@ -106,11 +110,17 @@ export async function ingestMeetingMessage(
      same artifact can fan out to N feeds correctly. The artifact
      row itself stays unique-by-content via the artifact upsert. */
 
-  // 2. Route the message to a feed. We re-load the live feed list every
-  //    call rather than caching — feed config is small and admin
-  //    changes need to take effect within one tick.
-  const feeds = await listFeeds({ onlyEnabled: true });
-  const route = routeMessageToFeed(
+  // 2. Route the message to a feed. When the caller pins a specific
+  //    feed (Run-now from a feed page), use it directly — bypasses
+  //    the router's first-match-wins, which would otherwise let an
+  //    older feed steal messages intended for a newer one. Otherwise
+  //    use the live router as before (cron path / fan-out).
+  let route: { feed_id: string; feed_slug: string } | null = null;
+  if (req.pinned_feed) {
+    route = { feed_id: req.pinned_feed.id, feed_slug: req.pinned_feed.slug };
+  } else {
+    const feeds = await listFeeds({ onlyEnabled: true });
+    route = routeMessageToFeed(
     {
       source_message_id: req.source_message_id,
       subject: req.subject,
@@ -119,6 +129,7 @@ export async function ingestMeetingMessage(
     },
     feeds,
   );
+  }
 
   if (!route) {
     return await quarantine({

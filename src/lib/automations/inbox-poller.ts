@@ -477,6 +477,10 @@ interface HistoricalScanArgs {
   filters: { sender_match?: string[]; subject_match?: string[] };
   /** Hard cap on messages pulled. Defaults to 50. */
   limit?: number;
+  /** Pin every ingested message to this feed instead of letting the
+   *  first-match-wins router pick. Used by Run-now from a feed page so
+   *  the click ingests into THAT feed, not the oldest matching one. */
+  pinnedFeed?: { id: string; slug: string };
 }
 
 const kqlValue = (s: string) =>
@@ -674,6 +678,7 @@ export async function pollInboxHistorical(args: HistoricalScanArgs): Promise<Pol
           attachments,
           user_id: args.userId,
           user_role: args.userRole,
+          pinned_feed: args.pinnedFeed,
         });
         if (result.was_duplicate) artifactsDuplicate += 1;
         else if (result.parse_status === "processed") artifactsIngested += 1;

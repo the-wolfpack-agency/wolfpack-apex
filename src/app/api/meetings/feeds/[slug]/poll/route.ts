@@ -64,6 +64,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           subject_match: feed.filters.subject_match ?? [],
         },
         limit: 50,
+        /* Pin to THIS feed so the click ingests here, regardless of
+           any older feed with overlapping filters that the live
+           router would otherwise prefer. */
+        pinnedFeed: { id: feed.id, slug: feed.slug },
       });
     let result: PollResult = await tryPoll(auth.user.id);
     if (
