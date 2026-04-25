@@ -27,6 +27,7 @@ import type {
   ClassKey,
   CourseType,
   ExceptionRecord,
+  SurveyAggregate,
 } from "../types";
 import { query as defaultQuery } from "@/lib/db";
 
@@ -131,6 +132,36 @@ function authorOf(
  * `source_payload.sections` directly; this helper just gives a single
  * paragraph for use in the print-friendly UI.
  */
+/**
+ * Pull the parser-survey aggregate back out of source_payload. The
+ * parser writes it as `source_payload.survey` (a SurveyAggregate); we
+ * defensively reshape so a malformed legacy row degrades to null
+ * instead of crashing the route.
+ */
+function extractSurveyAggregate(
+  payload: Record<string, unknown> | null,
+): SurveyAggregate | null {
+  if (!payload) return null;
+  const raw = payload.survey;
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Partial<SurveyAggregate>;
+  const responseCount = typeof r.response_count === "number" ? r.response_count : null;
+  if (responseCount === null) return null;
+  const avg = typeof r.average_score === "number" ? r.average_score : null;
+  const questions = Array.isArray(r.questions)
+    ? r.questions.filter(
+        (q): q is SurveyAggregate["questions"][number] =>
+          !!q &&
+          typeof (q as { question?: unknown }).question === "string",
+      )
+    : [];
+  return {
+    response_count: responseCount,
+    average_score: avg,
+    questions,
+  };
+}
+
 function noteOf(payload: Record<string, unknown> | null): string {
   if (!payload) return "";
   const sections = payload.sections;
@@ -236,6 +267,11 @@ export async function assemblePorscheClassSummary(
     note: noteOf(row.source_payload),
   }));
 
+  /* Survey aggregate — parser-survey writes the SurveyAggregate into
+     source_payload.survey on the latest survey snapshot. */
+  const surveyRow = snapshots.find((r) => r.source_type === "survey");
+  const survey = surveyRow ? extractSurveyAggregate(surveyRow.source_payload) : null;
+
   // Open exceptions touching this class — either the exception row
   // mentions the class_key in its detail OR the artifact it complains
   // about has a snapshot under this class_key.
@@ -268,7 +304,7 @@ export async function assemblePorscheClassSummary(
     participants,
     coordinator_notes,
     instructor_notes,
-    survey: null, // Stub until parser-survey is real.
+    survey,
     open_exceptions,
     generated_at,
   };

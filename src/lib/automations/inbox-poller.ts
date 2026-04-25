@@ -216,13 +216,28 @@ export function detectSourceType(
 ): AutomationSourceType | null {
   const lower = filename.toLowerCase();
   const ct = (contentType ?? "").toLowerCase();
+  const isSpreadsheet =
+    lower.endsWith(".xlsx") ||
+    lower.endsWith(".csv") ||
+    ct.includes("spreadsheet") ||
+    ct.includes("text/csv");
+
+  /* Survey export wins over the generic porsche-daily roster when the
+     filename advertises itself ("Survey Data PCBA …" or starts with
+     a course code immediately followed by a hotel name). The two
+     exports look identical to MIME type inspection — only the
+     filename disambiguates them. */
   if (
-    "porsche_xlsx" in automation.parsers &&
-    (lower.endsWith(".xlsx") ||
-      lower.endsWith(".csv") ||
-      ct.includes("spreadsheet") ||
-      ct.includes("text/csv"))
+    "survey" in automation.parsers &&
+    isSpreadsheet &&
+    (/(^|[^a-z])survey[\s_]*data/i.test(filename) ||
+      /(^|[^a-z])(101|102)\b.*\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(
+        filename,
+      ))
   ) {
+    return "survey";
+  }
+  if ("porsche_xlsx" in automation.parsers && isSpreadsheet) {
     return "porsche_xlsx";
   }
   return null;
