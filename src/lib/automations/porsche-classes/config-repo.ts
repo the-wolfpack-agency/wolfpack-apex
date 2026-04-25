@@ -64,6 +64,10 @@ export const DEFAULT_INBOX_FILTERS: InboxFiltersConfig = {
     "porsche-academy-notification@porsche.de",
     "notifications@cognitoforms.com",
     "@thewolfpack.agency",
+    /* Wildcard "@" — every email address contains it. Lets distinctive
+       subjects (Survey Data PCBA, etc.) pass even when the sender is
+       unknown. Remove once the survey-vendor address is known. */
+    "@",
   ],
   subject_match: [
     "Scheduled Report Notification",
@@ -71,6 +75,7 @@ export const DEFAULT_INBOX_FILTERS: InboxFiltersConfig = {
     "Instructor Class Report",
     "Change Management Plan",
     "Brand Ambassador",
+    "Survey Data PCBA",
   ],
 };
 

@@ -88,6 +88,14 @@ export const porscheClasses: AutomationDefinition = {
       // mailbox being set up. Production senders above remain primary;
       // remove this line once the Porsche-side forwarding is wired.
       "@thewolfpack.agency",
+      /* Wildcard fallback: every email address contains "@", so this
+         pattern matches all senders. The subject_match list is the
+         actual gate — only emails whose subject hits one of the
+         distinctive Porsche / Cognito / survey patterns below ingest.
+         Used because the survey-vendor sender isn't yet known and we
+         want ingestion to work over the weekend. Tighten this when the
+         vendor address surfaces. */
+      "@",
     ],
     subject_match: [
       "Scheduled Report Notification",
@@ -95,6 +103,9 @@ export const porscheClasses: AutomationDefinition = {
       "Instructor Class Report",
       "Change Management Plan",
       "Brand Ambassador",
+      /* Survey vendor xlsx — distinctive enough that subject-only is
+         safe. Pattern: "Survey Data PCBA 101 Pendry March 23-27th". */
+      "Survey Data PCBA",
     ],
   },
   // Dynamic loader: wizard-managed filter row wins when present, static
