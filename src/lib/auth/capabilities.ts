@@ -118,10 +118,10 @@ export const CAPABILITIES = {
   "tools.view": "View the tools dashboard",
   "tools.run": "Run tool actions (PDF, screenshots, diff)",
 
-  // Automations — modular per-team-member workflow surface (Stream A
-  // first ships porsche-classes; capabilities are AUTOMATION-WIDE so a
-  // single grant lights up every registered automation).
-  "automations.view": "View the automations dashboard and per-automation pages",
+  // Automations — modular per-team-member workflow surface (capabilities
+  // are AUTOMATION-WIDE so a single grant lights up every registered
+  // automation, including the per-class summaries).
+  "automations.view": "View the automations dashboard, per-class summaries, and per-automation pages",
   "automations.run": "Trigger ingest / poll for an automation",
   "automations.override": "Apply manual corrections (alias, exclude, class match) to an automation",
   "automations.resolve_exceptions": "Resolve or dismiss automation exceptions",
