@@ -120,12 +120,16 @@ export async function POST(req: NextRequest) {
 
   let livePullPart: ResponseWithLive["live_pull"] | undefined;
   if (wantsLivePull) {
-    /* Use auth.user.email when present (matches the dual-anchor token
-       lookup we normalised on); fall back to user.id. */
-    const lookupKey = auth.user.email ?? auth.user.id;
-    try {
-      const live = await livePullInbox({
-        userId: lookupKey,
+    /* Try both auth.user.id AND auth.user.email — the MS token might
+       be anchored on either depending on when/how it was connected.
+       getValidToken's dual lookup matches connected_by OR user_email
+       so handing it the id usually wins, but if the user's Instinct
+       email IS the same as their MS mailbox we want that fallback too.
+       livePullInbox tries the first key; if it returns no_user_connected,
+       we retry with the other. */
+    const tryLivePull = (key: string) =>
+      livePullInbox({
+        userId: key,
         filters: {
           subject_match: filters.subject_match,
           sender_match: filters.sender_match,
@@ -134,6 +138,16 @@ export async function POST(req: NextRequest) {
           limit: 50,
         },
       });
+
+    try {
+      /* Try the user's id first (matches connected_by on the token row
+         when MS Graph was connected via the standard flow). */
+      let live = await tryLivePull(auth.user.id);
+      /* Fallback: if id lookup said no_user_connected and the user has
+         an email, try that key — covers tokens anchored on email. */
+      if (live.skipped && live.skipped_reason === "no_user_connected" && auth.user.email && auth.user.email !== auth.user.id) {
+        live = await tryLivePull(auth.user.email);
+      }
       livePullPart = {
         enabled: true,
         skipped: live.skipped,
