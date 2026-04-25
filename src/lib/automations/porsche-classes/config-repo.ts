@@ -69,6 +69,8 @@ export const DEFAULT_INBOX_FILTERS: InboxFiltersConfig = {
     "Scheduled Report Notification",
     "Coordinator Class Report",
     "Instructor Class Report",
+    "Change Management Plan",
+    "Brand Ambassador",
   ],
 };
 

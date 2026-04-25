@@ -93,6 +93,8 @@ export const porscheClasses: AutomationDefinition = {
       "Scheduled Report Notification",
       "Coordinator Class Report",
       "Instructor Class Report",
+      "Change Management Plan",
+      "Brand Ambassador",
     ],
   },
   // Dynamic loader: wizard-managed filter row wins when present, static
