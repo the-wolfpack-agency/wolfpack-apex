@@ -253,6 +253,57 @@ export default function PorscheClassSummaryPage({
     | { kind: "error"; message: string }
   >({ kind: "idle" });
 
+  const [manualIngestState, setManualIngestState] = useState<
+    | { kind: "idle" }
+    | { kind: "uploading"; sourceType: string }
+    | { kind: "ok"; sourceType: string; snapshots: number }
+    | { kind: "error"; sourceType: string; message: string }
+  >({ kind: "idle" });
+
+  async function handleManualIngest(
+    sourceType: "survey" | "cognito_coordinator" | "cognito_instructor" | "porsche_xlsx",
+    file: File,
+  ) {
+    setManualIngestState({ kind: "uploading", sourceType });
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("source_type", sourceType);
+      const res = await fetchWithRefresh(
+        `/api/automations/porsche-classes/manual-ingest`,
+        { method: "POST", body: form },
+      );
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        result?: { snapshots_written?: number; parse_status?: string };
+        error?: string;
+      };
+      if (!res.ok || !body.ok) {
+        setManualIngestState({
+          kind: "error",
+          sourceType,
+          message: body.error ?? `HTTP ${res.status}`,
+        });
+        return;
+      }
+      setManualIngestState({
+        kind: "ok",
+        sourceType,
+        snapshots: body.result?.snapshots_written ?? 0,
+      });
+      /* Reload so the new snapshot flows into the summary. The parser
+         may have quarantined the artifact (snapshots_written=0) — in
+         that case the page re-renders with the fresh exception banner. */
+      window.location.reload();
+    } catch (err) {
+      setManualIngestState({
+        kind: "error",
+        sourceType,
+        message: (err as Error).message,
+      });
+    }
+  }
+
   interface MergeSuggestion {
     class_key: string;
     course_type: string;
@@ -823,12 +874,78 @@ export default function PorscheClassSummaryPage({
             )}
           </>
         ) : (
-          <p style={{ color: "var(--wp-text-dim)", fontStyle: "italic" }}>
-            No survey responses ingested for this class yet. The rollup
-            appears here automatically once the Cognito survey email
-            arrives — any parse issues will surface in the exception
-            banner above.
-          </p>
+          <div data-testid="survey-empty">
+            <p style={{ color: "var(--wp-text-dim)", fontStyle: "italic", margin: "0 0 0.6rem" }}>
+              No survey responses ingested for this class yet. The
+              rollup appears here automatically once the Cognito survey
+              email arrives — any parse issues will surface in the
+              exception banner above.
+            </p>
+            <label
+              data-testid="survey-manual-upload"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                padding: "0.5rem 0.9rem",
+                background: "transparent",
+                color: "var(--wp-text)",
+                border: "1px solid var(--wp-border)",
+                borderRadius: 6,
+                cursor:
+                  manualIngestState.kind === "uploading"
+                    ? "not-allowed"
+                    : "pointer",
+                fontSize: "0.85rem",
+                touchAction: "manipulation",
+              }}
+            >
+              {manualIngestState.kind === "uploading" &&
+              manualIngestState.sourceType === "survey"
+                ? "Uploading…"
+                : "Upload survey xlsx"}
+              <input
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                style={{ display: "none" }}
+                disabled={manualIngestState.kind === "uploading"}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void handleManualIngest("survey", f);
+                  /* Allow re-selecting the same file after a failure. */
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            <p
+              style={{
+                marginTop: "0.4rem",
+                marginBottom: 0,
+                color: "var(--wp-text-dim)",
+                fontSize: "0.75rem",
+              }}
+            >
+              Backfill path — uploads route through the same parser the
+              inbox poller uses, so failures show up in the exception
+              queue. The filename must encode the class (course / date /
+              location) the same way Cognito exports it.
+            </p>
+            {manualIngestState.kind === "error" &&
+              manualIngestState.sourceType === "survey" && (
+                <p
+                  role="alert"
+                  data-testid="survey-manual-upload-error"
+                  style={{
+                    marginTop: "0.4rem",
+                    marginBottom: 0,
+                    color: "var(--wp-error, #e87b7b)",
+                    fontSize: "0.85rem",
+                  }}
+                >
+                  Upload failed: {manualIngestState.message}
+                </p>
+              )}
+          </div>
         )}
       </section>
     </main>
