@@ -15,18 +15,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
-import { porscheClassesAutomation } from "@/lib/automations/porsche-classes";
-import type { AutomationDefinition } from "@/lib/automations/types";
-
-/**
- * Tiny inline registry so this route doesn't depend on Stream A's
- * `lib/automations/registry.ts` (which doesn't exist on this branch
- * yet). When Stream A's PR lands, the registry import replaces this
- * with one line; the assembler call site stays identical.
- */
-const REGISTRY: Readonly<Record<string, AutomationDefinition>> = {
-  "porsche-classes": porscheClassesAutomation,
-};
+import { getAutomation } from "@/lib/automations/registry";
 
 export async function GET(
   req: NextRequest,
@@ -41,7 +30,7 @@ export async function GET(
   // class_key is encoded in the URL because it contains `|` separators.
   const classKey = decodeURIComponent(rawClassKey);
 
-  const automation = REGISTRY[automationId];
+  const automation = getAutomation(automationId);
   if (!automation) {
     return NextResponse.json(
       { error: "automation not found", automationId },

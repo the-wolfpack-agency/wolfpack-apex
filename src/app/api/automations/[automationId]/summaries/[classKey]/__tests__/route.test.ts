@@ -13,17 +13,19 @@ jest.mock("@/lib/auth/require-capability", () => ({
 }));
 
 const mockAssemble = jest.fn();
-jest.mock("@/lib/automations/porsche-classes", () => ({
-  porscheClassesAutomation: {
-    id: "porsche-classes",
-    name: "Porsche Academy class registrations",
-    owner_label: "Alicia",
-    description: "test",
-    active_window_days: { min: -7, max: 30 },
-    inbox_filters: {},
-    parsers: {},
-    assemble_summary: (key: string) => mockAssemble(key),
-  },
+const fakeAutomation = {
+  id: "porsche-classes",
+  name: "Porsche Academy class registrations",
+  owner_label: "Alicia",
+  description: "test",
+  active_window_days: { min: -7, max: 30 },
+  inbox_filters: {},
+  parsers: {},
+  assemble_summary: (key: string) => mockAssemble(key),
+};
+jest.mock("@/lib/automations/registry", () => ({
+  getAutomation: (id: string) =>
+    id === "porsche-classes" ? fakeAutomation : null,
 }));
 
 import { NextRequest, NextResponse } from "next/server";
