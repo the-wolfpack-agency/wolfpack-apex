@@ -138,9 +138,6 @@ export default function AutomationOverviewPage({
           >
             {automation.description}
           </p>
-          <div style={{ color: "var(--wp-text-dim)", fontSize: "0.8rem", marginTop: "0.4rem" }}>
-            Owner: {automation.owner_label}
-          </div>
         </div>
         <button
           onClick={handleRunNow}

@@ -124,9 +124,9 @@ export default function AutomationsIndexPage() {
                       letterSpacing: "0.05em",
                     }}
                   >
-                    Owner: {a.owner_label} · Window:{" "}
-                    {a.active_window_days.min}d → {a.active_window_days.max}d
-                    · Sources: {a.source_types.length}
+                    Window: {a.active_window_days.min}d →{" "}
+                    {a.active_window_days.max}d · Sources:{" "}
+                    {a.source_types.length}
                   </div>
                 </div>
               </div>
