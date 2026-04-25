@@ -17,6 +17,7 @@
     "canary": "PROD_URL=${PROD_URL:-https://wolfpack-instinct.vercel.app} playwright test tests/e2e/ --config=playwright.config.ts --reporter=github"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.91.1",
     "@types/bcryptjs": "^3.0.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/pg": "^8.20.0",
