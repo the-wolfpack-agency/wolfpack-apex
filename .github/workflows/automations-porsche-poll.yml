@@ -40,7 +40,13 @@ jobs:
             exit 1
           fi
           response=$(mktemp)
+          # --location-trusted: follow Vercel's alias-domain rewrite
+          # (wolfpack-apex.vercel.app → wolfpack-instinct.vercel.app)
+          # AND keep the Authorization header on the redirect target.
+          # Without it, the bearer is stripped on the cross-host hop and
+          # the route 401s.
           status=$(curl -sS -o "$response" -w "%{http_code}" \
+            --location-trusted \
             -X POST \
             -H "Authorization: Bearer ${CRON_SECRET}" \
             -H "Content-Type: application/json" \
