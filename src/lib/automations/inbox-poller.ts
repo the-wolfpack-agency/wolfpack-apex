@@ -125,34 +125,48 @@ async function fetchAttachments(
       `inbox-poller: no token for user ${userId}`,
     );
   }
-  const url = `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size,contentBytes`;
-  const res = await fetch(url, {
+  /* IMPORTANT: do NOT include `contentBytes` in the LIST $select. Graph
+     drops items from the list response when contentBytes is requested
+     there (it's a large property only resolvable on individual
+     /attachments/{id} fetches). The earlier shape silently returned []
+     for messages whose only attachment was a real fileAttachment. We
+     now list the attachments first (cheap), then fetch each
+     fileAttachment individually with bytes. */
+  const listUrl = `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size`;
+  const listRes = await fetch(listUrl, {
     headers: { Authorization: `Bearer ${token.accessToken}` },
   });
-  if (!res.ok) {
+  if (!listRes.ok) {
     throw new GraphClientError(
-      res.status,
-      res.status === 401
+      listRes.status,
+      listRes.status === 401
         ? "unauthorized"
-        : res.status === 403
+        : listRes.status === 403
           ? "scope_missing"
-          : res.status === 404
+          : listRes.status === 404
             ? "not_found"
             : "graph_error",
-      `attachments fetch failed: ${res.status}`,
+      `attachments list failed: ${listRes.status}`,
     );
   }
-  const body = (await res.json()) as { value?: GraphAttachment[] };
+  const list = (await listRes.json()) as { value?: GraphAttachment[] };
   const out: Array<{ name: string; contentType: string; bytes: Buffer }> = [];
-  for (const att of body.value ?? []) {
+  for (const att of list.value ?? []) {
     if (att["@odata.type"] && !/fileAttachment/i.test(att["@odata.type"])) {
-      continue; // Skip reference / itemAttachment — we don't fetch those.
+      continue; // Skip reference / itemAttachment — we can't fetch bytes for those.
     }
-    if (!att.contentBytes) continue;
+    /* Per-attachment fetch to actually get contentBytes. */
+    const oneUrl = `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(att.id)}`;
+    const oneRes = await fetch(oneUrl, {
+      headers: { Authorization: `Bearer ${token.accessToken}` },
+    });
+    if (!oneRes.ok) continue;
+    const one = (await oneRes.json()) as GraphAttachment;
+    if (!one.contentBytes) continue;
     out.push({
-      name: att.name,
-      contentType: att.contentType,
-      bytes: Buffer.from(att.contentBytes, "base64"),
+      name: one.name,
+      contentType: one.contentType,
+      bytes: Buffer.from(one.contentBytes, "base64"),
     });
   }
   return out;
