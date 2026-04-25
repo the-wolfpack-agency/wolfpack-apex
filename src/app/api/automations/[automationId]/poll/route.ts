@@ -58,9 +58,17 @@ export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ automationId: string }> },
 ) {
+  const { automationId } = await ctx.params;
+  // Service-account path: GitHub Actions cron POSTs with the bearer
+  // CRON_SECRET. Accept that as a stand-in for capability auth.
+  if (isAuthorizedCron(req)) {
+    const userId =
+      process.env.AUTOMATION_POLL_USER_ID ?? "automation-cron";
+    const userRole = process.env.AUTOMATION_POLL_USER_ROLE ?? "ops";
+    return runPoll(automationId, userId, userRole);
+  }
   const auth = await requireCapability(req, "automations.run");
   if (!auth.ok) return auth.response;
-  const { automationId } = await ctx.params;
   return runPoll(automationId, auth.user.id, auth.user.role);
 }
 
