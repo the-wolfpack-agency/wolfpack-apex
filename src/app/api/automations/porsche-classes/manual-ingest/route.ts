@@ -24,7 +24,28 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { getAutomation } from "@/lib/automations/registry";
 import { ingestArtifact } from "@/lib/automations/porsche-classes/ingest";
-import type { AutomationSourceType } from "@/lib/automations/types";
+import type {
+  AutomationSourceType,
+  CourseType,
+} from "@/lib/automations/types";
+
+/**
+ * Parse a class_key of the form "BA101|2026-04-20|Ritz Carlton" into
+ * the (course_type, class_date, location) triple parser-survey expects
+ * as a class_override. Returns null when the shape is malformed —
+ * caller treats null as "no override, fall back to filename regex".
+ */
+function parseClassKey(
+  raw: string,
+): { course_type: CourseType; class_date: string; location: string } | null {
+  const parts = raw.split("|");
+  if (parts.length !== 3) return null;
+  const [course, date, location] = parts.map((p) => p.trim());
+  if (course !== "BA101" && course !== "BA102") return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  if (!location) return null;
+  return { course_type: course, class_date: date, location };
+}
 
 const ALLOWED_SOURCE_TYPES = new Set<AutomationSourceType>([
   "porsche_xlsx",
@@ -99,6 +120,28 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  /* Optional class_key override — when the operator uploads from a
+     specific class's summary page they pass the page's class_key so
+     the parser routes the snapshot to THAT class regardless of what
+     the filename / form fields say. Validated for shape; ill-formed
+     ⇒ 400 because the only callers that send it are our own UI which
+     should never produce a malformed value. */
+  const classKeyRaw = form.get("class_key");
+  let classOverride: ReturnType<typeof parseClassKey> = null;
+  if (typeof classKeyRaw === "string" && classKeyRaw.length > 0) {
+    classOverride = parseClassKey(classKeyRaw);
+    if (!classOverride) {
+      return NextResponse.json(
+        {
+          error:
+            `class_key '${classKeyRaw}' must be of the form ` +
+            `BA101|YYYY-MM-DD|Location`,
+        },
+        { status: 400 },
+      );
+    }
+  }
+
   const result = await ingestArtifact({
     automation,
     source_type: sourceType,
@@ -112,6 +155,7 @@ export async function POST(req: NextRequest) {
     mime: file.type || MIME_BY_SOURCE[sourceType] || "application/octet-stream",
     user_id: auth.user.id,
     user_role: auth.user.role,
+    class_override: classOverride ?? undefined,
   });
 
   return NextResponse.json({ ok: true, result });

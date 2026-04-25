@@ -291,6 +291,10 @@ export default function PorscheClassSummaryPage({
       const form = new FormData();
       form.append("file", file);
       form.append("source_type", sourceType);
+      /* Pass the page's class_key so the parser bypasses filename
+         regex matching and assigns the snapshot to THIS class — this
+         is the deterministic backfill path. */
+      form.append("class_key", classKey);
       const res = await fetchWithRefresh(
         `/api/automations/porsche-classes/manual-ingest`,
         { method: "POST", body: form },
@@ -1011,9 +1015,10 @@ export default function PorscheClassSummaryPage({
               }}
             >
               Backfill path — uploads route through the same parser the
-              inbox poller uses, so failures show up in the exception
-              queue. The filename must encode the class (course / date /
-              location) the same way Cognito exports it.
+              inbox poller uses, so failures still surface in the
+              exception queue. The snapshot is force-assigned to{" "}
+              <code>{classKey}</code> regardless of the filename, so you
+              can upload the file as Cognito exported it.
             </p>
             {manualIngestState.kind !== "idle" &&
               manualIngestState.sourceType === "survey" && (

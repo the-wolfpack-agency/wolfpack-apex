@@ -615,9 +615,14 @@ export const parseSurvey: Parser = async (
   }
   const rows = decoded.rows;
 
-  /* 3. Class identity from filename. Multi-class files refuse here. */
+  /* 3. Class identity. Manual-ingest path passes class_override so we
+        skip the filename regex entirely — the operator is uploading
+        from THIS class's page and the assignment must be deterministic.
+        Email-poller path falls back to filename parsing as before. */
   const fallbackYear = Number(input.received_at.slice(0, 4)) || new Date().getFullYear();
-  const ident = parseClassIdentityFromFilename(input.hint, fallbackYear);
+  const ident = input.class_override
+    ? input.class_override
+    : parseClassIdentityFromFilename(input.hint, fallbackYear);
   if ("error" in ident) {
     return fail(ident.error, { hint: input.hint });
   }

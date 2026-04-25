@@ -158,6 +158,20 @@ export interface ParseInput {
   source_message_id: string | null;
   /** Stored artifact id this parser is operating on. */
   source_artifact_id: string;
+  /**
+   * Optional class identity override. Used by the manual-ingest path
+   * where the operator is uploading from a specific class's page and
+   * the file should be assigned to THAT class regardless of what the
+   * filename / subject says. Parsers that key off filename (parser-
+   * survey, parser-cognito-*) MUST honor this when set rather than
+   * running their normal regex match — that's the whole point of the
+   * override.
+   */
+  class_override?: {
+    course_type: CourseType;
+    class_date: string; // YYYY-MM-DD
+    location: string;
+  };
 }
 
 export interface ParseSuccess {

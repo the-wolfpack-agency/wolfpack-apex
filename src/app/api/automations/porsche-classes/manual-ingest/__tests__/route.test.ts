@@ -109,6 +109,64 @@ describe("POST /api/automations/porsche-classes/manual-ingest", () => {
     expect(body.error).toMatch(/empty/);
   });
 
+  it("returns 400 when class_key is malformed", async () => {
+    allow();
+    const form = new FormData();
+    form.append("source_type", "survey");
+    form.append("class_key", "not-a-valid-key");
+    form.append("file", new File([new Uint8Array([1, 2, 3])], "a.xlsx"));
+    const r = await POST(multipart(form));
+    expect(r.status).toBe(400);
+    const body = (await r.json()) as { error: string };
+    expect(body.error).toMatch(/BA101\|YYYY-MM-DD\|Location/);
+  });
+
+  it("parses a valid class_key and forwards class_override to ingestArtifact", async () => {
+    allow();
+    mockIngestArtifact.mockResolvedValueOnce({
+      artifact_id: "art-2",
+      was_duplicate: false,
+      parse_status: "processed",
+      snapshots_written: 1,
+      deltas_written: 0,
+    });
+    const form = new FormData();
+    form.append("source_type", "survey");
+    form.append("class_key", "BA101|2026-04-20|Ritz Carlton");
+    form.append("file", new File([new Uint8Array([1])], "a.xlsx"));
+    const r = await POST(multipart(form));
+    expect(r.status).toBe(200);
+
+    const call = mockIngestArtifact.mock.calls[0][0] as {
+      class_override?: { course_type: string; class_date: string; location: string };
+    };
+    expect(call.class_override).toEqual({
+      course_type: "BA101",
+      class_date: "2026-04-20",
+      location: "Ritz Carlton",
+    });
+  });
+
+  it("omits class_override when class_key is not provided", async () => {
+    allow();
+    mockIngestArtifact.mockResolvedValueOnce({
+      artifact_id: "art-3",
+      was_duplicate: false,
+      parse_status: "processed",
+      snapshots_written: 1,
+      deltas_written: 0,
+    });
+    const form = new FormData();
+    form.append("source_type", "survey");
+    form.append("file", new File([new Uint8Array([1])], "a.xlsx"));
+    const r = await POST(multipart(form));
+    expect(r.status).toBe(200);
+    const call = mockIngestArtifact.mock.calls[0][0] as {
+      class_override?: unknown;
+    };
+    expect(call.class_override).toBeUndefined();
+  });
+
   it("forwards bytes to ingestArtifact with a synthetic manual:* message id", async () => {
     allow("ops", "user-42");
     mockIngestArtifact.mockResolvedValueOnce({

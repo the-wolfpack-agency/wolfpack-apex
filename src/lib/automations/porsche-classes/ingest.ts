@@ -61,6 +61,13 @@ export interface IngestRequest {
   /** Email of the user triggering the ingest (for analytics + audit). */
   user_id: string;
   user_role: string;
+  /**
+   * Optional class identity override forwarded to the parser via
+   * ParseInput.class_override. Used by the manual-ingest path so a
+   * survey upload from a specific class's page is deterministically
+   * assigned to THAT class instead of routed by filename regex.
+   */
+  class_override?: ParseInput["class_override"];
 }
 
 export interface IngestResult {
@@ -150,6 +157,7 @@ export async function ingestArtifact(
     received_at: req.received_at,
     source_message_id: req.source_message_id,
     source_artifact_id: artifactId,
+    class_override: req.class_override,
   };
 
   let result;
