@@ -962,7 +962,8 @@ export default function PorscheClassSummaryPage({
               queue. The filename must encode the class (course / date /
               location) the same way Cognito exports it.
             </p>
-            {manualIngestState.sourceType === "survey" && (
+            {manualIngestState.kind !== "idle" &&
+              manualIngestState.sourceType === "survey" && (
               <>
                 {manualIngestState.kind === "uploading" && (
                   <p
@@ -1033,8 +1034,8 @@ export default function PorscheClassSummaryPage({
                     Upload failed: {manualIngestState.message}
                   </p>
                 )}
-              </>
-            )}
+                </>
+              )}
           </div>
         )}
       </section>
