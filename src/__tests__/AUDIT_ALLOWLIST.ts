@@ -460,6 +460,11 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason:
       "501 Stream B stub — capability-gated read of attachment bytes; once Stream B replaces the body the audit will live in src/lib/automations/meeting-insights/parser-attachments via meeting.attachment_downloaded",
   },
+  {
+    route: "src/app/api/meetings/analyze/route.ts",
+    reason:
+      "Phase 5 ad-hoc analyzer — read-only POST. Aggregates already-ingested instinct_meeting_messages rows; no DB mutation. Fires meeting_insights.analyze_run analytics with actor + filter counts (no message contents) — that event IS the audit trail for the action.",
+  },
 
   // Automations (Stream A — porsche-classes ingest + dashboard).
   // Every state change writes to a dedicated automation table that IS
