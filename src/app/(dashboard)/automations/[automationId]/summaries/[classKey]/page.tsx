@@ -88,9 +88,15 @@ function summaryToPlainText(s: AssembledSummary): string {
   if (s.survey) {
     lines.push(`Responses: ${s.survey.response_count}`);
     if (s.survey.average_score !== null)
-      lines.push(`Average: ${s.survey.average_score.toFixed(2)} / 5`);
+      lines.push(`Overall average: ${s.survey.average_score.toFixed(2)} / 5`);
+    for (const q of s.survey.questions) {
+      lines.push(``);
+      const avg = q.average !== null ? ` — ${q.average.toFixed(2)} / 5` : "";
+      lines.push(`${q.question}${avg}`);
+      for (const c of q.comments) lines.push(`  - ${c}`);
+    }
   } else {
-    lines.push(`  (survey integration pending)`);
+    lines.push(`  (no survey responses ingested yet)`);
   }
   lines.push(``);
   lines.push(`---`);
@@ -742,17 +748,86 @@ export default function PorscheClassSummaryPage({
               <strong>Responses:</strong> {summary.survey.response_count}
             </p>
             {summary.survey.average_score !== null && (
-              <p style={{ margin: 0 }}>
-                <strong>Average:</strong>{" "}
+              <p style={{ margin: "0 0 0.6rem" }}>
+                <strong>Overall average:</strong>{" "}
                 {summary.survey.average_score.toFixed(2)} / 5
               </p>
+            )}
+            {summary.survey.questions.length > 0 && (
+              <div data-testid="survey-questions" style={{ marginTop: "0.4rem" }}>
+                {summary.survey.questions.map((q) => (
+                  <article
+                    key={q.question}
+                    data-testid="survey-question"
+                    style={{
+                      background: "var(--wp-card)",
+                      border: "1px solid var(--wp-border)",
+                      padding: "0.7rem 0.9rem",
+                      marginBottom: "0.5rem",
+                      borderRadius: 6,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "baseline",
+                        gap: "0.6rem",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <h3
+                        style={{
+                          margin: 0,
+                          fontSize: "0.9rem",
+                          fontWeight: 600,
+                          flex: 1,
+                          minWidth: 0,
+                        }}
+                      >
+                        {q.question}
+                      </h3>
+                      {q.average !== null && (
+                        <span
+                          data-testid="survey-question-average"
+                          style={{
+                            color: "var(--wp-gold)",
+                            fontSize: "0.85rem",
+                            fontWeight: 600,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {q.average.toFixed(2)} / 5
+                        </span>
+                      )}
+                    </div>
+                    {q.comments.length > 0 && (
+                      <ul
+                        style={{
+                          marginTop: "0.5rem",
+                          marginBottom: 0,
+                          paddingLeft: "1.1rem",
+                          color: "var(--wp-text-dim)",
+                          fontSize: "0.85rem",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {q.comments.map((c, i) => (
+                          <li key={`${q.question}-c-${i}`}>{c}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </article>
+                ))}
+              </div>
             )}
           </>
         ) : (
           <p style={{ color: "var(--wp-text-dim)", fontStyle: "italic" }}>
-            Survey integration pending. Once survey artifacts arrive, the
-            rollup will appear here and any parse issues will surface in the
-            exception banner above.
+            No survey responses ingested for this class yet. The rollup
+            appears here automatically once the Cognito survey email
+            arrives — any parse issues will surface in the exception
+            banner above.
           </p>
         )}
       </section>
