@@ -1,0 +1,100 @@
+name: Automations · Health monitor
+
+# Runs every hour against PROD. Catches regressions before any real
+# user does. Two layers:
+#
+#   1. POLL PROBE     — POSTs the cron secret and asserts HTTP 200
+#                       (the result.skipped status is acceptable; only
+#                       5xx / 4xx fails the job).
+#   2. USER E2E       — runs tests/e2e/automations-porsche-classes.spec.ts
+#                       against the live prod URL using a real sign-in
+#                       (SMOKE_TEST_EMAIL + SMOKE_TEST_PASSWORD secrets).
+#
+# Required repo secrets:
+#   AUTOMATIONS_POLL_URL    e.g. https://wolfpack-instinct.vercel.app
+#   CRON_SECRET             same value set in Vercel env vars
+#   SMOKE_TEST_EMAIL        a real Instinct user with automations.view cap
+#   SMOKE_TEST_PASSWORD     password for that user (or app password)
+#
+# Failure surfaces in the GitHub Actions email; add a Slack webhook here
+# if you want it pushed somewhere louder.
+
+on:
+  schedule:
+    - cron: "5 * * * *" # every hour at :05
+  workflow_dispatch: {}
+
+concurrency:
+  group: automations-health-monitor
+  cancel-in-progress: false
+
+jobs:
+  poll-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: POST /api/automations/porsche-classes/poll → expect 200
+        env:
+          BASE_URL: ${{ secrets.AUTOMATIONS_POLL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::AUTOMATIONS_POLL_URL and CRON_SECRET must be set"
+            exit 1
+          fi
+          response=$(mktemp)
+          status=$(curl -sS -o "$response" -w "%{http_code}" \
+            --location-trusted \
+            -X POST \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            "${BASE_URL%/}/api/automations/porsche-classes/poll")
+          echo "::group::poll response (status=$status)"
+          cat "$response"; echo
+          echo "::endgroup::"
+          if [ "$status" != "200" ]; then
+            echo "::error::poll endpoint returned HTTP $status (expected 200)"
+            exit 1
+          fi
+          # Surface the skipped reason as a notice (not error) so the
+          # operator knows a connect-mailbox step is still pending.
+          if grep -q '"skipped"' "$response"; then
+            reason=$(grep -oE '"skipped":"[^"]*"' "$response" | head -1)
+            echo "::notice::poll skipped — $reason. Connect a mailbox to begin ingest."
+          fi
+
+  user-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: poll-probe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run prod E2E (sign-in + dashboard walk)
+        env:
+          PROD_URL: ${{ secrets.AUTOMATIONS_POLL_URL }}
+          SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: |
+          if [ -z "${SMOKE_TEST_EMAIL:-}" ] || [ -z "${SMOKE_TEST_PASSWORD:-}" ]; then
+            echo "::warning::SMOKE_TEST_EMAIL/PASSWORD not set — Playwright will skip the user-flow assertions but suite still runs"
+          fi
+          npx playwright test tests/e2e/automations-porsche-classes.spec.ts --reporter=list
+      - name: Upload trace on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-trace
+          path: |
+            test-results/**
+            playwright-report/**
+          if-no-files-found: ignore
+          retention-days: 7

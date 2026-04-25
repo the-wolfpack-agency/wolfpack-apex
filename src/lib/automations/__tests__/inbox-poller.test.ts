@@ -1,10 +1,36 @@
 /**
  * Tests for inbox-poller — the pure helpers (filter + source-type
- * detection). Full Graph round-trip is exercised via the API route
- * test which mocks the listMailDelta call.
+ * detection) plus the soft-fail "no token connected" path. Full Graph
+ * round-trip is exercised via the API route test which mocks
+ * listMailDelta.
  */
 
-import { messageMatchesAutomation, detectSourceType } from "@/lib/automations/inbox-poller";
+jest.mock("@/lib/microsoft-graph", () => ({
+  getValidToken: jest.fn(),
+}));
+jest.mock("@/lib/ms-graph/client", () => {
+  class GraphClientError extends Error {
+    constructor(public status: number, public code: string, msg: string) {
+      super(msg);
+    }
+  }
+  return {
+    listMailDelta: jest.fn(),
+    GraphClientError,
+  };
+});
+jest.mock("@/lib/automations/registry", () => ({
+  getAutomation: jest.fn(),
+}));
+jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn(() => Promise.resolve()) }));
+
+import {
+  messageMatchesAutomation,
+  detectSourceType,
+  pollInbox,
+} from "@/lib/automations/inbox-poller";
+import { getValidToken } from "@/lib/microsoft-graph";
+import { getAutomation } from "@/lib/automations/registry";
 import type { AutomationDefinition } from "@/lib/automations/types";
 
 const automation: AutomationDefinition = {
@@ -85,5 +111,27 @@ describe("detectSourceType", () => {
   it("returns null when porsche_xlsx parser is not registered", () => {
     const a: AutomationDefinition = { ...automation, parsers: {} };
     expect(detectSourceType("report.xlsx", "spreadsheet", a)).toBeNull();
+  });
+});
+
+describe("pollInbox · soft-fail when no user is connected", () => {
+  beforeEach(() => {
+    (getAutomation as jest.Mock).mockReturnValue(automation);
+    (getValidToken as jest.Mock).mockReset();
+  });
+
+  it("returns skipped:'no_user_connected' (not 500) when no token", async () => {
+    (getValidToken as jest.Mock).mockResolvedValueOnce(null);
+
+    const result = await pollInbox({
+      automationId: "porsche-classes",
+      userId: "automation-cron",
+      userRole: "ops",
+    });
+
+    expect(result.skipped).toBe("no_user_connected");
+    expect(result.messages_seen).toBe(0);
+    expect(result.errors).toBe(0);
+    // The poller must NOT throw — cron health stays green during bootstrap.
   });
 });

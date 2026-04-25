@@ -200,6 +200,10 @@ export interface PollResult {
   artifacts_quarantined: number;
   errors: number;
   duration_ms: number;
+  /** Set when the poll was a no-op due to a recoverable precondition
+      (e.g. no user has connected their mailbox yet). The route maps
+      this to a 200 so cron health stays green. */
+  skipped?: "no_user_connected" | "no_valid_token";
 }
 
 export async function pollInbox(args: {
@@ -213,8 +217,53 @@ export async function pollInbox(args: {
     throw new Error(`unknown automation: ${args.automationId}`);
   }
 
+  /* Soft-fail when the poller has no token to use. This is the normal
+     bootstrap state — the cron starts running before any user has
+     signed in. We return a structured skip so the route stays 200 and
+     cron health doesn't redline; once a real user connects, the next
+     tick proceeds normally. */
+  const preToken = await getValidToken(args.userId);
+  if (!preToken) {
+    trackEvent("automation.poll_skipped", {
+      automation_id: args.automationId,
+      reason: "no_user_connected",
+      user_id: args.userId,
+    }).catch(() => {});
+    return {
+      automation_id: args.automationId,
+      messages_seen: 0,
+      messages_matched: 0,
+      artifacts_ingested: 0,
+      artifacts_duplicate: 0,
+      artifacts_quarantined: 0,
+      errors: 0,
+      duration_ms: Date.now() - start,
+      skipped: "no_user_connected",
+    };
+  }
+
   const cursor = await loadDeltaLink(args.automationId, args.userId);
-  const { items, nextDeltaLink } = await listMailDelta(args.userId, cursor ?? undefined);
+  let items: Awaited<ReturnType<typeof listMailDelta>>["items"];
+  let nextDeltaLink: string | undefined;
+  try {
+    ({ items, nextDeltaLink } = await listMailDelta(args.userId, cursor ?? undefined));
+  } catch (err) {
+    if (err instanceof GraphClientError && err.code === "no_token") {
+      // Token expired between pre-check and the delta call. Treat as skip.
+      return {
+        automation_id: args.automationId,
+        messages_seen: 0,
+        messages_matched: 0,
+        artifacts_ingested: 0,
+        artifacts_duplicate: 0,
+        artifacts_quarantined: 0,
+        errors: 0,
+        duration_ms: Date.now() - start,
+        skipped: "no_valid_token",
+      };
+    }
+    throw err;
+  }
 
   const messagesSeen = items.length;
   let messagesMatched = 0;
