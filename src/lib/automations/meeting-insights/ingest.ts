@@ -152,8 +152,19 @@ export async function ingestMeetingMessage(
         body_text, body_html, has_attachments)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      ON CONFLICT (feed_id, source_message_id) DO UPDATE SET
-       -- benign touch so RETURNING gives the existing row.
-       subject = EXCLUDED.subject
+       /* Benign touch so RETURNING gives the existing row, plus a
+          self-heal: backfill body_text/body_html when the existing
+          row has an empty value. Earlier ingests dropped body_text
+          on the floor because of an arg-shape mismatch with the
+          parser; a re-poll should heal those rows. Never overwrites
+          existing non-empty content. */
+       subject = EXCLUDED.subject,
+       body_text = CASE
+         WHEN COALESCE(instinct_meeting_messages.body_text, '') = ''
+         THEN EXCLUDED.body_text
+         ELSE instinct_meeting_messages.body_text
+       END,
+       body_html = COALESCE(instinct_meeting_messages.body_html, EXCLUDED.body_html)
      RETURNING id, (xmax = 0) AS inserted`,
     [
       route.feed_id,

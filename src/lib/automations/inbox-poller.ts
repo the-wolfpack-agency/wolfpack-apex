@@ -663,10 +663,15 @@ export async function pollInboxHistorical(args: HistoricalScanArgs): Promise<Pol
            no message_id to analyze. */
         if (
           result.parse_status === "processed" &&
-          !result.was_duplicate &&
           result.feed_id &&
           result.message_id
         ) {
+          /* Always run on Run-now, including duplicates: an earlier
+             ingest may have produced an empty body_text (parser-shape
+             bug), and the conflict-handler now backfills it on re-
+             poll. Analyzer is idempotent on (message_id,
+             analyzer_version), so re-runs against unchanged content
+             cost a Haiku call but converge to the same record. */
           try {
             await runAnalyzer({
               feed_id: result.feed_id,
