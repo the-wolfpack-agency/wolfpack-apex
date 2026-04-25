@@ -47,9 +47,11 @@ export interface LivePullMatch {
 }
 
 export interface LivePullResult {
-  /** True when the user has no MS Graph token connected. */
+  /** True when the call short-circuited (no token, Graph error, etc). */
   skipped: boolean;
-  skipped_reason?: "no_user_connected" | "no_valid_token";
+  /** Either a known reason ('no_user_connected' / 'no_valid_token') or
+      a free-form fallback like 'graph_429' / a fetch error message. */
+  skipped_reason?: string;
   /** How many messages Graph returned this delta page. */
   inbox_seen: number;
   /** How many of those passed the typed filters + date range. */
