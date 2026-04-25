@@ -44,7 +44,21 @@ export default function AutomationOverviewPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
-  const [pollResult, setPollResult] = useState<string | null>(null);
+  type PollFeedback =
+    | { kind: "info"; msg: string }
+    | { kind: "ok"; msg: string }
+    | { kind: "warn"; msg: string }
+    | { kind: "error"; msg: string };
+  const [pollResult, setPollResult] = useState<PollFeedback | null>(null);
+
+  /* Auto-dismiss the poll-result banner after 6s on success/skip,
+     longer (12s) on error so the operator can read the message. */
+  useEffect(() => {
+    if (!pollResult) return;
+    const ms = pollResult.kind === "error" ? 12_000 : 6_000;
+    const id = window.setTimeout(() => setPollResult(null), ms);
+    return () => window.clearTimeout(id);
+  }, [pollResult]);
 
   async function load() {
     setLoading(true);
@@ -75,7 +89,13 @@ export default function AutomationOverviewPage({
 
   async function handleRunNow() {
     setPolling(true);
-    setPollResult(null);
+    /* Instant click-acknowledgement so the user knows the request is
+       in flight, not silently swallowed. The success/error message
+       below replaces this within ~1-3s. */
+    setPollResult({
+      kind: "info",
+      msg: "Started · checking the inbox now…",
+    });
     try {
       const r = await fetchWithRefresh(
         `/api/automations/${automationId}/poll`,
@@ -83,18 +103,42 @@ export default function AutomationOverviewPage({
       );
       const data = await r.json();
       if (!r.ok) {
-        setPollResult(`Failed: ${data.error ?? r.status}`);
+        setPollResult({
+          kind: "error",
+          msg: `Failed (${r.status}): ${data.error ?? "unknown"}`,
+        });
       } else {
         const res = data.result;
-        setPollResult(
-          `Polled · matched ${res.messages_matched} · ingested ` +
-            `${res.artifacts_ingested} · duplicates ${res.artifacts_duplicate} ` +
-            `· quarantined ${res.artifacts_quarantined}`,
-        );
-        await load();
+        if (res?.skipped === "no_user_connected" || res?.skipped === "no_valid_token") {
+          setPollResult({
+            kind: "warn",
+            msg:
+              "No mailbox connected yet. Sign in to Microsoft (top-right) and " +
+              "grant Mail.Read access, then click Run now again.",
+          });
+        } else {
+          const ing = res?.artifacts_ingested ?? 0;
+          const matched = res?.messages_matched ?? 0;
+          const dup = res?.artifacts_duplicate ?? 0;
+          const quar = res?.artifacts_quarantined ?? 0;
+          const headline =
+            ing === 0 && dup === 0
+              ? "Done · inbox checked, no new matching emails"
+              : `Done · ingested ${ing} new artifact${ing === 1 ? "" : "s"}`;
+          setPollResult({
+            kind: "ok",
+            msg:
+              `${headline} · matched ${matched}, duplicates ${dup}, ` +
+              `quarantined ${quar}`,
+          });
+          await load();
+        }
       }
     } catch (err) {
-      setPollResult(`Network error: ${(err as Error).message}`);
+      setPollResult({
+        kind: "error",
+        msg: `Network error: ${(err as Error).message}`,
+      });
     } finally {
       setPolling(false);
     }
@@ -143,8 +187,14 @@ export default function AutomationOverviewPage({
           onClick={handleRunNow}
           disabled={polling}
           data-testid="automation-run-now"
+          aria-busy={polling}
+          aria-live="polite"
           style={{
             background: polling ? "var(--wp-border)" : "var(--wp-gold)",
+            outline: polling ? "2px solid var(--wp-gold)" : "none",
+            outlineOffset: "2px",
+            boxShadow: polling ? "0 0 0 4px rgba(229,180,69,0.18)" : "none",
+            transition: "background 120ms, box-shadow 200ms, outline 120ms",
             color: polling ? "var(--wp-text-dim)" : "var(--wp-dark)",
             border: "none",
             padding: "0.6rem 1.2rem",
@@ -153,24 +203,96 @@ export default function AutomationOverviewPage({
             cursor: polling ? "not-allowed" : "pointer",
           }}
         >
-          {polling ? "Polling…" : "Run now"}
+          {polling ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "0.45rem" }}>
+              <span
+                aria-hidden="true"
+                style={{
+                  display: "inline-block",
+                  width: "10px",
+                  height: "10px",
+                  borderRadius: "50%",
+                  border: "2px solid currentColor",
+                  borderTopColor: "transparent",
+                  animation: "wp-spin 0.7s linear infinite",
+                }}
+              />
+              Polling…
+            </span>
+          ) : (
+            "Run now"
+          )}
+          <style jsx>{`
+            @keyframes wp-spin {
+              to {
+                transform: rotate(360deg);
+              }
+            }
+          `}</style>
         </button>
       </div>
 
       {pollResult && (
         <div
           data-testid="automation-poll-result"
+          data-kind={pollResult.kind}
+          role="status"
+          aria-live="polite"
           style={{
-            padding: "0.6rem 0.8rem",
-            background: "var(--wp-card)",
-            border: "1px solid var(--wp-border)",
+            padding: "0.7rem 0.9rem",
+            background:
+              pollResult.kind === "error"
+                ? "rgba(204,68,68,0.10)"
+                : pollResult.kind === "warn"
+                  ? "rgba(229,180,69,0.12)"
+                  : pollResult.kind === "ok"
+                    ? "rgba(80,175,110,0.12)"
+                    : "var(--wp-card)",
+            border: `1px solid ${
+              pollResult.kind === "error"
+                ? "#c44"
+                : pollResult.kind === "warn"
+                  ? "var(--wp-gold)"
+                  : pollResult.kind === "ok"
+                    ? "rgba(80,175,110,0.55)"
+                    : "var(--wp-border)"
+            }`,
+            borderLeftWidth: "4px",
             borderRadius: "6px",
-            color: "var(--wp-text-dim)",
+            color: "var(--wp-text)",
             marginBottom: "1rem",
-            fontSize: "0.85rem",
+            fontSize: "0.88rem",
+            lineHeight: 1.45,
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "0.6rem",
           }}
         >
-          {pollResult}
+          <span aria-hidden="true" style={{ fontSize: "1rem", lineHeight: 1 }}>
+            {pollResult.kind === "ok"
+              ? "✓"
+              : pollResult.kind === "error"
+                ? "✕"
+                : pollResult.kind === "warn"
+                  ? "⚠"
+                  : "•"}
+          </span>
+          <span style={{ flex: 1 }}>{pollResult.msg}</span>
+          <button
+            type="button"
+            onClick={() => setPollResult(null)}
+            aria-label="Dismiss"
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--wp-text-dim)",
+              cursor: "pointer",
+              fontSize: "0.9rem",
+              padding: "0 0.2rem",
+            }}
+          >
+            ×
+          </button>
         </div>
       )}
 
