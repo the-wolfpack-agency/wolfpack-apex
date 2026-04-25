@@ -197,7 +197,18 @@ export default function PorscheClassesThisWeekPage() {
     <div style={{ padding: "2rem", color: "var(--wp-text)" }}>
       <Link
         href={`/automations/${AUTOMATION_ID}`}
-        style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)", textDecoration: "none" }}
+        style={{
+          fontSize: "0.8rem",
+          color: "var(--wp-text-dim)",
+          textDecoration: "none",
+          /* Inline-block + padding gives a ≥44px touch target so iOS
+             reliably picks the link over the surrounding container. The
+             negative margin keeps the visual offset unchanged. */
+          display: "inline-block",
+          padding: "0.6rem 0.5rem",
+          margin: "-0.6rem -0.5rem",
+          touchAction: "manipulation",
+        }}
         data-testid="this-week-back"
       >
         ← Back to automation
@@ -343,18 +354,46 @@ function ClassRowCard({
     <div
       data-testid={`this-week-row-${row.class_key}`}
       data-status={row.status}
+      className="this-week-row"
       style={{
-        display: "grid",
-        gridTemplateColumns: "auto minmax(0,1fr) auto auto auto",
-        gap: "1rem",
-        alignItems: "center",
-        padding: "0.9rem 1rem",
         background: "var(--wp-card)",
         border: "1px solid var(--wp-border)",
         borderLeft: `4px solid ${STATUS_COLOR[row.status]}`,
         borderRadius: "6px",
       }}
     >
+      <style jsx>{`
+        /* Default: vertical stack on narrow screens — date and source
+           emojis were colliding because the 5-column grid was forcing
+           every cell into a too-narrow track on phones. */
+        .this-week-row {
+          display: flex;
+          flex-direction: column;
+          align-items: stretch;
+          gap: 0.6rem;
+          padding: 0.9rem 1rem;
+        }
+        .this-week-row :global([data-row-cell="activity"]) {
+          text-align: left;
+        }
+        .this-week-row :global([data-row-cell="actions"]) {
+          justify-content: flex-start;
+        }
+        @media (min-width: 720px) {
+          .this-week-row {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+            gap: 1rem;
+            align-items: center;
+          }
+          .this-week-row :global([data-row-cell="activity"]) {
+            text-align: right;
+          }
+          .this-week-row :global([data-row-cell="actions"]) {
+            justify-content: flex-end;
+          }
+        }
+      `}</style>
       {/* Status dot + label */}
       <div
         style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: "150px" }}
@@ -424,7 +463,14 @@ function ClassRowCard({
       </div>
 
       {/* Last activity + issue count */}
-      <div style={{ fontSize: "0.78rem", color: "var(--wp-text-dim)", minWidth: "120px", textAlign: "right" }}>
+      <div
+        data-row-cell="activity"
+        style={{
+          fontSize: "0.78rem",
+          color: "var(--wp-text-dim)",
+          minWidth: "120px",
+        }}
+      >
         <div>Last update {formatTime(row.last_activity_at)}</div>
         {row.open_exception_count > 0 && (
           <div style={{ color: "#c44", marginTop: "0.2rem" }}>
@@ -440,7 +486,10 @@ function ClassRowCard({
       </div>
 
       {/* Actions */}
-      <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+      <div
+        data-row-cell="actions"
+        style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}
+      >
         <Link
           href={`/automations/${AUTOMATION_ID}/summaries/${encodeURIComponent(row.class_key)}`}
           data-testid={`this-week-open-${row.class_key}`}

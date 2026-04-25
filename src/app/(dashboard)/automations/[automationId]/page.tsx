@@ -169,7 +169,15 @@ export default function AutomationOverviewPage({
         <div style={{ flex: 1, minWidth: "200px" }}>
           <Link
             href="/automations"
-            style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)", textDecoration: "none" }}
+            style={{
+              fontSize: "0.8rem",
+              color: "var(--wp-text-dim)",
+              textDecoration: "none",
+              display: "inline-block",
+              padding: "0.6rem 0.5rem",
+              margin: "-0.6rem -0.5rem",
+              touchAction: "manipulation",
+            }}
           >
             ← All automations
           </Link>

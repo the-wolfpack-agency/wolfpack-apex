@@ -151,7 +151,17 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="h-screen flex overflow-hidden" style={{ background: "var(--wp-dark)" }}>
+    <div
+      className="flex overflow-hidden"
+      style={{
+        background: "var(--wp-dark)",
+        /* Use dynamic viewport height so iOS Safari's collapsing toolbar
+           doesn't clip the bottom of the page. h-screen / 100vh assumes the
+           toolbar is hidden, so when it reappears the bottom of <main>
+           hides under it (text/buttons clipped near the page footer). */
+        height: "100dvh",
+      }}
+    >
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -289,7 +299,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           <NotificationBell />
         </header>
 
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 lg:p-8">
+        <main
+          className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 lg:p-8"
+          style={{
+            paddingBottom:
+              "max(1rem, calc(env(safe-area-inset-bottom) + 1rem))",
+          }}
+        >
           {children}
         </main>
       </div>

@@ -77,6 +77,10 @@ export default function SummariesIndexPage({
           fontSize: "0.8rem",
           color: "var(--wp-text-dim)",
           textDecoration: "none",
+          display: "inline-block",
+          padding: "0.6rem 0.5rem",
+          margin: "-0.6rem -0.5rem",
+          touchAction: "manipulation",
         }}
       >
         ← Back to automation
