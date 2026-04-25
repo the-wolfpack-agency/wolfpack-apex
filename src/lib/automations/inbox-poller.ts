@@ -619,13 +619,41 @@ export async function pollInboxHistorical(args: HistoricalScanArgs): Promise<Pol
 
     if (messageLevel) {
       try {
+        /* Graph's /messages?$search response returns a list shape that
+           omits the `body` payload to keep the response small. Do an
+           explicit per-message GET to retrieve the html/text body —
+           one extra round-trip but it's the only way to get the real
+           content. The bodyPreview from the list call is at most ~255
+           chars. */
+        let bodyHtml: string | null = null;
+        let bodyText: string | null = null;
+        try {
+          const detailUrl = `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(msg.id)}?$select=body,ccRecipients`;
+          const detailRes = await fetch(detailUrl, {
+            headers: { Authorization: `Bearer ${token.accessToken}` },
+          });
+          if (detailRes.ok) {
+            const detail = (await detailRes.json()) as {
+              body?: { contentType?: string | null; content?: string | null };
+              ccRecipients?: Array<{ emailAddress?: { address?: string | null } }>;
+            };
+            if (detail.body?.contentType?.toLowerCase() === "html") {
+              bodyHtml = detail.body?.content ?? null;
+            } else if (detail.body?.content) {
+              bodyText = detail.body.content;
+            }
+            (msg as unknown as { ccRecipients?: unknown }).ccRecipients =
+              detail.ccRecipients ?? [];
+          }
+        } catch (err) {
+          console.warn(
+            `[automations/inbox-poller] body fetch failed for ${msg.id}: ${(err as Error).message}`,
+          );
+        }
         const ext = msg as unknown as {
           ccRecipients?: Array<{ emailAddress?: { address?: string | null } }>;
-          body?: { contentType?: string | null; content?: string | null };
         };
         const ccRecipients = ext.ccRecipients ?? [];
-        const bodyHtml =
-          ext.body?.contentType === "html" ? (ext.body?.content ?? null) : null;
         const result = await ingestMeetingMessage({
           automation,
           source_message_id: msg.id,
@@ -642,7 +670,7 @@ export async function pollInboxHistorical(args: HistoricalScanArgs): Promise<Pol
           raw_bytes: Buffer.from(JSON.stringify(msg), "utf8"),
           mime: "message/rfc822",
           body_html: bodyHtml,
-          body_preview: msg.bodyPreview ?? null,
+          body_preview: bodyText ?? msg.bodyPreview ?? null,
           attachments,
           user_id: args.userId,
           user_role: args.userRole,
