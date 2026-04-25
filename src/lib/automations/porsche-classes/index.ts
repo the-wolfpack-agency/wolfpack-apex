@@ -37,6 +37,12 @@ export const porscheClasses: AutomationDefinition = {
     sender_match: [
       "porsche-academy-notification@porsche.de",
       "notifications@cognitoforms.com",
+      // Internal-domain testing: any email from a wolfpack address that
+      // also matches a subject below counts. Lets the program team
+      // verify ingest end-to-end without depending on the Porsche
+      // mailbox being set up. Production senders above remain primary;
+      // remove this line once the Porsche-side forwarding is wired.
+      "@thewolfpack.agency",
     ],
     subject_match: [
       "Scheduled Report Notification",
