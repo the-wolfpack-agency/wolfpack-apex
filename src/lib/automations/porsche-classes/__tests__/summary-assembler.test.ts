@@ -180,6 +180,10 @@ describe("assemblePorscheClassSummary", () => {
       cognito_coordinator: 1,
       cognito_instructor: 1,
       survey: 0,
+      // `email` is reserved for meeting-insights; porsche-classes never
+      // produces an email source, so the count is always 0 — but the
+      // record-shape constraint requires the key to be present.
+      email: 0,
     });
 
     expect(result!.generated_at).toBe(NOW);

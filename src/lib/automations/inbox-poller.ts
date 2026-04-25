@@ -29,6 +29,7 @@ import { query, writeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { getAutomation } from "./registry";
 import { ingestArtifact, type IngestResult } from "./porsche-classes/ingest";
+import { ingestMeetingMessage } from "./meeting-insights/ingest";
 import type { AutomationDefinition, AutomationId, AutomationSourceType } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -71,11 +72,36 @@ async function saveDeltaLink(
 /* Filter — does a message match this automation's inbox filters?      */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Resolve the active filter set for an automation. Awaits
+ * `loadInboxFilters()` when present (used by meeting-insights so admin
+ * changes to feeds take effect without a redeploy) and falls back to
+ * the static `inbox_filters` field on any error / when not provided.
+ *
+ * Exported for tests. The poller calls this ONCE per tick before the
+ * delta-fetch loop so we don't pay the cost per message.
+ */
+export async function resolveActiveInboxFilters(
+  automation: AutomationDefinition,
+): Promise<{ sender_match?: string[]; subject_match?: string[] }> {
+  if (typeof automation.loadInboxFilters === "function") {
+    try {
+      return await automation.loadInboxFilters();
+    } catch (err) {
+      console.warn(
+        `[automations/inbox-poller] loadInboxFilters threw for ${automation.id}: ${(err as Error).message}; falling back to static filters`,
+      );
+    }
+  }
+  return automation.inbox_filters;
+}
+
 export function messageMatchesAutomation(
   message: GraphMailMessage,
   automation: AutomationDefinition,
+  activeFilters?: { sender_match?: string[]; subject_match?: string[] },
 ): boolean {
-  const filters = automation.inbox_filters;
+  const filters = activeFilters ?? automation.inbox_filters;
   const senderMatch = filters.sender_match ?? [];
   const subjectMatch = filters.subject_match ?? [];
 
@@ -201,6 +227,18 @@ export function detectSourceType(
   return null;
 }
 
+/**
+ * Per-automation: does this automation ingest at the MESSAGE level
+ * (one row per email regardless of attachments, body extraction handled
+ * by Stream B parsers) rather than per-attachment? meeting-insights is
+ * the message-level case; porsche-classes is per-attachment.
+ *
+ * Exported so the poller can branch without a hard-coded id check.
+ */
+export function isMessageLevelIngest(automation: AutomationDefinition): boolean {
+  return "email" in automation.parsers;
+}
+
 /* ------------------------------------------------------------------ */
 /* Public entry point                                                  */
 /* ------------------------------------------------------------------ */
@@ -291,9 +329,16 @@ export async function pollInbox(args: {
   let artifactsQuarantined = 0;
   let errors = 0;
 
+  // Resolve the active filter set ONCE per tick (loadInboxFilters is the
+  // dynamic path used by meeting-insights; porsche-classes uses the
+  // static `inbox_filters` field). Single resolution avoids paying per
+  // message for what is effectively a global config read.
+  const activeFilters = await resolveActiveInboxFilters(automation);
+  const messageLevel = isMessageLevelIngest(automation);
+
   for (const msg of items) {
     if (msg["@removed"]) continue; // Mailbox tombstones — not relevant.
-    if (!messageMatchesAutomation(msg, automation)) continue;
+    if (!messageMatchesAutomation(msg, automation, activeFilters)) continue;
     messagesMatched += 1;
 
     let attachments: Awaited<ReturnType<typeof fetchAttachments>>;
@@ -304,6 +349,56 @@ export async function pollInbox(args: {
       console.warn(
         `[automations/inbox-poller] attachment fetch failed for ${msg.id}: ${(err as Error).message}`,
       );
+      continue;
+    }
+
+    if (messageLevel) {
+      // Message-level ingest path (meeting-insights): one row per email
+      // regardless of attachments. The orchestrator owns body parsing +
+      // attachment extraction internally.
+      try {
+        // Graph mail-message extras live behind the [k: string]: unknown
+        // index signature; cast through a narrow shape to extract them.
+        const ext = msg as unknown as {
+          ccRecipients?: Array<{ emailAddress?: { address?: string | null } }>;
+          body?: { contentType?: string | null; content?: string | null };
+        };
+        const ccRecipients = ext.ccRecipients ?? [];
+        const bodyHtml =
+          ext.body?.contentType === "html" ? (ext.body?.content ?? null) : null;
+        const result = await ingestMeetingMessage({
+          automation,
+          source_message_id: msg.id,
+          received_at: msg.receivedDateTime ?? new Date().toISOString(),
+          subject: msg.subject ?? "",
+          from_address: msg.from?.emailAddress?.address ?? "",
+          from_name: msg.from?.emailAddress?.name ?? null,
+          to_addresses: (msg.toRecipients ?? [])
+            .map((r) => r.emailAddress?.address)
+            .filter((s): s is string => typeof s === "string"),
+          cc_addresses: ccRecipients
+            .map((r) => r.emailAddress?.address)
+            .filter((s): s is string => typeof s === "string"),
+          // Raw bytes: we don't get the .eml from delta. Serialize the
+          // Graph envelope as a stable representation so the artifact
+          // hash is stable across replays.
+          raw_bytes: Buffer.from(JSON.stringify(msg), "utf8"),
+          mime: "message/rfc822",
+          body_html: bodyHtml,
+          body_preview: msg.bodyPreview ?? null,
+          attachments,
+          user_id: args.userId,
+          user_role: args.userRole,
+        });
+        if (result.was_duplicate) artifactsDuplicate += 1;
+        else if (result.parse_status === "processed") artifactsIngested += 1;
+        else if (result.parse_status === "error_quarantined") artifactsQuarantined += 1;
+      } catch (err) {
+        errors += 1;
+        console.warn(
+          `[automations/inbox-poller] meeting ingest failed for ${msg.id}: ${(err as Error).message}`,
+        );
+      }
       continue;
     }
 

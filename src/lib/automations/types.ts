@@ -29,10 +29,17 @@ export type AutomationSourceType =
   | "porsche_xlsx"
   | "cognito_coordinator"
   | "cognito_instructor"
-  | "survey";
+  | "survey"
+  // meeting-insights — generic email body + attachments. Stream B's
+  // per-mime extractors (.docx, .pdf) sit BEHIND the single `email`
+  // source-type because the shape of the parsed output (a body + a
+  // list of attachments) is the same regardless of which extractor
+  // ran. The orchestrator dispatches to mime-specific extractors
+  // internally rather than registering one per mime here.
+  | "email";
 
 /** Stable, route-safe identifier for an automation in the registry. */
-export type AutomationId = "porsche-classes";
+export type AutomationId = "porsche-classes" | "meeting-insights";
 
 /* ------------------------------------------------------------------ */
 /* Class identity (porsche-classes specific but reusable shape)        */
@@ -217,11 +224,23 @@ export interface AutomationDefinition {
   description: string;
   /** Window in days for "active" classes the digest cares about. */
   active_window_days: { min: number; max: number };
-  /** Subject-line / sender filters for the inbox poller. */
+  /** Subject-line / sender filters for the inbox poller. STATIC fallback;
+   *  if `loadInboxFilters` is also set, that wins for delta-feed dispatch
+   *  but this static set still serves as a safety net for any caller
+   *  that doesn't await the dynamic loader. */
   inbox_filters: {
     sender_match?: string[]; // substrings
     subject_match?: string[]; // substrings
   };
+  /** Optional dynamic filter loader. When set, the inbox poller calls this
+   *  ONCE per tick and uses the union as the effective filter. Lets
+   *  automations whose filters live in the database (meeting-insights
+   *  feeds) react to admin changes without a redeploy. Falls back to the
+   *  static `inbox_filters` field if this isn't set or if it throws. */
+  loadInboxFilters?: () => Promise<{
+    sender_match?: string[];
+    subject_match?: string[];
+  }>;
   /** Parsers keyed by source_type. */
   parsers: Partial<Record<AutomationSourceType, Parser>>;
   /** Optional summary assembler. */

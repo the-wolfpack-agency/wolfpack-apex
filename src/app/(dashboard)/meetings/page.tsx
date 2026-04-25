@@ -151,6 +151,14 @@ export default function MeetingsPage() {
           <p className="text-sm mt-1" style={{ color: "var(--wp-text-dim)" }}>
             Recordings ingested from Plaud. Shared across the team.
           </p>
+          <a
+            href="/meetings/feeds"
+            data-testid="meetings-feeds-link"
+            className="inline-block mt-2 text-sm font-medium"
+            style={{ color: "var(--wp-gold)" }}
+          >
+            Configure meeting-insights feeds →
+          </a>
         </div>
         <button
           onClick={() => { setShowDraft((v) => !v); setDraftMsg(""); }}
