@@ -110,18 +110,20 @@ export async function livePullInbox(args: {
     };
   }
 
-  /* Build a Graph $search clause from the typed filters. $search uses
-     KQL: `from:nick@thewolfpack.agency` for sender; `subject:"PCNA"`
-     for subject; multiple terms are OR'd by default. We OR the
-     senders + subjects within their groups and AND the two groups
-     together via separate clauses. Date range goes through $filter
-     (which can't combine with $search on /messages, so we date-filter
-     in JS after the search). */
+  /* Build a Graph $search KQL clause. Format per MS docs:
+     $search="from:nick@thewolfpack.agency"   (plain value, no inner quotes)
+     $search="subject:PCNA"
+     For multi-term values (e.g. names with spaces) the value can be
+     wrapped in single quotes: subject:'PCNA Weekly'. Multiple terms
+     are joined with AND/OR. The OUTER value passed to $search is one
+     string; URLSearchParams URL-encodes it as needed. */
+  const kqlValue = (s: string) =>
+    /[\s\-]/.test(s) ? `'${s.replace(/'/g, "")}'` : s;
   const senderTerms = args.filters.sender_match
-    .map((s) => `from:${JSON.stringify(s)}`)
+    .map((s) => `from:${kqlValue(s)}`)
     .join(" OR ");
   const subjectTerms = args.filters.subject_match
-    .map((s) => `subject:${JSON.stringify(s)}`)
+    .map((s) => `subject:${kqlValue(s)}`)
     .join(" OR ");
   let searchClause = "";
   if (senderTerms && subjectTerms) {
@@ -139,6 +141,8 @@ export async function livePullInbox(args: {
     "id,subject,bodyPreview,from,receivedDateTime,hasAttachments",
   );
   if (searchClause) {
+    /* Graph wants the $search value wrapped in double quotes. Set the
+       raw string here — URLSearchParams handles encoding. */
     url.searchParams.set("$search", `"${searchClause}"`);
   } else {
     /* No filters typed — fall back to most-recent N. */
