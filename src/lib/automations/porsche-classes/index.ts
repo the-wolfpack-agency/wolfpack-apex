@@ -1,51 +1,62 @@
 /**
- * porsche-classes — registers the BA101/102 automation in the registry.
+ * porsche-classes — Porsche Academy BA101/102 class registrations + summaries.
  *
- * Stream A (this file) registers:
- *   - parsers.porsche_xlsx       (./parser-xlsx)
- * and provides automation metadata (id, name, owner_label, filters,
- * active_window_days).
+ * Registers Alicia's automation in the Automations registry. Two streams
+ * shipped this in parallel:
+ *   - Stream A: ingest orchestrator, xlsx parser, delta engine, dashboard,
+ *     changes UI, exception queue, MS Graph inbox poller.
+ *   - Stream B: cognito coordinator + instructor parsers, survey stub,
+ *     summary assembler, summary UI, copy-to-clipboard / JSON download.
  *
- * Stream B will follow up with:
- *   - parsers.cognito_coordinator (./parser-cognito-coordinator)
- *   - parsers.cognito_instructor  (./parser-cognito-instructor)
- *   - parsers.survey              (./parser-survey)
- *   - assemble_summary            (./summary-assembler)
- *
- * Stream B's contract: the file paths above are reserved for them. They
- * either ADD entries to `parsers` and SET `assemble_summary` directly on
- * the exported AutomationDefinition, or ship a follow-up that mutates
- * the registry post-import. Either way the build stays green when their
- * files are absent (we register only what we own here).
+ * Adding the next per-source parser or replacing the survey stub is the
+ * intended extension path: drop a new file under this directory, add it
+ * to `parsers` below, ship.
  */
 
 import type { AutomationDefinition } from "@/lib/automations/types";
 import { parseXlsx } from "./parser-xlsx";
+import { parseCognitoCoordinator } from "./parser-cognito-coordinator";
+import { parseCognitoInstructor } from "./parser-cognito-instructor";
+import { parseSurvey } from "./parser-survey";
+import { assemblePorscheClassSummary } from "./summary-assembler";
 
 export const porscheClasses: AutomationDefinition = {
   id: "porsche-classes",
   name: "Porsche BA101 / BA102",
-  // Alicia Zulker — Program Director — owns this work day-to-day.
+  // Alicia owns this work day-to-day.
   owner_label: "alicia@thewolfpack.agency",
   description:
     "Daily ingest of Porsche Brand Ambassador 101/102 registration deltas + " +
     "coordinator / instructor / survey rollups. Replaces the Mon/Fri manual " +
     "report Alicia builds by hand.",
-  // 30 / 60-day window covers the active class horizon — anything
-  // outside this is informational only and does not need a digest.
+  // 60-day forward horizon plus a 7-day backward grace period covers the
+  // active class window — anything outside is informational only and does
+  // not need to appear in the digest.
   active_window_days: { min: -7, max: 60 },
   inbox_filters: {
-    // Subject substring on Cornerstone's standard "Scheduled Report
-    // Notification" plus the daily "PCNA Training Report" attachment
-    // hint. Both must pass `String.includes` to count.
-    sender_match: ["porsche-academy-notification@porsche.de"],
-    subject_match: ["Scheduled Report Notification"],
+    sender_match: [
+      "porsche-academy-notification@porsche.de",
+      "notifications@cognitoforms.com",
+    ],
+    subject_match: [
+      "Scheduled Report Notification",
+      "Coordinator Class Report",
+      "Instructor Class Report",
+    ],
   },
   parsers: {
     porsche_xlsx: parseXlsx,
-    // cognito_coordinator / cognito_instructor / survey: registered by
-    // Stream B in a follow-up PR. Until then, the inbox poller filters
-    // those source_types out and the summary assembler is a no-op.
+    cognito_coordinator: parseCognitoCoordinator,
+    cognito_instructor: parseCognitoInstructor,
+    survey: parseSurvey,
   },
-  // assemble_summary: provided by Stream B in a follow-up PR.
+  assemble_summary: assemblePorscheClassSummary,
+};
+
+export {
+  parseXlsx,
+  parseCognitoCoordinator,
+  parseCognitoInstructor,
+  parseSurvey,
+  assemblePorscheClassSummary,
 };
