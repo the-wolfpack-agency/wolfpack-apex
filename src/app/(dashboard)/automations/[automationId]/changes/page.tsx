@@ -4,7 +4,7 @@
  * /automations/[automationId]/changes — Mon/Fri-style digest.
  *
  * One row per class_key in the active window, showing the LATEST delta.
- * "Copy digest" copies a plain-text summary to the clipboard so Alicia
+ * "Copy digest" copies a plain-text summary to the clipboard so the program owner
  * can paste it straight into a sync email.
  */
 

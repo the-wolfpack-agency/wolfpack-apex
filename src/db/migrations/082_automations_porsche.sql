@@ -1,6 +1,6 @@
 -- 082_automations_porsche.sql — Porsche-classes automation tables (Stream A).
 --
--- Stream: automations (porsche-classes / Alicia's BA101/102 work). The
+-- Stream: automations (porsche-classes class-ops workflow). The
 -- automations surface is deliberately framework-shaped (see
 -- src/lib/automations/types.ts + registry.ts): one set of tables that
 -- every future automation REGISTRATION reuses by namespacing its rows
@@ -13,7 +13,7 @@
 --   _artifacts   — raw inbound bytes (eml / xlsx) for forensics + replay
 --   _snapshots   — one parsed view of one class at one ingest point
 --   _deltas      — change between two consecutive snapshots per class_key
---   _overrides   — Alicia's manual corrections (training data for matcher)
+--   _overrides   — the program owner's manual corrections (training data for matcher)
 --   _exceptions  — parse / match failures that need human review
 --
 -- Plus _poll_state — the MS Graph delta-link cursor for the inbox poller.
@@ -168,7 +168,7 @@ CREATE INDEX IF NOT EXISTS idx_instinct_auto_porsche_deltas_curr
 -- ============================================================
 -- instinct_automation_porsche_overrides
 -- ============================================================
--- Alicia's manual corrections — these are training data for the matcher
+-- the program owner's manual corrections — these are training data for the matcher
 -- (the matcher reads recent overrides on every snapshot resolve).
 CREATE TABLE IF NOT EXISTS instinct_automation_porsche_overrides (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -1,16 +1,16 @@
 "use client";
 
 /**
- * Per-class summary page — print-friendly layout that mirrors Alicia's
+ * Per-class summary page — print-friendly layout that mirrors the program owner's
  * existing Word template. Fetches the assembled summary from
  * `/api/automations/[automationId]/summaries/[classKey]` via
  * `fetchWithRefresh` (CLAUDE.md hard rule: every authenticated client
  * fetch goes through the refresh wrapper).
  *
- * Sections rendered (in the same order Alicia uses today):
+ * Sections rendered (in the same order the program team uses today):
  *   1. Class meta (course / date / location / generated_at)
  *   2. Open-exceptions banner — data-quality warnings appear ABOVE the
- *      content so Alicia notices before copying.
+ *      content so the program owner notices before copying.
  *   3. Attendance — count + the canonical participant list (xlsx).
  *   4. Coordinator notes — one block per coordinator.
  *   5. Instructor notes — one block per instructor.
@@ -50,7 +50,7 @@ function rerouteToLogin() {
 
 /**
  * Render an AssembledSummary as a plain-text block suitable for the
- * clipboard. Mirrors the Word-template layout Alicia delivers today.
+ * clipboard. Mirrors the Word-template layout the program team delivers today.
  */
 function summaryToPlainText(s: AssembledSummary): string {
   const lines: string[] = [];

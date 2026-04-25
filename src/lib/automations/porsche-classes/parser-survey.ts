@@ -2,14 +2,14 @@
  * Porsche Academy class survey parser — STUB.
  *
  * The survey aggregate is the third leg of the per-class summary (after
- * coordinator + instructor reports). Format unknown: Alicia hasn't sent
+ * coordinator + instructor reports). Format unknown: the program team hasn't sent
  * a real fixture yet. This stub returns a structured ParseFailure so
  * the ingest orchestrator can:
  *   1. surface a clear "needs format spec" exception in the queue
  *   2. defer the artifact instead of silently dropping it
  *   3. let us flip the implementation in once a real fixture lands
  *
- * TODO — what we need from Alicia before this stub becomes a real parser:
+ * TODO — what we need from the program team before this stub becomes a real parser:
  *   ───────────────────────────────────────────────────────────────────
  *   1. ONE real survey delivery for any past class (preferably with
  *      multiple respondents), in whichever format she actually receives
@@ -20,7 +20,7 @@
  *   3. Confirmation of whether responses are anonymized or include
  *      attendee names (drives whether `survey.responses[].name` is
  *      populated and whether we need to scrub PII before storage).
- *   4. The aggregation rule Alicia uses today: simple per-question
+ *   4. The aggregation rule the program team uses today: simple per-question
  *      average, weighted average, count-of-5s, etc. — drives the
  *      `SurveyAggregate` shape in `types.ts`.
  *   5. The "class identity" fields the survey carries (course / date /
@@ -55,7 +55,7 @@ export const parseSurvey: Parser = async (
       hint: input.hint,
       received_at: input.received_at,
       todo: [
-        "Need a real survey fixture from Alicia (any past class)",
+        "Need a real survey fixture from the program team (any past class)",
         "Confirm question set + 1-5 scale wording",
         "Confirm anonymized vs named responses",
         "Confirm aggregation rule (mean / weighted / count-of-5s)",

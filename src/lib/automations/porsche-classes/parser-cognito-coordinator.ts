@@ -4,7 +4,7 @@
  * Wired into the Automations contract via `Parser` from `types.ts`.
  * Pure: takes raw .eml bytes and returns either a single ParseSuccess
  * (one snapshot per email) or a ParseFailure that the ingest
- * orchestrator will turn into an exception row for Alicia to review.
+ * orchestrator will turn into an exception row for the program owner to review.
  *
  * Why this parser is "label-table, not regex-on-text":
  *   The text/plain body Cognito ships has no delimiters between fields,

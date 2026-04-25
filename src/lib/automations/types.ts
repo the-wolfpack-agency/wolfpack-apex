@@ -3,7 +3,7 @@
  *
  * The automations surface (`/automations/...`) is a multi-tenant
  * workspace for codifying a team member's manual recurring workflow.
- * The first registered automation is `porsche-classes` (Alicia's
+ * The first registered automation is `porsche-classes` (the program owner's
  * BA101/102 registration + summary work) but the route family is
  * deliberately generic so the next client automation is config-only:
  * register a new entry in `lib/automations/registry.ts`, give it
@@ -92,7 +92,7 @@ export interface DeltaRecord {
 }
 
 /* ------------------------------------------------------------------ */
-/* Override — Alicia's manual correction (training data for matcher)   */
+/* Override — the program owner's manual correction (training data for matcher)   */
 /* ------------------------------------------------------------------ */
 
 export type OverrideKind =

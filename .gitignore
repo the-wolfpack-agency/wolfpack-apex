@@ -49,3 +49,4 @@ tests/e2e/screenshots/
 # python (tools-runner-exec.py caches)
 __pycache__/
 *.pyc
+.claude/worktrees/

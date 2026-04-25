@@ -1,8 +1,8 @@
 /**
  * porsche-classes — Porsche Academy BA101/102 class registrations + summaries.
  *
- * Registers Alicia's automation in the Automations registry. Two streams
- * shipped this in parallel:
+ * Registers the Porsche Academy class-ops automation in the Automations
+ * registry. Two streams shipped this in parallel:
  *   - Stream A: ingest orchestrator, xlsx parser, delta engine, dashboard,
  *     changes UI, exception queue, MS Graph inbox poller.
  *   - Stream B: cognito coordinator + instructor parsers, survey stub,
@@ -23,12 +23,12 @@ import { assemblePorscheClassSummary } from "./summary-assembler";
 export const porscheClasses: AutomationDefinition = {
   id: "porsche-classes",
   name: "Porsche BA101 / BA102",
-  // Alicia owns this work day-to-day.
-  owner_label: "alicia@thewolfpack.agency",
+  // Process owner — the team member responsible for the workflow.
+  owner_label: "Program Director",
   description:
-    "Daily ingest of Porsche Brand Ambassador 101/102 registration deltas + " +
-    "coordinator / instructor / survey rollups. Replaces the Mon/Fri manual " +
-    "report Alicia builds by hand.",
+    "Daily ingest of Porsche Brand Ambassador 101/102 registration " +
+    "deltas plus coordinator / instructor / survey rollups. Replaces " +
+    "the Mon/Fri manual class-summary process.",
   // 60-day forward horizon plus a 7-day backward grace period covers the
   // active class window — anything outside is informational only and does
   // not need to appear in the digest.

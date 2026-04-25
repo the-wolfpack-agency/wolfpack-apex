@@ -7,7 +7,7 @@
  *   The text/plain body Cognito sends has zero delimiters between
  *   label and value (`Date4/13/2026ClassBA101Class LocationWestlake...`),
  *   so any regex-based parser must hard-code a label vocabulary and
- *   becomes brittle as soon as Alicia adds a question. The text/html
+ *   becomes brittle as soon as a new question is added. The text/html
  *   body, by contrast, is a tidy `<th>label</th><td>value</td>` table
  *   under `<h2 class="header-2">section heading</h2>` blocks. The HTML
  *   structure has been stable across every Cognito Forms email we've

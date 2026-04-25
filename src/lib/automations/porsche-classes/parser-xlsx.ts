@@ -5,7 +5,7 @@
  * Cornerstone. Sheet 1, header row at index 6, then one row per
  * (class, participant) pair. We filter to BA101 / BA102 (Brand
  * Ambassador 101 Skills / 102 Management) — those are the only
- * classes Alicia tracks.
+ * classes the program team tracks.
  *
  * Output: one `SnapshotInput` per distinct (course, date, location)
  * tuple. Participants per snapshot are deduped + canonicalized via
