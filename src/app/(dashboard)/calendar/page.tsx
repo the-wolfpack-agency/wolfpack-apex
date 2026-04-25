@@ -12,6 +12,7 @@ import {
   fetchWithRefresh,
   jsonHeaders,
 } from "@/lib/client-auth";
+import { MeetingBriefPanel } from "./_components/MeetingBriefPanel";
 
 type View = "week" | "month" | "year";
 
@@ -75,7 +76,21 @@ export default function CalendarPage() {
   const [data, setData] = useState<RangeResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [openBriefIds, setOpenBriefIds] = useState<Set<string>>(() => new Set());
   const viewedSuggestionIds = useMemo(() => new Set<string>(), []);
+
+  const toggleBrief = useCallback((eventId: string) => {
+    setOpenBriefIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(eventId)) {
+        next.delete(eventId);
+      } else {
+        next.add(eventId);
+        fireAnalytics("calendar.meeting_brief_opened", { event_id: eventId });
+      }
+      return next;
+    });
+  }, []);
 
   const load = useCallback(async (nextView: View) => {
     setLoading(true);
@@ -317,53 +332,80 @@ export default function CalendarPage() {
                     <li
                       key={e.id}
                       data-testid={`calendar-event-${e.id}`}
-                      className="flex justify-between gap-3 border-b pb-2"
+                      className="border-b pb-2"
                       style={{ borderColor: "var(--wp-dark-border)" }}
                     >
-                      <div className="min-w-0">
-                        {hasWeb ? (
-                          <a
-                            href={e.webLink as string}
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            data-testid={`calendar-event-weblink-${e.id}`}
-                            onClick={() => onOpenExternal("web")}
-                            className="text-sm font-medium truncate block hover:underline"
-                            style={{ color: "var(--wp-gold)" }}
-                          >
-                            {e.subject}
-                          </a>
-                        ) : (
-                          <p className="text-sm font-medium truncate" style={{ color: "var(--wp-text)" }}>
-                            {e.subject}
+                      <div className="flex justify-between gap-3">
+                        <div className="min-w-0">
+                          {hasWeb ? (
+                            <a
+                              href={e.webLink as string}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                              data-testid={`calendar-event-weblink-${e.id}`}
+                              onClick={() => onOpenExternal("web")}
+                              className="text-sm font-medium truncate block hover:underline"
+                              style={{ color: "var(--wp-gold)" }}
+                            >
+                              {e.subject}
+                            </a>
+                          ) : (
+                            <p className="text-sm font-medium truncate" style={{ color: "var(--wp-text)" }}>
+                              {e.subject}
+                            </p>
+                          )}
+                          <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                            {new Date(e.start).toLocaleString()}
+                            {e.location ? ` · ${e.location}` : ""}
                           </p>
-                        )}
-                        <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
-                          {new Date(e.start).toLocaleString()}
-                          {e.location ? ` · ${e.location}` : ""}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {hasJoin && (
-                          <a
-                            href={e.joinUrl as string}
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            data-testid={`calendar-event-joinurl-${e.id}`}
-                            onClick={() => onOpenExternal("join")}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            data-testid={`calendar-event-brief-toggle-${e.id}`}
+                            onClick={() => toggleBrief(e.id)}
                             className="text-xs font-semibold px-2 py-1 rounded"
                             style={{
-                              background: "var(--wp-gold)",
-                              color: "var(--wp-dark)",
+                              background: openBriefIds.has(e.id)
+                                ? "var(--wp-gold)"
+                                : "transparent",
+                              color: openBriefIds.has(e.id)
+                                ? "var(--wp-dark)"
+                                : "var(--wp-gold)",
+                              border: "1px solid var(--wp-gold)",
                             }}
                           >
-                            Join
-                          </a>
-                        )}
-                        <span className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
-                          {e.attendees.length} attendee{e.attendees.length === 1 ? "" : "s"}
-                        </span>
+                            {openBriefIds.has(e.id) ? "Hide brief" : "Brief"}
+                          </button>
+                          {hasJoin && (
+                            <a
+                              href={e.joinUrl as string}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                              data-testid={`calendar-event-joinurl-${e.id}`}
+                              onClick={() => onOpenExternal("join")}
+                              className="text-xs font-semibold px-2 py-1 rounded"
+                              style={{
+                                background: "var(--wp-gold)",
+                                color: "var(--wp-dark)",
+                              }}
+                            >
+                              Join
+                            </a>
+                          )}
+                          <span className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
+                            {e.attendees.length} attendee{e.attendees.length === 1 ? "" : "s"}
+                          </span>
+                        </div>
                       </div>
+                      {openBriefIds.has(e.id) && (
+                        <MeetingBriefPanel
+                          eventId={e.id}
+                          eventTitle={e.subject}
+                          eventStart={e.start}
+                          attendees={e.attendees}
+                        />
+                      )}
                     </li>
                   );
                 })}

@@ -12,6 +12,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { fetchWithRefresh } from "@/lib/client-auth";
 
 interface Feed {
@@ -27,6 +28,7 @@ interface Feed {
 }
 
 export default function MeetingFeedsPage() {
+  const searchParams = useSearchParams();
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +41,29 @@ export default function MeetingFeedsPage() {
   const [formSubjects, setFormSubjects] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [formSubmitting, setFormSubmitting] = useState(false);
+
+  // Phase 5: prefill from /meetings/analyze "Save as feed" button.
+  // Honored once on mount — re-visiting the page without prefill leaves
+  // the form alone.
+  useEffect(() => {
+    const raw = searchParams?.get("prefill");
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(decodeURIComponent(raw)) as {
+        sender_match?: string[];
+        subject_match?: string[];
+      };
+      if (Array.isArray(parsed.sender_match)) {
+        setFormSenders(parsed.sender_match.join(", "));
+      }
+      if (Array.isArray(parsed.subject_match)) {
+        setFormSubjects(parsed.subject_match.join(", "));
+      }
+      setFormOpen(true);
+    } catch {
+      // Malformed prefill — silently ignore. The user can still hand-type.
+    }
+  }, [searchParams]);
 
   async function loadFeeds() {
     setLoading(true);
@@ -180,23 +205,43 @@ export default function MeetingFeedsPage() {
             subject lines.
           </p>
         </div>
-        <button
-          type="button"
-          data-testid="meeting-feed-new"
-          onClick={() => setFormOpen((v) => !v)}
-          style={{
-            background: "var(--wp-gold)",
-            color: "var(--wp-dark)",
-            border: "none",
-            borderRadius: "8px",
-            padding: "0.6rem 1.2rem",
-            fontSize: "0.9rem",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          {formOpen ? "Cancel" : "New feed"}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Link
+            href="/meetings/analyze"
+            data-testid="meeting-feed-analyze-link"
+            style={{
+              background: "transparent",
+              color: "var(--wp-gold)",
+              border: "1px solid var(--wp-gold)",
+              borderRadius: "8px",
+              padding: "0.6rem 1.2rem",
+              fontSize: "0.9rem",
+              fontWeight: 600,
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+            }}
+          >
+            Ad-hoc analysis
+          </Link>
+          <button
+            type="button"
+            data-testid="meeting-feed-new"
+            onClick={() => setFormOpen((v) => !v)}
+            style={{
+              background: "var(--wp-gold)",
+              color: "var(--wp-dark)",
+              border: "none",
+              borderRadius: "8px",
+              padding: "0.6rem 1.2rem",
+              fontSize: "0.9rem",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            {formOpen ? "Cancel" : "New feed"}
+          </button>
+        </div>
       </div>
 
       {formOpen && (

@@ -10,7 +10,11 @@
  * `.ok` and the type narrows correctly.
  */
 
-import type { MeetingFeedFilters, MeetingFeedInput } from "./types";
+import type {
+  AnalyzeRequest,
+  MeetingFeedFilters,
+  MeetingFeedInput,
+} from "./types";
 
 export type ValidationResult<T> =
   | { ok: true; value: T }
@@ -164,4 +168,91 @@ export function validateFeedPatch(input: unknown): ValidationResult<Partial<Meet
     out.is_enabled = obj.is_enabled;
   }
   return { ok: true, value: out };
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 5 — analyze request                                           */
+/* ------------------------------------------------------------------ */
+
+export function validateAnalyzeRequest(input: unknown): ValidationResult<AnalyzeRequest> {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) {
+    return { ok: false, error: "request body must be an object" };
+  }
+  const obj = input as Record<string, unknown>;
+
+  const subject_match_raw = obj.subject_match ?? [];
+  const sender_match_raw = obj.sender_match ?? [];
+  if (!isStringArray(subject_match_raw)) {
+    return { ok: false, error: "subject_match must be string[]" };
+  }
+  if (!isStringArray(sender_match_raw)) {
+    return { ok: false, error: "sender_match must be string[]" };
+  }
+  if (subject_match_raw.length > MAX_FILTERS) {
+    return { ok: false, error: `subject_match exceeds ${MAX_FILTERS} entries` };
+  }
+  if (sender_match_raw.length > MAX_FILTERS) {
+    return { ok: false, error: `sender_match exceeds ${MAX_FILTERS} entries` };
+  }
+  const subject_match = subject_match_raw
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .map((s) => s.slice(0, MAX_FILTER_VALUE));
+  const sender_match = sender_match_raw
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .map((s) => s.slice(0, MAX_FILTER_VALUE));
+
+  if (subject_match.length === 0 && sender_match.length === 0) {
+    return {
+      ok: false,
+      error:
+        "at least one of subject_match or sender_match must contain a value",
+    };
+  }
+
+  let since: string | undefined;
+  if (obj.since !== undefined && obj.since !== null && obj.since !== "") {
+    if (typeof obj.since !== "string") {
+      return { ok: false, error: "since must be an ISO date string" };
+    }
+    if (!Number.isFinite(Date.parse(obj.since))) {
+      return { ok: false, error: "since is not a parseable date" };
+    }
+    since = obj.since;
+  }
+
+  let until: string | undefined;
+  if (obj.until !== undefined && obj.until !== null && obj.until !== "") {
+    if (typeof obj.until !== "string") {
+      return { ok: false, error: "until must be an ISO date string" };
+    }
+    if (!Number.isFinite(Date.parse(obj.until))) {
+      return { ok: false, error: "until is not a parseable date" };
+    }
+    until = obj.until;
+  }
+
+  if (since && until && Date.parse(since) > Date.parse(until)) {
+    return { ok: false, error: "since must be on or before until" };
+  }
+
+  let include_attachments: boolean | undefined;
+  if (obj.include_attachments !== undefined) {
+    if (typeof obj.include_attachments !== "boolean") {
+      return { ok: false, error: "include_attachments must be a boolean" };
+    }
+    include_attachments = obj.include_attachments;
+  }
+
+  return {
+    ok: true,
+    value: {
+      subject_match,
+      sender_match,
+      since,
+      until,
+      include_attachments,
+    },
+  };
 }

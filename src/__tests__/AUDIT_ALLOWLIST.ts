@@ -465,6 +465,12 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason:
       "Phase 5 ad-hoc analyzer — read-only POST. Aggregates already-ingested instinct_meeting_messages rows; no DB mutation. Fires meeting_insights.analyze_run analytics with actor + filter counts (no message contents) — that event IS the audit trail for the action.",
   },
+  {
+    route:
+      "src/app/api/meetings/feeds/[slug]/messages/[messageId]/analysis/regenerate/route.ts",
+    reason:
+      "runAnalyzer in src/lib/automations/meeting-insights/run-analyzer.ts upserts instinct_meeting_analyses (row IS the audit ledger — analyzer_version + analyzed_at + status) and the route fires automations.message_reanalyze_requested + automations.message_analyzed analytics with feed_id + message_id",
+  },
 
   // Automations (Stream A — porsche-classes ingest + dashboard).
   // Every state change writes to a dedicated automation table that IS
