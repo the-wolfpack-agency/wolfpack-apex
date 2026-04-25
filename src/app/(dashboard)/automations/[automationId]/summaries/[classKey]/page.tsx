@@ -257,6 +257,12 @@ export default function PorscheClassSummaryPage({
     | { kind: "idle" }
     | { kind: "uploading"; sourceType: string }
     | { kind: "ok"; sourceType: string; snapshots: number }
+    | {
+        kind: "quarantined";
+        sourceType: string;
+        exceptionId?: string;
+      }
+    | { kind: "duplicate"; sourceType: string }
     | { kind: "error"; sourceType: string; message: string }
   >({ kind: "idle" });
 
@@ -275,7 +281,12 @@ export default function PorscheClassSummaryPage({
       );
       const body = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
-        result?: { snapshots_written?: number; parse_status?: string };
+        result?: {
+          snapshots_written?: number;
+          parse_status?: string;
+          was_duplicate?: boolean;
+          exception_id?: string;
+        };
         error?: string;
       };
       if (!res.ok || !body.ok) {
@@ -286,15 +297,36 @@ export default function PorscheClassSummaryPage({
         });
         return;
       }
+      const snapshots = body.result?.snapshots_written ?? 0;
+      const parseStatus = body.result?.parse_status;
+      const wasDuplicate = body.result?.was_duplicate === true;
+
+      if (snapshots > 0) {
+        setManualIngestState({ kind: "ok", sourceType, snapshots });
+        /* Snapshot landed — reload so summary-assembler picks it up. */
+        window.location.reload();
+        return;
+      }
+      if (parseStatus === "error_quarantined") {
+        setManualIngestState({
+          kind: "quarantined",
+          sourceType,
+          exceptionId: body.result?.exception_id,
+        });
+        return;
+      }
+      if (wasDuplicate) {
+        setManualIngestState({ kind: "duplicate", sourceType });
+        return;
+      }
+      /* Catch-all: parsed clean but produced no snapshot for this class
+         (e.g. auto-split routed responses to a different class_key).
+         Surface the state clearly instead of pretending it worked. */
       setManualIngestState({
-        kind: "ok",
+        kind: "quarantined",
         sourceType,
-        snapshots: body.result?.snapshots_written ?? 0,
+        exceptionId: body.result?.exception_id,
       });
-      /* Reload so the new snapshot flows into the summary. The parser
-         may have quarantined the artifact (snapshots_written=0) — in
-         that case the page re-renders with the fresh exception banner. */
-      window.location.reload();
     } catch (err) {
       setManualIngestState({
         kind: "error",
@@ -930,21 +962,79 @@ export default function PorscheClassSummaryPage({
               queue. The filename must encode the class (course / date /
               location) the same way Cognito exports it.
             </p>
-            {manualIngestState.kind === "error" &&
-              manualIngestState.sourceType === "survey" && (
-                <p
-                  role="alert"
-                  data-testid="survey-manual-upload-error"
-                  style={{
-                    marginTop: "0.4rem",
-                    marginBottom: 0,
-                    color: "var(--wp-error, #e87b7b)",
-                    fontSize: "0.85rem",
-                  }}
-                >
-                  Upload failed: {manualIngestState.message}
-                </p>
-              )}
+            {manualIngestState.sourceType === "survey" && (
+              <>
+                {manualIngestState.kind === "uploading" && (
+                  <p
+                    data-testid="survey-manual-upload-progress"
+                    role="status"
+                    style={{
+                      marginTop: "0.4rem",
+                      marginBottom: 0,
+                      color: "var(--wp-text-dim)",
+                      fontSize: "0.85rem",
+                    }}
+                  >
+                    Uploading + parsing…
+                  </p>
+                )}
+                {manualIngestState.kind === "quarantined" && (
+                  <p
+                    role="alert"
+                    data-testid="survey-manual-upload-quarantined"
+                    style={{
+                      marginTop: "0.4rem",
+                      marginBottom: 0,
+                      color: "var(--wp-gold)",
+                      fontSize: "0.85rem",
+                    }}
+                  >
+                    Upload landed but the parser couldn&apos;t produce a
+                    snapshot for this class.{" "}
+                    <Link
+                      href={`/automations/${encodeURIComponent(automationId)}/exceptions`}
+                      style={{ color: "var(--wp-gold)", textDecoration: "underline" }}
+                    >
+                      Open the exception queue
+                    </Link>{" "}
+                    to see the parser&apos;s reason — most often the
+                    filename doesn&apos;t encode this class&apos;s
+                    course/date/location, or the workbook is missing
+                    required columns.
+                  </p>
+                )}
+                {manualIngestState.kind === "duplicate" && (
+                  <p
+                    role="status"
+                    data-testid="survey-manual-upload-duplicate"
+                    style={{
+                      marginTop: "0.4rem",
+                      marginBottom: 0,
+                      color: "var(--wp-text-dim)",
+                      fontSize: "0.85rem",
+                    }}
+                  >
+                    This file was already ingested before — no new data
+                    extracted. Upload a different export or check the
+                    summaries page for the class it actually belongs to.
+                  </p>
+                )}
+                {manualIngestState.kind === "error" && (
+                  <p
+                    role="alert"
+                    data-testid="survey-manual-upload-error"
+                    style={{
+                      marginTop: "0.4rem",
+                      marginBottom: 0,
+                      color: "var(--wp-error, #e87b7b)",
+                      fontSize: "0.85rem",
+                    }}
+                  >
+                    Upload failed: {manualIngestState.message}
+                  </p>
+                )}
+              </>
+            )}
           </div>
         )}
       </section>

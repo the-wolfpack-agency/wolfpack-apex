@@ -157,10 +157,11 @@ test.describe("Porsche class summary E2E", () => {
       "Jen Eby",
     );
 
-    // Survey rollup shows the placeholder copy.
+    // Survey rollup shows the empty-state copy + manual-upload affordance.
     await expect(page.getByTestId("survey-section")).toContainText(
-      /survey integration pending/i,
+      /No survey responses ingested for this class yet/i,
     );
+    await expect(page.getByTestId("survey-manual-upload")).toBeVisible();
 
     // 3-second idle window for async CSP/network failures to surface.
     await page.waitForTimeout(3_000);
@@ -178,6 +179,166 @@ test.describe("Porsche class summary E2E", () => {
         .map((f) => `  - [${f.kind}] ${f.detail}`)
         .join("\n")}`,
     ).toEqual([]);
+  });
+
+  /* Regression: a quarantined manual-ingest used to silently reload the
+     page, which made it look like "nothing happened" — the user had no
+     way to know the parser refused the file. Lock in that the
+     quarantine state surfaces visibly and that no reload fires. */
+  test("manual survey upload that quarantines surfaces a visible alert + does not reload", async ({
+    page,
+  }) => {
+    const signedIn = await signInIfPossible(page, target);
+    if (!signedIn) {
+      await page.goto(`${target.baseUrl}/`, { waitUntil: "domcontentloaded" });
+      await page.evaluate(() => {
+        localStorage.setItem("instinct_token", "test-token-not-validated");
+        localStorage.setItem(
+          "instinct_user",
+          JSON.stringify({
+            id: "u-test",
+            role: "ops",
+            name: "Test",
+            email: "test@instinct.local",
+          }),
+        );
+      });
+    }
+
+    await page.route(API_URL, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ summary: FAKE_SUMMARY }),
+      });
+    });
+
+    /* Stub the manual-ingest route to mimic a quarantined parse — the
+       actual server-side path is exercised by the contract test. */
+    await page.route(
+      "**/api/automations/porsche-classes/manual-ingest",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            result: {
+              artifact_id: "art-quar-1",
+              was_duplicate: false,
+              parse_status: "error_quarantined",
+              snapshots_written: 0,
+              deltas_written: 0,
+              exception_id: "exc-stub-1",
+            },
+          }),
+        });
+      },
+    );
+
+    /* Detect any unwanted full-page reload. window.location.reload
+       fires a navigation; we tag the page once and assert the tag is
+       still present after the upload. */
+    await page.goto(`${target.baseUrl}${PAGE_URL}`, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+    await page.evaluate(() => {
+      (window as unknown as { __noReloadProbe: boolean }).__noReloadProbe = true;
+    });
+
+    await expect(page.getByTestId("summary-page")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const fileChooserPromise = page.waitForEvent("filechooser");
+    await page.getByTestId("survey-manual-upload").click();
+    const fc = await fileChooserPromise;
+    await fc.setFiles({
+      name: "wrong-class.xlsx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      buffer: Buffer.from("PKbroken-but-non-empty"),
+    });
+
+    await expect(
+      page.getByTestId("survey-manual-upload-quarantined"),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(
+      page.getByTestId("survey-manual-upload-quarantined"),
+    ).toContainText(/parser couldn't produce a snapshot/i);
+
+    /* The reload guard: still set ⇒ no full-page reload happened. */
+    const stillTagged = await page.evaluate(
+      () =>
+        (window as unknown as { __noReloadProbe?: boolean }).__noReloadProbe ===
+        true,
+    );
+    expect(stillTagged, "page must NOT reload on quarantined upload").toBe(true);
+  });
+
+  test("manual survey upload that surfaces an HTTP error shows a visible alert", async ({
+    page,
+  }) => {
+    const signedIn = await signInIfPossible(page, target);
+    if (!signedIn) {
+      await page.goto(`${target.baseUrl}/`, { waitUntil: "domcontentloaded" });
+      await page.evaluate(() => {
+        localStorage.setItem("instinct_token", "test-token-not-validated");
+        localStorage.setItem(
+          "instinct_user",
+          JSON.stringify({
+            id: "u-test",
+            role: "ops",
+            name: "Test",
+            email: "test@instinct.local",
+          }),
+        );
+      });
+    }
+
+    await page.route(API_URL, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ summary: FAKE_SUMMARY }),
+      });
+    });
+    await page.route(
+      "**/api/automations/porsche-classes/manual-ingest",
+      async (route) => {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: false, error: "boom: parser threw" }),
+        });
+      },
+    );
+
+    await page.goto(`${target.baseUrl}${PAGE_URL}`, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+    await expect(page.getByTestId("summary-page")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const fileChooserPromise = page.waitForEvent("filechooser");
+    await page.getByTestId("survey-manual-upload").click();
+    const fc = await fileChooserPromise;
+    await fc.setFiles({
+      name: "broken.xlsx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      buffer: Buffer.from("PKbroken"),
+    });
+
+    await expect(
+      page.getByTestId("survey-manual-upload-error"),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(
+      page.getByTestId("survey-manual-upload-error"),
+    ).toContainText(/boom: parser threw/);
   });
 
   test("renders a clean error state when the API returns 404", async ({
