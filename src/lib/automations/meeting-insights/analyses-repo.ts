@@ -26,6 +26,13 @@ export interface MeetingAnalysisRecord {
   message_id: string;
   analyzer_version: string;
   analyzed_at: string;
+  /* Convenience one-line summary the assembler uses in the brief
+     panel. The Phase 2 LLM prompt doesn't currently produce it, so
+     we synthesize from the first decision (or topic) at read time —
+     `null` when neither is present. Keeps this shape compatible
+     with the Phase 4/5 callers that import MeetingAnalysisRecord
+     from types.ts. */
+  summary: string | null;
   decisions: MeetingAnalysis["decisions"];
   action_items: MeetingAnalysis["action_items"];
   topics: string[];
@@ -78,6 +85,21 @@ function rowToAnalysis(row: AnalysisRow): MeetingAnalysisRecord {
     return v as T;
   };
 
+  const decisions = parseJson<MeetingAnalysis["decisions"]>(row.decisions, []);
+  const topics = row.topics ?? [];
+  /* Synthesize a one-line summary for callers (Phase 4 brief panel)
+     that expect it. Prefer the first decision (analyzer puts it in
+     `summary`; the simulated row uses `description` — accept either);
+     fall back to a comma-joined preview of the top topics; null when
+     we have neither. */
+  const firstDec = decisions[0] as
+    | { summary?: string; description?: string }
+    | undefined;
+  const firstDecText = (firstDec?.summary || firstDec?.description || "").trim();
+  const summary =
+    firstDecText ||
+    (topics.length > 0 ? topics.slice(0, 3).join(" · ") : null);
+
   return {
     id: row.id,
     message_id: row.message_id,
@@ -86,12 +108,13 @@ function rowToAnalysis(row: AnalysisRow): MeetingAnalysisRecord {
       typeof row.analyzed_at === "string"
         ? row.analyzed_at
         : new Date(row.analyzed_at).toISOString(),
-    decisions: parseJson<MeetingAnalysis["decisions"]>(row.decisions, []),
+    summary,
+    decisions,
     action_items: parseJson<MeetingAnalysis["action_items"]>(
       row.action_items,
       [],
     ),
-    topics: row.topics ?? [],
+    topics,
     attendees: parseJson<MeetingAnalysis["attendees"]>(row.attendees, []),
     blockers: parseJson<MeetingAnalysis["blockers"]>(row.blockers, []),
     next_steps: parseJson<MeetingAnalysis["next_steps"]>(row.next_steps, []),
@@ -149,14 +172,87 @@ export async function getAnalysisByVersion(args: {
  * analyses in a single round-trip. Returns a Map keyed on message_id;
  * messages with no analysis are simply absent from the map.
  *
+ * Returns the SIMPLER `TypesMeetingAnalysisRecord` shape from
+ * `./types.ts` — which is what Phase 4/5 callers (brief.ts,
+ * aggregator.ts) import. The repo's richer internal record carries
+ * operational fields (analyzer_version, raw_llm_response, etc.) that
+ * Phase 4/5 doesn't need; we project down to the public shape here.
+ *
  * Tolerant of the analyses table not yet existing (early-bootstrap
  * worktree before migration 084 ran) — Postgres 42P01 surfaces as an
  * empty Map, never an exception.
  */
+import type {
+  MeetingAnalysisRecord as TypesMeetingAnalysisRecord,
+  Decision as TypesDecision,
+  ActionItem as TypesActionItem,
+  Topic as TypesTopic,
+  Attendee as TypesAttendee,
+} from "./types";
+
+function toPublicShape(r: MeetingAnalysisRecord): TypesMeetingAnalysisRecord {
+  /* Map the richer analyzer output (analyzer/types.ts shapes) down to
+     the simpler PUBLIC types.ts shape Phase 4/5 callers consume.
+     Field-name mismatches handled here once so the rest of the
+     surface stays clean. */
+  const pick = <T,>(obj: unknown, keys: string[]): T | null => {
+    if (typeof obj !== "object" || obj === null) return null;
+    for (const k of keys) {
+      const v = (obj as Record<string, unknown>)[k];
+      if (v != null) return v as T;
+    }
+    return null;
+  };
+  const decisions: TypesDecision[] = (r.decisions ?? []).map((d) => ({
+    description:
+      typeof d === "string"
+        ? d
+        : (pick<string>(d, ["description", "summary"]) ?? ""),
+    decided_by: pick<string>(d, ["decided_by", "made_by", "owners"]),
+    source_message_id: r.message_id,
+  }));
+  const action_items: TypesActionItem[] = (r.action_items ?? []).map((a) => ({
+    description:
+      typeof a === "string"
+        ? a
+        : (pick<string>(a, ["description"]) ?? ""),
+    assignee: pick<string>(a, ["assignee", "owner"]),
+    due: pick<string>(a, ["due", "due_date"]),
+    source_message_id: r.message_id,
+  }));
+  const topics: TypesTopic[] = (r.topics ?? []).map((t) =>
+    typeof t === "string"
+      ? { topic: t, detail: null }
+      : { topic: pick<string>(t, ["topic"]) ?? "", detail: null },
+  );
+  const attendees: TypesAttendee[] = (r.attendees ?? []).map((a) => ({
+    email: pick<string>(a, ["email"]),
+    name: pick<string>(a, ["name"]),
+  }));
+  const blockers: string[] = (r.blockers ?? []).map((b) =>
+    typeof b === "string" ? b : (pick<string>(b, ["description"]) ?? ""),
+  );
+  const next_steps: string[] = (r.next_steps ?? []).map((n) =>
+    typeof n === "string" ? n : (pick<string>(n, ["description"]) ?? String(n)),
+  );
+  return {
+    id: r.id,
+    message_id: r.message_id,
+    summary: r.summary,
+    decisions,
+    action_items,
+    topics,
+    attendees,
+    blockers,
+    next_steps,
+    created_at: r.created_at,
+  };
+}
+
 export async function getAnalysesByMessageIds(
   message_ids: string[],
-): Promise<Map<string, MeetingAnalysisRecord>> {
-  const out = new Map<string, MeetingAnalysisRecord>();
+): Promise<Map<string, TypesMeetingAnalysisRecord>> {
+  const out = new Map<string, TypesMeetingAnalysisRecord>();
   if (message_ids.length === 0) return out;
   try {
     const r = await query<AnalysisRow>(
@@ -170,7 +266,7 @@ export async function getAnalysesByMessageIds(
       [message_ids],
     );
     for (const row of r.rows) {
-      out.set(row.message_id, rowToAnalysis(row));
+      out.set(row.message_id, toPublicShape(rowToAnalysis(row)));
     }
   } catch (err) {
     /* 42P01 = relation does not exist (migration not yet applied).
