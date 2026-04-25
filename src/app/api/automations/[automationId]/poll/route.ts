@@ -69,11 +69,10 @@ export async function POST(
   }
   const auth = await requireCapability(req, "automations.run");
   if (!auth.ok) return auth.response;
-  /* Use the user's email as the poll anchor — it survives renames /
-     re-creations of the Instinct user record. getValidToken now does
-     a (connected_by OR user_email) lookup so this resolves either
-     way. */
-  return runPoll(automationId, auth.user.email ?? auth.user.id, auth.user.role);
+  /* Pass the Instinct user.id — that's what ms_tokens.connected_by
+     stores. getValidToken's (connected_by OR user_email) dual lookup
+     also handles the email-anchored case for backwards compat. */
+  return runPoll(automationId, auth.user.id, auth.user.role);
 }
 
 /**
