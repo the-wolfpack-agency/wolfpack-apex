@@ -145,21 +145,47 @@ export default function MeetingsPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>Meetings</h1>
-          <p className="text-sm mt-1" style={{ color: "var(--wp-text-dim)" }}>
-            Recordings ingested from Plaud. Shared across the team.
-          </p>
+      <div>
+        <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>Meetings</h1>
+        {/* Tab strip — top-level switch between the two ingest sources.
+            Both feed the Wolfpack Assistant; same data store, different
+            inputs. */}
+        <nav
+          className="flex items-center gap-1 mt-3 border-b"
+          style={{ borderColor: "var(--wp-dark-border)" }}
+          data-testid="meetings-tab-strip"
+        >
+          <span
+            className="px-4 py-2 text-sm font-medium border-b-2"
+            style={{
+              color: "var(--wp-gold)",
+              borderColor: "var(--wp-gold)",
+              marginBottom: "-1px",
+            }}
+            aria-current="page"
+            data-testid="meetings-tab-plaud"
+          >
+            Plaud transcripts
+          </span>
           <a
             href="/meetings/feeds"
-            data-testid="meetings-feeds-link"
-            className="inline-block mt-2 text-sm font-medium"
-            style={{ color: "var(--wp-gold)" }}
+            className="px-4 py-2 text-sm font-medium border-b-2 hover:opacity-80"
+            style={{
+              color: "var(--wp-text-dim)",
+              borderColor: "transparent",
+              marginBottom: "-1px",
+            }}
+            data-testid="meetings-tab-feeds"
           >
-            Configure meeting-insights feeds →
+            Email feeds
           </a>
-        </div>
+        </nav>
+      </div>
+
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>
+          Recordings ingested from Plaud. Shared across the team.
+        </p>
         <button
           onClick={() => { setShowDraft((v) => !v); setDraftMsg(""); }}
           className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors"

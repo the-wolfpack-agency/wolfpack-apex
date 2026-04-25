@@ -117,6 +117,51 @@ export default function MeetingFeedsPage() {
 
   return (
     <div style={{ padding: "2rem", color: "var(--wp-text)" }}>
+      {/* Tab strip mirroring the parent /meetings page so users can flip
+          between the two ingest sources without going hunting. */}
+      <h1 style={{ fontSize: "1.8rem", margin: "0 0 0.75rem", color: "var(--wp-gold)" }}>
+        Meetings
+      </h1>
+      <nav
+        data-testid="meetings-tab-strip"
+        style={{
+          display: "flex",
+          gap: "0.25rem",
+          borderBottom: "1px solid var(--wp-dark-border, #2a2a2a)",
+          marginBottom: "1.5rem",
+        }}
+      >
+        <a
+          href="/meetings"
+          data-testid="meetings-tab-plaud"
+          style={{
+            padding: "0.5rem 1rem",
+            fontSize: "0.875rem",
+            fontWeight: 500,
+            color: "var(--wp-text-dim)",
+            borderBottom: "2px solid transparent",
+            marginBottom: "-1px",
+            textDecoration: "none",
+          }}
+        >
+          Plaud transcripts
+        </a>
+        <span
+          data-testid="meetings-tab-feeds"
+          aria-current="page"
+          style={{
+            padding: "0.5rem 1rem",
+            fontSize: "0.875rem",
+            fontWeight: 500,
+            color: "var(--wp-gold)",
+            borderBottom: "2px solid var(--wp-gold)",
+            marginBottom: "-1px",
+          }}
+        >
+          Email feeds
+        </span>
+      </nav>
+
       <div
         style={{
           marginBottom: "1.5rem",
@@ -128,7 +173,7 @@ export default function MeetingFeedsPage() {
         }}
       >
         <div>
-          <h1 style={{ fontSize: "1.8rem", margin: 0 }}>Meeting Insights</h1>
+          <h2 style={{ fontSize: "1.3rem", margin: 0 }}>Meeting Insights feeds</h2>
           <p style={{ color: "var(--wp-text-dim)", marginTop: "0.4rem" }}>
             Configure recurring email feeds to capture meeting threads
             into searchable rows. Each feed watches a set of senders or
