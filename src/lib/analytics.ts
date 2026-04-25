@@ -210,6 +210,17 @@ export type InstinctEventType =
   | "meeting.prebrief_section_expanded"
   | "meeting.prebrief_meeting_selected"
   | "meeting.upcoming_fetched"
+  // Meeting-Insights ingest (org-shared automation feeds — Stream B).
+  //   meeting_insights.attachment_downloaded   { feed_slug, message_id,
+  //                                              attachment_id, filename,
+  //                                              mime, size_bytes }
+  //     — fires when a user with `meetings.export` pulls the raw bytes.
+  //   meeting_insights.attachment_text_viewed  { feed_slug, message_id,
+  //                                              attachment_id,
+  //                                              extraction_status, mime }
+  //     — fires when the AttachmentBlock UI expands to read parsed text.
+  | "meeting_insights.attachment_downloaded"
+  | "meeting_insights.attachment_text_viewed"
   // MS 365 Insights panel — patterns computed from calendar + tasks + email.
   // `ms_insight.computed` fires server-side per request; `_viewed` /
   // `_cta_clicked` fire client-side so the learning loop can grade which
