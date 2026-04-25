@@ -1224,7 +1224,8 @@ export type InstinctEventType =
   | "automations.delta_computed"
   | "automations.override_applied"
   | "automations.exception_resolved"
-  | "automations.poll_run";
+  | "automations.poll_run"
+  | "automations.poll_skipped";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

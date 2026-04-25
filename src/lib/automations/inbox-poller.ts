@@ -224,11 +224,16 @@ export async function pollInbox(args: {
      tick proceeds normally. */
   const preToken = await getValidToken(args.userId);
   if (!preToken) {
-    trackEvent("automation.poll_skipped", {
-      automation_id: args.automationId,
-      reason: "no_user_connected",
-      user_id: args.userId,
-    }).catch(() => {});
+    try {
+      trackEvent(
+        "automations.poll_skipped",
+        args.userId,
+        args.userRole,
+        { automation_id: args.automationId, reason: "no_user_connected" },
+      );
+    } catch {
+      /* analytics is best-effort; never throw out of poll */
+    }
     return {
       automation_id: args.automationId,
       messages_seen: 0,
