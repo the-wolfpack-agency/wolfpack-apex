@@ -82,10 +82,31 @@ export default function MeetingsAnalyzePage() {
   const [since, setSince] = useState("");
   const [until, setUntil] = useState("");
   const [includeAttachments, setIncludeAttachments] = useState(false);
+  const [livePull, setLivePull] = useState(true);
+
+  interface LivePullMatch {
+    source_message_id: string;
+    subject: string;
+    from_address: string;
+    from_name: string | null;
+    received_at: string;
+    body_preview: string;
+    has_attachments: boolean;
+  }
+  type ResponseWithLive = AnalyzeResponse & {
+    live_pull?: {
+      enabled: boolean;
+      skipped: boolean;
+      skipped_reason?: string;
+      inbox_seen: number;
+      truncated: boolean;
+      matches: LivePullMatch[];
+    };
+  };
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<AnalyzeResponse | null>(null);
+  const [result, setResult] = useState<ResponseWithLive | null>(null);
 
   async function handleSubmit(ev: FormEvent) {
     ev.preventDefault();
@@ -104,6 +125,7 @@ export default function MeetingsAnalyzePage() {
           since: since || undefined,
           until: until || undefined,
           include_attachments: includeAttachments,
+          live_pull: livePull,
         }),
       });
       if (res.status === 401) {
@@ -225,6 +247,25 @@ export default function MeetingsAnalyzePage() {
             Include attachment text in the dataset (best-effort)
           </span>
         </label>
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 6, marginTop: 4 }}>
+          <input
+            data-testid="analyze-live-pull"
+            type="checkbox"
+            checked={livePull}
+            onChange={(e) => setLivePull(e.target.checked)}
+            style={{ marginTop: 4 }}
+          />
+          <span style={{ fontSize: "0.85rem", color: "var(--wp-text-dim)", lineHeight: 1.4 }}>
+            <strong style={{ color: "var(--wp-text)" }}>
+              Also scan my live Outlook inbox
+            </strong>
+            <br />
+            One-shot Microsoft Graph query against the same filters. Returns
+            matching emails sitting in your inbox right now (with subject /
+            from / date / preview) even if they haven't been ingested into a
+            feed yet. No LLM, no persistence — just visibility.
+          </span>
+        </label>
         {error && (
           <div
             data-testid="analyze-error"
@@ -286,6 +327,73 @@ export default function MeetingsAnalyzePage() {
               Save this as a recurring feed
             </button>
           </div>
+
+          {result.live_pull && (
+            <Section
+              title={
+                result.live_pull.skipped
+                  ? "Live inbox scan — skipped"
+                  : `Live inbox matches (${result.live_pull.matches.length}${result.live_pull.truncated ? "+" : ""})`
+              }
+              testid="analyze-live-pull-section"
+            >
+              {result.live_pull.skipped ? (
+                <p style={emptyStyle}>
+                  {result.live_pull.skipped_reason === "no_user_connected"
+                    ? "Connect Microsoft (top-right) and grant Mail.Read access, then re-run."
+                    : `Skipped: ${result.live_pull.skipped_reason ?? "unknown"}`}
+                </p>
+              ) : result.live_pull.matches.length === 0 ? (
+                <p style={emptyStyle}>
+                  Scanned {result.live_pull.inbox_seen} recent inbox messages,
+                  none matched the typed filters.
+                </p>
+              ) : (
+                <div style={{ display: "grid", gap: 8 }}>
+                  <p
+                    style={{
+                      ...emptyStyle,
+                      marginBottom: 4,
+                      fontStyle: "normal",
+                    }}
+                  >
+                    Live matches from your Outlook inbox (NOT yet ingested into
+                    a feed). Save this as a feed above to capture future
+                    messages and run analysis.
+                  </p>
+                  {result.live_pull.matches.map((m) => (
+                    <div
+                      key={m.source_message_id}
+                      style={{
+                        padding: "0.6rem 0.8rem",
+                        background: "var(--wp-card)",
+                        border: "1px solid var(--wp-border)",
+                        borderRadius: 6,
+                      }}
+                    >
+                      <div style={{ display: "flex", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
+                        <strong style={{ fontSize: "0.9rem" }}>{m.subject}</strong>
+                        <span style={{ fontSize: "0.75rem", color: "var(--wp-text-dim)" }}>
+                          {new Date(m.received_at).toLocaleString()}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: "0.78rem", color: "var(--wp-text-dim)", marginTop: 2 }}>
+                        From: {m.from_name ? `${m.from_name} <${m.from_address}>` : m.from_address}
+                        {m.has_attachments ? " · 📎" : ""}
+                      </div>
+                      {m.body_preview && (
+                        <p style={{ fontSize: "0.82rem", marginTop: 6, color: "var(--wp-text)", lineHeight: 1.45 }}>
+                          {m.body_preview.length > 280
+                            ? m.body_preview.slice(0, 280) + "…"
+                            : m.body_preview}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Section>
+          )}
 
           <Section title={`Top themes (${result.aggregated_themes.length})`} testid="analyze-themes">
             {result.aggregated_themes.length === 0 ? (

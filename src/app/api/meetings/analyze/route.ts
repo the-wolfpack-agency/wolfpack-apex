@@ -30,6 +30,10 @@ import {
   aggregateThemes,
 } from "@/lib/automations/meeting-insights/aggregator";
 import { validateAnalyzeRequest } from "@/lib/automations/meeting-insights/validation";
+import {
+  livePullInbox,
+  type LivePullMatch,
+} from "@/lib/automations/meeting-insights/live-pull";
 import type {
   AnalyzeMatchedMessage,
   AnalyzeResponse,
@@ -95,7 +99,63 @@ export async function POST(req: NextRequest) {
 
   const feedsTouched = new Set(messages.map((m) => m.feed_id)).size;
 
-  const response: AnalyzeResponse = {
+  /* Live-pull escape hatch: when ?live_pull=true (or body.live_pull),
+     also do a one-shot Microsoft Graph scan against the logged-in
+     user's inbox using the same typed filters. Returns matched email
+     metadata + bodyPreview WITHOUT persisting or analyzing — lets the
+     operator see what's there before deciding to ingest. */
+  type ResponseWithLive = AnalyzeResponse & {
+    live_pull?: {
+      enabled: boolean;
+      skipped: boolean;
+      skipped_reason?: string;
+      inbox_seen: number;
+      truncated: boolean;
+      matches: LivePullMatch[];
+    };
+  };
+
+  const wantsLivePull =
+    (body as { live_pull?: boolean } | null)?.live_pull === true;
+
+  let livePullPart: ResponseWithLive["live_pull"] | undefined;
+  if (wantsLivePull) {
+    /* Use auth.user.email when present (matches the dual-anchor token
+       lookup we normalised on); fall back to user.id. */
+    const lookupKey = auth.user.email ?? auth.user.id;
+    try {
+      const live = await livePullInbox({
+        userId: lookupKey,
+        filters: {
+          subject_match: filters.subject_match,
+          sender_match: filters.sender_match,
+          since: filters.since,
+          until: filters.until,
+          limit: 50,
+        },
+      });
+      livePullPart = {
+        enabled: true,
+        skipped: live.skipped,
+        skipped_reason: live.skipped_reason,
+        inbox_seen: live.inbox_seen,
+        truncated: live.truncated,
+        matches: live.matched,
+      };
+    } catch (err) {
+      /* Never block the ingested-data results on a Graph hiccup. */
+      livePullPart = {
+        enabled: true,
+        skipped: true,
+        skipped_reason: (err as Error).message,
+        inbox_seen: 0,
+        truncated: false,
+        matches: [],
+      };
+    }
+  }
+
+  const response: ResponseWithLive = {
     matched_messages,
     aggregated_themes,
     aggregated_action_items,
@@ -106,6 +166,7 @@ export async function POST(req: NextRequest) {
       feeds_touched: feedsTouched,
     },
     filters,
+    ...(livePullPart ? { live_pull: livePullPart } : {}),
   };
 
   trackEvent("meeting_insights.analyze_run", auth.user.id, auth.user.role, {
@@ -116,6 +177,8 @@ export async function POST(req: NextRequest) {
     sender_filter_count: filters.sender_match.length,
     since: filters.since ?? "",
     until: filters.until ?? "",
+    live_pull: wantsLivePull ? "true" : "false",
+    live_pull_matches: livePullPart?.matches.length ?? 0,
   });
 
   return NextResponse.json(response);
