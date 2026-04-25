@@ -46,9 +46,11 @@ export const CAPABILITIES = {
   "clients.view": "View clients list",
   "clients.edit": "Edit client records",
 
-  // Meetings (Plaud transcripts)
-  "meetings.view": "View meeting transcripts",
+  // Meetings (Plaud transcripts + meeting-insights feeds)
+  "meetings.view": "View meeting transcripts and meeting-insights feeds",
   "meetings.connect_plaud": "Connect org Plaud integration",
+  "meetings.manage": "Create/edit/delete meeting-insights feeds and trigger ingest",
+  "meetings.export": "Download meeting-insights attachment bytes",
 
   // Docs
   "docs.view": "View docs",

@@ -1225,7 +1225,31 @@ export type InstinctEventType =
   | "automations.override_applied"
   | "automations.exception_resolved"
   | "automations.poll_run"
-  | "automations.poll_skipped";
+  | "automations.poll_skipped"
+  // Meeting Insights — multi-feed recurring-meeting ingest (Stream A).
+  //
+  //   automations.feed_created      { automation_id, feed_id, feed_slug,
+  //                                    sender_match_count, subject_match_count }
+  //     — admin created a new feed; the sender/subject counts let
+  //       dashboards spot pathological catch-all feeds early.
+  //
+  //   automations.feed_updated      { automation_id, feed_id, feed_slug,
+  //                                    fields }   fields=comma-joined
+  //     — any patch to name / description / filters / is_enabled.
+  //
+  //   automations.feed_disabled     { automation_id, feed_id, feed_slug }
+  //     — soft-delete (is_enabled=false). History is preserved.
+  //
+  //   automations.feed_poll_triggered { automation_id, feed_id, feed_slug,
+  //                                     messages_seen, messages_matched,
+  //                                     artifacts_ingested, errors }
+  //     — operator hit the "Run now" button on a feed. The poll under
+  //       the hood is still automation-wide (one Graph cursor) but the
+  //       event records which feed asked.
+  | "automations.feed_created"
+  | "automations.feed_updated"
+  | "automations.feed_disabled"
+  | "automations.feed_poll_triggered";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

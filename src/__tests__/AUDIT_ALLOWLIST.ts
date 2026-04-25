@@ -431,6 +431,36 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "share-link issue/list/revoke — writes apex_share_tokens rows (created_by, revoked_at) serving as audit ledger + fires site.share_link_issued/_revoked analytics with user_id + token_nonce",
   },
 
+  // Meeting Insights (Stream A — multi-feed recurring-meeting ingest).
+  // Each mutation lands as a row whose dedicated columns serve as the
+  // audit ledger (created_by + created_at on feeds; received_at +
+  // source_message_id on messages; resolved_by + resolved_at on
+  // exceptions). Every mutation also fires an `automations.feed_*` /
+  // `automations.artifact_*` analytics event with actor + role. Same
+  // "row + event = audit trail" pattern as the porsche-classes block
+  // and the sites brief-edit block above.
+  {
+    route: "src/app/api/meetings/feeds/route.ts",
+    reason:
+      "createFeed inserts an instinct_meeting_feeds row with created_by + created_at and fires automations.feed_created — row + event ARE the audit trail",
+  },
+  {
+    route: "src/app/api/meetings/feeds/[slug]/route.ts",
+    reason:
+      "updateFeed/disableFeed write updated_at + is_enabled on instinct_meeting_feeds and fire automations.feed_updated/feed_disabled analytics with feed_id + slug",
+  },
+  {
+    route: "src/app/api/meetings/feeds/[slug]/poll/route.ts",
+    reason:
+      "pollInbox in src/lib/automations/inbox-poller.ts fires automations.poll_run + artifact_ingested/_quarantined; every artifact lands as an instinct_meeting_artifacts row that is itself the audit ledger",
+  },
+  {
+    route:
+      "src/app/api/meetings/feeds/[slug]/messages/[messageId]/attachments/[attachmentId]/download/route.ts",
+    reason:
+      "501 Stream B stub — capability-gated read of attachment bytes; once Stream B replaces the body the audit will live in src/lib/automations/meeting-insights/parser-attachments via meeting.attachment_downloaded",
+  },
+
   // Automations (Stream A — porsche-classes ingest + dashboard).
   // Every state change writes to a dedicated automation table that IS
   // the audit ledger — instinct_automation_porsche_artifacts (raw

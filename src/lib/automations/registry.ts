@@ -22,8 +22,9 @@ import type {
   AutomationId,
 } from "@/lib/automations/types";
 import { porscheClasses } from "./porsche-classes";
+import { meetingInsights } from "./meeting-insights";
 
-const REGISTRY: ReadonlyArray<AutomationDefinition> = [porscheClasses];
+const REGISTRY: ReadonlyArray<AutomationDefinition> = [porscheClasses, meetingInsights];
 
 const REGISTRY_INDEX: ReadonlyMap<AutomationId, AutomationDefinition> = new Map(
   REGISTRY.map((a) => [a.id, a]),

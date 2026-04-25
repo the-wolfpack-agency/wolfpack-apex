@@ -53,7 +53,7 @@ const HR: readonly Capability[] = [
   "hr.onboarding.manage",
   "hr.insights.view",
   // Cross-team reads
-  "meetings.view",
+  "meetings.view",           // HR reads meeting-insights feeds (read-only — no manage / export)
   "clients.view",            // HR sometimes references clients in onboarding
   "docs.view",
   "docs.edit",
@@ -150,6 +150,11 @@ const OPS: readonly Capability[] = [
   "automations.run",
   "automations.override",
   "automations.resolve_exceptions",
+  // Meeting-insights — Ops creates and manages org-shared feeds (the
+  // recurring-meeting threads the team wants captured). View + manage
+  // grants cover feed CRUD and ad-hoc poll. Export remains gated to
+  // CEO/CTO so finance/legal-relevant attachment bytes don't fan out.
+  "meetings.manage",
 ];
 
 /** Dev: full dev surface + sites. No HR sensitive, no finance. */
@@ -175,7 +180,7 @@ const DEV: readonly Capability[] = [
   "sites.view",
   "sites.deploy",           // dev-only by default
   "sites.edit",
-  "meetings.view",
+  "meetings.view",          // dev gets read-only meetings (debugging routing/parsers)
   "settings.view_own",
   "briefing.view",
   "dashboard.view",

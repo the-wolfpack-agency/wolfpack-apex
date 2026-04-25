@@ -199,6 +199,9 @@ export async function assemblePorscheClassSummary(
     cognito_coordinator: 0,
     cognito_instructor: 0,
     survey: 0,
+    // meeting-insights `email` source is unused by porsche-classes; the
+    // record-shape constraint requires every member of the union here.
+    email: 0,
   };
   for (const row of snapshots) sources[row.source_type] += 1;
 
