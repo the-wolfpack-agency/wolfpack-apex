@@ -26,6 +26,7 @@ import { trackEvent } from "@/lib/analytics";
 import type {
   AutomationDefinition,
   AutomationSourceType,
+  CourseType,
   ExceptionKind,
   ParseInput,
   SnapshotInput,
@@ -36,6 +37,12 @@ import {
   participantHash,
 } from "./normalize";
 import { computeDelta } from "./delta";
+import {
+  decodeSurveyRows,
+  parseMultiClassFilename,
+  splitMixedSurvey,
+  type CandidateClass,
+} from "./parser-survey";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -160,6 +167,96 @@ export async function ingestArtifact(
   }
 
   if (!result.ok) {
+    // Multi-class survey fallback: when the survey parser refuses
+    // because the filename names two courses (e.g. "101 Intercontinental
+    // & 102 Conrad"), try to auto-split using the daily roster instead
+    // of quarantining. This is the auto-splitter path — see
+    // splitMixedSurvey for the join semantics. If we can't find
+    // candidate classes, we fall through to the original quarantine
+    // behavior so the artifact still surfaces in the exception queue.
+    if (
+      req.source_type === "survey" &&
+      result.exception_kind === "parse_failure" &&
+      /multiple courses/i.test(result.error)
+    ) {
+      const splitSnapshots = await tryAutoSplitSurvey({
+        bytes: req.bytes,
+        hint: req.hint,
+        receivedAt: req.received_at,
+        sourceMessageId: req.source_message_id,
+        sourceArtifactId: artifactId,
+      });
+      if (splitSnapshots && splitSnapshots.length > 0) {
+        // Persist the split snapshots through the normal pipeline so
+        // deltas + analytics fire just like the single-class path.
+        let snapshotsWritten = 0;
+        let deltasWritten = 0;
+        for (const snap of splitSnapshots) {
+          const written = await persistSnapshot(automationId, snap);
+          if (written.created) snapshotsWritten += 1;
+          if (written.delta_id) {
+            deltasWritten += 1;
+            trackEvent(
+              "automations.delta_computed",
+              req.user_id,
+              req.user_role,
+              {
+                automation_id: automationId,
+                class_key: written.class_key,
+                added: written.added,
+                dropped: written.dropped,
+                is_baseline: written.is_baseline,
+              },
+            );
+          }
+        }
+        await writeQuery(
+          `UPDATE instinct_automation_porsche_artifacts
+              SET parse_status = 'processed'
+            WHERE id = $1
+            RETURNING id`,
+          [artifactId],
+          { expectRows: 1 },
+        );
+        trackEvent(
+          "automations.artifact_ingested",
+          req.user_id,
+          req.user_role,
+          {
+            automation_id: automationId,
+            source_type: req.source_type,
+            source_message_id: req.source_message_id ?? "",
+            classes: snapshotsWritten,
+            // Distinguishes auto-split events from straight-through
+            // ingests in analytics — useful both for measuring how
+            // often the splitter is invoked and for the dashboard's
+            // "needs attention" surface.
+            auto_split: true,
+          },
+        );
+        return {
+          artifact_id: artifactId,
+          was_duplicate: false,
+          parse_status: "processed",
+          snapshots_written: snapshotsWritten,
+          deltas_written: deltasWritten,
+        };
+      }
+      // Fallthrough: no candidates found — quarantine with a more
+      // helpful error so the operator knows the auto-split path was
+      // attempted but the daily roster wasn't available.
+      return await quarantine({
+        artifactId,
+        automationId,
+        source_message_id: req.source_message_id,
+        reason: `${result.error} (auto-split attempted: no roster snapshots found for the courses + dates in the filename)`,
+        exceptionKind: result.exception_kind,
+        user_id: req.user_id,
+        user_role: req.user_role,
+        finalStatus: "error_quarantined",
+      });
+    }
+
     return await quarantine({
       artifactId,
       automationId,
@@ -350,6 +447,117 @@ async function persistSnapshot(
     dropped: delta.dropped.length,
     is_baseline: delta.is_baseline,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Multi-class survey auto-split helper                                */
+/* ------------------------------------------------------------------ */
+
+interface AutoSplitArgs {
+  bytes: Buffer;
+  hint: string;
+  receivedAt: string;
+  sourceMessageId: string | null;
+  sourceArtifactId: string;
+}
+
+/**
+ * Attempt to auto-split a survey export that mixes responses from
+ * multiple classes. Returns null when:
+ *   - filename can't be parsed for course tokens / date range
+ *   - survey bytes can't be decoded
+ *   - no roster snapshots match the inferred courses + date window
+ *
+ * On success, returns the SnapshotInputs from `splitMixedSurvey` ready
+ * for `persistSnapshot`. Date tolerance is ±3 days vs. the start/end
+ * range parsed from the filename — covers off-by-one weekend dates and
+ * misaligned date pickers without pulling in unrelated classes.
+ */
+async function tryAutoSplitSurvey(
+  args: AutoSplitArgs,
+): Promise<ReturnType<typeof splitMixedSurvey> | null> {
+  const fallbackYear =
+    Number(args.receivedAt.slice(0, 4)) || new Date().getFullYear();
+  const filenameParts = parseMultiClassFilename(args.hint, fallbackYear);
+  if (!filenameParts) return null;
+
+  // Decode rows BEFORE the DB query — if the bytes are malformed we
+  // shouldn't waste a query on candidates we'll never use.
+  const decoded = decodeSurveyRows(args.bytes);
+  if ("error" in decoded) return null;
+
+  // Fetch candidate roster snapshots: matching course types, date
+  // within ±3 days of the filename's date range. We pull the LATEST
+  // snapshot per class_key so a re-uploaded daily report doesn't
+  // create phantom candidates.
+  const TOLERANCE_DAYS = 3;
+  const startDate = shiftIsoDate(filenameParts.date_start, -TOLERANCE_DAYS);
+  const endDate = shiftIsoDate(filenameParts.date_end, TOLERANCE_DAYS);
+
+  const candidatesRes = await query<{
+    class_key: string;
+    course_type: CourseType;
+    class_date: string;
+    location: string;
+    source_payload: { participants_with_ppn?: Array<{ ppn_id: string | null }> } | null;
+  }>(
+    `SELECT DISTINCT ON (class_key)
+            class_key, course_type, class_date::text AS class_date,
+            location, source_payload
+       FROM instinct_automation_porsche_snapshots
+      WHERE source_type = 'porsche_xlsx'
+        AND course_type = ANY($1::text[])
+        AND class_date >= $2::date
+        AND class_date <= $3::date
+      ORDER BY class_key, captured_at DESC, created_at DESC`,
+    [filenameParts.course_types, startDate, endDate],
+  );
+
+  if (candidatesRes.rows.length === 0) return null;
+
+  const candidateClasses: CandidateClass[] = candidatesRes.rows.map((r) => {
+    const ppns = new Set<string>();
+    const list = r.source_payload?.participants_with_ppn ?? [];
+    for (const p of list) {
+      if (p.ppn_id) ppns.add(p.ppn_id.toLowerCase());
+    }
+    return {
+      course_type: r.course_type,
+      class_date: r.class_date,
+      location: r.location,
+      roster_ppns: ppns,
+    };
+  });
+
+  // If NO candidate has any PPN IDs at all, the auto-split would be a
+  // no-op — fall through to quarantine with a distinct error so we
+  // know to backfill the rosters with PPN IDs before retrying.
+  const totalPpnsAcross = candidateClasses.reduce(
+    (n, c) => n + c.roster_ppns.size,
+    0,
+  );
+  if (totalPpnsAcross === 0) return null;
+
+  return splitMixedSurvey({
+    rows: decoded.rows,
+    filename: args.hint,
+    receivedAt: args.receivedAt,
+    sourceMessageId: args.sourceMessageId,
+    sourceArtifactId: args.sourceArtifactId,
+    candidateClasses,
+  });
+}
+
+/** Shift an ISO date `YYYY-MM-DD` by N days. Pure UTC arithmetic — no
+ *  local-tz drift.  */
+function shiftIsoDate(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const t = Date.UTC(y, m - 1, d) + days * 86400000;
+  const out = new Date(t);
+  const yy = out.getUTCFullYear();
+  const mm = String(out.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(out.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
 }
 
 /* ------------------------------------------------------------------ */

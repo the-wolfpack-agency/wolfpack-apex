@@ -33,6 +33,7 @@ import type {
   ParseResult,
   Parser,
   CourseType,
+  SnapshotInput,
   SurveyAggregate,
 } from "../types";
 import {
@@ -183,7 +184,7 @@ export function parseClassIdentityFromFilename(
 /* Parse helpers                                                       */
 /* ------------------------------------------------------------------ */
 
-interface RawRow {
+export interface RawRow {
   "Assessment Name"?: string | null;
   "First Name"?: string | null;
   "Last Name"?: string | null;
@@ -276,41 +277,281 @@ function aggregate(rows: RawRow[]): SurveyAggregate {
 }
 
 /* ------------------------------------------------------------------ */
+/* Raw byte decoder — reusable by the orchestrator's split path        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Decode survey bytes to typed `RawRow[]`. Exposed so the ingest
+ * orchestrator can call `splitMixedSurvey` against the same row shape
+ * the parser uses without re-implementing the xlsx read logic.
+ *
+ * Returns `{ error }` on the same failure modes `parseSurvey` surfaces:
+ * unreadable workbook, no sheets, empty sheet, missing required
+ * columns. The orchestrator falls through to its existing quarantine
+ * behavior in those cases.
+ */
+export function decodeSurveyRows(
+  bytes: Buffer,
+): { rows: RawRow[] } | { error: string } {
+  let workbook: XLSX.WorkBook;
+  try {
+    workbook = XLSX.read(bytes, { type: "buffer" });
+  } catch (err) {
+    return { error: `Could not read survey workbook: ${(err as Error).message}` };
+  }
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return { error: "Survey workbook has no sheets" };
+  const rows = XLSX.utils.sheet_to_json<RawRow>(workbook.Sheets[sheetName], {
+    defval: null,
+  });
+  if (rows.length === 0) return { error: "Survey workbook is empty" };
+  const sample = rows[0] as Record<string, unknown>;
+  if (!("Prompt" in sample) || !("Question Type" in sample) || !("Response" in sample)) {
+    return {
+      error: `Survey workbook missing required columns. Got: ${Object.keys(sample).join(", ")}`,
+    };
+  }
+  return { rows };
+}
+
+/* ------------------------------------------------------------------ */
+/* Mixed-class filename parsing — for orchestrator candidate lookup    */
+/* ------------------------------------------------------------------ */
+
+/** Extract the (likely) course tokens + a date window from a multi-class
+ *  survey filename. Returns null if the filename has no recognizable
+ *  date range; otherwise returns the union of courses found and an
+ *  inclusive `[start, end]` ISO-date pair (the splitter caller then
+ *  widens this by ±tolerance days when querying candidate classes).
+ *
+ *  This is intentionally permissive — it's the input to a candidate
+ *  lookup, not a hard rejection gate. Returning multiple courses is
+ *  the EXPECTED case (this helper exists for the multi-course branch).
+ */
+export function parseMultiClassFilename(
+  filename: string,
+  fallbackYear: number,
+): {
+  course_types: CourseType[];
+  date_start: string;
+  date_end: string;
+} | null {
+  const stem = filename.replace(/\.[^./\\]+$/, "");
+  const courseHits = stem.match(COURSE_RE) ?? [];
+  const distinctCourses = Array.from(new Set(courseHits));
+  if (distinctCourses.length === 0) return null;
+
+  const courseTypes: CourseType[] = distinctCourses.map((c) =>
+    c === "101" ? "BA101" : "BA102",
+  );
+
+  // Match "Month DD-DD[th][, YYYY]" — same shape as the single-class path.
+  const dateRange = stem.match(
+    new RegExp(
+      `${ANY_MONTH}\\s+(\\d{1,2})\\s*[-–]\\s*(\\d{1,2})(?:st|nd|rd|th)?(?:,\\s*(\\d{4}))?`,
+      "i",
+    ),
+  );
+  if (!dateRange) return null;
+  const month = MONTH_NUM[dateRange[1].toLowerCase()];
+  if (!month) return null;
+  const dayStart = dateRange[2].padStart(2, "0");
+  const dayEnd = dateRange[3].padStart(2, "0");
+  const year = dateRange[4] ?? String(fallbackYear);
+  return {
+    course_types: courseTypes,
+    date_start: `${year}-${month}-${dayStart}`,
+    date_end: `${year}-${month}-${dayEnd}`,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Mixed-class auto-splitter                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One candidate class the splitter is allowed to route respondents to.
+ * `roster_ppns` is the set of PPN IDs the daily report says belong to
+ * this class — that's the join key. Lowercased; the splitter
+ * lowercases on its side too so callers can pass either case.
+ */
+export interface CandidateClass {
+  course_type: CourseType;
+  /** ISO date `YYYY-MM-DD`. */
+  class_date: string;
+  /** Already-normalized location (`normalizeLocation` output). */
+  location: string;
+  /** Set of PPN IDs that appear on this class's roster. */
+  roster_ppns: Set<string>;
+}
+
+export interface SplitMixedSurveyArgs {
+  rows: RawRow[];
+  filename: string;
+  receivedAt: string;
+  sourceMessageId: string | null;
+  sourceArtifactId: string;
+  candidateClasses: CandidateClass[];
+}
+
+/**
+ * Auto-split a mixed-class survey export.
+ *
+ * Today, when a single survey xlsx contains responses from multiple
+ * classes (e.g. "Survey Data PCBA_April 6-10_101 Intercontinental &
+ * 102 Conrad.xlsx"), the regular `parseSurvey` refuses with a
+ * `parse_failure: multiple courses` because the file alone doesn't
+ * say which respondent went to which class. Alicia handles this
+ * manually today by cross-referencing the daily roster.
+ *
+ * `splitMixedSurvey` does that programmatically. The orchestrator
+ * passes in the candidate classes (from `instinct_automation_porsche_snapshots`
+ * `source_type='porsche_xlsx'` snapshots that match the courses + dates
+ * in the filename, ±a few days), each with the PPN IDs from its
+ * roster. We bucket each respondent by which roster their PPN ID
+ * matches, then aggregate per-class and emit one snapshot per matched
+ * class.
+ *
+ * Respondents whose PPN ID matches NO candidate roster (e.g. a
+ * walk-in that wasn't in the daily report) are recorded under
+ * `source_payload.unmatched_respondents` on the FIRST emitted
+ * snapshot so they're never silently dropped.
+ *
+ * Returns `[]` when there are zero usable respondents OR zero
+ * candidate classes — caller should fall through to quarantine in
+ * that case so the artifact still surfaces in the exception queue.
+ */
+export function splitMixedSurvey(args: SplitMixedSurveyArgs): SnapshotInput[] {
+  if (args.candidateClasses.length === 0) return [];
+  if (args.rows.length === 0) return [];
+
+  // Index candidates by their lowercased PPN IDs for O(1) lookup.
+  // We DON'T require unique PPN-to-class mapping: if a PPN somehow
+  // appears on two rosters (it shouldn't, but defensively) the first
+  // candidate wins — deterministic on candidate input order.
+  const ppnToClassIdx = new Map<string, number>();
+  for (let i = 0; i < args.candidateClasses.length; i++) {
+    for (const p of args.candidateClasses[i].roster_ppns) {
+      const k = p.toLowerCase().trim();
+      if (!k) continue;
+      if (!ppnToClassIdx.has(k)) ppnToClassIdx.set(k, i);
+    }
+  }
+
+  // Bucket survey rows by candidate-class index. Rows with PPN IDs
+  // that match NO candidate go to the `unmatched` bucket so they
+  // surface as a warning rather than a silent drop.
+  const buckets: RawRow[][] = args.candidateClasses.map(() => []);
+  const unmatchedRespondents = new Map<
+    string,
+    { first: string; last: string; ppn_id: string | null }
+  >();
+
+  for (const row of args.rows) {
+    const ppnRaw = (row["PPN ID"] ?? "").toString().trim().toLowerCase();
+    if (!ppnRaw) {
+      // No PPN ID at all — track as unmatched so reviewers see the gap.
+      const respKey = `${row["First Name"] ?? ""}|${row["Last Name"] ?? ""}|`;
+      if (!unmatchedRespondents.has(respKey)) {
+        unmatchedRespondents.set(respKey, {
+          first: (row["First Name"] ?? "").toString(),
+          last: (row["Last Name"] ?? "").toString(),
+          ppn_id: null,
+        });
+      }
+      continue;
+    }
+    const idx = ppnToClassIdx.get(ppnRaw);
+    if (idx === undefined) {
+      const respKey = `${row["First Name"] ?? ""}|${row["Last Name"] ?? ""}|${ppnRaw}`;
+      if (!unmatchedRespondents.has(respKey)) {
+        unmatchedRespondents.set(respKey, {
+          first: (row["First Name"] ?? "").toString(),
+          last: (row["Last Name"] ?? "").toString(),
+          ppn_id: ppnRaw,
+        });
+      }
+      continue;
+    }
+    buckets[idx].push(row);
+  }
+
+  // Build one snapshot per candidate class that actually got rows.
+  // Empty buckets are skipped — emitting a 0-respondent snapshot for a
+  // class that had no survey responses would create a misleading "0
+  // average" rollup downstream. The class will simply have no survey
+  // snapshot for this artifact, which is the correct semantics.
+  const snapshots: SnapshotInput[] = [];
+  const unmatchedList = Array.from(unmatchedRespondents.values());
+  let unmatchedAttached = false;
+
+  for (let i = 0; i < args.candidateClasses.length; i++) {
+    const bucket = buckets[i];
+    if (bucket.length === 0) continue;
+    const cand = args.candidateClasses[i];
+    const aggregate_value = aggregate(bucket);
+    if (aggregate_value.response_count === 0) continue;
+
+    const payload: Record<string, unknown> = {
+      survey: aggregate_value,
+      fixture_filename: args.filename,
+      // Mark the snapshot as the product of an auto-split — useful
+      // for the dashboard's "needs review" filter and for analytics
+      // (we want to see how often the splitter is invoked vs. the
+      // single-class happy path).
+      auto_split_from_mixed_survey: true,
+      auto_split_total_candidates: args.candidateClasses.length,
+    };
+    if (!unmatchedAttached && unmatchedList.length > 0) {
+      // Attach the unmatched roster ONCE — the first snapshot we emit
+      // — so downstream UI/analytics can surface it without having to
+      // dedupe across snapshots.
+      payload.unmatched_respondents = unmatchedList;
+      unmatchedAttached = true;
+    }
+
+    snapshots.push({
+      source_type: SOURCE_TYPE,
+      source_message_id: args.sourceMessageId,
+      source_artifact_id: args.sourceArtifactId,
+      captured_at: args.receivedAt,
+      class: {
+        course_type: cand.course_type,
+        class_date: cand.class_date,
+        location: cand.location,
+        participants: collectRespondents(bucket),
+      },
+      source_payload: payload,
+    });
+  }
+
+  return snapshots;
+}
+
+/* ------------------------------------------------------------------ */
 /* Public entry point                                                  */
 /* ------------------------------------------------------------------ */
 
 export const parseSurvey: Parser = async (
   input: ParseInput,
 ): Promise<ParseResult> => {
-  /* 1. Decode the xlsx. */
-  let workbook: XLSX.WorkBook;
-  try {
-    workbook = XLSX.read(input.bytes, { type: "buffer" });
-  } catch (err) {
-    return fail(`Could not read survey workbook: ${(err as Error).message}`, {
-      hint: input.hint,
-    });
+  /* 1+2. Decode bytes + header sanity in one helper, so the
+     orchestrator's split-path can reuse the exact same decode logic. */
+  const decoded = decodeSurveyRows(input.bytes);
+  if ("error" in decoded) {
+    // Header-mismatch is a different exception_kind than a workbook
+    // read failure — preserve that distinction for the exception queue.
+    if (decoded.error.startsWith("Survey workbook missing required columns")) {
+      return missingHeader(
+        decoded.error.replace(
+          "Got:",
+          "Expected Prompt / Question Type / Response, got:",
+        ),
+      );
+    }
+    return fail(decoded.error, { hint: input.hint });
   }
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) {
-    return fail("Survey workbook has no sheets", { hint: input.hint });
-  }
-  const rows = XLSX.utils.sheet_to_json<RawRow>(workbook.Sheets[sheetName], {
-    defval: null,
-  });
-  if (rows.length === 0) {
-    return fail("Survey workbook is empty", { hint: input.hint });
-  }
-
-  /* 2. Header sanity. The export is long-format; the FIRST row already
-     has the typed object keys via sheet_to_json. We probe a couple of
-     fields to confirm we're looking at the right export shape. */
-  const sample = rows[0] as Record<string, unknown>;
-  if (!("Prompt" in sample) || !("Question Type" in sample) || !("Response" in sample)) {
-    return missingHeader(
-      `Survey workbook missing required columns. Expected Prompt / Question Type / Response, got: ${Object.keys(sample).join(", ")}`,
-    );
-  }
+  const rows = decoded.rows;
 
   /* 3. Class identity from filename. Multi-class files refuse here. */
   const fallbackYear = Number(input.received_at.slice(0, 4)) || new Date().getFullYear();

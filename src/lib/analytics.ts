@@ -1307,7 +1307,26 @@ export type InstinctEventType =
   | "automations.message_analyzed"
   | "automations.message_reanalyze_requested"
   | "automations.themes_viewed"
-  | "automations.themes_searched";
+  | "automations.themes_searched"
+  // Porsche-classes summary export — Alicia's manual workflow today is
+  // "download summary → drop into PCNA SharePoint folder". The
+  // /summaries/[classKey]/upload-sharepoint route automates the drop and
+  // emits one event per attempt so we can prove the automation
+  // (a) ran for the right class, and (b) when it gracefully degraded
+  // (skipped_reason captures why — not_configured / no_token /
+  // graph_error). Success path includes destination web_url.
+  //
+  //   automations.sharepoint_upload_attempted { automation_id, class_key,
+  //                                              filename, byte_count }
+  //   automations.sharepoint_upload_succeeded { automation_id, class_key,
+  //                                              filename, byte_count,
+  //                                              web_url }
+  //   automations.sharepoint_upload_skipped   { automation_id, class_key,
+  //                                              filename, skipped_reason,
+  //                                              status? }
+  | "automations.sharepoint_upload_attempted"
+  | "automations.sharepoint_upload_succeeded"
+  | "automations.sharepoint_upload_skipped";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

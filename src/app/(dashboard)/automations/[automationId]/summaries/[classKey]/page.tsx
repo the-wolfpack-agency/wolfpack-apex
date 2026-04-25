@@ -217,6 +217,61 @@ export default function PorscheClassSummaryPage({
     URL.revokeObjectURL(url);
   }
 
+  function handleDownloadDocx() {
+    if (!summary) return;
+    /* The export-docx route streams the file. Use a plain link click so
+       the browser's auth cookies + Authorization header (via Next.js
+       middleware) ride along; reading the bytes via fetch+blob would
+       require redoing the JWT bearer dance for nothing. */
+    const a = document.createElement("a");
+    a.href = `/api/automations/${encodeURIComponent(
+      automationId,
+    )}/summaries/${encodeURIComponent(rawClassKey)}/export-docx`;
+    a.click();
+  }
+
+  const [uploadState, setUploadState] = useState<
+    | { kind: "idle" }
+    | { kind: "uploading" }
+    | { kind: "ok"; web_url: string }
+    | { kind: "skipped"; reason: string }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
+
+  async function handleUploadToSharePoint() {
+    if (!summary) return;
+    setUploadState({ kind: "uploading" });
+    try {
+      const res = await fetchWithRefresh(
+        `/api/automations/${encodeURIComponent(
+          automationId,
+        )}/summaries/${encodeURIComponent(rawClassKey)}/upload-sharepoint`,
+        { method: "POST" },
+      );
+      const body = (await res.json()) as {
+        ok?: boolean;
+        web_url?: string;
+        skipped_reason?: string;
+        error?: string;
+      };
+      if (res.status === 200 && body.ok && body.web_url) {
+        setUploadState({ kind: "ok", web_url: body.web_url });
+      } else if (res.status === 202 && body.skipped_reason) {
+        setUploadState({ kind: "skipped", reason: body.skipped_reason });
+      } else {
+        setUploadState({
+          kind: "error",
+          message: body.error ?? `HTTP ${res.status}`,
+        });
+      }
+    } catch (err) {
+      setUploadState({
+        kind: "error",
+        message: (err as Error).message,
+      });
+    }
+  }
+
   if (loading) {
     return (
       <main data-testid="summary-loading" style={{ padding: 24 }}>
@@ -330,7 +385,97 @@ export default function PorscheClassSummaryPage({
           >
             Download JSON
           </button>
+          <button
+            type="button"
+            onClick={handleDownloadDocx}
+            data-testid="download-docx"
+            style={{
+              background: "transparent",
+              color: "var(--wp-text)",
+              border: "1px solid var(--wp-border)",
+              padding: "0.55rem 1rem",
+              borderRadius: 6,
+              cursor: "pointer",
+            }}
+          >
+            Download Word
+          </button>
+          <button
+            type="button"
+            onClick={handleUploadToSharePoint}
+            data-testid="upload-sharepoint"
+            disabled={uploadState.kind === "uploading"}
+            style={{
+              background:
+                uploadState.kind === "ok"
+                  ? "rgba(80,175,110,0.18)"
+                  : "transparent",
+              color: "var(--wp-text)",
+              border: "1px solid var(--wp-border)",
+              padding: "0.55rem 1rem",
+              borderRadius: 6,
+              cursor:
+                uploadState.kind === "uploading" ? "not-allowed" : "pointer",
+            }}
+          >
+            {uploadState.kind === "uploading"
+              ? "Uploading…"
+              : uploadState.kind === "ok"
+                ? "✓ Uploaded"
+                : "Upload to SharePoint"}
+          </button>
         </div>
+        {uploadState.kind === "ok" && (
+          <p
+            data-testid="sharepoint-upload-success"
+            style={{ marginTop: "0.5rem", fontSize: "0.85rem" }}
+          >
+            Saved to{" "}
+            <a
+              href={uploadState.web_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "var(--wp-gold)" }}
+            >
+              SharePoint
+            </a>
+            .
+          </p>
+        )}
+        {uploadState.kind === "skipped" && (
+          <p
+            data-testid="sharepoint-upload-skipped"
+            style={{
+              marginTop: "0.5rem",
+              fontSize: "0.85rem",
+              color: "var(--wp-text-dim)",
+            }}
+          >
+            SharePoint upload skipped — {uploadState.reason.replace(/_/g, " ")}.
+            {uploadState.reason === "not_configured" && (
+              <>
+                {" "}
+                Set <code>INSTINCT_SHAREPOINT_SITE_ID</code>,{" "}
+                <code>INSTINCT_SHAREPOINT_DRIVE_ID</code>, and{" "}
+                <code>INSTINCT_SHAREPOINT_CLASS_SUMMARIES_PATH</code> in Vercel
+                env to enable.
+              </>
+            )}
+          </p>
+        )}
+        {uploadState.kind === "error" && (
+          <p
+            data-testid="sharepoint-upload-error"
+            role="alert"
+            style={{
+              marginTop: "0.5rem",
+              fontSize: "0.85rem",
+              color: "var(--wp-error, #e87b7b)",
+            }}
+          >
+            Upload failed: {uploadState.message}
+          </p>
+        )}
       </header>
 
       <section data-testid="attendance-section" style={{ marginBottom: "1.8rem" }}>

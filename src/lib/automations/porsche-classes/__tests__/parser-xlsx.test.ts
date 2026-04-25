@@ -93,6 +93,41 @@ describe("parseXlsx — real fixture", () => {
       expect(s.source_type).toBe("porsche_xlsx");
     }
   });
+
+  it("snapshots include participants_with_ppn in source_payload (auto-split join key)", async () => {
+    const bytes = fs.readFileSync(FIXTURE);
+    const result = await parseXlsx(makeInput(bytes));
+    if (!result.ok) throw new Error(`parse failed: ${result.error}`);
+    const target = result.snapshots.find(
+      (s) =>
+        s.class.course_type === "BA101" &&
+        s.class.class_date === "2026-04-13" &&
+        s.class.location === "Hilton Hotel",
+    );
+    expect(target).toBeDefined();
+    const payload = target!.source_payload as {
+      participants_with_ppn: Array<{
+        first: string;
+        last: string;
+        ppn_id: string | null;
+      }>;
+    };
+    expect(payload.participants_with_ppn).toBeDefined();
+    expect(payload.participants_with_ppn.length).toBe(31);
+    // Each entry has a first + last; PPN can be null (rare) but the
+    // overwhelming majority should be set on the real fixture.
+    const withPpn = payload.participants_with_ppn.filter((p) => !!p.ppn_id);
+    expect(withPpn.length).toBeGreaterThan(25);
+    // PPN IDs are lowercased on the way in.
+    for (const p of withPpn) {
+      expect(p.ppn_id).toBe(p.ppn_id!.toLowerCase());
+    }
+    // Parallel cardinality with the canonicalized participants list
+    // (post-dedupe). The two lists shouldn't drift in size on a
+    // well-formed roster: every roster row should produce one entry
+    // in both.
+    expect(payload.participants_with_ppn.length).toBe(target!.class.participants.length);
+  });
 });
 
 describe("parseXlsx — failure modes", () => {

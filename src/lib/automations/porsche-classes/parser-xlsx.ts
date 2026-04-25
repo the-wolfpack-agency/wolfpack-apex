@@ -41,6 +41,15 @@ const COL = {
   LAST_NAME: 4,
   FIRST_NAME: 5,
   EMAIL: 7,
+  // PPN ID — Cornerstone calls this "User Properties-User ID". This is
+  // the same identifier that appears as "PPN ID" in the survey export,
+  // and we use it as the join key when auto-splitting a survey export
+  // that mixes responses from multiple classes (see parser-survey
+  // `splitMixedSurvey`). Names alone aren't safe as a join key —
+  // diacritics, spelling, and "Bob/Robert" variants all break a name
+  // match — so we capture the PPN ID alongside the name in the snapshot
+  // payload without changing the existing `participants: string[]` shape.
+  USER_ID: 8,
   TRAINING_CENTER: 18, // primary location; fallback to FACILITIES (19)
   FACILITIES: 19,
   START_DATE: 21, // "Apr 13, 2026 6:00 PM"
@@ -50,6 +59,7 @@ const EXPECTED_HEADERS: Record<number, string> = {
   [COL.MODULE_TITLE]: "Module Properties-Module Title",
   [COL.LAST_NAME]: "User Properties-Last Name",
   [COL.FIRST_NAME]: "User Properties-First Name",
+  [COL.USER_ID]: "User Properties-User ID",
   [COL.TRAINING_CENTER]: "Training Center-Training Center Name",
   [COL.START_DATE]: "Session Properties-Start Date",
 };
@@ -184,11 +194,24 @@ export async function parseXlsx(input: ParseInput): Promise<ParseResult> {
 
   // Group by class_key components; each entry collects participant
   // strings (we let normalizeClass handle dedup + sort at the end).
+  //
+  // We ALSO collect a parallel `participants_with_ppn` list so the
+  // snapshot payload can later answer "which PPN IDs are on the roster
+  // for this class?" — used by the survey auto-splitter when a single
+  // survey export covers multiple classes. Kept separate from the
+  // existing `participants: string[]` so the delta engine's hash input
+  // doesn't change shape.
+  type ParticipantWithPpn = {
+    first: string;
+    last: string;
+    ppn_id: string | null;
+  };
   type Group = {
     course_type: CourseType;
     class_date: string;
     location: string;
     participants: string[];
+    participants_with_ppn: ParticipantWithPpn[];
   };
   const byKey = new Map<string, Group>();
 
@@ -232,6 +255,12 @@ export async function parseXlsx(input: ParseInput): Promise<ParseResult> {
       continue;
     }
     const fullName = `${firstName} ${lastName}`.trim();
+    // PPN ID may be missing on a small number of rows (test users,
+    // etc.) — we keep them in the roster anyway, but with a null PPN
+    // ID so the survey-splitter's name-vs-PPN coverage report can flag
+    // them. The xlsx column is empty/whitespace in those cases.
+    const rawPpn = (row[COL.USER_ID] ?? "").toString().trim();
+    const ppn_id = rawPpn ? rawPpn.toLowerCase() : null;
 
     const key = `${courseType}|${classDate}|${location}`;
     let group = byKey.get(key);
@@ -241,10 +270,16 @@ export async function parseXlsx(input: ParseInput): Promise<ParseResult> {
         class_date: classDate,
         location,
         participants: [],
+        participants_with_ppn: [],
       };
       byKey.set(key, group);
     }
     group.participants.push(fullName);
+    group.participants_with_ppn.push({
+      first: firstName,
+      last: lastName,
+      ppn_id,
+    });
   }
 
   if (byKey.size === 0) {
@@ -265,6 +300,20 @@ export async function parseXlsx(input: ParseInput): Promise<ParseResult> {
   const snapshots: SnapshotInput[] = [];
   for (const group of byKey.values()) {
     const cls = normalizeClass(group);
+    // Dedupe roster entries by PPN ID (or full-name fallback when PPN
+    // is null). Cornerstone occasionally emits the same user twice for
+    // the same class — typically a transcript re-row when status
+    // changes. Carrying duplicates through to source_payload would
+    // break the survey-splitter's "this PPN is on this class" check by
+    // inflating roster counts; dedupe here keeps the join key 1:1.
+    const seen = new Set<string>();
+    const dedupedWithPpn: ParticipantWithPpn[] = [];
+    for (const p of group.participants_with_ppn) {
+      const dedupeKey = p.ppn_id ?? `${p.first}|${p.last}`.toLowerCase();
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      dedupedWithPpn.push(p);
+    }
     snapshots.push({
       source_type: "porsche_xlsx",
       source_message_id: input.source_message_id,
@@ -275,6 +324,11 @@ export async function parseXlsx(input: ParseInput): Promise<ParseResult> {
         skipped_no_date: skippedNoDate,
         skipped_no_location: skippedNoLocation,
         skipped_no_name: skippedNoCourse,
+        // Roster join keys for downstream consumers (survey splitter).
+        // Shape: Array<{first, last, ppn_id|null}>. NOT the same shape
+        // as `class.participants` (which is the sorted-lowercase string
+        // array the delta engine hashes) — see splitMixedSurvey docs.
+        participants_with_ppn: dedupedWithPpn,
       },
     });
   }

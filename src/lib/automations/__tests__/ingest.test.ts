@@ -34,14 +34,17 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
-const fakeAutomation = (parser?: (...a: unknown[]) => Promise<ParseResult>): AutomationDefinition => ({
+const fakeAutomation = (
+  parser?: (...a: unknown[]) => Promise<ParseResult>,
+  sourceType: "porsche_xlsx" | "survey" = "porsche_xlsx",
+): AutomationDefinition => ({
   id: "porsche-classes",
   name: "Test",
   owner_label: "x",
   description: "x",
   active_window_days: { min: 0, max: 30 },
   inbox_filters: {},
-  parsers: parser ? { porsche_xlsx: parser as never } : {},
+  parsers: parser ? ({ [sourceType]: parser as never } as never) : {},
 });
 
 const baseRequest = (overrides: Partial<Parameters<typeof ingestArtifact>[0]> = {}) => ({
@@ -181,6 +184,183 @@ describe("ingestArtifact — success path", () => {
       "u_1",
       "ops",
       expect.objectContaining({ classes: 1 }),
+    );
+  });
+
+  it("auto-splits a multi-class survey when candidate rosters exist (no quarantine)", async () => {
+    /* The real survey parser is what's registered in the registry. We
+       simulate the orchestrator's multi-class fallback by:
+         1. parser returns parse_failure with "multiple courses"
+         2. orchestrator decodes survey bytes, queries candidate rosters,
+            calls splitMixedSurvey, persists per-class snapshots
+       We mock the DB calls in order. */
+
+    // Build a tiny synthetic survey workbook with PPN IDs that match
+    // two synthetic candidate classes. xlsx package handles the bytes.
+    const XLSX = await import("xlsx");
+    const sheetRows = [
+      {
+        "Assessment Name": "T",
+        "First Name": "Alice",
+        "Last Name": "Andrews",
+        Status: "ACTIVE",
+        "PPN ID": "aandrews",
+        "Submission Time": "2026-04-10",
+        "Question Type": "SINGLE_ANSWER",
+        Prompt: "Q1",
+        Response: "Strongly agree",
+      },
+      {
+        "Assessment Name": "T",
+        "First Name": "Carol",
+        "Last Name": "Clark",
+        Status: "ACTIVE",
+        "PPN ID": "cclark",
+        "Submission Time": "2026-04-10",
+        "Question Type": "SINGLE_ANSWER",
+        Prompt: "Q1",
+        Response: "Agree",
+      },
+    ];
+    const sheet = XLSX.utils.json_to_sheet(sheetRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, sheet, "Sheet1");
+    const surveyBytes = Buffer.from(XLSX.write(wb, { type: "buffer", bookType: "xlsx" }));
+
+    // 1. artifact insert (new row)
+    mockWriteQuery.mockResolvedValueOnce({
+      rows: [{ id: "art_split", parse_status: "pending", inserted: true }],
+    });
+
+    // The real parser will be passed in as the registered parser; it
+    // returns parse_failure with the "multiple courses" error message
+    // when given a mixed-class filename. We mock the parser.
+    const parser = jest.fn().mockResolvedValue({
+      ok: false,
+      source_type: "survey",
+      error: "Filename names multiple courses (101, 102); survey responses can't be split without a class roster.",
+      exception_kind: "parse_failure",
+    });
+
+    // 2. SELECT candidate rosters → return two rows that cover both PPN IDs
+    mockQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          class_key: "BA101|2026-04-06|Intercontinental",
+          course_type: "BA101",
+          class_date: "2026-04-06",
+          location: "Intercontinental",
+          source_payload: {
+            participants_with_ppn: [{ first: "Alice", last: "Andrews", ppn_id: "aandrews" }],
+          },
+        },
+        {
+          class_key: "BA102|2026-04-06|Conrad",
+          course_type: "BA102",
+          class_date: "2026-04-06",
+          location: "Conrad",
+          source_payload: {
+            participants_with_ppn: [{ first: "Carol", last: "Clark", ppn_id: "cclark" }],
+          },
+        },
+      ],
+    });
+
+    // 3+4. snapshot insert (BA101) + prev-snapshot SELECT (empty) + delta insert
+    mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "snap_a", inserted: true }] });
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "delta_a" }] });
+
+    // 5+6. snapshot insert (BA102) + prev-snapshot SELECT (empty) + delta insert
+    mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "snap_b", inserted: true }] });
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "delta_b" }] });
+
+    // 7. update artifact -> processed
+    mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "art_split" }] });
+
+    const result = await ingestArtifact(
+      baseRequest({
+        automation: fakeAutomation(parser as never, "survey"),
+        source_type: "survey" as const,
+        bytes: surveyBytes,
+        hint: "Survey Data PCBA_April 6-10_101 Intercontinental & 102 Conrad.xlsx",
+        mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+
+    expect(result.parse_status).toBe("processed");
+    expect(result.snapshots_written).toBe(2);
+    expect(result.deltas_written).toBe(2);
+    expect(result.exception_id).toBeUndefined();
+    // The orchestrator emitted artifact_ingested with auto_split=true.
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "automations.artifact_ingested",
+      "u_1",
+      "ops",
+      expect.objectContaining({ classes: 2, auto_split: true }),
+    );
+  });
+
+  it("falls through to quarantine when the multi-class survey has no candidate rosters", async () => {
+    // Modify the registry's parser stub: real survey parser would
+    // also need to be passed but for this orchestrator-level test we
+    // mock it and assert the fallthrough path.
+    const XLSX = await import("xlsx");
+    const sheet = XLSX.utils.json_to_sheet([
+      {
+        "Assessment Name": "T",
+        "First Name": "Alice",
+        "Last Name": "A",
+        Status: "ACTIVE",
+        "PPN ID": "x",
+        "Submission Time": "2026-04-10",
+        "Question Type": "SINGLE_ANSWER",
+        Prompt: "Q1",
+        Response: "Agree",
+      },
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, sheet, "Sheet1");
+    const surveyBytes = Buffer.from(XLSX.write(wb, { type: "buffer", bookType: "xlsx" }));
+
+    // 1. artifact insert
+    mockWriteQuery.mockResolvedValueOnce({
+      rows: [{ id: "art_no_rosters", parse_status: "pending", inserted: true }],
+    });
+    const parser = jest.fn().mockResolvedValue({
+      ok: false,
+      source_type: "survey",
+      error: "Filename names multiple courses (101, 102); survey responses can't be split without a class roster.",
+      exception_kind: "parse_failure",
+    });
+    // 2. SELECT candidate rosters → empty
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    // 3. quarantine: update artifact
+    mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "art_no_rosters" }] });
+    // 4. quarantine: insert exception
+    mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "exc_no_rosters" }] });
+
+    const result = await ingestArtifact(
+      baseRequest({
+        automation: fakeAutomation(parser as never, "survey"),
+        source_type: "survey" as const,
+        bytes: surveyBytes,
+        hint: "Survey Data PCBA_April 6-10_101 Intercontinental & 102 Conrad.xlsx",
+        mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+
+    expect(result.parse_status).toBe("error_quarantined");
+    expect(result.exception_id).toBe("exc_no_rosters");
+    // The quarantine reason should mention the auto-split was attempted.
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "automations.artifact_quarantined",
+      "u_1",
+      "ops",
+      expect.objectContaining({
+        reason: expect.stringMatching(/auto-split attempted/i),
+      }),
     );
   });
 

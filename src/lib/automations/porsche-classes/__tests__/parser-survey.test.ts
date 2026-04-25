@@ -13,7 +13,14 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { parseSurvey, parseClassIdentityFromFilename } from "../parser-survey";
+import {
+  parseSurvey,
+  parseClassIdentityFromFilename,
+  parseMultiClassFilename,
+  splitMixedSurvey,
+  decodeSurveyRows,
+  type RawRow,
+} from "../parser-survey";
 
 const FIXTURES_DIR = path.join(__dirname, "..", "__fixtures__");
 
@@ -131,6 +138,275 @@ describe("parseSurvey · single-class fixtures", () => {
        but still well above 1. */
     expect(survey.average_score!).toBeGreaterThan(2);
     expect(survey.average_score!).toBeLessThan(5);
+  });
+});
+
+describe("parseMultiClassFilename", () => {
+  it("returns both course types + date range from a true mixed-class filename", () => {
+    const r = parseMultiClassFilename(
+      "Survey Data PCBA_April 6-10_101 Intercontinental & 102 Conrad.xlsx",
+      2026,
+    );
+    expect(r).not.toBeNull();
+    if (!r) return;
+    expect(r.course_types.sort()).toEqual(["BA101", "BA102"]);
+    expect(r.date_start).toBe("2026-04-06");
+    expect(r.date_end).toBe("2026-04-10");
+  });
+
+  it("also handles single-course filenames (caller decides whether to use it)", () => {
+    const r = parseMultiClassFilename(
+      "Survey Data PCBA 101 Pendry March 23-27th.xlsx",
+      2026,
+    );
+    expect(r).not.toBeNull();
+    if (!r) return;
+    expect(r.course_types).toEqual(["BA101"]);
+    expect(r.date_start).toBe("2026-03-23");
+    expect(r.date_end).toBe("2026-03-27");
+  });
+
+  it("returns null for filenames without a recognizable date range", () => {
+    expect(parseMultiClassFilename("101 102 random.xlsx", 2026)).toBeNull();
+  });
+
+  it("returns null for filenames without any course code", () => {
+    expect(
+      parseMultiClassFilename("Survey Data April 6-10.xlsx", 2026),
+    ).toBeNull();
+  });
+});
+
+describe("splitMixedSurvey", () => {
+  function row(opts: {
+    first: string;
+    last: string;
+    ppn: string;
+    prompt: string;
+    response: string;
+    qType?: "SINGLE_ANSWER" | "OPEN_ANSWER";
+  }): RawRow {
+    return {
+      "Assessment Name": "Test",
+      "First Name": opts.first,
+      "Last Name": opts.last,
+      Status: "ACTIVE",
+      "PPN ID": opts.ppn,
+      Role: null,
+      "Submission Time": "2026-04-10T12:00:00Z",
+      "Question Type": opts.qType ?? "SINGLE_ANSWER",
+      Prompt: opts.prompt,
+      Response: opts.response,
+    };
+  }
+
+  const baseEnv = {
+    filename: "Survey Data PCBA_April 6-10_101 Intercontinental & 102 Conrad.xlsx",
+    receivedAt: "2026-04-11T00:00:00Z",
+    sourceMessageId: "msg_split_1",
+    sourceArtifactId: "art_split_1",
+  };
+
+  it("routes respondents to the candidate class whose roster contains their PPN", () => {
+    const rows: RawRow[] = [
+      row({ first: "Alice", last: "Andrews", ppn: "aandrews", prompt: "Q1", response: "Strongly agree" }),
+      row({ first: "Alice", last: "Andrews", ppn: "aandrews", prompt: "Q2", response: "Agree" }),
+      row({ first: "Bob", last: "Brown", ppn: "bbrown", prompt: "Q1", response: "Disagree" }),
+      row({ first: "Bob", last: "Brown", ppn: "bbrown", prompt: "Q2", response: "Strongly disagree" }),
+      row({ first: "Carol", last: "Clark", ppn: "cclark", prompt: "Q1", response: "Strongly agree" }),
+    ];
+
+    const candidates = [
+      {
+        course_type: "BA101" as const,
+        class_date: "2026-04-06",
+        location: "Intercontinental",
+        roster_ppns: new Set(["aandrews", "bbrown"]),
+      },
+      {
+        course_type: "BA102" as const,
+        class_date: "2026-04-06",
+        location: "Conrad",
+        roster_ppns: new Set(["cclark"]),
+      },
+    ];
+
+    const snaps = splitMixedSurvey({ ...baseEnv, rows, candidateClasses: candidates });
+    expect(snaps).toHaveLength(2);
+
+    const intercontinental = snaps.find((s) => s.class.location === "Intercontinental");
+    expect(intercontinental).toBeDefined();
+    expect(intercontinental!.class.course_type).toBe("BA101");
+    const intercontPayload = intercontinental!.source_payload as {
+      survey: { response_count: number };
+      auto_split_from_mixed_survey: boolean;
+    };
+    expect(intercontPayload.survey.response_count).toBe(2); // alice + bob
+    expect(intercontPayload.auto_split_from_mixed_survey).toBe(true);
+
+    const conrad = snaps.find((s) => s.class.location === "Conrad");
+    expect(conrad).toBeDefined();
+    expect(conrad!.class.course_type).toBe("BA102");
+    const conradPayload = conrad!.source_payload as {
+      survey: { response_count: number };
+    };
+    expect(conradPayload.survey.response_count).toBe(1); // carol
+  });
+
+  it("PPN ID is matched case-insensitively (roster lowercase, survey uppercase)", () => {
+    const rows: RawRow[] = [
+      row({ first: "A", last: "A", ppn: "AANDREWS", prompt: "Q1", response: "Agree" }),
+    ];
+    const candidates = [
+      {
+        course_type: "BA101" as const,
+        class_date: "2026-04-06",
+        location: "Intercontinental",
+        roster_ppns: new Set(["aandrews"]), // lowercased on the roster side
+      },
+    ];
+    const snaps = splitMixedSurvey({ ...baseEnv, rows, candidateClasses: candidates });
+    expect(snaps).toHaveLength(1);
+  });
+
+  it("respondents whose PPN matches NO candidate are recorded under unmatched_respondents (never silently dropped)", () => {
+    const rows: RawRow[] = [
+      row({ first: "Alice", last: "Andrews", ppn: "aandrews", prompt: "Q1", response: "Agree" }),
+      row({ first: "Walk", last: "In", ppn: "walkin1", prompt: "Q1", response: "Agree" }),
+      row({ first: "No", last: "Ppn", ppn: "", prompt: "Q1", response: "Agree" }),
+    ];
+    const candidates = [
+      {
+        course_type: "BA101" as const,
+        class_date: "2026-04-06",
+        location: "Intercontinental",
+        roster_ppns: new Set(["aandrews"]),
+      },
+    ];
+    const snaps = splitMixedSurvey({ ...baseEnv, rows, candidateClasses: candidates });
+    expect(snaps).toHaveLength(1);
+    const payload = snaps[0].source_payload as {
+      unmatched_respondents: Array<{ first: string; last: string; ppn_id: string | null }>;
+    };
+    expect(payload.unmatched_respondents).toBeDefined();
+    expect(payload.unmatched_respondents).toHaveLength(2);
+    const ppns = payload.unmatched_respondents.map((u) => u.ppn_id).sort();
+    expect(ppns).toEqual([null, "walkin1"]);
+  });
+
+  it("returns [] when there are no candidate classes (caller falls through to quarantine)", () => {
+    const rows: RawRow[] = [
+      row({ first: "A", last: "A", ppn: "x", prompt: "Q1", response: "Agree" }),
+    ];
+    const snaps = splitMixedSurvey({ ...baseEnv, rows, candidateClasses: [] });
+    expect(snaps).toEqual([]);
+  });
+
+  it("returns [] when there are no rows", () => {
+    const candidates = [
+      {
+        course_type: "BA101" as const,
+        class_date: "2026-04-06",
+        location: "Intercontinental",
+        roster_ppns: new Set(["aandrews"]),
+      },
+    ];
+    const snaps = splitMixedSurvey({ ...baseEnv, rows: [], candidateClasses: candidates });
+    expect(snaps).toEqual([]);
+  });
+
+  it("skips a candidate class whose bucket has no respondents (no misleading 0-response snapshot)", () => {
+    const rows: RawRow[] = [
+      row({ first: "A", last: "A", ppn: "aandrews", prompt: "Q1", response: "Agree" }),
+    ];
+    const candidates = [
+      {
+        course_type: "BA101" as const,
+        class_date: "2026-04-06",
+        location: "Intercontinental",
+        roster_ppns: new Set(["aandrews"]),
+      },
+      {
+        course_type: "BA102" as const,
+        class_date: "2026-04-06",
+        location: "Conrad",
+        roster_ppns: new Set(["cclark"]), // nobody from this roster filed a response
+      },
+    ];
+    const snaps = splitMixedSurvey({ ...baseEnv, rows, candidateClasses: candidates });
+    expect(snaps).toHaveLength(1);
+    expect(snaps[0].class.location).toBe("Intercontinental");
+  });
+
+  it("handles a real mixed-class scenario stitched from two single-class fixtures", async () => {
+    /* Stitch Pendry 101 + Intercontinental 102 rows into a synthetic
+       mixed-class export, then re-route each respondent back to their
+       original class via PPN ID match. The aggregate per class should
+       match what the single-class parseSurvey produces. */
+    const pendryBytes = fs.readFileSync(path.join(FIXTURES_DIR, "survey-real-101-pendry.xlsx"));
+    const interBytes = fs.readFileSync(path.join(FIXTURES_DIR, "survey-real-102-intercontinental.xlsx"));
+    const pendry = decodeSurveyRows(pendryBytes);
+    const inter = decodeSurveyRows(interBytes);
+    if ("error" in pendry) throw new Error(pendry.error);
+    if ("error" in inter) throw new Error(inter.error);
+
+    const ppnsPendry = new Set<string>();
+    for (const r of pendry.rows) {
+      const p = String(r["PPN ID"] ?? "").trim().toLowerCase();
+      if (p) ppnsPendry.add(p);
+    }
+    const ppnsInter = new Set<string>();
+    for (const r of inter.rows) {
+      const p = String(r["PPN ID"] ?? "").trim().toLowerCase();
+      if (p) ppnsInter.add(p);
+    }
+
+    const merged = [...pendry.rows, ...inter.rows];
+    const snaps = splitMixedSurvey({
+      ...baseEnv,
+      filename: "Survey Data PCBA_March 16-27_101 Pendry & 102 Intercontinental.xlsx",
+      rows: merged,
+      candidateClasses: [
+        {
+          course_type: "BA101",
+          class_date: "2026-03-23",
+          location: "Pendry",
+          roster_ppns: ppnsPendry,
+        },
+        {
+          course_type: "BA102",
+          class_date: "2026-03-16",
+          location: "Intercontinental",
+          roster_ppns: ppnsInter,
+        },
+      ],
+    });
+
+    expect(snaps).toHaveLength(2);
+    const pendrySnap = snaps.find((s) => s.class.location === "Pendry")!;
+    const interSnap = snaps.find((s) => s.class.location === "Intercontinental")!;
+    expect(pendrySnap.class.course_type).toBe("BA101");
+    expect(interSnap.class.course_type).toBe("BA102");
+
+    const pendrySurvey = (pendrySnap.source_payload as { survey: { response_count: number } }).survey;
+    const interSurvey = (interSnap.source_payload as { survey: { response_count: number } }).survey;
+    expect(pendrySurvey.response_count).toBe(ppnsPendry.size);
+    expect(interSurvey.response_count).toBe(ppnsInter.size);
+  });
+});
+
+describe("decodeSurveyRows", () => {
+  it("returns rows for a real fixture", () => {
+    const bytes = readFixture("survey-real-101-pendry.xlsx");
+    const r = decodeSurveyRows(bytes);
+    expect("error" in r).toBe(false);
+    if ("error" in r) return;
+    expect(r.rows.length).toBeGreaterThan(0);
+  });
+
+  it("returns error for non-xlsx bytes", () => {
+    const r = decodeSurveyRows(Buffer.from("not an xlsx"));
+    expect("error" in r).toBe(true);
   });
 });
 
