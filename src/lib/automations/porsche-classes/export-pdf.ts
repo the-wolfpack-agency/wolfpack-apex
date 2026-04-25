@@ -65,12 +65,13 @@ type ReactPDFModule = typeof import("@react-pdf/renderer");
 let cachedModule: ReactPDFModule | null = null;
 async function loadReactPdf(): Promise<ReactPDFModule> {
   if (cachedModule) return cachedModule;
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
-  const dyn = new Function(
-    "specifier",
-    "return import(specifier);",
-  ) as (specifier: string) => Promise<ReactPDFModule>;
-  cachedModule = await dyn("@react-pdf/renderer");
+  /* serverExternalPackages in next.config.ts excludes
+     @react-pdf/renderer from the Webpack bundle, so a normal dynamic
+     import resolves through Node's native ESM loader at request time.
+     The previous `new Function("return import(specifier)")` workaround
+     existed for the bundled-package case and broke on Vercel runtime
+     because Webpack's chunk-loader couldn't resolve the path. */
+  cachedModule = (await import("@react-pdf/renderer")) as ReactPDFModule;
   return cachedModule;
 }
 
