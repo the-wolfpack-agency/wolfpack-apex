@@ -412,14 +412,10 @@ describe("GET .../attachments/[id]/download", () => {
     expect(r.status).toBe(403);
   });
 
-  it("501 with extractor_pending when authorized", async () => {
-    allow();
-    const r = await downloadGET(
-      req("GET", "http://x/dl"),
-      PARAMS_DL("weekly", "m-1", "att-1"),
-    );
-    expect(r.status).toBe(501);
-    const body = (await r.json()) as { error: string };
-    expect(body.error).toBe("extractor_pending");
-  });
+  /* Stream B replaced the 501 stub with the real bytes-streaming
+     implementation. The full coverage (200 / 401 / 404 / mime / DB
+     query shape) lives alongside the route file at
+     .../download/__tests__/route.test.ts where it can mock the db
+     module. Only the auth gate stays here — that's framework-level
+     and doesn't depend on the route body. */
 });
