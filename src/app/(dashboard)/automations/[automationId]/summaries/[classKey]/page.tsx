@@ -258,6 +258,11 @@ export default function PorscheClassSummaryPage({
     | { kind: "uploading"; sourceType: string }
     | { kind: "ok"; sourceType: string; snapshots: number }
     | {
+        kind: "wrong_class";
+        sourceType: string;
+        snapshots: number;
+      }
+    | {
         kind: "quarantined";
         sourceType: string;
         exceptionId?: string;
@@ -265,6 +270,17 @@ export default function PorscheClassSummaryPage({
     | { kind: "duplicate"; sourceType: string }
     | { kind: "error"; sourceType: string; message: string }
   >({ kind: "idle" });
+
+  async function refetchSummary(): Promise<AssembledSummary | null> {
+    const res = await fetchWithRefresh(
+      `/api/automations/${encodeURIComponent(
+        automationId,
+      )}/summaries/${encodeURIComponent(classKey)}`,
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as ApiResponse;
+    return json.summary;
+  }
 
   async function handleManualIngest(
     sourceType: "survey" | "cognito_coordinator" | "cognito_instructor" | "porsche_xlsx",
@@ -302,9 +318,32 @@ export default function PorscheClassSummaryPage({
       const wasDuplicate = body.result?.was_duplicate === true;
 
       if (snapshots > 0) {
-        setManualIngestState({ kind: "ok", sourceType, snapshots });
-        /* Snapshot landed — reload so summary-assembler picks it up. */
-        window.location.reload();
+        /* Snapshot landed somewhere — refetch THIS class's summary in
+           place. If it now has the matching source_type populated, the
+           upload was for this class. Otherwise the parser auto-split
+           responses to a different class_key (common for mixed-class
+           Cognito exports). */
+        const refreshed = await refetchSummary();
+        const populated =
+          refreshed != null &&
+          ((sourceType === "survey" && refreshed.survey != null) ||
+            (sourceType === "cognito_coordinator" &&
+              refreshed.coordinator_notes.length >
+                (summary?.coordinator_notes.length ?? 0)) ||
+            (sourceType === "cognito_instructor" &&
+              refreshed.instructor_notes.length >
+                (summary?.instructor_notes.length ?? 0)) ||
+            (sourceType === "porsche_xlsx" &&
+              refreshed.participants.length >
+                (summary?.participants.length ?? 0)));
+
+        if (refreshed) setSummary(refreshed);
+
+        if (populated) {
+          setManualIngestState({ kind: "ok", sourceType, snapshots });
+          return;
+        }
+        setManualIngestState({ kind: "wrong_class", sourceType, snapshots });
         return;
       }
       if (parseStatus === "error_quarantined") {
@@ -319,9 +358,7 @@ export default function PorscheClassSummaryPage({
         setManualIngestState({ kind: "duplicate", sourceType });
         return;
       }
-      /* Catch-all: parsed clean but produced no snapshot for this class
-         (e.g. auto-split routed responses to a different class_key).
-         Surface the state clearly instead of pretending it worked. */
+      /* Catch-all: parsed clean but produced no snapshot. */
       setManualIngestState({
         kind: "quarantined",
         sourceType,
@@ -825,6 +862,22 @@ export default function PorscheClassSummaryPage({
 
       <section data-testid="survey-section" style={{ marginBottom: "1.8rem" }}>
         <h2 style={{ fontSize: "1.1rem", marginBottom: "0.4rem" }}>Survey rollup</h2>
+        {manualIngestState.kind === "ok" &&
+          manualIngestState.sourceType === "survey" && (
+            <p
+              data-testid="survey-manual-upload-ok"
+              role="status"
+              style={{
+                margin: "0 0 0.6rem",
+                color: "rgba(80,175,110,1)",
+                fontSize: "0.85rem",
+              }}
+            >
+              ✓ Uploaded — {manualIngestState.snapshots} snapshot
+              {manualIngestState.snapshots === 1 ? "" : "s"} landed on
+              this class.
+            </p>
+          )}
         {summary.survey ? (
           <>
             <p style={{ margin: "0 0 0.3rem" }}>
@@ -977,6 +1030,44 @@ export default function PorscheClassSummaryPage({
                     }}
                   >
                     Uploading + parsing…
+                  </p>
+                )}
+                {manualIngestState.kind === "wrong_class" && (
+                  <p
+                    role="alert"
+                    data-testid="survey-manual-upload-wrong-class"
+                    style={{
+                      marginTop: "0.4rem",
+                      marginBottom: 0,
+                      color: "var(--wp-gold)",
+                      fontSize: "0.85rem",
+                    }}
+                  >
+                    Uploaded — {manualIngestState.snapshots} snapshot
+                    {manualIngestState.snapshots === 1 ? "" : "s"} landed,
+                    but none for THIS class. The parser routed responses
+                    to a different class_key (course / date / location)
+                    based on the filename or roster matching. Open{" "}
+                    <Link
+                      href={`/automations/${encodeURIComponent(automationId)}/summaries`}
+                      style={{
+                        color: "var(--wp-gold)",
+                        textDecoration: "underline",
+                      }}
+                    >
+                      Class summaries
+                    </Link>{" "}
+                    to find where they landed, or{" "}
+                    <Link
+                      href={`/automations/${encodeURIComponent(automationId)}/exceptions`}
+                      style={{
+                        color: "var(--wp-gold)",
+                        textDecoration: "underline",
+                      }}
+                    >
+                      check the exception queue
+                    </Link>{" "}
+                    if the file should have matched here.
                   </p>
                 )}
                 {manualIngestState.kind === "quarantined" && (

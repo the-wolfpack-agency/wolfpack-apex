@@ -181,6 +181,108 @@ test.describe("Porsche class summary E2E", () => {
     ).toEqual([]);
   });
 
+  /* Regression coverage for two manual-ingest bugs that shipped earlier:
+     (1) silent window.location.reload() on success made an
+         auto-split-to-different-class look identical to no-op
+     (2) quarantine path also silently reloaded with no error visible
+     The fix replaces the reload with an in-place refetch + per-outcome
+     alerts. These tests lock that in. */
+  test("manual survey upload that lands on a DIFFERENT class shows wrong-class alert", async ({
+    page,
+  }) => {
+    const signedIn = await signInIfPossible(page, target);
+    if (!signedIn) {
+      await page.goto(`${target.baseUrl}/`, { waitUntil: "domcontentloaded" });
+      await page.evaluate(() => {
+        localStorage.setItem("instinct_token", "test-token-not-validated");
+        localStorage.setItem(
+          "instinct_user",
+          JSON.stringify({
+            id: "u-test",
+            role: "ops",
+            name: "Test",
+            email: "test@instinct.local",
+          }),
+        );
+      });
+    }
+
+    /* Both initial-load and post-upload refetch return the same
+       summary with survey=null. The route counts how many times we
+       fulfill so the test can assert the in-place refetch fired. */
+    let summaryFetches = 0;
+    await page.route(API_URL, async (route) => {
+      summaryFetches += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ summary: FAKE_SUMMARY }),
+      });
+    });
+
+    /* Manual-ingest succeeds with snapshots_written=1, but THIS class's
+       survey stays null on the refetch — i.e. parser auto-split the
+       responses to a different class_key. */
+    await page.route(
+      "**/api/automations/porsche-classes/manual-ingest",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            result: {
+              artifact_id: "art-split-1",
+              was_duplicate: false,
+              parse_status: "processed",
+              snapshots_written: 1,
+              deltas_written: 1,
+            },
+          }),
+        });
+      },
+    );
+
+    await page.goto(`${target.baseUrl}${PAGE_URL}`, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+    await page.evaluate(() => {
+      (window as unknown as { __noReloadProbe: boolean }).__noReloadProbe = true;
+    });
+
+    await expect(page.getByTestId("summary-page")).toBeVisible({
+      timeout: 10_000,
+    });
+    const initialFetches = summaryFetches;
+
+    const fileChooserPromise = page.waitForEvent("filechooser");
+    await page.getByTestId("survey-manual-upload").click();
+    const fc = await fileChooserPromise;
+    await fc.setFiles({
+      name: "BA101_OtherLocation.xlsx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      buffer: Buffer.from("PKnon-empty"),
+    });
+
+    await expect(
+      page.getByTestId("survey-manual-upload-wrong-class"),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(
+      page.getByTestId("survey-manual-upload-wrong-class"),
+    ).toContainText(/none for THIS class/i);
+
+    /* In-place refetch fired (initialFetches+1) instead of full reload. */
+    expect(summaryFetches).toBeGreaterThan(initialFetches);
+    const stillTagged = await page.evaluate(
+      () =>
+        (window as unknown as { __noReloadProbe?: boolean }).__noReloadProbe ===
+        true,
+    );
+    expect(stillTagged, "page must NOT reload on wrong-class upload").toBe(true);
+  });
+
   /* Regression: a quarantined manual-ingest used to silently reload the
      page, which made it look like "nothing happened" — the user had no
      way to know the parser refused the file. Lock in that the
