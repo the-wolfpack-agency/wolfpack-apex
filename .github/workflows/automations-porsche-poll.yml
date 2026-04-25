@@ -1,0 +1,53 @@
+name: Automations · Porsche Classes · poll inbox
+
+# Polls Alicia's mailbox for new Porsche daily registration emails and
+# Cognito coordinator/instructor reports, parses them, and writes
+# snapshots + deltas to Postgres. Runs every 30 min during weekday
+# business hours (US Eastern). Vercel cron isn't used because the Hobby
+# plan only allows daily crons; GitHub Actions has no such limit and
+# this is the existing cadence pattern in wolfpack-auto's pipelines.
+#
+# Required repo secret:
+#   AUTOMATIONS_POLL_URL   e.g. https://wolfpack-apex.vercel.app
+#   CRON_SECRET            same value set in Vercel env vars; the
+#                          /poll route 401s without the matching header
+
+on:
+  schedule:
+    # */30 8-18 Mon-Fri ET. GH Actions cron is UTC, so 12-22 UTC covers
+    # 8-18 ET year-round (DST-safe within ±1h, acceptable for a polling
+    # job whose worst case is "next tick picks it up 30 min later").
+    - cron: "*/30 12-22 * * 1-5"
+  workflow_dispatch: {}
+
+concurrency:
+  group: automations-porsche-poll
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Hit the poll endpoint
+        env:
+          BASE_URL: ${{ secrets.AUTOMATIONS_POLL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::AUTOMATIONS_POLL_URL and CRON_SECRET repo secrets must both be set"
+            exit 1
+          fi
+          response=$(mktemp)
+          status=$(curl -sS -o "$response" -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            "${BASE_URL%/}/api/automations/porsche-classes/poll")
+          echo "status=$status"
+          cat "$response"
+          if [ "$status" -ge 300 ]; then
+            echo "::error::poll failed with HTTP $status"
+            exit 1
+          fi
