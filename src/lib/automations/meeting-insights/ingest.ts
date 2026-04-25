@@ -303,25 +303,37 @@ async function safeExtractBodyText(input: {
   body_preview: string | null;
 }): Promise<string> {
   try {
-    // Stream B's `parseEmailBody` lives at ./parser-email-body. Kept
-     // as a dynamic import for backwards-compat with the seam used
-     // before Stream B merged.
+    /* Stream B's parser at ./parser-email-body uses cheerio for
+       proper paragraph-preserving HTML→text conversion. It expects
+       `{ contentType, content }` (matches Graph's message.body shape)
+       and returns `{ body_text, body_html }`. */
     const mod = (await import("./parser-email-body")) as unknown as {
       parseEmailBody?: (i: {
-        body_html: string | null;
-        body_preview: string | null;
+        contentType: string;
+        content: string;
       }) => Promise<{ body_text: string }> | { body_text: string };
     };
     if (typeof mod.parseEmailBody === "function") {
-      const out = await mod.parseEmailBody(input);
-      return out.body_text;
+      if (input.body_html) {
+        const out = await mod.parseEmailBody({
+          contentType: "html",
+          content: input.body_html,
+        });
+        if (out.body_text) return out.body_text;
+      }
+      if (input.body_preview) {
+        const out = await mod.parseEmailBody({
+          contentType: "text",
+          content: input.body_preview,
+        });
+        if (out.body_text) return out.body_text;
+      }
     }
   } catch {
-    // Stream B parser not merged yet — fall through to local fallback.
+    /* Parser threw — fall through to local fallback so ingest never
+       loses the message. */
   }
   if (input.body_html) {
-    // Conservative tag strip. Real Stream B parser handles entities,
-    // quoted-printable, signature trimming, etc.
     return input.body_html
       .replace(/<\s*(script|style)[\s\S]*?<\/\s*\1\s*>/gi, "")
       .replace(/<[^>]+>/g, " ")

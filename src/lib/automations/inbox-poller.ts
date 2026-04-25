@@ -30,6 +30,7 @@ import { trackEvent } from "@/lib/analytics";
 import { getAutomation } from "./registry";
 import { ingestArtifact, type IngestResult } from "./porsche-classes/ingest";
 import { ingestMeetingMessage } from "./meeting-insights/ingest";
+import { runAnalyzer } from "./meeting-insights/run-analyzer";
 import type { AutomationDefinition, AutomationId, AutomationSourceType } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -649,6 +650,34 @@ export async function pollInboxHistorical(args: HistoricalScanArgs): Promise<Pol
         if (result.was_duplicate) artifactsDuplicate += 1;
         else if (result.parse_status === "processed") artifactsIngested += 1;
         else if (result.parse_status === "error_quarantined") artifactsQuarantined += 1;
+
+        /* Run-now is a user-triggered, foreground action — they want
+           insights immediately, not "next analyzer cron tick". The
+           default fire-and-forget analyzer in ingestMeetingMessage is
+           unreliable in serverless (process can be killed when the
+           response returns). Await it inline here so the response
+           reflects the actual outcome.
+
+           Skip on duplicates: the analysis already exists, no work to
+           redo. Skip on quarantine: the message wasn't routed, there's
+           no message_id to analyze. */
+        if (
+          result.parse_status === "processed" &&
+          !result.was_duplicate &&
+          result.feed_id &&
+          result.message_id
+        ) {
+          try {
+            await runAnalyzer({
+              feed_id: result.feed_id,
+              message_id: result.message_id,
+            });
+          } catch (err) {
+            console.warn(
+              `[automations/inbox-poller] inline analyzer failed for ${msg.id}: ${(err as Error).message}`,
+            );
+          }
+        }
       } catch (err) {
         errors += 1;
         console.warn(
