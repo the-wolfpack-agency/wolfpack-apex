@@ -1,0 +1,495 @@
+Received: from SA1P222MB0166.NAMP222.PROD.OUTLOOK.COM (2603:10b6:806:1f9::12)
+ by SA1P222MB0389.NAMP222.PROD.OUTLOOK.COM with HTTPS; Sat, 18 Apr 2026
+ 02:16:17 +0000
+Received: from DM6PR07CA0112.namprd07.prod.outlook.com (2603:10b6:5:330::27)
+ by SA1P222MB0166.NAMP222.PROD.OUTLOOK.COM (2603:10b6:806:1f9::12) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.9818.25; Sat, 18 Apr
+ 2026 02:16:15 +0000
+Received: from DS3PEPF000099DC.namprd04.prod.outlook.com
+ (2603:10b6:5:330:cafe::16) by DM6PR07CA0112.outlook.office365.com
+ (2603:10b6:5:330::27) with Microsoft SMTP Server (version=TLS1_3,
+ cipher=TLS_AES_256_GCM_SHA384) id 15.20.9769.54 via Frontend Transport; Sat,
+ 18 Apr 2026 02:16:15 +0000
+Authentication-Results: spf=softfail (sender IP is 205.220.189.247)
+ smtp.mailfrom=email01.cognitoforms.com; dkim=fail (body hash did not verify)
+ header.d=mandrillapp.com;dkim=fail (body hash did not verify)
+ header.d=cognitoforms.com;dmarc=fail action=none
+ header.from=cognitoforms.com;compauth=softpass reason=201
+Received-SPF: SoftFail (protection.outlook.com: domain of transitioning
+ email01.cognitoforms.com discourages use of 205.220.189.247 as permitted
+ sender)
+Received: from dispatch1-usg1.ppe-hosted.com (205.220.189.247) by
+ DS3PEPF000099DC.mail.protection.outlook.com (10.167.17.198) with Microsoft
+ SMTP Server (version=TLS1_3, cipher=TLS_AES_256_GCM_SHA384) id 15.20.9791.48
+ via Frontend Transport; Sat, 18 Apr 2026 02:16:15 +0000
+Received: from m0423605.ppops.net (ip6-localhost [127.0.0.1])
+	by engine.ppe-hosted.com (PPE Hosted ESMTP Server) with ESMTP id 7582760059
+	for <support@porscheacademy.us>; Sat, 18 Apr 2026 02:16:14 +0000 (UTC)
+Authentication-Results-Original: ppe-hosted.com; spf=pass
+ smtp.mailfrom=email01.cognitoforms.com; dkim=pass header.d=mandrillapp.com
+ header.s=mte1; dkim=pass header.d=cognitoforms.com header.s=mte1; dmarc=pass
+ header.from=cognitoforms.com header.policy=none; 
+X-Virus-Scanned: Proofpoint Essentials engine
+Received: from smtp1.cognitoforms.com (smtp1.cognitoforms.com [198.2.187.82])
+	(using TLSv1.3 with cipher TLS_AES_256_GCM_SHA384 (256/256 bits)
+	 key-exchange X25519 server-signature RSA-PSS (4096 bits) server-digest SHA256)
+	(No client certificate requested)
+	by mx1-usg1.ppe-hosted.com (PPE Hosted ESMTP Server) with ESMTPS id 7F47820005B
+	for <support@porscheacademy.us>; Sat, 18 Apr 2026 02:16:13 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=mandrillapp.com;
+	s=mte1; t=1776478573; x=1776748573;
+	bh=jztr00fgT8ehT9KoYOFlyo/BdPFKHBH/UxEoFRKcIlw=;
+	h=From:Subject:reply-to:To:Feedback-ID:Message-Id:Date:MIME-Version:
+	 Content-Type:CC:Date:Subject:From;
+	b=fYqRydnypRoQ/I57C/KdwQAzvvor5Pc0VMlor2pDUyzrmcDAuDs1xAwm2nRhui8K+
+	 vu2yFQ2IF4p+CjBMUSUWegRCZHsIcK0AWX6GJl/PIZdmQFwPiHaIJRGYxyhNoi+6K8
+	 LrskjGlimRCuWQst2p3ztlHy/+0jLlgHrM/TYZsQ37k4CgH63+FBBrX9XnwjSJin/T
+	 PIa09uG3A19ERqnWNJAjLwnpyq3iVjlUwfvv3J2Yx7uckeZ1S9aNBMCxMIXKapZQRz
+	 qRPpms5DSzFAvIE9g0ZJp/CMYU5Tx0BMY//ztqJ8PjuHcAXbYVGXwyoHCdNYAjsE6G
+	 YT5ICYoAEP5ZA==
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=cognitoforms.com;
+	s=mte1; t=1776478573; x=1776739073;
+	i=notifications@cognitoforms.com;
+	bh=jztr00fgT8ehT9KoYOFlyo/BdPFKHBH/UxEoFRKcIlw=;
+	h=From:Subject:reply-to:To:Feedback-ID:Message-Id:Date:MIME-Version:
+	 Content-Type:CC:Date:Subject:From;
+	b=BLbqaQhvzTrc9M+adjGGHs5llFlvwsyzNLFrenM3Wnjygqf10LSUiMRuo/lNAHt1e
+	 JsMondvhwuNnjudLSGunFJiBwVMLVpxRzY7OHf35/xnqkTwMNouXT3UMnDSa/f6d82
+	 oWSiAnP0L1NH0wUR2qMikHZ/edSvgRiSfY8teXsDyTPh/E3fsVhzyIx+ZJhwY/5cOp
+	 mPODnuz2pCiwbaN3Vvc8/pYEFLIRfnyAHyrXd6OnWKDztrcFW8zmtNrksY62fgHT3x
+	 BjiZh1zlW9t2bdiwRNV3xVKFnL98xN3P1R2ZTL3bn84bP5QF1clkCbX+pnoIW9RM39
+	 mxVAYfig2WawQ==
+Received: from pmta09.mandrill.prod.suw01.rsglab.com (localhost [127.0.0.1])
+	by smtp1.cognitoforms.com (Mailchimp) with ESMTP id 4fyFjT2B1DzCfP2hv
+	for <support@porscheacademy.us>; Sat, 18 Apr 2026 02:16:13 +0000 (GMT)
+From: "Porsche Academy US" <notifications@cognitoforms.com>
+Subject: =?utf-8?Q?Instructor=20Class=20Report=20-=20Lorena=20Norman?=
+Received: from [4.156.104.40] by mandrillapp.com id 9e8b1b6e38d94da5bcbaf39c7f55ca4c; Sat, 18 Apr 2026 02:16:13 +0000
+reply-to: support@porscheacademy.us
+To: support@porscheacademy.us, lorena@porscheacademy.us
+X-Native-Encoded: 1
+X-Report-Abuse: =?UTF-8?Q?Please=20forward=20a=20copy=20of=20this=20message,=20including=20all=20headers,=20to=20abuse@mandrill.com.=20You=20can=20also=20report=20abuse=20here:=20https://mandrillapp.com/contact/abuse=3Fid=3D30313695.9e8b1b6e38d94da5bcbaf39c7f55ca4c?=
+X-Mandrill-User: md_30313695
+Feedback-ID: 30313695:30313695.20260418:md
+Message-Id: <30313695.20260418021613.69e2e96d41beb8.16197314@smtp1.cognitoforms.com>
+Date: Sat, 18 Apr 2026 02:16:13 +0000
+Content-Type: multipart/alternative; boundary="_av-a70mRgdiJG8I3QN5fQdgjQ"
+X-MDID: 1776478574-2z7aA9Gj8q-j
+X-PPE-STACK: {"stack":"usg1"}
+X-MDID-I: usg1;us-east-1f;1776478574;2z7aA9Gj8q-j;<bounce-md_30313695.69e2e96d.v1-9e8b1b6e38d94da5bcbaf39c7f55ca4c@email01.cognitoforms.com>;642e1e2c3550e112eb771f187c3e5bf0
+X-PPE-TRUSTED: V=1;DIR=IN;
+Return-Path: bounce-md_30313695.69e2e96d.v1-9e8b1b6e38d94da5bcbaf39c7f55ca4c@email01.cognitoforms.com
+X-MS-Exchange-Organization-ExpirationStartTime: 18 Apr 2026 02:16:15.3466
+ (UTC)
+X-MS-Exchange-Organization-ExpirationStartTimeReason: OriginalSubmit
+X-MS-Exchange-Organization-ExpirationInterval: 1:00:00:00.0000000
+X-MS-Exchange-Organization-ExpirationIntervalReason: OriginalSubmit
+X-MS-Exchange-Organization-Network-Message-Id: c649396a-1862-4150-272d-08de9cf0780e
+X-EOPAttributedMessage: 0
+X-EOPTenantAttributedMessage: 40e9e0e5-dfc4-48f7-8e1f-1bfabd3432ec:0
+X-MS-Exchange-Organization-MessageDirectionality: Incoming
+X-MS-PublicTrafficType: Email
+X-MS-TrafficTypeDiagnostic: DS3PEPF000099DC:EE_|SA1P222MB0166:EE_|SA1P222MB0389:EE_
+X-MS-Exchange-Organization-AuthSource: DS3PEPF000099DC.namprd04.prod.outlook.com
+X-MS-Exchange-Organization-AuthAs: Anonymous
+X-MS-Office365-Filtering-Correlation-Id: c649396a-1862-4150-272d-08de9cf0780e
+X-MS-Exchange-Organization-SCL: 1
+X-Microsoft-Antispam: BCL:2;ARA:13230040|13012899012|12012899012|3092899012|3072899012|13102899012|5062899012|3109299003|4092899012|7049299003|69100299015|7149299003|82310400026|2092899012|8096899003|4076899003|57112099003|13003099007|19002099003|16102099003;
+X-Forefront-Antispam-Report: CIP:205.220.189.247;CTRY:US;LANG:en;SCL:1;SRV:;IPV:NLI;SFV:NSPM;H:dispatch1-usg1.ppe-hosted.com;PTR:dispatch1-usg1.ppe-hosted.com;CAT:NONE;SFS:(13230040)(13012899012)(12012899012)(3092899012)(3072899012)(13102899012)(5062899012)(3109299003)(4092899012)(7049299003)(69100299015)(7149299003)(82310400026)(2092899012)(8096899003)(4076899003)(57112099003)(13003099007)(19002099003)(16102099003);DIR:INB;
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 18 Apr 2026 02:16:15.0323
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: c649396a-1862-4150-272d-08de9cf0780e
+X-MS-Exchange-CrossTenant-Id: 40e9e0e5-dfc4-48f7-8e1f-1bfabd3432ec
+X-MS-Exchange-CrossTenant-AuthSource: DS3PEPF000099DC.namprd04.prod.outlook.com
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: Internet
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: SA1P222MB0166
+X-MS-Exchange-Transport-EndToEndLatency: 00:00:02.8742340
+X-MS-Exchange-Processed-By-BccFoldering: 15.20.9818.014
+Keywords: Purple category
+X-Microsoft-Antispam-Mailbox-Delivery:
+	ucf:0;jmr:0;auth:0;dest:I;ENG:(910005)(944490095)(944506478)(944626604)(920097)(930201)(20251009189)(140003);
+X-Microsoft-Antispam-Message-Info:
+	=?utf-8?B?OTFTNDJ2T1p0d0tkQmZSS2RDV2VYdzAvM21zUzZPZFp3cjgrYkVXTXAvdHhw?=
+ =?utf-8?B?aXh4bVBOMWVNN3ppTThRVHNCNnMzcENrNUQ5a25DV01WZkd4cmIzd2FYMzBK?=
+ =?utf-8?B?NG1BRnpZS2RNSDMrZ08xRDg2TWh1YWs2RG5YOWdLaHVlbHBYZCs4YjZKZ3VZ?=
+ =?utf-8?B?M0lVaEd6R3AwUEQ1QklHb0k2SURMejZhdEhqT0wzSTZvZVhzQ0E3MUQyY1di?=
+ =?utf-8?B?Wm1ERFVTV1Jld0cwYmpJVDRCN1Q2TmxBVm5sbXpTMmEyNm90Z0JLVlh1U1ZY?=
+ =?utf-8?B?NzBZQWpWKzI0K2FxZUtFTzFZcDR4K3RrL0JhRWtkREpwVDMwU3o5VFlKWHV5?=
+ =?utf-8?B?TkJXTlVjZHBjNTlGMkt1VHpFLzdjbDBnaCtLVmlrM2ViVE9ZRXdYdktDNDlR?=
+ =?utf-8?B?b20wTTFYc1pjS29KcTc4NGVPeUt2aXRBZEJZdHhXOFRNRHRLNGlPVFl1dEVI?=
+ =?utf-8?B?Slp4UFo2eUFiM3JGYkdEa0RzTEN5SmV4aWp2VzVDc1NEWWhKMzN5MG9oRXla?=
+ =?utf-8?B?am1CMzBZZmxMdXliMy9TYWxkV1ZZbVdiRWoxSzduS280ZU5ZSEZDeGRKc0sz?=
+ =?utf-8?B?L2hrUzhNSmpLU08xdDNxNThpbnpibTN3M2RKeVJlVDRIcE01TkM0L094SXpu?=
+ =?utf-8?B?OG0waWJCUEp3RFh0MVhZMmFCUUQ5RlB0WjIwT3hEMHFsbmxLcXhKNkxDVW5t?=
+ =?utf-8?B?S1Roc1lWeWs5SmFxVVBlOEduazJnYU9DS05TTzlYNUNkYkhRR0hDNXYrRmts?=
+ =?utf-8?B?eFhSUEFNMlMvZ1BaT2Q4NjN3Yk9aQ1B0cUlZLy9mSnZEa1RLTmxQNFNmVTNo?=
+ =?utf-8?B?UzJ6dmttZFNHekxDRjR3NmhBNlBTOUQ1ZmplOU9WeHh5OHV6TDN4UVU0RlVx?=
+ =?utf-8?B?c0Q1Z0JrZmQ2MTd0dVJSTXZzR1FWVndDa21ERGdnVWFqOGc5UDhScDRSRS9i?=
+ =?utf-8?B?UWtHOUw2Q0VQS29JeC9KeUR0ZWdFbSs5Q3FnYmYxTTIwRk5LY3dwUUNtcEgr?=
+ =?utf-8?B?NWpBTHp4RWVTQmdBZjJTdFgzMzhYc2tvb1EyMS9XQkkwNW81Nk1pdHd3akR1?=
+ =?utf-8?B?emJHN0p3a21ObGZ3MEF5OHdoRVY0Nk1mWVhvV2ZjM2xhb3NVZitDNWZWNnBZ?=
+ =?utf-8?B?UXh3Z2JWOHAwUTU5eWczY3Rvbm5RYWF6dGMvY1o5WCtZdGlPNFg1K2x5NlBz?=
+ =?utf-8?B?YmcvNDBNMzd5TzYxaUM3c1JNZDBhRjVWZVJUUEZtVjdvc0QvQWFiQkRmSlFW?=
+ =?utf-8?B?cVNKT2dVUHIzeU1zOGNWU0lwbFdWUjhIcjJwb3ozVDA3dmN1SXBhdGRkU3h6?=
+ =?utf-8?B?c2JVMWU2NjNkNEI1Y3FINFlpU2pMdnlqWlpTbS9mckFNWTZaNGsvTVJrdjly?=
+ =?utf-8?B?c28wbTRDOXR3cC9rMk55eWRhclJjbXNLU3o3cVJGSkVzRHRNc2dRSmR1elkz?=
+ =?utf-8?B?cXkwZ3ppV0VCaWZMSDUyemJoakwwK1dmRVJoVTNKTjlwdEpFcHhkRk9lcVJy?=
+ =?utf-8?B?aUtFMzNlQ2Qwa2tJZ0F5bkYvTjJ0bk14NWc2SnRxNlZwYnNab3I2TzJOY3VI?=
+ =?utf-8?B?Z0JsT3JpVWJnOFczRDFheThhWENWNU8wTmV4cTgvOFErZXBYd2VnRStIQTZH?=
+ =?utf-8?B?dE5aUDdSNVUwdlRHU2JISENMTC9sWmpMWFBKL0dXMEFWOXVaRDNHb251RnF4?=
+ =?utf-8?B?R3l3UldTQVpsWHNhLytrOTdSWkl5SVVEWWtCenBwbjEreURmQlRJT3RGR1Vh?=
+ =?utf-8?B?eEVrTVpaNWxKTHVCVVJoTEVFK2dBSERiK213WngxNlFGWldDenhpbzliK3pl?=
+ =?utf-8?B?S2M4c05BczFHdGRJdFJkeTNsa09nZktuZ2RsZ2toSXJySUJtdU9wSTgzWUFO?=
+ =?utf-8?B?Z1FUT0d4eE8zejRmZjNTS0JUU0ZxYUZYYjFOTGF5R1RhV0xneTZRWEx0STRZ?=
+ =?utf-8?B?djJkZ2lvbGVhYUJyd3Nrd0V4YjNhcHJFYWFsUGVJTDl3dlY0dG1Yc29kWjFK?=
+ =?utf-8?B?bXhZNjRiWGpldE1qNlZiUlROclhSY3NSalhJdHhsOTZOS0duY2xHcHFBMWFO?=
+ =?utf-8?B?MVp0OEJIOU5JUllkZlMrelhKUGV5ZndkZi9tV21DSWJWWDFlbkUza3dkNVBQ?=
+ =?utf-8?B?eFo3SCtIU0gzQzI5N0V4T2tyNWRUYUtQN1B1RmVTU0ZrSmNQYU9zWmlQb251?=
+ =?utf-8?B?NnZ2ellXbllrTXdKL3A2UnNZZ2tUU0dXUnovK2swMURiVlVranEwcWhRelVJ?=
+ =?utf-8?B?c09uSlRNam5CSUliODlCNGpVcHU3Z3ZKVkVOcmN3eWdtUUwwb29DZUkvU3Bn?=
+ =?utf-8?B?OXNBU2lsNzJPVDkzNCtNTVJTSTIrZjQ5SWNFRmkzK0piWXRCdVdIc0tJalFK?=
+ =?utf-8?B?L2tuOGl3OGswRndleGoxRnRPUEhoSlBKMFBQMEJIRlZsTmd0cVNIYmZzQ2Vv?=
+ =?utf-8?B?a1lrUHVCNCtGZ0xWblVjSE90R0RiSmJCdS8zdkU0cUR3cTVjcTBqR21PZ3FO?=
+ =?utf-8?B?TllVS1dnV0F2RXZWVk5TOUdhZlAwUEhBMDhMQ05Mb0l0aDNDSWMreVdsZmhF?=
+ =?utf-8?B?S2p6ODJIcnF4VllJalBuaWRwWUZoRFFHQks0THJXK1N2Q3N6cW51TWNuTFpG?=
+ =?utf-8?B?bE80TnVVd2JiM05wY0Z6MU9ieklYQURjUXlIWXY3S2NwT2gxYVR3R0JaTElS?=
+ =?utf-8?B?NEVPbUVRWlZ1enQxajlmbmpWZFZsR3NuK2lJZnhBRmdYb1lJSWMydEhuVnRi?=
+ =?utf-8?B?YVdiMUc0eHM2S0c3b0kyZzVxQncvN1FyTy9lZkVRRHgwa2J6MnNKQnIyMk9L?=
+ =?utf-8?B?Snhkby9zN1g5K3RuaVFDR2xBaXQ2TUViMFhSU00yaVNiKzFxbVhNejE3UzNt?=
+ =?utf-8?B?M1dwU0ZodDUwTTgwTDJ3T3dxaW9HZEIzR3RBT2hydVV0R1lDV3Q5cmxiNmZr?=
+ =?utf-8?B?YTd4Q3ZEaHkvVWcwQW50S0dSc2VrRFZDd0RIVEJDbHdUeUdkazRpalp5ZnBI?=
+ =?utf-8?B?clArRDRRZUJZMHI3dnVsS2htSjM2amJZd0hQRDFYMXgwMFhoa0JrK0xHWWFv?=
+ =?utf-8?B?VW16MEVuYnRiSitPRmcreXgxajVSbkJVaEJyb2NESDllSnBwUHc2N3FqY3lU?=
+ =?utf-8?B?T3R0SUNmL2pGUGdhWVVNb1F3d1prRW5WYlV2RkIyTGZIWmFvaTVSRHVkRlcy?=
+ =?utf-8?B?cWtuS2hvVmVhdkhqR2VnUS9ZNWJwVXg4dWR2NTVzSmlGNUx4K0p2RExxMVcr?=
+ =?utf-8?B?R0VHTGdHRFAxandhTlV3bHNxSHhiVHJGd04yK1RZeVpBVnVlTDJCalB5OTdj?=
+ =?utf-8?B?b0xwbzRaMHRyVDVCNjdMZ292K1A0ZkVKZDlWWmtSeE1sOW9oQkdTaEJzRjFz?=
+ =?utf-8?B?Rk9YU3dYTHFzdEtFQnVFRG9ZSGk5UTVpbUNWM3lUczV4MlpremExRGN4WXR4?=
+ =?utf-8?B?YjB5RTVzbXBiRW1HZkthcEtaUk4xMU5LOXpmN2dUWk5CelJtRUxRaHdIVHMy?=
+ =?utf-8?B?NnpncEJPK0RCV2xEQ3NVZjI5N0JBNzdXb0RLeTB6Unhib2VIeUE1RHFiVFZw?=
+ =?utf-8?B?aHNCanRoeHFLU1VZeUZOVXFTeWxOaCtKUFR5eERsTFl1Z2xOWWkzMHRrQUtH?=
+ =?utf-8?B?TVVXWFpXREplY2FmZzJuTXdWVTdSNTFmTHA1ckYrQ21QOGQvNk1sMmNkamhW?=
+ =?utf-8?Q?SyWvfFXHGH7onq4MPoL1B1yQuxH09EM=3D?=
+MIME-Version: 1.0
+
+--_av-a70mRgdiJG8I3QN5fQdgjQ
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+Content-length: 2093
+
+         
+= Porsche Academy US =
+
+== Instructor Class Report ==
+
+ View full entry at https://urldefense.proofpoint.com/v2/url?u=http-3A__CognitoForms.com&d=DwICaQ&c=euGZstcaTDllvimEN8b7jXrwqOf-v5A_CdpgnVfiiMM&r=py-TCkIJDvit3pqy-oJwlMhAkcO_Fc9SRj3Mjwz_HNI&m=BTeF965obIyPGfb_Nxa8yiUKWynkkNLPEweiLosxpxe5rtIeMiFmit-S4T59aP8h&s=Zm69ALt8e1mYEdYICbG4wZhWRIGI5fHLIYL0ZmsElFY&e=.
+<https://urldefense.proofpoint.com/v2/url?u=https-3A__www.cognitoforms.com_PorscheAcademyUS_17_entries_15&d=DwICaQ&c=euGZstcaTDllvimEN8b7jXrwqOf-v5A_CdpgnVfiiMM&r=py-TCkIJDvit3pqy-oJwlMhAkcO_Fc9SRj3Mjwz_HNI&m=BTeF965obIyPGfb_Nxa8yiUKWynkkNLPEweiLosxpxe5rtIeMiFmit-S4T59aP8h&s=JQS3bKA1rt4Aj5GFpOVEpoampXPQf-EiV5KaM64rmm4&e=> 
+
+== Entry Details ==
+
+NameLorena NormanEmaillorena@porscheacademy.usClass
+Date4/13/2026ClassBA101Class LocationWestlakeDid you enter anything in
+CRM?NoDid you face any technical difficulties (e.g., PMA platform,
+audio-visual issues)?YesPlease provide details:Details were provided to
+Alicia and Amy. One participant not logged in course Day 1 and continuous
+Training Guide errors from there on out. Was fixed on Friday for knowledge
+test. AI Smart Coach was kicking an error for a select few, also fixed on
+Day 3.Was there anything about the event that could be improved
+logistically? Break times, post test time, lunch times, offsite events
+etc?YesPlease provide details:Shuttle needed for Thursday dinner
+evening.Are there any issues or changes in the content that we need to
+make/be aware of?NoWere there any successes (WOW moments) that stood
+out?YesPlease provide details:This class was extremely supportive of one
+another and engaged since Day 1. Watching Jose deliver his Capstone
+Presentation was a highlight for the week. He utilizes SMART, DISC, SPARK
+and SWOT to demonstrate his understanding and ability to apply it.Were
+there any PAX details that stood out for future surprise and delight
+moments?NoDId you have any challenging events, PAX or situations that we
+need to be aware of?NoDo you have any other feedback or suggestions to
+improve future training sessions?Not at this time.
+--_av-a70mRgdiJG8I3QN5fQdgjQ
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+Content-length: 20586
+
+<!DOCTYPE HTML PUBLIC '-//W3C//DTD XHTML 1.0 Transitional//EN' 'http://www.=
+w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd'><html xmlns=3D"http://www.w3.=
+org/1999/xhtml"><head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dutf-8">
+<meta name=3D"viewport" content=3D"width=3Ddevice-width, initial-scale=3D1.=
+0">
+<meta name=3D"x-apple-disable-message-reformatting">
+<!--[if !mso]><!-->
+<meta http-equiv=3D"X-UA-Compatible" content=3D"IE=3Dedge">
+<!--<![endif]-->
+<!--[if mso]>
+<style>
+	li p {
+		margin: 0 !important;
+	}
+</style>
+<![endif]--><style>#outlook a{padding:0}.ReadMsgBody{width:100%}.ExternalCl=
+ass{width:100%}.ExternalClass,.ExternalClass p,.ExternalClass span,.Externa=
+lClass font,.ExternalClass td,.ExternalClass div{line-height:100%}body,tabl=
+e,td,p,a,li,blockquote{-webkit-text-size-adjust:100%;-ms-text-size-adjust:1=
+00%}table,td{mso-table-lspace:0pt;mso-table-rspace:0pt}*,body,li{margin:0;p=
+adding:0}table{border-collapse:collapse !important}body,#bodyTable,#bodyCel=
+l{height:100% !important;margin:0;padding:0;width:100% !important}#bodyCell=
+{padding:20px}body,#bodyTable{background-color:#fff}h2{color:#404040 !impor=
+tant;display:block;font-family:Arial,Helvetica,sans-serif;font-size:18px;fo=
+nt-style:normal;font-weight:bold;line-height:100%;letter-spacing:normal;tex=
+t-align:left}#header{text-align:center;border-bottom:2px solid #ddd}#logo{m=
+ax-width:150px;margin-top:15px}.bodyContent th,.bodyContent td{font-size:13=
+px;font-family:Arial,Helvetica,sans-serif;line-height:125%}#pseudo-body{fon=
+t-family:Helvetica,Arial,sans-serif;color:#333;font-size:16px}.bodyContent{=
+font-family:Arial,Helvetica,sans-serif;font-size:14px;text-align:left}.body=
+Content a:link,.bodyContent a:visited,.bodyContent a .yshortcuts{color:#eb4=
+102;font-weight:normal;text-decoration:underline}.header-2{font-size:1.5em;=
+padding-left:5px;margin-top:10px;margin-bottom:10px}.header-3{margin:0;colo=
+r:#333;font-size:1.3em}.small{font-size:.75em;color:#777;line-height:1.4;fo=
+nt-family:Helvetica,Arial,sans-serif}.label{font-size:.8em;font-weight:bold=
+;text-transform:uppercase}.wrapper{margin-top:20px;margin-bottom:30px}.vert=
+ical-spacing{padding-bottom:20px}h1{font-size:1.8em}h2{font-size:1.4em}h3{f=
+ont-size:1em}h4{font-size:.9em}h5{font-size:.8em}h6{font-size:.7em}h1,h2,h3=
+,h4,h5,h6{margin:0;font-family:Helvetica,Arial,sans-serif;color:#333;font-w=
+eight:bold}p{font-family:Helvetica,Arial,sans-serif;color:#333;line-height:=
+1.4}a{color:#d85427;text-decoration:underline 1px #d85427;text-underline-of=
+fset:1px}.cognito-content{font-family:Helvetica,Arial,sans-serif;font-size:=
+14px;text-align:left;color:#333}.cognito-content p,.cognito-content ul,.cog=
+nito-content ol,.cognito-content hr,.cognito-content img,.cognito-content p=
+re{margin-top:1em;margin-bottom:1em}.cognito-content>*:first-child{margin-t=
+op:0}.cognito-content p:empty,.cognito-content li p,.cognito-content li+ul,=
+.cognito-content li+ol,.cognito-content li>ol,.cognito-content li>ul{margin=
+-top:0;margin-bottom:0}.cognito-content ul,.cognito-content ol{padding-left=
+:1.5em;margin-left:0}.cognito-content ul{list-style-type:disc}.cognito-cont=
+ent li+ul,.cognito-content li ul{list-style-type:circle}.cognito-content li=
+ *+p,.cognito-content li p+p{margin-top:1em}.cognito-content h1,.cognito-co=
+ntent h2,.cognito-content h3,.cognito-content h4,.cognito-content h5,.cogni=
+to-content h6{margin-top:.7em;margin-bottom:.7em}#templateFooter{background=
+-color:#fff;border-top:1px solid #fff;border-bottom:2px solid #ddd}.footerC=
+ontent{color:gray;font-family:Arial,Helvetica,sans-serif;font-size:10px;lin=
+e-height:150%;background-color:#fff;text-align:left}.footerContent .footerC=
+ontent a:link,.footerContent .footerContent a:visited,.footerContent .foote=
+rContent a .yshortcuts,.footerContent .footerContent a span{color:#606060;f=
+ont-weight:normal;text-decoration:underline}.real-table-container{backgroun=
+d:#fff;border-right:2px solid #ddd;border-bottom:2px solid #ddd}.real-table=
+-container thead{background-color:#333;color:#fff;text-align:left}.real-tab=
+le-container td,.real-table-container th{padding-top:8px;padding-bottom:8px=
+;font-family:Helvetica,Arial,sans-serif}th{font-size:11px;text-align:left;t=
+ext-transform:uppercase;color:#777}thead th{font-size:1em;color:#fff}td{pad=
+ding:1px}table.cellpadding-0 td{padding:0px}table.cellpadding-4 td{padding:=
+4px}table.cellpadding-5 td{padding:5px}table.cellpadding-8 td{padding:8px}t=
+able.cellpadding-12 td{padding:12px}table.cellpadding-20 td{padding:20px}ta=
+ble[cellspacing=3D"0"]{border-spacing:0;border-collapse:collapse}td.price,t=
+head .price{text-align:center;padding:0}td.group{font-size:.75em;font-style=
+:italic;font-weight:bold;border-bottom:none;border-top:2px solid #ddd;color=
+:#888;padding-bottom:0;padding-left:0;padding-top:15px}.variant{font-style:=
+italic}.total{background-color:#f6f6f6;font-weight:bold}.grand-total{backgr=
+ound-color:#ddd;font-size:1.5em}@media only screen and (max-width: 600px){i=
+mg{height:auto !important;max-width:600px !important;width:100% !important}=
+}@media only screen and (max-width: 480px){body,table,td,p,a,li,blockquote{=
+-webkit-text-size-adjust:none !important}body{width:100% !important;min-wid=
+th:100% !important}#bodyCell{padding:10px !important}}</style></head><body =
+leftmargin=3D"0" marginwidth=3D"0" topmargin=3D"0" marginheight=3D"0" offse=
+t=3D"0" style=3D"-webkit-text-size-adjust: 100%;-ms-text-size-adjust: 100%;=
+margin: 0;padding: 0;background-color: #fff;width: 100% !important;min-widt=
+h: 100% !important;height: 100% !important;"><table width=3D"100%" id=3D"ps=
+eudo-body" style=3D"-webkit-text-size-adjust: 100%;-ms-text-size-adjust: 10=
+0%;mso-table-lspace: 0pt;mso-table-rspace: 0pt;font-family: helvetica, aria=
+l, sans-serif;color: #333333;font-size: 16px;border-collapse: collapse !imp=
+ortant;"><tr><td bgcolor=3D"#eeeeee" align=3D"center" style=3D"-webkit-text=
+-size-adjust: 100%;-ms-text-size-adjust: 100%;mso-table-lspace: 0pt;mso-tab=
+le-rspace: 0pt;"><table width=3D"100%" id=3D"header" style=3D"-webkit-text-=
+size-adjust: 100%;-ms-text-size-adjust: 100%;mso-table-lspace: 0pt;mso-tabl=
+e-rspace: 0pt;border-bottom: 2px solid #dddddd;border-collapse: collapse !i=
+mportant;"><tr><td bgcolor=3D"#ffffff" align=3D"center" width=3D"100%" styl=
+e=3D"-webkit-text-size-adjust: 100%;-ms-text-size-adjust: 100%;mso-table-ls=
+pace: 0pt;mso-table-rspace: 0pt; padding: 20px; line-height: 1.3; text-alig=
+n: center;"><div style=3D"max-width:600px;margin:0 auto;"><!--[if (gte mso =
+9)|(IE)]><table width=3D"600" align=3D"center" style=3D"width:600px"><tr><t=
+d align=3D"center"><![endif]--><img src=3D"https://www.cognitoforms.com/fil=
+e/NfFuVFr3SovVeaNoTnNv6MBAXN3qaF1dOxohm8fiQTzExlXORCc4vSWLvSDpWEAk" ?id=3D"=
+logo" style=3D"max-width: 100%;"><!--[if (gte mso 9)|(IE)]></td></tr></tabl=
+e><![endif]--></div><h1 class=3D"header-1" style=3D"margin-bottom: 0;font-f=
+amily: helvetica, arial, sans-serif;color: #333333;">Porsche Academy US</h1=
+><h2 style=3D"margin-bottom: 0;font-family: helvetica, arial, sans-serif;co=
+lor: #888888 !important; text-align: center; font-weight: normal; margin: 0=
+;">Instructor Class Report</h2><br><table width=3D"100%" style=3D"-webkit-t=
+ext-size-adjust: 100%;-ms-text-size-adjust: 100%;mso-table-lspace: 0pt;mso-=
+table-rspace: 0pt;border-collapse: collapse !important;"><tr><td align=3D"c=
+enter" style=3D"-webkit-text-size-adjust: 100%;-ms-text-size-adjust: 100%;m=
+so-table-lspace: 0pt;mso-table-rspace: 0pt; line-height: 1.3;"><div style=
+=3D"max-width:600px;margin:0 auto;"><!--[if (gte mso 9)|(IE)]><table width=
+=3D"600" align=3D"center" style=3D"width:600px"><tr><td align=3D"center"><!=
+[endif]--><table width=3D"100%" class=3D"cognito-content" align=3D"center" =
+style=3D"color: rgb(51, 51, 51); font-family: helvetica, arial, sans-serif;=
+ -ms-text-size-adjust: 100%; -webkit-text-size-adjust: 100%; line-height: 1=
+.3; margin-left: auto; margin-right: auto;"><tr><td style=3D"text-align: le=
+ft;"><p>&nbsp;<a href=3D"https://urldefense.proofpoint.com/v2/url?u=3Dhttps=
+-3A__www.cognitoforms.com_PorscheAcademyUS_17_entries_15&amp;d=3DDwMFaQ&amp=
+;c=3DeuGZstcaTDllvimEN8b7jXrwqOf-v5A_CdpgnVfiiMM&amp;r=3Dpy-TCkIJDvit3pqy-o=
+JwlMhAkcO_Fc9SRj3Mjwz_HNI&amp;m=3DBTeF965obIyPGfb_Nxa8yiUKWynkkNLPEweiLosxp=
+xe5rtIeMiFmit-S4T59aP8h&amp;s=3DJQS3bKA1rt4Aj5GFpOVEpoampXPQf-EiV5KaM64rmm4=
+&amp;e=3D" target=3D"_blank">View full entry at CognitoForms.com.</a>&nbsp;=
+</p></td></tr></table><!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]=
+--></div></td></tr></table></td></tr></table><table bgcolor=3D"#eeeeee" cel=
+lpadding=3D"5" class=3D"cellpadding-5" width=3D"100%" style=3D"-webkit-text=
+-size-adjust: 100%;-ms-text-size-adjust: 100%;mso-table-lspace: 0pt;mso-tab=
+le-rspace: 0pt;border-collapse: collapse !important;"><tr><td align=3D"cent=
+er" style=3D"line-height: 1.3; -webkit-text-size-adjust: 100%;-ms-text-size=
+-adjust: 100%;mso-table-lspace: 0pt;mso-table-rspace: 0pt;"><div style=3D"m=
+ax-width:600px;margin:0 auto;"><!--[if (gte mso 9)|(IE)]><table width=3D"60=
+0" align=3D"center" style=3D"width:600px"><tr><td><![endif]--><table border=
+=3D"0" cellpadding=3D"0" cellspacing=3D"0" width=3D"100%" class=3D"wrapper =
+cellpadding-0" style=3D"-webkit-text-size-adjust: 100%;-ms-text-size-adjust=
+: 100%;mso-table-lspace: 0pt;mso-table-rspace: 0pt;margin-top: 20px;margin-=
+bottom:0;border-collapse: collapse !important;"><tr><td valign=3D"top" styl=
+e=3D"-webkit-text-size-adjust: 100%;-ms-text-size-adjust: 100%;mso-table-ls=
+pace: 0pt;mso-table-rspace: 0pt;"><table width=3D"100%"><tr><td style=3D"pa=
+dding-bottom: 20px;"><h2 class=3D"header-2" style=3D"color: #333333;display=
+: block;font-family: helvetica, arial, sans-serif;font-size: 1.7em;font-sty=
+le: normal;font-weight: bold;line-height: 100%;letter-spacing: normal;text-=
+align: left;margin-bottom: 0;">Entry Details</h2></td></tr></table><table w=
+idth=3D"100%" cellpadding=3D"12" class=3D"wrapper cellpadding-12" style=3D"=
+-webkit-text-size-adjust: 100%;-ms-text-size-adjust: 100%;mso-table-lspace:=
+ 0pt;mso-table-rspace: 0pt;border-collapse: collapse !important;"><tr><td c=
+lass=3D"real-table-container" style=3D"-webkit-text-size-adjust: 100%;-ms-t=
+ext-size-adjust: 100%;mso-table-lspace: 0pt;mso-table-rspace: 0pt;backgroun=
+d: white;border-right: 2px solid #dddddd;border-bottom: 2px solid #dddddd;m=
+argin-left: 10px;"><table width=3D"100%" cellspacing=3D"0" cellpadding=3D"4=
+" class=3D"cellpadding-4" style=3D"-webkit-text-size-adjust: 100%;-ms-text-=
+size-adjust: 100%;mso-table-lspace: 0pt;mso-table-rspace: 0pt;border-collap=
+se: collapse !important;"><tr><th valign=3D"top" style=3D"width: 40%; font-=
+size: 12px;text-align: left;text-transform: uppercase;color: #777777;paddin=
+g-top: 15px;padding-bottom: 15px;border-bottom: 1px solid #eeeeee;font-fami=
+ly: Helvetica, Arial, sans-serif;">Name</th><td valign=3D"top" style=3D"-we=
+bkit-text-size-adjust: 100%;-ms-text-size-adjust: 100%;mso-table-lspace: 0p=
+t;mso-table-rspace: 0pt;text-align:left;padding-top: 15px;padding-bottom: 1=
+5px;border-bottom: 1px solid #eeeeee;font-family: Helvetica, Arial, sans-se=
+rif;">Lorena Norman</td></tr><tr><th valign=3D"top" style=3D"width: 40%; fo=
+nt-size: 12px;text-align: left;text-transform: uppercase;color: #777777;pad=
+ding-top: 15px;padding-bottom: 15px;border-bottom: 1px solid #eeeeee;font-f=
+amily: Helvetica, Arial, sans-serif;">Email</th><td valign=3D"top" style=3D=
+"-webkit-text-size-adjust: 100%;-ms-text-size-adjust: 100%;mso-table-lspace=
+: 0pt;mso-table-rspace: 0pt;text-align:left;padding-top: 15px;padding-botto=
+m: 15px;border-bottom: 1px solid #eeeeee;font-family: Helvetica, Arial, san=
+s-serif;">lorena@porscheacademy.us</td></tr><tr><th valign=3D"top" style=3D=
+"width: 40%; font-size: 12px;text-align: left;text-transform: uppercase;col=
+or: #777777;padding-top: 15px;padding-bottom: 15px;border-bottom: 1px solid=
+ #eeeeee;font-family: Helvetica, Arial, sans-serif;">Class Date</th><td val=
+ign=3D"top" style=3D"-webkit-text-size-adjust: 100%;-ms-text-size-adjust: 1=
+00%;mso-table-lspace: 0pt;mso-table-rspace: 0pt;text-align:left;padding-top=
+: 15px;padding-bottom: 15px;border-bottom: 1px solid #eeeeee;font-family: H=
+elvetica, Arial, sans-serif;">4/13/2026</td></tr><tr><th valign=3D"top" sty=
+le=3D"width: 40%; font-size: 12px;text-align: left;text-transform: uppercas=
+e;color: #777777;padding-top: 15px;padding-bottom: 15px;border-bottom: 1px =
+solid #eeeeee;font-family: Helvetica, Arial, sans-serif;">Class</th><td val=
+ign=3D"top" style=3D"-webkit-text-size-adjust: 100%;-ms-text-size-adjust: 1=
+00%;mso-table-lspace: 0pt;mso-table-rspace: 0pt;text-align:left;padding-top=
+: 15px;padding-bottom: 15px;border-bottom: 1px solid #eeeeee;font-family: H=
+elvetica, Arial, sans-serif;">BA101</td></tr><tr><th valign=3D"top" style=
+=3D"width: 40%; font-size: 12px;text-align: left;text-transform: uppercase;=
+color: #777777;padding-top: 15px;padding-bottom: 15px;border-bottom: 1px so=
+lid #eeeeee;font-family: Helvetica, Arial, sans-serif;">Class Location</th>=
+<td valign=3D"top" style=3D"-webkit-text-size-adjust: 100%;-ms-text-size-ad=
+just: 100%;mso-table-lspace: 0pt;mso-table-rspace: 0pt;text-align:left;padd=
+ing-top: 15px;padding-bottom: 15px;border-bottom: 1px solid #eeeeee;font-fa=
+mily: Helvetica, Arial, sans-serif;">Westlake</td></tr><tr><th valign=3D"to=
+p" style=3D"width: 40%; font-size: 12px;text-align: left;text-transform: up=
+percase;color: #777777;padding-top: 15px;padding-bottom: 15px;border-bottom=
+: 1px solid #eeeeee;font-family: Helvetica, Arial, sans-serif;">Did you ent=
+er anything in CRM?</th><td valign=3D"top" style=3D"-webkit-text-size-adjus=
+t: 100%;-ms-text-size-adjust: 100%;mso-table-lspace: 0pt;mso-table-rspace: =
+0pt;text-align:left;padding-top: 15px;padding-bottom: 15px;border-bottom: 1=
+px solid #eeeeee;font-family: Helvetica, Arial, sans-serif;">No</td></tr><t=
+r><th valign=3D"top" style=3D"width: 40%; font-size: 12px;text-align: left;=
+text-transform: uppercase;color: #777777;padding-top: 15px;padding-bottom: =
+15px;border-bottom: 1px solid #eeeeee;font-family: Helvetica, Arial, sans-s=
+erif;">Did you face any technical difficulties (e.g., PMA platform, audio-v=
+isual issues)?</th><td valign=3D"top" style=3D"-webkit-text-size-adjust: 10=
+0%;-ms-text-size-adjust: 100%;mso-table-lspace: 0pt;mso-table-rspace: 0pt;t=
+ext-align:left;padding-top: 15px;padding-bottom: 15px;border-bottom: 1px so=
+lid #eeeeee;font-family: Helvetica, Arial, sans-serif;">Yes</td></tr><tr><t=
+h valign=3D"top" style=3D"width: 40%; font-size: 12px;text-align: left;text=
+-transform: uppercase;color: #777777;padding-top: 15px;padding-bottom: 15px=
+;border-bottom: 1px solid #eeeeee;font-family: Helvetica, Arial, sans-serif=
+;">Please provide details:</th><td valign=3D"top" style=3D"-webkit-text-siz=
+e-adjust: 100%;-ms-text-size-adjust: 100%;mso-table-lspace: 0pt;mso-table-r=
+space: 0pt;text-align:left;padding-top: 15px;padding-bottom: 15px;border-bo=
+ttom: 1px solid #eeeeee;font-family: Helvetica, Arial, sans-serif;">Details=
+ were provided to Alicia and Amy. One participant not logged in course Day =
+1 and continuous Training Guide errors from there on out. Was fixed on Frid=
+ay for knowledge test. AI Smart Coach was kicking an error for a select few=
+, also fixed on Day 3.</td></tr><tr><th valign=3D"top" style=3D"width: 40%;=
+ font-size: 12px;text-align: left;text-transform: uppercase;color: #777777;=
+padding-top: 15px;padding-bottom: 15px;border-bottom: 1px solid #eeeeee;fon=
+t-family: Helvetica, Arial, sans-serif;">Was there anything about the event=
+ that could be improved logistically? Break times, post test time, lunch ti=
+mes, offsite events etc?</th><td valign=3D"top" style=3D"-webkit-text-size-=
+adjust: 100%;-ms-text-size-adjust: 100%;mso-table-lspace: 0pt;mso-table-rsp=
+ace: 0pt;text-align:left;padding-top: 15px;padding-bottom: 15px;border-bott=
+om: 1px solid #eeeeee;font-family: Helvetica, Arial, sans-serif;">Yes</td><=
+/tr><tr><th valign=3D"top" style=3D"width: 40%; font-size: 12px;text-align:=
+ left;text-transform: uppercase;color: #777777;padding-top: 15px;padding-bo=
+ttom: 15px;border-bottom: 1px solid #eeeeee;font-family: Helvetica, Arial, =
+sans-serif;">Please provide details:</th><td valign=3D"top" style=3D"-webki=
+t-text-size-adjust: 100%;-ms-text-size-adjust: 100%;mso-table-lspace: 0pt;m=
+so-table-rspace: 0pt;text-align:left;padding-top: 15px;padding-bottom: 15px=
+;border-bottom: 1px solid #eeeeee;font-family: Helvetica, Arial, sans-serif=
+;">Shuttle needed for Thursday dinner evening.</td></tr><tr><th valign=3D"t=
+op" style=3D"width: 40%; font-size: 12px;text-align: left;text-transform: u=
+ppercase;color: #777777;padding-top: 15px;padding-bottom: 15px;border-botto=
+m: 1px solid #eeeeee;font-family: Helvetica, Arial, sans-serif;">Are there =
+any issues or changes in the content that we need to make/be aware of?</th>=
+<td valign=3D"top" style=3D"-webkit-text-size-adjust: 100%;-ms-text-size-ad=
+just: 100%;mso-table-lspace: 0pt;mso-table-rspace: 0pt;text-align:left;padd=
+ing-top: 15px;padding-bottom: 15px;border-bottom: 1px solid #eeeeee;font-fa=
+mily: Helvetica, Arial, sans-serif;">No</td></tr><tr><th valign=3D"top" sty=
+le=3D"width: 40%; font-size: 12px;text-align: left;text-transform: uppercas=
+e;color: #777777;padding-top: 15px;padding-bottom: 15px;border-bottom: 1px =
+solid #eeeeee;font-family: Helvetica, Arial, sans-serif;">Were there any su=
+ccesses (WOW moments) that stood out?</th><td valign=3D"top" style=3D"-webk=
+it-text-size-adjust: 100%;-ms-text-size-adjust: 100%;mso-table-lspace: 0pt;=
+mso-table-rspace: 0pt;text-align:left;padding-top: 15px;padding-bottom: 15p=
+x;border-bottom: 1px solid #eeeeee;font-family: Helvetica, Arial, sans-seri=
+f;">Yes</td></tr><tr><th valign=3D"top" style=3D"width: 40%; font-size: 12p=
+x;text-align: left;text-transform: uppercase;color: #777777;padding-top: 15=
+px;padding-bottom: 15px;border-bottom: 1px solid #eeeeee;font-family: Helve=
+tica, Arial, sans-serif;">Please provide details:</th><td valign=3D"top" st=
+yle=3D"-webkit-text-size-adjust: 100%;-ms-text-size-adjust: 100%;mso-table-=
+lspace: 0pt;mso-table-rspace: 0pt;text-align:left;padding-top: 15px;padding=
+-bottom: 15px;border-bottom: 1px solid #eeeeee;font-family: Helvetica, Aria=
+l, sans-serif;">This class was extremely supportive of one another and enga=
+ged since Day 1. Watching Jose deliver his Capstone Presentation was a high=
+light for the week. He utilizes SMART, DISC, SPARK and SWOT to demonstrate =
+his understanding and ability to apply it.</td></tr><tr><th valign=3D"top" =
+style=3D"width: 40%; font-size: 12px;text-align: left;text-transform: upper=
+case;color: #777777;padding-top: 15px;padding-bottom: 15px;border-bottom: 1=
+px solid #eeeeee;font-family: Helvetica, Arial, sans-serif;">Were there any=
+ PAX details that stood out for future surprise and delight moments?</th><t=
+d valign=3D"top" style=3D"-webkit-text-size-adjust: 100%;-ms-text-size-adju=
+st: 100%;mso-table-lspace: 0pt;mso-table-rspace: 0pt;text-align:left;paddin=
+g-top: 15px;padding-bottom: 15px;border-bottom: 1px solid #eeeeee;font-fami=
+ly: Helvetica, Arial, sans-serif;">No</td></tr><tr><th valign=3D"top" style=
+=3D"width: 40%; font-size: 12px;text-align: left;text-transform: uppercase;=
+color: #777777;padding-top: 15px;padding-bottom: 15px;border-bottom: 1px so=
+lid #eeeeee;font-family: Helvetica, Arial, sans-serif;">DId you have any ch=
+allenging events, PAX or situations that we need to be aware of?</th><td va=
+lign=3D"top" style=3D"-webkit-text-size-adjust: 100%;-ms-text-size-adjust: =
+100%;mso-table-lspace: 0pt;mso-table-rspace: 0pt;text-align:left;padding-to=
+p: 15px;padding-bottom: 15px;border-bottom: 1px solid #eeeeee;font-family: =
+Helvetica, Arial, sans-serif;">No</td></tr><tr><th valign=3D"top" style=3D"=
+width: 40%; font-size: 12px;text-align: left;text-transform: uppercase;colo=
+r: #777777;padding-top: 15px;padding-bottom: 15px;border-bottom: 1px solid =
+#eeeeee;font-family: Helvetica, Arial, sans-serif;">Do you have any other f=
+eedback or suggestions to improve future training sessions?</th><td valign=
+=3D"top" style=3D"-webkit-text-size-adjust: 100%;-ms-text-size-adjust: 100%=
+;mso-table-lspace: 0pt;mso-table-rspace: 0pt;text-align:left;padding-top: 1=
+5px;padding-bottom: 15px;border-bottom: 1px solid #eeeeee;font-family: Helv=
+etica, Arial, sans-serif;">Not at this time.</td></tr></table></td></tr></t=
+able></td></tr></table><!--[if (gte mso 9)|(IE)]></td></tr></table><![endif=
+]--></div></td></tr></table></body></html>
+
+--_av-a70mRgdiJG8I3QN5fQdgjQ--
