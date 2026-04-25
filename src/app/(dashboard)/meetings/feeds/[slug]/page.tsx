@@ -45,6 +45,40 @@ export default function MeetingFeedDetailPage() {
 
   // Edit form state
   const [editOpen, setEditOpen] = useState(false);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+
+  async function handleDelete() {
+    /* Soft-delete: API DELETE sets is_enabled=false; the row + all
+       ingested messages stay so history is preserved. */
+    const ok = window.confirm(
+      `Disable feed "${feed?.name ?? slug}"?\n\n` +
+        "The feed stops polling but the existing messages and " +
+        "analyses stay searchable. You can re-enable later by editing " +
+        "and saving.",
+    );
+    if (!ok) return;
+    setDeleteSubmitting(true);
+    try {
+      const res = await fetchWithRefresh(
+        `/api/meetings/feeds/${encodeURIComponent(slug)}`,
+        { method: "DELETE" },
+      );
+      if (res.status === 401) {
+        window.location.href = "/login?next=/meetings/feeds";
+        return;
+      }
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string; detail?: string } | null;
+        setError(body?.detail || body?.error || `Delete failed (${res.status})`);
+        return;
+      }
+      window.location.href = "/meetings/feeds";
+    } catch (err) {
+      setError(`Network error: ${(err as Error).message}`);
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  }
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editSenders, setEditSenders] = useState("");
@@ -203,6 +237,20 @@ export default function MeetingFeedDetailPage() {
             style={btnSecondary}
           >
             {editOpen ? "Cancel" : "Edit"}
+          </button>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleteSubmitting}
+            data-testid="meeting-feed-delete"
+            style={{
+              ...btnSecondary,
+              borderColor: "rgba(204,68,68,0.55)",
+              color: "#e07b7b",
+              opacity: deleteSubmitting ? 0.6 : 1,
+            }}
+          >
+            {deleteSubmitting ? "Disabling…" : "Delete"}
           </button>
         </div>
       </div>
