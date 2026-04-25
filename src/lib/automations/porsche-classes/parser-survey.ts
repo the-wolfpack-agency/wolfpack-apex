@@ -184,6 +184,21 @@ export function parseClassIdentityFromFilename(
 /* Parse helpers                                                       */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Two known PCNA export shapes — same data, different column headers.
+ *
+ * Legacy shape (used through ~April 10): "Assessment Name", "First Name",
+ * "Last Name", "Status", "PPN ID", "Role", "Submission Time",
+ * "Question Type", "Prompt", "Response".
+ *
+ * v2 shape (April 6-10 onward): "question_order", "question_text",
+ * "question_type", "submitted_answer", "submitted_at_utc",
+ * "submitted_at_et", "lmsId", "firstName", "lastName", "email". No
+ * Status column — assume every row counts.
+ *
+ * `RawRow` is the legacy shape; v2 rows are normalized into this shape
+ * by `normalizeRow()` so the rest of the parser is format-agnostic.
+ */
 export interface RawRow {
   "Assessment Name"?: string | null;
   "First Name"?: string | null;
@@ -195,6 +210,44 @@ export interface RawRow {
   "Question Type"?: string | null;
   Prompt?: string | null;
   Response?: string | null;
+}
+
+interface RawRowV2 {
+  question_order?: number | string | null;
+  question_text?: string | null;
+  question_type?: string | null;
+  submitted_answer?: string | null;
+  submitted_at_utc?: string | null;
+  submitted_at_et?: string | null;
+  lmsId?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+}
+
+function isV2Shape(sample: Record<string, unknown>): boolean {
+  return (
+    "question_text" in sample &&
+    "submitted_answer" in sample &&
+    "question_type" in sample
+  );
+}
+
+function normalizeRow(raw: Record<string, unknown>): RawRow {
+  if (!isV2Shape(raw)) return raw as RawRow;
+  const r = raw as RawRowV2;
+  return {
+    "Assessment Name": null,
+    "First Name": r.firstName ?? null,
+    "Last Name": r.lastName ?? null,
+    Status: "ACTIVE", // v2 export has no Status column; treat all as active.
+    "PPN ID": r.lmsId ?? null,
+    Role: null,
+    "Submission Time": r.submitted_at_utc ?? null,
+    "Question Type": r.question_type ?? null,
+    Prompt: r.question_text ?? null,
+    Response: r.submitted_answer ?? null,
+  };
 }
 
 function fail(error: string, detail?: Record<string, unknown>): ParseResult {
@@ -301,16 +354,25 @@ export function decodeSurveyRows(
   }
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) return { error: "Survey workbook has no sheets" };
-  const rows = XLSX.utils.sheet_to_json<RawRow>(workbook.Sheets[sheetName], {
-    defval: null,
-  });
-  if (rows.length === 0) return { error: "Survey workbook is empty" };
-  const sample = rows[0] as Record<string, unknown>;
-  if (!("Prompt" in sample) || !("Question Type" in sample) || !("Response" in sample)) {
+  const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+    workbook.Sheets[sheetName],
+    { defval: null },
+  );
+  if (rawRows.length === 0) return { error: "Survey workbook is empty" };
+  const sample = rawRows[0];
+  const isLegacy =
+    "Prompt" in sample &&
+    "Question Type" in sample &&
+    "Response" in sample;
+  const isV2 = isV2Shape(sample);
+  if (!isLegacy && !isV2) {
     return {
       error: `Survey workbook missing required columns. Got: ${Object.keys(sample).join(", ")}`,
     };
   }
+  /* Normalize v2 rows into the legacy shape so the rest of the parser
+     (aggregate, splitMixedSurvey, collectRespondents) is format-blind. */
+  const rows = rawRows.map(normalizeRow);
   return { rows };
 }
 
