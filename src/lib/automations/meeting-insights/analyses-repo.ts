@@ -143,6 +143,45 @@ export async function getAnalysisByVersion(args: {
   return r.rows.length === 0 ? null : rowToAnalysis(r.rows[0]);
 }
 
+/**
+ * Bulk-fetch the LATEST analysis per message_id. Used by Phase 4 (brief)
+ * and Phase 5 (ad-hoc analyze) to enrich a list of messages with their
+ * analyses in a single round-trip. Returns a Map keyed on message_id;
+ * messages with no analysis are simply absent from the map.
+ *
+ * Tolerant of the analyses table not yet existing (early-bootstrap
+ * worktree before migration 084 ran) — Postgres 42P01 surfaces as an
+ * empty Map, never an exception.
+ */
+export async function getAnalysesByMessageIds(
+  message_ids: string[],
+): Promise<Map<string, MeetingAnalysisRecord>> {
+  const out = new Map<string, MeetingAnalysisRecord>();
+  if (message_ids.length === 0) return out;
+  try {
+    const r = await query<AnalysisRow>(
+      `SELECT DISTINCT ON (message_id)
+              id, message_id, analyzer_version, analyzed_at,
+              decisions, action_items, topics, attendees, blockers, next_steps,
+              raw_llm_response, model, tokens_used, status, error_detail, created_at
+         FROM instinct_meeting_analyses
+        WHERE message_id = ANY($1::uuid[])
+        ORDER BY message_id, analyzed_at DESC`,
+      [message_ids],
+    );
+    for (const row of r.rows) {
+      out.set(row.message_id, rowToAnalysis(row));
+    }
+  } catch (err) {
+    /* 42P01 = relation does not exist (migration not yet applied).
+       Brief + analyze degrade gracefully to "no analyses available" —
+       counts/listings still render, decisions/actions just empty. */
+    const code = (err as { code?: string }).code;
+    if (code !== "42P01") throw err;
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ */
 /* Upsert                                                              */
 /* ------------------------------------------------------------------ */
