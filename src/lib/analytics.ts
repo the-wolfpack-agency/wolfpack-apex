@@ -221,6 +221,24 @@ export type InstinctEventType =
   //     — fires when the AttachmentBlock UI expands to read parsed text.
   | "meeting_insights.attachment_downloaded"
   | "meeting_insights.attachment_text_viewed"
+  // Phase 4 — calendar-event meeting brief.
+  //   meeting_insights.brief_viewed: server-side per /api/meetings/brief
+  //     hit. metadata = { title, matched: boolean, feed_slug,
+  //                       open_action_items, recurring_topics,
+  //                       exception_count }
+  //   calendar.meeting_brief_opened: client-side disclosure click
+  //     metadata = { event_id }
+  //   calendar.meeting_brief_viewed: client-side after brief renders
+  //     metadata = { event_id, matched, feed_slug }
+  | "meeting_insights.brief_viewed"
+  | "calendar.meeting_brief_opened"
+  | "calendar.meeting_brief_viewed"
+  // Phase 5 — ad-hoc multi-term analyze.
+  //   meeting_insights.analyze_run: server-side per /api/meetings/analyze
+  //     hit. metadata = { matched, analyzed, feeds_touched,
+  //                       subject_filter_count, sender_filter_count,
+  //                       since, until }
+  | "meeting_insights.analyze_run"
   // MS 365 Insights panel — patterns computed from calendar + tasks + email.
   // `ms_insight.computed` fires server-side per request; `_viewed` /
   // `_cta_clicked` fire client-side so the learning loop can grade which
@@ -1260,7 +1278,35 @@ export type InstinctEventType =
   | "automations.feed_created"
   | "automations.feed_updated"
   | "automations.feed_disabled"
-  | "automations.feed_poll_triggered";
+  | "automations.feed_poll_triggered"
+  // Meeting Insights — Phase 2 analyzer + Phase 3 themes events.
+  //
+  //   automations.message_analyzed   { automation_id, feed_id, feed_slug,
+  //                                     message_id, analyzer_version,
+  //                                     status, topics, decisions,
+  //                                     action_items, tokens_used,
+  //                                     triggered_by? }
+  //     — fired after every analyzer pass (success | partial | error).
+  //       triggered_by="manual" when the operator hit "Re-analyze".
+  //
+  //   automations.message_reanalyze_requested { automation_id, feed_id,
+  //                                              feed_slug, message_id,
+  //                                              prior_status }
+  //     — operator clicked "Re-analyze" on a message detail page.
+  //
+  //   automations.themes_viewed     { automation_id, feed_id, feed_slug,
+  //                                    recurring, stale, open_action_items }
+  //     — themes tab page-view; counts so we can see whether the page
+  //       is actually surfacing signal.
+  //
+  //   automations.themes_searched   { automation_id, feed_id, feed_slug,
+  //                                    query_length, hit_count }
+  //     — semantic search executed. query_length only (no q text) so
+  //       we don't leak meeting content into the events stream.
+  | "automations.message_analyzed"
+  | "automations.message_reanalyze_requested"
+  | "automations.themes_viewed"
+  | "automations.themes_searched";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

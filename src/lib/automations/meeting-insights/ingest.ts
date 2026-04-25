@@ -219,6 +219,19 @@ export async function ingestMeetingMessage(
     attachments: attachmentsPersisted,
   });
 
+  // 6. Fire the Phase 2 analyzer async — never blocks ingest. Failures
+  //    land as status='error' rows; they don't break this pipeline.
+  if (created) {
+    void fireAnalyzer({
+      feed_id: route.feed_id,
+      message_id: messageId,
+      user_id: req.user_id,
+      user_role: req.user_role,
+      automation_id: req.automation.id,
+      feed_slug: route.feed_slug,
+    });
+  }
+
   return {
     artifact_id: artifactId,
     feed_id: route.feed_id,
@@ -227,6 +240,48 @@ export async function ingestMeetingMessage(
     parse_status: "processed",
     attachments_persisted: attachmentsPersisted,
   };
+}
+
+/**
+ * Async analyzer trigger. Imports lazily so we don't pay the SDK init
+ * cost on cold ingest paths that don't need analysis (e.g. duplicate
+ * messages). Catches everything; logs but never propagates.
+ */
+async function fireAnalyzer(args: {
+  feed_id: string;
+  message_id: string;
+  user_id: string;
+  user_role: string;
+  automation_id: string;
+  feed_slug: string;
+}): Promise<void> {
+  try {
+    const mod = await import("./run-analyzer");
+    const out = await mod.runAnalyzer({
+      feed_id: args.feed_id,
+      message_id: args.message_id,
+    });
+    if (out.record) {
+      trackEvent("automations.message_analyzed", args.user_id, args.user_role, {
+        automation_id: args.automation_id,
+        feed_id: args.feed_id,
+        feed_slug: args.feed_slug,
+        message_id: args.message_id,
+        analyzer_version: out.record.analyzer_version,
+        status: out.record.status,
+        topics: out.record.topics.length,
+        decisions: out.record.decisions.length,
+        action_items: out.record.action_items.length,
+        tokens_used: out.record.tokens_used ?? 0,
+      });
+    }
+  } catch (err) {
+    // Final safety net — analyzer failure never breaks ingest.
+    console.warn(
+      "[meeting-insights/ingest] analyzer fire failed:",
+      (err as Error).message,
+    );
+  }
 }
 
 /* ------------------------------------------------------------------ */
