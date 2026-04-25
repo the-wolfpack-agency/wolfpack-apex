@@ -430,6 +430,29 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/sites/[id]/share/route.ts",
     reason: "share-link issue/list/revoke — writes apex_share_tokens rows (created_by, revoked_at) serving as audit ledger + fires site.share_link_issued/_revoked analytics with user_id + token_nonce",
   },
+
+  // Automations (Stream A — porsche-classes ingest + dashboard).
+  // Every state change writes to a dedicated automation table that IS
+  // the audit ledger — instinct_automation_porsche_artifacts (raw
+  // bytes), _snapshots (parsed view), _deltas (change row), _exceptions
+  // (resolution_by + resolved_at), _overrides (created_by). On top of
+  // those rows, automations.* analytics events fire on every meaningful
+  // step (artifact_ingested, artifact_quarantined, delta_computed,
+  // override_applied, exception_resolved, poll_run). Same "row + event
+  // = audit trail" pattern as the sites brief-edit / form-submission
+  // allowlist entries above.
+  {
+    route: "src/app/api/automations/[automationId]/poll/route.ts",
+    reason: "pollInbox in src/lib/automations/inbox-poller.ts fires automations.poll_run + automations.artifact_ingested/_quarantined; every artifact lands as an apex_automation_porsche_artifacts row that is itself the audit ledger",
+  },
+  {
+    route: "src/app/api/automations/[automationId]/override/route.ts",
+    reason: "insertOverride writes an apex_automation_porsche_overrides row with created_by + created_at (append-only ledger) and fires automations.override_applied analytics — row + event ARE the audit trail",
+  },
+  {
+    route: "src/app/api/automations/[automationId]/exceptions/[exceptionId]/resolve/route.ts",
+    reason: "resolveException flips status with resolved_by + resolved_at on apex_automation_porsche_exceptions (row records the resolver) and fires automations.exception_resolved analytics — row + event ARE the audit trail",
+  },
 ];
 
 export const AUDIT_ALLOWLIST_ROUTES: ReadonlySet<string> = new Set(
