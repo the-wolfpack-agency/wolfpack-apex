@@ -535,6 +535,25 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["admin", "analytics", "dashboard"],
   },
+  automations: {
+    domain: "automations",
+    route: "/automations",
+    title: "Automations",
+    purpose: "Codified recurring workflows — Instinct watches an inbox, parses inbound artifacts, surfaces deltas vs. the previous snapshot, and queues anything ambiguous for human review. The first registered automation is Porsche BA101/102 registration ingest.",
+    what_you_can_do: [
+      "See every registered automation and its owner at /automations.",
+      "Open an automation to view artifacts received today, classes in window, and open exceptions.",
+      "Click Changes to see a Mon/Fri-style digest of who joined / dropped per class.",
+      "Resolve or dismiss exceptions (parse failures, low-confidence matches) from the queue.",
+      "Click Run now to trigger an ad-hoc inbox poll.",
+    ],
+    how_to: [
+      "Open Automations from the left nav.",
+      "Click into a specific automation (e.g. Porsche BA101/102).",
+      "Use the metric tiles to gauge state, then drill into Changes or Exceptions.",
+    ],
+    related_pages: ["dashboard", "analytics", "knowledge"],
+  },
   messages: {
     domain: "messages",
     route: "/messages",
