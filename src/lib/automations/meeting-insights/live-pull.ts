@@ -18,7 +18,8 @@
  * apply.
  */
 
-import { listMailDelta, type GraphMailMessage } from "@/lib/ms-graph/client";
+import type { GraphMailMessage } from "@/lib/ms-graph/client";
+import { getValidToken } from "@/lib/microsoft-graph";
 
 export interface LivePullFilters {
   /** Subject substring matchers (case-insensitive, ANY-of). Empty = all. */
@@ -82,33 +83,110 @@ function inDateRange(m: GraphMailMessage, f: LivePullFilters): boolean {
 }
 
 /**
- * Run a one-shot inbox scan against typed filters. NEVER persists
- * anything — caller decides what to do with the matches (eg show in
- * UI, offer "save as feed", etc.).
+ * Run a one-shot inbox scan against typed filters. Uses Microsoft
+ * Graph's `$search` + `$filter` so the matching happens server-side
+ * — avoids draining tens of thousands of messages just to throw
+ * away the irrelevant ones (which busted Vercel's 10s function
+ * limit on the previous delta-drain implementation).
+ *
+ * NEVER persists anything — caller decides what to do with the
+ * matches (show in UI, offer "save as feed", etc.).
  */
 export async function livePullInbox(args: {
   userId: string;
   filters: LivePullFilters;
 }): Promise<LivePullResult> {
-  const limit = args.filters.limit ?? 50;
-  let items: GraphMailMessage[] = [];
-  try {
-    /* No deltaLink — we want a fresh scan against the entire inbox.
-       For phase-1 ergonomics this returns the most-recent slice; if
-       we ever want true full-history we'd drain nextLinks. */
-    const r = await listMailDelta(args.userId);
-    items = r.items;
-  } catch (err) {
-    const code = (err as { code?: string }).code;
-    if (code === "no_token") {
-      return { skipped: true, skipped_reason: "no_user_connected", inbox_seen: 0, matched: [], truncated: false };
-    }
-    throw err;
+  const limit = Math.min(args.filters.limit ?? 50, 100);
+  const token = await getValidToken(args.userId);
+  if (!token) {
+    return {
+      skipped: true,
+      skipped_reason: "no_user_connected",
+      inbox_seen: 0,
+      matched: [],
+      truncated: false,
+    };
   }
 
-  const live = items.filter((m) => !m["@removed"]);
+  /* Build a Graph $search clause from the typed filters. $search uses
+     KQL: `from:nick@thewolfpack.agency` for sender; `subject:"PCNA"`
+     for subject; multiple terms are OR'd by default. We OR the
+     senders + subjects within their groups and AND the two groups
+     together via separate clauses. Date range goes through $filter
+     (which can't combine with $search on /messages, so we date-filter
+     in JS after the search). */
+  const senderTerms = args.filters.sender_match
+    .map((s) => `from:${JSON.stringify(s)}`)
+    .join(" OR ");
+  const subjectTerms = args.filters.subject_match
+    .map((s) => `subject:${JSON.stringify(s)}`)
+    .join(" OR ");
+  let searchClause = "";
+  if (senderTerms && subjectTerms) {
+    searchClause = `(${senderTerms}) AND (${subjectTerms})`;
+  } else if (senderTerms) {
+    searchClause = senderTerms;
+  } else if (subjectTerms) {
+    searchClause = subjectTerms;
+  }
+
+  const url = new URL("https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages");
+  url.searchParams.set("$top", String(limit));
+  url.searchParams.set(
+    "$select",
+    "id,subject,bodyPreview,from,receivedDateTime,hasAttachments",
+  );
+  if (searchClause) {
+    url.searchParams.set("$search", `"${searchClause}"`);
+  } else {
+    /* No filters typed — fall back to most-recent N. */
+    url.searchParams.set("$orderby", "receivedDateTime desc");
+  }
+
+  let items: GraphMailMessage[] = [];
+  try {
+    const res = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${token.accessToken}`,
+        ConsistencyLevel: "eventual", // required when using $search
+      },
+    });
+    if (res.status === 401) {
+      return {
+        skipped: true,
+        skipped_reason: "no_valid_token",
+        inbox_seen: 0,
+        matched: [],
+        truncated: false,
+      };
+    }
+    if (!res.ok) {
+      return {
+        skipped: true,
+        skipped_reason: `graph_${res.status}`,
+        inbox_seen: 0,
+        matched: [],
+        truncated: false,
+      };
+    }
+    const body = (await res.json()) as { value?: GraphMailMessage[] };
+    items = body.value ?? [];
+  } catch (err) {
+    return {
+      skipped: true,
+      skipped_reason: (err as Error).message,
+      inbox_seen: 0,
+      matched: [],
+      truncated: false,
+    };
+  }
+
+  /* Graph's $search is approximate — apply the typed substring rules
+     locally to belt-and-suspenders. Also apply the date range, which
+     can't be combined with $search server-side. */
   const matched: LivePullMatch[] = [];
-  for (const m of live) {
+  for (const m of items) {
+    if (m["@removed"]) continue;
     if (!matchesFilters(m, args.filters)) continue;
     if (!inDateRange(m, args.filters)) continue;
     matched.push({
@@ -125,8 +203,8 @@ export async function livePullInbox(args: {
 
   return {
     skipped: false,
-    inbox_seen: live.length,
+    inbox_seen: items.length,
     matched,
-    truncated: matched.length >= limit && live.length > matched.length,
+    truncated: matched.length >= limit && items.length > matched.length,
   };
 }
