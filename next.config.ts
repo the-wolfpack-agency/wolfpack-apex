@@ -8,9 +8,11 @@ const nextConfig: NextConfig = {
   // server-only packages like unpdf from the function bundle).
   outputFileTracingRoot: path.resolve(__dirname),
   // unpdf wraps pdfjs-dist's legacy build which uses dynamic require
-  // for its worker. Mark it as an external server package so Next
-  // doesn't try to bundle it.
-  serverExternalPackages: ["unpdf"],
+  // for its worker. @react-pdf/renderer is ESM-only and pulls in
+  // yoga-layout WASM via its own ESM tree — both fail when Webpack
+  // bundles them. Mark as external so Next loads them at request
+  // time via Node's native loader.
+  serverExternalPackages: ["unpdf", "@react-pdf/renderer"],
 };
 
 export default nextConfig;
