@@ -100,6 +100,87 @@ interface AttachmentRow extends Record<string, unknown> {
 }
 
 /**
+ * Phase 5 — ad-hoc query across already-ingested messages. Joins
+ * feeds so callers get the feed slug/name on each row without an N+1
+ * lookup. Filters are arrays of substrings; ANY match within an array
+ * (OR), ALL arrays must match if non-empty (AND).
+ *
+ * subject_match / sender_match are case-insensitive ILIKE patterns.
+ * Empty arrays mean "no constraint on that axis".
+ */
+export interface SearchedMessageRecord extends MeetingMessageRecord {
+  feed_slug: string;
+  feed_name: string;
+}
+
+export async function searchMessages(args: {
+  subject_match: string[];
+  sender_match: string[];
+  since?: string;
+  until?: string;
+  limit?: number;
+}): Promise<SearchedMessageRecord[]> {
+  const limit = Math.min(Math.max(args.limit ?? 500, 1), 2000);
+
+  // Build dynamic WHERE — every condition is parameterized.
+  const where: string[] = [];
+  const params: unknown[] = [];
+  let i = 1;
+
+  if (args.subject_match.length > 0) {
+    const ors: string[] = [];
+    for (const s of args.subject_match) {
+      params.push(`%${s}%`);
+      ors.push(`m.subject ILIKE $${i++}`);
+    }
+    where.push(`(${ors.join(" OR ")})`);
+  }
+  if (args.sender_match.length > 0) {
+    const ors: string[] = [];
+    for (const s of args.sender_match) {
+      params.push(`%${s.toLowerCase()}%`);
+      ors.push(`LOWER(m.from_address) ILIKE $${i++}`);
+    }
+    where.push(`(${ors.join(" OR ")})`);
+  }
+  if (args.since) {
+    params.push(args.since);
+    where.push(`m.received_at >= $${i++}`);
+  }
+  if (args.until) {
+    params.push(args.until);
+    where.push(`m.received_at <= $${i++}`);
+  }
+
+  params.push(limit);
+  const limitIdx = i++;
+
+  const sql = `
+    SELECT m.id, m.feed_id, m.source_message_id, m.artifact_id, m.subject,
+           m.from_address, m.from_name, m.to_addresses, m.cc_addresses,
+           m.received_at, m.body_text, m.body_html, m.has_attachments,
+           m.created_at,
+           f.slug AS feed_slug, f.name AS feed_name
+      FROM instinct_meeting_messages m
+      JOIN instinct_meeting_feeds f ON f.id = m.feed_id
+     ${where.length > 0 ? "WHERE " + where.join(" AND ") : ""}
+     ORDER BY m.received_at DESC
+     LIMIT $${limitIdx}
+  `;
+
+  interface SearchRow extends MessageRow {
+    feed_slug: string;
+    feed_name: string;
+  }
+  const r = await query<SearchRow>(sql, params);
+  return r.rows.map((row) => ({
+    ...rowToMessage(row),
+    feed_slug: row.feed_slug,
+    feed_name: row.feed_name,
+  }));
+}
+
+/**
  * Lists attachment metadata for a message — does NOT include `bytes`.
  * Bytes are loaded separately via the (Stream B) download route, gated
  * by `meetings.export`.
