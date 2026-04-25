@@ -62,14 +62,40 @@ beforeEach(() => {
 });
 
 describe("ingestMeetingMessage", () => {
-  it("short-circuits on a duplicate processed artifact", async () => {
-    mockWriteQuery.mockResolvedValueOnce({
-      rows: [{ id: "art-1", parse_status: "processed", inserted: false }],
-    });
+  it("does NOT short-circuit on a duplicate artifact — proceeds to message routing", async () => {
+    /* The artifact-level short-circuit was removed because it
+       prevented the SAME Graph email from fanning out to multiple
+       feeds. Now the upsert chain (message + attachments) runs even
+       if the artifact already exists; idempotency is enforced at the
+       (feed_id, source_message_id) message level. */
+    mockWriteQuery
+      .mockResolvedValueOnce({
+        rows: [{ id: "art-1", parse_status: "processed", inserted: false }],
+      })
+      // upsert message — pretend the row already existed (xmax != 0)
+      .mockResolvedValueOnce({
+        rows: [{ id: "msg-1", inserted: false }],
+      })
+      // mark artifact processed
+      .mockResolvedValueOnce({ rows: [{ id: "art-1" }] });
+    mockListFeeds.mockResolvedValueOnce([
+      {
+        id: "feed-1",
+        slug: "weekly",
+        name: "Weekly",
+        description: null,
+        filters: { sender_match: ["bot@example.com"], subject_match: [] },
+        is_enabled: true,
+        created_by: "u",
+        created_at: "",
+        updated_at: "",
+      },
+    ]);
     const result = await ingestMeetingMessage(baseRequest());
     expect(result.was_duplicate).toBe(true);
     expect(result.artifact_id).toBe("art-1");
-    expect(mockListFeeds).not.toHaveBeenCalled();
+    expect(result.message_id).toBe("msg-1");
+    expect(mockListFeeds).toHaveBeenCalled();
   });
 
   it("quarantines + inserts an exception when no feed matches", async () => {

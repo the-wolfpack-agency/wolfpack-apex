@@ -98,17 +98,13 @@ export async function ingestMeetingMessage(
     { expectRows: 1 },
   );
   const artifactId = artifact.rows[0].id;
-
-  if (!artifact.rows[0].inserted && artifact.rows[0].parse_status === "processed") {
-    return {
-      artifact_id: artifactId,
-      feed_id: null,
-      message_id: null,
-      was_duplicate: true,
-      parse_status: "processed",
-      attachments_persisted: 0,
-    };
-  }
+  /* The artifact-level dedupe used to short-circuit here, but that
+     prevented multiple feeds from ever capturing the same Graph email
+     — the second feed in the chain saw was_duplicate:true and never
+     got a message row of its own. Dedup is now at the (feed_id,
+     source_message_id) level (the message-row upsert below), so the
+     same artifact can fan out to N feeds correctly. The artifact
+     row itself stays unique-by-content via the artifact upsert. */
 
   // 2. Route the message to a feed. We re-load the live feed list every
   //    call rather than caching — feed config is small and admin
