@@ -135,3 +135,113 @@ describe("pollInbox · soft-fail when no user is connected", () => {
     // The poller must NOT throw — cron health stays green during bootstrap.
   });
 });
+
+describe("pollInboxHistorical · $search-based historical scan", () => {
+  const realFetch = global.fetch;
+  let lastFetchUrl = "";
+
+  function mockFetch(items: unknown[], status = 200) {
+    global.fetch = jest.fn(async (url: RequestInfo | URL) => {
+      lastFetchUrl = String(url);
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        json: async () => ({ value: items }),
+        text: async () => JSON.stringify({ value: items }),
+      } as Response;
+    }) as typeof fetch;
+  }
+
+  beforeEach(() => {
+    (getAutomation as jest.Mock).mockReturnValue(automation);
+    (getValidToken as jest.Mock).mockReset();
+    (getValidToken as jest.Mock).mockResolvedValue({
+      accessToken: "tok",
+      userEmail: "u@x",
+    });
+    lastFetchUrl = "";
+  });
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
+  it("returns skipped:'no_user_connected' when no token", async () => {
+    (getValidToken as jest.Mock).mockResolvedValueOnce(null);
+    const { pollInboxHistorical } = await import("@/lib/automations/inbox-poller");
+    const r = await pollInboxHistorical({
+      automationId: "porsche-classes",
+      userId: "u-1",
+      userRole: "ops",
+      filters: { sender_match: ["porsche-academy-notification@porsche.de"] },
+    });
+    expect(r.skipped).toBe("no_user_connected");
+  });
+
+  it("uses $search when filters are provided", async () => {
+    mockFetch([]);
+    const { pollInboxHistorical } = await import("@/lib/automations/inbox-poller");
+    await pollInboxHistorical({
+      automationId: "porsche-classes",
+      userId: "u-1",
+      userRole: "ops",
+      filters: { sender_match: ["nick@thewolfpack.agency"] },
+    });
+    expect(lastFetchUrl).toContain("%24search");
+    /* Bare email (no spaces / dashes) goes through unwrapped; URL-encoded "@" is %40. */
+    expect(lastFetchUrl).toContain("from%3Anick%40thewolfpack.agency");
+  });
+
+  it("single-quotes KQL values that contain dashes", async () => {
+    mockFetch([]);
+    const { pollInboxHistorical } = await import("@/lib/automations/inbox-poller");
+    await pollInboxHistorical({
+      automationId: "porsche-classes",
+      userId: "u-1",
+      userRole: "ops",
+      filters: { sender_match: ["porsche-academy-notification@porsche.de"] },
+    });
+    /* %27 is a single quote — wrapping is required because KQL needs the
+       value quoted when it contains a dash. */
+    expect(lastFetchUrl).toContain(
+      "from%3A%27porsche-academy-notification%40porsche.de%27",
+    );
+  });
+
+  it("falls back to $orderby when no filters typed", async () => {
+    mockFetch([]);
+    const { pollInboxHistorical } = await import("@/lib/automations/inbox-poller");
+    await pollInboxHistorical({
+      automationId: "porsche-classes",
+      userId: "u-1",
+      userRole: "ops",
+      filters: { sender_match: [], subject_match: [] },
+    });
+    expect(lastFetchUrl).not.toContain("%24search");
+    expect(lastFetchUrl).toContain("%24orderby");
+  });
+
+  it("returns errors:1 when Graph returns non-OK", async () => {
+    mockFetch([], 400);
+    const { pollInboxHistorical } = await import("@/lib/automations/inbox-poller");
+    const r = await pollInboxHistorical({
+      automationId: "porsche-classes",
+      userId: "u-1",
+      userRole: "ops",
+      filters: { sender_match: ["porsche-academy-notification@porsche.de"] },
+    });
+    expect(r.errors).toBe(1);
+    expect(r.messages_seen).toBe(0);
+  });
+
+  it("returns skipped:'no_valid_token' on 401", async () => {
+    mockFetch([], 401);
+    const { pollInboxHistorical } = await import("@/lib/automations/inbox-poller");
+    const r = await pollInboxHistorical({
+      automationId: "porsche-classes",
+      userId: "u-1",
+      userRole: "ops",
+      filters: { sender_match: ["x"] },
+    });
+    expect(r.skipped).toBe("no_valid_token");
+  });
+});

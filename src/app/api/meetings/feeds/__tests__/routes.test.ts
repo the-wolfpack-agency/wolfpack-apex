@@ -36,6 +36,7 @@ jest.mock("@/lib/automations/meeting-insights/messages-repo", () => ({
 const mockPollInbox = jest.fn();
 jest.mock("@/lib/automations/inbox-poller", () => ({
   pollInbox: (...a: unknown[]) => mockPollInbox(...a),
+  pollInboxHistorical: (...a: unknown[]) => mockPollInbox(...a),
 }));
 
 const mockTrackEvent = jest.fn();

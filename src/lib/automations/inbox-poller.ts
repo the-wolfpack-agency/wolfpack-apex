@@ -455,3 +455,254 @@ export async function pollInbox(args: {
     duration_ms,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Historical $search-based scan                                       */
+/*                                                                     */
+/* The delta-feed cursor is shared across every meeting-insights feed  */
+/* because the underlying Graph mailbox is one stream. That makes      */
+/* "Run now" on a brand-new feed return 0 — the cursor is already      */
+/* past the historical messages this feed wants. This entry point      */
+/* runs a Graph $search using the feed's own filters, ingests every    */
+/* match, and never touches the delta cursor (so cron continues to     */
+/* drive forward incrementally for all feeds).                         */
+/* ------------------------------------------------------------------ */
+
+interface HistoricalScanArgs {
+  automationId: AutomationId;
+  userId: string;
+  userRole: string;
+  /** Filters to scope the $search — typically the feed's own filters. */
+  filters: { sender_match?: string[]; subject_match?: string[] };
+  /** Hard cap on messages pulled. Defaults to 50. */
+  limit?: number;
+}
+
+const kqlValue = (s: string) =>
+  /[\s\-]/.test(s) ? `'${s.replace(/'/g, "")}'` : s;
+
+function buildSearchClause(filters: HistoricalScanArgs["filters"]): string {
+  const senders = (filters.sender_match ?? [])
+    .map((s) => `from:${kqlValue(s)}`)
+    .join(" OR ");
+  const subjects = (filters.subject_match ?? [])
+    .map((s) => `subject:${kqlValue(s)}`)
+    .join(" OR ");
+  if (senders && subjects) return `(${senders}) AND (${subjects})`;
+  return senders || subjects;
+}
+
+export async function pollInboxHistorical(args: HistoricalScanArgs): Promise<PollResult> {
+  const start = Date.now();
+  const automation = getAutomation(args.automationId);
+  if (!automation) {
+    throw new Error(`unknown automation: ${args.automationId}`);
+  }
+  const limit = Math.min(args.limit ?? 50, 100);
+
+  const token = await getValidToken(args.userId);
+  if (!token) {
+    return {
+      automation_id: args.automationId,
+      messages_seen: 0,
+      messages_matched: 0,
+      artifacts_ingested: 0,
+      artifacts_duplicate: 0,
+      artifacts_quarantined: 0,
+      errors: 0,
+      duration_ms: Date.now() - start,
+      skipped: "no_user_connected",
+    };
+  }
+
+  const searchClause = buildSearchClause(args.filters);
+  const url = new URL("https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages");
+  url.searchParams.set("$top", String(limit));
+  url.searchParams.set(
+    "$select",
+    "id,subject,bodyPreview,from,toRecipients,ccRecipients,body,receivedDateTime,hasAttachments",
+  );
+  if (searchClause) {
+    url.searchParams.set("$search", `"${searchClause}"`);
+  } else {
+    url.searchParams.set("$orderby", "receivedDateTime desc");
+  }
+
+  let items: GraphMailMessage[] = [];
+  try {
+    const res = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${token.accessToken}`,
+        ConsistencyLevel: "eventual",
+      },
+    });
+    if (res.status === 401) {
+      return {
+        automation_id: args.automationId,
+        messages_seen: 0,
+        messages_matched: 0,
+        artifacts_ingested: 0,
+        artifacts_duplicate: 0,
+        artifacts_quarantined: 0,
+        errors: 0,
+        duration_ms: Date.now() - start,
+        skipped: "no_valid_token",
+      };
+    }
+    if (!res.ok) {
+      console.warn(
+        `[automations/inbox-poller] historical $search failed: graph_${res.status}`,
+      );
+      return {
+        automation_id: args.automationId,
+        messages_seen: 0,
+        messages_matched: 0,
+        artifacts_ingested: 0,
+        artifacts_duplicate: 0,
+        artifacts_quarantined: 0,
+        errors: 1,
+        duration_ms: Date.now() - start,
+      };
+    }
+    const body = (await res.json()) as { value?: GraphMailMessage[] };
+    items = body.value ?? [];
+  } catch (err) {
+    console.warn(
+      `[automations/inbox-poller] historical $search threw: ${(err as Error).message}`,
+    );
+    return {
+      automation_id: args.automationId,
+      messages_seen: 0,
+      messages_matched: 0,
+      artifacts_ingested: 0,
+      artifacts_duplicate: 0,
+      artifacts_quarantined: 0,
+      errors: 1,
+      duration_ms: Date.now() - start,
+    };
+  }
+
+  const messagesSeen = items.length;
+  let messagesMatched = 0;
+  let artifactsIngested = 0;
+  let artifactsDuplicate = 0;
+  let artifactsQuarantined = 0;
+  let errors = 0;
+
+  /* Belt-and-suspenders: Graph's $search is approximate, so re-apply the
+     typed substring filters locally. */
+  const localFilters = {
+    sender_match: args.filters.sender_match ?? [],
+    subject_match: args.filters.subject_match ?? [],
+  };
+
+  const messageLevel = isMessageLevelIngest(automation);
+
+  for (const msg of items) {
+    if (msg["@removed"]) continue;
+    if (!messageMatchesAutomation(msg, automation, localFilters)) continue;
+    messagesMatched += 1;
+
+    let attachments: Awaited<ReturnType<typeof fetchAttachments>> = [];
+    if (msg.hasAttachments) {
+      try {
+        attachments = await fetchAttachments(args.userId, msg.id);
+      } catch (err) {
+        errors += 1;
+        console.warn(
+          `[automations/inbox-poller] attachment fetch failed for ${msg.id}: ${(err as Error).message}`,
+        );
+        continue;
+      }
+    }
+
+    if (messageLevel) {
+      try {
+        const ext = msg as unknown as {
+          ccRecipients?: Array<{ emailAddress?: { address?: string | null } }>;
+          body?: { contentType?: string | null; content?: string | null };
+        };
+        const ccRecipients = ext.ccRecipients ?? [];
+        const bodyHtml =
+          ext.body?.contentType === "html" ? (ext.body?.content ?? null) : null;
+        const result = await ingestMeetingMessage({
+          automation,
+          source_message_id: msg.id,
+          received_at: msg.receivedDateTime ?? new Date().toISOString(),
+          subject: msg.subject ?? "",
+          from_address: msg.from?.emailAddress?.address ?? "",
+          from_name: msg.from?.emailAddress?.name ?? null,
+          to_addresses: (msg.toRecipients ?? [])
+            .map((r) => r.emailAddress?.address)
+            .filter((s): s is string => typeof s === "string"),
+          cc_addresses: ccRecipients
+            .map((r) => r.emailAddress?.address)
+            .filter((s): s is string => typeof s === "string"),
+          raw_bytes: Buffer.from(JSON.stringify(msg), "utf8"),
+          mime: "message/rfc822",
+          body_html: bodyHtml,
+          body_preview: msg.bodyPreview ?? null,
+          attachments,
+          user_id: args.userId,
+          user_role: args.userRole,
+        });
+        if (result.was_duplicate) artifactsDuplicate += 1;
+        else if (result.parse_status === "processed") artifactsIngested += 1;
+        else if (result.parse_status === "error_quarantined") artifactsQuarantined += 1;
+      } catch (err) {
+        errors += 1;
+        console.warn(
+          `[automations/inbox-poller] meeting ingest failed for ${msg.id}: ${(err as Error).message}`,
+        );
+      }
+      continue;
+    }
+
+    for (const att of attachments) {
+      const sourceType = detectSourceType(att.name, att.contentType, automation);
+      if (!sourceType) continue;
+      try {
+        const result: IngestResult = await ingestArtifact({
+          automation,
+          source_type: sourceType,
+          source_message_id: msg.id,
+          received_at: msg.receivedDateTime ?? new Date().toISOString(),
+          bytes: att.bytes,
+          hint: att.name,
+          mime: att.contentType || "application/octet-stream",
+          user_id: args.userId,
+          user_role: args.userRole,
+        });
+        if (result.was_duplicate) artifactsDuplicate += 1;
+        else if (result.parse_status === "processed") artifactsIngested += 1;
+        else if (result.parse_status === "error_quarantined") artifactsQuarantined += 1;
+      } catch (err) {
+        errors += 1;
+        console.warn(
+          `[automations/inbox-poller] historical ingest failed for ${msg.id}/${att.name}: ${(err as Error).message}`,
+        );
+      }
+    }
+  }
+
+  const duration_ms = Date.now() - start;
+  trackEvent("automations.poll_historical", args.userId, args.userRole, {
+    automation_id: args.automationId,
+    messages_seen: messagesSeen,
+    messages_matched: messagesMatched,
+    artifacts_ingested: artifactsIngested,
+    artifacts_quarantined: artifactsQuarantined,
+    duration_ms,
+  });
+
+  return {
+    automation_id: args.automationId,
+    messages_seen: messagesSeen,
+    messages_matched: messagesMatched,
+    artifacts_ingested: artifactsIngested,
+    artifacts_duplicate: artifactsDuplicate,
+    artifacts_quarantined: artifactsQuarantined,
+    errors,
+    duration_ms,
+  };
+}

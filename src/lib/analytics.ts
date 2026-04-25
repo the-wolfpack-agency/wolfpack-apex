@@ -1254,6 +1254,7 @@ export type InstinctEventType =
   | "automations.override_applied"
   | "automations.exception_resolved"
   | "automations.poll_run"
+  | "automations.poll_historical"
   | "automations.poll_skipped"
   // Meeting Insights — multi-feed recurring-meeting ingest (Stream A).
   //

@@ -17,7 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
 import { getAutomation } from "@/lib/automations/registry";
-import { pollInbox } from "@/lib/automations/inbox-poller";
+import { pollInboxHistorical, type PollResult } from "@/lib/automations/inbox-poller";
 import { getFeedBySlug } from "@/lib/automations/meeting-insights/feeds-repo";
 
 interface Ctx {
@@ -49,11 +49,30 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   }
 
   try {
-    const result = await pollInbox({
-      automationId: "meeting-insights",
-      userId: auth.user.email ?? auth.user.id,
-      userRole: auth.user.role,
-    });
+    /* "Run now" runs a $search-based historical scan against the
+       feed's own filters. Bypasses the shared delta cursor so a brand-
+       new feed can pull historical matches; cron continues to drive
+       the delta cursor forward for incremental polling. Try userId
+       first, fall back to email — same dual-anchor pattern as live-pull. */
+    const tryPoll = (key: string) =>
+      pollInboxHistorical({
+        automationId: "meeting-insights",
+        userId: key,
+        userRole: auth.user.role,
+        filters: {
+          sender_match: feed.filters.sender_match ?? [],
+          subject_match: feed.filters.subject_match ?? [],
+        },
+        limit: 50,
+      });
+    let result: PollResult = await tryPoll(auth.user.id);
+    if (
+      result.skipped === "no_user_connected" &&
+      auth.user.email &&
+      auth.user.email !== auth.user.id
+    ) {
+      result = await tryPoll(auth.user.email);
+    }
     trackEvent("automations.feed_poll_triggered", auth.user.id, auth.user.role, {
       automation_id: "meeting-insights",
       feed_id: feed.id,
