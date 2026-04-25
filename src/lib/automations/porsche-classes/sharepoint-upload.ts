@@ -46,6 +46,7 @@
  */
 
 import { getValidToken } from "@/lib/microsoft-graph";
+import { getSharepointConfig } from "./config-repo";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -70,7 +71,7 @@ export interface UploadClassSummaryArgs {
 export type UploadSkippedReason = "not_configured" | "no_token" | "graph_error";
 
 export type UploadClassSummaryResult =
-  | { ok: true; web_url: string }
+  | { ok: true; web_url: string; item_id: string | null }
   | {
       ok: false;
       error: string;
@@ -89,15 +90,42 @@ interface SharepointConfig {
 // ---------------------------------------------------------------------------
 
 /**
- * Read the three required env vars. Returns null when any are missing /
- * blank — the caller surfaces this as `skipped_reason: "not_configured"`.
+ * Resolve the SharePoint destination. Prefers the operator-managed row
+ * in `instinct_automation_porsche_config` (written via the wizard at
+ * `/automations/porsche-classes/setup`); falls back to the legacy env
+ * vars when no config row exists. Returns null when neither yields a
+ * complete (site_id + drive_id + folder_path) triple — the caller
+ * surfaces `skipped_reason: "not_configured"`.
  *
  * Trims whitespace because Vercel env vars have a documented history of
  * silently appending trailing newlines (see feedback memory note
- * `feedback_vercel_env_trailing_newline`). A trailing `\n` in the site id
- * would make every Graph call 404. Trim everywhere.
+ * `feedback_vercel_env_trailing_newline`). A trailing `\n` in the site
+ * id would make every Graph call 404. Trim everywhere.
+ *
+ * Async: reads from the DB (config-repo) first. The route layer already
+ * handles async; the only sync caller in tests is `buildUploadUrl` which
+ * takes the resolved config directly and is unaffected.
  */
-function loadConfig(): SharepointConfig | null {
+async function loadConfig(): Promise<SharepointConfig | null> {
+  /* Tier 1: operator-managed config row. */
+  try {
+    const dbConfig = await getSharepointConfig();
+    if (dbConfig) {
+      return {
+        siteId: dbConfig.site_id,
+        driveId: dbConfig.drive_id,
+        folderPath: dbConfig.path,
+      };
+    }
+  } catch (err) {
+    /* Tier 1 fall-through is safe — env vars are the documented
+       fallback. Log so a config-repo outage shows up in observability. */
+    console.warn(
+      `[sharepoint-upload] config-repo lookup failed, falling back to env: ${(err as Error).message}`,
+    );
+  }
+
+  /* Tier 2: legacy env vars (pre-wizard deployments). */
   const siteId = (process.env.INSTINCT_SHAREPOINT_SITE_ID || "").trim();
   const driveId = (process.env.INSTINCT_SHAREPOINT_DRIVE_ID || "").trim();
   const folderPathRaw = (
@@ -176,6 +204,20 @@ function extractWebUrl(payload: unknown): string {
   return "";
 }
 
+/**
+ * Pull the durable Graph item id from a drive-item response. Returned
+ * separately from web_url so the audit log can store both — the item_id
+ * is what the SharePoint DELETE undo path needs (web_url is a friendly
+ * link that may not survive a rename).
+ */
+function extractItemId(payload: unknown): string | null {
+  if (payload && typeof payload === "object") {
+    const obj = payload as Record<string, unknown>;
+    if (typeof obj.id === "string") return obj.id;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -203,7 +245,7 @@ export async function uploadClassSummary(
     };
   }
 
-  const config = loadConfig();
+  const config = await loadConfig();
   if (!config) {
     return {
       ok: false,
@@ -256,7 +298,8 @@ export async function uploadClassSummary(
       payload = null;
     }
     const webUrl = extractWebUrl(payload);
-    return { ok: true, web_url: webUrl };
+    const itemId = extractItemId(payload);
+    return { ok: true, web_url: webUrl, item_id: itemId };
   }
 
   // Non-2xx — read body for diagnostic, classify into skipped_reason.

@@ -1326,7 +1326,26 @@ export type InstinctEventType =
   //                                              status? }
   | "automations.sharepoint_upload_attempted"
   | "automations.sharepoint_upload_succeeded"
-  | "automations.sharepoint_upload_skipped";
+  | "automations.sharepoint_upload_skipped"
+  // Porsche-classes operator setup wizard
+  // (/automations/porsche-classes/setup) — non-technical operators
+  // configure ingest mailbox filters + SharePoint destination without
+  // touching env vars. Events fire from
+  // /api/automations/porsche-classes/config and /sharepoint-test.
+  //
+  //   automations.config_viewed       { automation_id }
+  //     — operator opened the wizard and the GET /config call returned.
+  //
+  //   automations.config_updated      { automation_id, fields }
+  //     — operator saved a new config row. fields=comma-joined list of
+  //       which payloads changed (inbox_filters / sharepoint).
+  //
+  //   automations.sharepoint_test_run { automation_id, ok, status? }
+  //     — sharepoint-test endpoint hit Graph; ok=true on a 2xx folder
+  //       lookup, false otherwise.
+  | "automations.config_viewed"
+  | "automations.config_updated"
+  | "automations.sharepoint_test_run";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

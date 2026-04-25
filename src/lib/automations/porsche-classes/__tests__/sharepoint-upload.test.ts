@@ -18,6 +18,13 @@ jest.mock("@/lib/microsoft-graph", () => ({
   getValidToken: (...args: unknown[]) => mockGetValidToken(...args),
 }));
 
+/* sharepoint-upload now reads the config-repo first and falls back to
+   env vars. These tests exercise the env-var fallback path; pin
+   getSharepointConfig to null so the DB tier never runs. */
+jest.mock("@/lib/automations/porsche-classes/config-repo", () => ({
+  getSharepointConfig: jest.fn(async () => null),
+}));
+
 import {
   uploadClassSummary,
   buildUploadUrl,

@@ -19,6 +19,47 @@ import { parseCognitoCoordinator } from "./parser-cognito-coordinator";
 import { parseCognitoInstructor } from "./parser-cognito-instructor";
 import { parseSurvey } from "./parser-survey";
 import { assemblePorscheClassSummary } from "./summary-assembler";
+import {
+  getInboxFilters as loadInboxFiltersFromConfig,
+  DEFAULT_INBOX_FILTERS,
+} from "./config-repo";
+
+/**
+ * Dynamic loader for the inbox poller. Reads the operator-managed row
+ * from `instinct_automation_porsche_config` (key='inbox_filters') and
+ * falls back to the static defaults declared in the AutomationDefinition
+ * below. Wired the same way meeting-insights does it
+ * (`unionEnabledFilters`) so the inbox-poller's
+ * `resolveActiveInboxFilters` calls this once per tick — operator edits
+ * to the wizard apply on the NEXT poll, no redeploy.
+ *
+ * Soft-fails to defaults on any DB error so a transient outage doesn't
+ * break ingest entirely (matches the inbox-poller's existing graceful-
+ * degradation contract).
+ */
+export async function loadInboxFilters(): Promise<{
+  sender_match: string[];
+  subject_match: string[];
+}> {
+  try {
+    const filters = await loadInboxFiltersFromConfig();
+    /* Empty arrays from a half-saved config row would silently disable
+       ingest. If both lists are empty, prefer the static defaults so a
+       brand-new tenant still receives traffic. */
+    if (
+      filters.sender_match.length === 0 &&
+      filters.subject_match.length === 0
+    ) {
+      return DEFAULT_INBOX_FILTERS;
+    }
+    return filters;
+  } catch (err) {
+    console.warn(
+      `[porsche-classes] loadInboxFilters fell back to defaults: ${(err as Error).message}`,
+    );
+    return DEFAULT_INBOX_FILTERS;
+  }
+}
 
 export const porscheClasses: AutomationDefinition = {
   id: "porsche-classes",
@@ -33,6 +74,10 @@ export const porscheClasses: AutomationDefinition = {
   // active class window — anything outside is informational only and does
   // not need to appear in the digest.
   active_window_days: { min: -7, max: 60 },
+  // Static fallback — used by callers that don't await loadInboxFilters
+  // (any direct read of the AutomationDefinition) and as the safety-net
+  // when the dynamic loader throws. Keep in sync with
+  // DEFAULT_INBOX_FILTERS in ./config-repo.ts.
   inbox_filters: {
     sender_match: [
       "porsche-academy-notification@porsche.de",
@@ -50,6 +95,9 @@ export const porscheClasses: AutomationDefinition = {
       "Instructor Class Report",
     ],
   },
+  // Dynamic loader: wizard-managed filter row wins when present, static
+  // fallback above kicks in when no row exists / DB unreachable.
+  loadInboxFilters,
   parsers: {
     porsche_xlsx: parseXlsx,
     cognito_coordinator: parseCognitoCoordinator,

@@ -17,6 +17,7 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { getAutomation } from "@/lib/automations/registry";
 import { insertOverride, listOverrides } from "@/lib/automations/queries";
 import { trackEvent } from "@/lib/analytics";
+import { recordAction } from "@/lib/automations/porsche-classes/audit-repo";
 import type { OverrideKind } from "@/lib/automations/types";
 
 const VALID_KINDS: ReadonlySet<OverrideKind> = new Set([
@@ -98,5 +99,37 @@ export async function POST(
     kind: override.kind,
   });
 
-  return NextResponse.json({ override }, { status: 201 });
+  // Audit log + 24h undo: only class_match overrides are user-revertable
+  // (a class_match merges two class_keys; the undo deletes the override
+  // row and the assembler stops merging on the next read). Other override
+  // kinds (alias, exclude_*) are not auditable here today — they can be
+  // added later by widening the action_kind CHECK constraint.
+  let audit_id: string | null = null;
+  if (override.kind === "class_match") {
+    try {
+      const audit = await recordAction({
+        automation_id: automation.id,
+        action_kind: "class_match_merge",
+        // target_ref = the class_key the merge points TO (the surviving
+        // key for the assembler); the original "from" key is in detail
+        // so the audit history widget can show both sides.
+        target_ref: override.to_value,
+        actor: auth.user.email,
+        detail: {
+          override_id: override.id,
+          from_value: override.from_value,
+          to_value: override.to_value,
+          reason: override.reason,
+        },
+      });
+      audit_id = audit.id;
+    } catch (err) {
+      console.warn(
+        `[automations/${automation.id}/override] audit insert failed:`,
+        (err as Error).message,
+      );
+    }
+  }
+
+  return NextResponse.json({ override, audit_id }, { status: 201 });
 }

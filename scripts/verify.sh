@@ -33,6 +33,12 @@ skip_stage() {
   echo "[SKIP] $name ($reason)"
 }
 
+# `--experimental-vm-modules` lets the export-pdf renderer's lazy
+# dynamic import of @react-pdf/renderer (ESM-only) load inside Jest's
+# sandboxed VM. Production (Node 20 on Vercel) doesn't need this flag —
+# only Jest's module registry does.
+export NODE_OPTIONS="${NODE_OPTIONS:-} --experimental-vm-modules"
+
 run_stage "lint"       npm run lint
 run_stage "typecheck"  npx tsc --noEmit
 run_stage "unit-tests" npx jest --silent

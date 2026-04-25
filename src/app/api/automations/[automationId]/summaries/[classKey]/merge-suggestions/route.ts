@@ -20,7 +20,7 @@ import { getAutomation } from "@/lib/automations/registry";
 import { query } from "@/lib/db";
 import { expandClassKeyEquivalence } from "@/lib/automations/porsche-classes/summary-assembler";
 
-interface SuggestionRow {
+interface SuggestionRow extends Record<string, unknown> {
   class_key: string;
   course_type: string;
   class_date: string;

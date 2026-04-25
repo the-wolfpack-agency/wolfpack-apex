@@ -230,6 +230,15 @@ export default function PorscheClassSummaryPage({
     a.click();
   }
 
+  function handleDownloadPdf() {
+    if (!summary) return;
+    const a = document.createElement("a");
+    a.href = `/api/automations/${encodeURIComponent(
+      automationId,
+    )}/summaries/${encodeURIComponent(rawClassKey)}/export-pdf`;
+    a.click();
+  }
+
   const [uploadState, setUploadState] = useState<
     | { kind: "idle" }
     | { kind: "uploading" }
@@ -527,6 +536,21 @@ export default function PorscheClassSummaryPage({
             }}
           >
             Download Word
+          </button>
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            data-testid="download-pdf"
+            style={{
+              background: "transparent",
+              color: "var(--wp-text)",
+              border: "1px solid var(--wp-border)",
+              padding: "0.55rem 1rem",
+              borderRadius: 6,
+              cursor: "pointer",
+            }}
+          >
+            Download PDF
           </button>
           <button
             type="button"

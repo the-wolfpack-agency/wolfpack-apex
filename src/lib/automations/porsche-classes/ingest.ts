@@ -43,6 +43,8 @@ import {
   splitMixedSurvey,
   type CandidateClass,
 } from "./parser-survey";
+import { recordAction } from "./audit-repo";
+import { notifySummaryReadyIfTransition } from "./notify-summary-ready";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -191,9 +193,13 @@ export async function ingestArtifact(
         // deltas + analytics fire just like the single-class path.
         let snapshotsWritten = 0;
         let deltasWritten = 0;
+        const auditSnapshotIds: string[] = [];
         for (const snap of splitSnapshots) {
           const written = await persistSnapshot(automationId, snap);
-          if (written.created) snapshotsWritten += 1;
+          if (written.created) {
+            snapshotsWritten += 1;
+            auditSnapshotIds.push(written.snapshot_id);
+          }
           if (written.delta_id) {
             deltasWritten += 1;
             trackEvent(
@@ -209,6 +215,11 @@ export async function ingestArtifact(
               },
             );
           }
+          // Notify on summary-ready transition for each affected class.
+          await notifySummaryReadyIfTransition({
+            automation_id: automationId,
+            class_key: written.class_key,
+          }).catch(() => {});
         }
         await writeQuery(
           `UPDATE instinct_automation_porsche_artifacts
@@ -234,6 +245,33 @@ export async function ingestArtifact(
             auto_split: true,
           },
         );
+        // Audit log + 24h undo: the auto-split is a SYSTEM-driven mutation
+        // that the operator may want to reverse if the splitter routed
+        // responses to the wrong classes. Capture the synthetic snapshot
+        // ids + the parser's original error so the revert handler can
+        // delete the snapshots AND restore a fresh parse_failure
+        // exception. Actor is "system" — no user clicked, the orchestrator
+        // ran from the inbox poller path. Defensive try/catch so an audit
+        // outage does not poison the artifact-processed state.
+        if (auditSnapshotIds.length > 0) {
+          try {
+            await recordAction({
+              automation_id: automationId,
+              action_kind: "survey_auto_split",
+              target_ref: artifactId,
+              actor: "system",
+              detail: {
+                snapshot_ids: auditSnapshotIds,
+                exception_id: null,
+                original_error: result.error,
+              },
+            });
+          } catch (err) {
+            console.warn(
+              `[ingest] audit insert (survey_auto_split) failed: ${(err as Error).message}`,
+            );
+          }
+        }
         return {
           artifact_id: artifactId,
           was_duplicate: false,
@@ -286,6 +324,13 @@ export async function ingestArtifact(
         is_baseline: written.is_baseline,
       });
     }
+    // Notify operators when this snapshot drives the class to "ready"
+    // (all four sources present for the first time). Fire-and-forget —
+    // failures don't poison the ingest write path.
+    await notifySummaryReadyIfTransition({
+      automation_id: automationId,
+      class_key: written.class_key,
+    }).catch(() => {});
   }
 
   // 5. Mark artifact processed. RETURNING id so writeQuery's

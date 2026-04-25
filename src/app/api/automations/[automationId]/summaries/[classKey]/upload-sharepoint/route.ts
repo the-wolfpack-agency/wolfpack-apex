@@ -30,6 +30,7 @@ import { trackEvent } from "@/lib/analytics";
 import { getAutomation } from "@/lib/automations/registry";
 import { renderClassSummaryDocx } from "@/lib/automations/porsche-classes/export-docx";
 import { uploadClassSummary } from "@/lib/automations/porsche-classes/sharepoint-upload";
+import { recordAction } from "@/lib/automations/porsche-classes/audit-repo";
 
 interface Ctx {
   params: Promise<{ automationId: string; classKey: string }>;
@@ -149,8 +150,34 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         web_url: result.web_url,
       },
     );
+    // Audit log + 24h undo: record the action AFTER the analytics event
+    // (analytics is fire-and-forget so its failure mode is invisible;
+    // the audit insert is strict — we wrap defensively so a pg outage on
+    // the audit table does not poison a successful upload). The audit
+    // row carries item_id (durable Graph handle for DELETE) + web_url
+    // (operator-friendly link).
+    let audit_id: string | null = null;
+    try {
+      const audit = await recordAction({
+        automation_id: automationId,
+        action_kind: "sharepoint_upload",
+        target_ref: classKey,
+        actor: auth.user.email,
+        detail: {
+          item_id: result.item_id,
+          web_url: result.web_url,
+          filename,
+        },
+      });
+      audit_id = audit.id;
+    } catch (err) {
+      console.warn(
+        `[automations/${automationId}/summaries/${classKey}/upload-sharepoint] audit insert failed:`,
+        (err as Error).message,
+      );
+    }
     return NextResponse.json(
-      { ok: true, web_url: result.web_url, filename },
+      { ok: true, web_url: result.web_url, filename, audit_id },
       { status: 200 },
     );
   }
