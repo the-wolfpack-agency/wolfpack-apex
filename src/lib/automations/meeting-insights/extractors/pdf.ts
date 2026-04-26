@@ -41,7 +41,7 @@ export function makeExtractPdfWith(reader: PdfTextReader): AttachmentExtractor {
       return { text, status: "extracted" };
     } catch (e) {
       if (process.env.MEETING_INSIGHTS_DEBUG) {
-        // eslint-disable-next-line no-console
+         
         console.error("[meeting-insights/pdf]", e);
       }
       return { text: null, status: "error" };

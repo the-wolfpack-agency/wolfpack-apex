@@ -2,7 +2,7 @@
  * entity-tags.test.ts — L3 polymorphic tag CRUD + dedup + analytics.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockQuery = jest.fn();
 const mockWriteQuery = jest.fn();

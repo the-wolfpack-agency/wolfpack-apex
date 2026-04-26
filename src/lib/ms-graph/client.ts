@@ -34,7 +34,7 @@
  * refreshes 5 minutes before expiry. If it returns null (refresh failed
  * or user not connected), we throw GraphClientError.code="no_token".
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { getValidToken } from "@/lib/microsoft-graph";
 

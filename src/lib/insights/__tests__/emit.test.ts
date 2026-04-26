@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 /**
  * Insights emitter contract:

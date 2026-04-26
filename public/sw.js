@@ -1,4 +1,4 @@
-/* eslint-disable no-restricted-globals */
+ 
 /**
  * Instinct service worker — offline shell caching.
  *

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import { generateCalendarSuggestions } from "@/lib/calendar/suggestions";
 import type { HistoricalInsights } from "@/lib/calendar/historical-insights";
 

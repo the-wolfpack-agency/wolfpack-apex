@@ -2,7 +2,7 @@
  * entity-links.test.ts — L3 polymorphic link CRUD + dedup + analytics.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockWriteQuery = jest.fn();
 const mockSafeQuery = jest.fn();

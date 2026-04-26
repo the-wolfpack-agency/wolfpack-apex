@@ -15,7 +15,7 @@
  * handler owns the trackEvent call and the shape can be reused by
  * future server-rendered surfaces.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import {
   fetchCalendarEvents,
