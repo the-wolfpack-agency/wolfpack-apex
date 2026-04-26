@@ -80,7 +80,7 @@ jobs:
 
       - name: Set up Python 3.13
         if: steps.pat-check.outputs.configured == 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.13'
           cache: pip
@@ -347,7 +347,7 @@ jobs:
 
       - name: Set up Python 3.13
         if: steps.pat-check.outputs.configured == 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.13'
           cache: pip
