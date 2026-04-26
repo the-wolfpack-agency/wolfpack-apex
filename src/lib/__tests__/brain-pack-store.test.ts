@@ -145,7 +145,7 @@ describe("brain-pack-store — quota handling", () => {
         result: unknown;
         onsuccess: null | (() => void);
       } = {
-        result: fakeDb,
+        result: fakeDb as unknown as IDBDatabase,
         onupgradeneeded: null,
         onerror: null,
         onsuccess: null,

@@ -167,7 +167,6 @@ describe("assistant-drafts-offline — offline queues the USER MESSAGE", () => {
 
   it("rejects an empty or missing message", async () => {
     await expect(
-      // @ts-expect-error — runtime validation
       sendAssistantMessageOffline({ message: "" }),
     ).rejects.toThrow(/message is required/i);
   });

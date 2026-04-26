@@ -190,7 +190,7 @@ describe("migration 057 — learning-loop analytics integration", () => {
     jest.resetModules();
 
     const trackEventMock = jest.fn();
-    const safeQueryMock = jest.fn(async (sql: string) => {
+    const safeQueryMock = jest.fn(async (sql: string, _params?: unknown[]) => {
       // Stateful-enough: return an empty rows array for every call so
       // INSERT/UPDATE/DELETE paths don't short-circuit on "not found".
       // Route the RETURNING query so link/recategorize return a row

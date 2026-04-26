@@ -232,8 +232,12 @@ describe("recurringAttendeesInsight", () => {
   test("ignores blank / non-string attendee entries defensively", () => {
     const events = [
       ev(-DAY / 60_000, 30, ["Nick Hoxsie", "", "  "]),
-      // @ts-expect-error — emulate a malformed payload
-      ev(-2 * DAY / 60_000, 30, ["Nick Hoxsie", null, undefined, 42 as any]),
+      ev(-2 * DAY / 60_000, 30, [
+        "Nick Hoxsie",
+        null as unknown as string,
+        undefined as unknown as string,
+        42 as unknown as string,
+      ]),
     ];
     const i = recurringAttendeesInsight(events, NOW, 7);
     expect(i.metric).toBe(2);
