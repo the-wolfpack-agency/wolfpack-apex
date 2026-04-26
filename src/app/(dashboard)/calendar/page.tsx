@@ -13,6 +13,7 @@ import {
   jsonHeaders,
 } from "@/lib/client-auth";
 import { MeetingBriefPanel } from "./_components/MeetingBriefPanel";
+import CalendarWeekGrid from "./_components/CalendarWeekGrid";
 
 type View = "week" | "month" | "year";
 
@@ -78,6 +79,52 @@ export default function CalendarPage() {
   const [error, setError] = useState<string | null>(null);
   const [openBriefIds, setOpenBriefIds] = useState<Set<string>>(() => new Set());
   const viewedSuggestionIds = useMemo(() => new Set<string>(), []);
+
+  // Week-grid anchor — any date inside the displayed week. Defaults
+  // to today; prev/next/today step it. Captured from `?date=` on
+  // mount so deep-links land on a specific week.
+  const [anchorIso, setAnchorIso] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const v = params.get("date");
+      if (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+    }
+    return new Date().toISOString().slice(0, 10);
+  });
+  const stepWeek = useCallback((deltaDays: number) => {
+    setAnchorIso((prev) => {
+      const d = new Date(prev);
+      d.setDate(d.getDate() + deltaDays);
+      return d.toISOString().slice(0, 10);
+    });
+  }, []);
+  const goToday = useCallback(() => {
+    setAnchorIso(new Date().toISOString().slice(0, 10));
+  }, []);
+  const handleGridEventClick = useCallback(
+    (eventId: string) => {
+      // Open the brief AND scroll its list row into view so the user
+      // sees the same details panel they would from the flat list.
+      setOpenBriefIds((prev) => {
+        const next = new Set(prev);
+        next.add(eventId);
+        return next;
+      });
+      fireAnalytics("calendar.meeting_brief_opened", {
+        event_id: eventId,
+        source: "week_grid",
+      });
+      if (typeof window !== "undefined") {
+        requestAnimationFrame(() => {
+          const el = document.querySelector<HTMLElement>(
+            `[data-testid="calendar-event-${eventId}"]`,
+          );
+          if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+        });
+      }
+    },
+    [],
+  );
 
   const toggleBrief = useCallback((eventId: string) => {
     setOpenBriefIds((prev) => {
@@ -184,6 +231,17 @@ export default function CalendarPage() {
 
       {data && !loading && (
         <>
+          {view === "week" ? (
+            <CalendarWeekGrid
+              events={data.events}
+              anchorIso={anchorIso}
+              onEventClick={handleGridEventClick}
+              onPrevWeek={() => stepWeek(-7)}
+              onNextWeek={() => stepWeek(7)}
+              onToday={goToday}
+            />
+          ) : null}
+
           <div
             className="rounded-lg p-4 border"
             style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}

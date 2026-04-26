@@ -131,3 +131,81 @@ describe("CalendarPage", () => {
     expect(container.innerHTML).toBe("");
   });
 });
+
+describe("CalendarPage — week grid integration", () => {
+  test("week view renders the grid above the analytics dashboard with the sample event", async () => {
+    mockRange({
+      ...SAMPLE,
+      events: [
+        {
+          ...SAMPLE.events[0],
+          // Force into the visible window: 10am local on a Sun-anchored
+          // week; Apr 21 2026 is a Tuesday → day idx 2.
+          start: "2026-04-21T10:00:00",
+          end: "2026-04-21T11:00:00",
+          subject: "Admin Access",
+        },
+      ],
+    });
+    render(<CalendarPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("calendar-week-grid")).toBeInTheDocument(),
+    );
+    // Event card lives inside the week grid AND in the flat list.
+    expect(screen.getByTestId("calendar-week-event-e1")).toBeInTheDocument();
+    expect(screen.getByTestId("calendar-event-e1")).toBeInTheDocument();
+  });
+
+  test("clicking a grid event opens the brief panel in the flat list (single source of truth)", async () => {
+    // jsdom doesn't implement scrollIntoView. The page calls it
+    // inside requestAnimationFrame after the click — stub it so the
+    // rAF callback doesn't throw.
+    (Element.prototype as any).scrollIntoView = () => {};
+
+    mockRange({
+      ...SAMPLE,
+      events: [
+        {
+          ...SAMPLE.events[0],
+          start: "2026-04-21T10:00:00",
+          end: "2026-04-21T11:00:00",
+        },
+      ],
+    });
+    render(<CalendarPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("calendar-week-grid")).toBeInTheDocument(),
+    );
+    const callsBefore = mockFetchWithRefresh.mock.calls.length;
+    fireEvent.click(screen.getByTestId("calendar-week-event-e1"));
+    // Match on body content directly so the assertion is robust to
+    // event-shape drift; the page POSTs /api/analytics with a body
+    // that tags the brief-open as coming from the week_grid.
+    await waitFor(() => {
+      const newCalls = mockFetchWithRefresh.mock.calls
+        .slice(callsBefore)
+        .filter((c) => c[0] === "/api/analytics");
+      const matched = newCalls.find((c) => {
+        const body = String(c[1]?.body ?? "");
+        return (
+          body.includes("calendar.meeting_brief_opened") &&
+          body.includes("week_grid") &&
+          body.includes("e1")
+        );
+      });
+      expect(matched).toBeTruthy();
+    });
+  });
+
+  test("non-week views (month/year) do NOT render the grid", async () => {
+    mockRange(SAMPLE);
+    render(<CalendarPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("calendar-week-grid")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByTestId("calendar-view-month"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("calendar-week-grid")).toBeNull();
+    });
+  });
+});

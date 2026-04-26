@@ -79,21 +79,31 @@ export function emitInsight(e: InsightEvent): void {
   // existing /api/analytics endpoint, which forwards to trackEvent
   // server-side. Fire-and-forget — UX never blocks on telemetry.
   if (typeof window !== "undefined") {
-    const token = getClientToken();
-    void fetch("/api/analytics", {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({
-        event: eventNameFor(e),
-        metadata: buildMetadata(e),
-      }),
-    }).catch(() => {
+    // Hard-guard so a missing/undefined `fetch` (jsdom in unit tests,
+    // some legacy browsers) can't throw a synchronous ReferenceError
+    // and abort the surrounding click handler. Telemetry is
+    // strictly fire-and-forget; a failure here MUST NOT bubble.
+    try {
+      const f = (globalThis as { fetch?: typeof fetch }).fetch;
+      if (typeof f !== "function") return;
+      const token = getClientToken();
+      void f("/api/analytics", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          event: eventNameFor(e),
+          metadata: buildMetadata(e),
+        }),
+      }).catch(() => {
+        /* telemetry failure is non-fatal */
+      });
+    } catch {
       /* telemetry failure is non-fatal */
-    });
+    }
     return;
   }
 
