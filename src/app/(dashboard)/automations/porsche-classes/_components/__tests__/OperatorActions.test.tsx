@@ -239,4 +239,63 @@ describe("<OperatorActions /> — backfill upload", () => {
       screen.getByTestId("operator-actions-file-row-0").textContent,
     ).toMatch(/uploaded file is empty/);
   });
+
+  test("regression: rows past the first do NOT stall at 'queued' when value='' clears the FileList", async () => {
+    // Production bug surfaced 2026-04-26: clicking the input with 5
+    // files left rows 2-5 stuck at "queued". Cause: the onChange
+    // handler used `void uploadAll(e.target.files)` then synchronously
+    // `e.target.value = ""`, which invalidates the live FileList the
+    // async loop is iterating over. Fix: snapshot to File[] BEFORE
+    // clearing value. This test reproduces the failure path by
+    // simulating a FileList that becomes empty mid-flight.
+    mockFetchWithRefresh
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { snapshot_id: "1" } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { snapshot_id: "2" } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { snapshot_id: "3" } }),
+      });
+
+    render(<OperatorActions onChanged={() => {}} />);
+    const input = screen.getByTestId(
+      "operator-actions-file-input",
+    ) as HTMLInputElement;
+
+    const f1 = new File(["a"], "Coordinator Class Report - A.eml");
+    const f2 = new File(["b"], "Instructor Class Report - B.eml");
+    const f3 = new File(["c"], "Survey Data PCBA 101 X March 1-5.xlsx");
+
+    await act(async () => {
+      Object.defineProperty(input, "files", {
+        value: [f1, f2, f3],
+        configurable: true,
+      });
+      fireEvent.change(input);
+      // Simulate the input element being reset mid-flight — the
+      // bug's exact trigger. With the fix, the loop holds its own
+      // File[] snapshot so this is harmless.
+      Object.defineProperty(input, "files", {
+        value: [],
+        configurable: true,
+      });
+    });
+
+    // All three rows should reach "ok", not stall at "pending".
+    await waitFor(() => {
+      for (let i = 0; i < 3; i++) {
+        const row = screen.getByTestId(`operator-actions-file-row-${i}`);
+        expect(row.getAttribute("data-status")).toBe("ok");
+      }
+    });
+    expect(mockFetchWithRefresh).toHaveBeenCalledTimes(3);
+  });
 });

@@ -120,18 +120,16 @@ export default function OperatorActions(props: { onChanged?: () => void }) {
     setFiles(next);
   }
 
-  async function uploadAll(picked: FileList) {
-    if (!picked.length) return;
+  async function uploadAll(picked: File[]) {
+    if (picked.length === 0) return;
     setBulkRunning(true);
-    const local: IngestRow[] = Array.from(picked).map((f) => ({
+    const local: IngestRow[] = picked.map((f) => ({
       filename: f.name,
       source_type: detectSourceTypeFromFilename(f.name),
       status: "pending",
     }));
     setFiles(local);
     for (let i = 0; i < picked.length; i++) {
-      // Array access — picked.item(i) isn't reliable in jsdom and
-      // FileList[i] is the spec-compliant accessor across browsers.
       const f = picked[i];
       if (!f) continue;
       const sourceType = local[i].source_type;
@@ -298,10 +296,17 @@ export default function OperatorActions(props: { onChanged?: () => void }) {
               disabled={bulkRunning}
               style={{ display: "none" }}
               onChange={(e) => {
-                if (e.target.files && e.target.files.length > 0) {
-                  void uploadAll(e.target.files);
-                  // Allow re-selecting the same file later.
-                  e.target.value = "";
+                // Snapshot the FileList into a plain File[] BEFORE
+                // resetting input.value. Setting value="" invalidates
+                // the live FileList — without this snapshot the async
+                // upload loop reads stale entries and only the first
+                // file ingests; the rest sit at "queued" forever.
+                const picked = e.target.files
+                  ? Array.from(e.target.files)
+                  : [];
+                e.target.value = "";
+                if (picked.length > 0) {
+                  void uploadAll(picked);
                 } else {
                   onFilesChosen(null);
                 }
