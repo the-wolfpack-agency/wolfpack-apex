@@ -27,6 +27,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { fetchWithRefresh } from "@/lib/client-auth";
 import AutomationFlowDiagram from "./_components/AutomationFlowDiagram";
+import OperatorActions from "./_components/OperatorActions";
 
 const AUTOMATION_ID = "porsche-classes";
 const EXPECTED_SOURCE_ORDER = [
@@ -284,6 +285,8 @@ export default function PorscheClassesThisWeekPage() {
               : "Send all ready classes to SharePoint"}
         </button>
       </div>
+
+      <OperatorActions onChanged={load} />
 
       <AutomationFlowDiagram />
 
