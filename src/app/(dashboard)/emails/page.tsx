@@ -1023,6 +1023,14 @@ export default function EmailsPage() {
     minWidth: isNarrow ? "0" : "320px",
     flex: isNarrow ? "1 0 auto" : "1 1 480px",
     order: isNarrow ? 1 : 0,
+    // On narrow viewports, the composer must expand to its natural
+    // height and let the PAGE scroll. The default composerWrap has
+    // overflow:hidden + an internal scrolling composerBody, which
+    // traps the To field above the fold and makes it unreachable on
+    // mobile. Drop the inner clipping when stacked.
+    overflow: isNarrow ? "visible" : composerWrap.overflow,
+    boxSizing: "border-box",
+    maxWidth: "100%",
   };
   const responsiveInsightsWrap: React.CSSProperties = {
     ...insightsWrap,
@@ -1048,9 +1056,15 @@ export default function EmailsPage() {
         style={{
           ...responsivePageWrap,
           // Reading view doesn't need the three-pane layout — give it
-          // a single column so the body has room to breathe.
+          // a single column. Vertical scroll only; long URLs / wide
+          // tables in the message body must wrap, never push the
+          // page sideways.
           display: "block",
-          overflow: "auto",
+          overflowX: "hidden",
+          overflowY: "auto",
+          width: "100%",
+          maxWidth: "100%",
+          boxSizing: "border-box",
         }}
         data-testid="emails-page"
       >

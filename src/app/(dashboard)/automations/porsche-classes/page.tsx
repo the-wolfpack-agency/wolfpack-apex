@@ -195,8 +195,16 @@ export default function PorscheClassesThisWeekPage() {
 
   return (
     <div style={{ padding: "2rem", color: "var(--wp-text)" }}>
+      {/*
+        This page is the static `/automations/porsche-classes` route,
+        which Next.js resolves before `/automations/[automationId]` —
+        meaning a link to `/automations/porsche-classes` lands BACK on
+        this same page (self-loop, click does nothing). The breadcrumb
+        therefore goes to the automations INDEX, not to the (shadowed)
+        per-automation overview.
+      */}
       <Link
-        href={`/automations/${AUTOMATION_ID}`}
+        href="/automations"
         style={{
           fontSize: "0.8rem",
           color: "var(--wp-text-dim)",
@@ -211,7 +219,7 @@ export default function PorscheClassesThisWeekPage() {
         }}
         data-testid="this-week-back"
       >
-        ← Back to automation
+        ← Back to automations
       </Link>
       <div
         style={{

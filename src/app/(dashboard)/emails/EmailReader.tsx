@@ -478,11 +478,21 @@ const containerStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 8,
+  // Lock to the parent's width — long unbroken tokens (URLs, etc.)
+  // must wrap inside the reader rather than push the page sideways
+  // on mobile.
+  boxSizing: "border-box",
+  minWidth: 0,
+  overflowWrap: "anywhere",
+  wordBreak: "break-word",
 };
 
 const headerStyle: React.CSSProperties = {
   borderBottom: "1px solid var(--wp-border)",
   paddingBottom: 12,
+  minWidth: 0,
+  overflowWrap: "anywhere",
+  wordBreak: "break-word",
 };
 
 const metaRowStyle: React.CSSProperties = {
@@ -491,6 +501,7 @@ const metaRowStyle: React.CSSProperties = {
   gap: 12,
   alignItems: "baseline",
   flexWrap: "wrap",
+  minWidth: 0,
 };
 
 const backButtonStyle: React.CSSProperties = {
