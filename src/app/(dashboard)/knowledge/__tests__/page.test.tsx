@@ -144,3 +144,84 @@ test("offline ask with no cache shows 'connect and ask' copy", async () => {
     configurable: true,
   });
 });
+
+test("?id=<entryId> deep-link auto-selects + expands the matching entry", async () => {
+  // Mount with a deep-link URL — search results / external links land
+  // here. The entry must already be expanded so the user reads the
+  // answer immediately, no extra click.
+  window.history.replaceState({}, "", "/knowledge?id=k-deep-1");
+
+  const SAMPLE = {
+    id: "k-deep-1",
+    question: "What does PCNA stand for?",
+    answer: "Porsche Cars North America.",
+    source: "human",
+    asked_by: "u1",
+    confidence: 0.9,
+    rating: null,
+    view_count: 0,
+    tokens_used: 0,
+    tags: [],
+    created_at: "2026-04-20T00:00:00Z",
+    updated_at: "2026-04-20T00:00:00Z",
+  };
+
+  fetchMock.mockImplementation((url: unknown) => {
+    if (typeof url === "string" && url.includes("/api/knowledge")) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ entries: [SAMPLE] }),
+      } as unknown as Response);
+    }
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({}),
+    } as unknown as Response);
+  });
+
+  const Page = await importPage();
+  await act(async () => {
+    render(<Page />);
+  });
+
+  // The entry container exists with the deep-link data attribute.
+  await waitFor(() => {
+    expect(
+      document.querySelector('[data-knowledge-entry="k-deep-1"]'),
+    ).toBeInTheDocument();
+  });
+  // The expanded body shows up (selected state renders the answer).
+  await waitFor(() => {
+    expect(screen.getByText("Porsche Cars North America.")).toBeInTheDocument();
+  });
+
+  // URL cleanup so this leak doesn't affect later tests.
+  window.history.replaceState({}, "", "/knowledge");
+});
+
+test("?id=<missingId> fallthrough: no crash, no entry selected", async () => {
+  window.history.replaceState({}, "", "/knowledge?id=does-not-exist");
+  fetchMock.mockImplementation(() =>
+    Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ entries: [] }),
+    } as unknown as Response),
+  );
+
+  const Page = await importPage();
+  await act(async () => {
+    render(<Page />);
+  });
+
+  // Empty state renders — no crash from the deep-link resolver.
+  await waitFor(() => {
+    expect(
+      screen.getByText(/No knowledge entries found/i),
+    ).toBeInTheDocument();
+  });
+
+  window.history.replaceState({}, "", "/knowledge");
+});

@@ -97,6 +97,17 @@ export default function KnowledgePage() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
+  // Deep-link target captured on mount from `/knowledge?id=<entryId>`
+  // (search results, in-app links). Cleared once the matching entry
+  // has been selected + scrolled into view so future navigations
+  // don't re-trigger the effect.
+  const [pendingDeepLinkId, setPendingDeepLinkId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    const params = new URLSearchParams(window.location.search);
+    const v = params.get("id");
+    return v && v.trim() ? v.trim() : null;
+  });
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const on = () => setIsOnline(true);
@@ -122,6 +133,42 @@ export default function KnowledgePage() {
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Resolve `?id=<entryId>` deep-link as soon as entries are loaded:
+  // auto-select that entry (rendering its expanded body) and scroll
+  // it into view so the user lands directly on the answer they
+  // clicked from search. If the id is on a later page, page through
+  // until we find it (bounded to a few extra pages so we never spin
+  // forever on a stale link).
+  useEffect(() => {
+    if (!pendingDeepLinkId) return;
+    if (loading) return;
+    const target = entries.find((e) => e.id === pendingDeepLinkId);
+    if (target) {
+      setSelected(target);
+      setPendingDeepLinkId(null);
+      if (typeof window !== "undefined") {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const el = document.querySelector<HTMLElement>(
+              `[data-knowledge-entry="${target.id}"]`,
+            );
+            if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+          });
+        });
+      }
+      return;
+    }
+    // Not in the currently-loaded slice — pull the next page if more
+    // are available. Cap at 4 paginations (~200 extra entries) to
+    // avoid an unbounded fetch when the deep-link is stale.
+    if (hasMore && entries.length < PAGE_SIZE * 5) {
+      void loadMore();
+    } else {
+      setPendingDeepLinkId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingDeepLinkId, entries, loading, hasMore]);
 
   async function fetchEntries(q?: string) {
     setLoading(true);
@@ -812,6 +859,7 @@ export default function KnowledgePage() {
           {entries.map((entry) => (
             <div
               key={entry.id}
+              data-knowledge-entry={entry.id}
               onClick={() => setSelected(selected?.id === entry.id ? null : entry)}
               className="rounded-lg border p-4 cursor-pointer transition-colors hover:border-[var(--wp-gold)]"
               style={{
