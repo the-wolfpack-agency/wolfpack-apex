@@ -53,6 +53,34 @@ test.describe("/automations — porsche-classes flow", () => {
       `GET /automations status (401 = blank page; we want 200)`,
     ).toBe(200);
 
+    /* Pre-flight: hit /api/automations with the same auth context the
+       page uses, so a missing capability fails fast with a clear message
+       instead of a generic "row didn't render" 20s timeout. The page
+       calls this same endpoint client-side and renders an error banner
+       on 401, but the empty-list rendering looks identical to "still
+       loading" if you only watch for the row testid. */
+    const apiCheck = await page.evaluate(async () => {
+      const token = localStorage.getItem("instinct_token");
+      const res = await fetch("/api/automations", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      let body: unknown;
+      try {
+        body = await res.json();
+      } catch {
+        body = null;
+      }
+      return { status: res.status, body };
+    });
+    expect(
+      apiCheck.status,
+      `GET /api/automations returned ${apiCheck.status}. ` +
+        `If 401 with capability=automations.view, the SMOKE_TEST user ` +
+        `lacks that capability — grant it via the role-capabilities map ` +
+        `(roles: CTO/CEO/HR/OPS/DEV) and update the user's role in the ` +
+        `instinct_users table. Body: ${JSON.stringify(apiCheck.body)}`,
+    ).toBe(200);
+
     /* The dashboard layout renders "Loading…" until its useEffect
        hydrates `user` from localStorage. Wait for the porsche-classes
        row testid directly — it only mounts after layout-auth resolves
