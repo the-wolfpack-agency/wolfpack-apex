@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { fetchWithRefresh } from "@/lib/client-auth";
+import AutomationFlowDiagram from "./_components/AutomationFlowDiagram";
 
 const AUTOMATION_ID = "porsche-classes";
 const EXPECTED_SOURCE_ORDER = [
@@ -283,6 +284,8 @@ export default function PorscheClassesThisWeekPage() {
               : "Send all ready classes to SharePoint"}
         </button>
       </div>
+
+      <AutomationFlowDiagram />
 
       {loading && (
         <div style={{ color: "var(--wp-text-dim)", marginTop: "1.5rem" }}>
