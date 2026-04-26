@@ -41,9 +41,35 @@ async function runPoll(automationId: string, userId: string, userRole: string) {
     });
     return NextResponse.json({ ok: true, result });
   } catch (err) {
-    console.error("[automations/poll]", (err as Error).message);
+    /* "No valid Microsoft token" thrown by ms-graph clients downstream
+       of pollInbox is the documented bootstrap state — the cron runs
+       before any user has connected their mailbox. Translate to a 200
+       with a structured skipped result so the health-monitor workflow
+       treats it as a notice (not a failure). */
+    const message = (err as Error).message ?? "";
+    if (message.includes("No valid Microsoft token")) {
+      return NextResponse.json(
+        {
+          ok: true,
+          result: {
+            automation_id: automationId,
+            messages_seen: 0,
+            messages_matched: 0,
+            artifacts_ingested: 0,
+            artifacts_duplicate: 0,
+            artifacts_quarantined: 0,
+            errors: 0,
+            duration_ms: 0,
+            skipped: "no_user_connected",
+            skipped_user_id: userId,
+          },
+        },
+        { status: 200 },
+      );
+    }
+    console.error("[automations/poll]", message);
     return NextResponse.json(
-      { ok: false, error: (err as Error).message },
+      { ok: false, error: message },
       { status: 500 },
     );
   }
