@@ -43,6 +43,7 @@ import {
   getInstinctUser,
 } from "@/lib/client-auth";
 import { emitInsight } from "@/lib/insights/emit";
+import EmailReader from "./EmailReader";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -232,6 +233,29 @@ export default function EmailsPage() {
   useEffect(() => {
     if (isMobile) setTemplatesOpen(false);
   }, [isMobile]);
+
+  // Deep-link reading mode: `/emails?id=<graphMessageId>` switches the
+  // page from compose to a single-email read+reply view (search results,
+  // notification clicks, etc. land here). Captured on mount so toggling
+  // back to compose is a state flip — no router round-trip.
+  const [readingId, setReadingId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    const params = new URLSearchParams(window.location.search);
+    const v = params.get("id");
+    return v && v.trim() ? v.trim() : null;
+  });
+  const closeReader = useCallback(() => {
+    setReadingId(null);
+    if (typeof window !== "undefined") {
+      // Drop the query string so a refresh / share keeps users on
+      // the compose surface they just navigated back to.
+      try {
+        window.history.replaceState({}, "", "/emails");
+      } catch {
+        /* noop */
+      }
+    }
+  }, []);
 
   const [draft, setDraft] = useState<DraftState>(() => loadDraft());
   const [toInput, setToInput] = useState("");
@@ -1017,6 +1041,23 @@ export default function EmailsPage() {
     flexShrink: isMobile ? 0 : 0,
     order: isNarrow ? 3 : 0,
   };
+
+  if (readingId) {
+    return (
+      <div
+        style={{
+          ...responsivePageWrap,
+          // Reading view doesn't need the three-pane layout — give it
+          // a single column so the body has room to breathe.
+          display: "block",
+          overflow: "auto",
+        }}
+        data-testid="emails-page"
+      >
+        <EmailReader id={readingId} onClose={closeReader} />
+      </div>
+    );
+  }
 
   return (
     <div style={responsivePageWrap} data-testid="emails-page">

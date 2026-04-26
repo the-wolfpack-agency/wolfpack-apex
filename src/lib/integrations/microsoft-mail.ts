@@ -551,6 +551,162 @@ export async function replyToMessage(
 }
 
 // ---------------------------------------------------------------------------
+// Read a single message (used by /emails?id=<id> deep-link reading view)
+// ---------------------------------------------------------------------------
+
+export interface MessageDetail {
+  id: string;
+  subject: string;
+  from: { name: string; email: string };
+  toRecipients: { name: string; email: string }[];
+  ccRecipients: { name: string; email: string }[];
+  receivedDateTime: string;
+  bodyContentType: "html" | "text";
+  bodyContent: string;
+  bodyPreview: string;
+  webLink: string;
+}
+
+async function graphGet<T = unknown>(
+  endpoint: string,
+  accessToken: string,
+  expectedScope: string,
+): Promise<GraphCallSuccess<T> | GraphCallError> {
+  const url = endpoint.startsWith("http") ? endpoint : `${GRAPH_BASE_URL}/${endpoint}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      code: "internal",
+      message: `network_error: ${(err as Error).message}`,
+    };
+  }
+
+  if (res.status === 429) {
+    const ra = parseInt(res.headers.get("Retry-After") || "0", 10);
+    return {
+      ok: false,
+      status: 429,
+      code: "rate_limited",
+      retryAfter: Number.isFinite(ra) && ra > 0 ? ra : 1,
+      message: "rate_limited",
+    };
+  }
+  if (res.status === 403) {
+    const body = await safeJson(res);
+    const c = classify403(body, expectedScope);
+    return { ok: false, status: 403, code: c.code, scope: c.scope, message: c.message };
+  }
+  if (res.status === 401) {
+    return { ok: false, status: 401, code: "not_connected", message: "microsoft_not_connected" };
+  }
+  if (res.status === 404) {
+    return { ok: false, status: 404, code: "graph_error", message: "not_found" };
+  }
+  if (!res.ok) {
+    const text = await safeText(res);
+    return {
+      ok: false,
+      status: res.status,
+      code: "graph_error",
+      message: `graph_${res.status}: ${text.slice(0, 200)}`,
+    };
+  }
+  const data = (await safeJson(res)) as T;
+  return { ok: true, status: res.status, headers: res.headers, data, messageId: null };
+}
+
+interface RawRecipient {
+  emailAddress?: { name?: string; address?: string };
+}
+interface RawMessage {
+  id: string;
+  subject: string;
+  from?: RawRecipient | null;
+  toRecipients?: RawRecipient[];
+  ccRecipients?: RawRecipient[];
+  receivedDateTime: string;
+  bodyPreview?: string;
+  body?: { contentType?: string; content?: string };
+  webLink?: string;
+}
+
+function normalizeRecipientList(list: RawRecipient[] | undefined): { name: string; email: string }[] {
+  return (list ?? [])
+    .map((r) => ({
+      name: r.emailAddress?.name ?? "",
+      email: r.emailAddress?.address ?? "",
+    }))
+    .filter((r) => r.email);
+}
+
+/**
+ * Fetch a single Outlook message by its Graph id. Returns the full
+ * body so the reading view can render it. Used by `GET /api/mail/[id]`
+ * which the search → /emails?id=<id> deep-link consumes.
+ *
+ * Mail.Read scope only — strictly less than the Mail.Send scope used
+ * by send/reply.
+ */
+export async function getMessage(userId: string, id: string): Promise<Result<MessageDetail>> {
+  const cleanId = String(id || "").trim();
+  if (!cleanId) {
+    return { ok: false, code: "invalid_input", message: "id required" };
+  }
+  const token = await getValidToken(userId);
+  if (!token) {
+    return { ok: false, code: "not_connected", message: "microsoft_not_connected" };
+  }
+
+  const select = "id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,webLink";
+  const path = `me/messages/${encodeURIComponent(cleanId)}?$select=${encodeURIComponent(select)}`;
+  const res = await graphGet<RawMessage>(path, token.accessToken, "Mail.Read");
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      code: res.code,
+      scope: res.scope,
+      retryAfter: res.retryAfter,
+      status: res.status,
+      message: res.message,
+    };
+  }
+  const m = res.data;
+  if (!m) {
+    return { ok: false, code: "graph_error", status: res.status, message: "empty_response" };
+  }
+
+  const detail: MessageDetail = {
+    id: m.id,
+    subject: m.subject ?? "",
+    from: {
+      name: m.from?.emailAddress?.name ?? "",
+      email: m.from?.emailAddress?.address ?? "",
+    },
+    toRecipients: normalizeRecipientList(m.toRecipients),
+    ccRecipients: normalizeRecipientList(m.ccRecipients),
+    receivedDateTime: m.receivedDateTime ?? "",
+    bodyContentType: m.body?.contentType?.toLowerCase() === "html" ? "html" : "text",
+    bodyContent: m.body?.content ?? "",
+    bodyPreview: m.bodyPreview ?? "",
+    webLink: m.webLink ?? "",
+  };
+
+  trackEvent("system.ms_mail_read", userId, "system", { id: cleanId });
+  return { ok: true, value: detail };
+}
+
+// ---------------------------------------------------------------------------
 // Test-only helpers
 // ---------------------------------------------------------------------------
 

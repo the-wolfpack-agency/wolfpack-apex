@@ -561,35 +561,15 @@ export default function MessagesPage() {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const lastAiDraftRef = useRef<{ text: string; atMs: number } | null>(null);
 
-  // Collapsible LEFT-panel sections. Persisted to localStorage so the
-  // user's preference survives reloads. Default to COLLAPSED on first
-  // load — once a workspace has dozens of chats and channels, an
-  // open-by-default list scrolled the page on every visit. The
-  // collapsed default lets users browse the page header and other
-  // sections first, then opt in to the lists they care about.
-  // Existing users with a saved preference keep it.
-  const [chatsOpen, setChatsOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem("instinct.messages.chats_open") === "1";
-  });
-  const [teamsOpen, setTeamsOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem("instinct.messages.teams_open") === "1";
-  });
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(
-      "instinct.messages.chats_open",
-      chatsOpen ? "1" : "0",
-    );
-  }, [chatsOpen]);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(
-      "instinct.messages.teams_open",
-      teamsOpen ? "1" : "0",
-    );
-  }, [teamsOpen]);
+  // Collapsible LEFT-panel sections — ALWAYS default to collapsed on
+  // mount. We deliberately do NOT persist this to localStorage: once
+  // a workspace has dozens of chats/channels the open list dominates
+  // the page, and users expect a clean Messages landing every time
+  // they click the nav. If a user arrives via a `?chat=…` /
+  // `?team=…&channel=…` deep-link the resolver below auto-opens the
+  // relevant section so the target row is visible.
+  const [chatsOpen, setChatsOpen] = useState<boolean>(false);
+  const [teamsOpen, setTeamsOpen] = useState<boolean>(false);
 
   // Bootstrap the unread-badge cursor. TeamsUnreadBadge /
   // MessagesNavBadge / document-title notifications all key off
@@ -3096,11 +3076,15 @@ function ChannelThreadPane(props: {
                  inside the narrow textarea on mobile. The aria-label
                  above keeps the descriptive form for screen readers. */
               placeholder="Message"
-              rows={2}
+              /* rows={1} + minHeight: 36 makes the input the same
+                 height as the AI / Send buttons by default — multi-
+                 line drafts overflow into vertical scroll up to
+                 maxHeight (no jarring height jump per keystroke). */
+              rows={1}
               style={{
                 flex: 1,
                 resize: "none",
-                minHeight: 44,
+                minHeight: 36,
                 maxHeight: 150,
                 overflowY: "auto",
                 padding: "8px 10px",

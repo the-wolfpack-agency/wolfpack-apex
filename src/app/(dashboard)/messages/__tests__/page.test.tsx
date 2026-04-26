@@ -135,6 +135,26 @@ beforeEach(() => {
   }
 });
 
+/**
+ * Production default for the LEFT-panel sections is COLLAPSED on
+ * every load (no localStorage persistence) so the Messages page
+ * renders clean for users with hundreds of chats. Most of the tests
+ * in this file were written expecting the sections to be open. This
+ * helper renders the page and then clicks both section toggles open
+ * so legacy tests keep asserting against the expanded list. New
+ * tests that explicitly cover the collapsed default render the page
+ * directly via render(<MessagesPage />).
+ */
+async function renderMessagesOpen(): Promise<ReturnType<typeof render>> {
+  const r = render(<MessagesPage />);
+  await waitFor(() => screen.getByTestId("messages-page"));
+  await act(async () => {
+    fireEvent.click(screen.getByTestId("messages-section-chats-toggle"));
+    fireEvent.click(screen.getByTestId("messages-section-teams-toggle"));
+  });
+  return r;
+}
+
 // ---------------------------------------------------------------- helpers
 
 describe("stripHtmlToText", () => {
@@ -355,7 +375,7 @@ describe("MessagesPage", () => {
       if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
       return ok({});
     });
-    render(<MessagesPage />);
+    await renderMessagesOpen();
     await waitFor(() =>
       expect(screen.getByTestId("messages-page")).toBeInTheDocument(),
     );
@@ -375,8 +395,7 @@ describe("MessagesPage", () => {
       if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
       return ok({});
     });
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
     expect(screen.getByTestId("chat-unread-chat-1")).toHaveTextContent("2");
     const row2 = screen.getByTestId("chat-row-chat-2");
     expect(within(row2).getByText("Launch team")).toBeInTheDocument();
@@ -395,8 +414,7 @@ describe("MessagesPage", () => {
       return ok({});
     });
     const beforeMs = Date.now();
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
     const stored = window.localStorage.getItem("instinct.messages.last_seen");
     expect(stored).not.toBeNull();
     const storedMs = Date.parse(stored as string);
@@ -436,8 +454,7 @@ describe("MessagesPage", () => {
       return ok({});
     });
 
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
 
     await act(async () => {
       fireEvent.click(screen.getByTestId("chat-row-chat-1"));
@@ -495,7 +512,7 @@ describe("MessagesPage", () => {
       return ok({});
     });
 
-    render(<MessagesPage />);
+    await renderMessagesOpen();
 
     await waitFor(() => {
       expect(screen.getByTestId("message-deep-msg")).toBeInTheDocument();
@@ -540,7 +557,7 @@ describe("MessagesPage", () => {
       return ok({});
     });
 
-    render(<MessagesPage />);
+    await renderMessagesOpen();
     await waitFor(() => screen.getByTestId("chat-row-chat-stale-meta"));
 
     // formatRelativeTime("1m ago") returns something matching /m$/.
@@ -593,8 +610,7 @@ describe("MessagesPage", () => {
       return ok({});
     });
 
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
     await act(async () => {
       fireEvent.click(screen.getByTestId("chat-row-chat-1"));
     });
@@ -625,8 +641,7 @@ describe("MessagesPage", () => {
         return ok({ messages: [] });
       return ok({});
     });
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
     await act(async () => {
       fireEvent.click(screen.getByTestId("chat-row-chat-1"));
     });
@@ -687,8 +702,7 @@ describe("MessagesPage", () => {
       return ok({});
     });
 
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
     await act(async () => {
       fireEvent.click(screen.getByTestId("chat-row-chat-1"));
     });
@@ -725,7 +739,7 @@ describe("MessagesPage", () => {
       if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
       return ok({});
     });
-    render(<MessagesPage />);
+    await renderMessagesOpen();
     await waitFor(() => screen.getByTestId("chat-row-chat-1"));
     const row = screen.getByTestId("chat-row-chat-1") as HTMLElement;
     const inline = row.getAttribute("style") ?? "";
@@ -743,8 +757,7 @@ describe("MessagesPage — inline compose", () => {
    * captured in one place.
    */
   async function selectChat1AndWaitForComposer() {
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
     await act(async () => {
       fireEvent.click(screen.getByTestId("chat-row-chat-1"));
     });
@@ -918,8 +931,7 @@ describe("MessagesPage — inline compose", () => {
       return ok({});
     });
 
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
 
     // chat-old is dated 2026-04-01, so it lands at the BOTTOM of the
     // initial list ordering. Confirm that's where it starts.
@@ -1091,8 +1103,7 @@ describe("MessagesPage — inline compose", () => {
       }
       return Promise.resolve(ok({}));
     });
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
     await act(async () => {
       fireEvent.click(screen.getByTestId("chat-row-chat-1"));
     });
@@ -1223,8 +1234,7 @@ describe("MessagesPage — inline compose", () => {
 
 describe("MessagesPage — @mentions", () => {
   async function selectChat1AndWaitForComposer() {
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
     await act(async () => {
       fireEvent.click(screen.getByTestId("chat-row-chat-1"));
     });
@@ -1503,17 +1513,18 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     });
   }
 
-  test("Chats section defaults to COLLAPSED on first load and toggles open", async () => {
-    // Bypass the describe-level seed — we're testing first-load behavior.
-    window.localStorage.removeItem("instinct.messages.chats_open");
-    window.localStorage.removeItem("instinct.messages.teams_open");
+  test("Chats section ALWAYS defaults to COLLAPSED on every visit (no localStorage persistence)", async () => {
+    // Mobile UX: dozens of chats / channels visibly dominate the
+    // page on landing. The section defaults to collapsed on every
+    // mount — even for returning users who once toggled it open.
+    // The deep-link path (?chat=…) is what auto-expands; nothing
+    // else does.
+    window.localStorage.setItem("instinct.messages.chats_open", "1"); // would have re-expanded under old behavior
     wireSimpleGraph();
     render(<MessagesPage />);
     await waitFor(() => screen.getByTestId("messages-page"));
 
-    // New default — collapsed on first visit (localStorage empty).
-    // Once a workspace has dozens of chats, an open-by-default list
-    // scrolled the page. Users now opt in.
+    // Collapsed even though localStorage says "1".
     expect(screen.queryByTestId("messages-section-chats-list")).toBeNull();
     expect(
       screen.getByTestId("messages-section-chats-toggle"),
@@ -1528,9 +1539,6 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
       screen.getByTestId("messages-section-chats-toggle"),
     ).toHaveAttribute("data-open", "true");
 
-    // Persisted to localStorage as "1" (existing user keeps preference).
-    expect(window.localStorage.getItem("instinct.messages.chats_open")).toBe("1");
-
     // Toggle fires analytics.
     const fired = mockFetchWithRefresh.mock.calls
       .filter((c) => c[0] === "/api/analytics")
@@ -1543,15 +1551,23 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     );
   });
 
-  test("returning user with chats_open=1 in localStorage starts expanded", async () => {
-    // describe-level seed already sets this; assert behavior holds.
+  test("regression: chats_open=1 in localStorage is IGNORED — page stays collapsed", async () => {
+    // Was: localStorage seeded chats_open=1 → page rendered open on
+    // mount (UX complaint: should always be collapsed unless deep-
+    // linked). New behavior: ignore localStorage entirely; the only
+    // auto-open path is the URL deep-link resolver.
+    window.localStorage.setItem("instinct.messages.chats_open", "1");
+    window.localStorage.setItem("instinct.messages.teams_open", "1");
     wireSimpleGraph();
     render(<MessagesPage />);
     await waitFor(() => screen.getByTestId("messages-page"));
-    expect(screen.getByTestId("messages-section-chats-list")).toBeInTheDocument();
+    expect(screen.queryByTestId("messages-section-chats-list")).toBeNull();
     expect(
       screen.getByTestId("messages-section-chats-toggle"),
-    ).toHaveAttribute("data-open", "true");
+    ).toHaveAttribute("data-open", "false");
+    expect(
+      screen.getByTestId("messages-section-teams-toggle"),
+    ).toHaveAttribute("data-open", "false");
   });
 
   test("Teams section lazy-loads /api/ms/teams when first expanded", async () => {
@@ -1559,8 +1575,7 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     // OR click to expand before the lazy load fires.
     window.localStorage.setItem("instinct.messages.teams_open", "1");
     wireSimpleGraph();
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
 
     // Section is open via the seeded preference → /api/ms/teams should fire on mount.
     await waitFor(() => {
@@ -1598,7 +1613,7 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     // rows render at all.
     window.localStorage.setItem("instinct.messages.teams_open", "1");
     wireSimpleGraph();
-    render(<MessagesPage />);
+    await renderMessagesOpen();
     await waitFor(() => screen.getByTestId("team-row-team-wolf"));
     // Channels should appear without us clicking the toggle.
     await waitFor(() => {
@@ -1609,7 +1624,7 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
   test("expanding a team loads its channels and persists the expansion state", async () => {
     window.localStorage.setItem("instinct.messages.teams_open", "1");
     wireSimpleGraph();
-    render(<MessagesPage />);
+    await renderMessagesOpen();
     await waitFor(() => screen.getByTestId("team-row-team-wolf"));
 
     // Channels not loaded yet.
@@ -1648,7 +1663,7 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
 
   test("clicking a channel loads its messages, renders ascending, fires analytics", async () => {
     wireSimpleGraph();
-    render(<MessagesPage />);
+    await renderMessagesOpen();
     await waitFor(() => screen.getByTestId("team-row-team-wolf"));
     await act(async () => {
       fireEvent.click(screen.getByTestId("team-toggle-team-wolf"));
@@ -1710,8 +1725,7 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
         });
       return ok({});
     });
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
     await waitFor(() => {
       const card = screen.getByTestId("messages-teams-graph-error");
       expect(card).toBeInTheDocument();
@@ -1737,8 +1751,7 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
         return ok({ teams: [], scope_missing: true });
       return ok({});
     });
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
     await waitFor(() => {
       expect(
         screen.getByTestId("messages-teams-scope-missing"),
@@ -1774,7 +1787,7 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
       return ok({});
     });
 
-    render(<MessagesPage />);
+    await renderMessagesOpen();
     await waitFor(() => screen.getByTestId("team-row-team-wolf"));
     await act(async () => {
       fireEvent.click(screen.getByTestId("team-toggle-team-wolf"));
@@ -1825,7 +1838,7 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
         return ok({ message: null, scope_missing: true });
       return ok({});
     });
-    render(<MessagesPage />);
+    await renderMessagesOpen();
     await waitFor(() => screen.getByTestId("team-row-team-wolf"));
     await act(async () => {
       fireEvent.click(screen.getByTestId("team-toggle-team-wolf"));
@@ -1894,8 +1907,7 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
       return ok({});
     });
 
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
     await act(async () => {
       fireEvent.click(screen.getByTestId("chat-row-chat-1"));
     });
@@ -1956,8 +1968,7 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
       return ok({});
     });
 
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
     await act(async () => {
       fireEvent.click(screen.getByTestId("chat-row-chat-1"));
     });
@@ -1988,8 +1999,7 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
 
   test("regression: messages-page constrains its own scroll (overflow:hidden + position:absolute)", async () => {
     wireSimpleGraph();
-    render(<MessagesPage />);
-    await waitFor(() => screen.getByTestId("messages-page"));
+    await renderMessagesOpen();
     const page = screen.getByTestId("messages-page");
     // Inline style — the page has to claim a fixed slot in the
     // dashboard <main> so its inner aside / thread scroll
@@ -2002,7 +2012,7 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
 
   test("selecting a chat clears any active channel selection (right pane is single-target)", async () => {
     wireSimpleGraph();
-    render(<MessagesPage />);
+    await renderMessagesOpen();
     await waitFor(() => screen.getByTestId("team-row-team-wolf"));
     await act(async () => {
       fireEvent.click(screen.getByTestId("team-toggle-team-wolf"));

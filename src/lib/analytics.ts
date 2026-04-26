@@ -615,6 +615,7 @@ export type InstinctEventType =
   | "system.ms_mail_sent"
   | "system.ms_mail_reply_sent"
   | "system.ms_mail_send_failed"
+  | "system.ms_mail_read"
   // Microsoft 365 Calendar (Calendars.ReadWrite)
   | "system.ms_calendar_event_created"
   | "system.ms_calendar_event_updated"

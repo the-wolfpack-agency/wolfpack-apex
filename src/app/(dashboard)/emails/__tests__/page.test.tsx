@@ -134,6 +134,15 @@ beforeEach(() => {
   );
   // jsdom session storage isolation
   window.sessionStorage.clear();
+  // Drop any `?id=…` query string that a previous deep-link test
+  // may have left on the URL — page initializer reads
+  // window.location.search synchronously so leakage would flip
+  // unrelated tests into reading mode.
+  try {
+    window.history.replaceState({}, "", "/emails");
+  } catch {
+    /* noop */
+  }
   // jsdom does not implement document.execCommand. Stub it so the
   // toolbar code path runs (and so we can spy on it in individual tests).
   if (typeof (document as any).execCommand !== "function") {
@@ -730,5 +739,91 @@ describe("EmailsPage — responsive layout", () => {
     await waitFor(() => screen.getByTestId("ai-draft-btn"));
     expect(screen.getByTestId("ai-draft-btn").style.whiteSpace).toBe("nowrap");
     expect(screen.getByTestId("compose-send").style.whiteSpace).toBe("nowrap");
+  });
+});
+
+describe("EmailsPage — deep-link reading view (?id=<graphMessageId>)", () => {
+  test("?id=<id> swaps the page into the EmailReader fetched from /api/mail/<id>", async () => {
+    window.history.replaceState({}, "", "/emails?id=msg-deep-1");
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      if (url === "/api/mail/msg-deep-1") {
+        return Promise.resolve(
+          ok({
+            message: {
+              id: "msg-deep-1",
+              subject: "Deep linked thread",
+              from: { name: "James", email: "james@example.test" },
+              toRecipients: [{ name: "Nick", email: "nick@x.test" }],
+              ccRecipients: [],
+              receivedDateTime: "2026-04-22T10:00:00Z",
+              bodyContentType: "text",
+              bodyContent: "Hello from search",
+              bodyPreview: "Hello",
+              webLink: "https://outlook.office.com/m/x",
+            },
+          }),
+        );
+      }
+      return Promise.resolve(defaultRouter(url));
+    });
+
+    render(<EmailsPage />);
+    await waitFor(() => screen.getByTestId("emails-page"));
+    // Reader rendered, NOT the compose form.
+    await waitFor(() =>
+      expect(screen.getByTestId("email-reader")).toBeInTheDocument(),
+    );
+    expect(screen.queryByLabelText("To email input")).toBeNull();
+    expect(screen.getByTestId("email-reader-subject").textContent).toBe(
+      "Deep linked thread",
+    );
+    // Confirm the fetch URL.
+    const calls = mockFetchWithRefresh.mock.calls.map((c: any) => c[0]);
+    expect(calls).toContain("/api/mail/msg-deep-1");
+  });
+
+  test("Back button drops out of reading view, clears ?id= from the URL, and shows the composer", async () => {
+    window.history.replaceState({}, "", "/emails?id=msg-deep-2");
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      if (url === "/api/mail/msg-deep-2") {
+        return Promise.resolve(
+          ok({
+            message: {
+              id: "msg-deep-2",
+              subject: "x",
+              from: { name: "x", email: "x@x.test" },
+              toRecipients: [],
+              ccRecipients: [],
+              receivedDateTime: "2026-04-22T10:00:00Z",
+              bodyContentType: "text",
+              bodyContent: "x",
+              bodyPreview: "x",
+              webLink: "",
+            },
+          }),
+        );
+      }
+      return Promise.resolve(defaultRouter(url));
+    });
+    render(<EmailsPage />);
+    await waitFor(() => screen.getByTestId("email-reader"));
+
+    fireEvent.click(screen.getByTestId("email-reader-back"));
+
+    // Composer surface back; reader gone.
+    await waitFor(() =>
+      expect(screen.queryByTestId("email-reader")).toBeNull(),
+    );
+    expect(screen.getByLabelText("To email input")).toBeInTheDocument();
+    // URL no longer carries the deep-link query.
+    expect(window.location.search).toBe("");
+  });
+
+  test("?id=<id> with empty/whitespace value falls through to compose mode", async () => {
+    window.history.replaceState({}, "", "/emails?id=%20%20");
+    render(<EmailsPage />);
+    await waitFor(() => screen.getByTestId("emails-page"));
+    expect(screen.queryByTestId("email-reader")).toBeNull();
+    expect(screen.getByLabelText("To email input")).toBeInTheDocument();
   });
 });
