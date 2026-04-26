@@ -155,9 +155,19 @@ function SearchContents() {
     router.replace(path);
   }, [query, typesParam, router]);
 
-  // Debounced run.
+  // Debounced run. An empty query stays idle — show the initial prompt
+  // instead of firing a wildcard search and dumping every recent record
+  // into the page on first load.
   useEffect(() => {
     if (runTimer.current) window.clearTimeout(runTimer.current);
+    if (!query.trim()) {
+      setLoading(false);
+      setResults([]);
+      setCounts({});
+      setTookMs(0);
+      setError("");
+      return;
+    }
     runTimer.current = window.setTimeout(() => {
       void runSearch(query, activeTypes);
     }, 250);
@@ -278,12 +288,27 @@ function SearchContents() {
           <span style={{ color: "var(--wp-error)" }} data-testid="search-error">
             {error}
           </span>
-        ) : (
+        ) : query ? (
           <span data-testid="search-meta">
             {results.length} result{results.length === 1 ? "" : "s"} in {tookMs}ms
           </span>
-        )}
+        ) : null}
       </div>
+
+      {!loading && !error && !query && (
+        <div
+          data-testid="search-idle"
+          style={{
+            padding: "32px",
+            textAlign: "center",
+            color: "var(--wp-text-secondary)",
+            border: "1px dashed var(--wp-border)",
+            borderRadius: "8px",
+          }}
+        >
+          Type to search across your chats, emails, calendar, and knowledge.
+        </div>
+      )}
 
       {!loading && !error && results.length === 0 && query && (
         <div

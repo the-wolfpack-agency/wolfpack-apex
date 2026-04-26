@@ -90,6 +90,18 @@ async function flushDebounce(): Promise<void> {
 }
 
 describe("/search page", () => {
+  it("stays idle on first visit — no fetch, idle copy visible until the user types", async () => {
+    render(<SearchPage />);
+
+    // Wait past the old debounce window — nothing should fire because the
+    // query is empty.
+    await flushDebounce();
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(screen.getByTestId("search-idle")).toBeInTheDocument();
+    expect(screen.queryByTestId("search-meta")).not.toBeInTheDocument();
+  });
+
   it("renders results from the API mock, grouped by type", async () => {
     render(<SearchPage />);
 
