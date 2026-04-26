@@ -125,4 +125,33 @@ describe("POST /api/assistant/draft-reply", () => {
       expect.objectContaining({ surface: "chat" }),
     );
   });
+
+  it("503 + code=missing_api_key when ANTHROPIC_API_KEY not configured", async () => {
+    mockGetUser.mockReturnValue({ id: "u1", role: "ceo", name: "Nick" });
+    __setDraftProviderForTests({
+      draftReply: jest.fn(async () => {
+        throw new Error("ANTHROPIC_API_KEY not configured");
+      }),
+    });
+    const { POST } = await import("@/app/api/assistant/draft-reply/route");
+    const res = await POST(mkReq({ surface: "chat" }));
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: string; code: string };
+    expect(body.code).toBe("missing_api_key");
+    expect(body.error).toMatch(/AI assistant not configured/i);
+  });
+
+  it("503 + code=missing_api_key for OPENAI_API_KEY missing (multi-provider)", async () => {
+    mockGetUser.mockReturnValue({ id: "u1", role: "ceo", name: "Nick" });
+    __setDraftProviderForTests({
+      draftReply: jest.fn(async () => {
+        throw new Error("OPENAI_API_KEY missing — set in Vercel env");
+      }),
+    });
+    const { POST } = await import("@/app/api/assistant/draft-reply/route");
+    const res = await POST(mkReq({ surface: "chat" }));
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe("missing_api_key");
+  });
 });

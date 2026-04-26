@@ -1259,9 +1259,25 @@ export default function MessagesPage() {
         }),
       });
       if (!res.ok) {
+        // 503 + code=missing_api_key means the operator hasn't set
+        // ANTHROPIC_API_KEY in Vercel env yet. Tell the user the
+        // actual reason instead of "Try again" — the user can't fix
+        // a config gap by retrying.
+        let reason: "missing_api_key" | "transient" = "transient";
+        try {
+          const body = (await res.json()) as { code?: string };
+          if (res.status === 503 && body?.code === "missing_api_key") {
+            reason = "missing_api_key";
+          }
+        } catch {
+          /* response not JSON — fall through to transient */
+        }
         setToast({
           key: Date.now(),
-          text: "Couldn't draft a reply. Try again.",
+          text:
+            reason === "missing_api_key"
+              ? "AI Assistant isn't configured yet. Ask your admin to set the AI API key."
+              : "Couldn't draft a reply. Try again.",
         });
         return;
       }

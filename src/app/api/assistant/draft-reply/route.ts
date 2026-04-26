@@ -98,11 +98,29 @@ export async function POST(req: NextRequest) {
       completionTokens: result.completionTokens,
     });
   } catch (err) {
-    console.error("[api/assistant/draft-reply] error:", (err as Error).message);
+    const message = (err as Error).message ?? "";
+    console.error("[api/assistant/draft-reply] error:", message);
     trackEvent("assistant.draft_failed", user.id, user.role, {
       surface: body.surface as string,
-      reason: (err as Error).message.slice(0, 120),
+      reason: message.slice(0, 120),
     });
+    /* Distinguish "not configured" (operator action: set env var) from
+       a transient backend error (user action: try again). The UI uses
+       `code` to render the right toast — no point telling someone to
+       "try again" when the API key has never been set. */
+    if (
+      /ANTHROPIC_API_KEY|OPENAI_API_KEY|api[\s_-]?key.*(?:not configured|missing)/i.test(
+        message,
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error: "AI assistant not configured",
+          code: "missing_api_key",
+        },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }
