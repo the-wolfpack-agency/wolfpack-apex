@@ -39,7 +39,7 @@ const EXPECTED_SOURCE_ORDER = [
 type SourceType = (typeof EXPECTED_SOURCE_ORDER)[number];
 type Status = "ready" | "waiting" | "needs_attention";
 
-interface ClassRow {
+export interface ClassRow {
   class_key: string;
   course_type: string;
   class_date: string;
@@ -58,7 +58,7 @@ interface ApiResponse {
   classes: ClassRow[];
 }
 
-type UploadState =
+export type UploadState =
   | { kind: "idle" }
   | { kind: "uploading" }
   | { kind: "ok"; web_url?: string }
@@ -349,7 +349,7 @@ export default function PorscheClassesThisWeekPage() {
   );
 }
 
-function ClassRowCard({
+export function ClassRowCard({
   row,
   uploadState,
   onUpload,
@@ -361,6 +361,8 @@ function ClassRowCard({
   const showSendButton =
     row.status === "ready" && !row.sharepoint_uploaded_at;
 
+  const summaryHref = `/automations/${AUTOMATION_ID}/summaries/${encodeURIComponent(row.class_key)}`;
+
   return (
     <div
       data-testid={`this-week-row-${row.class_key}`}
@@ -371,8 +373,32 @@ function ClassRowCard({
         border: "1px solid var(--wp-border)",
         borderLeft: `4px solid ${STATUS_COLOR[row.status]}`,
         borderRadius: "6px",
+        position: "relative",
       }}
     >
+      {/*
+        Full-area overlay link — makes the entire row clickable so
+        users don't have to aim for the small "Open" pill. The link
+        sits at z-index 0; action buttons (Send to SharePoint) are
+        rendered with position:relative + z-index 1 so they remain
+        the click target inside their footprint.
+      */}
+      <Link
+        href={summaryHref}
+        aria-label={`Open ${row.course_type} ${formatDate(row.class_date)} summary`}
+        data-testid={`this-week-row-link-${row.class_key}`}
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 0,
+          borderRadius: "6px",
+        }}
+      />
+      <style jsx>{`
+        .this-week-row:hover {
+          border-color: var(--wp-gold);
+        }
+      `}</style>
       <style jsx>{`
         /* Default: vertical stack on narrow screens — date and source
            emojis were colliding because the 5-column grid was forcing
@@ -496,26 +522,19 @@ function ClassRowCard({
         )}
       </div>
 
-      {/* Actions */}
+      {/* Actions — buttons live above the row-overlay link via
+          position:relative + z-index:1 so clicking Send doesn't also
+          trigger the row navigation. */}
       <div
         data-row-cell="actions"
-        style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}
+        style={{
+          display: "flex",
+          gap: "0.5rem",
+          flexWrap: "wrap",
+          position: "relative",
+          zIndex: 1,
+        }}
       >
-        <Link
-          href={`/automations/${AUTOMATION_ID}/summaries/${encodeURIComponent(row.class_key)}`}
-          data-testid={`this-week-open-${row.class_key}`}
-          style={{
-            padding: "0.45rem 0.8rem",
-            borderRadius: "6px",
-            border: "1px solid var(--wp-border)",
-            color: "var(--wp-text)",
-            background: "transparent",
-            textDecoration: "none",
-            fontSize: "0.85rem",
-          }}
-        >
-          Open
-        </Link>
         {showSendButton && (
           <button
             type="button"
