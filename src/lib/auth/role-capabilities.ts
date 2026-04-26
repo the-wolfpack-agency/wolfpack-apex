@@ -117,6 +117,7 @@ const SALES: readonly Capability[] = [
   "tasks.view",
   "tasks.edit",
   "tools.view",
+  "automations.view",        // sales sees the automations dashboard read-only
 ];
 
 /** Ops: internal process + docs. No HR, no finance, no deploys. */
@@ -220,6 +221,7 @@ const DESIGNER: readonly Capability[] = [
   "tasks.view",
   "tasks.edit",
   "tools.view",
+  "automations.view",        // designers see the automations dashboard read-only
 ];
 
 const ROLE_MAP: Record<TeamRole, readonly Capability[]> = {
