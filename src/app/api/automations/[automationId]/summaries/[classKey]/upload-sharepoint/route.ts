@@ -54,24 +54,37 @@ interface Ctx {
  *   - Multiple consecutive whitespace runs collapse to a single space.
  */
 export function buildFilename(opts: {
-  course_type: string;
-  class_date: string;
-  location: string;
+  course_type: unknown;
+  class_date: unknown;
+  location: unknown;
 }): string {
-  const dateOnly = (raw: string): string => {
-    if (!raw) return "Date";
+  // Coerce every field to a string before doing string ops. Postgres
+  // can hand back DATE columns as JS Date instances depending on
+  // pg-types config, and any non-string value here would throw
+  // "TypeError: e.match is not a function" the moment we touch the
+  // regex below. Build-tool-first defensive: stringify, then process.
+  const toStr = (v: unknown): string => {
+    if (v == null) return "";
+    if (v instanceof Date) {
+      return Number.isNaN(v.getTime()) ? "" : v.toISOString();
+    }
+    return typeof v === "string" ? v : String(v);
+  };
+  const dateOnly = (raw: unknown): string => {
+    const s = toStr(raw);
+    if (!s) return "Date";
     // Match the leading YYYY-MM-DD if present (covers both
     // 2026-04-20T00:00:00.000Z and bare 2026-04-20). Anything that
     // doesn't match falls back to a parse + slice so we never leak
     // a colon or period through.
-    const m = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
     if (m) return m[1];
-    const d = new Date(raw);
+    const d = new Date(s);
     if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-    return safe(raw);
+    return safe(s);
   };
-  const safe = (s: string): string => {
-    let out = (s || "")
+  const safe = (raw: unknown): string => {
+    let out = toStr(raw)
       .replace(/[\\/:*?"<>|#%&]+/g, "")
       .replace(/\s+/g, " ")
       .replace(/^[\s.]+|[\s.]+$/g, "")

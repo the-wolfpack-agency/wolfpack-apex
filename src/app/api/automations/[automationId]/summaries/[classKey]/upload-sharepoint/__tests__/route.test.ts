@@ -377,4 +377,37 @@ describe("buildFilename — Graph-safe drive-item name builder", () => {
     });
     expect(out).toMatch(/^Class - 2026-04-20 - Class\.docx$/);
   });
+
+  it("regression: tolerates a Date object for class_date (Postgres pg-types case)", () => {
+    // Real prod failure 2026-04-26: server logs showed
+    //   TypeError: e.match is not a function
+    // because pg returned class_date as a JS Date instance and
+    // buildFilename was calling .match() on it directly. Fix:
+    // coerce every field to a string first.
+    const out = buildFilename({
+      course_type: "BA101",
+      class_date: new Date("2026-04-20T00:00:00.000Z"),
+      location: "Ritz Carlton",
+    });
+    expect(out).toBe("BA101 - 2026-04-20 - Ritz Carlton.docx");
+  });
+
+  it("regression: nullish fields don't throw — fall back to 'Class' segments", () => {
+    expect(() =>
+      buildFilename({
+        course_type: null,
+        class_date: undefined,
+        location: null,
+      }),
+    ).not.toThrow();
+  });
+
+  it("regression: number course (pg int column quirk) is stringified, not exploded", () => {
+    const out = buildFilename({
+      course_type: 101,
+      class_date: "2026-04-20",
+      location: "Ritz Carlton",
+    });
+    expect(out).toBe("101 - 2026-04-20 - Ritz Carlton.docx");
+  });
 });
