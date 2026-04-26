@@ -2398,6 +2398,11 @@ export default function MessagesPage() {
                             fontSize: 13,
                             lineHeight: 1.35,
                             whiteSpace: "pre-wrap",
+                            // Long unbroken tokens (URLs, paths) must
+                            // wrap inside the 80%-wide bubble or they
+                            // push the chat box past its bounds.
+                            overflowWrap: "anywhere",
+                            wordBreak: "break-word",
                             marginTop: 2,
                             color: "var(--wp-text, #eee)",
                           }}
@@ -3012,6 +3017,11 @@ function ChannelThreadPane(props: {
                 style={{
                   fontSize: 14,
                   whiteSpace: "pre-wrap",
+                  // Long unbroken tokens (URLs, paths) must wrap
+                  // inside the 80%-wide bubble or they push the chat
+                  // box past its bounds.
+                  overflowWrap: "anywhere",
+                  wordBreak: "break-word",
                   marginTop: 4,
                   color: "var(--wp-text, #eee)",
                 }}
