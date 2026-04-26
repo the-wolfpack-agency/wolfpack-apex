@@ -45,6 +45,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { getValidToken, fetchRecentEmails, fetchCalendarEvents } from "@/lib/microsoft-graph";
 import { listChatsResult, getChatMessagesResult } from "@/lib/ms-graph-chats";
+import { listJoinedTeams, listTeamChannels, listChannelMessages } from "@/lib/ms-graph-teams";
+import { searchKnowledge } from "@/lib/knowledge";
 import { emitInsight } from "@/lib/insights/emit";
 
 export type SearchResultType = "chat" | "channel" | "email" | "calendar" | "knowledge";
@@ -213,6 +215,76 @@ async function searchCalendar(userId: string, q: string, perTypeLimit: number): 
   return out;
 }
 
+async function searchChannels(userId: string, q: string, perTypeLimit: number): Promise<SearchResult[]> {
+  const token = await getValidToken(userId);
+  if (!token) return [];
+  const teamsRes = await listJoinedTeams(token.accessToken, 10, userId);
+  if (!teamsRes.ok) return [];
+  const out: SearchResult[] = [];
+  // Stage 1: cheap channel-name/description match across the user's
+  // top teams. Bounded — top 8 teams, top 20 channels per team.
+  const channelTriples: Array<{ teamId: string; teamName: string; channel: { id: string; displayName: string; description?: string; webUrl?: string } }> = [];
+  for (const team of teamsRes.teams.slice(0, 8)) {
+    const chRes = await listTeamChannels(token.accessToken, team.id, 20, userId);
+    if (!chRes.ok) continue;
+    for (const ch of chRes.channels) {
+      channelTriples.push({ teamId: team.id, teamName: team.displayName, channel: ch });
+      if (matches(ch.displayName, q) || matches(ch.description || "", q) || matches(team.displayName, q)) {
+        out.push({
+          type: "channel",
+          id: `${team.id}:${ch.id}`,
+          title: `${team.displayName} · ${ch.displayName}`,
+          snippet: ch.description || "",
+          timestamp: "",
+          url: ch.webUrl || `/messages?channel=${encodeURIComponent(ch.id)}`,
+        });
+        if (out.length >= perTypeLimit) return out;
+      }
+    }
+  }
+  // Stage 2: with a query and remaining slots, scan recent messages in
+  // up to 5 channels we haven't already matched. Capped to keep Graph
+  // traffic bounded — heavy queries are the index's job, not v1's.
+  if (q && out.length < perTypeLimit) {
+    const seen = new Set(out.map((r) => r.id));
+    for (const t of channelTriples) {
+      const composite = `${t.teamId}:${t.channel.id}`;
+      if (seen.has(composite)) continue;
+      const msgs = await listChannelMessages(token.accessToken, t.teamId, t.channel.id, 20, userId);
+      if (!msgs.ok) continue;
+      const hit = msgs.messages.find((m) => matches(m.bodyText || "", q));
+      if (hit) {
+        out.push({
+          type: "channel",
+          id: composite,
+          title: `${t.teamName} · ${t.channel.displayName}`,
+          snippet: buildSnippet(hit.bodyText || "", q),
+          timestamp: hit.createdDateTime,
+          url: t.channel.webUrl || `/messages?channel=${encodeURIComponent(t.channel.id)}`,
+        });
+        if (out.length >= perTypeLimit) break;
+      }
+    }
+  }
+  return out;
+}
+
+async function searchKnowledgeEntries(q: string, perTypeLimit: number): Promise<SearchResult[]> {
+  // Empty query → return the most recent / popular entries so the
+  // Knowledge filter shows *something* on a bare /search?types=knowledge.
+  // searchKnowledge handles empty by returning DEMO entries when no DB
+  // is configured, and ILIKE '%%' matches everything when one is.
+  const entries = await searchKnowledge(q, perTypeLimit);
+  return entries.map((e) => ({
+    type: "knowledge" as const,
+    id: e.id,
+    title: e.question,
+    snippet: buildSnippet(e.answer, q),
+    timestamp: e.updated_at || e.created_at || "",
+    url: `/knowledge?id=${encodeURIComponent(e.id)}`,
+  }));
+}
+
 /**
  * Even-share allocation across requested types. With N types and
  * `limit` total slots, each type gets ceil(limit/N) — small enough
@@ -239,17 +311,13 @@ export async function GET(req: NextRequest) {
 
   // Run the per-type queries in parallel. Each is independently
   // best-effort — a Graph 401 in one surface doesn't block another.
-  const [chatResults, emailResults, calendarResults] = await Promise.all([
+  const [chatResults, emailResults, calendarResults, channelResults, knowledgeResults] = await Promise.all([
     types.has("chat") ? searchChats(user.id, q, perType).catch(() => []) : Promise.resolve<SearchResult[]>([]),
     types.has("email") ? searchEmails(user.id, q, perType).catch(() => []) : Promise.resolve<SearchResult[]>([]),
     types.has("calendar") ? searchCalendar(user.id, q, perType).catch(() => []) : Promise.resolve<SearchResult[]>([]),
+    types.has("channel") ? searchChannels(user.id, q, perType).catch(() => []) : Promise.resolve<SearchResult[]>([]),
+    types.has("knowledge") ? searchKnowledgeEntries(q, perType).catch(() => []) : Promise.resolve<SearchResult[]>([]),
   ]);
-
-  // TODO(azure-search): channel + knowledge results land here once the
-  // Azure AI Search index is live. Today the response advertises 0 for
-  // both so the UI chip can render in a disabled state.
-  const channelResults: SearchResult[] = [];
-  const knowledgeResults: SearchResult[] = [];
 
   // Merge then cap. Within each type the underlying helpers preserve
   // recency order; the merged list interleaves by alternating types

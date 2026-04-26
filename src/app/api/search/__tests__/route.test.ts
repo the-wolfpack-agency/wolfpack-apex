@@ -18,6 +18,10 @@ const mockFetchRecentEmails = jest.fn();
 const mockFetchCalendarEvents = jest.fn();
 const mockListChatsResult = jest.fn();
 const mockGetChatMessagesResult = jest.fn();
+const mockListJoinedTeams = jest.fn();
+const mockListTeamChannels = jest.fn();
+const mockListChannelMessages = jest.fn();
+const mockSearchKnowledge = jest.fn();
 const mockTrackEvent = jest.fn();
 
 jest.mock("@/lib/auth", () => ({
@@ -31,6 +35,14 @@ jest.mock("@/lib/microsoft-graph", () => ({
 jest.mock("@/lib/ms-graph-chats", () => ({
   listChatsResult: (...a: any[]) => mockListChatsResult(...a),
   getChatMessagesResult: (...a: any[]) => mockGetChatMessagesResult(...a),
+}));
+jest.mock("@/lib/ms-graph-teams", () => ({
+  listJoinedTeams: (...a: any[]) => mockListJoinedTeams(...a),
+  listTeamChannels: (...a: any[]) => mockListTeamChannels(...a),
+  listChannelMessages: (...a: any[]) => mockListChannelMessages(...a),
+}));
+jest.mock("@/lib/knowledge", () => ({
+  searchKnowledge: (...a: any[]) => mockSearchKnowledge(...a),
 }));
 jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: any[]) => mockTrackEvent(...a),
@@ -53,6 +65,10 @@ beforeEach(() => {
   mockFetchCalendarEvents.mockResolvedValue([]);
   mockListChatsResult.mockResolvedValue({ ok: true, chats: [] });
   mockGetChatMessagesResult.mockResolvedValue({ ok: true, messages: [] });
+  mockListJoinedTeams.mockResolvedValue({ ok: true, teams: [] });
+  mockListTeamChannels.mockResolvedValue({ ok: true, channels: [] });
+  mockListChannelMessages.mockResolvedValue({ ok: true, messages: [] });
+  mockSearchKnowledge.mockResolvedValue([]);
 });
 
 describe("GET /api/search", () => {
@@ -175,6 +191,65 @@ describe("GET /api/search", () => {
       ([name]) => name === "insight.search.no_results",
     );
     expect(noResultsCalls.length).toBe(0);
+  });
+
+  it("returns Channels results — name match + recent-message match across joined teams", async () => {
+    mockListJoinedTeams.mockResolvedValue({
+      ok: true,
+      teams: [{ id: "team-1", displayName: "Greenfield Account" }],
+    });
+    mockListTeamChannels.mockResolvedValue({
+      ok: true,
+      channels: [
+        { id: "chan-1", displayName: "general", description: "Team-wide", webUrl: "https://teams.test/chan-1" },
+        { id: "chan-2", displayName: "deals", description: "Deal status updates", webUrl: "https://teams.test/chan-2" },
+      ],
+    });
+    mockListChannelMessages.mockResolvedValue({
+      ok: true,
+      messages: [
+        { id: "m-1", createdDateTime: "2026-04-22T10:00:00Z", bodyText: "Greenfield SOW signed today" },
+      ],
+    });
+
+    const res = await GET(makeReq("?q=greenfield&types=channels"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.counts.channels).toBeGreaterThan(0);
+    const channelHits = body.results.filter((r: any) => r.type === "channel");
+    expect(channelHits.length).toBeGreaterThan(0);
+    // Channel-level match (team name contains "greenfield") should land first.
+    expect(channelHits[0].title).toContain("Greenfield");
+  });
+
+  it("returns Knowledge results from the knowledge index", async () => {
+    mockSearchKnowledge.mockResolvedValue([
+      {
+        id: "kb-1",
+        question: "How do I onboard a new dealer?",
+        answer: "Use the wizard at /setup. The full guide covers DNS, MFA, and seat assignment.",
+        source: "manual",
+        asked_by: "u1",
+        confidence: 0.9,
+        rating: null,
+        view_count: 12,
+        tokens_used: 0,
+        tags: [],
+        created_at: "2026-04-20T00:00:00Z",
+        updated_at: "2026-04-22T00:00:00Z",
+      },
+    ]);
+
+    const res = await GET(makeReq("?q=onboard&types=knowledge"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.counts.knowledge).toBe(1);
+    const kbHit = body.results.find((r: any) => r.type === "knowledge");
+    expect(kbHit).toBeDefined();
+    expect(kbHit.id).toBe("kb-1");
+    expect(kbHit.title).toContain("onboard");
   });
 
   it("respects the types= filter — only calls helpers for requested surfaces", async () => {
