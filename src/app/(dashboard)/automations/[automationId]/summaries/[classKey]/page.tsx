@@ -50,6 +50,30 @@ function rerouteToLogin() {
 }
 
 /**
+ * Friendly date renderer — strips the time-of-day, millis, and Z that
+ * arrive on `class_date` (ISO timestamp from the assembler) so the
+ * page header reads "Mon, Apr 20, 2026" instead of
+ * "2026-04-20T00:00:00.000Z". Falls through to the raw input if it
+ * doesn't parse, so we never silently hide the data.
+ */
+export function formatClassDate(raw: string): string {
+  if (!raw) return "";
+  // Pull leading YYYY-MM-DD if present (covers "2026-04-20" and
+  // "2026-04-20T00:00:00.000Z"); add midday-UTC so toLocaleDateString
+  // doesn't tip back a day on negative-UTC machines.
+  const m = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  const iso = m ? `${m[1]}T12:00:00Z` : raw;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return raw;
+  return d.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+/**
  * Render an AssembledSummary as a plain-text block suitable for the
  * clipboard. Mirrors the Word-template layout the program team delivers today.
  */
@@ -58,7 +82,7 @@ function summaryToPlainText(s: AssembledSummary): string {
   lines.push(`PORSCHE ACADEMY — CLASS SUMMARY`);
   lines.push(``);
   lines.push(`Course: ${s.course_type}`);
-  lines.push(`Date: ${s.class_date}`);
+  lines.push(`Date: ${formatClassDate(s.class_date)}`);
   lines.push(`Location: ${s.location}`);
   lines.push(``);
   lines.push(`ATTENDANCE`);
@@ -612,7 +636,7 @@ export default function PorscheClassSummaryPage({
           <strong style={{ color: "var(--wp-text)" }}>
             {summary.course_type}
           </strong>{" "}
-          · {summary.class_date} · {summary.location}
+          · {formatClassDate(summary.class_date)} · {summary.location}
         </p>
         <p
           style={{

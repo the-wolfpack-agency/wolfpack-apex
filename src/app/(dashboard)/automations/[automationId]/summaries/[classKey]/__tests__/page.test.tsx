@@ -82,6 +82,32 @@ beforeEach(() => {
 
 const PARAMS = Promise.resolve({ automationId: "porsche-classes", classKey: "BA101%7C2026-04-20%7CRitz%20Carlton" });
 
+describe("SummaryPage — header date formatting", () => {
+  test("renders class_date as a friendly date, not the raw ISO string", async () => {
+    renderPage();
+    await waitFor(() => screen.getByTestId("summary-page"));
+    const header = screen.getByTestId("summary-header");
+    // No raw ISO in the header.
+    expect(header.textContent).not.toMatch(/2026-04-20T00:00:00\.000Z/);
+    // Friendly date shape: "Mon, Apr 20, 2026" (locale-dependent
+    // exact format, but year + month abbrev should both appear).
+    expect(header.textContent).toMatch(/2026/);
+    expect(header.textContent).toMatch(/Apr/);
+  });
+
+  test("Copy as plain text uses the friendly date too", async () => {
+    renderPage();
+    await waitFor(() => screen.getByTestId("summary-page"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("copy-plain-text"));
+    });
+    const wt = (navigator.clipboard as any).writeText as jest.Mock;
+    const text = wt.mock.calls[0][0] as string;
+    expect(text).not.toMatch(/2026-04-20T00:00:00\.000Z/);
+    expect(text).toMatch(/Apr/);
+  });
+});
+
 describe("SummaryPage — every button on the toolbar functions", () => {
   test("Copy as plain text → writes the formatted summary to navigator.clipboard", async () => {
     renderPage();
