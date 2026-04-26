@@ -229,3 +229,34 @@ describe("setSharepointConfig", () => {
     expect(stored.path).toBe("PCNA/Class Summaries");
   });
 });
+
+describe("DEFAULT_INBOX_FILTERS — subject scope locked to the class-summary workflow", () => {
+  test("only the four class-summary source streams match by subject", () => {
+    // Operator-confirmed scope (2026-04-26). Anything else
+    // ('Change Management Plan', 'Brand Ambassador',
+    // 'Skills Practice Auditor Score Sheet', etc.) is intentionally
+    // OUT of scope — they exist as separate Cognito forms but are
+    // not part of the class summary doc. Re-adding them without a
+    // parser would quarantine every match.
+    expect(DEFAULT_INBOX_FILTERS.subject_match.sort()).toEqual(
+      [
+        "Coordinator Class Report",
+        "Instructor Class Report",
+        "Scheduled Report Notification",
+        "Survey Data PCBA",
+      ].sort(),
+    );
+  });
+
+  test("dropped patterns must NOT reappear without a paired parser", () => {
+    const dropped = [
+      "Change Management Plan",
+      "Brand Ambassador",
+      "Skills Practice",
+      "Auditor Score Sheet",
+    ];
+    for (const d of dropped) {
+      expect(DEFAULT_INBOX_FILTERS.subject_match).not.toContain(d);
+    }
+  });
+});

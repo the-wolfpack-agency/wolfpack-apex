@@ -73,9 +73,11 @@ export const DEFAULT_INBOX_FILTERS: InboxFiltersConfig = {
     "Scheduled Report Notification",
     "Coordinator Class Report",
     "Instructor Class Report",
-    "Change Management Plan",
-    "Brand Ambassador",
     "Survey Data PCBA",
+    // "Change Management Plan" + "Brand Ambassador" removed 2026-04-26:
+    // not part of the class-summary workflow per operator
+    // confirmation. They previously matched but had no parser, so
+    // every such email quarantined.
   ],
 };
 

@@ -101,11 +101,17 @@ export const porscheClasses: AutomationDefinition = {
       "Scheduled Report Notification",
       "Coordinator Class Report",
       "Instructor Class Report",
-      "Change Management Plan",
-      "Brand Ambassador",
       /* Survey vendor xlsx — distinctive enough that subject-only is
          safe. Pattern: "Survey Data PCBA 101 Pendry March 23-27th". */
       "Survey Data PCBA",
+      // Removed 2026-04-26 (operator confirmation):
+      //   - "Change Management Plan"  → not part of the class-summary
+      //     workflow; would match BUT we have no parser, so they used
+      //     to quarantine on every send.
+      //   - "Brand Ambassador"        → too broad; would match unrelated
+      //     PCNA program emails. The Coordinator/Instructor reports
+      //     above already cover the actual class-level Cognito sources.
+      //   - "Skills Practice Auditor" → not in the summary workflow.
     ],
   },
   // Dynamic loader: wizard-managed filter row wins when present, static
