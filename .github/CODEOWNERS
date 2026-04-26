@@ -1,0 +1,23 @@
+# CODEOWNERS — required reviewer routing for the wolfpack-apex repo.
+#
+# Format: <pattern> @<github-username>
+# First match wins per file. The catch-all at the bottom ensures every
+# PR has a default reviewer.
+#
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default catch-all: CTO reviews anything not specifically routed.
+*                                  @nhomyk
+
+# Security-sensitive paths: CTO must review.
+.github/workflows/                 @nhomyk
+SECURITY.md                        @nhomyk
+src/lib/auth/                      @nhomyk
+src/lib/crypto/                    @nhomyk
+src/middleware.ts                  @nhomyk
+next.config.ts                     @nhomyk
+src/db/migrations/                 @nhomyk
+
+# Public-facing surfaces: review carefully.
+src/app/api/public/                @nhomyk
+src/app/(public)/                  @nhomyk

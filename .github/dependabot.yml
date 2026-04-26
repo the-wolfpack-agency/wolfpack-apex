@@ -1,0 +1,64 @@
+# Dependabot configuration — automated dependency updates.
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# The auto-merge workflow (.github/workflows/dependabot-auto-merge.yml,
+# if present) merges green patch/minor PRs automatically. Major bumps
+# always require manual review.
+
+version: 2
+updates:
+  # JavaScript / TypeScript dependencies
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "daily"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 10
+    groups:
+      # Group all React-ecosystem updates together to avoid lockstep noise
+      react-ecosystem:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react*"
+          - "next"
+          - "eslint-config-next"
+      # Group all jest / playwright / testing-library together
+      testing:
+        patterns:
+          - "jest"
+          - "jest-*"
+          - "@playwright/*"
+          - "@testing-library/*"
+          - "ts-jest"
+          - "fake-indexeddb"
+      # Group all type definitions
+      types:
+        patterns:
+          - "@types/*"
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    # Security patches always go through, regardless of grouping
+    allow:
+      - dependency-type: "direct"
+      - dependency-type: "indirect"
+
+  # GitHub Actions versions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
