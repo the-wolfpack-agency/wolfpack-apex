@@ -561,15 +561,35 @@ export default function MessagesPage() {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const lastAiDraftRef = useRef<{ text: string; atMs: number } | null>(null);
 
-  // Collapsible LEFT-panel sections — ALWAYS default to collapsed on
-  // mount. We deliberately do NOT persist this to localStorage: once
-  // a workspace has dozens of chats/channels the open list dominates
-  // the page, and users expect a clean Messages landing every time
-  // they click the nav. If a user arrives via a `?chat=…` /
-  // `?team=…&channel=…` deep-link the resolver below auto-opens the
-  // relevant section so the target row is visible.
-  const [chatsOpen, setChatsOpen] = useState<boolean>(false);
-  const [teamsOpen, setTeamsOpen] = useState<boolean>(false);
+  // Collapsible LEFT-panel sections. Persisted to localStorage so the
+  // user's preference survives reloads — closing the section once is
+  // remembered, opening it once is remembered. Default on first
+  // visit is COLLAPSED so a workspace with hundreds of chats doesn't
+  // dominate the landing view; returning users keep their choice.
+  // Deep-link arrivals (`?chat=…` / `?team=…&channel=…`) override and
+  // auto-open the relevant section so the target row is visible.
+  const [chatsOpen, setChatsOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("instinct.messages.chats_open") === "1";
+  });
+  const [teamsOpen, setTeamsOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("instinct.messages.teams_open") === "1";
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      "instinct.messages.chats_open",
+      chatsOpen ? "1" : "0",
+    );
+  }, [chatsOpen]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      "instinct.messages.teams_open",
+      teamsOpen ? "1" : "0",
+    );
+  }, [teamsOpen]);
 
   // Bootstrap the unread-badge cursor. TeamsUnreadBadge /
   // MessagesNavBadge / document-title notifications all key off
