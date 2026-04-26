@@ -47,6 +47,9 @@ import MessagesPage, {
   stripHtmlToText,
   formatRelativeTime,
   getChatTitle,
+  colorForSender,
+  buildTeamsDeepLink,
+  BASIC_EMOJIS,
 } from "@/app/(dashboard)/messages/page";
 
 interface MockResponse {
@@ -235,6 +238,97 @@ describe("getChatTitle", () => {
         "Nick Homyk",
       ),
     ).toBe("Jane");
+  });
+});
+
+// ---------------------------------------------- new pure helpers (2026-04-26)
+
+describe("colorForSender", () => {
+  test("returns the same color for the same key (deterministic)", () => {
+    const c1 = colorForSender("alice@example.com");
+    const c2 = colorForSender("alice@example.com");
+    expect(c1).toBe(c2);
+  });
+
+  test("different keys can map to different palette colors", () => {
+    const colors = new Set<string>();
+    for (const key of [
+      "a@x", "b@y", "c@z", "d@w", "e@v",
+      "f@u", "g@t", "h@s", "i@r", "j@q",
+    ]) {
+      colors.add(colorForSender(key));
+    }
+    // 10 distinct keys against an 8-color palette — assert >1 color
+    // emerges (collisions are fine and expected; we just need to
+    // prove the function isn't constant).
+    expect(colors.size).toBeGreaterThan(1);
+  });
+
+  test("falls back to a default for empty key", () => {
+    expect(colorForSender("")).toBeTruthy();
+    expect(colorForSender(null)).toBeTruthy();
+    expect(colorForSender(undefined)).toBeTruthy();
+  });
+
+  test("returns a hex color string (palette member)", () => {
+    expect(colorForSender("anyone")).toMatch(/^#[0-9a-fA-F]{6}$/);
+  });
+});
+
+describe("buildTeamsDeepLink", () => {
+  test("chat URL encodes member emails as comma-separated list", () => {
+    const url = buildTeamsDeepLink("chat", ["alice@x.com", "bob@y.com"]);
+    expect(url).toBe(
+      "https://teams.microsoft.com/l/chat/0/0?users=alice%40x.com,bob%40y.com",
+    );
+  });
+
+  test("call URL sets withVideo=false", () => {
+    const url = buildTeamsDeepLink("call", ["alice@x.com"]);
+    expect(url).toBe(
+      "https://teams.microsoft.com/l/call/0/0?users=alice%40x.com&withVideo=false",
+    );
+  });
+
+  test("video URL sets withVideo=true", () => {
+    const url = buildTeamsDeepLink("video", ["alice@x.com"]);
+    expect(url).toBe(
+      "https://teams.microsoft.com/l/call/0/0?users=alice%40x.com&withVideo=true",
+    );
+  });
+
+  test("returns null when no valid emails available", () => {
+    expect(buildTeamsDeepLink("chat", [])).toBeNull();
+    expect(buildTeamsDeepLink("chat", ["not-an-email"])).toBeNull();
+    expect(buildTeamsDeepLink("call", [""])).toBeNull();
+  });
+
+  test("filters out non-email strings (graceful fallback)", () => {
+    const url = buildTeamsDeepLink("chat", [
+      "alice@x.com",
+      "",
+      "not-an-email",
+      "bob@y.com",
+    ]);
+    expect(url).toContain("alice%40x.com");
+    expect(url).toContain("bob%40y.com");
+    expect(url).not.toContain("not-an-email");
+  });
+});
+
+describe("BASIC_EMOJIS palette", () => {
+  test("includes the user-requested basics: thumbs up, checkmark, smile", () => {
+    const chars = BASIC_EMOJIS.map((e) => e.char);
+    expect(chars).toContain("👍");
+    expect(chars).toContain("✅");
+    expect(chars).toContain("😄");
+  });
+
+  test("each entry has a non-empty name (used as testid + aria-label)", () => {
+    for (const e of BASIC_EMOJIS) {
+      expect(e.name).toBeTruthy();
+      expect(e.char).toBeTruthy();
+    }
   });
 });
 

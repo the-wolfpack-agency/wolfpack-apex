@@ -154,6 +154,78 @@ interface DeepLinkPayload {
 }
 
 /**
+ * Color-code chat bubbles per sender (Slack-style accent stripe).
+ *
+ * Pure function: same input → same color, deterministic across renders
+ * so a participant keeps their color throughout the thread. Uses a
+ * curated dark-theme palette (gold reserved for "me" — never returned
+ * here) that's color-blind friendly enough for typical chat use.
+ */
+const SENDER_PALETTE = [
+  "#4f9eff", // blue
+  "#7bc97b", // green
+  "#e87b7b", // red-pink
+  "#c084fc", // purple
+  "#f59e0b", // amber
+  "#06b6d4", // cyan
+  "#f472b6", // pink
+  "#a3e635", // lime
+] as const;
+
+export function colorForSender(senderKey: string | null | undefined): string {
+  if (!senderKey) return SENDER_PALETTE[0];
+  // Cheap deterministic hash — DJB2 variant. Stable across runtimes.
+  let hash = 5381;
+  for (let i = 0; i < senderKey.length; i++) {
+    hash = ((hash << 5) + hash + senderKey.charCodeAt(i)) >>> 0;
+  }
+  return SENDER_PALETTE[hash % SENDER_PALETTE.length];
+}
+
+/**
+ * Client-side fallback Teams deep-link builder. The /api/ms/deep-links
+ * route is the canonical source (it knows the user's tenant + the
+ * resolved chat ID); when it returns null (degraded scope, network
+ * blip, etc.) we still render an enabled button using the documented
+ * Teams URL spec so the user can hand off to the app.
+ *
+ * Specs:
+ *   chat:  https://teams.microsoft.com/l/chat/0/0?users=<comma-emails>
+ *   call:  https://teams.microsoft.com/l/call/0/0?users=<comma-emails>&withVideo=false
+ *   video: https://teams.microsoft.com/l/call/0/0?users=<comma-emails>&withVideo=true
+ */
+export function buildTeamsDeepLink(
+  type: "chat" | "call" | "video",
+  memberEmails: string[],
+): string | null {
+  const cleaned = memberEmails
+    .filter((e): e is string => typeof e === "string" && e.includes("@"))
+    .map((e) => encodeURIComponent(e));
+  if (cleaned.length === 0) return null;
+  const users = cleaned.join(",");
+  if (type === "chat") {
+    return `https://teams.microsoft.com/l/chat/0/0?users=${users}`;
+  }
+  const withVideo = type === "video" ? "true" : "false";
+  return `https://teams.microsoft.com/l/call/0/0?users=${users}&withVideo=${withVideo}`;
+}
+
+/**
+ * Basic emoji palette — covers the 90% of casual chat reactions
+ * (Teams' "Like" / "Heart" / "Laugh" / "Surprised" / "Sad" / "Angry"
+ * plus the universal "checkmark" + "thumbs up" the user asked for).
+ * Inserted into the draft textarea at cursor position.
+ */
+export const BASIC_EMOJIS: ReadonlyArray<{ char: string; name: string }> = [
+  { char: "👍", name: "thumbs up" },
+  { char: "✅", name: "checkmark" },
+  { char: "😄", name: "smile" },
+  { char: "❤️", name: "heart" },
+  { char: "🎉", name: "celebrate" },
+  { char: "👀", name: "eyes" },
+] as const;
+
+/**
  * Allow-list HTML strip. No new deps — wolfpack-apex does not ship
  * DOMPurify (see package.json). We remove *all* tags and decode the
  * most common entities, keeping only text. Safe by construction:
@@ -486,6 +558,7 @@ export default function MessagesPage() {
   // measure acceptance (sent within 5min of the suggestion + edit
   // distance to the suggestion).
   const [aiDrafting, setAiDrafting] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const lastAiDraftRef = useRef<{ text: string; atMs: number } | null>(null);
 
   // Collapsible LEFT-panel sections. Persisted to localStorage so the
@@ -1095,20 +1168,33 @@ export default function MessagesPage() {
       }
 
       // Deep links in parallel — failures just leave the buttons disabled.
+      const memberEmails = chat.members
+        .map((m) => m.email)
+        .filter(Boolean) as string[];
       const [chatDl, callDl, videoDl] = await Promise.all([
         fetchDeepLink("chat", { chatId: chat.id }),
         fetchDeepLink("call", {
-          users: (chat.members.map((m) => m.email).filter(Boolean) as string[]).join(","),
+          users: memberEmails.join(","),
           withVideo: 0,
         }),
         fetchDeepLink("call", {
-          users: (chat.members.map((m) => m.email).filter(Boolean) as string[]).join(","),
+          users: memberEmails.join(","),
           withVideo: 1,
         }),
       ]);
-      setChatDeepLink(chatDl?.url ?? null);
-      setCallDeepLink(callDl?.url ?? null);
-      setVideoDeepLink(videoDl?.url ?? null);
+      /* If the API didn't supply a URL (degraded scope, route 5xx,
+         empty tenant), fall back to the documented Teams URL spec
+         built from the member emails. The buttons stay enabled and
+         the user can hand off — better than greyed-out + dead. */
+      setChatDeepLink(
+        chatDl?.url ?? buildTeamsDeepLink("chat", memberEmails),
+      );
+      setCallDeepLink(
+        callDl?.url ?? buildTeamsDeepLink("call", memberEmails),
+      );
+      setVideoDeepLink(
+        videoDl?.url ?? buildTeamsDeepLink("video", memberEmails),
+      );
     },
     [],
   );
@@ -2145,17 +2231,26 @@ export default function MessagesPage() {
                         ? m.body?.content ?? ""
                         : stripHtmlToText(m.body?.content);
                     const isMe = m.role === "me";
+                    /* Per-sender color: gold for "me", palette-hash
+                       for everyone else so every participant has a
+                       stable accent stripe. Authors are keyed off
+                       displayName when no stable id is available. */
+                    const senderColor = isMe
+                      ? "var(--wp-gold, #eab308)"
+                      : colorForSender(m.from?.displayName ?? "unknown");
                     return (
                       <div
                         key={m.id}
                         data-testid={`message-${m.id}`}
                         data-pending={m.pending ? "true" : "false"}
                         data-role={m.role ?? "other"}
+                        data-sender-color={senderColor}
                         style={{
                           background: isMe
                             ? "rgba(234,179,8,0.10)"
                             : "var(--wp-dark-surface2, #222)",
                           border: "1px solid var(--wp-dark-border, #333)",
+                          borderLeft: `3px solid ${senderColor}`,
                           borderRadius: 8,
                           padding: "8px 12px",
                           alignSelf: isMe ? "flex-end" : "flex-start",
@@ -2165,23 +2260,28 @@ export default function MessagesPage() {
                       >
                         <div
                           style={{
-                            fontSize: 12,
+                            fontSize: 11,
                             color: "var(--wp-text-muted, #9ca3af)",
                             display: "flex",
                             justifyContent: "space-between",
                             gap: 8,
                           }}
                         >
-                          <span>{m.from?.displayName ?? "Unknown"}</span>
+                          <span style={{ color: senderColor, fontWeight: 600 }}>
+                            {m.from?.displayName ?? "Unknown"}
+                          </span>
                           <span>
                             {m.pending ? "Sending…" : formatRelativeTime(m.createdDateTime)}
                           </span>
                         </div>
                         <div
                           style={{
-                            fontSize: 14,
+                            /* Teams uses ~13px / 1.35 line-height for
+                               message body. Was 14/1.4 — too large.  */
+                            fontSize: 13,
+                            lineHeight: 1.35,
                             whiteSpace: "pre-wrap",
-                            marginTop: 4,
+                            marginTop: 2,
                             color: "var(--wp-text, #eee)",
                           }}
                         >
@@ -2224,7 +2324,8 @@ export default function MessagesPage() {
                     aria-label="Draft a reply with AI"
                     title="Draft a reply with AI"
                     style={{
-                      padding: "8px 10px",
+                      height: 44,
+                      padding: "0 10px",
                       borderRadius: 6,
                       border: "1px solid var(--wp-dark-border, #333)",
                       background: "var(--wp-dark-surface2, #222)",
@@ -2239,6 +2340,81 @@ export default function MessagesPage() {
                   >
                     {aiDrafting ? "…" : "✨ AI"}
                   </button>
+                  {/* Emoji quick-insert — Teams-style basic palette.
+                      Inserts at end of draft; cursor positioning is
+                      kept simple to avoid touching the contentEditable
+                      mention machinery. */}
+                  <div
+                    style={{ position: "relative", display: "inline-block" }}
+                    data-testid="messages-emoji-picker-wrap"
+                  >
+                    <button
+                      type="button"
+                      data-testid="messages-emoji-toggle"
+                      onClick={() => setEmojiOpen((v) => !v)}
+                      aria-label="Insert emoji"
+                      aria-expanded={emojiOpen}
+                      title="Insert emoji"
+                      style={{
+                        height: 44,
+                        padding: "0 10px",
+                        borderRadius: 6,
+                        border: "1px solid var(--wp-dark-border, #333)",
+                        background: emojiOpen
+                          ? "var(--wp-dark-surface, #1a1a1a)"
+                          : "var(--wp-dark-surface2, #222)",
+                        color: "var(--wp-text, #eee)",
+                        fontSize: 18,
+                        cursor: "pointer",
+                      }}
+                    >
+                      😊
+                    </button>
+                    {emojiOpen ? (
+                      <div
+                        role="menu"
+                        data-testid="messages-emoji-menu"
+                        style={{
+                          position: "absolute",
+                          bottom: "calc(100% + 6px)",
+                          left: 0,
+                          display: "flex",
+                          gap: 4,
+                          padding: 6,
+                          background: "var(--wp-dark-surface2, #222)",
+                          border: "1px solid var(--wp-dark-border, #333)",
+                          borderRadius: 8,
+                          boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+                          zIndex: 10,
+                        }}
+                      >
+                        {BASIC_EMOJIS.map((e) => (
+                          <button
+                            key={e.char}
+                            type="button"
+                            data-testid={`messages-emoji-${e.name.replace(/\s+/g, "-")}`}
+                            onClick={() => {
+                              setDraft((prev) => `${prev}${e.char}`);
+                              setEmojiOpen(false);
+                              composeInputRef.current?.focus();
+                            }}
+                            aria-label={`Insert ${e.name}`}
+                            title={e.name}
+                            style={{
+                              padding: "4px 6px",
+                              fontSize: 18,
+                              border: "none",
+                              background: "transparent",
+                              cursor: "pointer",
+                              borderRadius: 4,
+                            }}
+                          >
+                            {e.char}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                   <div style={{ flex: 1, position: "relative" }}>
                     {mentionMatch && mentionCandidates.length > 0 ? (
                       <div
@@ -2349,7 +2525,11 @@ export default function MessagesPage() {
                     disabled={!canSend}
                     aria-label="Send message"
                     style={{
-                      padding: "8px 16px",
+                      /* Match textarea minHeight so Send sits in-line
+                         with the input baseline (was misaligned with
+                         8px vertical padding only). */
+                      height: 44,
+                      padding: "0 16px",
                       borderRadius: 6,
                       border: "1px solid var(--wp-gold, #eab308)",
                       background: canSend
