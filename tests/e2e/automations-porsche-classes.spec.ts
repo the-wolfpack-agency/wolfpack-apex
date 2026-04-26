@@ -53,13 +53,12 @@ test.describe("/automations — porsche-classes flow", () => {
       `GET /automations status (401 = blank page; we want 200)`,
     ).toBe(200);
 
-    await expect(page.getByText(/Automations/i).first()).toBeVisible({
-      timeout: 10_000,
-    });
-
-    // The porsche-classes registry entry must be present.
+    /* The dashboard layout renders "Loading…" until its useEffect
+       hydrates `user` from localStorage. Wait for the porsche-classes
+       row testid directly — it only mounts after layout-auth resolves
+       AND /api/automations returns. Stable selector ⇒ no race. */
     const porscheRow = page.getByTestId("automation-row-porsche-classes");
-    await expect(porscheRow).toBeVisible();
+    await expect(porscheRow).toBeVisible({ timeout: 20_000 });
     await porscheRow.click();
 
     /* ---------- /automations/porsche-classes overview ---------- */
