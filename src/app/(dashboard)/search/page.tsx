@@ -102,7 +102,6 @@ function SearchContents() {
   );
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [counts, setCounts] = useState<Record<string, number>>({});
   const [tookMs, setTookMs] = useState<number>(0);
   const [error, setError] = useState<string>("");
 
@@ -126,17 +125,14 @@ function SearchContents() {
         if (!res.ok) {
           setError(`Search failed (${res.status})`);
           setResults([]);
-          setCounts({});
           return;
         }
         const body = (await res.json()) as SearchResponse;
         setResults(body.results || []);
-        setCounts(body.counts || {});
         setTookMs(body.took_ms || 0);
       } catch {
         setError("Search failed — check your connection.");
         setResults([]);
-        setCounts({});
       } finally {
         setLoading(false);
       }
@@ -163,7 +159,6 @@ function SearchContents() {
     if (!query.trim()) {
       setLoading(false);
       setResults([]);
-      setCounts({});
       setTookMs(0);
       setError("");
       return;
@@ -249,13 +244,11 @@ function SearchContents() {
       >
         {TYPE_ORDER.map((t) => {
           const active = activeTypes.has(t);
-          const disabled = (counts[`${t}s`] ?? counts[t] ?? 0) === 0 && (t === "channel" || t === "knowledge");
           return (
             <button
               key={t}
               type="button"
               onClick={() => toggleType(t)}
-              disabled={disabled}
               aria-pressed={active}
               data-testid={`chip-${t}`}
               style={{
@@ -264,9 +257,8 @@ function SearchContents() {
                 border: `1px solid ${active ? "var(--wp-gold)" : "var(--wp-border)"}`,
                 background: active ? "var(--wp-gold)" : "transparent",
                 color: active ? "var(--wp-bg)" : "var(--wp-text-secondary)",
-                cursor: disabled ? "not-allowed" : "pointer",
+                cursor: "pointer",
                 fontSize: "13px",
-                opacity: disabled ? 0.4 : 1,
               }}
             >
               {TYPE_LABELS[t]}
