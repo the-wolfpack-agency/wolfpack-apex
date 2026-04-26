@@ -8,15 +8,33 @@
 version: 2
 updates:
   # JavaScript / TypeScript dependencies
+  #
+  # Throttling philosophy:
+  #   - WEEKLY (not daily) so a single Monday batch is the only Actions
+  #     spend; daily was burning ~40% of the monthly minutes budget on
+  #     the first run alone.
+  #   - DIRECT deps only — transitive deps churn far more often and
+  #     usually arrive bundled with their parent's update anyway.
+  #   - 3-PR cap so the queue never exceeds 12 simultaneous runs
+  #     (3 PRs × 4 workflows). Anything beyond gets queued for next week.
+  #   - Aggressive grouping so a single PR carries multiple bumps in the
+  #     same family (react / testing / types).
+  #   - Security alerts are NEVER throttled — they bypass these limits
+  #     via Dependabot's separate vulnerability-alerts channel.
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+      day: "monday"
       time: "09:00"
       timezone: "America/Los_Angeles"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 3
+    # Only direct deps — `indirect` was producing the bare-os / call-bind /
+    # node-releases / enhanced-resolve flood. Those bubble up via npm
+    # automatically when a direct dep updates.
+    allow:
+      - dependency-type: "direct"
     groups:
-      # Group all React-ecosystem updates together to avoid lockstep noise
       react-ecosystem:
         patterns:
           - "react"
@@ -24,7 +42,6 @@ updates:
           - "@types/react*"
           - "next"
           - "eslint-config-next"
-      # Group all jest / playwright / testing-library together
       testing:
         patterns:
           - "jest"
@@ -33,22 +50,24 @@ updates:
           - "@testing-library/*"
           - "ts-jest"
           - "fake-indexeddb"
-      # Group all type definitions
       types:
         patterns:
           - "@types/*"
+      # Lump everything else into a single weekly PR so the queue never
+      # blows up. Major bumps still carve out their own PR (Dependabot
+      # default).
+      other-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
     labels:
       - "dependencies"
       - "npm"
     commit-message:
       prefix: "deps"
       include: "scope"
-    # Security patches always go through, regardless of grouping
-    allow:
-      - dependency-type: "direct"
-      - dependency-type: "indirect"
 
-  # GitHub Actions versions
+  # GitHub Actions versions — weekly, low churn.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -56,6 +75,11 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 3
+    groups:
+      actions-ecosystem:
+        patterns:
+          - "*"
     labels:
       - "dependencies"
       - "github-actions"
