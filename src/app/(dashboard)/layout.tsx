@@ -11,6 +11,7 @@ import {
 } from "@/lib/client-auth";
 import NotificationBell from "@/components/NotificationBell";
 import TeamsUnreadBadge from "@/components/TeamsUnreadBadge";
+import NewMessageToast from "@/components/NewMessageToast";
 import MessagesNavBadge from "@/components/MessagesNavBadge";
 import InstinctChat from "@/components/InstinctChat";
 import WelcomeTooltip from "@/components/WelcomeTooltip";
@@ -326,6 +327,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           <WelcomeTooltip />
         </>
       )}
+      {/* New-message slide-in toast — fires whenever the Teams unread
+          count grows during this session. Self-suppresses on /messages
+          (the user's already there). Self-renders nothing when count
+          isn't growing — costs ~1 poll piggybacking on the existing
+          adaptive-poll cadence. */}
+      <NewMessageToast />
     </div>
   );
 }

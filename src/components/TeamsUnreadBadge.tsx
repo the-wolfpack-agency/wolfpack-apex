@@ -192,35 +192,51 @@ export default function TeamsUnreadBadge() {
   if (count <= 0 || silencedRef.current) return null;
 
   return (
-    <a
-      href="/messages"
-      data-testid="teams-unread-badge"
-      aria-label={`Teams: ${count} new message${count === 1 ? "" : "s"}`}
-      onClick={handleClick}
-      className="relative inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold transition-colors"
-      style={{
-        color: "var(--wp-dark)",
-        background: "var(--wp-gold)",
-        border: "1px solid var(--wp-dark-border)",
-      }}
-    >
-      <svg
-        className="w-4 h-4"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        strokeWidth={2}
-        aria-hidden
+    <>
+      {/* Local @keyframes — kept inline so this component is fully
+          self-contained (no global CSS file dependency). The pulse
+          ring is gold-tinted and fades out so it draws the eye
+          without becoming visual noise. */}
+      <style>{`
+        @keyframes wp-unread-pulse {
+          0%   { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.55); }
+          70%  { box-shadow: 0 0 0 10px rgba(234, 179, 8, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0); }
+        }
+        .wp-unread-badge-pulse {
+          animation: wp-unread-pulse 1.4s cubic-bezier(0.66, 0, 0, 1) infinite;
+        }
+      `}</style>
+      <a
+        href="/messages"
+        data-testid="teams-unread-badge"
+        aria-label={`Teams: ${count} new message${count === 1 ? "" : "s"}`}
+        onClick={handleClick}
+        className="wp-unread-badge-pulse relative inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-bold transition-colors"
+        style={{
+          color: "var(--wp-dark)",
+          background: "var(--wp-gold)",
+          border: "1px solid var(--wp-dark-border)",
+        }}
       >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-        />
-      </svg>
-      <span data-testid="teams-unread-badge-count">
-        {count > 99 ? "99+" : count}
-      </span>
-    </a>
+        <svg
+          className="w-4 h-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+          aria-hidden
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+          />
+        </svg>
+        <span data-testid="teams-unread-badge-count">
+          {count > 99 ? "99+" : count}
+        </span>
+      </a>
+    </>
   );
 }
