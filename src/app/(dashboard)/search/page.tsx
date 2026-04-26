@@ -104,6 +104,7 @@ function SearchContents() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [tookMs, setTookMs] = useState<number>(0);
   const [error, setError] = useState<string>("");
+  const [inputFocused, setInputFocused] = useState(false);
 
   const runTimer = useRef<number | null>(null);
 
@@ -217,22 +218,55 @@ function SearchContents() {
         Search
       </h1>
 
-      <div style={{ marginBottom: "16px" }}>
+      <div style={{ marginBottom: "16px", position: "relative" }}>
+        {/* Magnifying glass prefix so the field reads as an input
+            even before focus — the previous design had a 1px border
+            that was nearly invisible against the dark surface and
+            users couldn't tell it was clickable. */}
+        <svg
+          aria-hidden="true"
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{
+            position: "absolute",
+            left: "14px",
+            top: "50%",
+            transform: "translateY(-50%)",
+            color: inputFocused ? "var(--wp-gold)" : "var(--wp-text-secondary)",
+            pointerEvents: "none",
+          }}
+        >
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
         <input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onFocus={() => setInputFocused(true)}
+          onBlur={() => setInputFocused(false)}
           placeholder="Search chats, emails, calendar..."
           aria-label="Universal search"
           data-testid="search-input"
           style={{
             width: "100%",
-            padding: "12px 16px",
+            padding: "12px 16px 12px 44px",
             fontSize: "16px",
             background: "var(--wp-surface)",
             color: "var(--wp-text-primary)",
-            border: "1px solid var(--wp-border)",
+            border: `2px solid ${inputFocused ? "var(--wp-gold)" : "var(--wp-text-secondary)"}`,
             borderRadius: "8px",
+            outline: "none",
+            boxShadow: inputFocused
+              ? "0 0 0 3px rgba(234, 179, 8, 0.15)"
+              : "none",
+            transition: "border-color 120ms, box-shadow 120ms",
           }}
         />
       </div>
