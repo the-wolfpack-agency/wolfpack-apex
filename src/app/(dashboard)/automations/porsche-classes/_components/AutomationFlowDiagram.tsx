@@ -40,8 +40,8 @@ const NODES: Node[] = [
     label: "Emails arrive",
     detail: "Coordinator notes, instructor notes, the roster, and the survey come in by email and are picked up automatically.",
     tone: "input",
-    before: "Outlook inbox: you watched for and forwarded each email by hand.",
-    after: "Instinct watches Outlook for you. New messages show up here as soon as they arrive.",
+    before: "Outlook inbox. You watched for and forwarded each email manually.",
+    after: "Instinct watches Outlook. New messages appear here as they arrive.",
   },
   {
     id: "parsers",
@@ -49,8 +49,8 @@ const NODES: Node[] = [
     label: "Read each email",
     detail: "Each kind of email gets read and turned into clean, organized information.",
     tone: "process",
-    before: "You opened each Word doc, Excel file, and Cognito form, then copied the bits you needed.",
-    after: "Instinct reads each one for you and pulls out the names, dates, scores, and notes.",
+    before: "You opened each Word doc, Excel file, and Cognito form and copied the relevant fields manually.",
+    after: "Instinct reads each one and extracts the names, dates, scores, and notes.",
   },
   {
     id: "snapshots",
@@ -58,8 +58,8 @@ const NODES: Node[] = [
     label: "Save the pieces",
     detail: "Every email is saved and tagged with the class it belongs to so nothing gets lost.",
     tone: "store",
-    before: "OneDrive folders, Outlook flags, and a personal spreadsheet to keep track of what came in.",
-    after: "Everything is filed away in the system and tagged with the class it belongs to.",
+    before: "OneDrive folders, Outlook flags, and a personal spreadsheet to track what had arrived.",
+    after: "Each item is stored and tagged with the class it belongs to.",
   },
   {
     id: "assembler",
@@ -67,8 +67,8 @@ const NODES: Node[] = [
     label: "Build the summary",
     detail: "All the pieces for one class are combined into a single class summary.",
     tone: "process",
-    before: "Word: you opened the template and re-typed each field from your notes.",
-    after: "Instinct fills the template for you. Every coordinator note, instructor note, attendee, and survey question is in the right place.",
+    before: "Word. You opened the template and re-typed each field from your notes.",
+    after: "Instinct fills the template. Coordinator notes, instructor notes, attendees, and survey questions are placed in the matching sections.",
   },
   {
     id: "exceptions",
@@ -76,8 +76,8 @@ const NODES: Node[] = [
     label: "Check for gaps",
     detail: "Flags anything missing or unusual (no roster, dates that do not match, surveys with few responses).",
     tone: "process",
-    before: "You scanned the email thread looking for missing pieces or wrong dates.",
-    after: "Instinct flags anything off (missing roster, wrong date, low survey turnout) so you do not have to hunt for problems.",
+    before: "You scanned the email thread for missing pieces or incorrect dates.",
+    after: "Instinct flags issues (missing roster, mismatched dates, low survey turnout) on the summary page.",
   },
   {
     id: "review",
@@ -86,7 +86,7 @@ const NODES: Node[] = [
     detail: "Open the summary, look over any flags, and choose how to share it.",
     tone: "human",
     before: "You read the document end to end and edited it before sending.",
-    after: "You open the finished summary, glance at any flags, and decide how to share it.",
+    after: "You open the finished summary, review any flags, and decide how to share it.",
   },
   {
     id: "sharepoint",
@@ -94,8 +94,8 @@ const NODES: Node[] = [
     label: "Send to SharePoint",
     detail: "One click creates the Word file and saves it to the right SharePoint folder. The action is logged so you can undo it.",
     tone: "store",
-    before: "Save as Word, open SharePoint in the browser, drag the file into the right folder, share the link.",
-    after: "One click sends the Word file straight to the right SharePoint folder. The action is logged so you can undo it.",
+    before: "Save as Word, open SharePoint in the browser, drag the file into the correct folder, share the link.",
+    after: "One click sends the Word file to the configured SharePoint folder. The action is logged and can be undone.",
   },
 ];
 
@@ -214,13 +214,12 @@ export default function AutomationFlowDiagram() {
                 marginBottom: 6,
               }}
             >
-              Tools you used to bounce between
+              Previous tools used for this process
             </div>
             <div style={{ color: "var(--wp-text-dim)" }}>
               Outlook (forwarding emails), Excel (the roster), Cognito
               Forms (the survey), Word (the template), OneDrive (saving
-              drafts), and SharePoint (filing the final document). Six
-              tools, lots of copy and paste, easy to miss something.
+              drafts), and SharePoint (filing the final document).
             </div>
             <div
               style={{
@@ -229,13 +228,13 @@ export default function AutomationFlowDiagram() {
                 color: "var(--wp-success, #22c55e)",
               }}
             >
-              What replaces all of that
+              New automated process
             </div>
             <div style={{ color: "var(--wp-text-dim)" }}>
-              One page in Instinct. The system collects the emails,
-              reads each one, builds the Word document for you, and
-              files it to SharePoint when you click Send. You stop
-              juggling six tools and only review the finished summary.
+              One page in Instinct. Emails are collected and read for
+              you, the Word document is built, and it is filed to
+              SharePoint when you click Send. You review the finished
+              summary.
             </div>
           </div>
 

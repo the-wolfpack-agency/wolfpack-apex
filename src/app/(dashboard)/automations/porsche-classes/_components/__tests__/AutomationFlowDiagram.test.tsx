@@ -112,10 +112,13 @@ describe("<AutomationFlowDiagram />", () => {
     expect(sharepoint.textContent).toMatch(/one click/i);
   });
 
-  test("top-level 'tools replaced' banner names the old tools and the new single-page replacement", () => {
+  test("top-level 'previous vs new' banner names the old tools and the new automated process", () => {
     render(<AutomationFlowDiagram />);
     const banner = screen.getByTestId("automation-flow-tools-replaced");
-    // Old toolset.
+    // Section labels — neutral, not sales pitch.
+    expect(banner.textContent).toMatch(/Previous tools used for this process/);
+    expect(banner.textContent).toMatch(/New automated process/);
+    // Old toolset listed factually.
     expect(banner.textContent).toMatch(/Outlook/);
     expect(banner.textContent).toMatch(/Excel/);
     expect(banner.textContent).toMatch(/Cognito/);
