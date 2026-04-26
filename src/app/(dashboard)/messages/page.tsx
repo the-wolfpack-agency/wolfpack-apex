@@ -2315,7 +2315,7 @@ export default function MessagesPage() {
                   </div>
                 ) : null}
 
-                <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "stretch", gap: 8 }}>
                   <button
                     type="button"
                     data-testid="messages-compose-ai-draft"
@@ -2324,7 +2324,9 @@ export default function MessagesPage() {
                     aria-label="Draft a reply with AI"
                     title="Draft a reply with AI"
                     style={{
-                      height: 44,
+                      /* alignItems: stretch on the parent makes all
+                         buttons match the textarea height. No fixed
+                         height needed — it'd fight stretch on rows>1. */
                       padding: "0 10px",
                       borderRadius: 6,
                       border: "1px solid var(--wp-dark-border, #333)",
@@ -2356,7 +2358,7 @@ export default function MessagesPage() {
                       aria-expanded={emojiOpen}
                       title="Insert emoji"
                       style={{
-                        height: 44,
+                        height: "100%",
                         padding: "0 10px",
                         borderRadius: 6,
                         border: "1px solid var(--wp-dark-border, #333)",
@@ -2498,7 +2500,11 @@ export default function MessagesPage() {
                         // first.
                         window.setTimeout(() => setMentionMatch(null), 120);
                       }}
-                      placeholder="Send a Teams message…"
+                      /* Short placeholder so it doesn't wrap on narrow
+                         viewports (the textarea is rows={2} and the
+                         old "Send a Teams message…" copy split into two
+                         lines on mobile, looking ragged). */
+                      placeholder="Message…"
                       rows={2}
                       style={{
                         width: "100%",
@@ -2525,10 +2531,8 @@ export default function MessagesPage() {
                     disabled={!canSend}
                     aria-label="Send message"
                     style={{
-                      /* Match textarea minHeight so Send sits in-line
-                         with the input baseline (was misaligned with
-                         8px vertical padding only). */
-                      height: 44,
+                      /* Stretch to match textarea height (rows={2}
+                         renders ~60px; height:44 was visibly short). */
                       padding: "0 16px",
                       borderRadius: 6,
                       border: "1px solid var(--wp-gold, #eab308)",
