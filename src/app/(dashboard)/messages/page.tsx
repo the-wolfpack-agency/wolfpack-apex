@@ -1235,6 +1235,25 @@ export default function MessagesPage() {
     void loadThread(chat);
   }
 
+  // Scroll a deep-linked row in the LEFT panel into view. Some users
+  // have hundreds of chats and dozens of channels — the auto-select
+  // is invisible without this, since the target lives far below the
+  // fold. requestAnimationFrame waits one paint so the row exists in
+  // the DOM after the section expand / channel-list render.
+  function scrollLeftPanelRowIntoView(testId: string): void {
+    if (typeof window === "undefined") return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = document.querySelector<HTMLElement>(
+          `[data-testid="${testId}"]`,
+        );
+        if (el) {
+          el.scrollIntoView({ block: "center", behavior: "smooth" });
+        }
+      });
+    });
+  }
+
   // Resolve a `?chat=<id>` deep-link as soon as the chat list lands.
   // Auto-expands the Chats section so the selected row is visible.
   useEffect(() => {
@@ -1248,6 +1267,7 @@ export default function MessagesPage() {
     }
     setChatsOpen(true);
     selectChat(target);
+    scrollLeftPanelRowIntoView(`chat-row-${target.id}`);
     setPendingDeepLink(null);
     // selectChat is stable enough for our purposes; including it would
     // require wrapping in useCallback. eslint-disable-next-line.
@@ -1287,6 +1307,7 @@ export default function MessagesPage() {
       return;
     }
     selectChannel(team.id, channel.id, team.displayName, channel.displayName);
+    scrollLeftPanelRowIntoView(`channel-row-${channel.id}`);
     setPendingDeepLink(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingDeepLink, teamsOpen, teams, expandedTeams, channelsByTeam]);
