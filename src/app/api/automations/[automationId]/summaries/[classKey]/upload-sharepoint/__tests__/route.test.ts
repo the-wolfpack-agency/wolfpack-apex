@@ -296,3 +296,85 @@ describe("POST upload-sharepoint", () => {
     expect(body.upstream_status).toBe(403);
   });
 });
+
+import { buildFilename } from "../route";
+
+describe("buildFilename — Graph-safe drive-item name builder", () => {
+  it("normalizes a full ISO class_date to YYYY-MM-DD (drops time + millis + Z)", () => {
+    // Real-world bug: SharePoint rejected names like
+    // "Porsche Academy - 2026-04-20T000000.000Z - Ritz Carlton.docx"
+    // with "The string did not match the expected pattern".
+    const out = buildFilename({
+      course_type: "Porsche Academy",
+      class_date: "2026-04-20T00:00:00.000Z",
+      location: "Ritz Carlton",
+    });
+    expect(out).toBe("Porsche Academy - 2026-04-20 - Ritz Carlton.docx");
+  });
+
+  it("accepts a bare YYYY-MM-DD class_date unchanged", () => {
+    expect(
+      buildFilename({
+        course_type: "BA101",
+        class_date: "2026-04-20",
+        location: "Atlanta",
+      }),
+    ).toBe("BA101 - 2026-04-20 - Atlanta.docx");
+  });
+
+  it("falls back to a parsed date when the input isn't ISO-shaped", () => {
+    const out = buildFilename({
+      course_type: "BA101",
+      class_date: "April 20, 2026",
+      location: "Atlanta",
+    });
+    expect(out).toMatch(/^BA101 - \d{4}-\d{2}-\d{2} - Atlanta\.docx$/);
+  });
+
+  it("strips Windows-restricted chars (\\, /, :, *, ?, \", <, >, |)", () => {
+    const out = buildFilename({
+      course_type: "Course / Foo: Bar?",
+      class_date: "2026-04-20",
+      location: 'Site|"Place"',
+    });
+    expect(out).not.toMatch(/[\\/:*?"<>|]/);
+    expect(out.endsWith(".docx")).toBe(true);
+  });
+
+  it("strips hash, percent, ampersand (some tenants reject these in path names)", () => {
+    const out = buildFilename({
+      course_type: "Cls #100 & Co.",
+      class_date: "2026-04-20",
+      location: "%Place%",
+    });
+    expect(out).not.toMatch(/[#%&]/);
+  });
+
+  it("trims leading/trailing whitespace and trailing periods (Graph forbids both)", () => {
+    const out = buildFilename({
+      course_type: "  Padded Course .  ",
+      class_date: "2026-04-20",
+      location: "Loc.",
+    });
+    // No leading/trailing whitespace anywhere a segment is joined
+    expect(out).toBe("Padded Course - 2026-04-20 - Loc.docx");
+  });
+
+  it("collapses consecutive whitespace to a single space", () => {
+    const out = buildFilename({
+      course_type: "Lots   of    spaces",
+      class_date: "2026-04-20",
+      location: "X",
+    });
+    expect(out).toBe("Lots of spaces - 2026-04-20 - X.docx");
+  });
+
+  it("falls back to 'Class' when a field is empty after sanitization", () => {
+    const out = buildFilename({
+      course_type: "///",
+      class_date: "2026-04-20",
+      location: "",
+    });
+    expect(out).toMatch(/^Class - 2026-04-20 - Class\.docx$/);
+  });
+});

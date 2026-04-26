@@ -38,18 +38,48 @@ interface Ctx {
 
 /**
  * Build a deterministic SharePoint filename from the assembled summary.
- * Format: `<course> - <date> - <location>.docx`. Spaces are kept (Graph
- * accepts them when properly encoded by buildUploadUrl); slashes and
- * other path-separators are stripped because they'd be rejected.
+ * Format: `<course> - YYYY-MM-DD - <location>.docx`.
+ *
+ * Hardened against the "The string did not match the expected pattern"
+ * error Microsoft Graph returns when a drive-item name violates the
+ * SharePoint name regex:
+ *   - class_date is normalized to YYYY-MM-DD (no time-of-day, no `Z`,
+ *     no `.000` — those produced patterns like `T000000.000Z` that
+ *     Graph rejected on path-addressed PUT).
+ *   - All Windows-restricted chars (\\ / : * ? " < > |) are stripped.
+ *   - Hash, percent, ampersand stripped (some SharePoint tenants
+ *     reject these in path names).
+ *   - Leading/trailing whitespace and trailing periods trimmed —
+ *     Graph forbids both.
+ *   - Multiple consecutive whitespace runs collapse to a single space.
  */
-function buildFilename(opts: {
+export function buildFilename(opts: {
   course_type: string;
   class_date: string;
   location: string;
 }): string {
-  const safe = (s: string) =>
-    s.replace(/[\\/:*?"<>|]+/g, "").trim() || "Class";
-  return `${safe(opts.course_type)} - ${safe(opts.class_date)} - ${safe(opts.location)}.docx`;
+  const dateOnly = (raw: string): string => {
+    if (!raw) return "Date";
+    // Match the leading YYYY-MM-DD if present (covers both
+    // 2026-04-20T00:00:00.000Z and bare 2026-04-20). Anything that
+    // doesn't match falls back to a parse + slice so we never leak
+    // a colon or period through.
+    const m = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+    const d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    return safe(raw);
+  };
+  const safe = (s: string): string => {
+    let out = (s || "")
+      .replace(/[\\/:*?"<>|#%&]+/g, "")
+      .replace(/\s+/g, " ")
+      .replace(/^[\s.]+|[\s.]+$/g, "")
+      .trim();
+    if (!out) out = "Class";
+    return out;
+  };
+  return `${safe(opts.course_type)} - ${dateOnly(opts.class_date)} - ${safe(opts.location)}.docx`;
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
