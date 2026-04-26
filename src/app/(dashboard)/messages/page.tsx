@@ -2501,10 +2501,11 @@ export default function MessagesPage() {
                         window.setTimeout(() => setMentionMatch(null), 120);
                       }}
                       /* Short placeholder so it doesn't wrap on narrow
-                         viewports (the textarea is rows={2} and the
-                         old "Send a Teams message…" copy split into two
-                         lines on mobile, looking ragged). */
-                      placeholder="Message…"
+                         viewports. The ellipsis was getting pushed to
+                         a second line in the rows={2} textarea on
+                         mobile — plain "Message" is cleaner and
+                         matches Slack / iMessage convention. */
+                      placeholder="Message"
                       rows={2}
                       style={{
                         width: "100%",
