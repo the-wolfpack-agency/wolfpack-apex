@@ -59,17 +59,22 @@ describe("parseClassIdentityFromFilename", () => {
     expect(r.location).toBe("Intercontinental");
   });
 
-  it("preserves multi-hotel locations as one class ('Conrad & Westlake')", () => {
+  it("REFUSES multi-hotel filenames so they route to the splitter (e.g. 'Conrad & Westlake')", () => {
+    // Production bug found 2026-04-26: "Survey Data PCBA 101 Conrad &
+    // Westlake_April 13-17.xlsx" had 869 rows, 58 respondents, and
+    // was being parsed as ONE class with location "Conrad &
+    // Westlake". That class doesn't exist in the snapshot store, so
+    // every respondent ended up orphaned. Same fix shape as the
+    // multi-course refusal: surface a structured error so the
+    // orchestrator routes to splitMixedSurvey, which buckets
+    // respondents by PPN ID against the Conrad and Westlake rosters.
     const r = parseClassIdentityFromFilename(
       "Survey Data PCBA 101 Conrad & Westlake_April 13-17.xlsx",
       2026,
     );
-    expect("error" in r).toBe(false);
-    if ("error" in r) return;
-    expect(r.course_type).toBe("BA101");
-    expect(r.class_date).toBe("2026-04-13");
-    expect(r.location).toMatch(/Conrad/);
-    expect(r.location).toMatch(/Westlake/);
+    expect("error" in r).toBe(true);
+    if (!("error" in r)) return;
+    expect(r.error).toMatch(/multiple locations/i);
   });
 
   it("REFUSES multi-course filenames (101 AND 102 in one file)", () => {
@@ -123,11 +128,23 @@ describe("parseSurvey · single-class fixtures", () => {
   });
 
   it("handles 'Strong Disagree' typo + other Likert variants in one file", async () => {
+    // The fixture is a real multi-location file (Conrad & Westlake)
+    // — its filename now correctly refuses to parse as one class.
+    // To exercise Likert vocabulary tolerance independently of
+    // filename routing, use the same path the manual-ingest button
+    // uses: class_override pins the identity so the parser focuses
+    // on the rows. Production multi-location files reach the same
+    // code via splitMixedSurvey, which calls the same row-aggregator.
     const result = await parseSurvey({
       bytes: readFixture("survey-real-101-conrad-westlake.xlsx"),
       hint: "Survey Data PCBA 101 Conrad & Westlake_April 13-17.xlsx",
       ...baseEnvelope,
-    });
+      class_override: {
+        course_type: "BA101",
+        class_date: "2026-04-13",
+        location: "Conrad",
+      },
+    } as Parameters<typeof parseSurvey>[0]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const survey = (result.snapshots[0].source_payload as {

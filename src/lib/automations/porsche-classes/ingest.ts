@@ -187,7 +187,7 @@ export async function ingestArtifact(
     if (
       req.source_type === "survey" &&
       result.exception_kind === "parse_failure" &&
-      /multiple courses/i.test(result.error)
+      /multiple (courses|locations)/i.test(result.error)
     ) {
       const splitSnapshots = await tryAutoSplitSurvey({
         bytes: req.bytes,

@@ -175,6 +175,24 @@ export function parseClassIdentityFromFilename(
     .replace(/\b\d{1,2}\.\d{1,2}\.\d{2,4}\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+  /* Same-course multi-location detection. A file like
+     "Survey Data PCBA 101 Conrad & Westlake_April 13-17.xlsx" has
+     ONE course code (101) but TWO locations. Without this check the
+     code below would normalize "Conrad & Westlake" into a single
+     location string, the assembler wouldn't find a matching class,
+     and 58 respondents would end up orphaned. Refuse with a
+     structured error so the orchestrator routes the file to
+     `splitMixedSurvey` (same path as multi-course mixed files). */
+  if (/(\s&\s|\sand\s)/i.test(cleaned)) {
+    return {
+      error:
+        `Filename names multiple locations ("${cleaned}"); ` +
+        `survey responses can't be split without a class roster. ` +
+        `Save one file per location first, or rely on the auto-splitter.`,
+    };
+  }
+
   const location = normalizeLocation(cleaned || "Unknown");
 
   return { course_type, class_date, location };
@@ -420,6 +438,7 @@ export function parseMultiClassFilename(
   const dayStart = dateRange[2].padStart(2, "0");
   const dayEnd = dateRange[3].padStart(2, "0");
   const year = dateRange[4] ?? String(fallbackYear);
+
   return {
     course_types: courseTypes,
     date_start: `${year}-${month}-${dayStart}`,
