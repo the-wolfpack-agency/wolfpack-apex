@@ -3092,7 +3092,10 @@ function ChannelThreadPane(props: {
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder={`Send a message to #${props.channelName}…`}
+              /* Short placeholder so it doesn't wrap or truncate
+                 inside the narrow textarea on mobile. The aria-label
+                 above keeps the descriptive form for screen readers. */
+              placeholder="Message"
               rows={2}
               style={{
                 flex: 1,
