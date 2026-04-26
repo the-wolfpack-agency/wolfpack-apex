@@ -232,6 +232,21 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     result.skipped_reason === "not_configured" ||
     result.skipped_reason === "no_token";
   const status = isGraceful ? 202 : 502;
+
+  // Server-side diagnostic — Graph 4xx with a confusing message
+  // ("The string did not match the expected pattern") is always a
+  // path-validation failure. Logging the exact filename + status +
+  // body makes the next session debuggable.
+  if (!isGraceful) {
+    console.error(
+      `[automations/${automationId}/summaries/${classKey}/upload-sharepoint] ` +
+        `Graph rejected upload — ` +
+        `filename="${filename}" ` +
+        `status=${result.status ?? 0} ` +
+        `error=${(result.error ?? "").slice(0, 800)}`,
+    );
+  }
+
   return NextResponse.json(
     {
       ok: false,
@@ -239,6 +254,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       skipped_reason: result.skipped_reason ?? "graph_error",
       ...(result.status ? { upstream_status: result.status } : {}),
       filename,
+      // Diagnostic block surfaced in the UI so the operator can see
+      // what was actually sent. Only filled on real failures.
+      diagnostic: {
+        filename,
+        course_type: summary.course_type,
+        class_date: summary.class_date,
+        location: summary.location,
+        byte_count: bytes.length,
+      },
     },
     { status },
   );

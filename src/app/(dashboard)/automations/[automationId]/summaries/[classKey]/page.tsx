@@ -274,7 +274,18 @@ export default function PorscheClassSummaryPage({
     | { kind: "uploading" }
     | { kind: "ok"; web_url: string }
     | { kind: "skipped"; reason: string }
-    | { kind: "error"; message: string }
+    | {
+        kind: "error";
+        message: string;
+        diagnostic?: {
+          filename?: string;
+          course_type?: string;
+          class_date?: string;
+          location?: string;
+          byte_count?: number;
+        };
+        upstream_status?: number;
+      }
   >({ kind: "idle" });
 
   const [manualIngestState, setManualIngestState] = useState<
@@ -486,6 +497,14 @@ export default function PorscheClassSummaryPage({
         web_url?: string;
         skipped_reason?: string;
         error?: string;
+        upstream_status?: number;
+        diagnostic?: {
+          filename?: string;
+          course_type?: string;
+          class_date?: string;
+          location?: string;
+          byte_count?: number;
+        };
       };
       if (res.status === 200 && body.ok && body.web_url) {
         setUploadState({ kind: "ok", web_url: body.web_url });
@@ -495,6 +514,8 @@ export default function PorscheClassSummaryPage({
         setUploadState({
           kind: "error",
           message: body.error ?? `HTTP ${res.status}`,
+          diagnostic: body.diagnostic,
+          upstream_status: body.upstream_status,
         });
       }
     } catch (err) {
@@ -774,7 +795,7 @@ export default function PorscheClassSummaryPage({
           </p>
         )}
         {uploadState.kind === "error" && (
-          <p
+          <div
             data-testid="sharepoint-upload-error"
             role="alert"
             style={{
@@ -783,8 +804,48 @@ export default function PorscheClassSummaryPage({
               color: "var(--wp-error, #e87b7b)",
             }}
           >
-            Upload failed: {uploadState.message}
-          </p>
+            <p style={{ margin: 0 }}>Upload failed: {uploadState.message}</p>
+            {uploadState.diagnostic ? (
+              <pre
+                data-testid="sharepoint-upload-diagnostic"
+                style={{
+                  marginTop: "0.4rem",
+                  fontSize: "0.72rem",
+                  color: "var(--wp-text-dim)",
+                  background: "var(--wp-dark-surface, #1a1a1a)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  borderRadius: 4,
+                  padding: "0.5rem 0.7rem",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  overflowWrap: "anywhere",
+                }}
+              >
+                {[
+                  uploadState.upstream_status
+                    ? `upstream_status: ${uploadState.upstream_status}`
+                    : null,
+                  uploadState.diagnostic.filename
+                    ? `filename: "${uploadState.diagnostic.filename}"`
+                    : null,
+                  uploadState.diagnostic.course_type
+                    ? `course_type: ${uploadState.diagnostic.course_type}`
+                    : null,
+                  uploadState.diagnostic.class_date
+                    ? `class_date (raw): ${uploadState.diagnostic.class_date}`
+                    : null,
+                  uploadState.diagnostic.location
+                    ? `location: "${uploadState.diagnostic.location}"`
+                    : null,
+                  uploadState.diagnostic.byte_count
+                    ? `byte_count: ${uploadState.diagnostic.byte_count}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join("\n")}
+              </pre>
+            ) : null}
+          </div>
         )}
       </header>
 
