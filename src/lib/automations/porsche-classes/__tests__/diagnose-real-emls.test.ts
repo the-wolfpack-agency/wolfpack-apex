@@ -19,6 +19,7 @@ import {
   parseMultiClassFilename,
   decodeSurveyRows,
 } from "@/lib/automations/porsche-classes/parser-survey";
+import { parseXlsx } from "@/lib/automations/porsche-classes/parser-xlsx";
 
 const DIR = path.join(
   process.env.HOME ?? "",
@@ -30,9 +31,15 @@ const SURVEY_DIR = path.join(
   "Downloads",
   "Program Evals",
 );
+const ROSTER_DIR = path.join(
+  process.env.HOME ?? "",
+  "Downloads",
+  "Automating Porsche Class Participant Updates_Changes",
+);
 
 const folderPresent = fs.existsSync(DIR);
 const surveyFolderPresent = fs.existsSync(SURVEY_DIR);
+const rosterFolderPresent = fs.existsSync(ROSTER_DIR);
 
 function findSurveyFiles(root: string): string[] {
   const out: string[] = [];
@@ -202,5 +209,47 @@ function findSurveyFiles(root: string): string[] {
         }
       },
     );
+  },
+);
+
+(rosterFolderPresent ? describe : describe.skip)(
+  "Real Porsche academy participant-updates samples — xlsx parser end-to-end",
+  () => {
+    const xlsxFiles = rosterFolderPresent
+      ? fs
+          .readdirSync(ROSTER_DIR)
+          .filter((f) => f.endsWith(".xlsx"))
+          .sort()
+      : [];
+
+    test.each(xlsxFiles)("parseXlsx ingests %s without falling back to fail()", async (f) => {
+      const full = path.join(ROSTER_DIR, f);
+      const bytes = fs.readFileSync(full);
+      const result = await parseXlsx({
+        bytes,
+        hint: f,
+        received_at: new Date().toISOString(),
+        source_message_id: `diagnostic:${f}`,
+        source_artifact_id: `diagnostic:${f}:body`,
+      } as Parameters<typeof parseXlsx>[0]);
+
+      if (!result.ok) {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[${f}] parseXlsx returned !ok: ${result.error}`,
+          (result as any).detail ?? {},
+        );
+      }
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const snaps = (result as any).snapshots;
+        expect(Array.isArray(snaps)).toBe(true);
+        expect(snaps.length).toBeGreaterThan(0);
+        // eslint-disable-next-line no-console
+        console.log(
+          `[${f}] ok snapshot_count=${snaps.length} first_class=${snaps[0]?.class?.course_type}|${snaps[0]?.class?.class_date}|${snaps[0]?.class?.location} participants=${snaps[0]?.class?.participants?.length ?? 0}`,
+        );
+      }
+    });
   },
 );
