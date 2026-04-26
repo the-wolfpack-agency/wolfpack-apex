@@ -115,6 +115,13 @@ beforeEach(() => {
       "instinct_user",
       JSON.stringify({ email: "me@wolfpack.test" }),
     );
+    // Sections now default to COLLAPSED on first visit (UX fix —
+    // dozens of chats / channels were scrolling the page). Tests in
+    // this file were written assuming open-by-default; seed both
+    // sections open as a global default. Tests that need the
+    // first-visit collapsed default can `removeItem` after clear.
+    window.localStorage.setItem("instinct.messages.chats_open", "1");
+    window.localStorage.setItem("instinct.messages.teams_open", "1");
   } catch {
     /* noop */
   }
@@ -1403,6 +1410,12 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
         "instinct_user",
         JSON.stringify({ email: "me@wolfpack.test" }),
       );
+      // Sections now default to COLLAPSED. Tests in this block were
+      // written assuming open-by-default — seed both sections open
+      // for every test except the ones that explicitly exercise the
+      // new collapsed default.
+      window.localStorage.setItem("instinct.messages.chats_open", "1");
+      window.localStorage.setItem("instinct.messages.teams_open", "1");
     } catch {
       /* noop */
     }
@@ -1448,28 +1461,33 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     });
   }
 
-  test("Chats section header is present and toggles the chat list visibility", async () => {
+  test("Chats section defaults to COLLAPSED on first load and toggles open", async () => {
+    // Bypass the describe-level seed — we're testing first-load behavior.
+    window.localStorage.removeItem("instinct.messages.chats_open");
+    window.localStorage.removeItem("instinct.messages.teams_open");
     wireSimpleGraph();
     render(<MessagesPage />);
     await waitFor(() => screen.getByTestId("messages-page"));
 
-    // Chats section is visible by default.
-    expect(screen.getByTestId("messages-section-chats-list")).toBeInTheDocument();
-    expect(
-      screen.getByTestId("messages-section-chats-toggle"),
-    ).toHaveAttribute("data-open", "true");
-
-    // Click to collapse — chat list disappears.
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("messages-section-chats-toggle"));
-    });
+    // New default — collapsed on first visit (localStorage empty).
+    // Once a workspace has dozens of chats, an open-by-default list
+    // scrolled the page. Users now opt in.
     expect(screen.queryByTestId("messages-section-chats-list")).toBeNull();
     expect(
       screen.getByTestId("messages-section-chats-toggle"),
     ).toHaveAttribute("data-open", "false");
 
-    // Persisted to localStorage.
-    expect(window.localStorage.getItem("instinct.messages.chats_open")).toBe("0");
+    // Click to expand — chat list renders.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-section-chats-toggle"));
+    });
+    expect(screen.getByTestId("messages-section-chats-list")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("messages-section-chats-toggle"),
+    ).toHaveAttribute("data-open", "true");
+
+    // Persisted to localStorage as "1" (existing user keeps preference).
+    expect(window.localStorage.getItem("instinct.messages.chats_open")).toBe("1");
 
     // Toggle fires analytics.
     const fired = mockFetchWithRefresh.mock.calls
@@ -1478,17 +1496,31 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     expect(fired.find((b) => b.event === "messages.section_toggled")).toEqual(
       expect.objectContaining({
         event: "messages.section_toggled",
-        metadata: { section: "chats", expanded: false },
+        metadata: { section: "chats", expanded: true },
       }),
     );
   });
 
+  test("returning user with chats_open=1 in localStorage starts expanded", async () => {
+    // describe-level seed already sets this; assert behavior holds.
+    wireSimpleGraph();
+    render(<MessagesPage />);
+    await waitFor(() => screen.getByTestId("messages-page"));
+    expect(screen.getByTestId("messages-section-chats-list")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("messages-section-chats-toggle"),
+    ).toHaveAttribute("data-open", "true");
+  });
+
   test("Teams section lazy-loads /api/ms/teams when first expanded", async () => {
+    // Section now defaults to COLLAPSED so we must seed localStorage
+    // OR click to expand before the lazy load fires.
+    window.localStorage.setItem("instinct.messages.teams_open", "1");
     wireSimpleGraph();
     render(<MessagesPage />);
     await waitFor(() => screen.getByTestId("messages-page"));
 
-    // Section is open by default → /api/ms/teams should fire on mount.
+    // Section is open via the seeded preference → /api/ms/teams should fire on mount.
     await waitFor(() => {
       expect(
         mockFetchWithRefresh.mock.calls.some((c) => c[0] === "/api/ms/teams"),
@@ -1520,6 +1552,9 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
       "instinct.messages.expanded_teams",
       JSON.stringify({ "team-wolf": true }),
     );
+    // Teams section now defaults collapsed — seed open so the team
+    // rows render at all.
+    window.localStorage.setItem("instinct.messages.teams_open", "1");
     wireSimpleGraph();
     render(<MessagesPage />);
     await waitFor(() => screen.getByTestId("team-row-team-wolf"));
@@ -1530,6 +1565,7 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
   });
 
   test("expanding a team loads its channels and persists the expansion state", async () => {
+    window.localStorage.setItem("instinct.messages.teams_open", "1");
     wireSimpleGraph();
     render(<MessagesPage />);
     await waitFor(() => screen.getByTestId("team-row-team-wolf"));

@@ -562,15 +562,19 @@ export default function MessagesPage() {
   const lastAiDraftRef = useRef<{ text: string; atMs: number } | null>(null);
 
   // Collapsible LEFT-panel sections. Persisted to localStorage so the
-  // user's preference survives reloads. Default both open on first
-  // load — discoverability beats tidiness for new users.
+  // user's preference survives reloads. Default to COLLAPSED on first
+  // load — once a workspace has dozens of chats and channels, an
+  // open-by-default list scrolled the page on every visit. The
+  // collapsed default lets users browse the page header and other
+  // sections first, then opt in to the lists they care about.
+  // Existing users with a saved preference keep it.
   const [chatsOpen, setChatsOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    return window.localStorage.getItem("instinct.messages.chats_open") !== "0";
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("instinct.messages.chats_open") === "1";
   });
   const [teamsOpen, setTeamsOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    return window.localStorage.getItem("instinct.messages.teams_open") !== "0";
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("instinct.messages.teams_open") === "1";
   });
   useEffect(() => {
     if (typeof window === "undefined") return;

@@ -45,7 +45,10 @@ const DOMAIN_MAP: DomainEntry[] = [
   {
     domain: "meetings",
     label: "Meetings",
-    href: "/meetings",
+    /* Land on the first tab (Email feeds) — same as the sidebar Nav.
+       Was /meetings (the Plaud transcripts tab); users were dropping
+       into the second tab without context for why they were there. */
+    href: "/meetings/feeds",
     keywords: ["meeting", "meetings", "standup", "huddle", "sync", "1:1", "1on1", "call"],
   },
   {

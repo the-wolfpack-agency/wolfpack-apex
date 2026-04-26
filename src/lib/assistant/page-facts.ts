@@ -104,7 +104,9 @@ export const PAGE_FACTS: Record<string, PageFact> = {
   },
   meetings: {
     domain: "meetings",
-    route: "/meetings",
+    /* First-tab landing — see related-pages.ts for the same fix.
+       Sidebar nav uses /meetings/feeds; chatbot helpers should agree. */
+    route: "/meetings/feeds",
     title: "Meetings",
     purpose: "The canonical home for every meeting — agendas, transcripts, decisions, and follow-ups — linked to calendar events.",
     what_you_can_do: [

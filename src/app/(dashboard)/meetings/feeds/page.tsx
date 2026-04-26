@@ -338,24 +338,36 @@ export default function MeetingFeedsPage() {
       {loading && <div style={{ color: "var(--wp-text-dim)" }}>Loading…</div>}
       {error && <div style={{ color: "var(--wp-error)" }}>{error}</div>}
 
-      {!loading && !error && feeds.length === 0 && (
-        <div
-          style={{
-            padding: "3rem",
-            textAlign: "center",
-            border: "1px dashed var(--wp-border)",
-            borderRadius: "8px",
-            color: "var(--wp-text-dim)",
-          }}
-          data-testid="meeting-feeds-empty"
-        >
-          No feeds yet. Create one to start ingesting.
-        </div>
-      )}
+      {/* Hide disabled feeds from the list. They were cluttering the
+          page during testing — every paused / archived feed showed up
+          dimmed with "(disabled)" next to the name. The data still
+          exists in the API (admins can re-enable from the per-feed
+          page), but the canonical list shows only what's actively
+          ingesting. */}
+      {(() => {
+        const visibleFeeds = feeds.filter((f) => f.is_enabled);
+        return (
+          <>
+            {!loading && !error && visibleFeeds.length === 0 && (
+              <div
+                style={{
+                  padding: "3rem",
+                  textAlign: "center",
+                  border: "1px dashed var(--wp-border)",
+                  borderRadius: "8px",
+                  color: "var(--wp-text-dim)",
+                }}
+                data-testid="meeting-feeds-empty"
+              >
+                {feeds.length === 0
+                  ? "No feeds yet. Create one to start ingesting."
+                  : `No active feeds. ${feeds.length} disabled feed${feeds.length === 1 ? "" : "s"} hidden — re-enable from the per-feed page.`}
+              </div>
+            )}
 
-      {!loading && feeds.length > 0 && (
-        <div style={{ display: "grid", gap: "0.75rem" }} data-testid="meeting-feeds-list">
-          {feeds.map((f) => (
+            {!loading && visibleFeeds.length > 0 && (
+              <div style={{ display: "grid", gap: "0.75rem" }} data-testid="meeting-feeds-list">
+                {visibleFeeds.map((f) => (
             <Link
               key={f.id}
               href={`/meetings/feeds/${f.slug}`}
@@ -402,9 +414,12 @@ export default function MeetingFeedsPage() {
                 </div>
               </div>
             </Link>
-          ))}
-        </div>
-      )}
+                ))}
+              </div>
+            )}
+          </>
+        );
+      })()}
     </div>
   );
 }
