@@ -27,57 +27,75 @@ interface Node {
   tone: Tone;
   /** Optional emoji glyph rendered to the left of the label. */
   glyph: string;
+  /** Tools / steps the user previously did by hand. */
+  before: string;
+  /** What now happens automatically (or in one click). */
+  after: string;
 }
 
 const NODES: Node[] = [
   {
     id: "feeds",
     glyph: "📥",
-    label: "Email feeds",
-    detail: "Coordinator notes, instructor notes, roster, survey CSV — ingested as they arrive.",
+    label: "Emails arrive",
+    detail: "Coordinator notes, instructor notes, the roster, and the survey come in by email and are picked up automatically.",
     tone: "input",
+    before: "Outlook inbox: you watched for and forwarded each email by hand.",
+    after: "Instinct watches Outlook for you. New messages show up here as soon as they arrive.",
   },
   {
     id: "parsers",
     glyph: "⚙️",
-    label: "Parsers",
-    detail: "One parser per format. Free-form email → structured fields.",
+    label: "Read each email",
+    detail: "Each kind of email gets read and turned into clean, organized information.",
     tone: "process",
+    before: "You opened each Word doc, Excel file, and Cognito form, then copied the bits you needed.",
+    after: "Instinct reads each one for you and pulls out the names, dates, scores, and notes.",
   },
   {
     id: "snapshots",
     glyph: "🗂️",
-    label: "Snapshots",
-    detail: "Each parsed document stored in Postgres, tagged with class_key.",
+    label: "Save the pieces",
+    detail: "Every email is saved and tagged with the class it belongs to so nothing gets lost.",
     tone: "store",
+    before: "OneDrive folders, Outlook flags, and a personal spreadsheet to keep track of what came in.",
+    after: "Everything is filed away in the system and tagged with the class it belongs to.",
   },
   {
     id: "assembler",
     glyph: "🧩",
-    label: "Assembler",
-    detail: "All snapshots for one class fused into a single AssembledSummary.",
+    label: "Build the summary",
+    detail: "All the pieces for one class are combined into a single class summary.",
     tone: "process",
+    before: "Word: you opened the template and re-typed each field from your notes.",
+    after: "Instinct fills the template for you. Every coordinator note, instructor note, attendee, and survey question is in the right place.",
   },
   {
     id: "exceptions",
     glyph: "🚨",
-    label: "Exception detector",
-    detail: "Flags missing roster, mismatched dates, low survey response — surfaced inline.",
+    label: "Check for gaps",
+    detail: "Flags anything missing or unusual (no roster, dates that do not match, surveys with few responses).",
     tone: "process",
+    before: "You scanned the email thread looking for missing pieces or wrong dates.",
+    after: "Instinct flags anything off (missing roster, wrong date, low survey turnout) so you do not have to hunt for problems.",
   },
   {
     id: "review",
     glyph: "👀",
     label: "You review",
-    detail: "Open the summary, scan exceptions, choose how to ship.",
+    detail: "Open the summary, look over any flags, and choose how to share it.",
     tone: "human",
+    before: "You read the document end to end and edited it before sending.",
+    after: "You open the finished summary, glance at any flags, and decide how to share it.",
   },
   {
     id: "sharepoint",
     glyph: "📤",
-    label: "SharePoint",
-    detail: "One click renders Word + uploads to the configured folder. Audit row written.",
+    label: "Send to SharePoint",
+    detail: "One click creates the Word file and saves it to the right SharePoint folder. The action is logged so you can undo it.",
     tone: "store",
+    before: "Save as Word, open SharePoint in the browser, drag the file into the right folder, share the link.",
+    after: "One click sends the Word file straight to the right SharePoint folder. The action is logged so you can undo it.",
   },
 ];
 
@@ -169,11 +187,57 @@ export default function AutomationFlowDiagram() {
               lineHeight: 1.5,
             }}
           >
-            Each box was a manual step the program team used to do by hand.
-            Arrows show where the data flows. Only the green box still
-            requires you — everything else runs continuously in the
-            background.
+            Every box used to be a step you did by hand. Arrows show
+            how the work moves from one step to the next. Only the
+            green box still needs you. Everything else happens
+            automatically in the background.
           </p>
+
+          <div
+            data-testid="automation-flow-tools-replaced"
+            style={{
+              marginBottom: "1rem",
+              padding: "0.75rem 0.9rem",
+              border: "1px solid var(--wp-dark-border)",
+              borderLeft: "3px solid var(--wp-gold, #eab308)",
+              borderRadius: 6,
+              background: "var(--wp-dark-surface2)",
+              fontSize: "0.78rem",
+              lineHeight: 1.5,
+              color: "var(--wp-text)",
+            }}
+          >
+            <div
+              style={{
+                fontWeight: 600,
+                color: "var(--wp-gold, #eab308)",
+                marginBottom: 6,
+              }}
+            >
+              Tools you used to bounce between
+            </div>
+            <div style={{ color: "var(--wp-text-dim)" }}>
+              Outlook (forwarding emails), Excel (the roster), Cognito
+              Forms (the survey), Word (the template), OneDrive (saving
+              drafts), and SharePoint (filing the final document). Six
+              tools, lots of copy and paste, easy to miss something.
+            </div>
+            <div
+              style={{
+                marginTop: 8,
+                fontWeight: 600,
+                color: "var(--wp-success, #22c55e)",
+              }}
+            >
+              What replaces all of that
+            </div>
+            <div style={{ color: "var(--wp-text-dim)" }}>
+              One page in Instinct. The system collects the emails,
+              reads each one, builds the Word document for you, and
+              files it to SharePoint when you click Send. You stop
+              juggling six tools and only review the finished summary.
+            </div>
+          </div>
 
           <ol
             data-testid="automation-flow-steps"
@@ -240,6 +304,32 @@ export default function AutomationFlowDiagram() {
                 >
                   {node.detail}
                 </span>
+                <div
+                  data-testid={`automation-flow-compare-${node.id}`}
+                  style={{
+                    marginTop: "0.55rem",
+                    paddingTop: "0.5rem",
+                    borderTop: "1px dashed var(--wp-dark-border)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4,
+                    fontSize: "0.72rem",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  <span style={{ color: "var(--wp-text-muted)" }}>
+                    <strong style={{ color: "var(--wp-text-dim)" }}>Before:</strong>{" "}
+                    {node.before}
+                  </span>
+                  <span style={{ color: "var(--wp-text-muted)" }}>
+                    <strong
+                      style={{ color: TONE_STYLES[node.tone].accent }}
+                    >
+                      Now:
+                    </strong>{" "}
+                    {node.after}
+                  </span>
+                </div>
                 {/* Arrow to next node — hidden on the last one and on
                     narrow viewports where boxes stack vertically. */}
                 {i < NODES.length - 1 ? (
@@ -273,10 +363,10 @@ export default function AutomationFlowDiagram() {
               color: "var(--wp-text-dim)",
             }}
           >
-            <LegendDot color={TONE_STYLES.input.accent} label="Input — data comes in" />
-            <LegendDot color={TONE_STYLES.process.accent} label="System processing" />
-            <LegendDot color={TONE_STYLES.human.accent} label="You review" />
-            <LegendDot color={TONE_STYLES.store.accent} label="System of record" />
+            <LegendDot color={TONE_STYLES.input.accent} label="Information coming in" />
+            <LegendDot color={TONE_STYLES.process.accent} label="The system does the work" />
+            <LegendDot color={TONE_STYLES.human.accent} label="You take a look" />
+            <LegendDot color={TONE_STYLES.store.accent} label="Saved for the record" />
           </div>
 
           <p

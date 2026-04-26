@@ -245,10 +245,10 @@ export default function PorscheClassesThisWeekPage() {
               lineHeight: 1.4,
             }}
           >
-            Every active class shows up here automatically once its first
-            email arrives. Green means ready to ship — yellow means
-            we&apos;re still waiting on something — red means something
-            needs your attention.
+            Every active class shows up here as soon as the first email
+            arrives. Green classes are ready to send to SharePoint.
+            Yellow classes are still waiting for something. Red classes
+            need your attention.
           </p>
         </div>
         <button

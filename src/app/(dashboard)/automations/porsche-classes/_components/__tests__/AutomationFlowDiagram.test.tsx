@@ -96,4 +96,41 @@ describe("<AutomationFlowDiagram />", () => {
       screen.getByTestId("automation-flow-toggle"),
     ).toHaveAttribute("aria-expanded", "false");
   });
+
+  test("each stage shows a Before / Now comparison so non-technical users see what's replaced", () => {
+    render(<AutomationFlowDiagram />);
+    const stages = ["feeds", "parsers", "snapshots", "assembler", "exceptions", "review", "sharepoint"];
+    for (const id of stages) {
+      const card = screen.getByTestId(`automation-flow-compare-${id}`);
+      expect(card.textContent).toMatch(/Before:/);
+      expect(card.textContent).toMatch(/Now:/);
+    }
+    // Spot-check the SharePoint stage references the manual drag-drop
+    // and the new one-click upload.
+    const sharepoint = screen.getByTestId("automation-flow-compare-sharepoint");
+    expect(sharepoint.textContent).toMatch(/drag/i);
+    expect(sharepoint.textContent).toMatch(/one click/i);
+  });
+
+  test("top-level 'tools replaced' banner names the old tools and the new single-page replacement", () => {
+    render(<AutomationFlowDiagram />);
+    const banner = screen.getByTestId("automation-flow-tools-replaced");
+    // Old toolset.
+    expect(banner.textContent).toMatch(/Outlook/);
+    expect(banner.textContent).toMatch(/Excel/);
+    expect(banner.textContent).toMatch(/Cognito/);
+    expect(banner.textContent).toMatch(/Word/);
+    expect(banner.textContent).toMatch(/OneDrive/);
+    expect(banner.textContent).toMatch(/SharePoint/);
+    // New: one Instinct page.
+    expect(banner.textContent).toMatch(/Instinct/);
+    expect(banner.textContent).toMatch(/One page/);
+  });
+
+  test("user-facing copy contains no em-dash characters (style guide: avoid em dashes)", () => {
+    render(<AutomationFlowDiagram />);
+    const body = screen.getByTestId("automation-flow-body");
+    // U+2014 EM DASH or U+2013 EN DASH.
+    expect(body.textContent ?? "").not.toMatch(/[—–]/);
+  });
 });
