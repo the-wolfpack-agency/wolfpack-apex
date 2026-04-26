@@ -2417,7 +2417,19 @@ export default function MessagesPage() {
                       </div>
                     ) : null}
                   </div>
-                  <div style={{ flex: 1, position: "relative" }}>
+                  <div
+                    style={{
+                      flex: 1,
+                      position: "relative",
+                      /* Flex column so the textarea inside can flex to
+                         fill the height that alignItems:stretch on the
+                         parent imposes — otherwise the textarea sits
+                         at its rows={2} natural height (~55px) while
+                         the buttons stretch to ~70-80px. */
+                      display: "flex",
+                      flexDirection: "column",
+                    }}
+                  >
                     {mentionMatch && mentionCandidates.length > 0 ? (
                       <div
                         data-testid="messages-mention-dropdown"
@@ -2511,6 +2523,10 @@ export default function MessagesPage() {
                         width: "100%",
                         boxSizing: "border-box",
                         resize: "none",
+                        /* flex:1 makes textarea fill the stretched
+                           wrapper, so it visually matches the AI /
+                           emoji / Send button heights. */
+                        flex: 1,
                         minHeight: 44,
                         maxHeight: 150, // ~6 rows at 14px line-height.
                         overflowY: "auto",

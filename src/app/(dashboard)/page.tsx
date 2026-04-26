@@ -61,11 +61,71 @@ function getUserRole(): string | null {
   }
 }
 
+interface SetupStatus {
+  complete: boolean;
+  steps: {
+    profile: boolean;
+    team: boolean;
+    integrations: boolean;
+  };
+  nextStep: "profile" | "team" | "integrations" | "complete";
+}
+
+/**
+ * Build the 3-step onboarding checklist for the dashboard banner.
+ * Pure helper so it's unit-testable without rendering the page.
+ *
+ * Steps are intentionally ordered from "must do first" to "nice to
+ * have" so the user has a clear path. Each step has a label, a CTA,
+ * and the boolean from /api/workspace/status that flags completion.
+ */
+export interface OnboardingStep {
+  key: "profile" | "integrations" | "team";
+  label: string;
+  description: string;
+  done: boolean;
+  ctaHref: string;
+  ctaLabel: string;
+}
+
+export function buildOnboardingSteps(status: SetupStatus | null): OnboardingStep[] {
+  const steps = status?.steps ?? { profile: false, team: false, integrations: false };
+  return [
+    {
+      key: "profile",
+      label: "Set up your workspace",
+      description:
+        "Tell Instinct what to call your workspace and add yourself as the first team member.",
+      done: !!steps.profile,
+      ctaHref: "/setup",
+      ctaLabel: steps.profile ? "Edit profile" : "Set up workspace",
+    },
+    {
+      key: "integrations",
+      label: "Connect Microsoft 365",
+      description:
+        "Link your Outlook so Instinct can read meeting invites, emails, and Teams chats — and ingest the Porsche Academy automations.",
+      done: !!steps.integrations,
+      ctaHref: "/settings",
+      ctaLabel: steps.integrations ? "Manage integrations" : "Connect Microsoft",
+    },
+    {
+      key: "team",
+      label: "Invite your team",
+      description: "Add at least one teammate so Instinct can surface their work alongside yours.",
+      done: !!steps.team,
+      ctaHref: "/hr",
+      ctaLabel: steps.team ? "Manage team" : "Invite team",
+    },
+  ];
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardData | null>(null);
   const [events, setEvents] = useState<RecentEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [showBriefing, setShowBriefing] = useState(false);
+  const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [setupComplete, setSetupComplete] = useState(true); // default true to avoid flash
 
   useEffect(() => {
@@ -97,6 +157,7 @@ export default function DashboardPage() {
     fetchWithRefresh("/api/workspace/status", { headers: authHeaders() })
       .then((r) => r.json())
       .then((data) => {
+        setSetupStatus(data);
         setSetupComplete(data.complete ?? true);
         if (!data.complete) {
           // Track banner shown
@@ -167,9 +228,14 @@ export default function DashboardPage() {
       {/* OAuth callback status banner (Microsoft / QuickBooks) */}
       <IntegrationStatusBanner />
 
-      {/* First-run setup banner */}
+      {/* First-run onboarding checklist — auto-hides once every step
+          flips to done. Each step has a checkmark + a CTA that takes
+          the user straight to the page where they can finish it.
+          Built for the non-tech-savvy: no jargon, plain-language
+          descriptions, one obvious action per row. */}
       {!setupComplete && (
         <div
+          data-testid="onboarding-checklist"
           style={{
             padding: "1.5rem",
             background: "var(--wp-card, var(--wp-dark-surface))",
@@ -178,18 +244,85 @@ export default function DashboardPage() {
           }}
         >
           <h3 className="text-lg font-semibold" style={{ color: "var(--wp-gold)" }}>
-            Welcome to Instinct
+            Welcome — let&apos;s get you set up
           </h3>
-          <p className="text-sm mt-1" style={{ color: "var(--wp-text-dim)" }}>
-            Complete your workspace setup to get the most out of the platform.
+          <p className="text-sm mt-1 mb-4" style={{ color: "var(--wp-text-dim)" }}>
+            Three quick steps and Instinct will start working in the background for you.
+            Steps you&apos;ve already done show a check.
           </p>
-          <a
-            href="/setup"
-            className="inline-block mt-3 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-            style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
-          >
-            Complete Setup
-          </a>
+          <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.6rem" }}>
+            {buildOnboardingSteps(setupStatus).map((step, idx) => (
+              <li
+                key={step.key}
+                data-testid={`onboarding-step-${step.key}`}
+                data-done={step.done ? "true" : "false"}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "0.8rem",
+                  padding: "0.8rem 1rem",
+                  background: "var(--wp-dark-surface, #1a1a1a)",
+                  border: `1px solid ${step.done ? "var(--wp-success, #16a34a)" : "var(--wp-dark-border, #333)"}`,
+                  borderRadius: 8,
+                  opacity: step.done ? 0.7 : 1,
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    flexShrink: 0,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 26,
+                    height: 26,
+                    borderRadius: "50%",
+                    background: step.done
+                      ? "var(--wp-success, #16a34a)"
+                      : "var(--wp-dark-surface2, #222)",
+                    color: step.done ? "var(--wp-dark, #000)" : "var(--wp-gold, #eab308)",
+                    border: step.done ? "none" : "1px solid var(--wp-gold, #eab308)",
+                    fontWeight: 700,
+                    fontSize: 13,
+                  }}
+                >
+                  {step.done ? "✓" : idx + 1}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontWeight: 600,
+                      color: "var(--wp-text, #eee)",
+                      textDecoration: step.done ? "line-through" : "none",
+                    }}
+                  >
+                    {step.label}
+                  </div>
+                  <div
+                    className="text-sm"
+                    style={{ color: "var(--wp-text-dim, #9ca3af)", marginTop: 2 }}
+                  >
+                    {step.description}
+                  </div>
+                </div>
+                {!step.done && (
+                  <a
+                    href={step.ctaHref}
+                    data-testid={`onboarding-cta-${step.key}`}
+                    className="inline-block px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+                    style={{
+                      background: "var(--wp-gold)",
+                      color: "var(--wp-dark)",
+                      whiteSpace: "nowrap",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {step.ctaLabel}
+                  </a>
+                )}
+              </li>
+            ))}
+          </ol>
         </div>
       )}
 
