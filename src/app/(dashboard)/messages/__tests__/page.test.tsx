@@ -125,6 +125,14 @@ beforeEach(() => {
   } catch {
     /* noop */
   }
+  // Clear any deep-link query string left behind by a previous test
+  // (`?chat=...` / `?team=...&channel=...`) so the messages page
+  // initializer doesn't auto-select stale targets in unrelated cases.
+  try {
+    window.history.replaceState({}, "", "/messages");
+  } catch {
+    /* noop */
+  }
 });
 
 // ---------------------------------------------------------------- helpers
@@ -459,6 +467,40 @@ describe("MessagesPage", () => {
     );
 
     // The chat GET came back 200 (not "not 500") — assert explicitly.
+    const threadCall = mockFetchWithRefresh.mock.calls.find(
+      (c) => c[0] === "/api/ms/chats/chat-1",
+    );
+    expect(threadCall).toBeDefined();
+  });
+
+  test("deep-link: ?chat=<id> auto-selects the chat and loads its thread without a click", async () => {
+    // Search results, email handoffs, etc. land users on
+    // /messages?chat=<id>. The page must auto-select that chat
+    // and load its thread — landing on the bare list defeats the
+    // point of the deep link.
+    window.history.replaceState({}, "", "/messages?chat=chat-1");
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1")
+        return ok({
+          messages: [
+            {
+              id: "deep-msg",
+              from: { displayName: "Jane" },
+              createdDateTime: "2026-04-23T10:00:00Z",
+              body: { contentType: "text", content: "hi from deep link" },
+            },
+          ],
+        });
+      return ok({});
+    });
+
+    render(<MessagesPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("message-deep-msg")).toBeInTheDocument();
+    });
+    // Confirm the thread fetch was made — no manual click required.
     const threadCall = mockFetchWithRefresh.mock.calls.find(
       (c) => c[0] === "/api/ms/chats/chat-1",
     );

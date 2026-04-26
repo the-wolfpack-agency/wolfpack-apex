@@ -764,6 +764,26 @@ export default function MessagesPage() {
     }).catch(() => undefined);
   }, [loadChatList]);
 
+  // Deep-link target captured at mount from `?chat=<id>` or
+  // `?team=<id>&channel=<id>`. Search results, email handoffs, and
+  // any external link can drop the user straight onto the right
+  // conversation. Cleared once consumed so toggling the section
+  // doesn't re-trigger the auto-select.
+  const [pendingDeepLink, setPendingDeepLink] = useState<
+    | { kind: "chat"; chatId: string }
+    | { kind: "channel"; teamId: string; channelId: string }
+    | null
+  >(() => {
+    if (typeof window === "undefined") return null;
+    const params = new URLSearchParams(window.location.search);
+    const chatId = params.get("chat");
+    const teamId = params.get("team");
+    const channelId = params.get("channel");
+    if (chatId) return { kind: "chat", chatId };
+    if (teamId && channelId) return { kind: "channel", teamId, channelId };
+    return null;
+  });
+
   // ---- Teams + channels loaders --------------------------------------
 
   const loadTeams = useCallback(async () => {
@@ -1214,6 +1234,62 @@ export default function MessagesPage() {
     setMentionHighlight(0);
     void loadThread(chat);
   }
+
+  // Resolve a `?chat=<id>` deep-link as soon as the chat list lands.
+  // Auto-expands the Chats section so the selected row is visible.
+  useEffect(() => {
+    if (!pendingDeepLink || pendingDeepLink.kind !== "chat") return;
+    if (!chats) return;
+    const target = chats.find((c) => c.id === pendingDeepLink.chatId);
+    if (!target) {
+      // Chat not in the user's recent list — clear so we don't loop.
+      setPendingDeepLink(null);
+      return;
+    }
+    setChatsOpen(true);
+    selectChat(target);
+    setPendingDeepLink(null);
+    // selectChat is stable enough for our purposes; including it would
+    // require wrapping in useCallback. eslint-disable-next-line.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingDeepLink, chats]);
+
+  // Resolve a `?team=<id>&channel=<id>` deep-link. Sequence:
+  //   1. Open the Teams & channels section.
+  //   2. Wait for the joined-teams list to load → look up the team.
+  //   3. Mark the team expanded → triggers channel-list fetch.
+  //   4. When the channel list is ready, call selectChannel and
+  //      clear the pending state.
+  useEffect(() => {
+    if (!pendingDeepLink || pendingDeepLink.kind !== "channel") return;
+    if (!teamsOpen) {
+      setTeamsOpen(true);
+      return;
+    }
+    if (!teams) return;
+    const team = teams.find((t) => t.id === pendingDeepLink.teamId);
+    if (!team) {
+      setPendingDeepLink(null);
+      return;
+    }
+    if (!expandedTeams[team.id]) {
+      setExpandedTeams((prev) => ({ ...prev, [team.id]: true }));
+      if (!channelsByTeam[team.id]) void loadChannelsForTeam(team.id);
+      return;
+    }
+    const chList = channelsByTeam[team.id];
+    if (!chList || chList === "loading" || chList === "scope_missing" || (typeof chList === "object" && "kind" in chList)) {
+      return;
+    }
+    const channel = chList.find((c) => c.id === pendingDeepLink.channelId);
+    if (!channel) {
+      setPendingDeepLink(null);
+      return;
+    }
+    selectChannel(team.id, channel.id, team.displayName, channel.displayName);
+    setPendingDeepLink(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingDeepLink, teamsOpen, teams, expandedTeams, channelsByTeam]);
 
   function clearSelection() {
     setSelectedId(null);
@@ -3063,7 +3139,7 @@ function SectionHeader(props: {
         border: "none",
         background: "transparent",
         cursor: "pointer",
-        color: "var(--wp-text, #eee)",
+        color: "var(--wp-gold, #eab308)",
         fontSize: 12,
         fontWeight: 700,
         letterSpacing: 0.4,

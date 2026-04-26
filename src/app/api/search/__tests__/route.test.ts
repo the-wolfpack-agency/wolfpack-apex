@@ -221,6 +221,15 @@ describe("GET /api/search", () => {
     expect(channelHits.length).toBeGreaterThan(0);
     // Channel-level match (team name contains "greenfield") should land first.
     expect(channelHits[0].title).toContain("Greenfield");
+    // Channel results MUST route back into /messages — never out to
+    // teams.microsoft.com — so the click lands on our deep-linked
+    // thread view, not Outlook/Teams web.
+    for (const hit of channelHits) {
+      expect(hit.url.startsWith("/messages?")).toBe(true);
+      expect(hit.url).toContain("team=");
+      expect(hit.url).toContain("channel=");
+      expect(hit.url).not.toContain("teams.test");
+    }
   });
 
   it("returns Knowledge results from the knowledge index", async () => {

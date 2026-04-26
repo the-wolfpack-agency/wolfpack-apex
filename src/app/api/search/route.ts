@@ -236,7 +236,7 @@ async function searchChannels(userId: string, q: string, perTypeLimit: number): 
           title: `${team.displayName} · ${ch.displayName}`,
           snippet: ch.description || "",
           timestamp: "",
-          url: ch.webUrl || `/messages?channel=${encodeURIComponent(ch.id)}`,
+          url: `/messages?team=${encodeURIComponent(team.id)}&channel=${encodeURIComponent(ch.id)}`,
         });
         if (out.length >= perTypeLimit) return out;
       }
@@ -260,7 +260,7 @@ async function searchChannels(userId: string, q: string, perTypeLimit: number): 
           title: `${t.teamName} · ${t.channel.displayName}`,
           snippet: buildSnippet(hit.bodyText || "", q),
           timestamp: hit.createdDateTime,
-          url: t.channel.webUrl || `/messages?channel=${encodeURIComponent(t.channel.id)}`,
+          url: `/messages?team=${encodeURIComponent(t.teamId)}&channel=${encodeURIComponent(t.channel.id)}`,
         });
         if (out.length >= perTypeLimit) break;
       }
