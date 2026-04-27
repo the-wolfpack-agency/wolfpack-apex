@@ -100,7 +100,12 @@ const MS_SCOPES: string[] = [
   "Calendars.ReadWrite",
   "Contacts.ReadWrite",
   "Tasks.ReadWrite",
-  "Files.ReadWrite",
+  // Files.ReadWrite.All (delegated) — covers the user's OneDrive AND any
+  // SharePoint document library they have edit access to. The basic
+  // Files.ReadWrite is OneDrive-only; uploads to a SharePoint site drive
+  // (e.g. PCNAINTERNAL/Shared Documents/Class Summaries via the
+  // porsche-classes automation) 403 with delegated Files.ReadWrite.
+  "Files.ReadWrite.All",
   "Chat.Read",
   "ChatMessage.Read",
   "Presence.Read",
