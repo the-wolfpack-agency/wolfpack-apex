@@ -28,6 +28,7 @@ import {
   messageMatchesAutomation,
   detectSourceType,
   pollInbox,
+  getMailboxBase,
 } from "@/lib/automations/inbox-poller";
 import { getValidToken } from "@/lib/microsoft-graph";
 import { getAutomation } from "@/lib/automations/registry";
@@ -111,6 +112,42 @@ describe("detectSourceType", () => {
   it("returns null when porsche_xlsx parser is not registered", () => {
     const a: AutomationDefinition = { ...automation, parsers: {} };
     expect(detectSourceType("report.xlsx", "spreadsheet", a)).toBeNull();
+  });
+});
+
+describe("getMailboxBase · routes to /me by default and /users/<upn> when env set", () => {
+  // The 4 Graph mail-read sites in inbox-poller.ts compose URLs as
+  // `https://graph.microsoft.com/v1.0${getMailboxBase()}/...`. Confirm
+  // both branches so a future env-var flip to a shared mailbox can't
+  // silently keep polling /me.
+  const ORIGINAL = process.env.AUTOMATION_POLL_MAILBOX_UPN;
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.AUTOMATION_POLL_MAILBOX_UPN;
+    else process.env.AUTOMATION_POLL_MAILBOX_UPN = ORIGINAL;
+  });
+
+  it("returns /me when env var is unset (default — operator's own inbox)", () => {
+    delete process.env.AUTOMATION_POLL_MAILBOX_UPN;
+    expect(getMailboxBase()).toBe("/me");
+  });
+
+  it("returns /me when env var is empty or whitespace-only", () => {
+    process.env.AUTOMATION_POLL_MAILBOX_UPN = "   ";
+    expect(getMailboxBase()).toBe("/me");
+    process.env.AUTOMATION_POLL_MAILBOX_UPN = "";
+    expect(getMailboxBase()).toBe("/me");
+  });
+
+  it("returns /users/<encoded-upn> when env var is set", () => {
+    process.env.AUTOMATION_POLL_MAILBOX_UPN = "pcna-automation@thewolfpack.agency";
+    // The @ in the UPN must be URL-encoded so Graph parses it as a
+    // single path segment, not a host.
+    expect(getMailboxBase()).toBe("/users/pcna-automation%40thewolfpack.agency");
+  });
+
+  it("trims surrounding whitespace before encoding (Vercel env vars have a trailing-newline history)", () => {
+    process.env.AUTOMATION_POLL_MAILBOX_UPN = "  pcna-automation@thewolfpack.agency\n";
+    expect(getMailboxBase()).toBe("/users/pcna-automation%40thewolfpack.agency");
   });
 });
 

@@ -96,6 +96,14 @@ const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
 const MS_SCOPES: string[] = [
   "User.Read",
   "Mail.Read",
+  // Mail.Read.Shared — required for the porsche-classes automation
+  // poller to read messages from a shared mailbox (e.g.
+  // pcna-automation@thewolfpack.agency) when the operator-managed
+  // env var AUTOMATION_POLL_MAILBOX_UPN is set. The shared-mailbox
+  // path uses /users/{upn}/messages instead of /me/messages, which
+  // requires this delegated scope on top of Mail.Read. Tenant admin
+  // consent typically required.
+  "Mail.Read.Shared",
   "Mail.Send",
   "Calendars.ReadWrite",
   "Contacts.ReadWrite",

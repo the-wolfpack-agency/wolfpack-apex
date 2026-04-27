@@ -34,6 +34,32 @@ import { runAnalyzer } from "./meeting-insights/run-analyzer";
 import type { AutomationDefinition, AutomationId, AutomationSourceType } from "./types";
 
 /* ------------------------------------------------------------------ */
+/* Mailbox routing                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Graph mailbox base for the inbox poller. Returns `/me` by default —
+ * the operator's own inbox, no extra scope needed. When the env var
+ * `AUTOMATION_POLL_MAILBOX_UPN` is set (e.g.
+ * `pcna-automation@thewolfpack.agency`), routes through
+ * `/users/<encoded-upn>` so the cron reads from a shared mailbox that
+ * the operator has been granted Full Access to in Exchange admin.
+ *
+ * The shared-mailbox path additionally requires `Mail.Read.Shared` in
+ * MS_SCOPES (already declared in microsoft-graph.ts) and an Exchange
+ * "Full Access" delegation on the target mailbox. With both in place,
+ * the operator's existing delegated token can read shared messages
+ * without changing the Microsoft connection — only the env var flips.
+ *
+ * Returns the path WITHOUT trailing slash. Callers compose
+ * `https://graph.microsoft.com/v1.0${getMailboxBase()}/messages/...`.
+ */
+export function getMailboxBase(): string {
+  const upn = (process.env.AUTOMATION_POLL_MAILBOX_UPN || "").trim();
+  return upn ? `/users/${encodeURIComponent(upn)}` : "/me";
+}
+
+/* ------------------------------------------------------------------ */
 /* Cursor helpers                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -159,7 +185,7 @@ async function fetchAttachments(
      for messages whose only attachment was a real fileAttachment. We
      now list the attachments first (cheap), then fetch each
      fileAttachment individually with bytes. */
-  const listUrl = `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size`;
+  const listUrl = `https://graph.microsoft.com/v1.0${getMailboxBase()}/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size`;
   const listRes = await fetch(listUrl, {
     headers: { Authorization: `Bearer ${token.accessToken}` },
   });
@@ -183,7 +209,7 @@ async function fetchAttachments(
       continue; // Skip reference / itemAttachment — we can't fetch bytes for those.
     }
     /* Per-attachment fetch to actually get contentBytes. */
-    const oneUrl = `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(att.id)}`;
+    const oneUrl = `https://graph.microsoft.com/v1.0${getMailboxBase()}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(att.id)}`;
     const oneRes = await fetch(oneUrl, {
       headers: { Authorization: `Bearer ${token.accessToken}` },
     });
@@ -631,7 +657,7 @@ export async function pollInboxHistorical(args: HistoricalScanArgs): Promise<Pol
   }
 
   const searchClause = buildSearchClause(args.filters);
-  const url = new URL("https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages");
+  const url = new URL(`https://graph.microsoft.com/v1.0${getMailboxBase()}/mailFolders/inbox/messages`);
   url.searchParams.set("$top", String(limit));
   url.searchParams.set(
     "$select",
@@ -742,7 +768,7 @@ export async function pollInboxHistorical(args: HistoricalScanArgs): Promise<Pol
         let bodyHtml: string | null = null;
         let bodyText: string | null = null;
         try {
-          const detailUrl = `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(msg.id)}?$select=body,ccRecipients`;
+          const detailUrl = `https://graph.microsoft.com/v1.0${getMailboxBase()}/messages/${encodeURIComponent(msg.id)}?$select=body,ccRecipients`;
           const detailRes = await fetch(detailUrl, {
             headers: { Authorization: `Bearer ${token.accessToken}` },
           });
