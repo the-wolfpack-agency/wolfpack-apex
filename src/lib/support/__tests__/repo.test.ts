@@ -129,6 +129,9 @@ describe("createTicket", () => {
       "internal",
       "user-1",
       "alicia@x",
+      null,
+      null,
+      null,
     ]);
     expect(opts).toEqual({ expectRows: 1 });
     expect(mockUpsert).toHaveBeenCalledWith(

@@ -7,6 +7,7 @@ jest.mock("@/lib/support/repo", () => ({
   getTicket: jest.fn(),
   updateTicket: jest.fn(),
   deleteTicket: jest.fn(),
+  listTicketMessages: jest.fn(),
 }));
 jest.mock("@/lib/analytics", () => ({
   trackEvent: jest.fn(),
@@ -70,11 +71,64 @@ describe("GET /api/support/tickets/[id]", () => {
   it("200 returns ticket", async () => {
     requireCapability.mockResolvedValue(authed());
     repo.getTicket.mockResolvedValue(ticket);
+    repo.listTicketMessages.mockResolvedValue([]);
     const { GET } = await import("../tickets/[id]/route");
     const res = await GET(req("GET"), ctx);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.ticket).toEqual(ticket);
+    expect(body.ticket).toEqual({ ...ticket, thread: [] });
+  });
+
+  it("includes empty thread when listTicketMessages returns no rows", async () => {
+    requireCapability.mockResolvedValue(authed());
+    repo.getTicket.mockResolvedValue(ticket);
+    repo.listTicketMessages.mockResolvedValue([]);
+    const { GET } = await import("../tickets/[id]/route");
+    const res = await GET(req("GET"), ctx);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ticket.thread).toEqual([]);
+    expect(repo.listTicketMessages).toHaveBeenCalledWith("tk-1");
+  });
+
+  it("hydrates thread when listTicketMessages returns messages", async () => {
+    requireCapability.mockResolvedValue(authed());
+    repo.getTicket.mockResolvedValue(ticket);
+    const messages = [
+      {
+        id: "m1",
+        ticket_id: "tk-1",
+        direction: "inbound",
+        from_email: "user@x.com",
+        body: "hello",
+        received_at: "2026-04-27T00:00:00Z",
+      },
+      {
+        id: "m2",
+        ticket_id: "tk-1",
+        direction: "outbound",
+        from_email: "support@thewolfpack.agency",
+        body: "hi back",
+        received_at: "2026-04-27T00:05:00Z",
+      },
+    ];
+    repo.listTicketMessages.mockResolvedValue(messages);
+    const { GET } = await import("../tickets/[id]/route");
+    const res = await GET(req("GET"), ctx);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ticket.thread).toEqual(messages);
+  });
+
+  it("gracefully degrades to thread: [] when listTicketMessages throws", async () => {
+    requireCapability.mockResolvedValue(authed());
+    repo.getTicket.mockResolvedValue(ticket);
+    repo.listTicketMessages.mockRejectedValue(new Error("db down"));
+    const { GET } = await import("../tickets/[id]/route");
+    const res = await GET(req("GET"), ctx);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ticket.thread).toEqual([]);
   });
 
   it("500 when repo throws", async () => {

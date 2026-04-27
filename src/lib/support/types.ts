@@ -53,6 +53,26 @@ export interface SupportTicket {
   edit_diff: Record<string, unknown> | null;
   feedback_notes: string | null;
   feedback_at: string | null;
+  /**
+   * Microsoft Graph message id of the email that started the ticket
+   * (when the ticket was auto-created by the inbox poller). Used by the
+   * send route to call /messages/{id}/reply so the outbound message
+   * lands on the same conversation thread instead of starting a new one.
+   * Null for tickets created via the manual /support form.
+   */
+  graph_message_id: string | null;
+  /**
+   * RFC 5322 Message-ID of the inbound email. Survives mailbox moves
+   * and is what other mail clients use to thread, so we keep it for
+   * cross-system thread reconciliation.
+   */
+  graph_internet_message_id: string | null;
+  /**
+   * Microsoft Graph conversationId. The poller uses this to detect
+   * "customer replied to our reply" and route the new message onto the
+   * existing ticket instead of creating a duplicate.
+   */
+  graph_conversation_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -66,6 +86,11 @@ export interface CreateTicketInput {
   audience?: SupportAudience;
   created_by_user_id: string;
   created_by_email?: string | null;
+  /** Set by the inbox poller when the ticket is born from an inbound
+   *  email. Manual /support form leaves these undefined. */
+  graph_message_id?: string | null;
+  graph_internet_message_id?: string | null;
+  graph_conversation_id?: string | null;
 }
 
 export interface RecordFeedbackInput {

@@ -1355,12 +1355,19 @@ export type InstinctEventType =
   //   support.draft_generated   { ticket_id, pattern_ids, char_count }
   //   support.ticket_sent       { ticket_id, to_email, char_count }
   //   support.feedback_submitted { ticket_id, helpful, has_edit_diff }
+  //   support.poll_run            { source, mailbox, messages_seen,
+  //                                 tickets_created, replies_appended,
+  //                                 drafts_generated, errors, duration_ms,
+  //                                 [skipped], [status] }
+  //     — emitted on every inbox-poller tick (cron + operator Run-now).
+  //       Used to monitor poll cadence and catch token expiry early.
   | "support.ticket_created"
   | "support.list_viewed"
   | "support.ticket_updated"
   | "support.draft_generated"
   | "support.ticket_sent"
-  | "support.feedback_submitted";
+  | "support.feedback_submitted"
+  | "support.poll_run";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

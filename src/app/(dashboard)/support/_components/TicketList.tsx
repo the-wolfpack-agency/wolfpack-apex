@@ -50,6 +50,12 @@ export interface SupportTicket {
   feedback_helpful?: boolean | null;
   feedback_notes?: string | null;
   matched_patterns?: string[];
+  /* Email/message thread is hydrated only on the detail GET. The list
+     view never includes it, so it stays optional and tolerates older
+     fixtures + form-created internal tickets that have no thread. The
+     concrete TicketMessage shape lives next to the renderer in
+     TicketThread.tsx; the list type only cares that it's an array. */
+  thread?: import("./TicketThread").TicketMessage[] | null;
   created_at: string;
   created_by?: string | null;
   updated_at?: string | null;

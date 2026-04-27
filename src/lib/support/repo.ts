@@ -43,6 +43,21 @@ export interface CreateTicketRow {
   audience?: SupportAudience | string | null;
   created_by_user_id: string;
   created_by_email?: string | null;
+  /** Optional Graph thread-linking ids. Populated by the inbox poller
+   *  when the ticket is auto-created from an inbound email; left
+   *  undefined by the manual /support create flow. */
+  graph_message_id?: string | null;
+  graph_internet_message_id?: string | null;
+  graph_conversation_id?: string | null;
+}
+
+export interface AppendTicketReplyInput {
+  graph_message_id: string;
+  internet_message_id?: string | null;
+  from_email?: string | null;
+  body: string;
+  received_at?: string | null;
+  direction: "inbound" | "outbound";
 }
 
 export interface ListTicketsOptions {
@@ -93,6 +108,14 @@ function rowToTicket(r: Record<string, unknown>): SupportTicket {
     edit_diff: (r.edit_diff as Record<string, unknown> | null) ?? null,
     feedback_notes: r.feedback_notes == null ? null : String(r.feedback_notes),
     feedback_at: r.feedback_at == null ? null : String(r.feedback_at),
+    graph_message_id:
+      r.graph_message_id == null ? null : String(r.graph_message_id),
+    graph_internet_message_id:
+      r.graph_internet_message_id == null
+        ? null
+        : String(r.graph_internet_message_id),
+    graph_conversation_id:
+      r.graph_conversation_id == null ? null : String(r.graph_conversation_id),
     created_at: String(r.created_at),
     updated_at: String(r.updated_at),
   };
@@ -122,6 +145,7 @@ const TICKET_COLUMNS = `
   draft_response, draft_generated_at::text AS draft_generated_at, draft_pattern_ids,
   sent_response, sent_at::text AS sent_at, sent_to_email,
   helpful, edit_diff, feedback_notes, feedback_at::text AS feedback_at,
+  graph_message_id, graph_internet_message_id, graph_conversation_id,
   created_at::text AS created_at, updated_at::text AS updated_at
 `;
 
@@ -231,13 +255,15 @@ export async function createTicket(input: CreateTicketRow): Promise<SupportTicke
   const r = await writeQuery(
     `INSERT INTO instinct_support_tickets
        (title, body, diagnostic_text, category, severity, status, audience,
-        created_by_user_id, created_by_email)
+        created_by_user_id, created_by_email,
+        graph_message_id, graph_internet_message_id, graph_conversation_id)
      VALUES ($1, $2, $3,
              COALESCE($4, 'general'),
              COALESCE($5, 'p2'),
              COALESCE($6, 'open'),
              $7,
-             $8, $9)
+             $8, $9,
+             $10, $11, $12)
      RETURNING ${TICKET_COLUMNS}`,
     [
       input.title,
@@ -249,6 +275,9 @@ export async function createTicket(input: CreateTicketRow): Promise<SupportTicke
       audienceNormalized,
       input.created_by_user_id,
       input.created_by_email ?? null,
+      input.graph_message_id ?? null,
+      input.graph_internet_message_id ?? null,
+      input.graph_conversation_id ?? null,
     ],
     { expectRows: 1 },
   );
@@ -267,6 +296,110 @@ export async function getTicket(id: string): Promise<SupportTicket | null> {
     [id],
   );
   return r.rows[0] ? rowToTicket(r.rows[0]) : null;
+}
+
+/**
+ * Find an existing ticket by Microsoft Graph conversationId. Used by
+ * the inbox poller to detect "customer replied to our reply" so the new
+ * inbound message lands on the same ticket instead of starting a
+ * duplicate.
+ *
+ * Returns the most recently updated ticket on the unlikely event of a
+ * conversationId collision (Graph reuses ids across mailboxes when a
+ * thread is forwarded; ORDER BY updated_at picks the active one).
+ * Returns null when no ticket carries that conversation id (the typical
+ * "first email from this customer" case).
+ */
+export async function findTicketByConversationId(
+  conversation_id: string,
+): Promise<SupportTicket | null> {
+  if (!conversation_id) return null;
+  const r = await query<Record<string, unknown>>(
+    `SELECT ${TICKET_COLUMNS}
+       FROM instinct_support_tickets
+      WHERE graph_conversation_id = $1
+      ORDER BY updated_at DESC
+      LIMIT 1`,
+    [conversation_id],
+  );
+  return r.rows[0] ? rowToTicket(r.rows[0]) : null;
+}
+
+/**
+ * Append a reply (inbound or outbound) to an existing ticket's message
+ * thread. INSERTs into instinct_support_ticket_messages AND bumps the
+ * parent ticket's updated_at so the operator-facing list re-sorts the
+ * ticket to the top when a customer replies.
+ *
+ * Idempotent on (ticket_id, graph_message_id) — re-running the poller
+ * after a partial failure does NOT duplicate the message row. The
+ * uniqueness check is done client-side because the migration
+ * intentionally avoids a unique constraint (operators may want to
+ * manually attach the same internet_message_id to multiple tickets when
+ * a single email gets re-routed).
+ *
+ * Returns the inserted (or pre-existing) row's id.
+ */
+export async function appendTicketReply(
+  ticketId: string,
+  input: AppendTicketReplyInput,
+): Promise<string> {
+  /* Idempotency guard: skip the INSERT when the same Graph message id
+     already exists on this ticket. The poller cursor advances on
+     success so this should rarely fire, but a partial-failure replay
+     must never duplicate the inbound message. */
+  const existing = await query<{ id: string }>(
+    `SELECT id
+       FROM instinct_support_ticket_messages
+      WHERE ticket_id = $1 AND graph_message_id = $2
+      LIMIT 1`,
+    [ticketId, input.graph_message_id],
+  );
+  if (existing.rows[0]?.id) {
+    return existing.rows[0].id;
+  }
+
+  const r = await writeQuery<{ id: string }>(
+    `INSERT INTO instinct_support_ticket_messages
+       (ticket_id, direction, graph_message_id, internet_message_id,
+        from_email, body, received_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id`,
+    [
+      ticketId,
+      input.direction,
+      input.graph_message_id,
+      input.internet_message_id ?? null,
+      input.from_email ?? null,
+      input.body,
+      input.received_at ?? null,
+    ],
+    { expectRows: 1 },
+  );
+
+  /* Bump parent ticket's updated_at so the list view re-sorts. We do
+     this in a separate UPDATE rather than a trigger so the cursor
+     advance is observable in the same transaction shape as the parent
+     INSERT. expectRows is intentionally NOT set: a deleted-ticket race
+     would mean the message row was orphaned, which the FK
+     ON DELETE CASCADE prevents — but the UPDATE returning 0 rows in
+     edge cases must not block the INSERT we just did. */
+  try {
+    await writeQuery(
+      `UPDATE instinct_support_tickets
+          SET updated_at = NOW()
+        WHERE id = $1
+        RETURNING id`,
+      [ticketId],
+    );
+  } catch (err) {
+    console.warn(
+      "[support/repo] appendTicketReply parent updated_at bump failed:",
+      (err as Error).message,
+    );
+  }
+
+  return r.rows[0].id;
 }
 
 export async function listTickets(opts: ListTicketsOptions = {}): Promise<SupportTicket[]> {

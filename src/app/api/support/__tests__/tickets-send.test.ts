@@ -6,6 +6,7 @@ jest.mock("@/lib/auth/require-capability", () => ({
 jest.mock("@/lib/support/repo", () => ({
   getTicket: jest.fn(),
   updateTicket: jest.fn(),
+  appendTicketReply: jest.fn(),
 }));
 jest.mock("@/lib/microsoft-graph", () => ({
   getValidToken: jest.fn(),
@@ -159,6 +160,54 @@ describe("POST /api/support/tickets/[id]/send", () => {
         ticket_id: "tk-1",
         to_email: "user@example.com",
       }),
+    );
+  });
+
+  it("uses /messages/{id}/reply when ticket has graph_message_id (thread preservation)", async () => {
+    requireCapability.mockResolvedValue(authed());
+    repo.getTicket.mockResolvedValue({
+      ...ticket,
+      graph_message_id: "graph-msg-abc",
+      graph_conversation_id: "conv-1",
+    });
+    repo.updateTicket.mockResolvedValue({ ...ticket, status: "sent" });
+    repo.appendTicketReply.mockResolvedValue("reply-row-1");
+    getValidToken.mockResolvedValue({ accessToken: "tk", userEmail: "op@x.com" });
+    const fetchMock = jest.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    global.fetch = fetchMock;
+
+    const { POST } = await import("../tickets/[id]/send/route");
+    const res = await POST(req({ to_email: "user@example.com" }), ctx);
+    expect(res.status).toBe(200);
+
+    const calledUrl = fetchMock.mock.calls[0][0] as string;
+    expect(calledUrl).toBe(
+      "https://graph.microsoft.com/v1.0/me/messages/graph-msg-abc/reply",
+    );
+
+    /* /reply payload uses `comment` not `message.body.content`. */
+    const sentPayload = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(sentPayload.comment).toBe(ticket.draft_response);
+    expect(sentPayload.message.toRecipients[0].emailAddress.address).toBe(
+      "user@example.com",
+    );
+    expect(sentPayload.message.from).toBeUndefined();
+
+    /* Outbound row appended to the audit table. */
+    expect(repo.appendTicketReply).toHaveBeenCalledWith(
+      "tk-1",
+      expect.objectContaining({
+        direction: "outbound",
+        from_email: "support@thewolfpack.agency",
+      }),
+    );
+
+    /* Analytics carries the send_path discriminator. */
+    expect(trackEvent).toHaveBeenCalledWith(
+      "support.ticket_sent",
+      "u-1",
+      "dev",
+      expect.objectContaining({ send_path: "reply" }),
     );
   });
 

@@ -33,6 +33,7 @@ import { fetchWithRefresh, getInstinctUser } from "@/lib/client-auth";
 import SeverityBadge from "./SeverityBadge";
 import StatusPill from "./StatusPill";
 import AudienceBadge, { type Audience } from "./AudienceBadge";
+import TicketThread, { type TicketMessage } from "./TicketThread";
 import type { SupportTicket, TicketCategory } from "./TicketList";
 
 function audienceOf(t: SupportTicket): Audience {
@@ -274,6 +275,14 @@ export default function TicketDetail({
           </details>
         )}
       </section>
+
+      {/* Conversation thread — inbound email + customer replies +
+          operator outbound replies. Only rendered when the ticket has
+          messages so form-created internal tickets without an inbound
+          email don't show an empty card. */}
+      {ticket.thread && ticket.thread.length > 0 && (
+        <TicketThread thread={ticket.thread as TicketMessage[]} />
+      )}
 
       {/* Draft editor (pre-send) OR sent presentation */}
       {!sentOrResolved ? (

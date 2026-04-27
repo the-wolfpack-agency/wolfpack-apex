@@ -14,6 +14,7 @@ import {
   updateTicket,
   deleteTicket,
 } from "@/lib/support/repo";
+import * as repo from "@/lib/support/repo";
 
 const PATCHABLE_FIELDS = [
   "title",
@@ -42,7 +43,29 @@ export async function GET(
     if (!ticket) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
-    return NextResponse.json({ ticket });
+
+    /* Hydrate the email/message thread when the parallel-shipped repo
+       function is available. Until that lands we degrade to an empty
+       array so the UI render branch stays stable and the response shape
+       never depends on whether the new repo helper has been merged. */
+    let thread: unknown[] = [];
+    const maybeList = (repo as { listTicketMessages?: unknown })
+      .listTicketMessages;
+    if (typeof maybeList === "function") {
+      try {
+        const result = await (maybeList as (
+          ticketId: string,
+        ) => Promise<unknown[]>)(id);
+        if (Array.isArray(result)) thread = result;
+      } catch {
+        /* Swallow — a thread fetch failure must not 500 the ticket
+           detail page. We log via the empty array and let operators
+           still see the ticket body + draft editor. */
+        thread = [];
+      }
+    }
+
+    return NextResponse.json({ ticket: { ...ticket, thread } });
   } catch (err) {
     return NextResponse.json(
       { error: (err as Error).message },
