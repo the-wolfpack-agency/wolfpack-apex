@@ -1346,7 +1346,21 @@ export type InstinctEventType =
   //       lookup, false otherwise.
   | "automations.config_viewed"
   | "automations.config_updated"
-  | "automations.sharepoint_test_run";
+  | "automations.sharepoint_test_run"
+  // Support — operator-driven shared-mailbox ticket flow.
+  //
+  //   support.ticket_created    { ticket_id, category, severity }
+  //   support.list_viewed       { status?, category?, count }
+  //   support.ticket_updated    { ticket_id, fields_changed }
+  //   support.draft_generated   { ticket_id, pattern_ids, char_count }
+  //   support.ticket_sent       { ticket_id, to_email, char_count }
+  //   support.feedback_submitted { ticket_id, helpful, has_edit_diff }
+  | "support.ticket_created"
+  | "support.list_viewed"
+  | "support.ticket_updated"
+  | "support.draft_generated"
+  | "support.ticket_sent"
+  | "support.feedback_submitted";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;
