@@ -115,6 +115,12 @@ const MS_SCOPES: string[] = [
   // porsche-classes automation) 403 with delegated Files.ReadWrite.
   "Files.ReadWrite.All",
   "Chat.Read",
+  // Chat.ReadWrite — required for Instinct to SEND Teams chat messages
+  // (the Send button on the in-Instinct chat composer). Without this,
+  // /me/chats/{id}/messages POST returns 403 and the UI surfaces
+  // "Grant Chat.ReadWrite to send from here". Confirmed missing on
+  // 2026-04-27 when the operator tried to send a test message.
+  "Chat.ReadWrite",
   "ChatMessage.Read",
   "Presence.Read",
   "People.Read",
