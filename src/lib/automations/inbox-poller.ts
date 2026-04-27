@@ -366,17 +366,29 @@ export async function pollInbox(args: {
   userId: string;
   userRole: string;
 }): Promise<PollResult> {
+  /* Dispatch — when AUTOMATION_POLL_MAILBOX_UPN is set, we are reading
+     a mailbox we don't own (e.g. Alicia's). Server-side $search with
+     the automation's filter list is the privacy-safe path: only
+     messages matching the configured senders/subjects ever cross the
+     wire. Delta polling has no $search support and would pull every
+     inbox-message metadata through our code. */
+  if ((process.env.AUTOMATION_POLL_MAILBOX_UPN || "").trim()) {
+    return pollInboxBySearch(args);
+  }
+  return pollInboxByDelta(args);
+}
+
+async function pollInboxByDelta(args: {
+  automationId: AutomationId;
+  userId: string;
+  userRole: string;
+}): Promise<PollResult> {
   const start = Date.now();
   const automation = getAutomation(args.automationId);
   if (!automation) {
     throw new Error(`unknown automation: ${args.automationId}`);
   }
 
-  /* Soft-fail when the poller has no token to use. This is the normal
-     bootstrap state — the cron starts running before any user has
-     signed in. We return a structured skip so the route stays 200 and
-     cron health doesn't redline; once a real user connects, the next
-     tick proceeds normally. */
   const preToken = await getValidToken(args.userId);
   if (!preToken) {
     try {
@@ -443,128 +455,11 @@ export async function pollInbox(args: {
     if (msg["@removed"]) continue; // Mailbox tombstones — not relevant.
     if (!messageMatchesAutomation(msg, automation, activeFilters)) continue;
     messagesMatched += 1;
-
-    let attachments: Awaited<ReturnType<typeof fetchAttachments>>;
-    try {
-      attachments = await fetchAttachments(args.userId, msg.id);
-    } catch (err) {
-      errors += 1;
-      console.warn(
-        `[automations/inbox-poller] attachment fetch failed for ${msg.id}: ${(err as Error).message}`,
-      );
-      continue;
-    }
-
-    if (messageLevel) {
-      // Message-level ingest path (meeting-insights): one row per email
-      // regardless of attachments. The orchestrator owns body parsing +
-      // attachment extraction internally.
-      try {
-        // Graph mail-message extras live behind the [k: string]: unknown
-        // index signature; cast through a narrow shape to extract them.
-        const ext = msg as unknown as {
-          ccRecipients?: Array<{ emailAddress?: { address?: string | null } }>;
-          body?: { contentType?: string | null; content?: string | null };
-        };
-        const ccRecipients = ext.ccRecipients ?? [];
-        const bodyHtml =
-          ext.body?.contentType === "html" ? (ext.body?.content ?? null) : null;
-        const result = await ingestMeetingMessage({
-          automation,
-          source_message_id: msg.id,
-          received_at: msg.receivedDateTime ?? new Date().toISOString(),
-          subject: msg.subject ?? "",
-          from_address: msg.from?.emailAddress?.address ?? "",
-          from_name: msg.from?.emailAddress?.name ?? null,
-          to_addresses: (msg.toRecipients ?? [])
-            .map((r) => r.emailAddress?.address)
-            .filter((s): s is string => typeof s === "string"),
-          cc_addresses: ccRecipients
-            .map((r) => r.emailAddress?.address)
-            .filter((s): s is string => typeof s === "string"),
-          // Raw bytes: we don't get the .eml from delta. Serialize the
-          // Graph envelope as a stable representation so the artifact
-          // hash is stable across replays.
-          raw_bytes: Buffer.from(JSON.stringify(msg), "utf8"),
-          mime: "message/rfc822",
-          body_html: bodyHtml,
-          body_preview: msg.bodyPreview ?? null,
-          attachments,
-          user_id: args.userId,
-          user_role: args.userRole,
-        });
-        if (result.was_duplicate) artifactsDuplicate += 1;
-        else if (result.parse_status === "processed") artifactsIngested += 1;
-        else if (result.parse_status === "error_quarantined") artifactsQuarantined += 1;
-      } catch (err) {
-        errors += 1;
-        console.warn(
-          `[automations/inbox-poller] meeting ingest failed for ${msg.id}: ${(err as Error).message}`,
-        );
-      }
-      continue;
-    }
-
-    for (const att of attachments) {
-      const sourceType = detectSourceType(att.name, att.contentType, automation);
-      if (!sourceType) continue; // Not an attachment we know how to parse.
-
-      try {
-        const result: IngestResult = await ingestArtifact({
-          automation,
-          source_type: sourceType,
-          source_message_id: msg.id,
-          received_at: msg.receivedDateTime ?? new Date().toISOString(),
-          bytes: att.bytes,
-          hint: att.name,
-          mime: att.contentType || "application/octet-stream",
-          user_id: args.userId,
-          user_role: args.userRole,
-        });
-        if (result.was_duplicate) artifactsDuplicate += 1;
-        else if (result.parse_status === "processed") artifactsIngested += 1;
-        else if (result.parse_status === "error_quarantined") artifactsQuarantined += 1;
-      } catch (err) {
-        errors += 1;
-        console.warn(
-          `[automations/inbox-poller] ingest failed for ${msg.id}/${att.name}: ${(err as Error).message}`,
-        );
-      }
-    }
-
-    /* Body-level Cognito path: when the message subject matches a
-       Cognito form (Coordinator / Instructor Class Report) and the
-       form's "Entry Details" sit in the email body rather than as an
-       attachment, synthesize an .eml-shaped buffer from the Graph
-       message and route it through the same ingestArtifact pipeline.
-       Lets the existing parser-cognito-* parsers run unchanged. Only
-       fires when no attachment-level source_type was detected so we
-       don't double-ingest. */
-    const bodySourceType = detectBodySourceType(msg.subject ?? "", automation);
-    if (bodySourceType && attachments.length === 0) {
-      const emlBytes = synthesizeEmlFromGraphMessage(msg);
-      try {
-        const result: IngestResult = await ingestArtifact({
-          automation,
-          source_type: bodySourceType,
-          source_message_id: msg.id,
-          received_at: msg.receivedDateTime ?? new Date().toISOString(),
-          bytes: emlBytes,
-          hint: msg.subject ?? `${bodySourceType}.eml`,
-          mime: "message/rfc822",
-          user_id: args.userId,
-          user_role: args.userRole,
-        });
-        if (result.was_duplicate) artifactsDuplicate += 1;
-        else if (result.parse_status === "processed") artifactsIngested += 1;
-        else if (result.parse_status === "error_quarantined") artifactsQuarantined += 1;
-      } catch (err) {
-        errors += 1;
-        console.warn(
-          `[automations/inbox-poller] body ingest failed for ${msg.id}: ${(err as Error).message}`,
-        );
-      }
-    }
+    const r = await processMatchedMessage(msg, automation, args, messageLevel);
+    artifactsIngested += r.ingested;
+    artifactsDuplicate += r.duplicate;
+    artifactsQuarantined += r.quarantined;
+    errors += r.errors;
   }
 
   if (nextDeltaLink) {
@@ -574,6 +469,7 @@ export async function pollInbox(args: {
   const duration_ms = Date.now() - start;
   trackEvent("automations.poll_run", args.userId, args.userRole, {
     automation_id: args.automationId,
+    mode: "delta",
     messages_seen: messagesSeen,
     messages_matched: messagesMatched,
     artifacts_ingested: artifactsIngested,
@@ -592,6 +488,380 @@ export async function pollInbox(args: {
     duration_ms,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Per-message ingest                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Run a single matched message through the ingest pipeline. Extracted
+ * from the delta-poll loop so the new search-poll path can reuse the
+ * exact same data + learning integration (attachment ingest, body-
+ * Cognito synthesis, message-level meeting ingest, dedup counting).
+ *
+ * Counters are returned per-message so the caller can aggregate across
+ * the batch. NEVER throws — all failure paths increment `errors`.
+ */
+async function processMatchedMessage(
+  msg: GraphMailMessage,
+  automation: AutomationDefinition,
+  args: { userId: string; userRole: string },
+  messageLevel: boolean,
+): Promise<{ ingested: number; duplicate: number; quarantined: number; errors: number }> {
+  let ingested = 0;
+  let duplicate = 0;
+  let quarantined = 0;
+  let errors = 0;
+
+  let attachments: Awaited<ReturnType<typeof fetchAttachments>>;
+  try {
+    attachments = await fetchAttachments(args.userId, msg.id);
+  } catch (err) {
+    console.warn(
+      `[automations/inbox-poller] attachment fetch failed for ${msg.id}: ${(err as Error).message}`,
+    );
+    return { ingested, duplicate, quarantined, errors: errors + 1 };
+  }
+
+  if (messageLevel) {
+    // Message-level ingest path (meeting-insights): one row per email
+    // regardless of attachments. The orchestrator owns body parsing +
+    // attachment extraction internally.
+    try {
+      const ext = msg as unknown as {
+        ccRecipients?: Array<{ emailAddress?: { address?: string | null } }>;
+        body?: { contentType?: string | null; content?: string | null };
+      };
+      const ccRecipients = ext.ccRecipients ?? [];
+      const bodyHtml =
+        ext.body?.contentType === "html" ? (ext.body?.content ?? null) : null;
+      const result = await ingestMeetingMessage({
+        automation,
+        source_message_id: msg.id,
+        received_at: msg.receivedDateTime ?? new Date().toISOString(),
+        subject: msg.subject ?? "",
+        from_address: msg.from?.emailAddress?.address ?? "",
+        from_name: msg.from?.emailAddress?.name ?? null,
+        to_addresses: (msg.toRecipients ?? [])
+          .map((r) => r.emailAddress?.address)
+          .filter((s): s is string => typeof s === "string"),
+        cc_addresses: ccRecipients
+          .map((r) => r.emailAddress?.address)
+          .filter((s): s is string => typeof s === "string"),
+        raw_bytes: Buffer.from(JSON.stringify(msg), "utf8"),
+        mime: "message/rfc822",
+        body_html: bodyHtml,
+        body_preview: msg.bodyPreview ?? null,
+        attachments,
+        user_id: args.userId,
+        user_role: args.userRole,
+      });
+      if (result.was_duplicate) duplicate += 1;
+      else if (result.parse_status === "processed") ingested += 1;
+      else if (result.parse_status === "error_quarantined") quarantined += 1;
+    } catch (err) {
+      errors += 1;
+      console.warn(
+        `[automations/inbox-poller] meeting ingest failed for ${msg.id}: ${(err as Error).message}`,
+      );
+    }
+    return { ingested, duplicate, quarantined, errors };
+  }
+
+  for (const att of attachments) {
+    const sourceType = detectSourceType(att.name, att.contentType, automation);
+    if (!sourceType) continue;
+
+    try {
+      const result: IngestResult = await ingestArtifact({
+        automation,
+        source_type: sourceType,
+        source_message_id: msg.id,
+        received_at: msg.receivedDateTime ?? new Date().toISOString(),
+        bytes: att.bytes,
+        hint: att.name,
+        mime: att.contentType || "application/octet-stream",
+        user_id: args.userId,
+        user_role: args.userRole,
+      });
+      if (result.was_duplicate) duplicate += 1;
+      else if (result.parse_status === "processed") ingested += 1;
+      else if (result.parse_status === "error_quarantined") quarantined += 1;
+    } catch (err) {
+      errors += 1;
+      console.warn(
+        `[automations/inbox-poller] ingest failed for ${msg.id}/${att.name}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /* Body-level Cognito path: synthesize .eml from Graph message body
+     when no parseable attachment was found, so the parser-cognito-*
+     pipeline runs unchanged. */
+  const bodySourceType = detectBodySourceType(msg.subject ?? "", automation);
+  if (bodySourceType && attachments.length === 0) {
+    const emlBytes = synthesizeEmlFromGraphMessage(msg);
+    try {
+      const result: IngestResult = await ingestArtifact({
+        automation,
+        source_type: bodySourceType,
+        source_message_id: msg.id,
+        received_at: msg.receivedDateTime ?? new Date().toISOString(),
+        bytes: emlBytes,
+        hint: msg.subject ?? `${bodySourceType}.eml`,
+        mime: "message/rfc822",
+        user_id: args.userId,
+        user_role: args.userRole,
+      });
+      if (result.was_duplicate) duplicate += 1;
+      else if (result.parse_status === "processed") ingested += 1;
+      else if (result.parse_status === "error_quarantined") quarantined += 1;
+    } catch (err) {
+      errors += 1;
+      console.warn(
+        `[automations/inbox-poller] body ingest failed for ${msg.id}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  return { ingested, duplicate, quarantined, errors };
+}
+
+/* ------------------------------------------------------------------ */
+/* Search-mode poll                                                    */
+/*                                                                     */
+/* Used when AUTOMATION_POLL_MAILBOX_UPN is set — the cron reads a     */
+/* mailbox the operator doesn't own. Server-side $search guarantees    */
+/* only matching messages ever cross the wire from Graph, which is     */
+/* the privacy contract for reading another user's inbox.              */
+/*                                                                     */
+/* Cursor reuses the existing delta_link column with a "search:" ISO   */
+/* timestamp prefix to avoid a schema migration. The poller advances   */
+/* the cursor to the newest receivedDateTime seen this tick. Delta     */
+/* and search modes never share a cursor — the prefix is the discriminator. */
+/* ------------------------------------------------------------------ */
+
+const SEARCH_CURSOR_PREFIX = "search:";
+
+function parseSearchCursor(stored: string | null): string | null {
+  if (!stored || !stored.startsWith(SEARCH_CURSOR_PREFIX)) return null;
+  const iso = stored.slice(SEARCH_CURSOR_PREFIX.length);
+  return /^\d{4}-\d{2}-\d{2}T/.test(iso) ? iso : null;
+}
+
+function formatSearchCursor(iso: string): string {
+  return `${SEARCH_CURSOR_PREFIX}${iso}`;
+}
+
+async function pollInboxBySearch(args: {
+  automationId: AutomationId;
+  userId: string;
+  userRole: string;
+}): Promise<PollResult> {
+  const start = Date.now();
+  const automation = getAutomation(args.automationId);
+  if (!automation) {
+    throw new Error(`unknown automation: ${args.automationId}`);
+  }
+
+  const preToken = await getValidToken(args.userId);
+  if (!preToken) {
+    try {
+      trackEvent("automations.poll_skipped", args.userId, args.userRole, {
+        automation_id: args.automationId,
+        mode: "search",
+        reason: "no_user_connected",
+      });
+    } catch {
+      /* analytics best-effort */
+    }
+    return {
+      automation_id: args.automationId,
+      messages_seen: 0,
+      messages_matched: 0,
+      artifacts_ingested: 0,
+      artifacts_duplicate: 0,
+      artifacts_quarantined: 0,
+      errors: 0,
+      duration_ms: Date.now() - start,
+      skipped: "no_user_connected",
+    };
+  }
+
+  const activeFilters = await resolveActiveInboxFilters(automation);
+  const searchClause = buildSearchClause(activeFilters);
+  if (!searchClause) {
+    /* No filters configured — we WILL NOT poll a third-party mailbox
+       without a server-side filter. Refuse loudly so a misconfiguration
+       can't accidentally pull every email. */
+    try {
+      trackEvent("automations.poll_skipped", args.userId, args.userRole, {
+        automation_id: args.automationId,
+        mode: "search",
+        reason: "no_filters_in_search_mode",
+      });
+    } catch {
+      /* best-effort */
+    }
+    return {
+      automation_id: args.automationId,
+      messages_seen: 0,
+      messages_matched: 0,
+      artifacts_ingested: 0,
+      artifacts_duplicate: 0,
+      artifacts_quarantined: 0,
+      errors: 0,
+      duration_ms: Date.now() - start,
+      skipped: "no_user_connected", // reuse the existing skipped enum value
+    };
+  }
+
+  const stored = await loadDeltaLink(args.automationId, args.userId);
+  const since = parseSearchCursor(stored);
+
+  /* Compose the Graph URL: /{base}/mailFolders/inbox/messages with
+     server-side $search (sender + subject KQL) — only messages
+     matching the automation's filters cross the wire. The
+     receivedDateTime $filter further restricts to NEW messages since
+     last successful poll. ConsistencyLevel: eventual is required by
+     Graph for $search + $filter. */
+  const url = new URL(`https://graph.microsoft.com/v1.0${getMailboxBase()}/mailFolders/inbox/messages`);
+  url.searchParams.set("$top", "50");
+  url.searchParams.set(
+    "$select",
+    "id,subject,bodyPreview,from,toRecipients,ccRecipients,body,receivedDateTime,hasAttachments",
+  );
+  url.searchParams.set("$search", `"${searchClause}"`);
+  /* NOTE: Graph rejects $filter alongside $search in many cases — we
+     apply the receivedDateTime cutoff client-side for safety. The
+     $top: 50 cap protects from runaway when the cursor is far behind. */
+
+  let payload: { value?: GraphMailMessage[] } = {};
+  try {
+    const res = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${preToken.accessToken}`,
+        ConsistencyLevel: "eventual",
+      },
+    });
+    if (res.status === 401 || res.status === 403) {
+      try {
+        trackEvent("automations.poll_skipped", args.userId, args.userRole, {
+          automation_id: args.automationId,
+          mode: "search",
+          reason: res.status === 401 ? "no_valid_token" : "scope_or_access_missing",
+          status: res.status,
+        });
+      } catch {
+        /* best-effort */
+      }
+      return {
+        automation_id: args.automationId,
+        messages_seen: 0,
+        messages_matched: 0,
+        artifacts_ingested: 0,
+        artifacts_duplicate: 0,
+        artifacts_quarantined: 0,
+        errors: 0,
+        duration_ms: Date.now() - start,
+        skipped: res.status === 401 ? "no_valid_token" : "no_user_connected",
+      };
+    }
+    if (!res.ok) {
+      console.warn(
+        `[automations/inbox-poller] search-mode graph_${res.status}`,
+      );
+      return {
+        automation_id: args.automationId,
+        messages_seen: 0,
+        messages_matched: 0,
+        artifacts_ingested: 0,
+        artifacts_duplicate: 0,
+        artifacts_quarantined: 0,
+        errors: 1,
+        duration_ms: Date.now() - start,
+      };
+    }
+    payload = (await res.json()) as { value?: GraphMailMessage[] };
+  } catch (err) {
+    console.warn(
+      `[automations/inbox-poller] search-mode fetch threw: ${(err as Error).message}`,
+    );
+    return {
+      automation_id: args.automationId,
+      messages_seen: 0,
+      messages_matched: 0,
+      artifacts_ingested: 0,
+      artifacts_duplicate: 0,
+      artifacts_quarantined: 0,
+      errors: 1,
+      duration_ms: Date.now() - start,
+    };
+  }
+
+  const items = payload.value ?? [];
+  const messagesSeen = items.length;
+  let messagesMatched = 0;
+  let artifactsIngested = 0;
+  let artifactsDuplicate = 0;
+  let artifactsQuarantined = 0;
+  let errors = 0;
+  let newestSeen: string | null = since;
+
+  const messageLevel = isMessageLevelIngest(automation);
+
+  for (const msg of items) {
+    const rcv = msg.receivedDateTime ?? null;
+    if (since && rcv && rcv <= since) continue; // already processed
+    /* Defense-in-depth: even though $search filtered server-side,
+       re-apply the client-side filter so a Graph quirk (KQL behavior
+       differences across mailboxes) can never bypass the contract. */
+    if (!messageMatchesAutomation(msg, automation, activeFilters)) continue;
+    messagesMatched += 1;
+    const r = await processMatchedMessage(msg, automation, args, messageLevel);
+    artifactsIngested += r.ingested;
+    artifactsDuplicate += r.duplicate;
+    artifactsQuarantined += r.quarantined;
+    errors += r.errors;
+    if (rcv && (!newestSeen || rcv > newestSeen)) newestSeen = rcv;
+  }
+
+  /* Advance cursor only when we actually saw new messages — a poll
+     with zero matches must not move the cursor forward (would skip
+     mail that arrives between the search and the next tick). */
+  if (newestSeen && newestSeen !== since) {
+    await saveDeltaLink(args.automationId, args.userId, formatSearchCursor(newestSeen));
+  }
+
+  const duration_ms = Date.now() - start;
+  trackEvent("automations.poll_run", args.userId, args.userRole, {
+    automation_id: args.automationId,
+    mode: "search",
+    messages_seen: messagesSeen,
+    messages_matched: messagesMatched,
+    artifacts_ingested: artifactsIngested,
+    artifacts_quarantined: artifactsQuarantined,
+    duration_ms,
+  });
+
+  return {
+    automation_id: args.automationId,
+    messages_seen: messagesSeen,
+    messages_matched: messagesMatched,
+    artifacts_ingested: artifactsIngested,
+    artifacts_duplicate: artifactsDuplicate,
+    artifacts_quarantined: artifactsQuarantined,
+    errors,
+    duration_ms,
+  };
+}
+
+// Exported for tests — never call from production code.
+export const __searchModeInternalsForTests = {
+  parseSearchCursor,
+  formatSearchCursor,
+  pollInboxBySearch,
+};
 
 /* ------------------------------------------------------------------ */
 /* Historical $search-based scan                                       */
