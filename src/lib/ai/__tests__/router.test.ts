@@ -5,14 +5,16 @@
  *   - tier maps to right Anthropic model
  *   - cost_usd computed correctly per tier (cheap / standard / premium)
  *   - latency_ms is captured from the wall clock around the SDK call
- *   - anthropic-only flow today: AZURE env vars unset means Azure is
- *     never asked
+ *   - anthropic-only flow when AZURE env vars unset: Azure is never asked
  *   - failover: anthropic 5xx with no Azure available propagates a
  *     structured error
  *   - failover: when Azure is configured + primary, a 5xx falls back to
  *     Anthropic and reports fallback_used=true
- *   - PHI routes to Azure when Azure is configured
- *   - non-PHI stays on Anthropic when Azure is configured
+ *   - when Azure is configured, Azure is the primary for every request;
+ *     Anthropic remains the failover
+ *   - AI_PROVIDER_PRIMARY=anthropic forces Anthropic primary even when
+ *     Azure is configured
+ *   - both providers fail: error propagates, no analytics event
  *   - trackEvent fires with the expected shape including feature +
  *     provider + model + tier + cost + fallback_used
  *   - getAIClient returns a singleton
@@ -20,6 +22,7 @@
 
 const mockMessagesCreate = jest.fn();
 const mockTrackEvent = jest.fn();
+const mockFetch = jest.fn();
 
 jest.mock("@anthropic-ai/sdk", () => {
   class FakeInternalServerError extends Error {
@@ -50,19 +53,52 @@ jest.mock("@/lib/analytics", () => ({
 import { getAIClient, _resetAIClientForTests } from "@/lib/ai/router";
 import { ANTHROPIC_TIER_TO_MODEL } from "@/lib/ai/anthropic-provider";
 
+const originalFetch = global.fetch;
+
 beforeEach(() => {
   jest.clearAllMocks();
   _resetAIClientForTests(null);
   process.env.ANTHROPIC_API_KEY = "test-key";
   delete process.env.AZURE_OPENAI_ENDPOINT;
   delete process.env.AZURE_OPENAI_API_KEY;
+  delete process.env.AI_PROVIDER_PRIMARY;
+  delete process.env.AZURE_OPENAI_DEPLOYMENT_CHEAP;
+  delete process.env.AZURE_OPENAI_DEPLOYMENT_STANDARD;
+  delete process.env.AZURE_OPENAI_DEPLOYMENT_PREMIUM;
+  global.fetch = mockFetch as unknown as typeof fetch;
 });
 
 afterAll(() => {
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.AZURE_OPENAI_ENDPOINT;
   delete process.env.AZURE_OPENAI_API_KEY;
+  delete process.env.AI_PROVIDER_PRIMARY;
+  global.fetch = originalFetch;
 });
+
+function azureOk(content = "ok-azure", model = "gpt-4o") {
+  return {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => ({
+      choices: [{ message: { role: "assistant", content } }],
+      usage: { prompt_tokens: 100, completion_tokens: 50 },
+      model,
+    }),
+    text: async () => "",
+  };
+}
+
+function azureFail(status: number, body = "boom") {
+  return {
+    ok: false,
+    status,
+    statusText: `HTTP ${status}`,
+    json: async () => ({ error: { message: body } }),
+    text: async () => JSON.stringify({ error: { message: body } }),
+  };
+}
 
 function fakeOk(text = "hello", model = "claude-sonnet-4-6") {
   return {
@@ -214,6 +250,7 @@ describe("router — failover", () => {
     process.env.AZURE_OPENAI_ENDPOINT = "https://example.azure.com";
     process.env.AZURE_OPENAI_API_KEY = "akey";
     _resetAIClientForTests(null);
+    mockFetch.mockResolvedValueOnce(azureFail(503, "azure down"));
     mockMessagesCreate.mockResolvedValueOnce(fakeOk("from-anth"));
     const out = await getAIClient().complete({
       messages: [{ role: "user", content: "x" }],
@@ -227,23 +264,76 @@ describe("router — failover", () => {
     const payload = mockTrackEvent.mock.calls[0][3] as Record<string, unknown>;
     expect(payload.fallback_used).toBe(true);
   });
-});
 
-describe("router — sensitivity routing when Azure is configured", () => {
-  it("non-PHI stays on Anthropic", async () => {
+  it("both providers fail: throws and emits no analytics event", async () => {
     process.env.AZURE_OPENAI_ENDPOINT = "https://example.azure.com";
     process.env.AZURE_OPENAI_API_KEY = "akey";
     _resetAIClientForTests(null);
-    mockMessagesCreate.mockResolvedValueOnce(fakeOk());
+    mockFetch.mockResolvedValueOnce(azureFail(503, "azure down"));
+    mockMessagesCreate.mockRejectedValueOnce(
+      Object.assign(new Error("anth-down"), {
+        status: 500,
+        name: "InternalServerError",
+      }),
+    );
+    await expect(
+      getAIClient().complete({
+        messages: [{ role: "user", content: "x" }],
+        max_tokens: 10,
+        model_tier: "standard",
+        metadata: { feature: "failover.both.fail" },
+      }),
+    ).rejects.toMatchObject({ message: expect.stringContaining("anth-down") });
+    expect(mockTrackEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("router — Azure as primary when configured", () => {
+  it("Azure is primary for ALL traffic when AZURE env vars are set", async () => {
+    process.env.AZURE_OPENAI_ENDPOINT = "https://example.azure.com";
+    process.env.AZURE_OPENAI_API_KEY = "akey";
+    _resetAIClientForTests(null);
+    mockFetch.mockResolvedValueOnce(azureOk("ok"));
     const out = await getAIClient().complete({
       messages: [{ role: "user", content: "public stuff" }],
       max_tokens: 10,
       model_tier: "standard",
       sensitivity: "public",
-      metadata: { feature: "sensitivity.public" },
+      metadata: { feature: "azure.primary.public" },
+    });
+    expect(out.provider_used).toBe("azure-openai");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
+  });
+
+  it("only Anthropic configured: Anthropic is primary, no fallback", async () => {
+    // No AZURE env vars set in beforeEach; ANTHROPIC_API_KEY is set.
+    mockMessagesCreate.mockResolvedValueOnce(fakeOk("anth-only"));
+    const out = await getAIClient().complete({
+      messages: [{ role: "user", content: "x" }],
+      max_tokens: 10,
+      model_tier: "standard",
+      metadata: { feature: "anth.only" },
+    });
+    expect(out.provider_used).toBe("anthropic");
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("AI_PROVIDER_PRIMARY=anthropic forces Anthropic primary even when Azure configured", async () => {
+    process.env.AZURE_OPENAI_ENDPOINT = "https://example.azure.com";
+    process.env.AZURE_OPENAI_API_KEY = "akey";
+    process.env.AI_PROVIDER_PRIMARY = "anthropic";
+    _resetAIClientForTests(null);
+    mockMessagesCreate.mockResolvedValueOnce(fakeOk("anth-pinned"));
+    const out = await getAIClient().complete({
+      messages: [{ role: "user", content: "x" }],
+      max_tokens: 10,
+      model_tier: "standard",
+      metadata: { feature: "override.anth" },
     });
     expect(out.provider_used).toBe("anthropic");
     expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
 

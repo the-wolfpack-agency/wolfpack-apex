@@ -1,14 +1,21 @@
 /**
  * src/lib/ai/router — single entry point for AI completions.
  *
- * Routing rules (today, anthropic-only):
- *   - If AZURE_OPENAI_ENDPOINT is unset, every request goes to Anthropic.
- *   - When Azure is configured, requests with sensitivity === 'phi' go
- *     to Azure (BAA-covered); everything else stays on Anthropic.
+ * Routing rules:
+ *   - When Azure OpenAI is configured (AZURE_OPENAI_ENDPOINT +
+ *     AZURE_OPENAI_API_KEY) and the Azure provider supportsTier(tier)
+ *     returns true, Azure is the primary and Anthropic is the failover.
+ *     This matches the goal of using Azure's free credits as the
+ *     default path while keeping Anthropic warm as a hedge.
+ *   - When Azure is not configured, Anthropic is primary and there is
+ *     no failover.
+ *   - The AI_PROVIDER_PRIMARY env var ('anthropic' | 'azure-openai' |
+ *     'auto') pins the primary regardless of detection. Default 'auto'
+ *     uses the rules above.
  *
  * Failover:
- *   - On 5xx-class errors from the primary, fall back to Anthropic when
- *     a different provider is available. Track the fallback in analytics
+ *   - On 5xx-class errors from the primary, fall back to the other
+ *     provider when one is available. Track the fallback in analytics
  *     and on the response (`provider_used`).
  *   - If no fallback is available the original error propagates to the
  *     caller; `console.warn` records the failure.
@@ -46,11 +53,35 @@ function buildRegistry(): ProviderRegistry {
   };
 }
 
+type PrimaryOverride = "anthropic" | "azure-openai" | "auto";
+
+function readPrimaryOverride(): PrimaryOverride {
+  const raw = process.env.AI_PROVIDER_PRIMARY;
+  if (raw === "anthropic" || raw === "azure-openai" || raw === "auto") {
+    return raw;
+  }
+  return "auto";
+}
+
+function isAnthropicConfigured(): boolean {
+  return Boolean(process.env.ANTHROPIC_API_KEY);
+}
+
 function pickPrimary(
   req: AICompleteRequest,
   registry: ProviderRegistry,
 ): AIProvider {
-  if (isAzureConfigured() && req.sensitivity === "phi") {
+  const override = readPrimaryOverride();
+  if (override === "azure-openai" && registry.azure.supportsTier(req.model_tier)) {
+    return registry.azure;
+  }
+  if (override === "anthropic") {
+    return registry.anthropic;
+  }
+  if (
+    isAzureConfigured() &&
+    registry.azure.supportsTier(req.model_tier)
+  ) {
     return registry.azure;
   }
   return registry.anthropic;
@@ -59,9 +90,20 @@ function pickPrimary(
 function pickFallback(
   primary: AIProvider,
   registry: ProviderRegistry,
+  req: AICompleteRequest,
 ): AIProvider | null {
-  if (primary === registry.anthropic) return null;
-  return registry.anthropic;
+  if (primary === registry.anthropic) {
+    if (
+      isAzureConfigured() &&
+      registry.azure.supportsTier(req.model_tier)
+    ) {
+      return registry.azure;
+    }
+    return null;
+  }
+  // Azure is primary; Anthropic is the fallback only if its key is set.
+  if (isAnthropicConfigured()) return registry.anthropic;
+  return null;
 }
 
 function isRetryableError(err: unknown): boolean {
@@ -114,7 +156,7 @@ class RouterClient implements AIClient {
     } catch (err) {
       primarySpan.setAttribute("error_message", (err as Error).message);
       primarySpan.end("error");
-      const fallback = pickFallback(primary, this.registry);
+      const fallback = pickFallback(primary, this.registry, req);
       if (fallback && isRetryableError(err)) {
         console.warn(
           `[ai/router] primary ${primary.name} failed (${(err as Error).message}); falling back to ${fallback.name}`,
