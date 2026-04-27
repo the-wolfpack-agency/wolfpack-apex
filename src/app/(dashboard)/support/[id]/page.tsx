@@ -55,8 +55,19 @@ export default function SupportTicketPage() {
         );
         return;
       }
-      const data = (await res.json()) as SupportTicket;
-      setTicket(data);
+      const data = (await res.json()) as
+        | SupportTicket
+        | { ticket: SupportTicket };
+      /* GET /api/support/tickets/[id] wraps the ticket in { ticket: ... }
+         (so it can also include the message thread, etc.) while POST,
+         PATCH, and the inbound mutating endpoints return the ticket
+         directly. Accept either shape so the page survives a future
+         contract drift on either side. */
+      const t =
+        data && typeof data === "object" && "ticket" in data
+          ? (data as { ticket: SupportTicket }).ticket
+          : (data as SupportTicket);
+      setTicket(t);
     } catch (err) {
       setError(
         `Something went wrong loading the ticket: ${(err as Error).message}`,
