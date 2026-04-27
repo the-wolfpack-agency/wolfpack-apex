@@ -322,17 +322,34 @@ export interface CognitoSection {
 export function parseCognitoHtml(html: string): CognitoFormFields {
   const $ = cheerio.load(html);
 
-  // Form title: the body has an <h2> right under the logo with no
-  // .header-2 class but with text matching the report name. The Entry
-  // Details title is .header-2. The form title appears in <h1
-  // class="header-1">Porsche Academy US</h1> followed by a sibling <h2>
-  // with the form name. Easiest: pick the <h2> that is NOT a section
-  // heading and lives outside the data tables.
-  const formTitle = ($("h2")
-    .filter((_, el) => !$(el).hasClass("header-2"))
-    .first()
-    .text() || null) as string | null;
-  const formTitleClean = formTitle ? collapseWs(formTitle) : null;
+  // Form title: search every <h2> for one whose text matches the
+  // Cognito form-name pattern (e.g. "Coordinator Class Report",
+  // "Instructor Class Report", "Facilitator Class Report"). The
+  // earlier "first non-header-2 <h2>" heuristic broke when Outlook's
+  // .eml save reordered the DOM such that the first non-header-2
+  // <h2> was a section heading like "Hotel Experience" — confirmed
+  // against the BA101 2026-04-20 Ritz Carlton coordinator email on
+  // 2026-04-27. Searching specifically for /Class Report/i is robust
+  // against DOM reordering and matches every Cognito report variant.
+  let formTitle: string | null = null;
+  $("h2").each((_, el) => {
+    if (formTitle) return;
+    const text = collapseWs($(el).text());
+    if (/Class Report/i.test(text)) {
+      formTitle = text;
+    }
+  });
+  // Fall back to the legacy heuristic ONLY if no <h2> matched the
+  // report-name pattern — keeps backwards compat for any historical
+  // shape we haven't seen yet.
+  if (!formTitle) {
+    const legacy = ($("h2")
+      .filter((_, el) => !$(el).hasClass("header-2"))
+      .first()
+      .text() || null) as string | null;
+    formTitle = legacy ? collapseWs(legacy) : null;
+  }
+  const formTitleClean = formTitle;
 
   const sections: CognitoSection[] = [];
 

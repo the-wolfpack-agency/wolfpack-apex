@@ -156,6 +156,58 @@ describe("parseCognitoHtml on the Amy Federman coordinator fixture", () => {
   });
 });
 
+describe("parseCognitoHtml — DOM reordering robustness", () => {
+  // Regression — 2026-04-27. The BA101 2026-04-20 Ritz Carlton
+  // coordinator email saved as .eml from Outlook web had its DOM
+  // reshuffled such that the first non-header-2 <h2> the parser saw
+  // was "Hotel Experience" (a section heading) instead of
+  // "Coordinator Class Report" (the form title). The legacy heuristic
+  // ("first non-header-2 h2") returned the wrong title, the parser
+  // quarantined with `Form title does not match Coordinator Class
+  // Report: "Hotel Experience"`, and the coordinator notes never
+  // reached the assembled summary. Fix: search every <h2> for one
+  // matching /Class Report/i first, fall back to legacy only if none
+  // matched. These tests pin both happy paths.
+
+  it("finds 'Coordinator Class Report' even when 'Hotel Experience' h2 appears first", () => {
+    const html = `
+      <html><body>
+        <h2 style="display:block">Hotel Experience</h2>
+        <table><tr><td>fake row</td></tr></table>
+        <h2 style="display:block">Coordinator Class Report</h2>
+        <h2 class="header-2">Entry Details</h2>
+        <table><tr><td>Name</td><td>Test</td></tr></table>
+      </body></html>
+    `;
+    const fields = parseCognitoHtml(html);
+    expect(fields.formTitle).toBe("Coordinator Class Report");
+  });
+
+  it("finds 'Instructor Class Report' similarly (other Cognito form variant)", () => {
+    const html = `
+      <html><body>
+        <h2>General Class Logistics</h2>
+        <h2>Instructor Class Report</h2>
+        <h2 class="header-2">Entry Details</h2>
+      </body></html>
+    `;
+    const fields = parseCognitoHtml(html);
+    expect(fields.formTitle).toBe("Instructor Class Report");
+  });
+
+  it("falls back to legacy heuristic when no <h2> matches /Class Report/i", () => {
+    // Defense — historical shape we may not have seen yet.
+    const html = `
+      <html><body>
+        <h2>Some Future Form Name</h2>
+        <h2 class="header-2">Entry Details</h2>
+      </body></html>
+    `;
+    const fields = parseCognitoHtml(html);
+    expect(fields.formTitle).toBe("Some Future Form Name");
+  });
+});
+
 describe("normalizers", () => {
   it("normalizeClassDate accepts US M/D/YYYY", () => {
     expect(normalizeClassDate("4/13/2026")).toBe("2026-04-13");
