@@ -42,6 +42,19 @@ const BODY_SIZE = 22; // half-points → 11pt
 const H1_SIZE = 32; // 16pt
 const H2_SIZE = 26; // 13pt
 
+// Defensive YYYY-MM-DD formatter. The TS contract on AssembledSummary.class_date
+// is `string`, but the SQL read path historically returned a Date object when
+// the ::text cast was missing — interpolating with ${} produced
+// "Mon Apr 20 2026 00:00:00 GMT+0000 (Coordinated Universal Time)" in the
+// uploaded docx (2026-04-27). Cast is now fixed in summary-assembler.ts, but
+// keep this guard so any future drift cannot regress the deliverable.
+function fmtDate(v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "string") return v.length >= 10 ? v.slice(0, 10) : v;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  return String(v);
+}
+
 /**
  * docx requires a single Document. Build all children top-down then hand
  * off to Packer.toBuffer at the end.
@@ -58,7 +71,7 @@ export async function renderClassSummaryDocx(
       spacing: { after: 240 },
       children: [
         new TextRun({
-          text: `PCBA Class Summary — ${summary.course_type} | ${summary.location} | ${summary.class_date}`,
+          text: `PCBA Class Summary — ${summary.course_type} | ${summary.location} | ${fmtDate(summary.class_date)}`,
           bold: true,
           size: H1_SIZE,
           font: BODY_FONT,
@@ -72,7 +85,7 @@ export async function renderClassSummaryDocx(
   children.push(
     twoColTable([
       ["Course", summary.course_type],
-      ["Date", summary.class_date],
+      ["Date", fmtDate(summary.class_date)],
       ["Location", summary.location],
       ["Generated", summary.generated_at],
     ]),

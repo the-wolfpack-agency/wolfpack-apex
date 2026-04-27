@@ -77,10 +77,16 @@ interface ExceptionRow extends Record<string, unknown> {
  * for a given class_key. Postgres-specific (`DISTINCT ON`) — ok because
  * Instinct is Postgres-only.
  */
+// class_date::text — the snapshots column is a Postgres `date` and the pg
+// driver hydrates it as a JS Date. The TS contract is `string` (YYYY-MM-DD)
+// so without the cast every consumer that interpolates with ${} gets
+// `Mon Apr 20 2026 00:00:00 GMT+0000 (Coordinated Universal Time)` —
+// e.g. the docx title that landed in PCNAINTERNAL on 2026-04-27. The
+// ingest.ts read path already does this cast; keep them in sync.
 const LATEST_PER_SOURCE_SQL = `
   SELECT DISTINCT ON (source_type)
     id, source_type, source_message_id, source_artifact_id,
-    captured_at, class_key, course_type, class_date, location,
+    captured_at, class_key, course_type, class_date::text AS class_date, location,
     participants, source_payload, participant_hash, created_at
   FROM instinct_automation_porsche_snapshots
   WHERE class_key = ANY($1::text[])

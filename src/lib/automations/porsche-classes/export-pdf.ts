@@ -38,6 +38,16 @@ const BODY_SIZE = 11;
 const H1_SIZE = 16;
 const H2_SIZE = 13;
 
+// See export-docx.ts for the full rationale — keep these two formatters in
+// sync. Defensive coercion of class_date so a Date that slips through (the
+// pg driver hydrates `date` columns as Date) cannot leak into the PDF.
+function fmtDate(v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "string") return v.length >= 10 ? v.slice(0, 10) : v;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  return String(v);
+}
+
 // `e` is a thin wrapper around React.createElement typed loosely so we
 // can hand it @react-pdf primitive types (which the upstream typings
 // expose as class components with strict prop unions). Renderer output
@@ -202,7 +212,7 @@ export async function renderClassSummaryPdf(
     e(
       Text,
       { style: styles.title, key: "title" },
-      `PCBA Class Summary — ${summary.course_type} | ${summary.location} | ${summary.class_date}`,
+      `PCBA Class Summary — ${summary.course_type} | ${summary.location} | ${fmtDate(summary.class_date)}`,
     ),
   );
 
@@ -213,7 +223,7 @@ export async function renderClassSummaryPdf(
       View,
       { key: "identity-table" },
       identityRow(View, Text, styles, "Course", summary.course_type, "row-course"),
-      identityRow(View, Text, styles, "Date", summary.class_date, "row-date"),
+      identityRow(View, Text, styles, "Date", fmtDate(summary.class_date), "row-date"),
       identityRow(View, Text, styles, "Location", summary.location, "row-location"),
       identityRow(View, Text, styles, "Generated", summary.generated_at, "row-generated"),
     ),

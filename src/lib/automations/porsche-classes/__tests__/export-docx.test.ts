@@ -13,8 +13,17 @@
  *   4. Long survey comments are truncated at 200 chars.
  */
 
+import JSZip from "jszip";
 import { renderClassSummaryDocx } from "@/lib/automations/porsche-classes/export-docx";
 import type { AssembledSummary } from "@/lib/automations/types";
+
+/** Pull word/document.xml out of a rendered .docx for content assertions. */
+async function readDocumentXml(buf: Buffer): Promise<string> {
+  const zip = await JSZip.loadAsync(buf);
+  const entry = zip.file("word/document.xml");
+  if (!entry) throw new Error("word/document.xml missing from rendered docx");
+  return entry.async("string");
+}
 
 const baseSummary: AssembledSummary = {
   class_key: "BA101|2026-04-13|Westlake",
@@ -145,5 +154,37 @@ describe("renderClassSummaryDocx", () => {
     const buf = await renderClassSummaryDocx(blankNote);
     const asBuffer = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
     expect(isZipMagic(asBuffer)).toBe(true);
+  });
+
+  // Regression — 2026-04-27. The PCNAINTERNAL-uploaded docx title showed
+  // "Mon Apr 20 2026 00:00:00 GMT+0000 (Coordinated Universal Time)" because
+  // the assembler SQL was missing class_date::text and a JS Date object
+  // slipped into the renderer's `${summary.class_date}` interpolation.
+  // Even though the AssembledSummary TS type claims `string`, defend at the
+  // render boundary so a future drift cannot regress the deliverable.
+  it("formats a Date class_date as YYYY-MM-DD instead of leaking Date.toString()", async () => {
+    const dateAsObject = {
+      ...baseSummary,
+      // Cast through unknown — runtime simulates the pg-driver hydration.
+      class_date: new Date("2026-04-20T00:00:00.000Z") as unknown as string,
+    };
+    const buf = await renderClassSummaryDocx(dateAsObject);
+    const asBuffer = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+    const xml = await readDocumentXml(asBuffer);
+    expect(xml).not.toContain("Coordinated Universal Time");
+    expect(xml).not.toContain("GMT+0000");
+    expect(xml).toContain("2026-04-20");
+  });
+
+  it("formats a string class_date by trimming to YYYY-MM-DD prefix", async () => {
+    const dateAsIsoString = {
+      ...baseSummary,
+      class_date: "2026-05-04T12:34:56.789Z",
+    };
+    const buf = await renderClassSummaryDocx(dateAsIsoString);
+    const asBuffer = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+    const xml = await readDocumentXml(asBuffer);
+    expect(xml).toContain("2026-05-04");
+    expect(xml).not.toContain("12:34:56");
   });
 });
