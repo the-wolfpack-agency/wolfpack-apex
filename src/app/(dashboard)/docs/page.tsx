@@ -110,6 +110,28 @@ export default function DocsPage() {
       headers: authHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "docs" } }),
     }).catch(() => {});
+    // Deep-link target: `/docs?generate=1` opens the generator inline.
+    // Used by the Knowledge page CTA so the redundant blank state
+    // experience never lands; the user is dropped straight on the
+    // generate form. Cleared from the URL after the open so a refresh
+    // doesn't re-trigger it.
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("generate") === "1") {
+        setShowGenerate(true);
+        const url = new URL(window.location.href);
+        url.searchParams.delete("generate");
+        window.history.replaceState({}, "", url.toString());
+        fetchWithRefresh("/api/analytics", {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({
+            event: "knowledge.doc_generated",
+            metadata: { stage: "form_opened_via_deeplink", source: "knowledge_cta" },
+          }),
+        }).catch(() => {});
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -375,6 +397,7 @@ export default function DocsPage() {
         <div
           className="rounded-lg border p-5"
           style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+          data-testid="docs-generate-panel"
         >
           <h3 className="text-sm font-semibold mb-4" style={{ color: "var(--wp-gold)" }}>
             Generate Document
@@ -486,10 +509,72 @@ export default function DocsPage() {
         <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>Loading documents...</p>
       ) : docs.length === 0 ? (
         <div
-          className="rounded-lg border p-8 text-center"
+          className="rounded-lg border p-6 space-y-4"
           style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+          data-testid="docs-empty-state"
         >
-          <p style={{ color: "var(--wp-text-muted)" }}>No documents yet. Generate your first one!</p>
+          <div>
+            <h2 className="text-lg font-semibold" style={{ color: "var(--wp-gold)" }}>
+              No documents yet
+            </h2>
+            <p className="text-sm mt-1" style={{ color: "var(--wp-text-dim)" }}>
+              Generate technical documents straight from your codebase, git
+              history, or feature requests. Zero tokens, fully reversible,
+              and tied to the learning loop.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {[
+              {
+                type: "api_doc",
+                label: "API Documentation",
+                blurb: "Parse a TypeScript or Python file and produce a markdown reference for every export.",
+              },
+              {
+                type: "release_notes",
+                label: "Release Notes",
+                blurb: "Group commits since a date by feat/fix/docs/refactor for a clean changelog.",
+              },
+              {
+                type: "feature_doc",
+                label: "Feature Documentation",
+                blurb: "Render a feature request and its analysis as a stakeholder-ready brief.",
+              },
+            ].map((card) => (
+              <button
+                key={card.type}
+                type="button"
+                data-testid={`docs-empty-card-${card.type}`}
+                onClick={() => {
+                  setGenType(card.type);
+                  setShowGenerate(true);
+                }}
+                className="text-left rounded-lg border p-4 transition-colors hover:border-[var(--wp-gold)]"
+                style={{
+                  background: "var(--wp-dark-surface2)",
+                  borderColor: "var(--wp-dark-border)",
+                }}
+              >
+                <p className="text-sm font-semibold" style={{ color: "var(--wp-gold)" }}>
+                  {card.label}
+                </p>
+                <p className="text-xs mt-1.5 leading-relaxed" style={{ color: "var(--wp-text-dim)" }}>
+                  {card.blurb}
+                </p>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
+            Looking for question-and-answer style notes instead? Try the
+            {" "}
+            <a
+              href="/knowledge"
+              style={{ color: "var(--wp-gold)", textDecoration: "underline" }}
+            >
+              Knowledge Base
+            </a>
+            .
+          </p>
         </div>
       ) : (
         <div className="space-y-2">

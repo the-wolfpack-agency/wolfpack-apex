@@ -565,6 +565,34 @@ export default function KnowledgePage() {
           >
             {showCapture ? "Close add" : "Add info"}
           </button>
+          {/* Bridge to /docs — the technical-document generator (API
+              docs, release notes, feature briefs). Knowledge stores
+              Q/A entries; Docs stores generated long-form documents.
+              The CTA hands off rather than duplicating the form, so
+              there's exactly one source of truth for doc generation
+              while the user has a path from either entry point. */}
+          <a
+            href="/docs?generate=1"
+            data-testid="knowledge-generate-doc-cta"
+            onClick={() => {
+              fetchWithRefresh("/api/analytics", {
+                method: "POST",
+                headers: authHeaders(),
+                body: JSON.stringify({
+                  event: "knowledge.doc_generated",
+                  metadata: { stage: "cta_clicked", source: "knowledge_page" },
+                }),
+              }).catch(() => {});
+            }}
+            className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors border"
+            style={{
+              background: "var(--wp-dark-surface2)",
+              borderColor: "var(--wp-dark-border)",
+              color: "var(--wp-text)",
+            }}
+          >
+            Generate Document
+          </a>
         </div>
       </div>
 
