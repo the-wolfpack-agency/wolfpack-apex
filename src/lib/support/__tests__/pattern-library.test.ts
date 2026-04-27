@@ -16,26 +16,11 @@
 import type { SupportPattern } from "@/lib/support/types";
 import { SEED_PATTERNS } from "@/lib/support/seed-patterns";
 
-const mockMessagesCreate = jest.fn();
-jest.mock("@anthropic-ai/sdk", () => {
-  class FakeAuthError extends Error {}
-  class FakeRateLimit extends Error {}
-  class FakeAPIError extends Error {
-    status = 500;
-  }
-  const Anthropic = jest.fn().mockImplementation(() => ({
-    messages: { create: mockMessagesCreate },
-  })) as unknown as {
-    new (...args: unknown[]): unknown;
-    AuthenticationError: typeof FakeAuthError;
-    RateLimitError: typeof FakeRateLimit;
-    APIError: typeof FakeAPIError;
-  };
-  Anthropic.AuthenticationError = FakeAuthError;
-  Anthropic.RateLimitError = FakeRateLimit;
-  Anthropic.APIError = FakeAPIError;
-  return { __esModule: true, default: Anthropic };
-});
+const mockComplete = jest.fn();
+jest.mock("@/lib/ai", () => ({
+  __esModule: true,
+  getAIClient: () => ({ complete: mockComplete }),
+}));
 
 import {
   findMatchingPatterns,
@@ -251,14 +236,16 @@ describe("generateDraftResponse", () => {
     }
   });
 
-  it("calls the SDK and returns the joined text on success", async () => {
+  it("calls the AI client and returns the joined text on success", async () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
-    mockMessagesCreate.mockResolvedValueOnce({
-      content: [
-        { type: "text", text: "Hi Alicia,\n\nTry incognito.\n\nThe Wolfpack Team" },
-      ],
-      usage: { input_tokens: 100, output_tokens: 50 },
-      model: "claude-sonnet-4-6",
+    mockComplete.mockResolvedValueOnce({
+      content: "Hi Alicia,\n\nTry incognito.\n\nThe Wolfpack Team",
+      model_used: "claude-sonnet-4-6",
+      provider_used: "anthropic",
+      input_tokens: 100,
+      output_tokens: 50,
+      cost_usd: 0.001,
+      latency_ms: 5,
     });
     const out = await generateDraftResponse({
       ticket: {
@@ -275,14 +262,26 @@ describe("generateDraftResponse", () => {
       expect(out.from_cache).toBe(false);
       expect(out.tokens_used).toBe(150);
     }
-    expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+    expect(mockComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model_tier: "standard",
+        sensitivity: "public",
+        metadata: expect.objectContaining({ feature: "support.draft" }),
+      }),
+    );
   });
 
   it("short-circuits to the cache on a repeated body+patternIds key", async () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
-    mockMessagesCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: "First draft" }],
-      usage: { input_tokens: 1, output_tokens: 1 },
+    mockComplete.mockResolvedValueOnce({
+      content: "First draft",
+      model_used: "claude-sonnet-4-6",
+      provider_used: "anthropic",
+      input_tokens: 1,
+      output_tokens: 1,
+      cost_usd: 0,
+      latency_ms: 1,
     });
     const args = {
       ticket: {
@@ -300,14 +299,19 @@ describe("generateDraftResponse", () => {
       expect(second.draft).toBe(first.draft);
       expect(second.from_cache).toBe(true);
     }
-    expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
+    expect(mockComplete).toHaveBeenCalledTimes(1);
   });
 
-  it("returns ok:false when the SDK returns no text blocks", async () => {
+  it("returns ok:false when the AI client returns empty text", async () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
-    mockMessagesCreate.mockResolvedValueOnce({
-      content: [],
-      usage: { input_tokens: 1, output_tokens: 0 },
+    mockComplete.mockResolvedValueOnce({
+      content: "",
+      model_used: "claude-sonnet-4-6",
+      provider_used: "anthropic",
+      input_tokens: 1,
+      output_tokens: 0,
+      cost_usd: 0,
+      latency_ms: 1,
     });
     const out = await generateDraftResponse({
       ticket: {
@@ -321,9 +325,9 @@ describe("generateDraftResponse", () => {
     expect(out.ok).toBe(false);
   });
 
-  it("handles SDK exceptions cleanly", async () => {
+  it("handles AI client exceptions cleanly", async () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
-    mockMessagesCreate.mockRejectedValueOnce(new Error("network blew up"));
+    mockComplete.mockRejectedValueOnce(new Error("network blew up"));
     const out = await generateDraftResponse({
       ticket: {
         title: "t",

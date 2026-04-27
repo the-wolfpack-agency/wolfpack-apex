@@ -1367,7 +1367,15 @@ export type InstinctEventType =
   | "support.draft_generated"
   | "support.ticket_sent"
   | "support.feedback_submitted"
-  | "support.poll_run";
+  | "support.poll_run"
+  // AI provider abstraction (src/lib/ai). Emitted on every model call so
+  // we can attribute spend per feature, watch latency, and detect when
+  // the failover path is firing.
+  //
+  //   ai.completion { feature, provider, model, tier, input_tokens,
+  //                   output_tokens, cost_usd, latency_ms, fallback_used,
+  //                   sensitivity? }
+  | "ai.completion";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

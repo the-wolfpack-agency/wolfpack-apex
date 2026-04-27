@@ -8,8 +8,9 @@
  *      each pattern's match_signatures and returns matches sorted by
  *      net feedback score (success - fail) descending. No I/O.
  *
- *   2. generateDraftResponse(ticket, patterns) — async. Calls Claude
- *      Sonnet with a system prompt that instructs it to draft a clear,
+ *   2. generateDraftResponse(ticket, patterns) — async. Calls the
+ *      provider-neutral AI client (src/lib/ai) at standard tier with a
+ *      system prompt that instructs the model to draft a clear,
  *      friendly response, reference the matched templates, and avoid
  *      em dashes. Result is cached by sha256(body + pattern ids) so
  *      a retry never re-bills the model.
@@ -21,7 +22,8 @@
  */
 
 import { createHash } from "node:crypto";
-import Anthropic from "@anthropic-ai/sdk";
+
+import { getAIClient } from "@/lib/ai";
 
 import type {
   CreateTicketInput,
@@ -32,23 +34,6 @@ import type {
 import { isMatchSignature } from "./types";
 
 export const SUPPORT_DRAFT_MODEL = "claude-sonnet-4-6";
-
-// ---------------------------------------------------------------------------
-// Anthropic client (singleton, opt-in via env var)
-// ---------------------------------------------------------------------------
-
-let _client: Anthropic | null = null;
-
-function getClient(): Anthropic | null {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
-  if (!_client) {
-    _client = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
-      maxRetries: 2,
-    });
-  }
-  return _client;
-}
 
 export function isDraftGeneratorAvailable(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY);
@@ -218,8 +203,7 @@ export async function generateDraftResponse(
     };
   }
 
-  const client = getClient();
-  if (!client) {
+  if (!isDraftGeneratorAvailable()) {
     return {
       ok: false,
       error_detail: "ANTHROPIC_API_KEY not set",
@@ -228,32 +212,21 @@ export async function generateDraftResponse(
   }
 
   try {
-    const response = await client.messages.create({
-      model: SUPPORT_DRAFT_MODEL,
-      max_tokens: 2048,
-      system: [
-        {
-          type: "text",
-          text: SYSTEM_PROMPT,
-          cache_control: { type: "ephemeral" },
-        },
-      ],
+    const response = await getAIClient().complete({
       messages: [
         {
           role: "user",
           content: buildUserPrompt(input.ticket, input.matchingPatterns),
         },
       ],
+      system: SYSTEM_PROMPT,
+      max_tokens: 2048,
+      model_tier: "standard",
+      sensitivity: "public",
+      metadata: { feature: "support.draft" },
     });
 
-    const text = response.content
-      .filter(
-        (block): block is Anthropic.Messages.TextBlock => block.type === "text",
-      )
-      .map((b) => b.text)
-      .join("")
-      .trim();
-
+    const text = response.content.trim();
     if (!text) {
       return {
         ok: false,
@@ -264,11 +237,7 @@ export async function generateDraftResponse(
 
     draftCache.set(key, { draft: text, cached_at: Date.now() });
 
-    const tokens =
-      (response.usage?.input_tokens ?? 0) +
-      (response.usage?.output_tokens ?? 0) +
-      (response.usage?.cache_creation_input_tokens ?? 0) +
-      (response.usage?.cache_read_input_tokens ?? 0);
+    const tokens = response.input_tokens + response.output_tokens;
 
     return {
       ok: true,
@@ -278,30 +247,32 @@ export async function generateDraftResponse(
       tokens_used: tokens,
     };
   } catch (err) {
-    if (err instanceof Anthropic.AuthenticationError) {
+    const message = err instanceof Error ? err.message : String(err);
+    const status = (err as { status?: unknown }).status;
+    if (status === 401) {
       return {
         ok: false,
-        error_detail: `anthropic_auth_error: ${err.message}`,
+        error_detail: `anthropic_auth_error: ${message}`,
         pattern_ids: patternIds,
       };
     }
-    if (err instanceof Anthropic.RateLimitError) {
+    if (status === 429) {
       return {
         ok: false,
-        error_detail: `anthropic_rate_limited: ${err.message}`,
+        error_detail: `anthropic_rate_limited: ${message}`,
         pattern_ids: patternIds,
       };
     }
-    if (err instanceof Anthropic.APIError) {
+    if (typeof status === "number") {
       return {
         ok: false,
-        error_detail: `anthropic_api_error_${err.status}: ${err.message}`,
+        error_detail: `anthropic_api_error_${status}: ${message}`,
         pattern_ids: patternIds,
       };
     }
     return {
       ok: false,
-      error_detail: `support_draft_unknown_error: ${(err as Error).message ?? String(err)}`,
+      error_detail: `support_draft_unknown_error: ${message}`,
       pattern_ids: patternIds,
     };
   }

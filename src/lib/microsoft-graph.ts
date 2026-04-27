@@ -11,6 +11,31 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { safeQuery, query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
+import { getSecretOrThrow } from "@/lib/secrets";
+
+// TODO: when Azure Key Vault is provisioned, more secrets will move
+// behind getSecretOrThrow (MS_TENANT_ID, MS_REDIRECT_URI, INSTINCT_JWT_SECRET).
+// For now only the credential pair MS_CLIENT_ID / MS_CLIENT_SECRET reads
+// through the wrapper because they are the highest-rotation secrets and
+// run on every token refresh.
+let cachedClientId: string | null = null;
+let cachedClientSecret: string | null = null;
+
+async function getMsClientCreds(): Promise<{ clientId: string; clientSecret: string } | null> {
+  try {
+    if (!cachedClientId) cachedClientId = await getSecretOrThrow("microsoft-client-id");
+    if (!cachedClientSecret) cachedClientSecret = await getSecretOrThrow("microsoft-client-secret");
+    return { clientId: cachedClientId, clientSecret: cachedClientSecret };
+  } catch {
+    return null;
+  }
+}
+
+/** Test-only: clear the module-scoped MS credential cache. */
+export function _resetMsCredsCache(): void {
+  cachedClientId = null;
+  cachedClientSecret = null;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -290,11 +315,11 @@ export function getAuthUrl(userId: string): string {
  * Exchange an authorization code for access + refresh tokens.
  */
 export async function exchangeCode(code: string): Promise<MsTokens | null> {
-  const clientId = process.env.MS_CLIENT_ID;
-  const clientSecret = process.env.MS_CLIENT_SECRET;
+  const creds = await getMsClientCreds();
   const redirectUri = process.env.MS_REDIRECT_URI;
 
-  if (!clientId || !clientSecret || !redirectUri) return null;
+  if (!creds || !redirectUri) return null;
+  const { clientId, clientSecret } = creds;
 
   try {
     const res = await fetch(`${getAuthBaseUrl()}/token`, {
@@ -336,10 +361,9 @@ export async function exchangeCode(code: string): Promise<MsTokens | null> {
  * Refresh an expired access token using the refresh token.
  */
 export async function refreshAccessToken(currentRefreshToken: string): Promise<MsTokens | null> {
-  const clientId = process.env.MS_CLIENT_ID;
-  const clientSecret = process.env.MS_CLIENT_SECRET;
-
-  if (!clientId || !clientSecret) return null;
+  const creds = await getMsClientCreds();
+  if (!creds) return null;
+  const { clientId, clientSecret } = creds;
 
   try {
     const res = await fetch(`${getAuthBaseUrl()}/token`, {
