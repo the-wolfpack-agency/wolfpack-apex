@@ -94,6 +94,10 @@ describe("<TicketForm />", () => {
       diagnostic_text: "AADSTS20012: WS-Federation issuer",
       category: "m365",
       severity: "p1",
+      /* Audience defaults to 'internal' when the operator does not
+         explicitly switch it. The new tests below cover the explicit
+         switch path. */
+      audience: "internal",
     });
 
     expect(onCreated.mock.calls[0][0].id).toBe("tkt_new");
@@ -136,6 +140,60 @@ describe("<TicketForm />", () => {
         created_at: new Date().toISOString(),
       }),
     });
+  });
+
+  test("audience defaults to 'internal' on render with the matching hint", () => {
+    render(<TicketForm onCreated={() => {}} />);
+    const select = screen.getByTestId(
+      "ticket-form-audience",
+    ) as HTMLSelectElement;
+    expect(select.value).toBe("internal");
+    /* Hint copy explains routing so the operator picks consciously. */
+    expect(
+      screen.getByTestId("ticket-form-audience-hint").textContent,
+    ).toMatch(/your personal address/);
+  });
+
+  test("switching audience to client posts audience='client' and updates the hint", async () => {
+    mockFetchWithRefresh.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "tkt_client",
+        title: "VIP issue",
+        body: "VIP body",
+        category: "general",
+        severity: "p2",
+        status: "drafted",
+        audience: "client",
+        created_at: new Date().toISOString(),
+      }),
+    });
+    const onCreated = jest.fn();
+    render(<TicketForm onCreated={onCreated} />);
+
+    fireEvent.change(screen.getByTestId("ticket-form-audience"), {
+      target: { value: "client" },
+    });
+    /* Hint flips to the support@ routing once 'client' is picked. */
+    expect(
+      screen.getByTestId("ticket-form-audience-hint").textContent,
+    ).toMatch(/support@thewolfpack\.agency/);
+
+    fireEvent.change(screen.getByTestId("ticket-form-title"), {
+      target: { value: "VIP issue" },
+    });
+    fireEvent.change(screen.getByTestId("ticket-form-body"), {
+      target: { value: "VIP body" },
+    });
+    fireEvent.submit(screen.getByTestId("ticket-form"));
+
+    await waitFor(() => {
+      expect(onCreated).toHaveBeenCalledTimes(1);
+    });
+    const init = mockFetchWithRefresh.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse((init.body as string) ?? "{}");
+    expect(body.audience).toBe("client");
   });
 
   test("renders a friendly server error on non-2xx", async () => {

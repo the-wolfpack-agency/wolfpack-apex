@@ -4,8 +4,10 @@ import "@testing-library/jest-dom";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const mockFetchWithRefresh = jest.fn();
+const mockGetInstinctUser = jest.fn();
 jest.mock("@/lib/client-auth", () => ({
   fetchWithRefresh: (...a: any[]) => mockFetchWithRefresh(...a),
+  getInstinctUser: () => mockGetInstinctUser(),
 }));
 
 import TicketDetail, {
@@ -13,7 +15,11 @@ import TicketDetail, {
 } from "@/app/(dashboard)/support/_components/TicketDetail";
 import type { SupportTicket } from "@/app/(dashboard)/support/_components/TicketList";
 
-beforeEach(() => mockFetchWithRefresh.mockReset());
+beforeEach(() => {
+  mockFetchWithRefresh.mockReset();
+  mockGetInstinctUser.mockReset();
+  mockGetInstinctUser.mockReturnValue(null);
+});
 
 function makeTicket(overrides: Partial<SupportTicket> = {}): SupportTicket {
   return {
@@ -190,6 +196,49 @@ describe("<TicketDetail /> — drafted state", () => {
       );
     });
     expect(mockFetchWithRefresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("<TicketDetail /> — audience routing", () => {
+  test("renders an audience badge in the header for the ticket's audience", () => {
+    const t = makeTicket({ audience: "client" });
+    render(<TicketDetail ticket={t} onTicketUpdated={() => {}} />);
+    /* Header shows the badge so an operator can immediately tell
+       client-vs-internal at a glance, alongside severity + status. */
+    expect(screen.getByTestId("audience-badge-client")).toBeInTheDocument();
+  });
+
+  test("send modal From: defaults to support@ for client and operator email for internal", () => {
+    /* Client ticket: From: defaults to the support address. */
+    const clientTicket = makeTicket({
+      audience: "client",
+      body: "Reach me at user@example.com",
+    });
+    const { unmount } = render(
+      <TicketDetail ticket={clientTicket} onTicketUpdated={() => {}} />,
+    );
+    fireEvent.click(screen.getByTestId("ticket-detail-open-send"));
+    expect(
+      (screen.getByTestId("send-modal-from-input") as HTMLInputElement).value,
+    ).toBe("support@thewolfpack.agency");
+    expect(screen.getByTestId("send-modal-from").getAttribute("data-audience"))
+      .toBe("client");
+    unmount();
+
+    /* Internal ticket with a known operator email: From: pre-fills the
+       operator's address so the reply leaves from a recognizable inbox. */
+    mockGetInstinctUser.mockReturnValue({ email: "homyk@thewolfpack.agency" });
+    const internalTicket = makeTicket({
+      audience: "internal",
+      body: "Reach me at user@example.com",
+    });
+    render(<TicketDetail ticket={internalTicket} onTicketUpdated={() => {}} />);
+    fireEvent.click(screen.getByTestId("ticket-detail-open-send"));
+    expect(
+      (screen.getByTestId("send-modal-from-input") as HTMLInputElement).value,
+    ).toBe("homyk@thewolfpack.agency");
+    expect(screen.getByTestId("send-modal-from").getAttribute("data-audience"))
+      .toBe("internal");
   });
 });
 

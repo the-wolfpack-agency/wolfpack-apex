@@ -21,6 +21,7 @@ import {
   SEVERITY_LABEL,
   type Severity,
 } from "./SeverityBadge";
+import type { Audience } from "./AudienceBadge";
 import type { SupportTicket, TicketCategory } from "./TicketList";
 
 const CATEGORY_OPTIONS: { value: TicketCategory; label: string }[] = [
@@ -33,6 +34,25 @@ const CATEGORY_OPTIONS: { value: TicketCategory; label: string }[] = [
 
 const SEVERITY_ORDER: Severity[] = ["p0", "p1", "p2", "p3"];
 
+const AUDIENCE_OPTIONS: { value: Audience; label: string }[] = [
+  { value: "internal", label: "Internal (a teammate)" },
+  { value: "client", label: "Client (outside the agency)" },
+];
+
+/**
+ * Tiny inline helper text shown right under the audience picker so the
+ * operator sees, before submit, exactly which From: address the reply
+ * will leave from. Keeping this string here (instead of in
+ * AudienceBadge) means the form copy is self-contained and easy to
+ * tweak without touching the badge component.
+ */
+const AUDIENCE_HINT: Record<Audience, string> = {
+  client:
+    "This will be replied to from support@thewolfpack.agency.",
+  internal:
+    "This will be replied to from your personal address.",
+};
+
 export interface TicketFormProps {
   onCreated: (ticket: SupportTicket) => void;
 }
@@ -43,6 +63,9 @@ export default function TicketForm({ onCreated }: TicketFormProps) {
   const [diagnosticText, setDiagnosticText] = useState("");
   const [category, setCategory] = useState<TicketCategory>("general");
   const [severity, setSeverity] = useState<Severity>("p2");
+  /* Default to 'internal' so a forgotten click does not accidentally
+     cc support@thewolfpack.agency on a teammate's question. */
+  const [audience, setAudience] = useState<Audience>("internal");
   const [submitting, setSubmitting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -75,6 +98,7 @@ export default function TicketForm({ onCreated }: TicketFormProps) {
           diagnostic_text: diagnosticText.trim() || undefined,
           category,
           severity,
+          audience,
         }),
       });
       if (!res.ok) {
@@ -129,6 +153,36 @@ export default function TicketForm({ onCreated }: TicketFormProps) {
         padding: "1.4rem",
       }}
     >
+      <div style={{ marginBottom: "1rem" }}>
+        <label htmlFor="ticket-audience" style={labelStyle}>
+          Who is this for?
+        </label>
+        <select
+          id="ticket-audience"
+          value={audience}
+          onChange={(e) => setAudience(e.target.value as Audience)}
+          data-testid="ticket-form-audience"
+          disabled={submitting}
+          style={inputStyle}
+        >
+          {AUDIENCE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <p
+          data-testid="ticket-form-audience-hint"
+          style={{
+            margin: "0.3rem 0 0",
+            fontSize: "0.78rem",
+            color: "var(--wp-text-dim)",
+          }}
+        >
+          {AUDIENCE_HINT[audience]}
+        </p>
+      </div>
+
       <div style={{ marginBottom: "1rem" }}>
         <label htmlFor="ticket-title" style={labelStyle}>
           Title <span style={{ color: "rgb(232,123,123)" }}>*</span>

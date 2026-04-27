@@ -29,10 +29,35 @@
  */
 
 import { useMemo, useState } from "react";
-import { fetchWithRefresh } from "@/lib/client-auth";
+import { fetchWithRefresh, getInstinctUser } from "@/lib/client-auth";
 import SeverityBadge from "./SeverityBadge";
 import StatusPill from "./StatusPill";
+import AudienceBadge, { type Audience } from "./AudienceBadge";
 import type { SupportTicket, TicketCategory } from "./TicketList";
+
+function audienceOf(t: SupportTicket): Audience {
+  return t.audience === "client" ? "client" : "internal";
+}
+
+/**
+ * Resolve the From: address for the send modal based on audience.
+ *   client   → support@thewolfpack.agency
+ *   internal → operator's own email (looked up from the auth user blob)
+ *              with a graceful fallback to the support address when the
+ *              user blob lacks an email so we never render an empty
+ *              From: line.
+ */
+function fromAddressFor(
+  audience: Audience,
+  operatorEmailFallback: string | null,
+): string {
+  if (audience === "client") return SUPPORT_FROM_ADDRESS;
+  return operatorEmailFallback ?? SUPPORT_FROM_ADDRESS;
+}
+
+interface OperatorUser {
+  email?: string | null;
+}
 
 const CATEGORY_LABEL: Record<TicketCategory, string> = {
   m365: "Microsoft 365",
@@ -143,6 +168,7 @@ export default function TicketDetail({
         >
           <SeverityBadge severity={ticket.severity} />
           <StatusPill status={ticket.status} />
+          <AudienceBadge audience={audienceOf(ticket)} />
           <span
             style={{
               fontSize: "0.78rem",
@@ -513,6 +539,20 @@ function SendModal({
   onClose: () => void;
   onSent: (next: SupportTicket) => void;
 }) {
+  /* Operator email is read once on mount from the auth user blob. The
+     getInstinctUser helper safely returns null in SSR + missing-blob
+     scenarios so we degrade to the support address rather than render
+     an empty From: line. */
+  const operatorEmail = useMemo<string | null>(() => {
+    const u = getInstinctUser<OperatorUser>();
+    return u && typeof u.email === "string" && u.email.length > 0
+      ? u.email
+      : null;
+  }, []);
+  const audience = audienceOf(ticket);
+  const [fromEmail, setFromEmail] = useState<string>(
+    fromAddressFor(audience, operatorEmail),
+  );
   const [toEmail, setToEmail] = useState<string>(inferRecipient(ticket));
   const [subject, setSubject] = useState<string>(`Re: ${ticket.title}`);
   const [editedBody, setEditedBody] = useState<string>(draftText);
@@ -606,11 +646,61 @@ function SendModal({
           confirming.
         </p>
 
-        <ModalRow label="From" testid="send-modal-from">
-          <span style={{ color: "var(--wp-text)" }}>
-            {SUPPORT_FROM_ADDRESS}
-          </span>
-        </ModalRow>
+        <div
+          data-testid="send-modal-from"
+          data-audience={audience}
+          data-from-address={fromEmail}
+          style={{ marginBottom: "0.9rem" }}
+        >
+          <label
+            htmlFor="send-from"
+            style={{
+              display: "block",
+              marginBottom: "0.2rem",
+              fontSize: "0.85rem",
+              color: "var(--wp-text-dim)",
+            }}
+          >
+            From
+          </label>
+          <input
+            id="send-from"
+            type="email"
+            value={fromEmail}
+            onChange={(e) => setFromEmail(e.target.value)}
+            data-testid="send-modal-from-input"
+            disabled={sending}
+            placeholder={
+              audience === "client"
+                ? "support@thewolfpack.agency"
+                : "your.address@thewolfpack.agency"
+            }
+            style={{
+              width: "100%",
+              padding: "0.5rem 0.7rem",
+              background: "var(--wp-dark)",
+              color: "var(--wp-text)",
+              border: "1px solid var(--wp-border, var(--wp-dark-border))",
+              borderRadius: 6,
+              fontSize: "0.9rem",
+              boxSizing: "border-box",
+            }}
+          />
+          {/* Mirror the address as visible text too so screen readers
+              + tests that read .textContent see the resolved address.
+              Plays well with the editable input above — operators see
+              the canonical version under the field while editing. */}
+          <p
+            data-testid="send-modal-from-resolved"
+            style={{
+              margin: "0.25rem 0 0",
+              fontSize: "0.78rem",
+              color: "var(--wp-text-dim)",
+            }}
+          >
+            Sending from {fromEmail || "(no address)"}.
+          </p>
+        </div>
 
         <div style={{ marginBottom: "0.9rem" }}>
           <label
@@ -776,39 +866,6 @@ function SendModal({
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ModalRow({
-  label,
-  children,
-  testid,
-}: {
-  label: string;
-  children: React.ReactNode;
-  testid?: string;
-}) {
-  return (
-    <div
-      data-testid={testid}
-      style={{
-        marginBottom: "0.7rem",
-        display: "flex",
-        gap: "0.5rem",
-        alignItems: "baseline",
-      }}
-    >
-      <span
-        style={{
-          fontSize: "0.78rem",
-          color: "var(--wp-text-dim)",
-          minWidth: 60,
-        }}
-      >
-        {label}
-      </span>
-      <span style={{ fontSize: "0.9rem" }}>{children}</span>
     </div>
   );
 }

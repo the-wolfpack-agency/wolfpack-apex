@@ -54,6 +54,7 @@ const ticketRow = {
   category: "other",
   severity: "p3",
   status: "drafted",
+  audience: "internal",
   created_by_user_id: "u-1",
   created_by_email: "op@x.com",
   draft_response: "Hi there, here is your draft.",
@@ -92,6 +93,7 @@ describe("GET /api/support/tickets", () => {
     expect(repo.listTickets).toHaveBeenCalledWith({
       status: "open",
       category: undefined,
+      audience: undefined,
       limit: 50,
     });
     expect(trackEvent).toHaveBeenCalledWith(
@@ -206,5 +208,42 @@ describe("POST /api/support/tickets", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toBe("constraint violation");
+  });
+
+  it("400 when audience is not 'client' or 'internal'", async () => {
+    requireCapability.mockResolvedValue(authed());
+    const { POST } = await import("../tickets/route");
+    const res = await POST(
+      req("POST", "http://t/api/support/tickets", {
+        title: "t",
+        body: "b",
+        audience: "vendor",
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_audience");
+    expect(repo.createTicket).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/support/tickets — audience filter", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("forwards ?audience=client to listTickets and returns the filtered set", async () => {
+    requireCapability.mockResolvedValue(authed());
+    const clientRow = { ...ticketRow, id: "tk-c1", audience: "client" };
+    repo.listTickets.mockResolvedValue([clientRow]);
+    const { GET } = await import("../tickets/route");
+    const res = await GET(
+      req("GET", "http://t/api/support/tickets?audience=client"),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.tickets).toHaveLength(1);
+    expect(body.tickets[0].audience).toBe("client");
+    expect(repo.listTickets).toHaveBeenCalledWith(
+      expect.objectContaining({ audience: "client" }),
+    );
   });
 });

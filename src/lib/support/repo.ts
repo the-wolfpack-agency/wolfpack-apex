@@ -21,6 +21,7 @@ import { upsertKnowledgePoint } from "@/lib/qdrant";
 import { executeCypher } from "@/lib/neo4j";
 
 import type {
+  SupportAudience,
   SupportPattern,
   SupportSeverity,
   SupportStatus,
@@ -39,6 +40,7 @@ export interface CreateTicketRow {
   category?: string | null;
   severity?: SupportSeverity | string | null;
   status?: SupportStatus | string;
+  audience?: SupportAudience | string | null;
   created_by_user_id: string;
   created_by_email?: string | null;
 }
@@ -46,6 +48,7 @@ export interface CreateTicketRow {
 export interface ListTicketsOptions {
   status?: string;
   category?: string;
+  audience?: string;
   limit?: number;
 }
 
@@ -61,6 +64,12 @@ export interface RecordFeedbackPayload {
 // ---------------------------------------------------------------------------
 
 function rowToTicket(r: Record<string, unknown>): SupportTicket {
+  /* `audience` is NOT NULL in the schema with default 'internal', but
+     defensive normalization keeps any old in-memory rows or test
+     fixtures from blowing up when the column is absent. */
+  const audienceRaw = r.audience == null ? "internal" : String(r.audience);
+  const audience: SupportAudience =
+    audienceRaw === "client" ? "client" : "internal";
   return {
     id: String(r.id),
     title: String(r.title),
@@ -69,6 +78,7 @@ function rowToTicket(r: Record<string, unknown>): SupportTicket {
     category: String(r.category ?? "general"),
     severity: r.severity as SupportTicket["severity"],
     status: r.status as SupportTicket["status"],
+    audience,
     created_by_user_id: String(r.created_by_user_id),
     created_by_email: r.created_by_email == null ? null : String(r.created_by_email),
     draft_response: r.draft_response == null ? null : String(r.draft_response),
@@ -107,7 +117,7 @@ function rowToPattern(r: Record<string, unknown>): SupportPattern {
 }
 
 const TICKET_COLUMNS = `
-  id, title, body, diagnostic_text, category, severity, status,
+  id, title, body, diagnostic_text, category, severity, status, audience,
   created_by_user_id, created_by_email,
   draft_response, draft_generated_at::text AS draft_generated_at, draft_pattern_ids,
   sent_response, sent_at::text AS sent_at, sent_to_email,
@@ -211,15 +221,23 @@ async function tryNeo4jSent(ticketId: string, sentAt: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function createTicket(input: CreateTicketRow): Promise<SupportTicket> {
+  /* Normalize audience defensively. Anything that isn't an exact
+     'client' or 'internal' falls back to 'internal' — the column has a
+     CHECK constraint, so passing through arbitrary strings would error
+     at the DB layer; better to coerce here and let the caller's own
+     400 validation handle bad input upstream. */
+  const audienceNormalized: SupportAudience =
+    input.audience === "client" ? "client" : "internal";
   const r = await writeQuery(
     `INSERT INTO instinct_support_tickets
-       (title, body, diagnostic_text, category, severity, status,
+       (title, body, diagnostic_text, category, severity, status, audience,
         created_by_user_id, created_by_email)
      VALUES ($1, $2, $3,
              COALESCE($4, 'general'),
              COALESCE($5, 'p2'),
              COALESCE($6, 'open'),
-             $7, $8)
+             $7,
+             $8, $9)
      RETURNING ${TICKET_COLUMNS}`,
     [
       input.title,
@@ -228,6 +246,7 @@ export async function createTicket(input: CreateTicketRow): Promise<SupportTicke
       input.category ?? null,
       input.severity ?? null,
       input.status ?? null,
+      audienceNormalized,
       input.created_by_user_id,
       input.created_by_email ?? null,
     ],
@@ -261,6 +280,12 @@ export async function listTickets(opts: ListTicketsOptions = {}): Promise<Suppor
     params.push(opts.category);
     where.push(`category = $${params.length}`);
   }
+  /* `audience='all'` is treated as no filter so the UI can use the same
+     pill pattern as the status filter without special-casing. */
+  if (opts.audience && opts.audience !== "all") {
+    params.push(opts.audience);
+    where.push(`audience = $${params.length}`);
+  }
   const limit = clampLimit(opts.limit);
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const r = await query<Record<string, unknown>>(
@@ -281,6 +306,7 @@ const PATCHABLE_FIELDS = new Set<string>([
   "category",
   "severity",
   "status",
+  "audience",
   "draft_response",
   "draft_generated_at",
   "draft_pattern_ids",

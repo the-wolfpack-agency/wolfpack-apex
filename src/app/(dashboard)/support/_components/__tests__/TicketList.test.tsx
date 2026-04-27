@@ -149,4 +149,73 @@ describe("<TicketList />", () => {
       /Connection lost/,
     );
   });
+
+  test("audience pill click invokes onAudienceFilterChange and filters the rows", () => {
+    const onAudienceFilterChange = jest.fn();
+    const tickets = [
+      makeTicket({ id: "1", audience: "client" }),
+      makeTicket({ id: "2", audience: "internal" }),
+      makeTicket({ id: "3", audience: "internal" }),
+    ];
+    /* Verify the audience pill row exists and counts each bucket. */
+    const { rerender } = render(
+      <TicketList
+        tickets={tickets}
+        filter="all"
+        onFilterChange={() => {}}
+        audienceFilter="all"
+        onAudienceFilterChange={onAudienceFilterChange}
+      />,
+    );
+    expect(
+      screen.getByTestId("ticket-list-audience-filters"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("ticket-audience-filter-all").textContent,
+    ).toMatch(/\(3\)/);
+    expect(
+      screen.getByTestId("ticket-audience-filter-client").textContent,
+    ).toMatch(/\(1\)/);
+    expect(
+      screen.getByTestId("ticket-audience-filter-internal").textContent,
+    ).toMatch(/\(2\)/);
+
+    fireEvent.click(screen.getByTestId("ticket-audience-filter-client"));
+    expect(onAudienceFilterChange).toHaveBeenCalledWith("client");
+
+    /* When the parent commits the filter, only matching rows render. */
+    rerender(
+      <TicketList
+        tickets={tickets}
+        filter="all"
+        onFilterChange={() => {}}
+        audienceFilter="client"
+        onAudienceFilterChange={onAudienceFilterChange}
+      />,
+    );
+    expect(screen.getByTestId("ticket-row-1")).toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-row-2")).toBeNull();
+    expect(screen.queryByTestId("ticket-row-3")).toBeNull();
+  });
+
+  test("each row renders an audience badge whose color matches its value", () => {
+    const tickets = [
+      makeTicket({ id: "c1", audience: "client" }),
+      makeTicket({ id: "i1", audience: "internal" }),
+    ];
+    render(
+      <TicketList
+        tickets={tickets}
+        filter="all"
+        onFilterChange={() => {}}
+      />,
+    );
+    const clientBadge = screen.getByTestId("audience-badge-client");
+    const internalBadge = screen.getByTestId("audience-badge-internal");
+    expect(clientBadge).toBeInTheDocument();
+    expect(internalBadge).toBeInTheDocument();
+    /* Client should use the info-blue token; internal should not. */
+    expect(clientBadge.style.background).toContain("82, 154, 232");
+    expect(internalBadge.style.background).not.toContain("82, 154, 232");
+  });
 });

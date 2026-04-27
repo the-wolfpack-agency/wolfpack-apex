@@ -21,6 +21,13 @@ import {
 } from "@/lib/support/pattern-library";
 
 const VALID_STATUSES = ["open", "drafted", "sent", "closed", "all"] as const;
+const VALID_AUDIENCES = ["client", "internal"] as const;
+type AudienceLiteral = (typeof VALID_AUDIENCES)[number];
+
+function isValidAudience(v: unknown): v is AudienceLiteral {
+  return typeof v === "string"
+    && (VALID_AUDIENCES as readonly string[]).includes(v);
+}
 
 export async function GET(req: NextRequest) {
   const auth = await requireCapability(req, "automations.run");
@@ -30,6 +37,7 @@ export async function GET(req: NextRequest) {
     const url = new URL(req.url);
     const statusParam = url.searchParams.get("status");
     const categoryParam = url.searchParams.get("category");
+    const audienceParam = url.searchParams.get("audience");
     const limitParam = parseInt(url.searchParams.get("limit") ?? "50", 10);
     const limit =
       Number.isFinite(limitParam) && limitParam > 0 && limitParam <= 500
@@ -44,12 +52,18 @@ export async function GET(req: NextRequest) {
       typeof categoryParam === "string" && categoryParam.length > 0
         ? categoryParam
         : undefined;
+    /* Unknown audience values silently fall back to no filter. The
+       create + patch endpoints validate strictly because they're
+       writes; reads stay forgiving so a stale bookmarked URL doesn't
+       400 the dashboard. */
+    const audience = isValidAudience(audienceParam) ? audienceParam : undefined;
 
-    const tickets = await listTickets({ status, category, limit });
+    const tickets = await listTickets({ status, category, audience, limit });
 
     trackEvent("support.list_viewed", auth.user.id, auth.user.role, {
       status: status ?? "",
       category: category ?? "",
+      audience: audience ?? "",
       count: tickets.length,
     });
 
@@ -95,6 +109,21 @@ export async function POST(req: NextRequest) {
   const category = typeof b.category === "string" ? b.category : null;
   const severity = typeof b.severity === "string" ? b.severity : null;
 
+  /* Audience: only validate when the caller actually supplied one.
+     Missing → default to 'internal' so the legacy clients (curl, old
+     scripts) keep working. Present-but-invalid → 400 so a typo never
+     silently lands as the wrong audience. */
+  let audience: "client" | "internal" = "internal";
+  if (b.audience !== undefined) {
+    if (!isValidAudience(b.audience)) {
+      return NextResponse.json(
+        { error: "invalid_audience" },
+        { status: 400 },
+      );
+    }
+    audience = b.audience;
+  }
+
   try {
     const ticket = await createTicket({
       title,
@@ -102,6 +131,7 @@ export async function POST(req: NextRequest) {
       diagnostic_text,
       category,
       severity,
+      audience,
       status: "open",
       created_by_user_id: auth.user.id,
       created_by_email: auth.user.email,
@@ -128,6 +158,7 @@ export async function POST(req: NextRequest) {
       ticket_id: String(ticket.id),
       category: category ?? "",
       severity: severity ?? "",
+      audience,
     });
 
     return NextResponse.json(updated ?? ticket, { status: 201 });

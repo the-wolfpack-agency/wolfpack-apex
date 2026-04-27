@@ -54,6 +54,7 @@ const baseTicketRow = {
   category: "auth",
   severity: "p2",
   status: "open",
+  audience: "internal",
   created_by_user_id: "user-1",
   created_by_email: "alicia@x",
   draft_response: null,
@@ -125,6 +126,7 @@ describe("createTicket", () => {
       "auth",
       "p2",
       "open",
+      "internal",
       "user-1",
       "alicia@x",
     ]);

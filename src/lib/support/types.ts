@@ -18,6 +18,20 @@ export type SupportStatus =
   | "resolved"
   | "closed";
 
+/**
+ * Audience for a support ticket:
+ *   - 'client'   — request from a paying client / dealer principal.
+ *                  Replies go from support@thewolfpack.agency.
+ *   - 'internal' — request from a Wolfpack teammate. Replies go from the
+ *                  operator's personal address.
+ *
+ * The runtime list is exported so API routes and UI form selects can
+ * validate without re-declaring the literal.
+ */
+export type SupportAudience = "client" | "internal";
+
+export const AUDIENCE_VALUES = ["client", "internal"] as const;
+
 export interface SupportTicket {
   id: string;
   title: string;
@@ -26,6 +40,7 @@ export interface SupportTicket {
   category: string;
   severity: SupportSeverity;
   status: SupportStatus;
+  audience: SupportAudience;
   created_by_user_id: string;
   created_by_email: string | null;
   draft_response: string | null;
@@ -48,6 +63,7 @@ export interface CreateTicketInput {
   diagnostic_text?: string | null;
   category?: string;
   severity?: SupportSeverity;
+  audience?: SupportAudience;
   created_by_user_id: string;
   created_by_email?: string | null;
 }

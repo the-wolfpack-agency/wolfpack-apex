@@ -21,6 +21,7 @@ import { useMemo } from "react";
 import Link from "next/link";
 import SeverityBadge, { type Severity } from "./SeverityBadge";
 import StatusPill, { type TicketStatus } from "./StatusPill";
+import AudienceBadge, { type Audience } from "./AudienceBadge";
 
 export type TicketCategory =
   | "m365"
@@ -37,6 +38,10 @@ export interface SupportTicket {
   category: TicketCategory;
   severity: Severity;
   status: TicketStatus;
+  /* Optional so older fixtures and any pre-101 ticket blob still
+     pass through TypeScript. The list defaults missing values to
+     'internal' before rendering the badge. */
+  audience?: Audience | null;
   draft_response?: string | null;
   drafted_at?: string | null;
   sent_response?: string | null;
@@ -52,6 +57,10 @@ export interface SupportTicket {
 
 export type FilterKey = "all" | "open" | "drafted" | "sent" | "resolved";
 
+/** Audience filter is independent from status — operators want to slice
+ *  by both at once ("open client tickets" vs "drafted internal").  */
+export type AudienceFilterKey = "all" | "client" | "internal";
+
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "all", label: "All" },
   { key: "open", label: "Open" },
@@ -59,6 +68,16 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "sent", label: "Sent" },
   { key: "resolved", label: "Resolved" },
 ];
+
+const AUDIENCE_FILTERS: { key: AudienceFilterKey; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "client", label: "Client" },
+  { key: "internal", label: "Internal" },
+];
+
+function audienceOf(t: SupportTicket): Audience {
+  return t.audience === "client" ? "client" : "internal";
+}
 
 const CATEGORY_LABEL: Record<TicketCategory, string> = {
   m365: "Microsoft 365",
@@ -111,6 +130,11 @@ export interface TicketListProps {
   tickets: SupportTicket[];
   filter: FilterKey;
   onFilterChange: (next: FilterKey) => void;
+  /* Audience filter is optional so existing call sites that don't
+     supply it keep working. The audience pill row simply hides when
+     no handler is wired in. */
+  audienceFilter?: AudienceFilterKey;
+  onAudienceFilterChange?: (next: AudienceFilterKey) => void;
   loading?: boolean;
   error?: string | null;
 }
@@ -119,6 +143,8 @@ export default function TicketList({
   tickets,
   filter,
   onFilterChange,
+  audienceFilter = "all",
+  onAudienceFilterChange,
   loading,
   error,
 }: TicketListProps) {
@@ -129,8 +155,86 @@ export default function TicketList({
     }, { all: 0, open: 0, drafted: 0, sent: 0, resolved: 0 });
   }, [tickets]);
 
+  const audienceCounts = useMemo(() => {
+    let client = 0;
+    let internal = 0;
+    for (const t of tickets) {
+      if (audienceOf(t) === "client") client += 1;
+      else internal += 1;
+    }
+    return { all: tickets.length, client, internal };
+  }, [tickets]);
+
+  /* Apply the audience filter client-side. The list page can also send
+     ?audience= to the server for a smaller payload, but doing the
+     filter here too keeps the pill counts honest if the parent omits
+     the server-side filter. */
+  const visibleTickets = useMemo(() => {
+    if (audienceFilter === "all") return tickets;
+    return tickets.filter((t) => audienceOf(t) === audienceFilter);
+  }, [tickets, audienceFilter]);
+
   return (
     <div data-testid="ticket-list-root">
+      {/* Audience filter pills — sit above the status pills so the
+          operator picks "who is this for" first, then "in what state". */}
+      {onAudienceFilterChange && (
+        <div
+          role="tablist"
+          aria-label="Filter tickets by audience"
+          data-testid="ticket-list-audience-filters"
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "0.5rem",
+            marginBottom: "0.7rem",
+          }}
+        >
+          {AUDIENCE_FILTERS.map((f) => {
+            const active = audienceFilter === f.key;
+            return (
+              <button
+                key={f.key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                data-testid={`ticket-audience-filter-${f.key}`}
+                data-active={active ? "yes" : "no"}
+                onClick={() => onAudienceFilterChange(f.key)}
+                style={{
+                  background: active
+                    ? "rgba(82,154,232,0.18)"
+                    : "var(--wp-card, var(--wp-dark-surface))",
+                  color: active
+                    ? "var(--wp-info, rgb(120,180,232))"
+                    : "var(--wp-text)",
+                  border: `1px solid ${active ? "var(--wp-info, rgb(120,180,232))" : "var(--wp-border, var(--wp-dark-border))"}`,
+                  borderRadius: 999,
+                  padding: "0.4rem 0.9rem",
+                  fontSize: "0.85rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  touchAction: "manipulation",
+                }}
+              >
+                {f.label}{" "}
+                <span
+                  style={{
+                    marginLeft: "0.35rem",
+                    color: active
+                      ? "var(--wp-info, rgb(120,180,232))"
+                      : "var(--wp-text-dim)",
+                    fontWeight: 500,
+                  }}
+                >
+                  ({audienceCounts[f.key]})
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Filter pills */}
       <div
         role="tablist"
@@ -209,7 +313,7 @@ export default function TicketList({
         </div>
       )}
 
-      {!loading && !error && tickets.length === 0 && (
+      {!loading && !error && visibleTickets.length === 0 && (
         <div
           data-testid="ticket-list-empty"
           style={{
@@ -221,16 +325,20 @@ export default function TicketList({
             maxWidth: 640,
           }}
         >
-          No tickets yet. Click &ldquo;New ticket&rdquo; to start.
+          {tickets.length === 0 ? (
+            <>No tickets yet. Click &ldquo;New ticket&rdquo; to start.</>
+          ) : (
+            "No tickets match the current filters."
+          )}
         </div>
       )}
 
-      {!loading && !error && tickets.length > 0 && (
+      {!loading && !error && visibleTickets.length > 0 && (
         <div
           data-testid="ticket-list-rows"
           style={{ display: "grid", gap: "0.6rem" }}
         >
-          {tickets.map((t) => (
+          {visibleTickets.map((t) => (
             <TicketRow key={t.id} ticket={t} />
           ))}
         </div>
@@ -311,6 +419,7 @@ export function TicketRow({ ticket }: { ticket: SupportTicket }) {
         <div className="row-meta" style={{ marginBottom: "0.35rem" }}>
           <SeverityBadge severity={ticket.severity} />
           <StatusPill status={ticket.status} />
+          <AudienceBadge audience={audienceOf(ticket)} />
           <span
             style={{
               fontSize: "0.75rem",

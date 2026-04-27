@@ -22,9 +22,12 @@ const PATCHABLE_FIELDS = [
   "category",
   "severity",
   "status",
+  "audience",
   "draft_response",
   "sent_to_email",
 ] as const;
+
+const VALID_AUDIENCES = ["client", "internal"] as const;
 
 export async function GET(
   req: NextRequest,
@@ -68,6 +71,20 @@ export async function PATCH(
   const patch: Record<string, unknown> = {};
   for (const field of PATCHABLE_FIELDS) {
     if (field in b) patch[field] = b[field];
+  }
+  /* Audience patches are validated strictly. The DB CHECK constraint
+     would catch the bad value too, but a 400 here gives the operator a
+     clear error instead of a generic 500. */
+  if ("audience" in patch) {
+    if (
+      typeof patch.audience !== "string"
+      || !(VALID_AUDIENCES as readonly string[]).includes(patch.audience)
+    ) {
+      return NextResponse.json(
+        { error: "invalid_audience" },
+        { status: 400 },
+      );
+    }
   }
   if (Object.keys(patch).length === 0) {
     return NextResponse.json(
