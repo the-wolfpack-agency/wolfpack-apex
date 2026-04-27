@@ -135,11 +135,111 @@ export async function GET(req: NextRequest) {
     [],
   );
 
+  /* Optional ?from=<class_key>&to=<class_key> participant-overlap test —
+     answers "are these the same physical class?" before clicking Merge.
+     For each class_key, pulls (a) the porsche_xlsx roster's participants
+     and (b) the cognito_coordinator's free-text answers, and counts
+     how many roster names from one class appear as substrings in the
+     other class's free-text. Provides hard evidence for class_match
+     overrides; replaces "trust the AI's reasoning" with explicit data. */
+  const fromKey = url.searchParams.get("from");
+  const toKey = url.searchParams.get("to");
+  let overlap: {
+    from: string;
+    to: string;
+    from_participants: string[];
+    to_participants: string[];
+    same_count: boolean;
+    name_matches_in_text: { name: string; appears_in: "from" | "to" | "both" }[];
+    error?: string;
+  } | null = null;
+
+  if (fromKey && toKey) {
+    try {
+      const overlapRows = await query<{
+        class_key: string;
+        source_type: string;
+        participants: unknown;
+        free_text_blob: string | null;
+      }>(
+        `SELECT class_key, source_type, participants,
+                (SELECT string_agg(value::text, ' ')
+                   FROM jsonb_each_text(source_payload->'fields')) AS free_text_blob
+           FROM instinct_automation_porsche_snapshots
+          WHERE class_key = ANY($1::text[])`,
+        [[fromKey, toKey]],
+      );
+
+      const lower = (s: string) => s.toLowerCase().replace(/[^a-z\s]/g, "");
+      const tokenize = (s: string) =>
+        new Set(lower(s).split(/\s+/).filter((t) => t.length >= 3));
+
+      const namesFor = (k: string): string[] => {
+        const xlsx = overlapRows.rows.find(
+          (r) => r.class_key === k && r.source_type === "porsche_xlsx",
+        );
+        if (!xlsx || !Array.isArray(xlsx.participants)) return [];
+        return xlsx.participants
+          .filter((n): n is string => typeof n === "string")
+          .map((n) => n);
+      };
+
+      const textFor = (k: string): string =>
+        overlapRows.rows
+          .filter((r) => r.class_key === k && r.source_type !== "porsche_xlsx")
+          .map((r) => r.free_text_blob ?? "")
+          .join(" ");
+
+      const fromParticipants = namesFor(fromKey);
+      const toParticipants = namesFor(toKey);
+      const fromText = textFor(fromKey);
+      const toText = textFor(toKey);
+      const fromTokens = tokenize(fromText);
+      const toTokens = tokenize(toText);
+
+      const matches: { name: string; appears_in: "from" | "to" | "both" }[] = [];
+      const checkName = (name: string) => {
+        const parts = lower(name).split(/\s+/).filter((t) => t.length >= 3);
+        if (parts.length === 0) return;
+        const inFrom = parts.some((p) => fromTokens.has(p));
+        const inTo = parts.some((p) => toTokens.has(p));
+        if (inFrom && inTo) matches.push({ name, appears_in: "both" });
+        else if (inFrom) matches.push({ name, appears_in: "from" });
+        else if (inTo) matches.push({ name, appears_in: "to" });
+      };
+      // Cross-reference: do FROM's roster names appear in TO's coordinator text?
+      // And vice versa? Either is strong evidence of same class.
+      [...fromParticipants, ...toParticipants].forEach(checkName);
+
+      overlap = {
+        from: fromKey,
+        to: toKey,
+        from_participants: fromParticipants,
+        to_participants: toParticipants,
+        same_count:
+          fromParticipants.length > 0 &&
+          fromParticipants.length === toParticipants.length,
+        name_matches_in_text: matches,
+      };
+    } catch (err) {
+      overlap = {
+        from: fromKey,
+        to: toKey,
+        from_participants: [],
+        to_participants: [],
+        same_count: false,
+        name_matches_in_text: [],
+        error: (err as Error).message,
+      };
+    }
+  }
+
   const errors = [snapshots.error, artifacts.error, exceptions.error, overrides.error]
     .filter((e): e is string => Boolean(e));
 
   return NextResponse.json({
-    query: { course, date },
+    query: { course, date, from: fromKey, to: toKey },
+    overlap,
     summary: {
       snapshot_count: snapshots.rows.length,
       distinct_class_keys: [...new Set(snapshots.rows.map((s) => s.class_key))],
