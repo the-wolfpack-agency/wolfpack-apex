@@ -86,13 +86,16 @@ export const parseCognitoInstructor: Parser = async (
   }
 
   const fields = parseCognitoHtml(parts.html);
+  /* Soft signal — see parser-cognito-coordinator for full rationale.
+     Subject (validated above) is the primary identifier; Outlook's
+     "Save as .eml" frequently strips the form-title h2. */
   if (
     !fields.formTitle ||
     !/Instructor Class Report/i.test(fields.formTitle)
   ) {
-    return fail(
-      `Form title does not match Instructor Class Report: "${fields.formTitle ?? "<missing>"}"`,
-      { formTitle: fields.formTitle },
+    console.warn(
+      `[parser-cognito-instructor] form-title h2 missing or mismatched ` +
+        `(subject already validated) — saw: "${fields.formTitle ?? "<missing>"}"`,
     );
   }
 

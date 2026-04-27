@@ -162,3 +162,51 @@ describe("parseCognitoCoordinator — failure paths", () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe("parseCognitoCoordinator — Outlook 'Save as .eml' resilience", () => {
+  // Regression — 2026-04-27. Outlook web's "Save as .eml" save path
+  // strips the original Cognito form-title <h2> from the HTML such
+  // that no <h2> in the resulting body matches /Class Report/i.
+  // Confirmed against the BA101 2026-04-20 Corrine DeArmitt .eml:
+  // 3 separate Backfill uploads (content_sha256 9f5e254c...) all
+  // quarantined with `Form title does not match Coordinator Class
+  // Report: "Hotel Experience"`. Subject was correct, all field
+  // labels were correct — only the form title h2 was missing.
+  // The fix relaxes form-title to a soft signal and trusts the
+  // already-validated subject + field-presence checks.
+  //
+  // Test strategy: take the real Amy Federman fixture (which has
+  // both the form-title h2 AND the field tables), strip the form-
+  // title h2 from its HTML, and confirm the parser STILL succeeds
+  // because subject + field-presence pass.
+
+  it("parses a real-shape .eml after the form-title h2 is stripped", async () => {
+    const fixturePath = join(
+      FIXTURES,
+      "Coordinator Class Report - Amy Federman.eml",
+    );
+    const raw = readFileSync(fixturePath, "utf8");
+    // Remove any <h2>...Coordinator Class Report...</h2> from the body.
+    const stripped = raw.replace(
+      /<h2[^>]*>[^<]*Coordinator Class Report[^<]*<\/h2>/gi,
+      "",
+    );
+    const result = await parseCognitoCoordinator({
+      bytes: Buffer.from(stripped, "utf8"),
+      hint: "Coordinator Class Report - Amy Federman.eml",
+      received_at: "2026-04-20T22:00:00.000Z",
+      source_message_id: null,
+      source_artifact_id: "artifact-outlook-saved",
+    });
+    if (!result.ok) {
+      throw new Error(
+        `expected ok=true; got error="${result.error}" exception_kind="${result.exception_kind}"`,
+      );
+    }
+    expect(result.snapshots).toHaveLength(1);
+    const snap = result.snapshots[0];
+    expect(snap.class.course_type).toBe("BA101");
+    expect(snap.class.class_date).toBe("2026-04-13");
+    expect(snap.class.location).toBe("Westlake");
+  });
+});

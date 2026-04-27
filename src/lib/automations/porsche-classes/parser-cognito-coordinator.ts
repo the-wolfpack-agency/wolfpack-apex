@@ -113,13 +113,26 @@ export const parseCognitoCoordinator: Parser = async (
   }
 
   const fields = parseCognitoHtml(parts.html);
+  /* Form-title h2 is a SOFT signal. The email subject (validated
+     above) is the primary identifier — every Cognito form auto-emails
+     with subject "Coordinator Class Report - <name>". When the .eml
+     is saved via Outlook web's "Save as .eml" the original form-title
+     <h2> is stripped or relocated such that no <h2> in the resulting
+     HTML matches /Class Report/i (confirmed against Corrine DeArmitt
+     2026-04-20 .eml on 2026-04-27 — the rendered email content shows
+     "Entry Details" as the first heading; "Coordinator Class Report"
+     text exists nowhere in the body). If we hard-fail here the entire
+     pipeline blocks on Outlook's serialization choice. Since subject
+     already passed, log + continue. The downstream missingField
+     guards on Class / Class Date / Class Location still protect us
+     from genuinely malformed inputs. */
   if (
     !fields.formTitle ||
     !/Coordinator Class Report/i.test(fields.formTitle)
   ) {
-    return fail(
-      `Form title does not match Coordinator Class Report: "${fields.formTitle ?? "<missing>"}"`,
-      { formTitle: fields.formTitle },
+    console.warn(
+      `[parser-cognito-coordinator] form-title h2 missing or mismatched ` +
+        `(subject already validated) — saw: "${fields.formTitle ?? "<missing>"}"`,
     );
   }
 
