@@ -1,22 +1,38 @@
 /**
  * src/lib/ai/azure-openai-provider — Azure OpenAI Chat Completions adapter.
  *
- * Uses raw fetch (no @azure/openai SDK) against:
- *   POST {AZURE_OPENAI_ENDPOINT}/openai/deployments/{deployment}/chat/completions
- *      ?api-version=2024-08-01-preview
+ * Supports BOTH Microsoft endpoint formats and auto-detects from the URL:
+ *
+ * 1) Classic Azure OpenAI ("Azure OpenAI" resource type):
+ *    POST {AZURE_OPENAI_ENDPOINT}/openai/deployments/{deployment}/chat/completions
+ *         ?api-version=2024-08-01-preview
+ *    Body does NOT include `model` — the deployment is encoded in the URL.
+ *    Detected when the hostname is *.openai.azure.com (or anything that is
+ *    not a Foundry hostname).
+ *
+ * 2) Azure AI Foundry ("Azure AI" / Foundry resource type):
+ *    POST {endpointBase}/models/chat/completions?api-version=2024-05-01-preview
+ *    Body INCLUDES `model: deploymentName` — Foundry's inference router needs
+ *    the deployment name in the body, not the URL.
+ *    Detected when the hostname matches *.services.ai.azure.com OR the
+ *    endpoint URL ends with /models. If the supplied endpoint already ends
+ *    in /models we use it as-is; otherwise we append /models.
+ *
+ * The classic and Foundry response shapes are both OpenAI-compatible
+ * (choices[0].message.content + usage.{prompt_tokens, completion_tokens}),
+ * so a single parser handles both.
  *
  * Required env (set in Vercel production):
- *   AZURE_OPENAI_ENDPOINT       https://YOUR_RESOURCE.openai.azure.com (no trailing slash)
- *   AZURE_OPENAI_API_KEY        Key 1 or Key 2 from Azure portal -> Resource -> Keys and Endpoint
+ *   AZURE_OPENAI_ENDPOINT       https://YOUR_RESOURCE.openai.azure.com (classic)
+ *                               OR https://YOUR_RESOURCE.services.ai.azure.com (Foundry)
+ *                               OR https://YOUR_RESOURCE.services.ai.azure.com/models
+ *   AZURE_OPENAI_API_KEY        Key 1 or Key 2 from Azure portal
  * Optional env (defaults to standard model names):
  *   AZURE_OPENAI_DEPLOYMENT_CHEAP     default 'gpt-4o-mini'
  *   AZURE_OPENAI_DEPLOYMENT_STANDARD  default 'gpt-4o'
  *   AZURE_OPENAI_DEPLOYMENT_PREMIUM   default 'gpt-4'
  * Optional env:
  *   AI_PROVIDER_PRIMARY  'azure-openai' | 'anthropic' | 'auto' (default 'auto')
- * Free tier note: Azure offers $200 free credits for new accounts (30 days).
- * For ongoing free use after credits, consider Azure AI Foundry's free model
- * garden (Llama, Mistral) — different SDK path, would need a separate adapter.
  */
 
 import type {
@@ -39,7 +55,10 @@ const TIER_DEPLOYMENT_ENV: Record<AIModelTier, string> = {
   premium: "AZURE_OPENAI_DEPLOYMENT_PREMIUM",
 };
 
-const API_VERSION = "2024-08-01-preview";
+const CLASSIC_API_VERSION = "2024-08-01-preview";
+const FOUNDRY_API_VERSION = "2024-05-01-preview";
+
+export type AzureEndpointFormat = "classic" | "foundry";
 
 interface TierPricing {
   input_per_mtok: number;
@@ -83,6 +102,16 @@ interface AzureErrorBody {
   error?: { code?: string; message?: string };
 }
 
+interface ClassicRequestBody {
+  messages: AzureChatMessage[];
+  max_tokens: number;
+  temperature: number;
+}
+
+interface FoundryRequestBody extends ClassicRequestBody {
+  model: string;
+}
+
 export class AzureProviderError extends Error {
   status: number;
 
@@ -91,6 +120,30 @@ export class AzureProviderError extends Error {
     this.name = "AzureProviderError";
     this.status = status;
   }
+}
+
+/**
+ * Detect which Azure endpoint format a URL targets.
+ *
+ * Foundry indicators (any one is sufficient):
+ *   - hostname ends in `.services.ai.azure.com`
+ *   - URL path ends with `/models` (case-insensitive)
+ *
+ * Anything else (including *.openai.azure.com) is treated as classic.
+ *
+ * Exported so unit tests can pin the detection contract.
+ */
+export function detectEndpointFormat(endpoint: string): AzureEndpointFormat {
+  const normalized = endpoint.replace(/\/+$/, "");
+  let hostname = "";
+  try {
+    hostname = new URL(normalized).hostname.toLowerCase();
+  } catch {
+    hostname = "";
+  }
+  if (hostname.endsWith(".services.ai.azure.com")) return "foundry";
+  if (/\/models$/i.test(normalized)) return "foundry";
+  return "classic";
 }
 
 // TODO: swap to getSecret("azure-openai-*") from src/lib/secrets.ts
@@ -133,6 +186,24 @@ function toAzureMessage(m: AIMessage): AzureChatMessage {
   return { role: "user", content: m.content };
 }
 
+/**
+ * Build the Foundry inference URL. If the endpoint already ends in `/models`
+ * we use that as the base; otherwise we append `/models`. Either way the
+ * canonical path is `{base}/models/chat/completions?api-version=...`.
+ */
+function buildFoundryUrl(endpoint: string): string {
+  const trimmed = endpoint.replace(/\/+$/, "");
+  const base = /\/models$/i.test(trimmed) ? trimmed : `${trimmed}/models`;
+  return `${base}/chat/completions?api-version=${FOUNDRY_API_VERSION}`;
+}
+
+function buildClassicUrl(endpoint: string, deployment: string): string {
+  const trimmed = endpoint.replace(/\/+$/, "");
+  return `${trimmed}/openai/deployments/${encodeURIComponent(
+    deployment,
+  )}/chat/completions?api-version=${CLASSIC_API_VERSION}`;
+}
+
 async function readErrorMessage(res: Response): Promise<string> {
   try {
     const text = await res.text();
@@ -168,15 +239,30 @@ export class AzureOpenAIProvider implements AIProvider {
 
     const deployment = readDeploymentName(req.model_tier);
     const pricing = TIER_PRICING[req.model_tier];
-    const url = `${endpoint}/openai/deployments/${encodeURIComponent(
-      deployment,
-    )}/chat/completions?api-version=${API_VERSION}`;
+    const format = detectEndpointFormat(endpoint);
 
-    const body = {
-      messages: toAzureMessages(req),
-      max_tokens: req.max_tokens,
-      temperature: req.temperature ?? 0.7,
-    };
+    const messages = toAzureMessages(req);
+    const max_tokens = req.max_tokens;
+    const temperature = req.temperature ?? 0.7;
+
+    let url: string;
+    let body: ClassicRequestBody | FoundryRequestBody;
+    if (format === "foundry") {
+      url = buildFoundryUrl(endpoint);
+      body = {
+        model: deployment,
+        messages,
+        max_tokens,
+        temperature,
+      };
+    } else {
+      url = buildClassicUrl(endpoint, deployment);
+      body = {
+        messages,
+        max_tokens,
+        temperature,
+      };
+    }
 
     const start = Date.now();
     let res: Response;

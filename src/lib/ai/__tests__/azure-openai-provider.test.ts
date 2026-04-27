@@ -18,6 +18,7 @@ import {
   AzureProviderError,
   AZURE_TIER_PRICING,
   AZURE_TIER_TO_DEPLOYMENT,
+  detectEndpointFormat,
   isAzureConfigured,
 } from "@/lib/ai/azure-openai-provider";
 import type { AICompleteRequest } from "@/lib/ai/types";
@@ -296,5 +297,135 @@ describe("complete — error handling", () => {
       name: "AzureProviderError",
     });
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("detectEndpointFormat", () => {
+  it("returns 'foundry' for *.services.ai.azure.com URLs", () => {
+    expect(
+      detectEndpointFormat(
+        "https://homyk-mohqi52o-eastus2.services.ai.azure.com",
+      ),
+    ).toBe("foundry");
+    expect(
+      detectEndpointFormat(
+        "https://homyk-mohqi52o-eastus2.services.ai.azure.com/",
+      ),
+    ).toBe("foundry");
+  });
+
+  it("returns 'foundry' for endpoints ending in /models", () => {
+    expect(detectEndpointFormat("https://example.com/models")).toBe("foundry");
+    expect(detectEndpointFormat("https://example.com/models/")).toBe("foundry");
+    expect(
+      detectEndpointFormat(
+        "https://homyk-mohqi52o-eastus2.services.ai.azure.com/models",
+      ),
+    ).toBe("foundry");
+  });
+
+  it("returns 'classic' for *.openai.azure.com URLs", () => {
+    expect(detectEndpointFormat("https://r.openai.azure.com")).toBe("classic");
+    expect(detectEndpointFormat("https://r.openai.azure.com/")).toBe("classic");
+  });
+
+  it("returns 'classic' for unknown hostnames without /models suffix", () => {
+    expect(detectEndpointFormat("https://example.com")).toBe("classic");
+  });
+});
+
+describe("complete — Foundry mode", () => {
+  beforeEach(() => {
+    process.env.AZURE_OPENAI_API_KEY = "foundry-key";
+  });
+
+  it("builds Foundry URL as {base}/models/chat/completions when endpoint lacks /models", async () => {
+    process.env.AZURE_OPENAI_ENDPOINT =
+      "https://homyk-mohqi52o-eastus2.services.ai.azure.com";
+    mockFetch.mockResolvedValueOnce(okResponse());
+    const p = new AzureOpenAIProvider();
+    await p.complete(baseReq());
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(
+      "https://homyk-mohqi52o-eastus2.services.ai.azure.com/models/chat/completions?api-version=2024-05-01-preview",
+    );
+  });
+
+  it("uses endpoint as-is when it already ends in /models", async () => {
+    process.env.AZURE_OPENAI_ENDPOINT =
+      "https://homyk-mohqi52o-eastus2.services.ai.azure.com/models";
+    mockFetch.mockResolvedValueOnce(okResponse());
+    const p = new AzureOpenAIProvider();
+    await p.complete(baseReq());
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe(
+      "https://homyk-mohqi52o-eastus2.services.ai.azure.com/models/chat/completions?api-version=2024-05-01-preview",
+    );
+  });
+
+  it("includes model: deploymentName in body for Foundry mode", async () => {
+    process.env.AZURE_OPENAI_ENDPOINT =
+      "https://homyk-mohqi52o-eastus2.services.ai.azure.com";
+    process.env.AZURE_OPENAI_DEPLOYMENT_STANDARD = "gpt-4o-mini";
+    mockFetch.mockResolvedValueOnce(okResponse());
+    const p = new AzureOpenAIProvider();
+    await p.complete(baseReq());
+    const [, init] = mockFetch.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.model).toBe("gpt-4o-mini");
+    expect(body.messages).toEqual([{ role: "user", content: "hello" }]);
+    expect(body.max_tokens).toBe(64);
+  });
+
+  it("classic mode body does NOT include model field", async () => {
+    process.env.AZURE_OPENAI_ENDPOINT = "https://r.openai.azure.com";
+    mockFetch.mockResolvedValueOnce(okResponse());
+    const p = new AzureOpenAIProvider();
+    await p.complete(baseReq());
+    const [, init] = mockFetch.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.model).toBeUndefined();
+  });
+
+  it("Foundry mode parses response identically to classic (OpenAI shape)", async () => {
+    process.env.AZURE_OPENAI_ENDPOINT =
+      "https://homyk-mohqi52o-eastus2.services.ai.azure.com";
+    mockFetch.mockResolvedValueOnce(
+      okResponse("foundry answer", {
+        prompt_tokens: 12,
+        completion_tokens: 5,
+      }),
+    );
+    const p = new AzureOpenAIProvider();
+    const out = await p.complete(baseReq());
+    expect(out.content).toBe("foundry answer");
+    expect(out.input_tokens).toBe(12);
+    expect(out.output_tokens).toBe(5);
+    expect(out.provider_used).toBe("azure-openai");
+    expect(out.model_used).toBe(AZURE_TIER_TO_DEPLOYMENT.standard);
+  });
+
+  it("Foundry mode captures latency_ms across the fetch", async () => {
+    process.env.AZURE_OPENAI_ENDPOINT =
+      "https://homyk-mohqi52o-eastus2.services.ai.azure.com";
+    mockFetch.mockImplementationOnce(async () => {
+      await new Promise((r) => setTimeout(r, 25));
+      return okResponse();
+    });
+    const p = new AzureOpenAIProvider();
+    const out = await p.complete(baseReq());
+    expect(out.latency_ms).toBeGreaterThanOrEqual(20);
+  });
+
+  it("Foundry mode sends api-key header (same as classic)", async () => {
+    process.env.AZURE_OPENAI_ENDPOINT =
+      "https://homyk-mohqi52o-eastus2.services.ai.azure.com";
+    mockFetch.mockResolvedValueOnce(okResponse());
+    const p = new AzureOpenAIProvider();
+    await p.complete(baseReq());
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.method).toBe("POST");
+    expect(init.headers["api-key"]).toBe("foundry-key");
+    expect(init.headers["content-type"]).toBe("application/json");
   });
 });
