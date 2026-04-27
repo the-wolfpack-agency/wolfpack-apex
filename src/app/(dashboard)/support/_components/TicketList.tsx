@@ -28,7 +28,12 @@ export type TicketCategory =
   | "azure"
   | "instinct"
   | "wolfpack-auto"
+  | "porsche-classes"
+  | "billing"
+  | "urgent"
   | "general";
+
+export type CategorySource = "manual" | "ai";
 
 export interface SupportTicket {
   id: string;
@@ -50,6 +55,11 @@ export interface SupportTicket {
   feedback_helpful?: boolean | null;
   feedback_notes?: string | null;
   matched_patterns?: string[];
+  /* AI categorization metadata (added by migration 103). The list
+     view treats all of these as optional so older fixtures and any
+     pre-103 ticket blob still pass through TypeScript. */
+  category_source?: CategorySource | null;
+  category_confidence?: number | null;
   /* Email/message thread is hydrated only on the detail GET. The list
      view never includes it, so it stays optional and tolerates older
      fixtures + form-created internal tickets that have no thread. The
@@ -90,8 +100,41 @@ const CATEGORY_LABEL: Record<TicketCategory, string> = {
   azure: "Azure",
   instinct: "Instinct",
   "wolfpack-auto": "Wolfpack Auto",
+  "porsche-classes": "Porsche Classes",
+  billing: "Billing",
+  urgent: "Urgent",
   general: "General",
 };
+
+/* Confidence below this threshold renders the "AI ?" indicator next to
+ * the category, signalling to the operator that the AI was not sure
+ * and they may want to override. Matches the categorizer's internal
+ * 0.6 floor (below which it already coerces to 'general'); 0.8 is the
+ * "I'm confident" line above which we hide the indicator entirely. */
+const LOW_CONFIDENCE_THRESHOLD = 0.8;
+
+/**
+ * Returns the category label for a ticket, defensively coerced. Any
+ * category value that's not in CATEGORY_LABEL renders as "General" so
+ * an unexpected migration leaves the UI legible.
+ */
+function categoryLabel(t: SupportTicket): string {
+  const key = t.category as TicketCategory;
+  return CATEGORY_LABEL[key] ?? CATEGORY_LABEL.general;
+}
+
+/**
+ * Returns true when the AI categorized the ticket but its confidence
+ * was below the operator-facing threshold. The list row uses this to
+ * render a subtle "?" badge next to the category label.
+ */
+export function isLowConfidenceAICategory(t: SupportTicket): boolean {
+  return (
+    t.category_source === "ai" &&
+    typeof t.category_confidence === "number" &&
+    t.category_confidence < LOW_CONFIDENCE_THRESHOLD
+  );
+}
 
 /**
  * Plain-language relative time. Mirrors the formatter in the dashboard
@@ -427,12 +470,39 @@ export function TicketRow({ ticket }: { ticket: SupportTicket }) {
           <StatusPill status={ticket.status} />
           <AudienceBadge audience={audienceOf(ticket)} />
           <span
+            data-testid={`ticket-row-category-${ticket.id}`}
+            data-category-source={ticket.category_source ?? "manual"}
             style={{
               fontSize: "0.75rem",
               color: "var(--wp-text-dim)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.25rem",
             }}
           >
-            {CATEGORY_LABEL[ticket.category]}
+            {categoryLabel(ticket)}
+            {isLowConfidenceAICategory(ticket) && (
+              <span
+                role="img"
+                aria-label="AI category, low confidence"
+                title="AI auto-categorized — low confidence, click ticket to review"
+                data-testid={`ticket-row-ai-uncertain-${ticket.id}`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: "1rem",
+                  height: "1rem",
+                  borderRadius: 999,
+                  fontSize: "0.7rem",
+                  fontWeight: 700,
+                  background: "rgba(241,194,51,0.18)",
+                  color: "var(--wp-gold)",
+                }}
+              >
+                ?
+              </span>
+            )}
           </span>
         </div>
         <div

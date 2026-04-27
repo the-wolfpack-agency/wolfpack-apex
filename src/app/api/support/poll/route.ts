@@ -20,6 +20,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
+import { getObsClient } from "@/lib/obs";
 import { pollSupportInbox } from "@/lib/support/inbox-poller";
 
 /**
@@ -37,8 +38,25 @@ function isAuthorizedCron(req: NextRequest): boolean {
 }
 
 async function runPoll(userId: string, userRole: string) {
+  const obs = getObsClient();
+  const handle = obs.startSpan("cron.support.poll", {
+    user_id: userId,
+    user_role: userRole,
+  });
   try {
     const result = await pollSupportInbox({ userId, userRole });
+    /* Mirror the PollResult shape onto the span so traces line up
+       with analytics events without re-deriving the numbers. */
+    const r = result as unknown as Record<string, unknown> | null | undefined;
+    if (r && typeof r === "object") {
+      const num = (k: string) => (typeof r[k] === "number" ? (r[k] as number) : undefined);
+      handle.setAttribute("messages_seen", num("messages_seen") ?? null);
+      handle.setAttribute("tickets_created", num("tickets_created") ?? null);
+      handle.setAttribute("replies_appended", num("replies_appended") ?? null);
+      handle.setAttribute("errors", num("errors") ?? null);
+      handle.setAttribute("duration_ms", num("duration_ms") ?? null);
+    }
+    handle.end("ok");
     /* trackEvent is also fired inside pollSupportInbox on the happy +
        skipped paths so the route layer doesn't double-emit. We only
        emit here on hard error below. */
@@ -46,6 +64,12 @@ async function runPoll(userId: string, userRole: string) {
   } catch (err) {
     const message = (err as Error).message ?? "unknown";
     console.error("[support/poll]", message);
+    handle.setAttribute("error_message", message.slice(0, 300));
+    handle.end("error");
+    obs.recordError(err as Error, {
+      route: "cron.support.poll",
+      user_id: userId,
+    });
     try {
       trackEvent("support.poll_run", userId, userRole, {
         source: "support-inbox",

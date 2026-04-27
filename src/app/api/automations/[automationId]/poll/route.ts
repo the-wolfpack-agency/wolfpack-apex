@@ -13,6 +13,7 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { getAutomation } from "@/lib/automations/registry";
 import { pollInbox } from "@/lib/automations/inbox-poller";
 import type { AutomationId } from "@/lib/automations/types";
+import { getObsClient } from "@/lib/obs";
 
 /**
  * Cron secret check. Vercel Cron Jobs hit the route as GET with
@@ -33,12 +34,30 @@ async function runPoll(automationId: string, userId: string, userRole: string) {
   if (!automation) {
     return NextResponse.json({ error: "automation not found" }, { status: 404 });
   }
+  const obs = getObsClient();
+  const handle = obs.startSpan(`cron.automations.${automationId}.poll`, {
+    automation_id: automationId,
+    user_id: userId,
+    user_role: userRole,
+  });
   try {
     const result = await pollInbox({
       automationId: automation.id as AutomationId,
       userId,
       userRole,
     });
+    const r = result as unknown as Record<string, unknown> | null | undefined;
+    if (r && typeof r === "object") {
+      const num = (k: string) => (typeof r[k] === "number" ? (r[k] as number) : undefined);
+      handle.setAttribute("messages_seen", num("messages_seen") ?? null);
+      handle.setAttribute("messages_matched", num("messages_matched") ?? null);
+      handle.setAttribute("artifacts_ingested", num("artifacts_ingested") ?? null);
+      handle.setAttribute("artifacts_duplicate", num("artifacts_duplicate") ?? null);
+      handle.setAttribute("artifacts_quarantined", num("artifacts_quarantined") ?? null);
+      handle.setAttribute("errors", num("errors") ?? null);
+      handle.setAttribute("duration_ms", num("duration_ms") ?? null);
+    }
+    handle.end("ok");
     return NextResponse.json({ ok: true, result });
   } catch (err) {
     /* "No valid Microsoft token" thrown by ms-graph clients downstream
@@ -48,6 +67,8 @@ async function runPoll(automationId: string, userId: string, userRole: string) {
        treats it as a notice (not a failure). */
     const message = (err as Error).message ?? "";
     if (message.includes("No valid Microsoft token")) {
+      handle.setAttribute("skipped", "no_user_connected");
+      handle.end("ok");
       return NextResponse.json(
         {
           ok: true,
@@ -68,6 +89,13 @@ async function runPoll(automationId: string, userId: string, userRole: string) {
       );
     }
     console.error("[automations/poll]", message);
+    handle.setAttribute("error_message", message.slice(0, 300));
+    handle.end("error");
+    obs.recordError(err as Error, {
+      route: `cron.automations.${automationId}.poll`,
+      automation_id: automationId,
+      user_id: userId,
+    });
     return NextResponse.json(
       { ok: false, error: message },
       { status: 500 },

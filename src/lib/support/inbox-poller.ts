@@ -45,12 +45,14 @@ import {
   createTicket,
   findTicketByConversationId,
   listEnabledPatterns,
+  setTicketCategory,
   updateTicket,
 } from "@/lib/support/repo";
 import {
   findMatchingPatterns,
   generateDraftResponse,
 } from "@/lib/support/pattern-library";
+import { categorizeTicket } from "@/lib/support/categorizer";
 import type { CreateTicketRow } from "@/lib/support/repo";
 
 /* ------------------------------------------------------------------ */
@@ -451,8 +453,56 @@ export async function pollSupportInbox(args: {
          triple-write side-effects (Qdrant + Neo4j) so the
          data/learning integration is preserved automatically. */
       const ticketInput = messageToTicket(msg);
-      const ticket = await createTicket(ticketInput);
+      let ticket = await createTicket(ticketInput);
       ticketsCreated += 1;
+
+      /* AI auto-categorization for the email-ingest path. Email
+         tickets default to category='general' from messageToTicket,
+         so we always run the classifier on them. Defensive: any
+         failure (AI down, DB hiccup) is logged and we continue with
+         the default category; never block ticket creation on this. */
+      try {
+        const catResult = await categorizeTicket({
+          title: ticket.title,
+          body: ticket.body,
+          diagnostic_text: ticket.diagnostic_text ?? undefined,
+        });
+        await setTicketCategory(
+          ticket.id,
+          catResult.category,
+          "ai",
+          catResult.confidence,
+        );
+        /* Mirror the new category into the in-memory ticket so the
+           draft generator (which reads ticket.category for prompt
+           context) sees the up-to-date value. */
+        ticket = {
+          ...ticket,
+          category: catResult.category,
+          category_source: "ai",
+          category_confidence: catResult.confidence,
+        };
+        try {
+          trackEvent(
+            "support.categorized",
+            args.userId,
+            args.userRole,
+            {
+              ticket_id: ticket.id,
+              category: catResult.category,
+              confidence: catResult.confidence,
+              source: "ai",
+            },
+          );
+        } catch {
+          /* analytics best-effort */
+        }
+      } catch (err) {
+        console.warn(
+          "[support/inbox-poller] auto-categorize failed:",
+          (err as Error).message,
+        );
+      }
 
       /* Draft generation: pattern-match the body+diagnostic, then ask
          Claude for a draft. Both helpers fail gracefully — a missing

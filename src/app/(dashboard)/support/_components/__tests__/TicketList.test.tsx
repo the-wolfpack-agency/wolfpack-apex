@@ -198,6 +198,41 @@ describe("<TicketList />", () => {
     expect(screen.queryByTestId("ticket-row-3")).toBeNull();
   });
 
+  test("renders the AI '?' indicator when an AI-categorized ticket has low confidence", () => {
+    const lowConfidence = makeTicket({
+      id: "low",
+      category: "billing",
+      category_source: "ai",
+      category_confidence: 0.55,
+    });
+    const highConfidence = makeTicket({
+      id: "high",
+      category: "billing",
+      category_source: "ai",
+      category_confidence: 0.93,
+    });
+    const manual = makeTicket({
+      id: "manual",
+      category: "billing",
+      category_source: "manual",
+      category_confidence: null,
+    });
+    render(
+      <TicketList
+        tickets={[lowConfidence, highConfidence, manual]}
+        filter="all"
+        onFilterChange={() => {}}
+      />,
+    );
+    expect(
+      screen.getByTestId("ticket-row-ai-uncertain-low"),
+    ).toBeInTheDocument();
+    /* High-confidence AI category does NOT show the indicator. */
+    expect(screen.queryByTestId("ticket-row-ai-uncertain-high")).toBeNull();
+    /* Manual categorization never shows the indicator. */
+    expect(screen.queryByTestId("ticket-row-ai-uncertain-manual")).toBeNull();
+  });
+
   test("each row renders an audience badge whose color matches its value", () => {
     const tickets = [
       makeTicket({ id: "c1", audience: "client" }),

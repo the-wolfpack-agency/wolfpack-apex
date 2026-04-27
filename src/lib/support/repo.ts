@@ -22,6 +22,8 @@ import { executeCypher } from "@/lib/neo4j";
 
 import type {
   SupportAudience,
+  SupportCategoryHistoryEntry,
+  SupportCategorySource,
   SupportPattern,
   SupportSeverity,
   SupportStatus,
@@ -85,6 +87,39 @@ function rowToTicket(r: Record<string, unknown>): SupportTicket {
   const audienceRaw = r.audience == null ? "internal" : String(r.audience);
   const audience: SupportAudience =
     audienceRaw === "client" ? "client" : "internal";
+
+  /* category_source is added by migration 103. Rows older than that
+     migration have it absent → coerce to 'manual' so the UI never sees
+     an undefined source. */
+  const categorySourceRaw =
+    r.category_source == null ? "manual" : String(r.category_source);
+  const categorySource: SupportCategorySource =
+    categorySourceRaw === "ai" ? "ai" : "manual";
+
+  /* category_confidence may come back as a string from pg's NUMERIC
+     type. Coerce defensively so the API returns a number (or null). */
+  let categoryConfidence: number | null = null;
+  if (r.category_confidence != null) {
+    const n = Number(r.category_confidence);
+    categoryConfidence = Number.isFinite(n) ? n : null;
+  }
+
+  /* category_history is JSONB. node-postgres returns it as a parsed
+     array already, but defensive normalization keeps a string-encoded
+     fallback safe too. */
+  let categoryHistory: SupportCategoryHistoryEntry[] = [];
+  const rawHistory = r.category_history;
+  if (Array.isArray(rawHistory)) {
+    categoryHistory = rawHistory as SupportCategoryHistoryEntry[];
+  } else if (typeof rawHistory === "string" && rawHistory.length > 0) {
+    try {
+      const parsed = JSON.parse(rawHistory);
+      if (Array.isArray(parsed)) categoryHistory = parsed;
+    } catch {
+      categoryHistory = [];
+    }
+  }
+
   return {
     id: String(r.id),
     title: String(r.title),
@@ -116,6 +151,9 @@ function rowToTicket(r: Record<string, unknown>): SupportTicket {
         : String(r.graph_internet_message_id),
     graph_conversation_id:
       r.graph_conversation_id == null ? null : String(r.graph_conversation_id),
+    category_source: categorySource,
+    category_confidence: categoryConfidence,
+    category_history: categoryHistory,
     created_at: String(r.created_at),
     updated_at: String(r.updated_at),
   };
@@ -146,6 +184,7 @@ const TICKET_COLUMNS = `
   sent_response, sent_at::text AS sent_at, sent_to_email,
   helpful, edit_diff, feedback_notes, feedback_at::text AS feedback_at,
   graph_message_id, graph_internet_message_id, graph_conversation_id,
+  category_source, category_confidence, category_history,
   created_at::text AS created_at, updated_at::text AS updated_at
 `;
 
@@ -499,6 +538,61 @@ export async function updateTicket(
     await tryNeo4jSent(ticket.id, patch.sent_at);
   }
   return ticket;
+}
+
+/**
+ * Update a ticket's category alongside its provenance + confidence and
+ * append a new entry to the append-only `category_history` JSONB.
+ *
+ * Why a dedicated function instead of `updateTicket`:
+ *   - We always want the source + confidence to land together, never one
+ *     without the other. A single SQL statement enforces that
+ *     atomicity.
+ *   - The history JSONB needs to be APPENDED to, not overwritten. We
+ *     use the jsonb concat operator `||` to push the new entry onto the
+ *     existing array. This is replay-safe — running it twice with the
+ *     same args produces two history entries (which is correct: the
+ *     same change happened twice).
+ *
+ * On unknown ticket id, the UPDATE returns 0 rows and we surface a
+ * thrown WriteQueryError per the writeQuery `expectRows: 1` contract so
+ * the caller knows the ticket vanished mid-flight.
+ */
+export async function setTicketCategory(
+  ticketId: string,
+  category: string,
+  source: SupportCategorySource,
+  confidence?: number,
+): Promise<void> {
+  /* Build the new history entry as a JSON string and let pg cast it to
+     jsonb. We use jsonb_build_array to wrap it so we can use the `||`
+     concat operator on the existing array. */
+  const historyEntry = {
+    category,
+    source,
+    confidence: typeof confidence === "number" ? confidence : null,
+    at: new Date().toISOString(),
+  };
+
+  await writeQuery(
+    `UPDATE instinct_support_tickets
+        SET category = $2,
+            category_source = $3,
+            category_confidence = $4,
+            category_history = COALESCE(category_history, '[]'::jsonb)
+                                 || $5::jsonb,
+            updated_at = NOW()
+      WHERE id = $1
+      RETURNING id`,
+    [
+      ticketId,
+      category,
+      source,
+      typeof confidence === "number" ? confidence : null,
+      JSON.stringify([historyEntry]),
+    ],
+    { expectRows: 1 },
+  );
 }
 
 export async function deleteTicket(id: string): Promise<boolean> {

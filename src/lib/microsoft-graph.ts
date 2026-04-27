@@ -12,6 +12,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { safeQuery, query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { getSecretOrThrow } from "@/lib/secrets";
+import { getObsClient } from "@/lib/obs";
 
 // TODO: when Azure Key Vault is provisioned, more secrets will move
 // behind getSecretOrThrow (MS_TENANT_ID, MS_REDIRECT_URI, INSTINCT_JWT_SECRET).
@@ -315,10 +316,16 @@ export function getAuthUrl(userId: string): string {
  * Exchange an authorization code for access + refresh tokens.
  */
 export async function exchangeCode(code: string): Promise<MsTokens | null> {
+  const obs = getObsClient();
+  const handle = obs.startSpan("ms_graph.auth.exchange_code");
   const creds = await getMsClientCreds();
   const redirectUri = process.env.MS_REDIRECT_URI;
 
-  if (!creds || !redirectUri) return null;
+  if (!creds || !redirectUri) {
+    handle.setAttribute("skipped", "no_creds_or_redirect");
+    handle.end("ok");
+    return null;
+  }
   const { clientId, clientSecret } = creds;
 
   try {
@@ -337,14 +344,18 @@ export async function exchangeCode(code: string): Promise<MsTokens | null> {
       }).toString(),
     });
 
+    handle.setAttribute("status_code", res.status);
+
     if (!res.ok) {
       console.error("[microsoft-graph] Token exchange failed:", res.status, await res.text());
+      handle.end("error");
       return null;
     }
 
     const data = await res.json();
     const expiresAt = new Date(Date.now() + data.expires_in * 1000).toISOString();
 
+    handle.end("ok");
     return {
       access_token: data.access_token,
       refresh_token: data.refresh_token,
@@ -353,6 +364,9 @@ export async function exchangeCode(code: string): Promise<MsTokens | null> {
     };
   } catch (err) {
     console.error("[microsoft-graph] Token exchange error:", (err as Error).message);
+    handle.setAttribute("error_message", (err as Error).message);
+    handle.end("error");
+    obs.recordError(err as Error, { route: "ms_graph.auth.exchange_code" });
     return null;
   }
 }
@@ -361,8 +375,14 @@ export async function exchangeCode(code: string): Promise<MsTokens | null> {
  * Refresh an expired access token using the refresh token.
  */
 export async function refreshAccessToken(currentRefreshToken: string): Promise<MsTokens | null> {
+  const obs = getObsClient();
+  const handle = obs.startSpan("ms_graph.auth.refresh_token");
   const creds = await getMsClientCreds();
-  if (!creds) return null;
+  if (!creds) {
+    handle.setAttribute("skipped", "no_creds");
+    handle.end("ok");
+    return null;
+  }
   const { clientId, clientSecret } = creds;
 
   try {
@@ -380,14 +400,18 @@ export async function refreshAccessToken(currentRefreshToken: string): Promise<M
       }).toString(),
     });
 
+    handle.setAttribute("status_code", res.status);
+
     if (!res.ok) {
       console.error("[microsoft-graph] Token refresh failed:", res.status, await res.text());
+      handle.end("error");
       return null;
     }
 
     const data = await res.json();
     const expiresAt = new Date(Date.now() + data.expires_in * 1000).toISOString();
 
+    handle.end("ok");
     return {
       access_token: data.access_token,
       refresh_token: data.refresh_token,
@@ -396,6 +420,9 @@ export async function refreshAccessToken(currentRefreshToken: string): Promise<M
     };
   } catch (err) {
     console.error("[microsoft-graph] Token refresh error:", (err as Error).message);
+    handle.setAttribute("error_message", (err as Error).message);
+    handle.end("error");
+    obs.recordError(err as Error, { route: "ms_graph.auth.refresh_token" });
     return null;
   }
 }

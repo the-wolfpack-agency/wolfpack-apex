@@ -1361,6 +1361,12 @@ export type InstinctEventType =
   //                                 [skipped], [status] }
   //     — emitted on every inbox-poller tick (cron + operator Run-now).
   //       Used to monitor poll cadence and catch token expiry early.
+  //
+  //   support.categorized        { ticket_id, category, confidence, source }
+  //     — emitted by the AI auto-categorizer (manual create + email
+  //       ingest). Used by the learning loop to compute classifier
+  //       precision over time and surface which buckets the model
+  //       struggles with.
   | "support.ticket_created"
   | "support.list_viewed"
   | "support.ticket_updated"
@@ -1368,6 +1374,7 @@ export type InstinctEventType =
   | "support.ticket_sent"
   | "support.feedback_submitted"
   | "support.poll_run"
+  | "support.categorized"
   // AI provider abstraction (src/lib/ai). Emitted on every model call so
   // we can attribute spend per feature, watch latency, and detect when
   // the failover path is firing.

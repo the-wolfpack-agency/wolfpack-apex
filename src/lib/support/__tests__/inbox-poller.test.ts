@@ -26,12 +26,14 @@ const mockUpdateTicket = jest.fn();
 const mockFindByConv = jest.fn();
 const mockAppendReply = jest.fn();
 const mockListPatterns = jest.fn();
+const mockSetTicketCategory = jest.fn();
 jest.mock("@/lib/support/repo", () => ({
   createTicket: (...args: unknown[]) => mockCreateTicket(...args),
   updateTicket: (...args: unknown[]) => mockUpdateTicket(...args),
   findTicketByConversationId: (...args: unknown[]) => mockFindByConv(...args),
   appendTicketReply: (...args: unknown[]) => mockAppendReply(...args),
   listEnabledPatterns: (...args: unknown[]) => mockListPatterns(...args),
+  setTicketCategory: (...args: unknown[]) => mockSetTicketCategory(...args),
 }));
 
 const mockFindMatching = jest.fn();
@@ -39,6 +41,11 @@ const mockGenerateDraft = jest.fn();
 jest.mock("@/lib/support/pattern-library", () => ({
   findMatchingPatterns: (...args: unknown[]) => mockFindMatching(...args),
   generateDraftResponse: (...args: unknown[]) => mockGenerateDraft(...args),
+}));
+
+const mockCategorizeTicket = jest.fn();
+jest.mock("@/lib/support/categorizer", () => ({
+  categorizeTicket: (...args: unknown[]) => mockCategorizeTicket(...args),
 }));
 
 const mockQuery = jest.fn();
@@ -134,6 +141,14 @@ beforeEach(() => {
   mockAppendReply.mockResolvedValue("reply-1");
   mockCreateTicket.mockResolvedValue({ ...baseTicket });
   mockUpdateTicket.mockResolvedValue({ ...baseTicket, status: "drafted" });
+  mockSetTicketCategory.mockResolvedValue(undefined);
+  /* Default categorizer return: confident m365 pick. Tests that
+     care about specific categories override per-call. */
+  mockCategorizeTicket.mockResolvedValue({
+    category: "m365",
+    confidence: 0.91,
+    reasoning: "AADSTS error",
+  });
   delete process.env.SUPPORT_INBOX_MAILBOX_UPN;
 });
 
@@ -467,6 +482,65 @@ describe("pollSupportInbox", () => {
 
     expect(out.tickets_created).toBe(1);
     expect(out.drafts_generated).toBe(0);
+    expect(mockCreateTicket).toHaveBeenCalled();
+  });
+
+  it("auto-categorizes every email-ingested ticket via categorizeTicket + setTicketCategory", async () => {
+    mockGetValidToken.mockResolvedValueOnce({
+      accessToken: "tk",
+      userEmail: "op@x.com",
+    });
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ value: [buildGraphMessage()] }), {
+          status: 200,
+        }),
+      ) as unknown as typeof fetch;
+    mockCategorizeTicket.mockResolvedValueOnce({
+      category: "m365",
+      confidence: 0.92,
+      reasoning: "Outlook AADSTS error",
+    });
+
+    const out = await pollSupportInbox({ userId: "u-1", userRole: "ops" });
+
+    expect(out.tickets_created).toBe(1);
+    /* Categorizer was called with the ticket title + body. */
+    expect(mockCategorizeTicket).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: expect.any(String),
+        body: expect.any(String),
+      }),
+    );
+    /* setTicketCategory was called with source='ai' + the model's pick. */
+    expect(mockSetTicketCategory).toHaveBeenCalledWith(
+      "tk-new",
+      "m365",
+      "ai",
+      0.92,
+    );
+  });
+
+  it("ticket creation succeeds even when the categorizer fails", async () => {
+    mockGetValidToken.mockResolvedValueOnce({
+      accessToken: "tk",
+      userEmail: "op@x.com",
+    });
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ value: [buildGraphMessage()] }), {
+          status: 200,
+        }),
+      ) as unknown as typeof fetch;
+    /* setTicketCategory rejects to simulate a DB hiccup; the
+       categorizer itself never throws by design. */
+    mockSetTicketCategory.mockRejectedValueOnce(new Error("db hiccup"));
+
+    const out = await pollSupportInbox({ userId: "u-1", userRole: "ops" });
+
+    expect(out.tickets_created).toBe(1);
     expect(mockCreateTicket).toHaveBeenCalled();
   });
 });

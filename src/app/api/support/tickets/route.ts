@@ -14,11 +14,13 @@ import {
   listTickets,
   updateTicket,
   listEnabledPatterns,
+  setTicketCategory,
 } from "@/lib/support/repo";
 import {
   findMatchingPatterns,
   generateDraftResponse,
 } from "@/lib/support/pattern-library";
+import { categorizeTicket } from "@/lib/support/categorizer";
 
 const VALID_STATUSES = ["open", "drafted", "sent", "closed", "all"] as const;
 const VALID_AUDIENCES = ["client", "internal"] as const;
@@ -125,7 +127,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const ticket = await createTicket({
+    let ticket = await createTicket({
       title,
       body: ticketBody,
       diagnostic_text,
@@ -136,6 +138,61 @@ export async function POST(req: NextRequest) {
       created_by_user_id: auth.user.id,
       created_by_email: auth.user.email,
     });
+
+    /* AI auto-categorization. Runs BEFORE draft generation so the
+       drafter can later inform itself from the chosen category and so
+       the operator-facing UI shows the AI category from the very first
+       render of the ticket page. Skipped when the operator picked a
+       category explicitly (anything other than missing or 'general')
+       so a deliberate operator pick is never overwritten by the AI.
+       Wrapped in try/catch — categorization failure must NOT block
+       ticket creation. */
+    const operatorPickedCategory =
+      typeof category === "string"
+      && category.trim().length > 0
+      && category.trim() !== "general";
+
+    if (!operatorPickedCategory) {
+      try {
+        const result = await categorizeTicket({
+          title,
+          body: ticketBody,
+          diagnostic_text: diagnostic_text ?? undefined,
+        });
+        await setTicketCategory(
+          ticket.id,
+          result.category,
+          "ai",
+          result.confidence,
+        );
+        /* Re-load the ticket so the response payload reflects the new
+           category metadata. updateTicket below would clobber category
+           if we passed it in, so we go through setTicketCategory and
+           pull the fresh row through the next updateTicket call. */
+        ticket = {
+          ...ticket,
+          category: result.category,
+          category_source: "ai",
+          category_confidence: result.confidence,
+        };
+
+        trackEvent("support.categorized", auth.user.id, auth.user.role, {
+          ticket_id: String(ticket.id),
+          category: result.category,
+          confidence: result.confidence,
+          source: "ai",
+        });
+      } catch (err) {
+        /* Defensive: any failure (AI down, DB hiccup) is logged and
+           the ticket continues through draft generation with its
+           original category. The categorizer itself never throws, so
+           this block primarily guards setTicketCategory. */
+        console.warn(
+          "[support/tickets] auto-categorize failed:",
+          (err as Error).message,
+        );
+      }
+    }
 
     const matchText = `${ticketBody}\n${diagnostic_text ?? ""}`;
     const enabled = await listEnabledPatterns();
@@ -154,9 +211,14 @@ export async function POST(req: NextRequest) {
       draft_pattern_ids: patternIds,
     });
 
+    /* Report the operator-picked category when present (so legacy
+       analytics dashboards keep their shape), and the AI-picked
+       category when the operator left it blank/general. ticket.category
+       carries the post-categorization value either way after our
+       in-memory mirror above. */
     trackEvent("support.ticket_created", auth.user.id, auth.user.role, {
       ticket_id: String(ticket.id),
-      category: category ?? "",
+      category: operatorPickedCategory ? (category ?? "") : ticket.category,
       severity: severity ?? "",
       audience,
     });

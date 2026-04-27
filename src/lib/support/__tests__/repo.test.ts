@@ -43,6 +43,7 @@ import {
   listEnabledPatterns,
   getPatternBySlug,
   upsertSeedPattern,
+  setTicketCategory,
 } from "@/lib/support/repo";
 import { SEED_PATTERNS } from "@/lib/support/seed-patterns";
 
@@ -479,5 +480,58 @@ describe("upsertSeedPattern", () => {
     expect(mockWriteQuery).toHaveBeenCalledTimes(SEED_PATTERNS.length);
     const [sql] = mockWriteQuery.mock.calls[0];
     expect(sql).toMatch(/ON CONFLICT \(slug\) DO UPDATE/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setTicketCategory
+// ---------------------------------------------------------------------------
+describe("setTicketCategory", () => {
+  it("issues an UPDATE that sets category, source, confidence, and appends to category_history", async () => {
+    mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "tk-1" }] });
+
+    await setTicketCategory("tk-1", "m365", "ai", 0.91);
+
+    expect(mockWriteQuery).toHaveBeenCalledTimes(1);
+    const [sql, params, opts] = mockWriteQuery.mock.calls[0];
+    expect(sql).toMatch(/UPDATE instinct_support_tickets/);
+    expect(sql).toMatch(/category = \$2/);
+    expect(sql).toMatch(/category_source = \$3/);
+    expect(sql).toMatch(/category_confidence = \$4/);
+    /* History column is appended via JSONB concat — never overwritten. */
+    expect(sql).toMatch(/category_history = COALESCE\(category_history,\s*'\[\]'::jsonb\)\s*\|\|\s*\$5::jsonb/);
+    expect(sql).toMatch(/updated_at = NOW\(\)/);
+    expect(params[0]).toBe("tk-1");
+    expect(params[1]).toBe("m365");
+    expect(params[2]).toBe("ai");
+    expect(params[3]).toBe(0.91);
+    /* The history payload is a JSON-stringified array containing one
+       entry with the same category/source/confidence. */
+    const history = JSON.parse(String(params[4]));
+    expect(Array.isArray(history)).toBe(true);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      category: "m365",
+      source: "ai",
+      confidence: 0.91,
+    });
+    expect(typeof history[0].at).toBe("string");
+    expect(opts).toEqual({ expectRows: 1 });
+  });
+
+  it("stores confidence=null in history when none is provided", async () => {
+    mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "tk-1" }] });
+    await setTicketCategory("tk-1", "general", "manual");
+    const [, params] = mockWriteQuery.mock.calls[0];
+    expect(params[3]).toBeNull();
+    const history = JSON.parse(String(params[4]));
+    expect(history[0].confidence).toBeNull();
+  });
+
+  it("propagates a writeQuery error when the ticket id is unknown (no silent loss)", async () => {
+    mockWriteQuery.mockRejectedValueOnce(new Error("expected_rows: 1 got 0"));
+    await expect(
+      setTicketCategory("missing", "m365", "ai", 0.8),
+    ).rejects.toThrow(/expected_rows/);
   });
 });

@@ -65,8 +65,33 @@ const CATEGORY_LABEL: Record<TicketCategory, string> = {
   azure: "Azure",
   instinct: "Instinct",
   "wolfpack-auto": "Wolfpack Auto",
+  "porsche-classes": "Porsche Classes",
+  billing: "Billing",
+  urgent: "Urgent",
   general: "General",
 };
+
+/**
+ * All operator-selectable categories, in the order shown in the
+ * "Change category" picker. Matches the categorizer's allowed values
+ * one-to-one so the picker can't pick anything the backend refuses.
+ */
+const CATEGORY_OPTIONS: TicketCategory[] = [
+  "m365",
+  "azure",
+  "instinct",
+  "wolfpack-auto",
+  "porsche-classes",
+  "billing",
+  "urgent",
+  "general",
+];
+
+function categoryOf(t: SupportTicket): TicketCategory {
+  return (CATEGORY_OPTIONS as readonly string[]).includes(t.category)
+    ? (t.category as TicketCategory)
+    : "general";
+}
 
 const SUPPORT_FROM_ADDRESS = "support@thewolfpack.agency";
 
@@ -170,14 +195,10 @@ export default function TicketDetail({
           <SeverityBadge severity={ticket.severity} />
           <StatusPill status={ticket.status} />
           <AudienceBadge audience={audienceOf(ticket)} />
-          <span
-            style={{
-              fontSize: "0.78rem",
-              color: "var(--wp-text-dim)",
-            }}
-          >
-            {CATEGORY_LABEL[ticket.category]}
-          </span>
+          <CategoryChip
+            ticket={ticket}
+            onTicketUpdated={onTicketUpdated}
+          />
         </div>
         <h1
           style={{
@@ -1215,5 +1236,208 @@ function FeedbackWidget({
         </p>
       )}
     </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Category chip + change-category picker                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Header chip that shows the ticket's category and exposes a small
+ * "Change" picker so the operator can correct the AI's pick. When the
+ * category was set by the AI, the chip also shows the source ('AI')
+ * and confidence so the operator knows whether to second-guess it.
+ *
+ * Persistence: PATCH /api/support/tickets/[id] with `{ category }`.
+ * The route already accepts `category` in PATCHABLE_FIELDS so we don't
+ * need a new endpoint. On success the parent's onTicketUpdated swaps
+ * in the fresh ticket and the chip re-renders with the new label.
+ */
+function CategoryChip({
+  ticket,
+  onTicketUpdated,
+}: {
+  ticket: SupportTicket;
+  onTicketUpdated: (next: SupportTicket) => void;
+}) {
+  const [picking, setPicking] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const source = ticket.category_source ?? "manual";
+  const confidence =
+    typeof ticket.category_confidence === "number"
+      ? ticket.category_confidence
+      : null;
+  const cat = categoryOf(ticket);
+
+  async function chooseCategory(next: TicketCategory) {
+    if (next === cat) {
+      setPicking(false);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetchWithRefresh(
+        `/api/support/tickets/${encodeURIComponent(ticket.id)}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ category: next }),
+        },
+      );
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        setError(
+          errBody.error ??
+            "We couldn't update the category. Try again in a moment.",
+        );
+        return;
+      }
+      const json = (await res.json()) as { ticket?: SupportTicket };
+      const fresh = json.ticket ?? {
+        ...ticket,
+        category: next,
+        category_source: "manual" as const,
+      };
+      onTicketUpdated(fresh);
+      setPicking(false);
+    } catch (err) {
+      setError(
+        `Something went wrong updating the category: ${(err as Error).message}`,
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <span
+      data-testid="ticket-detail-category-chip"
+      data-category={cat}
+      data-category-source={source}
+      style={{
+        display: "inline-flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: "0.35rem",
+        fontSize: "0.78rem",
+        color: "var(--wp-text-dim)",
+      }}
+    >
+      <span>{CATEGORY_LABEL[cat]}</span>
+      {source === "ai" && (
+        <span
+          data-testid="ticket-detail-category-source"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.2rem",
+            padding: "0.1rem 0.4rem",
+            borderRadius: 999,
+            background: "rgba(120,180,232,0.15)",
+            color: "rgb(120,180,232)",
+            fontWeight: 600,
+          }}
+        >
+          AI
+          {confidence !== null && (
+            <span
+              data-testid="ticket-detail-category-confidence"
+              style={{ fontWeight: 500, opacity: 0.85 }}
+            >
+              {Math.round(confidence * 100)}%
+            </span>
+          )}
+        </span>
+      )}
+      {!picking && (
+        <button
+          type="button"
+          onClick={() => setPicking(true)}
+          disabled={saving}
+          data-testid="ticket-detail-category-change"
+          style={{
+            background: "transparent",
+            border: "1px solid var(--wp-border, var(--wp-dark-border))",
+            color: "var(--wp-text-dim)",
+            borderRadius: 999,
+            padding: "0.1rem 0.5rem",
+            fontSize: "0.72rem",
+            fontWeight: 600,
+            cursor: saving ? "not-allowed" : "pointer",
+          }}
+        >
+          Change
+        </button>
+      )}
+      {picking && (
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.3rem",
+          }}
+        >
+          <select
+            data-testid="ticket-detail-category-select"
+            disabled={saving}
+            defaultValue={cat}
+            onChange={(e) => chooseCategory(e.target.value as TicketCategory)}
+            style={{
+              background: "var(--wp-dark)",
+              color: "var(--wp-text)",
+              border: "1px solid var(--wp-border, var(--wp-dark-border))",
+              borderRadius: 6,
+              padding: "0.2rem 0.4rem",
+              fontSize: "0.78rem",
+            }}
+          >
+            {CATEGORY_OPTIONS.map((opt) => (
+              <option key={opt} value={opt}>
+                {CATEGORY_LABEL[opt]}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => {
+              setPicking(false);
+              setError(null);
+            }}
+            disabled={saving}
+            data-testid="ticket-detail-category-cancel"
+            style={{
+              background: "transparent",
+              border: "1px solid var(--wp-border, var(--wp-dark-border))",
+              color: "var(--wp-text-dim)",
+              borderRadius: 999,
+              padding: "0.1rem 0.5rem",
+              fontSize: "0.72rem",
+              fontWeight: 600,
+              cursor: saving ? "not-allowed" : "pointer",
+            }}
+          >
+            Cancel
+          </button>
+        </span>
+      )}
+      {error && (
+        <span
+          role="alert"
+          data-testid="ticket-detail-category-error"
+          style={{
+            color: "rgb(232,123,123)",
+            fontSize: "0.72rem",
+          }}
+        >
+          {error}
+        </span>
+      )}
+    </span>
   );
 }

@@ -19,6 +19,7 @@
  */
 
 import { trackEvent } from "@/lib/analytics";
+import { getObsClient } from "@/lib/obs";
 
 import { AnthropicProvider } from "./anthropic-provider";
 import {
@@ -83,23 +84,75 @@ class RouterClient implements AIClient {
 
   async complete(req: AICompleteRequest): Promise<AICompleteResponse> {
     const primary = pickPrimary(req, this.registry);
+    const obs = getObsClient();
     let response: AICompleteResponse;
     let fallbackUsed = false;
 
+    /* Wrap each provider call in its own span so we capture latency
+       per provider — including the failed primary when failover
+       happens. Span name encodes the provider so traces are easy to
+       filter in App Insights. */
+    const baseAttrs = {
+      feature: req.metadata?.feature ?? "unknown",
+      tier: req.model_tier,
+      sensitivity: req.sensitivity ?? null,
+    };
+
+    const primarySpan = obs.startSpan(`ai.completion.${primary.name}`, {
+      ...baseAttrs,
+      role: "primary",
+    });
     try {
       response = await primary.complete(req);
+      primarySpan.setAttribute("model_used", response.model_used);
+      primarySpan.setAttribute("input_tokens", response.input_tokens);
+      primarySpan.setAttribute("output_tokens", response.output_tokens);
+      primarySpan.setAttribute("cost_usd", response.cost_usd);
+      primarySpan.setAttribute("latency_ms", response.latency_ms);
+      primarySpan.setAttribute("fallback_used", false);
+      primarySpan.end("ok");
     } catch (err) {
+      primarySpan.setAttribute("error_message", (err as Error).message);
+      primarySpan.end("error");
       const fallback = pickFallback(primary, this.registry);
       if (fallback && isRetryableError(err)) {
         console.warn(
           `[ai/router] primary ${primary.name} failed (${(err as Error).message}); falling back to ${fallback.name}`,
         );
-        response = await fallback.complete(req);
+        const fbSpan = obs.startSpan(`ai.completion.${fallback.name}`, {
+          ...baseAttrs,
+          role: "fallback",
+          primary_failed: primary.name,
+        });
+        try {
+          response = await fallback.complete(req);
+          fbSpan.setAttribute("model_used", response.model_used);
+          fbSpan.setAttribute("input_tokens", response.input_tokens);
+          fbSpan.setAttribute("output_tokens", response.output_tokens);
+          fbSpan.setAttribute("cost_usd", response.cost_usd);
+          fbSpan.setAttribute("latency_ms", response.latency_ms);
+          fbSpan.setAttribute("fallback_used", true);
+          fbSpan.end("ok");
+        } catch (fbErr) {
+          fbSpan.setAttribute("error_message", (fbErr as Error).message);
+          fbSpan.end("error");
+          obs.recordError(fbErr as Error, {
+            ...baseAttrs,
+            provider: fallback.name,
+            role: "fallback",
+          });
+          throw fbErr;
+        }
         fallbackUsed = true;
       } else {
         console.warn(
           `[ai/router] ${primary.name} failed with no usable fallback: ${(err as Error).message}`,
         );
+        obs.recordError(err as Error, {
+          ...baseAttrs,
+          provider: primary.name,
+          role: "primary",
+        });
         throw err;
       }
     }

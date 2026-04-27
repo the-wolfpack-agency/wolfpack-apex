@@ -199,6 +199,64 @@ describe("<TicketDetail /> — drafted state", () => {
   });
 });
 
+describe("<TicketDetail /> — category chip + change picker", () => {
+  test("shows AI source + confidence percent for AI-categorized tickets", () => {
+    const t = makeTicket({
+      category: "m365",
+      category_source: "ai",
+      category_confidence: 0.92,
+    });
+    render(<TicketDetail ticket={t} onTicketUpdated={() => {}} />);
+    expect(screen.getByTestId("ticket-detail-category-chip")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("ticket-detail-category-source").textContent,
+    ).toMatch(/AI/);
+    expect(
+      screen.getByTestId("ticket-detail-category-confidence").textContent,
+    ).toMatch(/92%/);
+  });
+
+  test("Change category opens the picker and PATCHes the new value, then updates the ticket", async () => {
+    const t = makeTicket({
+      category: "m365",
+      category_source: "ai",
+      category_confidence: 0.62,
+    });
+    const updated = {
+      ...t,
+      category: "billing" as const,
+      category_source: "manual" as const,
+      category_confidence: null,
+    };
+    mockFetchWithRefresh.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ticket: updated }),
+    });
+
+    const onTicketUpdated = jest.fn();
+    render(<TicketDetail ticket={t} onTicketUpdated={onTicketUpdated} />);
+
+    fireEvent.click(screen.getByTestId("ticket-detail-category-change"));
+    expect(
+      screen.getByTestId("ticket-detail-category-select"),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("ticket-detail-category-select"), {
+      target: { value: "billing" },
+    });
+
+    await waitFor(() => {
+      expect(onTicketUpdated).toHaveBeenCalledWith(updated);
+    });
+
+    const [url, init] = mockFetchWithRefresh.mock.calls[0];
+    expect(url).toBe(`/api/support/tickets/${t.id}`);
+    expect((init as RequestInit).method).toBe("PATCH");
+    const body = JSON.parse(((init as RequestInit).body as string) ?? "{}");
+    expect(body).toEqual({ category: "billing" });
+  });
+});
+
 describe("<TicketDetail /> — audience routing", () => {
   test("renders an audience badge in the header for the ticket's audience", () => {
     const t = makeTicket({ audience: "client" });

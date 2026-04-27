@@ -32,6 +32,25 @@ export type SupportAudience = "client" | "internal";
 
 export const AUDIENCE_VALUES = ["client", "internal"] as const;
 
+/**
+ * Provenance of the `category` value on a ticket. Used by the UI to
+ * decide whether to render a "?" indicator (AI + low confidence) and
+ * by the learning loop to compute classifier precision.
+ */
+export type SupportCategorySource = "manual" | "ai";
+
+/**
+ * Append-only audit entry on a ticket's category_history JSONB column.
+ * Each entry records a category change. Never edited in place — the
+ * repo helper always pushes a new entry so the history is replay-safe.
+ */
+export interface SupportCategoryHistoryEntry {
+  category: string;
+  source: SupportCategorySource;
+  confidence?: number | null;
+  at: string;
+}
+
 export interface SupportTicket {
   id: string;
   title: string;
@@ -73,6 +92,23 @@ export interface SupportTicket {
    * existing ticket instead of creating a duplicate.
    */
   graph_conversation_id: string | null;
+  /**
+   * Provenance of `category`. 'manual' (operator picked) or 'ai'
+   * (auto-categorizer). Defaults to 'manual' on rows created before
+   * migration 103 and on any explicit operator pick.
+   */
+  category_source?: SupportCategorySource;
+  /**
+   * Confidence (0..1) the AI had when it picked `category`. Null/absent
+   * for operator-picked categories.
+   */
+  category_confidence?: number | null;
+  /**
+   * Append-only audit trail of every category change on this ticket.
+   * The latest entry is always the one whose values are reflected in
+   * `category` / `category_source` / `category_confidence`.
+   */
+  category_history?: SupportCategoryHistoryEntry[];
   created_at: string;
   updated_at: string;
 }
