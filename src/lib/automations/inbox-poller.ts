@@ -818,6 +818,41 @@ async function pollInboxBySearch(args: {
        differences across mailboxes) can never bypass the contract. */
     if (!messageMatchesAutomation(msg, automation, activeFilters)) continue;
     messagesMatched += 1;
+
+    /* Graph's $search list response OMITS the body field even when
+       $select includes it — known quirk, the body is only available via
+       a per-message detail GET. Fetch full body + ccRecipients so the
+       Cognito body-synth path can see the structured HTML. Without this
+       the synthesized .eml has only the 255-char bodyPreview and the
+       parser quarantines with "no text/html part". (Confirmed against
+       the BA101 2026-04-20 Ritz Carlton coordinator email on 2026-04-27.) */
+    try {
+      const detailUrl = `https://graph.microsoft.com/v1.0${getMailboxBase()}/messages/${encodeURIComponent(msg.id)}?$select=body,ccRecipients`;
+      const detailRes = await fetch(detailUrl, {
+        headers: { Authorization: `Bearer ${preToken.accessToken}` },
+      });
+      if (detailRes.ok) {
+        const detail = (await detailRes.json()) as {
+          body?: { contentType?: string | null; content?: string | null };
+          ccRecipients?: Array<{ emailAddress?: { address?: string | null } }>;
+        };
+        // Mutate in place — processMatchedMessage / synthesizeEml read msg.body.
+        (msg as unknown as { body?: typeof detail.body }).body = detail.body;
+        if (detail.ccRecipients) {
+          (msg as unknown as { ccRecipients?: typeof detail.ccRecipients }).ccRecipients =
+            detail.ccRecipients;
+        }
+      } else {
+        console.warn(
+          `[automations/inbox-poller] search-mode body-detail fetch failed for ${msg.id}: ${detailRes.status}`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[automations/inbox-poller] search-mode body-detail threw for ${msg.id}: ${(err as Error).message}`,
+      );
+    }
+
     const r = await processMatchedMessage(msg, automation, args, messageLevel);
     artifactsIngested += r.ingested;
     artifactsDuplicate += r.duplicate;

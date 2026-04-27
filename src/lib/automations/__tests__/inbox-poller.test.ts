@@ -282,6 +282,68 @@ describe("pollInbox dispatch · routes to search mode when AUTOMATION_POLL_MAILB
     expect(result.messages_seen).toBe(0);
   });
 
+  it("fetches per-message body detail (Graph $search omits body in list response)", async () => {
+    // Regression — 2026-04-27. The first cron tick against Alicia's
+    // mailbox quarantined the BA101 Ritz Carlton coordinator email
+    // because Graph $search returned the message WITHOUT the body
+    // field, so the synthesized .eml had only bodyPreview and the
+    // Cognito parser saw no text/html part. The fix: per-message
+    // detail GET for ?$select=body,ccRecipients before processing.
+    process.env.AUTOMATION_POLL_MAILBOX_UPN = "alicia@thewolfpack.agency";
+    (getValidToken as jest.Mock).mockResolvedValueOnce({ accessToken: "t" });
+    const fetchSpy = jest.fn(async (url: string) => {
+      const u = String(url);
+      // URL.searchParams.set percent-encodes the $; the actual URL
+      // contains %24search=, not $search=. The body-detail GET uses
+      // a template literal so $select stays literal there.
+      if (u.includes("%24search=")) {
+        // Search list response — note no body field, mimicking Graph's actual behavior.
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            value: [
+              {
+                id: "msg-1",
+                // Match the test automation's filter (porsche-academy sender +
+                // Scheduled Report Notification subject — see automation
+                // const at top of file). The body-detail fetch is what we're
+                // asserting; the sender shape is incidental.
+                subject: "Scheduled Report Notification",
+                from: { emailAddress: { address: "porsche-academy-notification@porsche.de" } },
+                receivedDateTime: "2026-04-27T13:00:00Z",
+                bodyPreview: "truncated...",
+                hasAttachments: false,
+                // body deliberately absent — Graph's $search list response
+                // omits the body field even when $select includes it.
+              },
+            ],
+          }),
+        } as Response;
+      }
+      // Per-message body-detail GET.
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          body: { contentType: "html", content: "<html><body>full email</body></html>" },
+          ccRecipients: [],
+        }),
+      } as Response;
+    });
+    global.fetch = fetchSpy as unknown as typeof fetch;
+
+    await pollInbox({ automationId: "porsche-classes", userId: "u1", userRole: "ops" });
+
+    // Two fetches: the $search list, then the per-message body GET.
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const detailCall = fetchSpy.mock.calls.find((c) =>
+      String(c[0]).includes("/messages/msg-1") && String(c[0]).includes("$select=body"),
+    );
+    expect(detailCall).toBeDefined();
+    expect(String(detailCall![0])).toContain("/users/alicia%40thewolfpack.agency");
+  });
+
   it("emits trackEvent with mode:'search' when the search path runs", async () => {
     process.env.AUTOMATION_POLL_MAILBOX_UPN = "alicia@thewolfpack.agency";
     (getValidToken as jest.Mock).mockResolvedValueOnce({ accessToken: "t" });
