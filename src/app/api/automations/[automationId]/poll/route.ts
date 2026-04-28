@@ -123,10 +123,13 @@ export async function POST(
   }
   const auth = await requireCapability(req, "automations.run");
   if (!auth.ok) return auth.response;
-  /* Pass the Instinct user.id — that's what ms_tokens.connected_by
-     stores. getValidToken's (connected_by OR user_email) dual lookup
-     also handles the email-anchored case for backwards compat. */
-  return runPoll(automationId, auth.user.id, auth.user.role);
+  /* Pass auth.user.email when present — matches the GET handler. The
+     ms_tokens.connected_by column historically stored synthetic ids
+     (e.g. "demo-cto") that don't match a session's auth.user.id, but
+     user_email is always the authoritative human address. The dual
+     lookup in getValidToken handles either, so passing email-first is
+     strictly more permissive without breaking id-anchored tokens. */
+  return runPoll(automationId, auth.user.email ?? auth.user.id, auth.user.role);
 }
 
 /**
