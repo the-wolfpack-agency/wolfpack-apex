@@ -127,19 +127,25 @@ async function listInboxSince(
   if (!tok) {
     throw new Error("inbox list fallback: no_valid_token at fallback time");
   }
-  /* Use URL constructor so $orderby's space and the $filter datetime
-     are encoded by the standard URL serializer rather than a hand-
-     concatenated string. Avoids any chance of an unencoded space or
-     special char tripping Graph's parser. */
-  const url = new URL("https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages");
-  url.searchParams.set("$top", "50");
-  url.searchParams.set("$orderby", "receivedDateTime desc");
-  url.searchParams.set(
-    "$select",
-    "id,subject,bodyPreview,from,toRecipients,hasAttachments,receivedDateTime,lastModifiedDateTime",
-  );
-  url.searchParams.set("$filter", `receivedDateTime ge ${sinceIso}`);
-  const res = await fetch(url.toString(), {
+  /* IMPORTANT: do NOT use URL/URLSearchParams here. searchParams.set
+     encodes spaces as `+` (form-urlencoded style), but Graph's OData
+     parser only accepts `%20` for spaces in $filter / $orderby
+     values. The `+` form silently returns 0 rows even though the
+     query is otherwise valid (confirmed against homyk's mailbox on
+     2026-04-28: searchParams form returned 0; manual string with
+     fetch's auto-encoding returned 48 including the cognito email).
+     Build the URL by hand and let fetch's encoder turn the literal
+     space in `$orderby` and the encodeURIComponent'd `$filter` into
+     `%20`. */
+  const select =
+    "id,subject,bodyPreview,from,toRecipients,hasAttachments,receivedDateTime,lastModifiedDateTime";
+  const filter = `receivedDateTime ge ${sinceIso}`;
+  const url =
+    `https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages` +
+    `?$top=50&$orderby=receivedDateTime desc` +
+    `&$select=${select}` +
+    `&$filter=${encodeURIComponent(filter)}`;
+  const res = await fetch(url, {
     headers: {
       Authorization: `Bearer ${tok.accessToken}`,
       Accept: "application/json",
