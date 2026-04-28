@@ -100,7 +100,21 @@ export default function OperatorActions(props: { onChanged?: () => void }) {
   const [pollState, setPollState] = useState<
     | { kind: "idle" }
     | { kind: "running" }
-    | { kind: "ok"; result: PollResult; diag?: PollDiag | null }
+    | {
+        kind: "ok";
+        result: PollResult;
+        diag?: PollDiag | null;
+        recent_exceptions?: Array<{
+          artifact_id: string | null;
+          kind: string;
+          detail: string;
+          source_message_id: string | null;
+          received_at: string | null;
+          mime: string | null;
+          subject_hint: string | null;
+          created_at: string;
+        }>;
+      }
     | { kind: "error"; message: string }
   >({ kind: "idle" });
 
@@ -124,7 +138,8 @@ export default function OperatorActions(props: { onChanged?: () => void }) {
       }
       const result: PollResult = body?.result ?? {};
       const diag: PollDiag | null = body?.diag ?? null;
-      setPollState({ kind: "ok", result, diag });
+      const recent_exceptions = body?.recent_exceptions ?? undefined;
+      setPollState({ kind: "ok", result, diag, recent_exceptions });
       props.onChanged?.();
     } catch (err) {
       setPollState({ kind: "error", message: (err as Error).message });
@@ -291,6 +306,9 @@ export default function OperatorActions(props: { onChanged?: () => void }) {
               <>
                 <PollSummary result={pollState.result} />
                 {pollState.diag ? <PollDiagBlock diag={pollState.diag} /> : null}
+                {pollState.recent_exceptions && pollState.recent_exceptions.length > 0 ? (
+                  <PollExceptionsBlock exceptions={pollState.recent_exceptions} />
+                ) : null}
               </>
             )}
           </div>
@@ -405,6 +423,74 @@ export default function OperatorActions(props: { onChanged?: () => void }) {
         </div>
       </div>
     </section>
+  );
+}
+
+function PollExceptionsBlock({
+  exceptions,
+}: {
+  exceptions: Array<{
+    artifact_id: string | null;
+    kind: string;
+    detail: string;
+    source_message_id: string | null;
+    received_at: string | null;
+    mime: string | null;
+    subject_hint: string | null;
+    created_at: string;
+  }>;
+}) {
+  return (
+    <div
+      data-testid="operator-actions-poll-exceptions"
+      style={{
+        marginTop: "0.55rem",
+        padding: "0.55rem 0.7rem",
+        background: "var(--wp-error-bg, rgba(196,68,68,0.08))",
+        border: "1px solid var(--wp-error, #c44)",
+        borderRadius: 6,
+        fontSize: "0.74rem",
+        lineHeight: 1.5,
+        color: "var(--wp-text-dim)",
+      }}
+    >
+      <div style={{ fontWeight: 600, color: "var(--wp-error, #c44)", marginBottom: 4 }}>
+        Quarantined this run ({exceptions.length})
+      </div>
+      <ul style={{ margin: 0, padding: "0 0 0 1rem", listStyle: "disc" }}>
+        {exceptions.map((e, i) => {
+          const subj = (e.subject_hint || "")
+            .split(/\r?\n/)
+            .find((line) => /^subject:/i.test(line))
+            ?.replace(/^subject:\s*/i, "")
+            .slice(0, 120);
+          return (
+            <li key={i} style={{ marginBottom: 4 }}>
+              <code>{e.kind}</code> · {e.detail.slice(0, 140)}
+              {e.received_at ? (
+                <>
+                  {" "}
+                  <span style={{ color: "var(--wp-text-muted)" }}>
+                    ({e.received_at.slice(0, 10)})
+                  </span>
+                </>
+              ) : null}
+              {subj ? (
+                <div style={{ color: "var(--wp-text-muted)", paddingLeft: 12 }}>
+                  Subject: {subj}
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      <div style={{ marginTop: 4, color: "var(--wp-text-muted)" }}>
+        Resolve from{" "}
+        <a href="/automations/porsche-classes/exceptions">
+          /automations/porsche-classes/exceptions
+        </a>
+      </div>
+    </div>
   );
 }
 

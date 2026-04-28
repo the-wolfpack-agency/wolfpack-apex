@@ -15,6 +15,66 @@ import { pollInbox, getMailboxBases } from "@/lib/automations/inbox-poller";
 import type { AutomationId } from "@/lib/automations/types";
 import { getObsClient } from "@/lib/obs";
 import { getValidToken } from "@/lib/microsoft-graph";
+import { query } from "@/lib/db";
+
+/**
+ * Pull the N most-recent open exceptions (parser quarantines) so the
+ * Run-now response can show an operator exactly what failed and why
+ * without making them dig into /diag. Best-effort — DB errors return [].
+ */
+async function recentQuarantines(automationId: string): Promise<
+  Array<{
+    artifact_id: string | null;
+    kind: string;
+    detail: string;
+    source_message_id: string | null;
+    received_at: string | null;
+    mime: string | null;
+    subject_hint: string | null;
+    created_at: string;
+  }>
+> {
+  if (automationId !== "porsche-classes") return [];
+  try {
+    const r = await query<{
+      artifact_id: string | null;
+      kind: string;
+      detail: string;
+      source_message_id: string | null;
+      received_at: string | null;
+      mime: string | null;
+      subject_hint: string | null;
+      created_at: string;
+    }>(
+      `SELECT
+         e.artifact_id::text                         AS artifact_id,
+         e.kind                                      AS kind,
+         e.detail                                    AS detail,
+         a.source_message_id                         AS source_message_id,
+         a.received_at::text                         AS received_at,
+         a.mime                                      AS mime,
+         /* The first 80 bytes of bytes is usually a Subject: header
+            for .eml ingests; gives the operator a quick "this was
+            the BA101 5/4 instructor email" cue without exposing the
+            whole body. xlsx ingests get null here. */
+         CASE WHEN a.mime = 'message/rfc822'
+           THEN convert_from(substring(a.bytes from 1 for 200), 'UTF8')
+           ELSE NULL
+         END                                         AS subject_hint,
+         e.created_at::text                          AS created_at
+       FROM instinct_automation_porsche_exceptions e
+       LEFT JOIN instinct_automation_porsche_artifacts a
+         ON a.id = e.artifact_id
+       WHERE e.created_at > NOW() - interval '1 hour'
+       ORDER BY e.created_at DESC
+       LIMIT 10`,
+      [],
+    );
+    return r.rows;
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Probe Graph for "what mailbox does our token actually read, and what
@@ -285,7 +345,16 @@ async function runPoll(automationId: string, userId: string, userRole: string) {
     if (typeof seen === "number" && seen === 0) {
       diag = await probeForDiag(userId);
     }
-    return NextResponse.json({ ok: true, result, diag });
+    /* When this poll quarantined anything, fetch the recent
+       exceptions inline so the operator can see what failed and why
+       without leaving the Run-now panel. */
+    const quarantined = (result as unknown as { artifacts_quarantined?: number })
+      .artifacts_quarantined;
+    let recent_exceptions: Awaited<ReturnType<typeof recentQuarantines>> | undefined;
+    if (typeof quarantined === "number" && quarantined > 0) {
+      recent_exceptions = await recentQuarantines(automationId);
+    }
+    return NextResponse.json({ ok: true, result, diag, recent_exceptions });
   } catch (err) {
     /* "No valid Microsoft token" thrown by ms-graph clients downstream
        of pollInbox is the documented bootstrap state — the cron runs
