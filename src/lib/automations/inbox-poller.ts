@@ -1187,8 +1187,35 @@ interface HistoricalScanArgs {
 const kqlValue = (s: string) =>
   /[\s\-]/.test(s) ? `'${s.replace(/'/g, "")}'` : s;
 
+/**
+ * Whether a sender pattern is safe to put inside a KQL `from:` clause.
+ *
+ * `messageMatchesAutomation` (delta-mode client-side filter) accepts
+ * substring patterns like `@thewolfpack.agency` or `@` as wildcards.
+ * Those substrings are NOT valid KQL `from:` values — Graph either
+ * rejects the query (silent return-0 behavior) or matches nothing.
+ * Skip anything that's not a real-shaped email address (`local@host`).
+ *
+ * Confirmed against homyk@thewolfpack.agency 2026-04-28: a clause
+ * containing `from:@` returned 0 across both alicia and homyk inboxes
+ * even though the cognito email matched the other senders/subjects.
+ */
+function isKqlSafeSenderPattern(s: string): boolean {
+  const at = s.indexOf("@");
+  /* Must have at least one char before AND after the @ — rules out
+     "@", "@host", "user@". Plain substrings like "@thewolfpack.agency"
+     fail this check and get dropped from the KQL clause (they remain
+     in the client-side filter list, so `messageMatchesAutomation`
+     still applies them after Graph returns matches for the other
+     real-email senders). */
+  if (at <= 0) return false;
+  if (at === s.length - 1) return false;
+  return true;
+}
+
 function buildSearchClause(filters: HistoricalScanArgs["filters"]): string {
   const senders = (filters.sender_match ?? [])
+    .filter(isKqlSafeSenderPattern)
     .map((s) => `from:${kqlValue(s)}`)
     .join(" OR ");
   const subjects = (filters.subject_match ?? [])
