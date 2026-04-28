@@ -59,6 +59,42 @@ export function getMailboxBase(): string {
   return upn ? `/users/${encodeURIComponent(upn)}` : "/me";
 }
 
+/**
+ * Return ALL mailbox bases the poller should read this tick. Resolution
+ * order:
+ *   1. `AUTOMATION_POLL_MAILBOX_UPNS` (comma-separated, e.g.
+ *      "alicia@thewolfpack.agency,homyk@thewolfpack.agency"). Each entry
+ *      becomes /users/<encoded-upn>. Whitespace and empty entries are
+ *      dropped. The literal token `me` (case-insensitive) maps to /me
+ *      so an operator's own inbox can be included in the rotation
+ *      without requiring Mail.Read.Shared.
+ *   2. `AUTOMATION_POLL_MAILBOX_UPN` (singular, legacy). Single
+ *      /users/<encoded-upn>. Kept so existing deployments keep working.
+ *   3. neither set → ["/me"] — the operator's own mailbox.
+ *
+ * The poller iterates over the returned bases sequentially per tick and
+ * aggregates messages_seen / matched / ingested across all of them.
+ * This is how the alicia@ + homyk@ split (Alicia receives some Cognito
+ * notifications, the operator receives the rest while parallel-testing)
+ * lands in one ingest pipeline without dropping either side.
+ */
+export function getMailboxBases(): string[] {
+  const list = (process.env.AUTOMATION_POLL_MAILBOX_UPNS || "").trim();
+  if (list) {
+    const bases = list
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((upn) =>
+        upn.toLowerCase() === "me" ? "/me" : `/users/${encodeURIComponent(upn)}`,
+      );
+    if (bases.length > 0) return bases;
+  }
+  const upn = (process.env.AUTOMATION_POLL_MAILBOX_UPN || "").trim();
+  if (upn) return [`/users/${encodeURIComponent(upn)}`];
+  return ["/me"];
+}
+
 /* ------------------------------------------------------------------ */
 /* Cursor helpers                                                      */
 /* ------------------------------------------------------------------ */
@@ -234,6 +270,11 @@ interface GraphAttachment {
 async function fetchAttachments(
   userId: string,
   messageId: string,
+  /** Optional explicit Graph base — when polling across multiple
+   *  mailboxes, attachments must be fetched from the SAME base the
+   *  message was discovered in. Falls back to getMailboxBase() so
+   *  every existing single-mailbox caller keeps working. */
+  baseOverride?: string,
 ): Promise<Array<{ name: string; contentType: string; bytes: Buffer }>> {
   const token = await getValidToken(userId);
   if (!token) {
@@ -243,6 +284,7 @@ async function fetchAttachments(
       `inbox-poller: no token for user ${userId}`,
     );
   }
+  const base = baseOverride ?? getMailboxBase();
   /* IMPORTANT: do NOT include `contentBytes` in the LIST $select. Graph
      drops items from the list response when contentBytes is requested
      there (it's a large property only resolvable on individual
@@ -250,7 +292,7 @@ async function fetchAttachments(
      for messages whose only attachment was a real fileAttachment. We
      now list the attachments first (cheap), then fetch each
      fileAttachment individually with bytes. */
-  const listUrl = `https://graph.microsoft.com/v1.0${getMailboxBase()}/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size`;
+  const listUrl = `https://graph.microsoft.com/v1.0${base}/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size`;
   const listRes = await fetch(listUrl, {
     headers: { Authorization: `Bearer ${token.accessToken}` },
   });
@@ -274,7 +316,7 @@ async function fetchAttachments(
       continue; // Skip reference / itemAttachment — we can't fetch bytes for those.
     }
     /* Per-attachment fetch to actually get contentBytes. */
-    const oneUrl = `https://graph.microsoft.com/v1.0${getMailboxBase()}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(att.id)}`;
+    const oneUrl = `https://graph.microsoft.com/v1.0${base}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(att.id)}`;
     const oneRes = await fetch(oneUrl, {
       headers: { Authorization: `Bearer ${token.accessToken}` },
     });
@@ -433,6 +475,20 @@ export interface PollResult {
       driving search-mode (and thus which env var change applies)
       versus the standard delta+inbox-list path. */
   mode?: "delta" | "delta+fallback" | "search";
+  /** Per-mailbox results when search mode polled multiple bases this
+      tick (AUTOMATION_POLL_MAILBOX_UPNS). Each entry shows what THAT
+      mailbox contributed so operators can see, e.g., "alicia got 0,
+      homyk got the cognito email". Absent on single-base ticks. */
+  bases_polled?: Array<{
+    base: string;
+    messages_seen: number;
+    messages_matched: number;
+    artifacts_ingested: number;
+    artifacts_duplicate: number;
+    artifacts_quarantined: number;
+    errors: number;
+    skipped: PollResult["skipped"] | null;
+  }>;
 }
 
 export async function pollInbox(args: {
@@ -440,16 +496,84 @@ export async function pollInbox(args: {
   userId: string;
   userRole: string;
 }): Promise<PollResult> {
-  /* Dispatch — when AUTOMATION_POLL_MAILBOX_UPN is set, we are reading
-     a mailbox we don't own (e.g. Alicia's). Server-side $search with
-     the automation's filter list is the privacy-safe path: only
-     messages matching the configured senders/subjects ever cross the
-     wire. Delta polling has no $search support and would pull every
-     inbox-message metadata through our code. */
-  if ((process.env.AUTOMATION_POLL_MAILBOX_UPN || "").trim()) {
-    return pollInboxBySearch(args);
+  /* Dispatch — when AUTOMATION_POLL_MAILBOX_UPN(S) is set, we are
+     reading mailboxes we may not own (e.g. Alicia's). Server-side
+     $search with the automation's filter list is the privacy-safe
+     path: only messages matching the configured senders/subjects ever
+     cross the wire. Delta polling has no $search support and would
+     pull every inbox-message metadata through our code.
+
+     Multi-mailbox: AUTOMATION_POLL_MAILBOX_UPNS (plural, comma-
+     separated) lets one tick span multiple mailboxes. Used when
+     Cognito notifications fan out to two recipients (Alicia for the
+     manual workflow, plus the operator for parallel-testing) — both
+     mailboxes need polling so neither side drops messages. */
+  const bases = getMailboxBases();
+  const usingSearch = bases.some((b) => b !== "/me") || bases.length > 1;
+  if (usingSearch) {
+    return pollInboxAcrossBases(args, bases);
   }
   return pollInboxByDelta(args);
+}
+
+/**
+ * Search-mode poll across N mailbox bases. Iterates the bases
+ * sequentially (Graph quotas are per-token, not per-mailbox, so
+ * parallel adds no real gain and risks throttling), aggregates the
+ * per-base PollResults, and returns one combined PollResult. Surfaces
+ * the per-base counts in `bases_polled` so the diag can render which
+ * mailbox produced what.
+ */
+async function pollInboxAcrossBases(
+  args: { automationId: AutomationId; userId: string; userRole: string },
+  bases: string[],
+): Promise<PollResult> {
+  const start = Date.now();
+  let messages_seen = 0;
+  let messages_matched = 0;
+  let artifacts_ingested = 0;
+  let artifacts_duplicate = 0;
+  let artifacts_quarantined = 0;
+  let errors = 0;
+  let firstSkipped: PollResult["skipped"] | undefined;
+  const perBase: PollResult["bases_polled"] = [];
+
+  for (const base of bases) {
+    const r = await pollInboxBySearch(args, base);
+    perBase!.push({
+      base,
+      messages_seen: r.messages_seen,
+      messages_matched: r.messages_matched,
+      artifacts_ingested: r.artifacts_ingested,
+      artifacts_duplicate: r.artifacts_duplicate,
+      artifacts_quarantined: r.artifacts_quarantined,
+      errors: r.errors,
+      skipped: r.skipped ?? null,
+    });
+    messages_seen += r.messages_seen;
+    messages_matched += r.messages_matched;
+    artifacts_ingested += r.artifacts_ingested;
+    artifacts_duplicate += r.artifacts_duplicate;
+    artifacts_quarantined += r.artifacts_quarantined;
+    errors += r.errors;
+    if (r.skipped && !firstSkipped) firstSkipped = r.skipped;
+  }
+
+  return {
+    automation_id: args.automationId,
+    messages_seen,
+    messages_matched,
+    artifacts_ingested,
+    artifacts_duplicate,
+    artifacts_quarantined,
+    errors,
+    duration_ms: Date.now() - start,
+    mode: "search",
+    bases_polled: perBase,
+    /* Only surface skipped when EVERY base skipped — partial skip is
+       not the same as the whole tick failing. */
+    ...(firstSkipped && perBase!.every((b) => b.skipped) ? { skipped: firstSkipped } : {}),
+  };
 }
 
 async function pollInboxByDelta(args: {
@@ -614,6 +738,12 @@ async function processMatchedMessage(
   automation: AutomationDefinition,
   args: { userId: string; userRole: string },
   messageLevel: boolean,
+  /** Optional Graph base — must match the mailbox the message was
+   *  discovered in. Critical when polling multiple mailboxes per tick
+   *  (AUTOMATION_POLL_MAILBOX_UPNS) so attachment fetches don't go to
+   *  the wrong /users/{upn}. Defaults to getMailboxBase() for legacy
+   *  callers. */
+  baseOverride?: string,
 ): Promise<{ ingested: number; duplicate: number; quarantined: number; errors: number }> {
   let ingested = 0;
   let duplicate = 0;
@@ -622,7 +752,7 @@ async function processMatchedMessage(
 
   let attachments: Awaited<ReturnType<typeof fetchAttachments>>;
   try {
-    attachments = await fetchAttachments(args.userId, msg.id);
+    attachments = await fetchAttachments(args.userId, msg.id, baseOverride);
   } catch (err) {
     console.warn(
       `[automations/inbox-poller] attachment fetch failed for ${msg.id}: ${(err as Error).message}`,
@@ -760,16 +890,24 @@ function formatSearchCursor(iso: string): string {
   return `${SEARCH_CURSOR_PREFIX}${iso}`;
 }
 
-async function pollInboxBySearch(args: {
-  automationId: AutomationId;
-  userId: string;
-  userRole: string;
-}): Promise<PollResult> {
+async function pollInboxBySearch(
+  args: {
+    automationId: AutomationId;
+    userId: string;
+    userRole: string;
+  },
+  /** Explicit Graph base to read from. When omitted, falls back to
+   *  the legacy single-base resolution (`getMailboxBase()`). The
+   *  multi-mailbox driver (`pollInboxAcrossBases`) passes one base
+   *  per iteration so each mailbox runs through the same code path. */
+  baseOverride?: string,
+): Promise<PollResult> {
   const start = Date.now();
   const automation = getAutomation(args.automationId);
   if (!automation) {
     throw new Error(`unknown automation: ${args.automationId}`);
   }
+  const base = baseOverride ?? getMailboxBase();
 
   const preToken = await getValidToken(args.userId);
   if (!preToken) {
@@ -823,7 +961,12 @@ async function pollInboxBySearch(args: {
     };
   }
 
-  const stored = await loadDeltaLink(args.automationId, args.userId);
+  /* Per-base cursor: when an explicit base is provided (multi-mailbox
+     mode), suffix the cursor key with the base so each mailbox tracks
+     its own newest-received timestamp. Single-base callers keep the
+     legacy plain-userId key — no schema change. */
+  const cursorKey = baseOverride ? `${args.userId}::${baseOverride}` : args.userId;
+  const stored = await loadDeltaLink(args.automationId, cursorKey);
   const since = parseSearchCursor(stored);
 
   /* Compose the Graph URL: /{base}/mailFolders/inbox/messages with
@@ -844,7 +987,7 @@ async function pollInboxBySearch(args: {
   const select =
     "id,subject,bodyPreview,from,toRecipients,ccRecipients,body,receivedDateTime,hasAttachments";
   const urlString =
-    `https://graph.microsoft.com/v1.0${getMailboxBase()}/mailFolders/inbox/messages` +
+    `https://graph.microsoft.com/v1.0${base}/mailFolders/inbox/messages` +
     `?$top=50` +
     `&$select=${encodeURIComponent(select)}` +
     `&$search=${encodeURIComponent(`"${searchClause}"`)}`;
@@ -943,7 +1086,7 @@ async function pollInboxBySearch(args: {
        parser quarantines with "no text/html part". (Confirmed against
        the BA101 2026-04-20 Ritz Carlton coordinator email on 2026-04-27.) */
     try {
-      const detailUrl = `https://graph.microsoft.com/v1.0${getMailboxBase()}/messages/${encodeURIComponent(msg.id)}?$select=body,ccRecipients`;
+      const detailUrl = `https://graph.microsoft.com/v1.0${base}/messages/${encodeURIComponent(msg.id)}?$select=body,ccRecipients`;
       const detailRes = await fetch(detailUrl, {
         headers: { Authorization: `Bearer ${preToken.accessToken}` },
       });
@@ -969,7 +1112,7 @@ async function pollInboxBySearch(args: {
       );
     }
 
-    const r = await processMatchedMessage(msg, automation, args, messageLevel);
+    const r = await processMatchedMessage(msg, automation, args, messageLevel, base);
     artifactsIngested += r.ingested;
     artifactsDuplicate += r.duplicate;
     artifactsQuarantined += r.quarantined;
@@ -981,7 +1124,7 @@ async function pollInboxBySearch(args: {
      with zero matches must not move the cursor forward (would skip
      mail that arrives between the search and the next tick). */
   if (newestSeen && newestSeen !== since) {
-    await saveDeltaLink(args.automationId, args.userId, formatSearchCursor(newestSeen));
+    await saveDeltaLink(args.automationId, cursorKey, formatSearchCursor(newestSeen));
   }
 
   const duration_ms = Date.now() - start;
