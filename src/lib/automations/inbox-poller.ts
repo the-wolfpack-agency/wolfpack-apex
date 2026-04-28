@@ -96,6 +96,49 @@ async function saveDeltaLink(
 }
 
 /* ------------------------------------------------------------------ */
+/* Delta fallback — direct inbox listing when delta returns 0 items    */
+/* ------------------------------------------------------------------ */
+//
+// Microsoft occasionally rebuilds the per-mailbox delta index (post
+// mailbox-move events, server migrations, or quota repairs). During
+// that window the delta endpoint returns 0 items even though the
+// underlying inbox has fresh messages — confirmed via a Graph probe on
+// 2026-04-28 when /me/mailFolders/inbox/messages returned a brand-new
+// cognitoforms email but /messages/delta returned 0. This fallback
+// preserves automation throughput across those events: when delta
+// returns 0, we list the inbox directly with a receivedDateTime filter.
+// We do NOT save a deltaLink from the fallback path — the next poll
+// will retry delta and resume normal operation once Microsoft's index
+// is healthy again.
+
+async function listInboxSince(
+  accessToken: string,
+  sinceIso: string,
+): Promise<GraphMailMessage[]> {
+  const select =
+    "id,subject,bodyPreview,from,toRecipients,hasAttachments,receivedDateTime,lastModifiedDateTime";
+  const filter = `receivedDateTime ge ${sinceIso}`;
+  const url =
+    `https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages` +
+    `?$top=50&$orderby=receivedDateTime desc` +
+    `&$select=${select}` +
+    `&$filter=${encodeURIComponent(filter)}`;
+  const res = await fetch(url, {
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      accept: "application/json",
+    },
+  });
+  if (!res.ok) {
+    throw new Error(
+      `inbox list fallback failed: ${res.status} ${await res.text().catch(() => "")}`,
+    );
+  }
+  const body = (await res.json()) as { value?: GraphMailMessage[] };
+  return body.value ?? [];
+}
+
+/* ------------------------------------------------------------------ */
 /* Filter — does a message match this automation's inbox filters?      */
 /* ------------------------------------------------------------------ */
 
@@ -437,6 +480,25 @@ async function pollInboxByDelta(args: {
     throw err;
   }
 
+  /* Delta fallback. When Graph's per-mailbox delta index is rebuilding
+     (transient post-mailbox-move event), delta returns 0 items even
+     when fresh messages exist in Inbox. Drop to a direct inbox list
+     for the last 7 days so ingest doesn't stall for hours. We rely on
+     the artifact dedupe (source_message_id, content_sha256) to keep
+     reprocessing safe across consecutive polls. */
+  let usedFallback = false;
+  if (items.length === 0) {
+    const sinceIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+    try {
+      items = await listInboxSince(preToken.accessToken, sinceIso);
+      if (items.length > 0) usedFallback = true;
+    } catch (err) {
+      console.warn(
+        `[automations/inbox-poller] inbox-list fallback failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
   const messagesSeen = items.length;
   let messagesMatched = 0;
   let artifactsIngested = 0;
@@ -462,14 +524,17 @@ async function pollInboxByDelta(args: {
     errors += r.errors;
   }
 
-  if (nextDeltaLink) {
+  /* Only persist the delta cursor when delta itself returned a fresh
+     link. The fallback list path bypasses delta entirely so it must
+     not poison the cursor; the next tick should retry delta. */
+  if (nextDeltaLink && !usedFallback) {
     await saveDeltaLink(args.automationId, args.userId, nextDeltaLink);
   }
 
   const duration_ms = Date.now() - start;
   trackEvent("automations.poll_run", args.userId, args.userRole, {
     automation_id: args.automationId,
-    mode: "delta",
+    mode: usedFallback ? "delta+inbox-list-fallback" : "delta",
     messages_seen: messagesSeen,
     messages_matched: messagesMatched,
     artifacts_ingested: artifactsIngested,
