@@ -10,7 +10,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
-import { recordFeedback } from "@/lib/support/repo";
+import { recordCacheFeedback } from "@/lib/ai/response-cache";
+import { getTicketCacheIds, recordFeedback } from "@/lib/support/repo";
 
 export async function POST(
   req: NextRequest,
@@ -59,6 +60,27 @@ export async function POST(
       helpful,
       has_edit_diff: editDiff !== null,
     });
+
+    /* Propagate the operator's vote to every cache row that powered
+       this ticket. Best-effort — recordCacheFeedback already swallows
+       its own DB errors, and the operator's primary feedback (on the
+       ticket) has already been persisted. */
+    try {
+      const cacheIds = await getTicketCacheIds(id);
+      const ids = [
+        cacheIds.draft,
+        cacheIds.categorize,
+        cacheIds.auto_ack,
+      ].filter(
+        (v): v is string => typeof v === "string" && v.length > 0,
+      );
+      await Promise.all(
+        ids.map((cid) => recordCacheFeedback(cid, helpful)),
+      );
+    } catch {
+      /* Cache feedback is a learning-loop signal, never a request
+         outcome. Swallow + continue. */
+    }
 
     return NextResponse.json({ ticket });
   } catch (err) {

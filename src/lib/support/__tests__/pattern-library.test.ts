@@ -8,7 +8,8 @@
  *   - findMatchingPatterns ignores disabled rows + invalid regex
  *   - cacheKeyFor is order-independent on pattern_ids
  *   - generateDraftResponse: missing API key returns ok:false
- *   - generateDraftResponse: cached key short-circuits the SDK call
+ *   - generateDraftResponse: cache hit returns provider_used='cache' + tokens_used=0
+ *   - generateDraftResponse: cache miss calls AI then writes to cache
  *   - generateDraftResponse: success path returns the model text
  *   - buildUserPrompt forwards diagnostic_text + pattern templates
  */
@@ -20,6 +21,14 @@ const mockComplete = jest.fn();
 jest.mock("@/lib/ai", () => ({
   __esModule: true,
   getAIClient: () => ({ complete: mockComplete }),
+}));
+
+const mockLookupCachedResponse = jest.fn();
+const mockCacheResponse = jest.fn();
+jest.mock("@/lib/ai/response-cache", () => ({
+  __esModule: true,
+  lookupCachedResponse: (...args: unknown[]) => mockLookupCachedResponse(...args),
+  cacheResponse: (...args: unknown[]) => mockCacheResponse(...args),
 }));
 
 import {
@@ -55,6 +64,10 @@ beforeEach(() => {
   jest.clearAllMocks();
   _resetDraftCacheForTests();
   delete process.env.ANTHROPIC_API_KEY;
+  /* Default cache mocks: every test gets a clean miss + a successful
+     write unless the test overrides per-call. */
+  mockLookupCachedResponse.mockResolvedValue({ hit: false });
+  mockCacheResponse.mockResolvedValue({ cache_id: "new-cache-id" });
 });
 
 describe("findMatchingPatterns — each seed signature hits", () => {
@@ -272,18 +285,22 @@ describe("generateDraftResponse", () => {
     );
   });
 
-  it("short-circuits to the cache on a repeated body+patternIds key", async () => {
+  it("returns provider_used='cache' and DOES NOT call AI when the response cache hits", async () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
-    mockComplete.mockResolvedValueOnce({
-      content: "First draft",
-      model_used: "claude-sonnet-4-6",
-      provider_used: "anthropic",
-      input_tokens: 1,
-      output_tokens: 1,
-      cost_usd: 0,
-      latency_ms: 1,
+    mockLookupCachedResponse.mockResolvedValueOnce({
+      hit: true,
+      cache_id: "cached-row-1",
+      cached: {
+        content: "Cached draft body",
+        model_used: "claude-sonnet-4-6",
+        provider_used: "cache",
+        input_tokens: 100,
+        output_tokens: 50,
+        cost_usd: 0,
+        latency_ms: 0,
+      },
     });
-    const args = {
+    const out = await generateDraftResponse({
       ticket: {
         title: "t",
         body: "AADSTS50126 example body",
@@ -291,15 +308,58 @@ describe("generateDraftResponse", () => {
         created_by_email: null,
       },
       matchingPatterns: [patternFromSeed(1)],
-    };
-    const first = await generateDraftResponse(args);
-    const second = await generateDraftResponse(args);
-    expect(first.ok && second.ok).toBe(true);
-    if (first.ok && second.ok) {
-      expect(second.draft).toBe(first.draft);
-      expect(second.from_cache).toBe(true);
+    });
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.draft).toBe("Cached draft body");
+      expect(out.from_cache).toBe(true);
+      expect(out.tokens_used).toBe(0);
+      expect(out.cache_id).toBe("cached-row-1");
+      expect(out.provider_used).toBe("cache");
+    }
+    /* The whole point: AI is NOT called on a cache hit. */
+    expect(mockComplete).not.toHaveBeenCalled();
+    expect(mockCacheResponse).not.toHaveBeenCalled();
+  });
+
+  it("calls AI on a cache miss and writes the result to the cache", async () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    mockLookupCachedResponse.mockResolvedValueOnce({ hit: false });
+    mockComplete.mockResolvedValueOnce({
+      content: "Fresh draft",
+      model_used: "claude-sonnet-4-6",
+      provider_used: "anthropic",
+      input_tokens: 100,
+      output_tokens: 50,
+      cost_usd: 0.001,
+      latency_ms: 5,
+    });
+    mockCacheResponse.mockResolvedValueOnce({ cache_id: "fresh-row-1" });
+
+    const out = await generateDraftResponse({
+      ticket: {
+        title: "t",
+        body: "fresh body",
+        diagnostic_text: null,
+        created_by_email: null,
+      },
+      matchingPatterns: [patternFromSeed(1)],
+    });
+
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.draft).toBe("Fresh draft");
+      expect(out.from_cache).toBe(false);
+      expect(out.tokens_used).toBe(150);
+      expect(out.cache_id).toBe("fresh-row-1");
+      expect(out.provider_used).toBe("anthropic");
     }
     expect(mockComplete).toHaveBeenCalledTimes(1);
+    expect(mockCacheResponse).toHaveBeenCalledTimes(1);
+    /* The cache write must include the cleaned (trimmed) text. */
+    const cacheArgs = mockCacheResponse.mock.calls[0][0];
+    expect(cacheArgs.feature).toBe("support.draft");
+    expect(cacheArgs.response.content).toBe("Fresh draft");
   });
 
   it("returns ok:false when the AI client returns empty text", async () => {

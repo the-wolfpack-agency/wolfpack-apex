@@ -1397,6 +1397,16 @@ export type InstinctEventType =
   //       to score auto-ack opt-in choices over time.
   | "support.patterns_viewed"
   | "support.pattern_updated"
+  // Persistent AI response cache (src/lib/ai/response-cache).
+  //
+  //   support.cache_hit  { feature, cache_id, tokens_saved }
+  //     — emitted whenever lookupCachedResponse returns a hit. `feature`
+  //       is one of 'support.draft' | 'support.categorize' |
+  //       'support.auto_ack'. `tokens_saved` is the cached response's
+  //       input_tokens + output_tokens. Used to surface the cache's
+  //       running token-savings headline metric on the analytics
+  //       dashboard.
+  | "support.cache_hit"
   // AI provider abstraction (src/lib/ai). Emitted on every model call so
   // we can attribute spend per feature, watch latency, and detect when
   // the failover path is firing.

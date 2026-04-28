@@ -656,6 +656,79 @@ export async function markTicketAutoAcknowledged(
   );
 }
 
+/**
+ * Stash the cache row ids that powered each of the AI features on a
+ * ticket. Stored in the cache_ids JSONB column added by migration 105.
+ *
+ * Shape: a partial map { draft?, categorize?, auto_ack? } merged onto
+ * the existing JSONB so successive calls (e.g. categorize → draft on
+ * the same ticket) accumulate every feature's id without overwriting.
+ *
+ * Used by the feedback handler: when an operator votes helpful /
+ * unhelpful on a ticket, we read this column and bump
+ * helpful_count/unhelpful_count on every cache row that produced
+ * content for the ticket.
+ *
+ * Best-effort. The cache feature is a token-savings optimization, not a
+ * correctness requirement — a failure to persist cache_ids must not
+ * cause the AI feature itself to fail. The caller wraps this in
+ * try/catch.
+ */
+export async function setTicketCacheIds(
+  ticketId: string,
+  cacheIds: { draft?: string | null; categorize?: string | null; auto_ack?: string | null },
+): Promise<void> {
+  /* Strip out undefined/null entries so we never write a literal `null`
+     to the JSONB. We want absence to mean "not yet known", not "we
+     tried and got nothing back". */
+  const merged: Record<string, string> = {};
+  if (typeof cacheIds.draft === "string" && cacheIds.draft.length > 0) {
+    merged.draft = cacheIds.draft;
+  }
+  if (typeof cacheIds.categorize === "string" && cacheIds.categorize.length > 0) {
+    merged.categorize = cacheIds.categorize;
+  }
+  if (typeof cacheIds.auto_ack === "string" && cacheIds.auto_ack.length > 0) {
+    merged.auto_ack = cacheIds.auto_ack;
+  }
+  if (Object.keys(merged).length === 0) return;
+
+  /* JSONB || merge: existing keys are overwritten, missing keys are
+     added. So categorize + draft + auto_ack land additively as separate
+     calls fire across the ticket lifecycle. */
+  await writeQuery(
+    `UPDATE instinct_support_tickets
+        SET cache_ids = COALESCE(cache_ids, '{}'::jsonb) || $2::jsonb,
+            updated_at = NOW()
+      WHERE id = $1
+      RETURNING id`,
+    [ticketId, JSON.stringify(merged)],
+    { expectRows: 1 },
+  );
+}
+
+/**
+ * Read the cache_ids JSONB on a ticket. Returns an empty object when
+ * the row is missing or the column is empty. Used by the feedback
+ * handler to find which cache rows to vote on.
+ */
+export async function getTicketCacheIds(
+  ticketId: string,
+): Promise<{ draft?: string; categorize?: string; auto_ack?: string }> {
+  const r = await query<{ cache_ids: unknown }>(
+    `SELECT cache_ids FROM instinct_support_tickets WHERE id = $1 LIMIT 1`,
+    [ticketId],
+  );
+  const row = r.rows[0];
+  if (!row || !row.cache_ids || typeof row.cache_ids !== "object") return {};
+  const obj = row.cache_ids as Record<string, unknown>;
+  const out: { draft?: string; categorize?: string; auto_ack?: string } = {};
+  if (typeof obj.draft === "string") out.draft = obj.draft;
+  if (typeof obj.categorize === "string") out.categorize = obj.categorize;
+  if (typeof obj.auto_ack === "string") out.auto_ack = obj.auto_ack;
+  return out;
+}
+
 export async function deleteTicket(id: string): Promise<boolean> {
   const r = await writeQuery(
     `DELETE FROM instinct_support_tickets

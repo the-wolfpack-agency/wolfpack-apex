@@ -15,6 +15,7 @@ import {
   updateTicket,
   listEnabledPatterns,
   setTicketCategory,
+  setTicketCacheIds,
 } from "@/lib/support/repo";
 import {
   findMatchingPatterns,
@@ -165,6 +166,15 @@ export async function POST(req: NextRequest) {
           "ai",
           result.confidence,
         );
+        /* Stash the categorize cache id on the ticket so the feedback
+           handler can vote on it later. Best-effort. */
+        if (result.cache_id) {
+          try {
+            await setTicketCacheIds(ticket.id, { categorize: result.cache_id });
+          } catch {
+            /* learning-loop loss only; never block ticket creation */
+          }
+        }
         /* Re-load the ticket so the response payload reflects the new
            category metadata. updateTicket below would clobber category
            if we passed it in, so we go through setTicketCategory and
@@ -210,6 +220,16 @@ export async function POST(req: NextRequest) {
       draft_generated_at: new Date().toISOString(),
       draft_pattern_ids: patternIds,
     });
+
+    /* Stash the draft cache id on the ticket so the feedback handler
+       can vote on it later. Best-effort. */
+    if (outcome.ok && outcome.cache_id) {
+      try {
+        await setTicketCacheIds(ticket.id, { draft: outcome.cache_id });
+      } catch {
+        /* learning-loop loss only; never block ticket creation */
+      }
+    }
 
     /* Report the operator-picked category when present (so legacy
        analytics dashboards keep their shape), and the AI-picked

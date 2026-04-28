@@ -40,6 +40,10 @@
 
 import { getAIClient } from "@/lib/ai";
 import type { AIMessage } from "@/lib/ai";
+import {
+  cacheResponse,
+  lookupCachedResponse,
+} from "@/lib/ai/response-cache";
 import { getValidToken } from "@/lib/microsoft-graph";
 import { trackEvent } from "@/lib/analytics";
 import { getObsClient } from "@/lib/obs";
@@ -49,6 +53,7 @@ import {
   getTicket,
   listEnabledPatterns,
   markTicketAutoAcknowledged,
+  setTicketCacheIds,
 } from "./repo";
 import { findMatchingPatterns } from "./pattern-library";
 import type { SupportPattern, SupportTicket } from "./types";
@@ -189,6 +194,15 @@ export function shouldAutoAcknowledge(
 export interface AutoAcknowledgeDraft {
   subject: string;
   body: string;
+  /**
+   * Cache row id this auto-ack was either served from (cache hit) or
+   * saved into (cache miss). Stored on the ticket's cache_ids JSONB so
+   * the feedback handler can propagate operator votes. Null when
+   * persistence failed or the safe fallback was used (we never cache
+   * the safe fallback — every fresh ticket gets the same fallback for
+   * free without consulting the cache).
+   */
+  cache_id?: string | null;
 }
 
 function buildUserPrompt(
@@ -240,13 +254,46 @@ export async function generateAutoAcknowledge(
 ): Promise<AutoAcknowledgeDraft> {
   const subject = `Re: ${ticket.title}`;
 
+  /* Persistent cache lookup. The auto-ack key is per-pattern so two
+     tickets matching the same pattern produce the same cached body
+     after normalization (names, timestamps, contact info stripped).
+     Cache failures fall through to a fresh AI call. */
+  let cacheId: string | null = null;
+  try {
+    const lookup = await lookupCachedResponse({
+      feature: "support.auto_ack",
+      input: {
+        feature: "support.auto_ack",
+        title: ticket.title,
+        body: ticket.body ?? "",
+        pattern_id: pattern.id,
+      },
+    });
+    if (lookup.hit) {
+      const candidate = (lookup.cached.content ?? "").trim();
+      /* Re-run the safety guards on the cached output. The forbidden-
+         phrase list is dynamic; a phrase added after the row was
+         cached must still trip the fallback. */
+      if (candidate && !containsForbiddenPhrase(candidate)) {
+        return { subject, body: candidate, cache_id: lookup.cache_id };
+      }
+      /* Cached row failed the guard — treat as a miss + write a fresh
+         row. The cache row is left in place; the unhelpful counter
+         path is the right way to retire it. */
+    }
+  } catch {
+    /* lookup helper logs; defensive double-swallow. */
+  }
+
   const messages: AIMessage[] = [
     { role: "user", content: buildUserPrompt(ticket, pattern) },
   ];
 
   let body: string;
+  let usedSafeFallback = false;
+  let aiResponse: Awaited<ReturnType<ReturnType<typeof getAIClient>["complete"]>> | null = null;
   try {
-    const response = await getAIClient().complete({
+    aiResponse = await getAIClient().complete({
       messages,
       system: SYSTEM_PROMPT,
       max_tokens: MAX_AUTO_ACK_TOKENS,
@@ -257,11 +304,13 @@ export async function generateAutoAcknowledge(
       sensitivity: "public",
       metadata: { feature: "support.auto_ack" },
     });
-    const candidate = (response.content ?? "").trim();
+    const candidate = (aiResponse.content ?? "").trim();
     if (!candidate) {
       body = SAFE_FALLBACK_BODY;
+      usedSafeFallback = true;
     } else if (containsForbiddenPhrase(candidate)) {
       body = SAFE_FALLBACK_BODY;
+      usedSafeFallback = true;
     } else {
       body = candidate;
     }
@@ -273,9 +322,32 @@ export async function generateAutoAcknowledge(
       (err as Error).message,
     );
     body = SAFE_FALLBACK_BODY;
+    usedSafeFallback = true;
   }
 
-  return { subject, body };
+  /* Only cache real AI output, never the safe fallback. The fallback
+     is the same for every ticket — caching it would waste a row and
+     mean future operator-helpful votes inflate a row that wasn't
+     actually used. */
+  if (!usedSafeFallback && aiResponse) {
+    try {
+      const written = await cacheResponse({
+        feature: "support.auto_ack",
+        input: {
+          feature: "support.auto_ack",
+          title: ticket.title,
+          body: ticket.body ?? "",
+          pattern_id: pattern.id,
+        },
+        response: { ...aiResponse, content: body },
+      });
+      cacheId = written.cache_id || null;
+    } catch {
+      /* swallowed by cacheResponse already; defensive double-catch. */
+    }
+  }
+
+  return { subject, body, cache_id: cacheId };
 }
 
 /* ------------------------------------------------------------------ */
@@ -555,6 +627,22 @@ export async function processAutoAcknowledge(
       stage: "append_reply",
       ticket_id: ticketId,
     });
+  }
+
+  /* Persist the cache row id so a future feedback vote on this ticket
+     can propagate to the cache. Best-effort — the auto-ack already
+     succeeded; a setTicketCacheIds failure is a learning-loop loss, not
+     a customer-facing one. */
+  if (draft.cache_id) {
+    try {
+      await setTicketCacheIds(ticketId, { auto_ack: draft.cache_id });
+    } catch (err) {
+      obs.recordError(err instanceof Error ? err : new Error(String(err)), {
+        feature: "support.auto_ack",
+        stage: "set_cache_id",
+        ticket_id: ticketId,
+      });
+    }
   }
 
   const latency_ms = Date.now() - start;

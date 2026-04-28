@@ -24,6 +24,10 @@
 
 import { getAIClient } from "@/lib/ai";
 import type { AIMessage } from "@/lib/ai";
+import {
+  cacheResponse,
+  lookupCachedResponse,
+} from "@/lib/ai/response-cache";
 
 export type SupportCategory =
   | "m365"
@@ -56,6 +60,17 @@ export interface CategorizeResult {
   category: SupportCategory;
   confidence: number;
   reasoning?: string;
+  /**
+   * Cache row id this classification was either served from (cache hit)
+   * or saved into (cache miss). Stored on the ticket's cache_ids JSONB
+   * so the feedback handler can propagate operator votes. Null when
+   * persistence failed or the row could not be written.
+   */
+  cache_id?: string | null;
+  /** Provider attribution. 'cache' on a hit, otherwise the upstream
+   *  provider name. Falls back to undefined on the FALLBACK path so
+   *  call sites can ignore it. */
+  provider_used?: string;
 }
 
 /**
@@ -165,6 +180,63 @@ const FALLBACK: CategorizeResult = {
 export async function categorizeTicket(
   input: CategorizeInput,
 ): Promise<CategorizeResult> {
+  /* Persistent cache lookup. Categorization is deterministic given the
+     same input; a previously-classified ticket should never burn fresh
+     tokens. Cache failures fall through to a miss — the AI call is
+     never blocked by a degraded cache. */
+  let cacheHitId: string | null = null;
+  try {
+    const lookup = await lookupCachedResponse({
+      feature: "support.categorize",
+      input: {
+        feature: "support.categorize",
+        title: input.title,
+        body: input.body,
+        diagnostic_text: input.diagnostic_text ?? null,
+      },
+    });
+    if (lookup.hit) {
+      const parsedHit = tryParseJSON(lookup.cached.content);
+      if (parsedHit && typeof parsedHit === "object") {
+        const obj = parsedHit as Record<string, unknown>;
+        if (isSupportCategory(obj.category)) {
+          const conf = clampConfidence(obj.confidence);
+          const reasoning =
+            typeof obj.reasoning === "string" && obj.reasoning.length > 0
+              ? obj.reasoning.slice(0, 280)
+              : undefined;
+          /* Apply the same low-confidence guard the fresh path applies
+             so the cached low-confidence response is treated identically
+             to a fresh low-confidence response. */
+          if (conf < CONFIDENCE_FLOOR) {
+            return {
+              category: "general",
+              confidence: conf,
+              reasoning:
+                reasoning ??
+                `low confidence (${conf.toFixed(2)} < ${CONFIDENCE_FLOOR})`,
+              cache_id: lookup.cache_id,
+              provider_used: "cache",
+            };
+          }
+          return {
+            category: obj.category,
+            confidence: conf,
+            reasoning,
+            cache_id: lookup.cache_id,
+            provider_used: "cache",
+          };
+        }
+      }
+      /* Hit but the cached content failed to parse cleanly. Treat as a
+         miss + fall through; we'll write a fresh row. Stash the id so
+         the writer can update-in-place rather than insert a duplicate. */
+      cacheHitId = lookup.cache_id;
+    }
+  } catch {
+    /* lookup helper already logs; defensive double-swallow. */
+  }
+
   const userMessage = buildUserMessage(input);
   const messages: AIMessage[] = [{ role: "user", content: userMessage }];
 
@@ -187,6 +259,25 @@ export async function categorizeTicket(
       (err as Error).message,
     );
     return { ...FALLBACK };
+  }
+
+  /* Cache the fresh response for future requests. Failure here is
+     non-fatal — the categorization still returns. */
+  let cacheId: string | null = cacheHitId;
+  try {
+    const written = await cacheResponse({
+      feature: "support.categorize",
+      input: {
+        feature: "support.categorize",
+        title: input.title,
+        body: input.body,
+        diagnostic_text: input.diagnostic_text ?? null,
+      },
+      response,
+    });
+    cacheId = written.cache_id || cacheHitId;
+  } catch {
+    /* swallowed; defensive double-catch. */
   }
 
   const parsed = tryParseJSON(response.content);
@@ -215,8 +306,16 @@ export async function categorizeTicket(
       reasoning:
         reasoning ??
         `low confidence (${confidence.toFixed(2)} < ${CONFIDENCE_FLOOR})`,
+      cache_id: cacheId,
+      provider_used: response.provider_used,
     };
   }
 
-  return { category: cat, confidence, reasoning };
+  return {
+    category: cat,
+    confidence,
+    reasoning,
+    cache_id: cacheId,
+    provider_used: response.provider_used,
+  };
 }

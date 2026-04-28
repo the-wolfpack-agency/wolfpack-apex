@@ -12,18 +12,26 @@
  *      provider-neutral AI client (src/lib/ai) at standard tier with a
  *      system prompt that instructs the model to draft a clear,
  *      friendly response, reference the matched templates, and avoid
- *      em dashes. Result is cached by sha256(body + pattern ids) so
- *      a retry never re-bills the model.
+ *      em dashes. The persistent response cache (src/lib/ai/response-cache)
+ *      is consulted FIRST: a strong lexical match returns the previously
+ *      generated draft without burning new tokens. Only on a miss do we
+ *      call the provider, and on success we write the result back to the
+ *      cache so future similar tickets are free.
  *
- * Caching: the spec asks for `instinct_kv_cache` if present, otherwise
- * an in-memory Map + TODO. The Map lives at module scope so it survives
- * across calls in the same process; serverless cold-starts will miss,
- * which is acceptable for the cost profile.
+ * Caching: persistent. Backed by `instinct_support_response_cache` (see
+ * migration 105). Replaces the previous process-local Map; cold starts
+ * on Vercel no longer lose the cache. Quality-gated — a cached draft the
+ * operator voted unhelpful is no longer served, the next request burns
+ * fresh tokens and writes a new row.
  */
 
 import { createHash } from "node:crypto";
 
 import { getAIClient } from "@/lib/ai";
+import {
+  cacheResponse,
+  lookupCachedResponse,
+} from "@/lib/ai/response-cache";
 
 import type {
   CreateTicketInput,
@@ -101,24 +109,30 @@ export function findMatchingPatterns(
 // ---------------------------------------------------------------------------
 // Draft response cache
 // ---------------------------------------------------------------------------
-
-interface CacheEntry {
-  draft: string;
-  cached_at: number;
-}
-
-// TODO: persist to instinct_kv_cache when that table is introduced. Until
-// then we use a process-local Map; cold starts on Vercel will repopulate.
-const draftCache = new Map<string, CacheEntry>();
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+//
+// The persistent cache lives in instinct_support_response_cache (migration
+// 105) and is reached through src/lib/ai/response-cache. The legacy
+// in-memory Map was deleted as part of that work — every cache decision
+// now goes through the DB so cold starts on Vercel don't lose savings.
+//
+// `cacheKeyFor` is preserved as a pure helper for backwards compatibility
+// with any caller that wants a deterministic key from (body, pattern_ids)
+// — the in-memory store is gone but the hash itself is still useful for
+// debugging cache collisions in tests.
 
 export function cacheKeyFor(body: string, patternIds: string[]): string {
   const ids = [...patternIds].sort().join(",");
   return createHash("sha256").update(`${body}::${ids}`).digest("hex");
 }
 
+/**
+ * Test-only no-op kept for backwards compatibility with existing tests
+ * that called this in beforeEach. The persistent cache lives in Postgres
+ * now and tests mock @/lib/ai/response-cache directly, so there is
+ * nothing to clear here.
+ */
 export function _resetDraftCacheForTests(): void {
-  draftCache.clear();
+  /* no-op — cache is persistent now; tests mock the cache module. */
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +161,17 @@ export interface GenerateDraftResult {
   pattern_ids: string[];
   from_cache: boolean;
   tokens_used: number;
+  /**
+   * Cache row id this draft was either served from (cache hit) or saved
+   * into (cache miss). Stored on the ticket's cache_ids JSONB so the
+   * feedback handler can propagate operator votes back to the cache.
+   * `null` only when persistence failed; the draft itself is still
+   * valid.
+   */
+  cache_id: string | null;
+  /** Provider attribution. 'cache' on a hit, otherwise the upstream
+   *  provider name (e.g. 'anthropic' / 'azure-openai'). */
+  provider_used: string;
 }
 
 export interface GenerateDraftFailure {
@@ -199,17 +224,36 @@ export async function generateDraftResponse(
   input: GenerateDraftInput,
 ): Promise<GenerateDraftOutcome> {
   const patternIds = input.matchingPatterns.map((p) => p.id);
-  const key = cacheKeyFor(input.ticket.body, patternIds);
 
-  const cached = draftCache.get(key);
-  if (cached && Date.now() - cached.cached_at < CACHE_TTL_MS) {
-    return {
-      ok: true,
-      draft: cached.draft,
-      pattern_ids: patternIds,
-      from_cache: true,
-      tokens_used: 0,
-    };
+  /* Persistent cache lookup. Returns a hit only when the same
+     conceptual ticket has been drafted before AND the operator has not
+     voted it down. Failures inside the cache module fall through to a
+     miss — the cache must never block a draft from being generated. */
+  try {
+    const lookup = await lookupCachedResponse({
+      feature: "support.draft",
+      input: {
+        feature: "support.draft",
+        title: input.ticket.title,
+        body: input.ticket.body,
+        diagnostic_text: input.ticket.diagnostic_text ?? null,
+        pattern_ids: patternIds,
+      },
+    });
+    if (lookup.hit) {
+      return {
+        ok: true,
+        draft: lookup.cached.content,
+        pattern_ids: patternIds,
+        from_cache: true,
+        tokens_used: 0,
+        cache_id: lookup.cache_id,
+        provider_used: "cache",
+      };
+    }
+  } catch {
+    /* lookupCachedResponse already swallows + logs; this is just
+       belt-and-braces in case a future change makes it throw. */
   }
 
   if (!isDraftGeneratorAvailable()) {
@@ -244,7 +288,26 @@ export async function generateDraftResponse(
       };
     }
 
-    draftCache.set(key, { draft: text, cached_at: Date.now() });
+    /* Persist to the cache so future similar tickets are free. Failure
+       here logs via obs but does not fail the draft — the operator
+       still gets the response we just paid for. */
+    let cacheId: string | null = null;
+    try {
+      const written = await cacheResponse({
+        feature: "support.draft",
+        input: {
+          feature: "support.draft",
+          title: input.ticket.title,
+          body: input.ticket.body,
+          diagnostic_text: input.ticket.diagnostic_text ?? null,
+          pattern_ids: patternIds,
+        },
+        response: { ...response, content: text },
+      });
+      cacheId = written.cache_id || null;
+    } catch {
+      /* swallowed by cacheResponse already; defensive double-catch. */
+    }
 
     const tokens = response.input_tokens + response.output_tokens;
 
@@ -254,6 +317,8 @@ export async function generateDraftResponse(
       pattern_ids: patternIds,
       from_cache: false,
       tokens_used: tokens,
+      cache_id: cacheId,
+      provider_used: response.provider_used,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

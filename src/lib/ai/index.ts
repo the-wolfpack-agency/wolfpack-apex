@@ -18,3 +18,19 @@ export type {
   AISensitivity,
 } from "./types";
 export { NoProviderAvailableError, NotImplementedError } from "./types";
+
+export {
+  lookupCachedResponse,
+  cacheResponse,
+  recordCacheFeedback,
+  normalizeForSignature,
+  signatureFor,
+} from "./response-cache";
+export type {
+  CacheFeature,
+  CacheInput,
+  LookupArgs,
+  LookupResult,
+  CacheResponseArgs,
+  CacheResponseResult,
+} from "./response-cache";

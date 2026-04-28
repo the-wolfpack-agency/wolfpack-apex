@@ -15,6 +15,7 @@ import {
   getTicket,
   updateTicket,
   listEnabledPatterns,
+  setTicketCacheIds,
 } from "@/lib/support/repo";
 import {
   findMatchingPatterns,
@@ -51,6 +52,16 @@ export async function POST(
       draft_generated_at: new Date().toISOString(),
       draft_pattern_ids: patternIds,
     });
+
+    /* Stash the draft cache id on the ticket so the feedback handler
+       can vote on it later. Best-effort. */
+    if (outcome.ok && outcome.cache_id) {
+      try {
+        await setTicketCacheIds(id, { draft: outcome.cache_id });
+      } catch {
+        /* learning-loop loss only; never block draft regeneration */
+      }
+    }
 
     trackEvent("support.draft_generated", auth.user.id, auth.user.role, {
       ticket_id: id,

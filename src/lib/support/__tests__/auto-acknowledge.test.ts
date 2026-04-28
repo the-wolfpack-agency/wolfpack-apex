@@ -12,6 +12,14 @@ jest.mock("@/lib/ai", () => ({
   getAIClient: () => ({ complete: (...args: unknown[]) => mockAIComplete(...args) }),
 }));
 
+const mockLookupCachedResponse = jest.fn();
+const mockCacheResponse = jest.fn();
+jest.mock("@/lib/ai/response-cache", () => ({
+  __esModule: true,
+  lookupCachedResponse: (...args: unknown[]) => mockLookupCachedResponse(...args),
+  cacheResponse: (...args: unknown[]) => mockCacheResponse(...args),
+}));
+
 const mockGetValidToken = jest.fn();
 jest.mock("@/lib/microsoft-graph", () => ({
   getValidToken: (...args: unknown[]) => mockGetValidToken(...args),
@@ -21,11 +29,13 @@ const mockGetTicket = jest.fn();
 const mockListEnabledPatterns = jest.fn();
 const mockMarkAck = jest.fn();
 const mockAppendReply = jest.fn();
+const mockSetTicketCacheIds = jest.fn();
 jest.mock("@/lib/support/repo", () => ({
   getTicket: (...args: unknown[]) => mockGetTicket(...args),
   listEnabledPatterns: (...args: unknown[]) => mockListEnabledPatterns(...args),
   markTicketAutoAcknowledged: (...args: unknown[]) => mockMarkAck(...args),
   appendTicketReply: (...args: unknown[]) => mockAppendReply(...args),
+  setTicketCacheIds: (...args: unknown[]) => mockSetTicketCacheIds(...args),
 }));
 
 const mockFindMatching = jest.fn();
@@ -133,6 +143,12 @@ beforeEach(() => {
   mockFindMatching.mockReturnValue([basePattern]);
   mockMarkAck.mockResolvedValue(undefined);
   mockAppendReply.mockResolvedValue("msg-row-1");
+  mockSetTicketCacheIds.mockResolvedValue(undefined);
+
+  /* Default cache mocks: every test gets a clean miss + a successful
+     write unless the test overrides per-call. */
+  mockLookupCachedResponse.mockResolvedValue({ hit: false });
+  mockCacheResponse.mockResolvedValue({ cache_id: "new-cache-id" });
 
   /* Default fetch: 202 Accepted (Graph reply happy path). */
   global.fetch = jest
@@ -284,6 +300,74 @@ describe("generateAutoAcknowledge", () => {
     });
     const out = await generateAutoAcknowledge(baseTicket, basePattern);
     expect(out.body).toMatch(/We received your message/i);
+  });
+
+  it("returns cached body and DOES NOT call AI when the cache hits", async () => {
+    mockLookupCachedResponse.mockResolvedValueOnce({
+      hit: true,
+      cache_id: "cached-ack-1",
+      cached: {
+        content:
+          "Hi there,\n\nThanks for reaching out. A team member will follow up.\n\nThe Wolfpack Team",
+        model_used: "gpt-4o-mini",
+        provider_used: "cache",
+        input_tokens: 200,
+        output_tokens: 80,
+        cost_usd: 0,
+        latency_ms: 0,
+      },
+    });
+    const out = await generateAutoAcknowledge(baseTicket, basePattern);
+    expect(out.cache_id).toBe("cached-ack-1");
+    expect(out.body).toMatch(/Wolfpack Team/);
+    expect(mockAIComplete).not.toHaveBeenCalled();
+    expect(mockCacheResponse).not.toHaveBeenCalled();
+  });
+
+  it("calls AI on a cache miss and writes the result to the cache", async () => {
+    mockLookupCachedResponse.mockResolvedValueOnce({ hit: false });
+    /* Default beforeEach AI mock returns a clean ack body. */
+    mockCacheResponse.mockResolvedValueOnce({ cache_id: "fresh-ack-1" });
+    const out = await generateAutoAcknowledge(baseTicket, basePattern);
+    expect(out.cache_id).toBe("fresh-ack-1");
+    expect(mockAIComplete).toHaveBeenCalledTimes(1);
+    expect(mockCacheResponse).toHaveBeenCalledTimes(1);
+    const cacheArgs = mockCacheResponse.mock.calls[0][0];
+    expect(cacheArgs.feature).toBe("support.auto_ack");
+  });
+
+  it("does NOT cache the safe fallback body", async () => {
+    /* Force an AI throw → safe fallback. */
+    mockLookupCachedResponse.mockResolvedValueOnce({ hit: false });
+    mockAIComplete.mockRejectedValueOnce(new Error("ai down"));
+    const out = await generateAutoAcknowledge(baseTicket, basePattern);
+    expect(out.body).toMatch(/We received your message/i);
+    /* Critical: never persist the fallback to the cache. */
+    expect(mockCacheResponse).not.toHaveBeenCalled();
+    expect(out.cache_id).toBeNull();
+  });
+
+  it("treats a cache hit that trips the forbidden-phrase guard as a miss + falls through to AI", async () => {
+    mockLookupCachedResponse.mockResolvedValueOnce({
+      hit: true,
+      cache_id: "stale-ack-1",
+      cached: {
+        content:
+          "Hi, your account is locked. Wait.\n\nThe Wolfpack Team",
+        model_used: "x",
+        provider_used: "cache",
+        input_tokens: 1,
+        output_tokens: 1,
+        cost_usd: 0,
+        latency_ms: 0,
+      },
+    });
+    /* Default fresh AI mock from beforeEach returns a clean body. */
+    mockCacheResponse.mockResolvedValueOnce({ cache_id: "fresh-ack-2" });
+    const out = await generateAutoAcknowledge(baseTicket, basePattern);
+    expect(out.body).not.toMatch(/your account is locked/i);
+    /* AI was called precisely because the cached body failed the guard. */
+    expect(mockAIComplete).toHaveBeenCalledTimes(1);
   });
 });
 

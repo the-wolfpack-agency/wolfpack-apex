@@ -17,6 +17,14 @@ jest.mock("@/lib/ai", () => ({
   getAIClient: () => ({ complete: mockComplete }),
 }));
 
+const mockLookupCachedResponse = jest.fn();
+const mockCacheResponse = jest.fn();
+jest.mock("@/lib/ai/response-cache", () => ({
+  __esModule: true,
+  lookupCachedResponse: (...args: unknown[]) => mockLookupCachedResponse(...args),
+  cacheResponse: (...args: unknown[]) => mockCacheResponse(...args),
+}));
+
 import { categorizeTicket } from "@/lib/support/categorizer";
 
 function aiOk(content: string) {
@@ -36,6 +44,10 @@ let consoleWarnSpy: jest.SpyInstance;
 beforeEach(() => {
   jest.clearAllMocks();
   consoleWarnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+  /* Default cache mocks: every test gets a clean miss + a successful
+     write unless the test overrides per-call. */
+  mockLookupCachedResponse.mockResolvedValue({ hit: false });
+  mockCacheResponse.mockResolvedValue({ cache_id: "new-cache-id" });
 });
 
 afterEach(() => {
@@ -198,6 +210,56 @@ describe("categorizeTicket — fallback paths", () => {
     });
     expect(out.category).toBe("billing");
     expect(out.confidence).toBeCloseTo(0.78, 5);
+  });
+});
+
+describe("categorizeTicket — response cache", () => {
+  it("returns provider_used='cache' and DOES NOT call AI when the cache hits", async () => {
+    mockLookupCachedResponse.mockResolvedValueOnce({
+      hit: true,
+      cache_id: "cached-cat-1",
+      cached: {
+        content: `{"category":"m365","confidence":0.92,"reasoning":"cached AADSTS"}`,
+        model_used: "claude-haiku-4-5",
+        provider_used: "cache",
+        input_tokens: 50,
+        output_tokens: 12,
+        cost_usd: 0,
+        latency_ms: 0,
+      },
+    });
+    const out = await categorizeTicket({
+      title: "Cannot sign in to Outlook",
+      body: "I keep getting AADSTS50126 every time I try to sign in.",
+    });
+    expect(out.category).toBe("m365");
+    expect(out.confidence).toBeCloseTo(0.92, 5);
+    expect(out.cache_id).toBe("cached-cat-1");
+    expect(out.provider_used).toBe("cache");
+    /* The whole point: AI is NOT called on a cache hit. */
+    expect(mockComplete).not.toHaveBeenCalled();
+    expect(mockCacheResponse).not.toHaveBeenCalled();
+  });
+
+  it("calls AI on a cache miss and writes the result back to the cache", async () => {
+    mockLookupCachedResponse.mockResolvedValueOnce({ hit: false });
+    mockComplete.mockResolvedValueOnce(
+      aiOk(
+        `{"category":"billing","confidence":0.82,"reasoning":"M365 license cost question"}`,
+      ),
+    );
+    mockCacheResponse.mockResolvedValueOnce({ cache_id: "fresh-cat-1" });
+
+    const out = await categorizeTicket({
+      title: "Cost of additional licenses",
+      body: "What is the monthly cost of adding three more licenses?",
+    });
+    expect(out.category).toBe("billing");
+    expect(out.cache_id).toBe("fresh-cat-1");
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+    expect(mockCacheResponse).toHaveBeenCalledTimes(1);
+    const cacheArgs = mockCacheResponse.mock.calls[0][0];
+    expect(cacheArgs.feature).toBe("support.categorize");
   });
 });
 
