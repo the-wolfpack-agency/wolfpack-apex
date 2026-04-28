@@ -167,7 +167,13 @@ export default function TicketDetail({
         );
         return;
       }
-      const fresh = (await res.json()) as SupportTicket;
+      const data = (await res.json()) as
+        | SupportTicket
+        | { ticket: SupportTicket };
+      const fresh =
+        data && typeof data === "object" && "ticket" in data
+          ? (data as { ticket: SupportTicket }).ticket
+          : (data as SupportTicket);
       onTicketUpdated(fresh);
       setDraftText(fresh.draft_response ?? "");
     } catch (err) {
@@ -619,7 +625,13 @@ function SendModal({
         );
         return;
       }
-      const fresh = (await res.json()) as SupportTicket;
+      const data = (await res.json()) as
+        | SupportTicket
+        | { ticket: SupportTicket };
+      const fresh =
+        data && typeof data === "object" && "ticket" in data
+          ? (data as { ticket: SupportTicket }).ticket
+          : (data as SupportTicket);
       onSent(fresh);
     } catch (err) {
       setError(
