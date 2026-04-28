@@ -73,6 +73,16 @@ export async function GET(req: NextRequest) {
     "me/mailFolders/inbox?$select=displayName,totalItemCount,unreadItemCount",
   );
 
+  /* Test the EXACT URL the inbox-list fallback builds. If this returns
+     0 items but the unfiltered probe above returns N, the receivedDateTime
+     ge filter is the bug — possibly a format Graph rejects silently. */
+  const sinceIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+  const filterUrl =
+    `me/mailFolders/inbox/messages?$top=50&$orderby=receivedDateTime desc` +
+    `&$select=id,subject,bodyPreview,from,toRecipients,hasAttachments,receivedDateTime,lastModifiedDateTime` +
+    `&$filter=${encodeURIComponent(`receivedDateTime ge ${sinceIso}`)}`;
+  const filtered = await graphGet(tok.accessToken, filterUrl);
+
   return NextResponse.json({
     user_id: userId,
     token_email: tok.userEmail,
@@ -82,5 +92,15 @@ export async function GET(req: NextRequest) {
     inbox_folder: inboxFolder.body,
     inbox_messages_status: inbox.status,
     inbox_messages: inbox.body,
+    fallback_filter_iso: sinceIso,
+    fallback_filter_url: filterUrl,
+    fallback_filter_status: filtered.status,
+    fallback_filter_count:
+      filtered.body && typeof filtered.body === "object" && "value" in (filtered.body as Record<string, unknown>)
+        ? Array.isArray((filtered.body as { value?: unknown }).value)
+          ? ((filtered.body as { value: unknown[] }).value).length
+          : "non-array-value"
+        : "no-value-key",
+    fallback_filter_body: filtered.body,
   });
 }
