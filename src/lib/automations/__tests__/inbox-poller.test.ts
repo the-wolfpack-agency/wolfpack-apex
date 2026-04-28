@@ -475,3 +475,172 @@ describe("pollInboxHistorical · $search-based historical scan", () => {
     expect(r.skipped).toBe("no_valid_token");
   });
 });
+
+describe("pollInboxByDelta · inbox-list fallback when delta returns 0", () => {
+  // Regression — 2026-04-28. After Microsoft moved support@thewolfpack.agency
+  // to a different Exchange backend, /me/mailFolders/inbox/messages/delta
+  // started returning 0 items for homyk@thewolfpack.agency even though
+  // /me/mailFolders/inbox/messages was returning fresh emails. Confirmed
+  // via graph-probe. The poller now falls back to a direct inbox list
+  // when delta returns nothing, so ingest doesn't stall while Microsoft
+  // rebuilds the per-mailbox delta index.
+  const { listMailDelta } = jest.requireMock("@/lib/ms-graph/client") as {
+    listMailDelta: jest.Mock;
+  };
+  const realFetch = global.fetch;
+  const ORIGINAL_UPN = process.env.AUTOMATION_POLL_MAILBOX_UPN;
+
+  beforeEach(() => {
+    delete process.env.AUTOMATION_POLL_MAILBOX_UPN; // force delta path
+    (getAutomation as jest.Mock).mockReturnValue({
+      ...automation,
+      inbox_filters: {
+        sender_match: ["notifications@cognitoforms.com"],
+        subject_match: ["Instructor Class Report"],
+      },
+    });
+    (getValidToken as jest.Mock).mockReset();
+    listMailDelta.mockReset();
+  });
+
+  afterEach(() => {
+    if (ORIGINAL_UPN === undefined) delete process.env.AUTOMATION_POLL_MAILBOX_UPN;
+    else process.env.AUTOMATION_POLL_MAILBOX_UPN = ORIGINAL_UPN;
+    global.fetch = realFetch;
+  });
+
+  it("falls back to /me/mailFolders/inbox/messages when delta returns 0 items", async () => {
+    (getValidToken as jest.Mock).mockResolvedValueOnce({
+      accessToken: "tok-abc",
+      userEmail: "homyk@thewolfpack.agency",
+    });
+    listMailDelta.mockResolvedValueOnce({ items: [], nextDeltaLink: undefined });
+
+    let capturedUrl = "";
+    let capturedAuth = "";
+    global.fetch = jest.fn(async (url: string, init?: RequestInit) => {
+      capturedUrl = String(url);
+      capturedAuth = String(
+        (init?.headers as Record<string, string> | undefined)?.authorization ?? "",
+      );
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          value: [
+            {
+              id: "msg-cognito-1",
+              subject: "Instructor Class Report - Declan Mulready",
+              from: {
+                emailAddress: { address: "notifications@cognitoforms.com" },
+              },
+              receivedDateTime: "2026-04-28T14:27:08Z",
+              hasAttachments: false,
+              bodyPreview: "Entry Details Name Declan Mulready",
+            },
+          ],
+        }),
+      } as Response;
+    }) as unknown as typeof fetch;
+
+    const result = await pollInbox({
+      automationId: "porsche-classes",
+      userId: "homyk@thewolfpack.agency",
+      userRole: "ops",
+    });
+
+    expect(listMailDelta).toHaveBeenCalledTimes(1);
+    expect(capturedUrl).toContain("/me/mailFolders/inbox/messages");
+    expect(capturedUrl).toContain("receivedDateTime");
+    expect(capturedAuth).toBe("Bearer tok-abc");
+    expect(result.messages_seen).toBe(1);
+    expect(result.messages_matched).toBe(1);
+  });
+
+  it("does NOT save deltaLink when fallback was used", async () => {
+    const { writeQuery } = jest.requireMock("@/lib/db") as {
+      writeQuery: jest.Mock;
+    };
+    writeQuery.mockClear();
+
+    (getValidToken as jest.Mock).mockResolvedValueOnce({
+      accessToken: "tok-abc",
+      userEmail: "homyk@thewolfpack.agency",
+    });
+    /* Delta returns 0 items but DOES return a fresh nextDeltaLink (Graph
+       behavior during a delta-rebuild window — it hands back a token
+       even though it has no items to deliver). The poller must NOT
+       persist that link, otherwise the next tick reads the empty delta
+       and the fallback never fires. */
+    listMailDelta.mockResolvedValueOnce({
+      items: [],
+      nextDeltaLink: "https://graph.microsoft.com/v1.0/...$deltatoken=fresh",
+    });
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ value: [] }),
+    })) as unknown as typeof fetch;
+
+    await pollInbox({
+      automationId: "porsche-classes",
+      userId: "homyk@thewolfpack.agency",
+      userRole: "ops",
+    });
+
+    /* Inspect writeQuery — only the saveDeltaLink path goes through it.
+       If fallback was used, no INSERT INTO instinct_automation_porsche_poll_state
+       call should have happened. */
+    const wroteDeltaLink = writeQuery.mock.calls.some((args: unknown[]) =>
+      typeof args[0] === "string" &&
+      (args[0] as string).includes("instinct_automation_porsche_poll_state"),
+    );
+    expect(wroteDeltaLink).toBe(false);
+  });
+
+  it("when fallback also returns 0, reports messages_seen:0 cleanly", async () => {
+    (getValidToken as jest.Mock).mockResolvedValueOnce({
+      accessToken: "tok-abc",
+      userEmail: "homyk@thewolfpack.agency",
+    });
+    listMailDelta.mockResolvedValueOnce({ items: [], nextDeltaLink: undefined });
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ value: [] }),
+    })) as unknown as typeof fetch;
+
+    const result = await pollInbox({
+      automationId: "porsche-classes",
+      userId: "homyk@thewolfpack.agency",
+      userRole: "ops",
+    });
+
+    expect(result.messages_seen).toBe(0);
+    expect(result.errors).toBe(0);
+  });
+
+  it("survives a fallback fetch error without throwing", async () => {
+    (getValidToken as jest.Mock).mockResolvedValueOnce({
+      accessToken: "tok-abc",
+      userEmail: "homyk@thewolfpack.agency",
+    });
+    listMailDelta.mockResolvedValueOnce({ items: [], nextDeltaLink: undefined });
+    global.fetch = jest.fn(async () => ({
+      ok: false,
+      status: 503,
+      text: async () => "ServiceUnavailable",
+    })) as unknown as typeof fetch;
+
+    const result = await pollInbox({
+      automationId: "porsche-classes",
+      userId: "homyk@thewolfpack.agency",
+      userRole: "ops",
+    });
+
+    expect(result.messages_seen).toBe(0);
+    /* The fallback failure is logged via console.warn and SHOULD NOT
+       count as a hard error — the next poll will retry. */
+    expect(result.errors).toBe(0);
+  });
+});

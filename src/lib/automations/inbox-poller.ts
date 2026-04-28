@@ -485,19 +485,24 @@ async function pollInboxByDelta(args: {
      when fresh messages exist in Inbox. Drop to a direct inbox list
      for the last 7 days so ingest doesn't stall for hours. We rely on
      the artifact dedupe (source_message_id, content_sha256) to keep
-     reprocessing safe across consecutive polls. */
-  let usedFallback = false;
+     reprocessing safe across consecutive polls. `triedFallback` is
+     true whenever delta returned 0 items, regardless of whether the
+     fallback itself found anything — used below to suppress the
+     deltaLink save, since a 0-item delta response cannot be trusted
+     to produce a usable cursor for the next tick. */
+  let triedFallback = false;
   if (items.length === 0) {
+    triedFallback = true;
     const sinceIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
     try {
       items = await listInboxSince(preToken.accessToken, sinceIso);
-      if (items.length > 0) usedFallback = true;
     } catch (err) {
       console.warn(
         `[automations/inbox-poller] inbox-list fallback failed: ${(err as Error).message}`,
       );
     }
   }
+  const usedFallback = triedFallback && items.length > 0;
 
   const messagesSeen = items.length;
   let messagesMatched = 0;
@@ -525,9 +530,11 @@ async function pollInboxByDelta(args: {
   }
 
   /* Only persist the delta cursor when delta itself returned a fresh
-     link. The fallback list path bypasses delta entirely so it must
-     not poison the cursor; the next tick should retry delta. */
-  if (nextDeltaLink && !usedFallback) {
+     link AND items > 0. A 0-item delta response — even one carrying a
+     nextDeltaLink — is the signature of an index-rebuild window; saving
+     that cursor would let the empty state stick across polls and keep
+     the fallback from ever firing again. */
+  if (nextDeltaLink && !triedFallback) {
     await saveDeltaLink(args.automationId, args.userId, nextDeltaLink);
   }
 
