@@ -123,13 +123,14 @@ export async function POST(
   }
   const auth = await requireCapability(req, "automations.run");
   if (!auth.ok) return auth.response;
-  /* Pass auth.user.email when present — matches the GET handler. The
-     ms_tokens.connected_by column historically stored synthetic ids
-     (e.g. "demo-cto") that don't match a session's auth.user.id, but
-     user_email is always the authoritative human address. The dual
-     lookup in getValidToken handles either, so passing email-first is
-     strictly more permissive without breaking id-anchored tokens. */
-  return runPoll(automationId, auth.user.email ?? auth.user.id, auth.user.role);
+  /* Pass the Instinct user.id — that's what ms_tokens.connected_by
+     stores for the demo accounts (e.g. "demo-cto"). getValidToken's
+     (connected_by OR user_email) lookup will match user_email for
+     non-demo sessions. We deliberately do NOT prefer user.email
+     because demo users have a placeholder email (cto@wolfpack.dev)
+     that does not match any real Microsoft mailbox; the id is the
+     stable anchor. */
+  return runPoll(automationId, auth.user.id, auth.user.role);
 }
 
 /**
@@ -149,7 +150,7 @@ export async function GET(
     const auth = await requireCapability(req, "automations.run");
     if (!auth.ok) return auth.response;
     const { automationId } = await ctx.params;
-    return runPoll(automationId, auth.user.email ?? auth.user.id, auth.user.role);
+    return runPoll(automationId, auth.user.id, auth.user.role);
   }
   const userId =
     process.env.AUTOMATION_POLL_USER_ID ?? "automation-cron";
