@@ -603,6 +603,47 @@ export async function pollSupportInbox(args: {
     }
   }
 
+  /* Self-healing retry pass for tickets whose first auto-ack attempt
+     failed (transient Graph 5xx, ErrorMailboxMoveInProgress, token
+     blip). We re-run processAutoAcknowledge on every recent client
+     ticket that still has no auto_acknowledged_at. processAutoAcknowledge
+     already short-circuits on `already_acknowledged` so this is safe.
+     We cap at 10/poll and 24h-old to bound work. */
+  let autoAckRetried = 0;
+  let autoAckRecovered = 0;
+  try {
+    const stuckResult = await query<{ id: string }>(
+      `SELECT id FROM instinct_support_tickets
+        WHERE audience = 'client'
+          AND graph_message_id IS NOT NULL
+          AND auto_acknowledged_at IS NULL
+          AND created_at > NOW() - INTERVAL '24 hours'
+        ORDER BY created_at ASC
+        LIMIT 10`,
+    );
+    for (const row of stuckResult.rows) {
+      autoAckRetried += 1;
+      try {
+        const r = await processAutoAcknowledge(row.id);
+        if (r.acknowledged) autoAckRecovered += 1;
+      } catch (err) {
+        getObsClient().recordError(
+          err instanceof Error ? err : new Error(String(err)),
+          {
+            feature: "support.auto_ack",
+            stage: "retry_pass",
+            ticket_id: row.id,
+          },
+        );
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[support/inbox-poller] auto-ack retry pass failed:",
+      (err as Error).message,
+    );
+  }
+
   const duration_ms = Date.now() - start;
   try {
     trackEvent("support.poll_run", args.userId, args.userRole, {
@@ -612,6 +653,8 @@ export async function pollSupportInbox(args: {
       tickets_created: ticketsCreated,
       replies_appended: repliesAppended,
       drafts_generated: draftsGenerated,
+      auto_ack_retried: autoAckRetried,
+      auto_ack_recovered: autoAckRecovered,
       errors,
       duration_ms,
     });
