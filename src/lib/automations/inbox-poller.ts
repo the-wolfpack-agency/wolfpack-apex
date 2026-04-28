@@ -1128,7 +1128,14 @@ async function pollInboxBySearch(
 
   for (const msg of items) {
     const rcv = msg.receivedDateTime ?? null;
-    if (since && rcv && rcv <= since) continue; // already processed
+    /* Cursor filter applies ONLY on the primary $search path. When
+       the fallback ran, we explicitly want historical items the
+       cursor would otherwise skip — that's the whole point of
+       falling back. Artifact-level dedup downstream
+       (source_message_id, content_sha256) prevents reprocessing
+       anything already ingested, so re-evaluating older mail is
+       safe. */
+    if (!usedSearchFallback && since && rcv && rcv <= since) continue;
     /* Defense-in-depth: even though $search filtered server-side,
        re-apply the client-side filter so a Graph quirk (KQL behavior
        differences across mailboxes) can never bypass the contract.
