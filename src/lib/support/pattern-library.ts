@@ -36,7 +36,16 @@ import { isMatchSignature } from "./types";
 export const SUPPORT_DRAFT_MODEL = "claude-sonnet-4-6";
 
 export function isDraftGeneratorAvailable(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  // Provider availability is now resolved by the AI router, which checks
+  // every configured backend (Anthropic, Azure OpenAI, Foundry). The
+  // legacy ANTHROPIC_API_KEY-only check incorrectly short-circuited the
+  // draft path when we were running Azure-only. Any configured provider
+  // is enough; the router throws NoProviderAvailableError if none are.
+  return Boolean(
+    process.env.ANTHROPIC_API_KEY ||
+      process.env.AZURE_OPENAI_ENDPOINT ||
+      process.env.AZURE_OPENAI_API_KEY,
+  );
 }
 
 // ---------------------------------------------------------------------------
