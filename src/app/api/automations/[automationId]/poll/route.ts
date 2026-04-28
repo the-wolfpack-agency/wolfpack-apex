@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { getAutomation } from "@/lib/automations/registry";
-import { pollInbox } from "@/lib/automations/inbox-poller";
+import { pollInbox, getMailboxBases } from "@/lib/automations/inbox-poller";
 import type { AutomationId } from "@/lib/automations/types";
 import { getObsClient } from "@/lib/obs";
 import { getValidToken } from "@/lib/microsoft-graph";
@@ -45,9 +45,21 @@ async function probeForDiag(userId: string): Promise<{
   upn_inbox_total: number | null;
   upn_inbox_newest: Array<{ subject: string; from: string; receivedDateTime: string }>;
   upn_status: number | null;
+  /** Multi-mailbox: every base the poller actually iterates this
+      tick (resolved from AUTOMATION_POLL_MAILBOX_UPNS / UPN / /me).
+      Each entry includes the mailbox's inbox total + 5 newest so
+      the operator can verify whether the target email lives in any
+      of them. */
+  bases: Array<{
+    base: string;
+    inbox_total: number | null;
+    status: number | null;
+    newest: Array<{ subject: string; from: string; receivedDateTime: string }>;
+  }>;
 }> {
   const upnEnv = (process.env.AUTOMATION_POLL_MAILBOX_UPN || "").trim();
   const pollerBase = upnEnv ? `/users/${encodeURIComponent(upnEnv)}` : "/me";
+  const allBases = getMailboxBases();
   const out = {
     token_email: null as string | null,
     me_userPrincipalName: null as string | null,
@@ -65,6 +77,12 @@ async function probeForDiag(userId: string): Promise<{
       receivedDateTime: string;
     }>,
     upn_status: null as number | null,
+    bases: [] as Array<{
+      base: string;
+      inbox_total: number | null;
+      status: number | null;
+      newest: Array<{ subject: string; from: string; receivedDateTime: string }>;
+    }>,
   };
   try {
     const tok = await getValidToken(userId);
@@ -122,10 +140,61 @@ async function probeForDiag(userId: string): Promise<{
     } else {
       out.error = `fallback_${fbRes.status}`;
     }
-    /* When the poller routes through search mode (UPN env set), also
-       probe the ACTUAL target mailbox so the operator can see whether
-       the cognito email is in /users/{upn}'s inbox. If pollerBase is
-       /me, this just re-reads /me which is harmless and we skip. */
+    /* Probe EVERY base the poller actually iterates so the operator
+       can confirm whether the target email lives in each mailbox.
+       Sequential, best-effort — failures per base are recorded as
+       status only, never throw out of the diag. */
+    for (const b of allBases) {
+      try {
+        const baseEntry = {
+          base: b,
+          inbox_total: null as number | null,
+          status: null as number | null,
+          newest: [] as Array<{ subject: string; from: string; receivedDateTime: string }>,
+        };
+        const folderRes = await fetch(
+          `https://graph.microsoft.com/v1.0${b}/mailFolders/inbox?$select=totalItemCount`,
+          { headers: auth },
+        );
+        baseEntry.status = folderRes.status;
+        if (folderRes.ok) {
+          const f = (await folderRes.json()) as { totalItemCount?: number };
+          baseEntry.inbox_total = f.totalItemCount ?? null;
+          const newestRes = await fetch(
+            `https://graph.microsoft.com/v1.0${b}/mailFolders/inbox/messages?$top=10&$select=subject,from,receivedDateTime&$orderby=receivedDateTime desc`,
+            { headers: auth },
+          );
+          if (newestRes.ok) {
+            const n = (await newestRes.json()) as {
+              value?: Array<{
+                subject?: string;
+                from?: { emailAddress?: { address?: string } };
+                receivedDateTime?: string;
+              }>;
+            };
+            baseEntry.newest = (n.value ?? []).map((m) => ({
+              subject: m.subject ?? "",
+              from: m.from?.emailAddress?.address ?? "",
+              receivedDateTime: m.receivedDateTime ?? "",
+            }));
+          }
+        }
+        out.bases.push(baseEntry);
+      } catch (err) {
+        out.bases.push({
+          base: b,
+          inbox_total: null,
+          status: null,
+          newest: [],
+        });
+        console.warn(
+          `[poll/diag] base probe ${b} threw: ${(err as Error).message}`,
+        );
+      }
+    }
+    /* Legacy single-UPN diag block (preserved for the existing UI
+       widget). Reads the OLD AUTOMATION_POLL_MAILBOX_UPN; the per-
+       base loop above is the canonical source of truth. */
     if (pollerBase !== "/me") {
       const upnFolderRes = await fetch(
         `https://graph.microsoft.com/v1.0${pollerBase}/mailFolders/inbox?$select=totalItemCount`,

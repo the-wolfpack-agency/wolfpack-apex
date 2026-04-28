@@ -60,6 +60,12 @@ interface PollDiag {
   upn_inbox_total?: number | null;
   upn_inbox_newest?: Array<{ subject: string; from: string; receivedDateTime: string }>;
   upn_status?: number | null;
+  bases?: Array<{
+    base: string;
+    inbox_total: number | null;
+    status: number | null;
+    newest: Array<{ subject: string; from: string; receivedDateTime: string }>;
+  }>;
 }
 
 interface IngestRow {
@@ -434,6 +440,43 @@ function PollDiagBlock({ diag }: { diag: PollDiag }) {
         Inbox folder: {diag.inbox_total ?? "?"} total, {diag.inbox_unread ?? "?"} unread ·
         Fallback URL returned {diag.fallback_count ?? "?"} messages
       </div>
+      {diag.bases && diag.bases.length > 0 ? (
+        <div
+          style={{
+            marginTop: 6,
+            padding: "0.4rem 0.5rem",
+            background: "var(--wp-dark-surface3, rgba(255,255,255,0.03))",
+            border: "1px solid var(--wp-dark-border)",
+            borderRadius: 4,
+          }}
+        >
+          <div style={{ fontWeight: 600, color: "var(--wp-text)" }}>
+            Polled bases ({diag.bases.length}):
+          </div>
+          {diag.bases.map((b, i) => (
+            <details key={i} style={{ marginTop: 4 }}>
+              <summary style={{ cursor: "pointer" }}>
+                <code>{b.base}</code> — HTTP {b.status ?? "?"} · total{" "}
+                {b.inbox_total ?? "?"}
+              </summary>
+              {b.newest.length > 0 ? (
+                <ul style={{ margin: "4px 0 0 1rem", padding: 0 }}>
+                  {b.newest.map((m, j) => (
+                    <li key={j}>
+                      <code>{m.receivedDateTime}</code> — {m.from} —{" "}
+                      {m.subject}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div style={{ color: "var(--wp-text-dim)" }}>
+                  (no messages returned)
+                </div>
+              )}
+            </details>
+          ))}
+        </div>
+      ) : null}
       {diag.poller_mailbox_base && diag.poller_mailbox_base !== "/me" ? (
         <div
           style={{
