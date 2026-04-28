@@ -112,21 +112,37 @@ async function saveDeltaLink(
 // is healthy again.
 
 async function listInboxSince(
-  accessToken: string,
+  userId: string,
   sinceIso: string,
 ): Promise<GraphMailMessage[]> {
-  const select =
-    "id,subject,bodyPreview,from,toRecipients,hasAttachments,receivedDateTime,lastModifiedDateTime";
-  const filter = `receivedDateTime ge ${sinceIso}`;
-  const url =
-    `https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages` +
-    `?$top=50&$orderby=receivedDateTime desc` +
-    `&$select=${select}` +
-    `&$filter=${encodeURIComponent(filter)}`;
-  const res = await fetch(url, {
+  /* Re-resolve the token here instead of reusing the preToken captured
+     at the start of the poll. The delta call (called between preToken
+     capture and this fallback) can spend hundreds of ms in a token
+     refresh cycle; by the time we reach the fallback, preToken may
+     have expired or been invalidated by a refresh. getValidToken
+     always returns a fresh access_token (refreshing on demand), which
+     is the same code path the diag probe uses — and the probe's
+     identical URL is confirmed to return data. */
+  const tok = await getValidToken(userId);
+  if (!tok) {
+    throw new Error("inbox list fallback: no_valid_token at fallback time");
+  }
+  /* Use URL constructor so $orderby's space and the $filter datetime
+     are encoded by the standard URL serializer rather than a hand-
+     concatenated string. Avoids any chance of an unencoded space or
+     special char tripping Graph's parser. */
+  const url = new URL("https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages");
+  url.searchParams.set("$top", "50");
+  url.searchParams.set("$orderby", "receivedDateTime desc");
+  url.searchParams.set(
+    "$select",
+    "id,subject,bodyPreview,from,toRecipients,hasAttachments,receivedDateTime,lastModifiedDateTime",
+  );
+  url.searchParams.set("$filter", `receivedDateTime ge ${sinceIso}`);
+  const res = await fetch(url.toString(), {
     headers: {
-      authorization: `Bearer ${accessToken}`,
-      accept: "application/json",
+      Authorization: `Bearer ${tok.accessToken}`,
+      Accept: "application/json",
     },
   });
   if (!res.ok) {
@@ -402,6 +418,10 @@ export interface PollResult {
       (e.g. no user has connected their mailbox yet). The route maps
       this to a 200 so cron health stays green. */
   skipped?: "no_user_connected" | "no_valid_token";
+  /** Set when delta returned 0 AND the inbox-list fallback threw —
+      surfaced so operators can tell "Graph rejected the fallback URL"
+      from "Graph really has no recent mail" without checking logs. */
+  fallback_error?: string;
 }
 
 export async function pollInbox(args: {
@@ -491,14 +511,16 @@ async function pollInboxByDelta(args: {
      deltaLink save, since a 0-item delta response cannot be trusted
      to produce a usable cursor for the next tick. */
   let triedFallback = false;
+  let fallbackError: string | null = null;
   if (items.length === 0) {
     triedFallback = true;
     const sinceIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
     try {
-      items = await listInboxSince(preToken.accessToken, sinceIso);
+      items = await listInboxSince(args.userId, sinceIso);
     } catch (err) {
+      fallbackError = (err as Error).message;
       console.warn(
-        `[automations/inbox-poller] inbox-list fallback failed: ${(err as Error).message}`,
+        `[automations/inbox-poller] inbox-list fallback failed: ${fallbackError}`,
       );
     }
   }
@@ -558,6 +580,7 @@ async function pollInboxByDelta(args: {
     artifacts_quarantined: artifactsQuarantined,
     errors,
     duration_ms,
+    ...(fallbackError ? { fallback_error: fallbackError } : {}),
   };
 }
 

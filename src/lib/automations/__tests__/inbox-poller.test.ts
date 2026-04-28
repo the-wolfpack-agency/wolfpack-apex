@@ -510,18 +510,27 @@ describe("pollInboxByDelta · inbox-list fallback when delta returns 0", () => {
   });
 
   it("falls back to /me/mailFolders/inbox/messages when delta returns 0 items", async () => {
-    (getValidToken as jest.Mock).mockResolvedValueOnce({
-      accessToken: "tok-abc",
-      userEmail: "homyk@thewolfpack.agency",
-    });
+    /* Two getValidToken calls: pre-token at start of poll, fresh
+       token re-resolved inside listInboxSince so a stale preToken
+       can't silently 401 the fallback. */
+    (getValidToken as jest.Mock)
+      .mockResolvedValueOnce({
+        accessToken: "tok-abc",
+        userEmail: "homyk@thewolfpack.agency",
+      })
+      .mockResolvedValueOnce({
+        accessToken: "tok-abc",
+        userEmail: "homyk@thewolfpack.agency",
+      });
     listMailDelta.mockResolvedValueOnce({ items: [], nextDeltaLink: undefined });
 
     let capturedUrl = "";
     let capturedAuth = "";
     global.fetch = jest.fn(async (url: string, init?: RequestInit) => {
       capturedUrl = String(url);
+      const headers = init?.headers as Record<string, string> | undefined;
       capturedAuth = String(
-        (init?.headers as Record<string, string> | undefined)?.authorization ?? "",
+        headers?.Authorization ?? headers?.authorization ?? "",
       );
       return {
         ok: true,
@@ -563,10 +572,15 @@ describe("pollInboxByDelta · inbox-list fallback when delta returns 0", () => {
     };
     writeQuery.mockClear();
 
-    (getValidToken as jest.Mock).mockResolvedValueOnce({
-      accessToken: "tok-abc",
-      userEmail: "homyk@thewolfpack.agency",
-    });
+    (getValidToken as jest.Mock)
+      .mockResolvedValueOnce({
+        accessToken: "tok-abc",
+        userEmail: "homyk@thewolfpack.agency",
+      })
+      .mockResolvedValueOnce({
+        accessToken: "tok-abc",
+        userEmail: "homyk@thewolfpack.agency",
+      });
     /* Delta returns 0 items but DOES return a fresh nextDeltaLink (Graph
        behavior during a delta-rebuild window — it hands back a token
        even though it has no items to deliver). The poller must NOT
@@ -599,10 +613,15 @@ describe("pollInboxByDelta · inbox-list fallback when delta returns 0", () => {
   });
 
   it("when fallback also returns 0, reports messages_seen:0 cleanly", async () => {
-    (getValidToken as jest.Mock).mockResolvedValueOnce({
-      accessToken: "tok-abc",
-      userEmail: "homyk@thewolfpack.agency",
-    });
+    (getValidToken as jest.Mock)
+      .mockResolvedValueOnce({
+        accessToken: "tok-abc",
+        userEmail: "homyk@thewolfpack.agency",
+      })
+      .mockResolvedValueOnce({
+        accessToken: "tok-abc",
+        userEmail: "homyk@thewolfpack.agency",
+      });
     listMailDelta.mockResolvedValueOnce({ items: [], nextDeltaLink: undefined });
     global.fetch = jest.fn(async () => ({
       ok: true,
@@ -621,10 +640,15 @@ describe("pollInboxByDelta · inbox-list fallback when delta returns 0", () => {
   });
 
   it("survives a fallback fetch error without throwing", async () => {
-    (getValidToken as jest.Mock).mockResolvedValueOnce({
-      accessToken: "tok-abc",
-      userEmail: "homyk@thewolfpack.agency",
-    });
+    (getValidToken as jest.Mock)
+      .mockResolvedValueOnce({
+        accessToken: "tok-abc",
+        userEmail: "homyk@thewolfpack.agency",
+      })
+      .mockResolvedValueOnce({
+        accessToken: "tok-abc",
+        userEmail: "homyk@thewolfpack.agency",
+      });
     listMailDelta.mockResolvedValueOnce({ items: [], nextDeltaLink: undefined });
     global.fetch = jest.fn(async () => ({
       ok: false,
@@ -642,5 +666,36 @@ describe("pollInboxByDelta · inbox-list fallback when delta returns 0", () => {
     /* The fallback failure is logged via console.warn and SHOULD NOT
        count as a hard error — the next poll will retry. */
     expect(result.errors).toBe(0);
+    /* But the failure IS surfaced on result.fallback_error so an
+       operator looking at Run-now output can tell "Graph rejected the
+       fallback" from "Graph really has no recent mail". */
+    expect(result.fallback_error).toContain("503");
+  });
+
+  it("surfaces fallback no_valid_token when the second token-resolve fails", async () => {
+    (getValidToken as jest.Mock)
+      .mockResolvedValueOnce({
+        accessToken: "tok-abc",
+        userEmail: "homyk@thewolfpack.agency",
+      })
+      /* The fresh token-resolve at fallback time returns null (token
+         got invalidated mid-poll). The fallback must surface this so
+         we can distinguish it from "Graph returned no items". */
+      .mockResolvedValueOnce(null);
+    listMailDelta.mockResolvedValueOnce({ items: [], nextDeltaLink: undefined });
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ value: [] }),
+    })) as unknown as typeof fetch;
+
+    const result = await pollInbox({
+      automationId: "porsche-classes",
+      userId: "homyk@thewolfpack.agency",
+      userRole: "ops",
+    });
+
+    expect(result.messages_seen).toBe(0);
+    expect(result.fallback_error).toContain("no_valid_token");
   });
 });

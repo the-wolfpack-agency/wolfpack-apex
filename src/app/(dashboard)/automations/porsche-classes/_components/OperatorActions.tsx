@@ -43,6 +43,7 @@ interface PollResult {
   errors?: number;
   duration_ms?: number;
   skipped?: string;
+  fallback_error?: string;
 }
 
 interface PollDiag {
@@ -464,17 +465,27 @@ function PollSummary({ result }: { result: PollResult }) {
     );
   }
   return (
-    <span>
-      Seen <strong>{result.messages_seen ?? 0}</strong> · Matched{" "}
-      <strong>{result.messages_matched ?? 0}</strong> · Ingested{" "}
-      <strong style={{ color: "var(--wp-success, #22c55e)" }}>
-        {result.artifacts_ingested ?? 0}
-      </strong>{" "}
-      · Duplicate {result.artifacts_duplicate ?? 0} · Quarantined{" "}
-      <strong style={{ color: "var(--wp-error, #c44)" }}>
-        {result.artifacts_quarantined ?? 0}
-      </strong>{" "}
-      · {result.duration_ms ?? 0}ms
-    </span>
+    <>
+      <span>
+        Seen <strong>{result.messages_seen ?? 0}</strong> · Matched{" "}
+        <strong>{result.messages_matched ?? 0}</strong> · Ingested{" "}
+        <strong style={{ color: "var(--wp-success, #22c55e)" }}>
+          {result.artifacts_ingested ?? 0}
+        </strong>{" "}
+        · Duplicate {result.artifacts_duplicate ?? 0} · Quarantined{" "}
+        <strong style={{ color: "var(--wp-error, #c44)" }}>
+          {result.artifacts_quarantined ?? 0}
+        </strong>{" "}
+        · {result.duration_ms ?? 0}ms
+      </span>
+      {result.fallback_error ? (
+        <div
+          data-testid="operator-actions-poll-fallback-error"
+          style={{ color: "var(--wp-error, #c44)", marginTop: 4 }}
+        >
+          Fallback failed: <code>{result.fallback_error}</code>
+        </div>
+      ) : null}
+    </>
   );
 }
