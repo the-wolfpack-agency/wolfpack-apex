@@ -70,10 +70,14 @@ export const porscheClasses: AutomationDefinition = {
     "Daily ingest of Porsche Brand Ambassador 101/102 registration " +
     "deltas plus coordinator / instructor / survey rollups. Replaces " +
     "the Mon/Fri manual class-summary process.",
-  // 60-day forward horizon plus a 7-day backward grace period covers the
-  // active class window — anything outside is informational only and does
-  // not need to appear in the digest.
-  active_window_days: { min: -7, max: 60 },
+  // Wide planning horizon. Ops gets schedules months ahead and needs
+  // those classes visible on the dashboard the moment the first email
+  // arrives — a 60-day forward window was clipping classes that ingest
+  // pulled in but couldn't render. Keep a 30-day backward grace so
+  // recently-completed classes still show for last-minute SharePoint
+  // uploads / late surveys; 365 forward covers the full annual program
+  // calendar with margin.
+  active_window_days: { min: -30, max: 365 },
   // Static fallback — used by callers that don't await loadInboxFilters
   // (any direct read of the AutomationDefinition) and as the safety-net
   // when the dynamic loader throws. Keep in sync with
