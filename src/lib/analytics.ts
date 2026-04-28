@@ -1367,6 +1367,13 @@ export type InstinctEventType =
   //       ingest). Used by the learning loop to compute classifier
   //       precision over time and surface which buckets the model
   //       struggles with.
+  //
+  //   support.auto_acknowledged  { ticket_id, pattern_id, char_count,
+  //                                latency_ms }
+  //     — emitted when the auto-ack pipeline successfully sent a reply
+  //       to a customer email. Used to monitor auto-ack volume per
+  //       pattern and feed the success_count / fail_count loop on the
+  //       pattern library.
   | "support.ticket_created"
   | "support.list_viewed"
   | "support.ticket_updated"
@@ -1375,6 +1382,21 @@ export type InstinctEventType =
   | "support.feedback_submitted"
   | "support.poll_run"
   | "support.categorized"
+  | "support.auto_acknowledged"
+  // /support/patterns management page (operator-facing).
+  //
+  //   support.patterns_viewed   { count, auto_ack_enabled_count }
+  //     — emitted whenever the operator opens /support/patterns. Lets
+  //       us measure how often operators inspect the pattern library
+  //       and how many patterns currently have auto-ack opted in.
+  //
+  //   support.pattern_updated   { pattern_id, pattern_slug,
+  //                               fields_changed, auto_acknowledge_enabled }
+  //     — emitted on every successful PATCH /api/support/patterns/[id].
+  //       The learning loop joins this stream against ticket outcomes
+  //       to score auto-ack opt-in choices over time.
+  | "support.patterns_viewed"
+  | "support.pattern_updated"
   // AI provider abstraction (src/lib/ai). Emitted on every model call so
   // we can attribute spend per feature, watch latency, and detect when
   // the failover path is firing.

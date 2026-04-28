@@ -138,23 +138,49 @@ export default function SupportPage() {
             time.
           </p>
         </div>
-        <Link
-          href="/support/new"
-          data-testid="support-new-cta"
+        <div
           style={{
-            background: "var(--wp-gold)",
-            color: "var(--wp-dark)",
-            border: "none",
-            padding: "0.65rem 1.2rem",
-            borderRadius: 6,
-            fontWeight: 600,
-            fontSize: "0.92rem",
-            textDecoration: "none",
-            whiteSpace: "nowrap",
+            display: "flex",
+            gap: "0.5rem",
+            flexWrap: "wrap",
+            alignItems: "center",
           }}
         >
-          + New ticket
-        </Link>
+          <Link
+            href="/support/patterns"
+            data-testid="support-manage-patterns-cta"
+            style={{
+              background: "transparent",
+              color: "var(--wp-text-dim)",
+              border: "1px solid var(--wp-border, var(--wp-dark-border))",
+              padding: "0.6rem 1rem",
+              borderRadius: 6,
+              fontWeight: 500,
+              fontSize: "0.88rem",
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Manage patterns
+          </Link>
+          <Link
+            href="/support/new"
+            data-testid="support-new-cta"
+            style={{
+              background: "var(--wp-gold)",
+              color: "var(--wp-dark)",
+              border: "none",
+              padding: "0.65rem 1.2rem",
+              borderRadius: 6,
+              fontWeight: 600,
+              fontSize: "0.92rem",
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+            }}
+          >
+            + New ticket
+          </Link>
+        </div>
       </header>
 
       <TicketList

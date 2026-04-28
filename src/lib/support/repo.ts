@@ -154,12 +154,35 @@ function rowToTicket(r: Record<string, unknown>): SupportTicket {
     category_source: categorySource,
     category_confidence: categoryConfidence,
     category_history: categoryHistory,
+    auto_acknowledged_at:
+      r.auto_acknowledged_at == null ? null : String(r.auto_acknowledged_at),
+    auto_acknowledge_message_id:
+      r.auto_acknowledge_message_id == null
+        ? null
+        : String(r.auto_acknowledge_message_id),
+    auto_acknowledge_pattern_id:
+      r.auto_acknowledge_pattern_id == null
+        ? null
+        : String(r.auto_acknowledge_pattern_id),
     created_at: String(r.created_at),
     updated_at: String(r.updated_at),
   };
 }
 
 function rowToPattern(r: Record<string, unknown>): SupportPattern {
+  /* auto_acknowledge_* columns ship in migration 104. Rows queried
+     before that migration runs simply have these absent — coerce to
+     safe defaults (disabled / empty template) so the type stays
+     populated and the UI never sees `undefined`. */
+  const autoAckEnabled =
+    r.auto_acknowledge_enabled == null
+      ? false
+      : Boolean(r.auto_acknowledge_enabled);
+  const autoAckTemplate =
+    r.auto_acknowledge_template == null
+      ? null
+      : String(r.auto_acknowledge_template);
+
   return {
     id: String(r.id),
     slug: String(r.slug),
@@ -172,6 +195,8 @@ function rowToPattern(r: Record<string, unknown>): SupportPattern {
     success_count: Number(r.success_count ?? 0),
     fail_count: Number(r.fail_count ?? 0),
     enabled: Boolean(r.enabled),
+    auto_acknowledge_enabled: autoAckEnabled,
+    auto_acknowledge_template: autoAckTemplate,
     created_at: String(r.created_at),
     updated_at: String(r.updated_at),
   };
@@ -185,12 +210,15 @@ const TICKET_COLUMNS = `
   helpful, edit_diff, feedback_notes, feedback_at::text AS feedback_at,
   graph_message_id, graph_internet_message_id, graph_conversation_id,
   category_source, category_confidence, category_history,
+  auto_acknowledged_at::text AS auto_acknowledged_at,
+  auto_acknowledge_message_id, auto_acknowledge_pattern_id,
   created_at::text AS created_at, updated_at::text AS updated_at
 `;
 
 const PATTERN_COLUMNS = `
   id, slug, name, category, match_signatures, draft_template,
   success_count, fail_count, enabled,
+  auto_acknowledge_enabled, auto_acknowledge_template,
   created_at::text AS created_at, updated_at::text AS updated_at
 `;
 
@@ -595,6 +623,39 @@ export async function setTicketCategory(
   );
 }
 
+/**
+ * Persist the metadata that proves an auto-ack reply was sent for a
+ * ticket. Called from the auto-acknowledge orchestrator AFTER Graph
+ * confirms the reply landed, so the three columns always agree.
+ *
+ * Sets:
+ *   - auto_acknowledged_at = NOW()
+ *   - auto_acknowledge_message_id = the Graph reply message id
+ *   - auto_acknowledge_pattern_id = the pattern that produced the
+ *     auto-ack (nullable; null when the auto-ack ran without a pattern,
+ *     though today the gate requires a pattern)
+ *
+ * Uses writeQuery with `expectRows: 1` so a missing-ticket race surfaces
+ * as a thrown WriteQueryError rather than silently writing nothing — per
+ * memory feedback_no_silent_data_loss.
+ */
+export async function markTicketAutoAcknowledged(
+  ticketId: string,
+  input: { messageId: string; patternId: string | null },
+): Promise<void> {
+  await writeQuery(
+    `UPDATE instinct_support_tickets
+        SET auto_acknowledged_at = NOW(),
+            auto_acknowledge_message_id = $2,
+            auto_acknowledge_pattern_id = $3,
+            updated_at = NOW()
+      WHERE id = $1
+      RETURNING id`,
+    [ticketId, input.messageId, input.patternId],
+    { expectRows: 1 },
+  );
+}
+
 export async function deleteTicket(id: string): Promise<boolean> {
   const r = await writeQuery(
     `DELETE FROM instinct_support_tickets
@@ -671,6 +732,81 @@ export async function listEnabledPatterns(): Promise<SupportPattern[]> {
       ORDER BY (success_count - fail_count) DESC, slug ASC`,
   );
   return r.rows.map(rowToPattern);
+}
+
+/**
+ * List EVERY pattern (enabled and disabled) for the operator-facing
+ * /support/patterns management page. Different from listEnabledPatterns,
+ * which is the runtime hot-path filter the matcher consults.
+ *
+ * Sort: most successful patterns first (so the operator sees what is
+ * actually working before scrolling past the noisy ones), then alpha
+ * by slug for stable rendering.
+ */
+export async function listAllPatterns(): Promise<SupportPattern[]> {
+  const r = await query<Record<string, unknown>>(
+    `SELECT ${PATTERN_COLUMNS}
+       FROM instinct_support_patterns
+      ORDER BY (success_count - fail_count) DESC, slug ASC`,
+  );
+  return r.rows.map(rowToPattern);
+}
+
+/* Patchable pattern fields exposed to the /support/patterns UI. The
+   seeded slug, name, category, and match_signatures are NOT operator-
+   editable from the UI (they're the contract the matcher relies on);
+   only the toggles + auto-ack template are. */
+const PATTERN_PATCHABLE_FIELDS = new Set<string>([
+  "enabled",
+  "auto_acknowledge_enabled",
+  "auto_acknowledge_template",
+]);
+
+/**
+ * Partial update of a pattern's operator-editable fields. Returns the
+ * updated pattern, or null when no row matched the id. Empty patches
+ * (no patchable fields) return the existing row unchanged.
+ *
+ * Strict by design: a key not in PATTERN_PATCHABLE_FIELDS is silently
+ * dropped. The API route validates upstream and returns 400 for unknown
+ * fields, but this defensive ignore keeps a future caller from
+ * accidentally rewriting `match_signatures` through this helper.
+ */
+export async function updatePattern(
+  id: string,
+  patch: Partial<SupportPattern> & Record<string, unknown>,
+): Promise<SupportPattern | null> {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  for (const [k, v] of Object.entries(patch)) {
+    if (!PATTERN_PATCHABLE_FIELDS.has(k)) continue;
+    /* auto_acknowledge_template can be explicitly null (operator
+       cleared the textarea). Other patchable fields are booleans, so
+       null-coalesce stays safe. */
+    params.push(v ?? null);
+    sets.push(`${k} = $${params.length}`);
+  }
+  if (sets.length === 0) {
+    const existing = await query<Record<string, unknown>>(
+      `SELECT ${PATTERN_COLUMNS}
+         FROM instinct_support_patterns
+        WHERE id = $1
+        LIMIT 1`,
+      [id],
+    );
+    return existing.rows[0] ? rowToPattern(existing.rows[0]) : null;
+  }
+  sets.push(`updated_at = NOW()`);
+  params.push(id);
+  const r = await writeQuery(
+    `UPDATE instinct_support_patterns
+        SET ${sets.join(", ")}
+      WHERE id = $${params.length}
+      RETURNING ${PATTERN_COLUMNS}`,
+    params,
+  );
+  if (r.rows.length === 0) return null;
+  return rowToPattern(r.rows[0] as Record<string, unknown>);
 }
 
 export async function getPatternBySlug(slug: string): Promise<SupportPattern | null> {

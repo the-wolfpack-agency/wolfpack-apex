@@ -79,6 +79,60 @@ describe("<TicketThread />", () => {
     );
   });
 
+  test("outbound auto-ack message renders the Auto-acknowledged badge", () => {
+    const inbound = msg({
+      id: "m-in",
+      direction: "inbound",
+      from_email: "customer@x.com",
+      body: "Original inbound email body.",
+    });
+    const autoAck = msg({
+      id: "m-out-auto",
+      direction: "outbound",
+      from_email: "support@thewolfpack.agency",
+      body: "Auto-ack reply body.",
+      is_auto_acknowledge: true,
+    });
+    const manualReply = msg({
+      id: "m-out-manual",
+      direction: "outbound",
+      from_email: "support@thewolfpack.agency",
+      body: "Manual operator reply.",
+      is_auto_acknowledge: false,
+    });
+
+    render(<TicketThread thread={[inbound, autoAck, manualReply]} />);
+
+    /* Exactly one badge for the auto-ack message; manual + inbound do
+       not render the badge. */
+    const badges = screen.getAllByTestId("ticket-thread-auto-ack-badge");
+    expect(badges).toHaveLength(1);
+    expect(badges[0].textContent).toMatch(/Auto-acknowledged/);
+    /* Info-blue token (82,154,232,*). */
+    expect(badges[0].getAttribute("style")).toMatch(/82,\s*154,\s*232/);
+
+    /* The auto-ack message item is marked. */
+    const items = screen.getAllByTestId("ticket-thread-message");
+    expect(items[1].getAttribute("data-auto-acknowledge")).toBe("true");
+    expect(items[2].getAttribute("data-auto-acknowledge")).toBe("false");
+    expect(items[0].getAttribute("data-auto-acknowledge")).toBe("false");
+  });
+
+  test("graceful fallback: missing is_auto_acknowledge field does not render the badge", () => {
+    /* Backend hasn't shipped yet -> no field at all on outbound row.
+       UI must NOT break (badge simply absent). */
+    const outbound = msg({
+      id: "m-out-legacy",
+      direction: "outbound",
+      from_email: "support@thewolfpack.agency",
+      body: "Legacy outbound reply.",
+    });
+    render(<TicketThread thread={[outbound]} />);
+    expect(
+      screen.queryByTestId("ticket-thread-auto-ack-badge"),
+    ).not.toBeInTheDocument();
+  });
+
   test("relative-time renders the right bucket", () => {
     const now = Date.now();
 

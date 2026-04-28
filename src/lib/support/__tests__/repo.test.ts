@@ -44,6 +44,7 @@ import {
   getPatternBySlug,
   upsertSeedPattern,
   setTicketCategory,
+  markTicketAutoAcknowledged,
 } from "@/lib/support/repo";
 import { SEED_PATTERNS } from "@/lib/support/seed-patterns";
 
@@ -533,5 +534,52 @@ describe("setTicketCategory", () => {
     await expect(
       setTicketCategory("missing", "m365", "ai", 0.8),
     ).rejects.toThrow(/expected_rows/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// markTicketAutoAcknowledged + createTicket auto-ack default
+// ---------------------------------------------------------------------------
+describe("markTicketAutoAcknowledged", () => {
+  it("issues an UPDATE that sets the 3 auto-ack columns + bumps updated_at", async () => {
+    mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "tk-1" }] });
+
+    await markTicketAutoAcknowledged("tk-1", {
+      messageId: "auto-ack:tk-1:1700000000000",
+      patternId: "p-1",
+    });
+
+    expect(mockWriteQuery).toHaveBeenCalledTimes(1);
+    const [sql, params, opts] = mockWriteQuery.mock.calls[0];
+    expect(sql).toMatch(/UPDATE instinct_support_tickets/);
+    expect(sql).toMatch(/auto_acknowledged_at = NOW\(\)/);
+    expect(sql).toMatch(/auto_acknowledge_message_id = \$2/);
+    expect(sql).toMatch(/auto_acknowledge_pattern_id = \$3/);
+    expect(sql).toMatch(/updated_at = NOW\(\)/);
+    expect(params).toEqual([
+      "tk-1",
+      "auto-ack:tk-1:1700000000000",
+      "p-1",
+    ]);
+    expect(opts).toEqual({ expectRows: 1 });
+  });
+});
+
+describe("createTicket auto-ack column defaults", () => {
+  it("returns null for auto_acknowledged_at, auto_acknowledge_message_id, and auto_acknowledge_pattern_id when row has them as null", async () => {
+    /* baseTicketRow is missing auto-ack columns entirely (pre-104
+       schema in the fixture); rowToTicket must coerce missing →
+       null so the API contract stays clean. */
+    mockWriteQuery.mockResolvedValueOnce({ rows: [baseTicketRow] });
+
+    const out = await createTicket({
+      title: "t",
+      body: "b",
+      created_by_user_id: "user-1",
+    });
+
+    expect(out.auto_acknowledged_at).toBeNull();
+    expect(out.auto_acknowledge_message_id).toBeNull();
+    expect(out.auto_acknowledge_pattern_id).toBeNull();
   });
 });

@@ -53,6 +53,8 @@ import {
   generateDraftResponse,
 } from "@/lib/support/pattern-library";
 import { categorizeTicket } from "@/lib/support/categorizer";
+import { processAutoAcknowledge } from "@/lib/support/auto-acknowledge";
+import { getObsClient } from "@/lib/obs";
 import type { CreateTicketRow } from "@/lib/support/repo";
 
 /* ------------------------------------------------------------------ */
@@ -550,6 +552,29 @@ export async function pollSupportInbox(args: {
           (err as Error).message,
         );
       }
+
+      /* Fire-and-forget auto-acknowledgement. The whole point of the
+         auto-ack is that it runs WITHIN 30 seconds of the email
+         landing — much faster than the 5-minute draft+review cron —
+         so we deliberately do NOT await it here. Auto-ack failure must
+         NEVER block ticket creation or cursor advance.
+         processAutoAcknowledge already returns a structured result and
+         logs via obs.recordError, but we wrap one more try/catch here
+         as belt-and-braces against any unhandled promise rejection. */
+      void processAutoAcknowledge(ticket.id).catch((err) => {
+        try {
+          getObsClient().recordError(
+            err instanceof Error ? err : new Error(String(err)),
+            {
+              feature: "support.auto_ack",
+              stage: "poller_dispatch",
+              ticket_id: ticket.id,
+            },
+          );
+        } catch {
+          /* obs failures must never escape the poller */
+        }
+      });
 
       if (rcv && (!newestProcessed || rcv > newestProcessed)) {
         newestProcessed = rcv;

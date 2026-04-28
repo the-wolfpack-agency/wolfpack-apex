@@ -48,6 +48,15 @@ jest.mock("@/lib/support/categorizer", () => ({
   categorizeTicket: (...args: unknown[]) => mockCategorizeTicket(...args),
 }));
 
+const mockProcessAutoAck = jest.fn();
+jest.mock("@/lib/support/auto-acknowledge", () => ({
+  processAutoAcknowledge: (...args: unknown[]) => mockProcessAutoAck(...args),
+}));
+
+jest.mock("@/lib/obs", () => ({
+  getObsClient: () => ({ recordError: jest.fn() }),
+}));
+
 const mockQuery = jest.fn();
 const mockWriteQuery = jest.fn();
 jest.mock("@/lib/db", () => ({
@@ -149,6 +158,9 @@ beforeEach(() => {
     confidence: 0.91,
     reasoning: "AADSTS error",
   });
+  /* Default auto-ack: succeeds. Tests that need a different shape
+     override per-call. */
+  mockProcessAutoAck.mockResolvedValue({ acknowledged: true });
   delete process.env.SUPPORT_INBOX_MAILBOX_UPN;
 });
 
@@ -520,6 +532,53 @@ describe("pollSupportInbox", () => {
       "ai",
       0.92,
     );
+  });
+
+  it("dispatches processAutoAcknowledge for every newly-created email ticket", async () => {
+    mockGetValidToken.mockResolvedValueOnce({
+      accessToken: "tk",
+      userEmail: "op@x.com",
+    });
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ value: [buildGraphMessage()] }), {
+          status: 200,
+        }),
+      ) as unknown as typeof fetch;
+
+    const out = await pollSupportInbox({ userId: "u-1", userRole: "ops" });
+
+    expect(out.tickets_created).toBe(1);
+    /* Fire-and-forget — but the mock should still have been invoked
+       synchronously from the poller's await loop. */
+    expect(mockProcessAutoAck).toHaveBeenCalledWith("tk-new");
+  });
+
+  it("does not throw and still creates the ticket when processAutoAcknowledge rejects", async () => {
+    mockGetValidToken.mockResolvedValueOnce({
+      accessToken: "tk",
+      userEmail: "op@x.com",
+    });
+    /* Auto-ack rejects — poller MUST NOT propagate the rejection up. */
+    mockProcessAutoAck.mockRejectedValueOnce(new Error("auto-ack blew up"));
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ value: [buildGraphMessage()] }), {
+          status: 200,
+        }),
+      ) as unknown as typeof fetch;
+
+    const out = await pollSupportInbox({ userId: "u-1", userRole: "ops" });
+
+    expect(out.tickets_created).toBe(1);
+    expect(out.errors).toBe(0);
+    expect(mockCreateTicket).toHaveBeenCalled();
+    /* Allow the rejected promise to settle so the .catch() handler
+       runs before the test ends — otherwise jest may flag an
+       unhandled rejection. */
+    await new Promise((r) => setImmediate(r));
   });
 
   it("ticket creation succeeds even when the categorizer fails", async () => {

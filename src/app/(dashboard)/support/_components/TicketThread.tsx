@@ -32,6 +32,19 @@ export interface TicketMessage {
   subject?: string | null;
   body: string;
   received_at: string;
+  /**
+   * True when this outbound message was the auto-acknowledgement reply
+   * the system sent before a human operator looked at the ticket.
+   * Surfaces a "Auto-acknowledged" badge so the operator knows what's
+   * already been said to the customer before they manually reply.
+   *
+   * Sourced from the parallel auto-ack backend (migration 104) which
+   * marks the row by matching its `graph_message_id` against the
+   * ticket's `auto_acknowledge_message_id`. When the backend hasn't
+   * shipped yet, this field is simply absent and the badge does not
+   * render — UI never breaks on missing data.
+   */
+  is_auto_acknowledge?: boolean | null;
 }
 
 const TRUNCATE_AT = 500;
@@ -117,6 +130,7 @@ export default function TicketThread({ thread }: TicketThreadProps) {
 function ThreadMessage({ msg }: { msg: TicketMessage }) {
   const [expanded, setExpanded] = useState(false);
   const inbound = msg.direction === "inbound";
+  const isAutoAck = msg.direction === "outbound" && msg.is_auto_acknowledge === true;
   const tooLong = msg.body.length > TRUNCATE_AT;
   const visibleBody =
     !tooLong || expanded ? msg.body : msg.body.slice(0, TRUNCATE_AT);
@@ -144,6 +158,7 @@ function ThreadMessage({ msg }: { msg: TicketMessage }) {
     <li
       data-testid="ticket-thread-message"
       data-direction={msg.direction}
+      data-auto-acknowledge={isAutoAck ? "true" : "false"}
       style={{
         background: "var(--wp-dark)",
         border: `1px solid var(--wp-border, var(--wp-dark-border))`,
@@ -193,6 +208,27 @@ function ThreadMessage({ msg }: { msg: TicketMessage }) {
         >
           {msg.from_email ?? "(unknown sender)"}
         </span>
+        {isAutoAck ? (
+          <span
+            data-testid="ticket-thread-auto-ack-badge"
+            aria-label="Auto-acknowledged"
+            title="This reply was sent automatically before a human operator looked at the ticket"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              background: "rgba(82,154,232,0.18)",
+              color: "rgb(140,185,235)",
+              padding: "0.1rem 0.45rem",
+              borderRadius: 999,
+              fontSize: "0.7rem",
+              fontWeight: 600,
+              letterSpacing: "0.02em",
+              border: "1px solid rgba(82,154,232,0.32)",
+            }}
+          >
+            Auto-acknowledged
+          </span>
+        ) : null}
         <span
           data-testid="ticket-thread-time"
           style={{

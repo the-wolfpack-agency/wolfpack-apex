@@ -109,6 +109,27 @@ export interface SupportTicket {
    * `category` / `category_source` / `category_confidence`.
    */
   category_history?: SupportCategoryHistoryEntry[];
+  /**
+   * Timestamp the auto-ack reply was sent. Null means no auto-ack
+   * happened (ticket pre-dates the feature, gate said no, or the AI /
+   * Graph send failed). Added by migration 104.
+   */
+  auto_acknowledged_at?: string | null;
+  /**
+   * Microsoft Graph message id of the auto-ack reply. Null when no
+   * auto-ack happened. Lets the operator UI render the auto-ack inside
+   * the ticket thread and lets the learning loop correlate auto-ack
+   * content with eventual resolution. Added by migration 104.
+   */
+  auto_acknowledge_message_id?: string | null;
+  /**
+   * Pattern that produced the auto-ack. Null when no auto-ack happened
+   * or when the auto-ack ran without a pattern match. FK to
+   * instinct_support_patterns(id) with ON DELETE SET NULL so deleting an
+   * experimental pattern does not cascade-blow-up historical tickets.
+   * Added by migration 104.
+   */
+  auto_acknowledge_pattern_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -156,6 +177,21 @@ export interface SupportPattern {
   success_count: number;
   fail_count: number;
   enabled: boolean;
+  /**
+   * Whether this pattern is allowed to drive an auto-acknowledgement
+   * email back to the customer when the inbox poller matches it.
+   * Default false. Operators must explicitly opt in per pattern from
+   * /support/patterns. Added by migration 104.
+   */
+  auto_acknowledge_enabled?: boolean;
+  /**
+   * Operator-authored starting-point template the AI uses to phrase the
+   * auto-acknowledgement. The AI rephrases this to match the customer's
+   * specific wording; it never claims state about the user's account
+   * (e.g. "your account is locked"), only general self-serve steps.
+   * Added by migration 104.
+   */
+  auto_acknowledge_template?: string | null;
   created_at: string;
   updated_at: string;
 }
