@@ -233,22 +233,96 @@ describe("pollInbox dispatch · routes to search mode when AUTOMATION_POLL_MAILB
   it("when env var is set, calls Graph search endpoint and NEVER calls listMailDelta", async () => {
     process.env.AUTOMATION_POLL_MAILBOX_UPN = "alicia@thewolfpack.agency";
     (getValidToken as jest.Mock).mockResolvedValueOnce({ accessToken: "t" });
-    let capturedUrl = "";
+    /* Capture the FIRST fetch URL — the search request. Subsequent
+       calls (e.g. body-detail or the inbox-list fallback that fires
+       when search returns 0) are out of scope for this assertion. */
+    const fetchUrls: string[] = [];
     global.fetch = jest.fn(async (url: string) => {
-      capturedUrl = String(url);
+      fetchUrls.push(String(url));
+      /* Make the search call return a stub matching message so the
+         poller doesn't drop into the fallback path — that's a
+         different code path tested separately. */
+      if (fetchUrls.length === 1) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            value: [
+              {
+                id: "m1",
+                subject: "Scheduled Report Notification",
+                from: { emailAddress: { address: "porsche-academy-notification@porsche.de" } },
+                receivedDateTime: "2026-04-28T14:00:00Z",
+                hasAttachments: false,
+              },
+            ],
+          }),
+        } as Response;
+      }
       return { ok: true, status: 200, json: async () => ({ value: [] }) } as Response;
     }) as unknown as typeof fetch;
 
     await pollInbox({ automationId: "porsche-classes", userId: "u1", userRole: "ops" });
 
     expect(listMailDelta).not.toHaveBeenCalled();
-    expect(capturedUrl).toContain("/users/alicia%40thewolfpack.agency/mailFolders/inbox/messages");
+    expect(fetchUrls[0]).toContain("/users/alicia%40thewolfpack.agency/mailFolders/inbox/messages");
     // Server-side filter is applied — the URL must contain $search.
     // (We build the URL manually to keep spaces as %20 not + — Graph
     // KQL silently returns 0 with `+`. So $search is literal here, not
     // %24-encoded.)
-    expect(capturedUrl).toContain("$search=");
-    expect(capturedUrl).toContain("from%3A");
+    expect(fetchUrls[0]).toContain("$search=");
+    expect(fetchUrls[0]).toContain("from%3A");
+  });
+
+  it("when search returns 0 items, falls back to inbox-list and re-applies client-side filter", async () => {
+    process.env.AUTOMATION_POLL_MAILBOX_UPN = "alicia@thewolfpack.agency";
+    (getValidToken as jest.Mock).mockResolvedValueOnce({ accessToken: "t" });
+    const fetchUrls: string[] = [];
+    global.fetch = jest.fn(async (url: string) => {
+      fetchUrls.push(String(url));
+      // Search call (first) returns 0; fallback (second) returns matches.
+      if (fetchUrls.length === 1) {
+        return { ok: true, status: 200, json: async () => ({ value: [] }) } as Response;
+      }
+      // Fallback inbox-list — return a message matching the test
+      // automation fixture's sender_match + subject_match (porsche-
+      // academy-notification@porsche.de + Scheduled Report Notification).
+      if (fetchUrls.length === 2) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            value: [
+              {
+                id: "m-cog",
+                subject: "Scheduled Report Notification - 2026",
+                from: {
+                  emailAddress: { address: "porsche-academy-notification@porsche.de" },
+                },
+                receivedDateTime: "2026-04-28T14:27:08Z",
+                hasAttachments: false,
+                bodyPreview: "Daily roster snapshot",
+              },
+            ],
+          }),
+        } as Response;
+      }
+      return { ok: true, status: 200, json: async () => ({ value: [] }) } as Response;
+    }) as unknown as typeof fetch;
+
+    const r = await pollInbox({
+      automationId: "porsche-classes",
+      userId: "u1",
+      userRole: "ops",
+    });
+
+    expect(fetchUrls[0]).toContain("$search=");
+    expect(fetchUrls[1]).toContain(
+      "/users/alicia%40thewolfpack.agency/mailFolders/inbox/messages",
+    );
+    expect(fetchUrls[1]).toContain("$filter=");
+    expect(r.messages_seen).toBeGreaterThanOrEqual(1);
+    expect(r.messages_matched).toBeGreaterThanOrEqual(1);
   });
 
   it("when env var is unset, does NOT call the search-mode fetch (delta path runs)", async () => {
@@ -365,7 +439,10 @@ describe("pollInbox dispatch · routes to search mode when AUTOMATION_POLL_MAILB
     const calls = trackEvent.mock.calls;
     const runCall = calls.find((c) => c[0] === "automations.poll_run");
     expect(runCall).toBeDefined();
-    expect(runCall![3]).toMatchObject({ mode: "search" });
+    /* mode is either "search" (search returned items) or
+       "search+inbox-list-fallback" (search returned 0, fallback ran).
+       Both prove the search path was taken. */
+    expect(runCall![3].mode).toMatch(/^search/);
   });
 });
 

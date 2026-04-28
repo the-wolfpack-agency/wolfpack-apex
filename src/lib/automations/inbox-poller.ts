@@ -1058,7 +1058,51 @@ async function pollInboxBySearch(
     };
   }
 
-  const items = payload.value ?? [];
+  let items = payload.value ?? [];
+  /* Search-mode fallback. Graph $search with delegated tokens against
+     /users/{upn}/messages can silently return 0 even when the inbox
+     genuinely contains matching mail — confirmed against
+     homyk@thewolfpack.agency 2026-04-28 with a known cognito email
+     in inbox. Cause is opaque (likely a KQL parser quirk for nested
+     AND/OR clauses with mixed quoted/unquoted values), and there's
+     no error response to discriminate on.
+
+     Drop to a direct inbox listing for the last 7 days when $search
+     returns 0, then re-apply the client-side filter. Privacy is
+     preserved: only matching messages are processed downstream;
+     non-matching ones are skipped without storage. The token already
+     has Mail.Read.Shared, so reading the metadata is in scope. */
+  let usedSearchFallback = false;
+  if (items.length === 0) {
+    try {
+      const sinceIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+      const fbSelect =
+        "id,subject,bodyPreview,from,toRecipients,ccRecipients,body,receivedDateTime,hasAttachments";
+      const fbFilter = `receivedDateTime ge ${sinceIso}`;
+      const fbUrl =
+        `https://graph.microsoft.com/v1.0${base}/mailFolders/inbox/messages` +
+        `?$top=50&$orderby=receivedDateTime desc` +
+        `&$select=${fbSelect}` +
+        `&$filter=${encodeURIComponent(fbFilter)}`;
+      const fbRes = await fetch(fbUrl, {
+        headers: { Authorization: `Bearer ${preToken.accessToken}` },
+      });
+      if (fbRes.ok) {
+        const fb = (await fbRes.json()) as { value?: GraphMailMessage[] };
+        items = fb.value ?? [];
+        usedSearchFallback = true;
+      } else {
+        console.warn(
+          `[automations/inbox-poller] search-mode fallback to inbox-list failed: ${base} → ${fbRes.status}`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[automations/inbox-poller] search-mode fallback threw for ${base}: ${(err as Error).message}`,
+      );
+    }
+  }
+
   const messagesSeen = items.length;
   let messagesMatched = 0;
   let artifactsIngested = 0;
@@ -1074,7 +1118,8 @@ async function pollInboxBySearch(
     if (since && rcv && rcv <= since) continue; // already processed
     /* Defense-in-depth: even though $search filtered server-side,
        re-apply the client-side filter so a Graph quirk (KQL behavior
-       differences across mailboxes) can never bypass the contract. */
+       differences across mailboxes) can never bypass the contract.
+       This is the PRIMARY filter when usedSearchFallback is true. */
     if (!messageMatchesAutomation(msg, automation, activeFilters)) continue;
     messagesMatched += 1;
 
@@ -1130,7 +1175,7 @@ async function pollInboxBySearch(
   const duration_ms = Date.now() - start;
   trackEvent("automations.poll_run", args.userId, args.userRole, {
     automation_id: args.automationId,
-    mode: "search",
+    mode: usedSearchFallback ? "search+inbox-list-fallback" : "search",
     messages_seen: messagesSeen,
     messages_matched: messagesMatched,
     artifacts_ingested: artifactsIngested,
