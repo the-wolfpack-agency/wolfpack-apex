@@ -31,7 +31,23 @@ async function probeForDiag(userId: string): Promise<{
   inbox_newest: Array<{ subject: string; from: string; receivedDateTime: string }>;
   fallback_count: number | null;
   error: string | null;
+  /** The actual mailbox base the search-mode poller uses. When this
+      differs from `/me`, the poller is reading a shared/delegated
+      mailbox via AUTOMATION_POLL_MAILBOX_UPN, NOT the operator's own
+      inbox. The cognito email may be in /me but absent from there. */
+  poller_mailbox_base: string;
+  /** What ENV the search/poll path resolves the UPN to, useful for
+      seeing which mailbox is actually being polled. */
+  automation_poll_mailbox_upn: string | null;
+  /** What `/users/{upn}/mailFolders/inbox` reports — totals + 5
+      newest. Empty / 404 means the poller is pointed at a mailbox
+      it can't read. */
+  upn_inbox_total: number | null;
+  upn_inbox_newest: Array<{ subject: string; from: string; receivedDateTime: string }>;
+  upn_status: number | null;
 }> {
+  const upnEnv = (process.env.AUTOMATION_POLL_MAILBOX_UPN || "").trim();
+  const pollerBase = upnEnv ? `/users/${encodeURIComponent(upnEnv)}` : "/me";
   const out = {
     token_email: null as string | null,
     me_userPrincipalName: null as string | null,
@@ -40,6 +56,15 @@ async function probeForDiag(userId: string): Promise<{
     inbox_newest: [] as Array<{ subject: string; from: string; receivedDateTime: string }>,
     fallback_count: null as number | null,
     error: null as string | null,
+    poller_mailbox_base: pollerBase,
+    automation_poll_mailbox_upn: upnEnv || null,
+    upn_inbox_total: null as number | null,
+    upn_inbox_newest: [] as Array<{
+      subject: string;
+      from: string;
+      receivedDateTime: string;
+    }>,
+    upn_status: null as number | null,
   };
   try {
     const tok = await getValidToken(userId);
@@ -96,6 +121,39 @@ async function probeForDiag(userId: string): Promise<{
       out.fallback_count = Array.isArray(fb.value) ? fb.value.length : null;
     } else {
       out.error = `fallback_${fbRes.status}`;
+    }
+    /* When the poller routes through search mode (UPN env set), also
+       probe the ACTUAL target mailbox so the operator can see whether
+       the cognito email is in /users/{upn}'s inbox. If pollerBase is
+       /me, this just re-reads /me which is harmless and we skip. */
+    if (pollerBase !== "/me") {
+      const upnFolderRes = await fetch(
+        `https://graph.microsoft.com/v1.0${pollerBase}/mailFolders/inbox?$select=totalItemCount`,
+        { headers: auth },
+      );
+      out.upn_status = upnFolderRes.status;
+      if (upnFolderRes.ok) {
+        const f = (await upnFolderRes.json()) as { totalItemCount?: number };
+        out.upn_inbox_total = f.totalItemCount ?? null;
+        const upnNewestRes = await fetch(
+          `https://graph.microsoft.com/v1.0${pollerBase}/mailFolders/inbox/messages?$top=5&$select=subject,from,receivedDateTime&$orderby=receivedDateTime desc`,
+          { headers: auth },
+        );
+        if (upnNewestRes.ok) {
+          const n = (await upnNewestRes.json()) as {
+            value?: Array<{
+              subject?: string;
+              from?: { emailAddress?: { address?: string } };
+              receivedDateTime?: string;
+            }>;
+          };
+          out.upn_inbox_newest = (n.value ?? []).map((m) => ({
+            subject: m.subject ?? "",
+            from: m.from?.emailAddress?.address ?? "",
+            receivedDateTime: m.receivedDateTime ?? "",
+          }));
+        }
+      }
     }
   } catch (err) {
     out.error = (err as Error).message ?? "probe_threw";

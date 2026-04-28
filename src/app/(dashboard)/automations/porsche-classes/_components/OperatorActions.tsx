@@ -55,6 +55,11 @@ interface PollDiag {
   inbox_newest: Array<{ subject: string; from: string; receivedDateTime: string }>;
   fallback_count: number | null;
   error: string | null;
+  poller_mailbox_base?: string;
+  automation_poll_mailbox_upn?: string | null;
+  upn_inbox_total?: number | null;
+  upn_inbox_newest?: Array<{ subject: string; from: string; receivedDateTime: string }>;
+  upn_status?: number | null;
 }
 
 interface IngestRow {
@@ -429,6 +434,51 @@ function PollDiagBlock({ diag }: { diag: PollDiag }) {
         Inbox folder: {diag.inbox_total ?? "?"} total, {diag.inbox_unread ?? "?"} unread ·
         Fallback URL returned {diag.fallback_count ?? "?"} messages
       </div>
+      {diag.poller_mailbox_base && diag.poller_mailbox_base !== "/me" ? (
+        <div
+          style={{
+            marginTop: 4,
+            padding: "0.4rem 0.5rem",
+            background: "var(--wp-warning-bg, rgba(217,119,6,0.1))",
+            border: "1px solid var(--wp-warning, #d97706)",
+            borderRadius: 4,
+          }}
+        >
+          <div style={{ fontWeight: 600, color: "var(--wp-warning, #d97706)" }}>
+            Search mode reads a DIFFERENT mailbox
+          </div>
+          <div>
+            <code>AUTOMATION_POLL_MAILBOX_UPN</code>={" "}
+            <code>{diag.automation_poll_mailbox_upn}</code>
+          </div>
+          <div>
+            Poller base: <code>{diag.poller_mailbox_base}</code>{" "}
+            (HTTP {diag.upn_status ?? "?"}, total{" "}
+            {diag.upn_inbox_total ?? "?"})
+          </div>
+          {diag.upn_inbox_newest && diag.upn_inbox_newest.length > 0 ? (
+            <details style={{ marginTop: 4 }}>
+              <summary style={{ cursor: "pointer" }}>
+                Newest 5 in UPN-target inbox
+              </summary>
+              <ul style={{ margin: "4px 0 0 1rem", padding: 0 }}>
+                {diag.upn_inbox_newest.map((m, i) => (
+                  <li key={i}>
+                    <code>{m.receivedDateTime}</code> — {m.from} — {m.subject}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : (
+            <div>
+              UPN-target inbox returned 0 messages — token cannot read{" "}
+              <code>{diag.automation_poll_mailbox_upn}</code> (missing
+              Mail.Read.Shared / Full Access delegation), or that
+              mailbox really has no recent mail.
+            </div>
+          )}
+        </div>
+      ) : null}
       {diag.inbox_newest.length > 0 ? (
         <details style={{ marginTop: 4 }}>
           <summary style={{ cursor: "pointer" }}>
