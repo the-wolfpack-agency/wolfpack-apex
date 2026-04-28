@@ -147,6 +147,23 @@ export default function SupportPage() {
           }}
         >
           <Link
+            href="/support/analytics"
+            data-testid="support-view-analytics-cta"
+            style={{
+              background: "transparent",
+              color: "var(--wp-text-dim)",
+              border: "1px solid var(--wp-border, var(--wp-dark-border))",
+              padding: "0.6rem 1rem",
+              borderRadius: 6,
+              fontWeight: 500,
+              fontSize: "0.88rem",
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+            }}
+          >
+            View AI savings
+          </Link>
+          <Link
             href="/support/patterns"
             data-testid="support-manage-patterns-cta"
             style={{

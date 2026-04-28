@@ -1407,6 +1407,14 @@ export type InstinctEventType =
   //       running token-savings headline metric on the analytics
   //       dashboard.
   | "support.cache_hit"
+  // Operator-facing AI-savings analytics page (/support/analytics or
+  // wherever the dashboard lives). Fires on every successful read of the
+  // /api/support/analytics aggregator so the learning system can see how
+  // often operators inspect the cost-savings dashboard.
+  //
+  //   support.analytics_viewed { window }
+  //     — `window` is one of 'today' | '7d' | '30d' | 'all'.
+  | "support.analytics_viewed"
   // AI provider abstraction (src/lib/ai). Emitted on every model call so
   // we can attribute spend per feature, watch latency, and detect when
   // the failover path is firing.

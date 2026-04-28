@@ -44,4 +44,17 @@ describe("/support page header CTAs", () => {
       "/support/new",
     );
   });
+
+  test("renders the View AI savings link pointing at /support/analytics", async () => {
+    render(<SupportPage />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("support-page")).toBeInTheDocument(),
+    );
+
+    const analytics = screen.getByTestId("support-view-analytics-cta");
+    expect(analytics).toBeInTheDocument();
+    expect(analytics.getAttribute("href")).toBe("/support/analytics");
+    expect(analytics.textContent).toMatch(/View AI savings/);
+  });
 });
