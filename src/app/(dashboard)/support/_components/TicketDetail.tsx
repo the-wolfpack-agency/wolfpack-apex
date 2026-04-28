@@ -1038,7 +1038,13 @@ function FeedbackWidget({
         );
         return;
       }
-      const fresh = (await res.json()) as SupportTicket;
+      const data = (await res.json()) as
+        | SupportTicket
+        | { ticket: SupportTicket };
+      const fresh =
+        data && typeof data === "object" && "ticket" in data
+          ? (data as { ticket: SupportTicket }).ticket
+          : (data as SupportTicket);
       onTicketUpdated(fresh);
       setPendingChoice(null);
       setNotes("");
