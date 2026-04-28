@@ -428,6 +428,11 @@ export interface PollResult {
       surfaced so operators can tell "Graph rejected the fallback URL"
       from "Graph really has no recent mail" without checking logs. */
   fallback_error?: string;
+  /** Which Graph access strategy actually ran. Surfaced so operators
+      can tell at a glance whether `AUTOMATION_POLL_MAILBOX_UPN` is
+      driving search-mode (and thus which env var change applies)
+      versus the standard delta+inbox-list path. */
+  mode?: "delta" | "delta+fallback" | "search";
 }
 
 export async function pollInbox(args: {
@@ -586,6 +591,7 @@ async function pollInboxByDelta(args: {
     artifacts_quarantined: artifactsQuarantined,
     errors,
     duration_ms,
+    mode: triedFallback ? "delta+fallback" : "delta",
     ...(fallbackError ? { fallback_error: fallbackError } : {}),
   };
 }
@@ -825,21 +831,30 @@ async function pollInboxBySearch(args: {
      matching the automation's filters cross the wire. The
      receivedDateTime $filter further restricts to NEW messages since
      last successful poll. ConsistencyLevel: eventual is required by
-     Graph for $search + $filter. */
-  const url = new URL(`https://graph.microsoft.com/v1.0${getMailboxBase()}/mailFolders/inbox/messages`);
-  url.searchParams.set("$top", "50");
-  url.searchParams.set(
-    "$select",
-    "id,subject,bodyPreview,from,toRecipients,ccRecipients,body,receivedDateTime,hasAttachments",
-  );
-  url.searchParams.set("$search", `"${searchClause}"`);
+     Graph for $search + $filter.
+
+     CRITICAL: do NOT use URL/URLSearchParams. searchParams.set
+     encodes spaces as `+` (form-urlencoded), but Graph KQL silently
+     returns 0 results when $search/$orderby contain `+` instead of
+     `%20`. Build the URL by hand and let encodeURIComponent (which
+     produces %20 for spaces) handle the values. (Confirmed against
+     homyk@thewolfpack.agency 2026-04-28: searchParams form returned
+     0 across 10+ manual runs; manual encodeURIComponent path returns
+     the expected hits.) */
+  const select =
+    "id,subject,bodyPreview,from,toRecipients,ccRecipients,body,receivedDateTime,hasAttachments";
+  const urlString =
+    `https://graph.microsoft.com/v1.0${getMailboxBase()}/mailFolders/inbox/messages` +
+    `?$top=50` +
+    `&$select=${encodeURIComponent(select)}` +
+    `&$search=${encodeURIComponent(`"${searchClause}"`)}`;
   /* NOTE: Graph rejects $filter alongside $search in many cases — we
      apply the receivedDateTime cutoff client-side for safety. The
      $top: 50 cap protects from runaway when the cursor is far behind. */
 
   let payload: { value?: GraphMailMessage[] } = {};
   try {
-    const res = await fetch(url.toString(), {
+    const res = await fetch(urlString, {
       headers: {
         Authorization: `Bearer ${preToken.accessToken}`,
         ConsistencyLevel: "eventual",
@@ -989,6 +1004,7 @@ async function pollInboxBySearch(args: {
     artifacts_quarantined: artifactsQuarantined,
     errors,
     duration_ms,
+    mode: "search",
   };
 }
 
@@ -1062,22 +1078,25 @@ export async function pollInboxHistorical(args: HistoricalScanArgs): Promise<Pol
     };
   }
 
+  /* Same %20-vs-+ encoding hazard as pollInboxBySearch: build the URL
+     by hand. URL.searchParams.set encodes spaces as `+`, which Graph
+     KQL rejects silently. */
   const searchClause = buildSearchClause(args.filters);
-  const url = new URL(`https://graph.microsoft.com/v1.0${getMailboxBase()}/mailFolders/inbox/messages`);
-  url.searchParams.set("$top", String(limit));
-  url.searchParams.set(
-    "$select",
-    "id,subject,bodyPreview,from,toRecipients,ccRecipients,body,receivedDateTime,hasAttachments",
-  );
+  const histSelect =
+    "id,subject,bodyPreview,from,toRecipients,ccRecipients,body,receivedDateTime,hasAttachments";
+  let urlStr =
+    `https://graph.microsoft.com/v1.0${getMailboxBase()}/mailFolders/inbox/messages` +
+    `?$top=${limit}` +
+    `&$select=${encodeURIComponent(histSelect)}`;
   if (searchClause) {
-    url.searchParams.set("$search", `"${searchClause}"`);
+    urlStr += `&$search=${encodeURIComponent(`"${searchClause}"`)}`;
   } else {
-    url.searchParams.set("$orderby", "receivedDateTime desc");
+    urlStr += `&$orderby=receivedDateTime desc`;
   }
 
   let items: GraphMailMessage[] = [];
   try {
-    const res = await fetch(url.toString(), {
+    const res = await fetch(urlStr, {
       headers: {
         Authorization: `Bearer ${token.accessToken}`,
         ConsistencyLevel: "eventual",

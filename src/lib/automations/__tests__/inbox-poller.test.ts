@@ -244,7 +244,10 @@ describe("pollInbox dispatch · routes to search mode when AUTOMATION_POLL_MAILB
     expect(listMailDelta).not.toHaveBeenCalled();
     expect(capturedUrl).toContain("/users/alicia%40thewolfpack.agency/mailFolders/inbox/messages");
     // Server-side filter is applied — the URL must contain $search.
-    expect(capturedUrl).toContain("%24search=");
+    // (We build the URL manually to keep spaces as %20 not + — Graph
+    // KQL silently returns 0 with `+`. So $search is literal here, not
+    // %24-encoded.)
+    expect(capturedUrl).toContain("$search=");
     expect(capturedUrl).toContain("from%3A");
   });
 
@@ -293,10 +296,10 @@ describe("pollInbox dispatch · routes to search mode when AUTOMATION_POLL_MAILB
     (getValidToken as jest.Mock).mockResolvedValueOnce({ accessToken: "t" });
     const fetchSpy = jest.fn(async (url: string) => {
       const u = String(url);
-      // URL.searchParams.set percent-encodes the $; the actual URL
-      // contains %24search=, not $search=. The body-detail GET uses
-      // a template literal so $select stays literal there.
-      if (u.includes("%24search=")) {
+      // We now build URLs manually (so spaces are %20 not + — Graph
+      // KQL silently returns 0 rows on `+`). The list URL contains a
+      // literal $search; the body-detail GET also uses literal $select.
+      if (u.includes("$search=")) {
         // Search list response — note no body field, mimicking Graph's actual behavior.
         return {
           ok: true,
@@ -416,7 +419,7 @@ describe("pollInboxHistorical · $search-based historical scan", () => {
       userRole: "ops",
       filters: { sender_match: ["nick@thewolfpack.agency"] },
     });
-    expect(lastFetchUrl).toContain("%24search");
+    expect(lastFetchUrl).toContain("$search");
     /* Bare email (no spaces / dashes) goes through unwrapped; URL-encoded "@" is %40. */
     expect(lastFetchUrl).toContain("from%3Anick%40thewolfpack.agency");
   });
@@ -430,10 +433,12 @@ describe("pollInboxHistorical · $search-based historical scan", () => {
       userRole: "ops",
       filters: { sender_match: ["porsche-academy-notification@porsche.de"] },
     });
-    /* %27 is a single quote — wrapping is required because KQL needs the
-       value quoted when it contains a dash. */
+    /* Single quotes wrap the KQL value because it contains a dash. We
+       build URLs manually so encodeURIComponent is the only encoder
+       — single quotes are left literal by encodeURIComponent (RFC
+       3986 unreserved character). */
     expect(lastFetchUrl).toContain(
-      "from%3A%27porsche-academy-notification%40porsche.de%27",
+      "from%3A'porsche-academy-notification%40porsche.de'",
     );
   });
 
@@ -446,8 +451,8 @@ describe("pollInboxHistorical · $search-based historical scan", () => {
       userRole: "ops",
       filters: { sender_match: [], subject_match: [] },
     });
-    expect(lastFetchUrl).not.toContain("%24search");
-    expect(lastFetchUrl).toContain("%24orderby");
+    expect(lastFetchUrl).not.toContain("$search");
+    expect(lastFetchUrl).toContain("$orderby");
   });
 
   it("returns errors:1 when Graph returns non-OK", async () => {

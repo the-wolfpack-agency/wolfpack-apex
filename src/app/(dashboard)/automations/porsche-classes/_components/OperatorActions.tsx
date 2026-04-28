@@ -44,6 +44,7 @@ interface PollResult {
   duration_ms?: number;
   skipped?: string;
   fallback_error?: string;
+  mode?: "delta" | "delta+fallback" | "search";
 }
 
 interface PollDiag {
@@ -477,6 +478,12 @@ function PollSummary({ result }: { result: PollResult }) {
           {result.artifacts_quarantined ?? 0}
         </strong>{" "}
         · {result.duration_ms ?? 0}ms
+        {result.mode ? (
+          <>
+            {" · "}
+            <code style={{ fontSize: "0.72rem" }}>mode={result.mode}</code>
+          </>
+        ) : null}
       </span>
       {result.fallback_error ? (
         <div
