@@ -180,8 +180,28 @@ export function messageBodyToPlainText(msg: GraphInboxMessage): string {
       const $ = loadHtml(raw);
       /* Strip noise — script/style/head must not contribute text. */
       $("script, style, head, meta, link").remove();
+      /* Cheerio's .text() concatenates with NO spacing between block
+         elements, so a multi-paragraph email collapses into one wall
+         of text (the "Alicia ZulkerProgram Director" symptom). Inject
+         newlines before extracting:
+           - <br> → single newline
+           - <p>, <div>, <li>, <tr>, headings → double newline (paragraph break)
+         Then run .text(), then collapse runs of newlines so we don't
+         end up with 8+ blank lines from nested divs. */
+      $("br").replaceWith("\n");
+      $("p, div, li, tr, h1, h2, h3, h4, h5, h6, blockquote, table").each(
+        (_, el) => {
+          $(el).prepend("\n\n");
+          $(el).append("\n\n");
+        },
+      );
       const text = $("body").text() || $.root().text();
-      return text.replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+      return text
+        .replace(/\r\n?/g, "\n")
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/\n[ \t]+/g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
     } catch (err) {
       console.warn(
         "[support/inbox-poller] HTML strip failed:",

@@ -205,6 +205,64 @@ describe("messageBodyToPlainText", () => {
     expect(out).not.toContain("bad()");
   });
 
+  it("preserves paragraph breaks between block elements (regression: Alicia ZulkerProgram Director)", () => {
+    /* Symptom 2026-04-28: incoming Outlook email had each paragraph
+       in its own <div>, plus an inline-block signature. cheerio.text()
+       concatenated everything into one wall of text — the operator
+       saw "Alicia ZulkerProgram Director The Wolfpack Agency" all as
+       one run-on. Block elements MUST inject paragraph breaks. */
+    const out = messageBodyToPlainText({
+      id: "x",
+      body: {
+        contentType: "html",
+        content:
+          "<html><body>" +
+          "<div>Hi there,</div>" +
+          "<div>Trying to get Matt added.</div>" +
+          "<div>Thanks!</div>" +
+          "<div>Alicia Zulker</div>" +
+          "<div>Program Director</div>" +
+          "</body></html>",
+      },
+    });
+    /* Two consecutive lines must NOT collapse into one run-on token. */
+    expect(out).not.toContain("Thanks!Alicia");
+    expect(out).not.toContain("ZulkerProgram");
+    /* Each div should be on its own line (allowing for a blank between). */
+    expect(out).toMatch(/Hi there,\s*\n/);
+    expect(out).toMatch(/Alicia Zulker\s*\n/);
+    expect(out).toMatch(/Program Director/);
+  });
+
+  it("renders <br> as a single line break", () => {
+    const out = messageBodyToPlainText({
+      id: "x",
+      body: {
+        contentType: "html",
+        content: "<html><body>Line one<br>Line two<br>Line three</body></html>",
+      },
+    });
+    expect(out).toMatch(/Line one\s*\n+\s*Line two/);
+    expect(out).toMatch(/Line two\s*\n+\s*Line three/);
+  });
+
+  it("collapses runaway nested-div blank lines so output is readable", () => {
+    /* Outlook frequently nests <div> inside <div> inside <div>. Without
+       the collapse, each level adds 2 newlines and we'd get a dozen
+       blank lines between paragraphs. */
+    const out = messageBodyToPlainText({
+      id: "x",
+      body: {
+        contentType: "html",
+        content: "<html><body><div><div><div>One</div></div></div><div><div>Two</div></div></body></html>",
+      },
+    });
+    /* Never more than one blank line between paragraphs. */
+    expect(out).not.toMatch(/\n\n\n/);
+    expect(out).toContain("One");
+    expect(out).toContain("Two");
+  });
+
   it("falls back to bodyPreview when no body content", () => {
     const out = messageBodyToPlainText({ id: "x", bodyPreview: "preview only" });
     expect(out).toBe("preview only");
