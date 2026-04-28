@@ -649,7 +649,14 @@ async function pollInboxByDelta(args: {
   let fallbackError: string | null = null;
   if (items.length === 0) {
     triedFallback = true;
-    const sinceIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+    /* 30-day backward window. Operators want past classes populated
+       on the dashboard from the historical mail in their inbox, not
+       just the last week. Graph $top: 50 caps the per-call return,
+       so very-deep backfills still need pagination — but for a
+       month of class-summary mail this typically pulls every match
+       in one call. Keep in sync with the search-mode fallback
+       below. */
+    const sinceIso = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
     try {
       items = await listInboxSince(args.userId, sinceIso);
     } catch (err) {
@@ -1067,15 +1074,21 @@ async function pollInboxBySearch(
      AND/OR clauses with mixed quoted/unquoted values), and there's
      no error response to discriminate on.
 
-     Drop to a direct inbox listing for the last 7 days when $search
+     Drop to a direct inbox listing for the last 30 days when $search
      returns 0, then re-apply the client-side filter. Privacy is
      preserved: only matching messages are processed downstream;
      non-matching ones are skipped without storage. The token already
-     has Mail.Read.Shared, so reading the metadata is in scope. */
+     has Mail.Read.Shared, so reading the metadata is in scope.
+
+     30-day window matches the delta-mode fallback so an operator can
+     populate "This week" with the recent past classes by clicking
+     Run-now once — no separate backfill flow needed for short
+     histories. Deeper history still requires the explicit historical
+     scan endpoint. */
   let usedSearchFallback = false;
   if (items.length === 0) {
     try {
-      const sinceIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+      const sinceIso = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
       const fbSelect =
         "id,subject,bodyPreview,from,toRecipients,ccRecipients,body,receivedDateTime,hasAttachments";
       const fbFilter = `receivedDateTime ge ${sinceIso}`;
