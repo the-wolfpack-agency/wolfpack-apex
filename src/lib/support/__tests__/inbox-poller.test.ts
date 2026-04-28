@@ -603,3 +603,139 @@ describe("pollSupportInbox", () => {
     expect(mockCreateTicket).toHaveBeenCalled();
   });
 });
+
+describe("pollSupportInbox · self-healing auto-ack retry pass", () => {
+  // Regression — 2026-04-28. Microsoft put support@ into
+  // ErrorMailboxMoveInProgress, which made the fire-and-forget auto-ack
+  // 503 silently. Tickets got created with auto_acknowledged_at = NULL
+  // and stayed that way forever even after the move finished. The fix
+  // is a retry pass at the end of every poll: SELECT recent client
+  // tickets with no auto_acknowledged_at and re-run processAutoAcknowledge
+  // on each. processAutoAcknowledge is idempotent (short-circuits on
+  // already_acknowledged) so this is safe.
+  beforeEach(() => {
+    mockGetValidToken.mockResolvedValue({ accessToken: "tk", userEmail: "op@x" });
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ value: [] }), { status: 200 }),
+      ) as unknown as typeof fetch;
+  });
+
+  it("calls processAutoAcknowledge for every recent stuck client ticket", async () => {
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("instinct_support_poll_state")) {
+        return { rows: [] };
+      }
+      if (
+        sql.includes("instinct_support_tickets") &&
+        sql.includes("auto_acknowledged_at IS NULL")
+      ) {
+        return {
+          rows: [
+            { id: "tk-stuck-1" },
+            { id: "tk-stuck-2" },
+            { id: "tk-stuck-3" },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+    mockProcessAutoAck.mockReset();
+    mockProcessAutoAck.mockResolvedValue({ acknowledged: true });
+
+    await pollSupportInbox({ userId: "u-1", userRole: "ops" });
+
+    expect(mockProcessAutoAck).toHaveBeenCalledTimes(3);
+    expect(mockProcessAutoAck).toHaveBeenCalledWith("tk-stuck-1");
+    expect(mockProcessAutoAck).toHaveBeenCalledWith("tk-stuck-2");
+    expect(mockProcessAutoAck).toHaveBeenCalledWith("tk-stuck-3");
+  });
+
+  it("counts only acknowledged retries as recovered (skip-reasons stay retried-but-not-recovered)", async () => {
+    /* trackEvent is the analytics surface — assert we emit
+       auto_ack_retried + auto_ack_recovered with the right values. */
+    const { trackEvent } = jest.requireMock("@/lib/analytics") as {
+      trackEvent: jest.Mock;
+    };
+    trackEvent.mockClear();
+
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("instinct_support_poll_state")) return { rows: [] };
+      if (
+        sql.includes("instinct_support_tickets") &&
+        sql.includes("auto_acknowledged_at IS NULL")
+      ) {
+        return { rows: [{ id: "t1" }, { id: "t2" }, { id: "t3" }] };
+      }
+      return { rows: [] };
+    });
+    mockProcessAutoAck.mockReset();
+    mockProcessAutoAck.mockResolvedValueOnce({ acknowledged: true }); // recovered
+    mockProcessAutoAck.mockResolvedValueOnce({
+      acknowledged: false,
+      reason: "graph_status_503",
+    });
+    mockProcessAutoAck.mockResolvedValueOnce({
+      acknowledged: false,
+      reason: "already_acknowledged",
+    });
+
+    await pollSupportInbox({ userId: "u-1", userRole: "ops" });
+
+    const pollEvent = trackEvent.mock.calls.find(
+      (args) => args[0] === "support.poll_run",
+    );
+    expect(pollEvent).toBeDefined();
+    const props = pollEvent![3] as Record<string, unknown>;
+    expect(props.auto_ack_retried).toBe(3);
+    expect(props.auto_ack_recovered).toBe(1);
+  });
+
+  it("survives a thrown processAutoAcknowledge without failing the poll", async () => {
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("instinct_support_poll_state")) return { rows: [] };
+      if (
+        sql.includes("instinct_support_tickets") &&
+        sql.includes("auto_acknowledged_at IS NULL")
+      ) {
+        return { rows: [{ id: "t-bad" }, { id: "t-ok" }] };
+      }
+      return { rows: [] };
+    });
+    mockProcessAutoAck.mockReset();
+    mockProcessAutoAck.mockRejectedValueOnce(new Error("boom"));
+    mockProcessAutoAck.mockResolvedValueOnce({ acknowledged: true });
+
+    const out = await pollSupportInbox({ userId: "u-1", userRole: "ops" });
+
+    /* Hard-fail of one retry must not poison the rest of the poll —
+       the second ticket still gets retried and the poll still returns
+       success-shaped result. */
+    expect(out.errors).toBe(0);
+    expect(mockProcessAutoAck).toHaveBeenCalledTimes(2);
+  });
+
+  it("does nothing (counters stay 0) when no stuck tickets exist", async () => {
+    const { trackEvent } = jest.requireMock("@/lib/analytics") as {
+      trackEvent: jest.Mock;
+    };
+    trackEvent.mockClear();
+
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("instinct_support_poll_state")) return { rows: [] };
+      return { rows: [] };
+    });
+    mockProcessAutoAck.mockReset();
+
+    await pollSupportInbox({ userId: "u-1", userRole: "ops" });
+
+    expect(mockProcessAutoAck).not.toHaveBeenCalled();
+    const pollEvent = trackEvent.mock.calls.find(
+      (args) => args[0] === "support.poll_run",
+    );
+    const props = pollEvent![3] as Record<string, unknown>;
+    expect(props.auto_ack_retried).toBe(0);
+    expect(props.auto_ack_recovered).toBe(0);
+  });
+});
