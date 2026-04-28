@@ -14,6 +14,94 @@ import { getAutomation } from "@/lib/automations/registry";
 import { pollInbox } from "@/lib/automations/inbox-poller";
 import type { AutomationId } from "@/lib/automations/types";
 import { getObsClient } from "@/lib/obs";
+import { getValidToken } from "@/lib/microsoft-graph";
+
+/**
+ * Probe Graph for "what mailbox does our token actually read, and what
+ * does its inbox look like right now". Called only when messages_seen
+ * is 0 so the operator gets actionable diag inline without a separate
+ * URL hit. Best-effort — every branch returns a partial shape, never
+ * throws.
+ */
+async function probeForDiag(userId: string): Promise<{
+  token_email: string | null;
+  me_userPrincipalName: string | null;
+  inbox_total: number | null;
+  inbox_unread: number | null;
+  inbox_newest: Array<{ subject: string; from: string; receivedDateTime: string }>;
+  fallback_count: number | null;
+  error: string | null;
+}> {
+  const out = {
+    token_email: null as string | null,
+    me_userPrincipalName: null as string | null,
+    inbox_total: null as number | null,
+    inbox_unread: null as number | null,
+    inbox_newest: [] as Array<{ subject: string; from: string; receivedDateTime: string }>,
+    fallback_count: null as number | null,
+    error: null as string | null,
+  };
+  try {
+    const tok = await getValidToken(userId);
+    if (!tok) {
+      out.error = "no_valid_token";
+      return out;
+    }
+    out.token_email = tok.userEmail ?? null;
+    const auth = { Authorization: `Bearer ${tok.accessToken}` };
+    const meRes = await fetch("https://graph.microsoft.com/v1.0/me", { headers: auth });
+    if (meRes.ok) {
+      const me = (await meRes.json()) as { userPrincipalName?: string };
+      out.me_userPrincipalName = me.userPrincipalName ?? null;
+    }
+    const folderRes = await fetch(
+      "https://graph.microsoft.com/v1.0/me/mailFolders/inbox?$select=totalItemCount,unreadItemCount",
+      { headers: auth },
+    );
+    if (folderRes.ok) {
+      const f = (await folderRes.json()) as { totalItemCount?: number; unreadItemCount?: number };
+      out.inbox_total = f.totalItemCount ?? null;
+      out.inbox_unread = f.unreadItemCount ?? null;
+    }
+    const newestRes = await fetch(
+      "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=5&$select=subject,from,receivedDateTime&$orderby=receivedDateTime desc",
+      { headers: auth },
+    );
+    if (newestRes.ok) {
+      const n = (await newestRes.json()) as {
+        value?: Array<{
+          subject?: string;
+          from?: { emailAddress?: { address?: string } };
+          receivedDateTime?: string;
+        }>;
+      };
+      out.inbox_newest = (n.value ?? []).map((m) => ({
+        subject: m.subject ?? "",
+        from: m.from?.emailAddress?.address ?? "",
+        receivedDateTime: m.receivedDateTime ?? "",
+      }));
+    }
+    /* Probe the SAME fallback URL the poller builds so we surface
+       whether the receivedDateTime ge filter format is being silently
+       rejected by Graph. */
+    const sinceIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+    const fallbackUrl =
+      `https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages` +
+      `?$top=50&$orderby=receivedDateTime desc` +
+      `&$select=id,subject,receivedDateTime` +
+      `&$filter=${encodeURIComponent(`receivedDateTime ge ${sinceIso}`)}`;
+    const fbRes = await fetch(fallbackUrl, { headers: auth });
+    if (fbRes.ok) {
+      const fb = (await fbRes.json()) as { value?: unknown[] };
+      out.fallback_count = Array.isArray(fb.value) ? fb.value.length : null;
+    } else {
+      out.error = `fallback_${fbRes.status}`;
+    }
+  } catch (err) {
+    out.error = (err as Error).message ?? "probe_threw";
+  }
+  return out;
+}
 
 /**
  * Cron secret check. Vercel Cron Jobs hit the route as GET with
@@ -58,7 +146,19 @@ async function runPoll(automationId: string, userId: string, userRole: string) {
       handle.setAttribute("duration_ms", num("duration_ms") ?? null);
     }
     handle.end("ok");
-    return NextResponse.json({ ok: true, result });
+    /* When the poll saw nothing, attach a diag block so the operator
+       can see immediately whether the token is bound to the expected
+       mailbox, what's actually in inbox, and whether the fallback
+       filter URL itself returned 0. Surfaces the same data as
+       /api/automations/porsche-classes/graph-probe but inline (no
+       separate URL hit needed — the dashboard fetch already carries
+       the right Authorization header). */
+    let diag: Awaited<ReturnType<typeof probeForDiag>> | undefined;
+    const seen = (result as unknown as { messages_seen?: number }).messages_seen;
+    if (typeof seen === "number" && seen === 0) {
+      diag = await probeForDiag(userId);
+    }
+    return NextResponse.json({ ok: true, result, diag });
   } catch (err) {
     /* "No valid Microsoft token" thrown by ms-graph clients downstream
        of pollInbox is the documented bootstrap state — the cron runs

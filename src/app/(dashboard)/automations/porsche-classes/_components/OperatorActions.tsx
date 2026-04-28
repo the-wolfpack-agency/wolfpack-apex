@@ -45,6 +45,16 @@ interface PollResult {
   skipped?: string;
 }
 
+interface PollDiag {
+  token_email: string | null;
+  me_userPrincipalName: string | null;
+  inbox_total: number | null;
+  inbox_unread: number | null;
+  inbox_newest: Array<{ subject: string; from: string; receivedDateTime: string }>;
+  fallback_count: number | null;
+  error: string | null;
+}
+
 interface IngestRow {
   filename: string;
   source_type: SourceType | null;
@@ -77,7 +87,7 @@ export default function OperatorActions(props: { onChanged?: () => void }) {
   const [pollState, setPollState] = useState<
     | { kind: "idle" }
     | { kind: "running" }
-    | { kind: "ok"; result: PollResult }
+    | { kind: "ok"; result: PollResult; diag?: PollDiag | null }
     | { kind: "error"; message: string }
   >({ kind: "idle" });
 
@@ -100,7 +110,8 @@ export default function OperatorActions(props: { onChanged?: () => void }) {
         return;
       }
       const result: PollResult = body?.result ?? {};
-      setPollState({ kind: "ok", result });
+      const diag: PollDiag | null = body?.diag ?? null;
+      setPollState({ kind: "ok", result, diag });
       props.onChanged?.();
     } catch (err) {
       setPollState({ kind: "error", message: (err as Error).message });
@@ -264,7 +275,10 @@ export default function OperatorActions(props: { onChanged?: () => void }) {
                 Poll failed: {pollState.message}
               </span>
             ) : (
-              <PollSummary result={pollState.result} />
+              <>
+                <PollSummary result={pollState.result} />
+                {pollState.diag ? <PollDiagBlock diag={pollState.diag} /> : null}
+              </>
             )}
           </div>
         </div>
@@ -378,6 +392,65 @@ export default function OperatorActions(props: { onChanged?: () => void }) {
         </div>
       </div>
     </section>
+  );
+}
+
+function PollDiagBlock({ diag }: { diag: PollDiag }) {
+  return (
+    <div
+      data-testid="operator-actions-poll-diag"
+      style={{
+        marginTop: "0.55rem",
+        padding: "0.55rem 0.7rem",
+        background: "var(--wp-dark-surface2)",
+        border: "1px solid var(--wp-dark-border)",
+        borderRadius: 6,
+        fontSize: "0.74rem",
+        lineHeight: 1.5,
+        color: "var(--wp-text-dim)",
+      }}
+    >
+      <div style={{ fontWeight: 600, color: "var(--wp-text)", marginBottom: 4 }}>
+        Diagnostic (poll saw 0 messages)
+      </div>
+      <div>
+        Token mailbox: <code>{diag.token_email ?? "(unknown)"}</code>
+        {diag.me_userPrincipalName &&
+        diag.me_userPrincipalName !== diag.token_email ? (
+          <span style={{ color: "var(--wp-warning, #d97706)" }}>
+            {" "}
+            (Graph /me reports <code>{diag.me_userPrincipalName}</code> — tokens mismatch!)
+          </span>
+        ) : null}
+      </div>
+      <div>
+        Inbox folder: {diag.inbox_total ?? "?"} total, {diag.inbox_unread ?? "?"} unread ·
+        Fallback URL returned {diag.fallback_count ?? "?"} messages
+      </div>
+      {diag.inbox_newest.length > 0 ? (
+        <details style={{ marginTop: 4 }}>
+          <summary style={{ cursor: "pointer" }}>
+            Newest 5 in inbox (Graph view)
+          </summary>
+          <ul style={{ margin: "4px 0 0 1rem", padding: 0 }}>
+            {diag.inbox_newest.map((m, i) => (
+              <li key={i}>
+                <code>{m.receivedDateTime}</code> — {m.from} — {m.subject}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : (
+        <div style={{ color: "var(--wp-error, #c44)" }}>
+          Inbox newest list is empty — token may be bound to wrong mailbox.
+        </div>
+      )}
+      {diag.error ? (
+        <div style={{ color: "var(--wp-error, #c44)" }}>
+          Probe error: <code>{diag.error}</code>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
