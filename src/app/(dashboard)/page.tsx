@@ -483,7 +483,7 @@ export default function DashboardPage() {
             so the card never looks broken to a brand-new user. */}
         <div
           className="rounded-lg p-5 border"
-          data-testid="quick-actions"
+          data-testid="quick-actions-card"
           data-source={quickActions[0]?.source ?? "fallback"}
           style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
         >
@@ -495,7 +495,8 @@ export default function DashboardPage() {
               <a
                 key={`${action.href}-${idx}`}
                 href={action.href}
-                data-testid="quick-action-tile"
+                data-testid={`quick-action-${idx}`}
+                data-position={idx}
                 data-source={action.source}
                 data-href={action.href}
                 onClick={() => handleQuickActionClick(action, idx)}
