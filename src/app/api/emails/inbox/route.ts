@@ -1,18 +1,25 @@
 /**
- * GET /api/emails/inbox — list inbox messages for the /emails page.
+ * GET /api/emails/inbox — list messages from one of the user's well-known
+ * mail folders for the /emails page.
  *
  * Query params:
- *   ?top=25         (1–100, default 25)
- *   ?skip=0         (>=0, default 0)
- *   ?unread=true    (filter on isRead=false)
+ *   ?top=25                         (1–100, default 25)
+ *   ?skip=0                         (>=0, default 0)
+ *   ?unread=true                    (filter on isRead=false — only honored
+ *                                    for `inbox` and `archived`; drafts +
+ *                                    sent ignore it)
+ *   ?folder=inbox|drafts|sent|archived  (default `inbox`; anything else
+ *                                        returns 400 invalid_input so a
+ *                                        typo never silently lists a wrong
+ *                                        folder)
  *
  * Auth: capability `emails.view`. Same scope_missing / not_connected
  * treatment as the rest of the mail surface.
  *
  * Architecture note: live Graph fetch on every call. The
- * `microsoft-mail.listInbox` helper memoizes nothing — the page-level
- * cache lives in `lib/microsoft-graph.ts` (5min TTL). For an inbox
- * surface that changes by the second a longer cache misleads users,
+ * `microsoft-mail.listFolderMessages` helper memoizes nothing — the
+ * page-level cache lives in `lib/microsoft-graph.ts` (5min TTL). For a
+ * mail list that changes by the second a longer cache misleads users,
  * and a local Postgres mirror would force a full delta-sync feature
  * we don't need yet. Keep this layer thin.
  */
@@ -21,7 +28,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
-import { listInbox, type ListInboxOptions } from "@/lib/integrations/microsoft-mail";
+import {
+  listFolderMessages,
+  isAppMailFolder,
+  type AppMailFolder,
+  type ListFolderMessagesOptions,
+} from "@/lib/integrations/microsoft-mail";
 
 // ---------------------------------------------------------------------------
 // Per-user rate limiter — 60/min. Inbox lists hit Graph hard so we cap.
@@ -49,15 +61,45 @@ export function _resetRateLimit(): void {
   inboxAttempts.clear();
 }
 
-function parseOpts(req: NextRequest): ListInboxOptions {
+interface ParsedOpts {
+  ok: true;
+  opts: ListFolderMessagesOptions;
+  folder: AppMailFolder;
+}
+interface ParseError {
+  ok: false;
+  status: 400;
+  body: { error: "invalid_input"; detail: string };
+}
+
+function parseOpts(req: NextRequest): ParsedOpts | ParseError {
   const u = new URL(req.url);
   const topRaw = parseInt(u.searchParams.get("top") ?? "25", 10);
   const skipRaw = parseInt(u.searchParams.get("skip") ?? "0", 10);
   const unread = u.searchParams.get("unread") === "true";
+  const folderRaw = u.searchParams.get("folder");
+  // Default to inbox when missing, but reject any unknown value so a
+  // typo can't silently list the wrong folder.
+  if (folderRaw !== null && folderRaw !== "" && !isAppMailFolder(folderRaw)) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: "invalid_input",
+        detail: `unknown folder: ${folderRaw}. Expected one of inbox|drafts|sent|archived`,
+      },
+    };
+  }
+  const folder: AppMailFolder = isAppMailFolder(folderRaw) ? folderRaw : "inbox";
   return {
-    top: Number.isFinite(topRaw) ? topRaw : 25,
-    skip: Number.isFinite(skipRaw) ? skipRaw : 0,
-    unreadOnly: unread,
+    ok: true,
+    folder,
+    opts: {
+      folder,
+      top: Number.isFinite(topRaw) ? topRaw : 25,
+      skip: Number.isFinite(skipRaw) ? skipRaw : 0,
+      unreadOnly: unread,
+    },
   };
 }
 
@@ -78,11 +120,16 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const parsed = parseOpts(req);
+  if (!parsed.ok) {
+    return NextResponse.json(parsed.body, { status: parsed.status });
+  }
+
   const auth = await requireCapability(req, "emails.view");
   if (!auth.ok) return auth.response;
   const { user } = auth;
 
-  const result = await listInbox(user.id, parseOpts(req));
+  const result = await listFolderMessages(user.id, parsed.opts);
   if (!result.ok) {
     switch (result.code) {
       case "not_connected":
@@ -120,6 +167,7 @@ export async function GET(req: NextRequest) {
       messages: result.value.messages,
       nextSkip: result.value.nextSkip,
       unreadCount: result.value.unreadCount,
+      folder: parsed.folder,
     },
     { status: 200 },
   );

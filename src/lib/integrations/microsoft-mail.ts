@@ -723,6 +723,42 @@ export interface InboxMessageSummary {
   hasAttachments: boolean;
   importance: "low" | "normal" | "high";
   webLink: string;
+  /** True when Graph reports this as a draft (drafts/sent folders). */
+  isDraft?: boolean;
+}
+
+/**
+ * App-side folder names. We map these to Microsoft Graph well-known
+ * folder names so the route layer never has to know about Graph's
+ * naming.
+ */
+export type AppMailFolder = "inbox" | "drafts" | "sent" | "archived";
+
+const APP_FOLDERS: readonly AppMailFolder[] = ["inbox", "drafts", "sent", "archived"];
+
+const FOLDER_TO_GRAPH: Record<AppMailFolder, string> = {
+  inbox: "inbox",
+  drafts: "drafts",
+  sent: "sentitems",
+  archived: "archive",
+};
+
+export function isAppMailFolder(s: unknown): s is AppMailFolder {
+  return typeof s === "string" && (APP_FOLDERS as readonly string[]).includes(s);
+}
+
+export function appMailFolderToGraph(folder: AppMailFolder): string {
+  return FOLDER_TO_GRAPH[folder];
+}
+
+/**
+ * Folders where the "unread" concept is meaningful. Drafts and sent
+ * messages don't carry a useful isRead state.
+ */
+const UNREAD_AWARE_FOLDERS: ReadonlySet<AppMailFolder> = new Set(["inbox", "archived"]);
+
+export function folderSupportsUnreadFilter(folder: AppMailFolder): boolean {
+  return UNREAD_AWARE_FOLDERS.has(folder);
 }
 
 export interface ListInboxOptions {
@@ -732,8 +768,22 @@ export interface ListInboxOptions {
   unreadOnly?: boolean;
   /** OData $skip for paging — cheap because we $orderby receivedDateTime. */
   skip?: number;
-  /** Folder. Defaults to "inbox". */
+  /**
+   * Folder. Defaults to "inbox". Accepts either an app folder name
+   * ("inbox" | "drafts" | "sent" | "archived") or a raw Graph well-known
+   * name ("sentitems", "archive"). Unknown values fall back to "inbox".
+   */
   folder?: string;
+}
+
+export interface ListFolderMessagesOptions {
+  folder: AppMailFolder;
+  top?: number;
+  skip?: number;
+  /**
+   * Only meaningful for inbox + archived. Drafts/sent ignore this.
+   */
+  unreadOnly?: boolean;
 }
 
 export interface ListInboxPage {
@@ -753,6 +803,7 @@ interface RawInboxMessage {
   hasAttachments?: boolean | null;
   importance?: string | null;
   webLink?: string | null;
+  isDraft?: boolean | null;
 }
 
 function normalizeImportance(v: string | null | undefined): "low" | "normal" | "high" {
@@ -775,22 +826,53 @@ function normalizeInboxRow(m: RawInboxMessage): InboxMessageSummary {
     hasAttachments: Boolean(m.hasAttachments),
     importance: normalizeImportance(m.importance),
     webLink: m.webLink ?? "",
+    isDraft: Boolean(m.isDraft),
   };
 }
 
 /**
- * List messages from the user's inbox folder. Mail.Read scope only.
- * Returns up to `top` rows ordered newest-first. Pagination is `$skip`
- * based — Graph's `@odata.nextLink` would also work but `$skip` keeps
- * the cursor stateless on the client.
+ * Resolve any caller-supplied folder string to (a) the app folder
+ * canonical name and (b) the Graph well-known name. Accepts both shapes
+ * so older callers passing "sentitems" / "archive" keep working.
  */
-export async function listInbox(
+function resolveFolder(input: string | undefined): {
+  appFolder: AppMailFolder;
+  graphFolder: string;
+} {
+  const cleaned = (input ?? "inbox").replace(/[^a-zA-Z0-9_-]/g, "") || "inbox";
+  if (isAppMailFolder(cleaned)) {
+    return { appFolder: cleaned, graphFolder: FOLDER_TO_GRAPH[cleaned] };
+  }
+  // Accept Graph well-known names that map to one of our app folders.
+  const lower = cleaned.toLowerCase();
+  if (lower === "sentitems") return { appFolder: "sent", graphFolder: "sentitems" };
+  if (lower === "archive") return { appFolder: "archived", graphFolder: "archive" };
+  // Unknown — fall back to inbox to keep the surface safe.
+  return { appFolder: "inbox", graphFolder: "inbox" };
+}
+
+/**
+ * List messages from one of the user's well-known mail folders.
+ * Mail.Read scope only.
+ *
+ * Drafts + sent items don't have a useful "unread" concept, so the
+ * `unreadOnly` filter is silently dropped for those folders. Inbox +
+ * archived honor it.
+ *
+ * Folder name mapping (app → Graph well-known):
+ *   inbox    → inbox
+ *   drafts   → drafts
+ *   sent     → sentitems
+ *   archived → archive
+ */
+export async function listFolderMessages(
   userId: string,
-  opts: ListInboxOptions = {},
+  opts: ListFolderMessagesOptions,
 ): Promise<Result<ListInboxPage>> {
+  const { appFolder, graphFolder } = resolveFolder(opts.folder);
   const top = Math.min(Math.max(Number.isFinite(opts.top) ? Number(opts.top) : 25, 1), 100);
   const skip = Math.max(Number.isFinite(opts.skip) ? Number(opts.skip) : 0, 0);
-  const folder = (opts.folder ?? "inbox").replace(/[^a-zA-Z0-9_-]/g, "") || "inbox";
+  const honorUnread = Boolean(opts.unreadOnly) && folderSupportsUnreadFilter(appFolder);
 
   const token = await getValidToken(userId);
   if (!token) {
@@ -798,9 +880,9 @@ export async function listInbox(
   }
 
   const select =
-    "id,subject,from,receivedDateTime,bodyPreview,isRead,hasAttachments,importance,webLink";
+    "id,subject,from,receivedDateTime,bodyPreview,isRead,hasAttachments,importance,webLink,isDraft";
   const order = "receivedDateTime desc";
-  const filter = opts.unreadOnly ? "isRead eq false" : "";
+  const filter = honorUnread ? "isRead eq false" : "";
   const params: string[] = [
     `$top=${top}`,
     `$skip=${skip}`,
@@ -810,7 +892,7 @@ export async function listInbox(
   ];
   if (filter) params.push(`$filter=${encodeURIComponent(filter)}`);
 
-  const path = `me/mailFolders/${folder}/messages?${params.join("&")}`;
+  const path = `me/mailFolders/${graphFolder}/messages?${params.join("&")}`;
   const res = await graphGet<{ value?: RawInboxMessage[]; "@odata.count"?: number }>(
     path,
     token.accessToken,
@@ -835,9 +917,10 @@ export async function listInbox(
   const nextSkip = messages.length === top ? skip + top : null;
 
   trackEvent("system.ms_mail_listed", userId, "system", {
-    folder,
+    folder: appFolder,
+    graph_folder: graphFolder,
     count: messages.length,
-    unread_only: Boolean(opts.unreadOnly),
+    unread_only: honorUnread,
     top,
     skip,
   });
@@ -847,9 +930,27 @@ export async function listInbox(
     value: {
       messages,
       nextSkip,
-      unreadCount: opts.unreadOnly ? totalCount : undefined,
+      unreadCount: honorUnread ? totalCount : undefined,
     },
   };
+}
+
+/**
+ * Backwards-compatible wrapper around `listFolderMessages`. Defaults to
+ * the inbox folder when none is passed. Keep this so older callers /
+ * tests that use `listInbox` keep working unchanged.
+ */
+export async function listInbox(
+  userId: string,
+  opts: ListInboxOptions = {},
+): Promise<Result<ListInboxPage>> {
+  const { appFolder } = resolveFolder(opts.folder);
+  return listFolderMessages(userId, {
+    folder: appFolder,
+    top: opts.top,
+    skip: opts.skip,
+    unreadOnly: opts.unreadOnly,
+  });
 }
 
 /**
@@ -1215,5 +1316,7 @@ export const __internal = {
   validateSendInput,
   normalizeRecipients,
   normalizeInboxRow,
+  resolveFolder,
   BODY_PREVIEW_MAX,
+  FOLDER_TO_GRAPH,
 };

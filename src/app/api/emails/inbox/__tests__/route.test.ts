@@ -13,7 +13,7 @@
  */
 
 const mockGetUser = jest.fn();
-const mockListInbox = jest.fn();
+const mockListFolderMessages = jest.fn();
 const mockRequireCapability = jest.fn();
 
 jest.mock("@/lib/auth", () => ({
@@ -23,7 +23,13 @@ jest.mock("@/lib/auth/require-capability", () => ({
   requireCapability: (...a: any[]) => mockRequireCapability(...a),
 }));
 jest.mock("@/lib/integrations/microsoft-mail", () => ({
-  listInbox: (...a: any[]) => mockListInbox(...a),
+  // The route now calls listFolderMessages directly. The folder
+  // allowlist (isAppMailFolder) lives in the lib so we expose the real
+  // implementation here — it's a pure typeguard with no IO.
+  listFolderMessages: (...a: any[]) => mockListFolderMessages(...a),
+  isAppMailFolder: (s: unknown) =>
+    typeof s === "string" &&
+    (["inbox", "drafts", "sent", "archived"] as string[]).includes(s),
 }));
 
 import { NextRequest } from "next/server";
@@ -68,11 +74,11 @@ describe("GET /api/emails/inbox", () => {
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.error).toBe("unauthorized");
-    expect(mockListInbox).not.toHaveBeenCalled();
+    expect(mockListFolderMessages).not.toHaveBeenCalled();
   });
 
   it("returns 200 with messages on happy path and passes unreadOnly", async () => {
-    mockListInbox.mockResolvedValueOnce({
+    mockListFolderMessages.mockResolvedValueOnce({
       ok: true,
       value: { messages: [SAMPLE_MSG], nextSkip: null, unreadCount: 1 },
     });
@@ -81,14 +87,54 @@ describe("GET /api/emails/inbox", () => {
     const body = await res.json();
     expect(body.messages).toHaveLength(1);
     expect(body.unreadCount).toBe(1);
-    expect(mockListInbox).toHaveBeenCalledWith(
+    // Default folder is inbox.
+    expect(body.folder).toBe("inbox");
+    expect(mockListFolderMessages).toHaveBeenCalledWith(
       "u1",
-      expect.objectContaining({ unreadOnly: true, top: 10, skip: 0 }),
+      expect.objectContaining({ unreadOnly: true, top: 10, skip: 0, folder: "inbox" }),
     );
   });
 
+  it.each(["inbox", "drafts", "sent", "archived"] as const)(
+    "200 + passes folder=%s through to listFolderMessages",
+    async (folder) => {
+      mockListFolderMessages.mockResolvedValueOnce({
+        ok: true,
+        value: { messages: [], nextSkip: null },
+      });
+      const res = await GET(makeReq(`?folder=${folder}`));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.folder).toBe(folder);
+      expect(mockListFolderMessages).toHaveBeenCalledWith(
+        "u1",
+        expect.objectContaining({ folder }),
+      );
+    },
+  );
+
+  it("returns 400 invalid_input when folder is not in the allowlist", async () => {
+    const res = await GET(makeReq("?folder=junk"));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_input");
+    expect(body.detail).toMatch(/junk/);
+    expect(mockListFolderMessages).not.toHaveBeenCalled();
+  });
+
+  it("rejects empty-string folder fall-through? — empty defaults to inbox (no 400)", async () => {
+    mockListFolderMessages.mockResolvedValueOnce({
+      ok: true,
+      value: { messages: [], nextSkip: null },
+    });
+    const res = await GET(makeReq("?folder="));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.folder).toBe("inbox");
+  });
+
   it("returns 401 microsoft_not_connected when the lib reports no token", async () => {
-    mockListInbox.mockResolvedValueOnce({
+    mockListFolderMessages.mockResolvedValueOnce({
       ok: false,
       code: "not_connected",
       message: "microsoft_not_connected",
@@ -100,7 +146,7 @@ describe("GET /api/emails/inbox", () => {
   });
 
   it("returns 403 forbidden + scope_missing", async () => {
-    mockListInbox.mockResolvedValueOnce({
+    mockListFolderMessages.mockResolvedValueOnce({
       ok: false,
       code: "scope_missing",
       scope: "Mail.Read",
@@ -114,7 +160,7 @@ describe("GET /api/emails/inbox", () => {
   });
 
   it("returns 429 rate_limited from the lib (graph backpressure)", async () => {
-    mockListInbox.mockResolvedValueOnce({
+    mockListFolderMessages.mockResolvedValueOnce({
       ok: false,
       code: "rate_limited",
       retryAfter: 7,
@@ -129,7 +175,7 @@ describe("GET /api/emails/inbox", () => {
   });
 
   it("returns 502 (NEVER 500) on Graph 5xx", async () => {
-    mockListInbox.mockResolvedValueOnce({
+    mockListFolderMessages.mockResolvedValueOnce({
       ok: false,
       code: "graph_error",
       status: 500,
@@ -142,19 +188,19 @@ describe("GET /api/emails/inbox", () => {
   });
 
   it("clamps top to 100 + paginates skip via lib opts", async () => {
-    mockListInbox.mockResolvedValueOnce({
+    mockListFolderMessages.mockResolvedValueOnce({
       ok: true,
       value: { messages: [], nextSkip: null },
     });
     await GET(makeReq("?top=5000&skip=300"));
-    expect(mockListInbox).toHaveBeenCalledWith(
+    expect(mockListFolderMessages).toHaveBeenCalledWith(
       "u1",
       expect.objectContaining({ top: 5000, skip: 300, unreadOnly: false }),
     );
   });
 
   it("rate-limits a flood from the same user (60/min)", async () => {
-    mockListInbox.mockResolvedValue({
+    mockListFolderMessages.mockResolvedValue({
       ok: true,
       value: { messages: [], nextSkip: null },
     });

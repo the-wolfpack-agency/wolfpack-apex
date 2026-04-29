@@ -231,3 +231,178 @@ describe("InboxPanel", () => {
     expect(screen.getByText(/Mail\.Read/)).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Folder-aware behaviour (Drafts / Sent / Archived)
+// ---------------------------------------------------------------------------
+
+describe("InboxPanel — folder awareness", () => {
+  it("default folder is 'inbox' and the request URL carries folder=inbox", async () => {
+    render(
+      <InboxPanel
+        activeId={null}
+        onOpen={jest.fn()}
+        onCompose={jest.fn()}
+        userId="u1"
+        userRole="ceo"
+      />,
+    );
+    await flush();
+    const urls = mockFetchWithRefresh.mock.calls.map((c: any[]) => String(c[0]));
+    expect(urls.some((u) => u.includes("folder=inbox"))).toBe(true);
+    expect(screen.getByTestId("inbox-header-label")).toHaveTextContent("Inbox");
+    // All / Unread filter is shown for inbox.
+    expect(screen.getByTestId("inbox-filter-row")).toBeInTheDocument();
+  });
+
+  it("folder='drafts' updates header + hides All/Unread + uses drafts empty copy", async () => {
+    mockFetchWithRefresh.mockReset();
+    mockFetchWithRefresh.mockImplementation(() =>
+      Promise.resolve(ok({ messages: [], nextSkip: null, folder: "drafts" })),
+    );
+    render(
+      <InboxPanel
+        activeId={null}
+        onOpen={jest.fn()}
+        onCompose={jest.fn()}
+        userId="u1"
+        userRole="ceo"
+        folder="drafts"
+      />,
+    );
+    await flush();
+    await waitFor(() => {
+      expect(screen.getByTestId("inbox-header-label")).toHaveTextContent("Drafts");
+    });
+    expect(screen.queryByTestId("inbox-filter-row")).toBeNull();
+    expect(screen.getByTestId("inbox-empty")).toHaveTextContent(/No drafts/i);
+    const urls = mockFetchWithRefresh.mock.calls.map((c: any[]) => String(c[0]));
+    expect(urls.some((u) => u.includes("folder=drafts"))).toBe(true);
+    // Drafts must NOT send unread=true even if internally toggled.
+    expect(urls.some((u) => u.includes("unread=true"))).toBe(false);
+  });
+
+  it("folder='sent' updates header + hides All/Unread + uses sent empty copy", async () => {
+    mockFetchWithRefresh.mockReset();
+    mockFetchWithRefresh.mockImplementation(() =>
+      Promise.resolve(ok({ messages: [], nextSkip: null, folder: "sent" })),
+    );
+    render(
+      <InboxPanel
+        activeId={null}
+        onOpen={jest.fn()}
+        onCompose={jest.fn()}
+        userId="u1"
+        userRole="ceo"
+        folder="sent"
+      />,
+    );
+    await flush();
+    await waitFor(() => {
+      expect(screen.getByTestId("inbox-header-label")).toHaveTextContent("Sent");
+    });
+    expect(screen.queryByTestId("inbox-filter-row")).toBeNull();
+    expect(screen.getByTestId("inbox-empty")).toHaveTextContent(/No sent items/i);
+  });
+
+  it("folder='archived' shows All/Unread + uses archived empty copy", async () => {
+    mockFetchWithRefresh.mockReset();
+    mockFetchWithRefresh.mockImplementation(() =>
+      Promise.resolve(ok({ messages: [], nextSkip: null, folder: "archived" })),
+    );
+    render(
+      <InboxPanel
+        activeId={null}
+        onOpen={jest.fn()}
+        onCompose={jest.fn()}
+        userId="u1"
+        userRole="ceo"
+        folder="archived"
+      />,
+    );
+    await flush();
+    await waitFor(() => {
+      expect(screen.getByTestId("inbox-header-label")).toHaveTextContent("Archived");
+    });
+    expect(screen.getByTestId("inbox-filter-row")).toBeInTheDocument();
+    expect(screen.getByTestId("inbox-empty")).toHaveTextContent(/No archived messages/i);
+  });
+
+  it("emits folder_loaded with folder + count + took_ms", async () => {
+    mockFetchWithRefresh.mockReset();
+    mockFetchWithRefresh.mockImplementation(() =>
+      Promise.resolve(ok({ messages: [], nextSkip: null, folder: "drafts" })),
+    );
+    render(
+      <InboxPanel
+        activeId={null}
+        onOpen={jest.fn()}
+        onCompose={jest.fn()}
+        userId="u1"
+        userRole="ceo"
+        folder="drafts"
+      />,
+    );
+    await flush();
+    await waitFor(() => {
+      const evt = mockEmitInsight.mock.calls
+        .map((c) => c[0])
+        .find((e: any) => e.action === "folder_loaded");
+      expect(evt).toBeTruthy();
+      expect(evt.payload.folder).toBe("drafts");
+      expect(evt.payload.count).toBe(0);
+      expect(typeof evt.payload.took_ms).toBe("number");
+    });
+  });
+
+  it("clicking a row in drafts emits draft_clicked_skipped (NOT thread_read)", async () => {
+    mockFetchWithRefresh.mockReset();
+    mockFetchWithRefresh.mockImplementation(() =>
+      Promise.resolve(
+        ok({
+          messages: [
+            {
+              id: "draft-1",
+              subject: "WIP",
+              from: { name: "Me", email: "me@x.co" },
+              receivedDateTime: new Date().toISOString(),
+              bodyPreview: "Half-typed",
+              isRead: true,
+              hasAttachments: false,
+              importance: "normal",
+              webLink: "",
+              isDraft: true,
+            },
+          ],
+          nextSkip: null,
+          folder: "drafts",
+        }),
+      ),
+    );
+    const onOpen = jest.fn();
+    render(
+      <InboxPanel
+        activeId={null}
+        onOpen={onOpen}
+        onCompose={jest.fn()}
+        userId="u1"
+        userRole="ceo"
+        folder="drafts"
+      />,
+    );
+    await flush();
+    await waitFor(() => screen.getByTestId("inbox-row-draft-1"));
+    fireEvent.click(screen.getByTestId("inbox-row-draft-1"));
+    const skipped = mockEmitInsight.mock.calls
+      .map((c) => c[0])
+      .find((e: any) => e.action === "draft_clicked_skipped");
+    expect(skipped).toBeTruthy();
+    expect(skipped.payload.message_id).toBe("draft-1");
+    expect(skipped.payload.folder).toBe("drafts");
+    const threadRead = mockEmitInsight.mock.calls
+      .map((c) => c[0])
+      .find((e: any) => e.action === "thread_read");
+    expect(threadRead).toBeUndefined();
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "draft-1" }));
+  });
+});
