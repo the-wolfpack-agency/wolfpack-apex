@@ -96,3 +96,21 @@ a:hover { color: var(--wp-gold-hover); }
     right: 12px;
   }
 }
+
+/*
+ * Notification deep-link flash highlight (Bug 3 fix on /messages).
+ *
+ * Applied for ~2s when the user lands on /messages via
+ * ?chat=X&message=Y. Fades a gold tint from the bubble background
+ * to transparent so the target message catches the eye in a long
+ * thread. Matches the existing wp-gold accent stripe style — does
+ * NOT change the bubble's geometry (no padding/border shift, no
+ * layout reflow) so smooth-scroll can complete cleanly.
+ */
+@keyframes wp-message-flash {
+  0%   { background-color: rgba(234, 179, 8, 0.35); }
+  100% { background-color: transparent; }
+}
+.message-flash {
+  animation: wp-message-flash 2s ease-out forwards;
+}
