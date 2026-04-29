@@ -309,6 +309,25 @@ export default function EmailsPage() {
       payload: {},
     });
 
+    /* Capture viewport bucket so the learning loop can correlate
+       narrow-viewport sessions with feature usage (insights opened,
+       templates expanded, sends completed). Without this we can't tell
+       whether the responsive layout actually serves narrow users.   */
+    if (typeof window !== "undefined") {
+      const w = window.innerWidth;
+      emitInsight({
+        actor: user.id,
+        role: user.role,
+        surface: "email",
+        action: "layout_mode",
+        tier: "personal",
+        payload: {
+          mode: w < 640 ? "mobile" : w < 1100 ? "narrow" : "wide",
+          width: w,
+        },
+      });
+    }
+
     (async () => {
       setTemplatesLoading(true);
       try {
@@ -1006,10 +1025,20 @@ export default function EmailsPage() {
   // sits directly on top of the Send button when the page is scrolled to
   // the bottom of the composer. Reserve ~6rem of scroll tail so Send
   // stays reachable above the FAB's footprint.
+  /* On narrow viewports, defer scrolling to the dashboard's <main>
+     element (which already has overflow-y:auto + 100dvh height).
+     Setting pageWrap.height:100% + overflow:auto here creates a second
+     scroll container inside <main>, and the user's natural scroll
+     gesture targets <main> first — leaving the inner pageWrap scroll
+     stuck and hiding the Recipient Context pane below the fold.
+     Letting the page take its natural height (`auto`) makes the whole
+     three-pane stack scroll inside <main>, so every pane is reachable. */
   const responsivePageWrap: React.CSSProperties = {
     ...pageWrap,
     flexDirection: isNarrow ? "column" : "row",
-    overflow: isNarrow ? "auto" : "hidden",
+    overflow: isNarrow ? "visible" : "hidden",
+    height: isNarrow ? "auto" : pageWrap.height,
+    minHeight: isNarrow ? "100%" : undefined,
     flexWrap: isNarrow ? "nowrap" : "wrap",
     paddingBottom: isMobile ? "6rem" : pageWrap.padding,
   };
@@ -1032,11 +1061,18 @@ export default function EmailsPage() {
     boxSizing: "border-box",
     maxWidth: "100%",
   };
+  /* On narrow viewports the insights pane is NOT a row neighbor, it's
+     stacked below the composer. Drop the row-mode `overflow:hidden` so
+     its full content (Recipient context header + body) is visible
+     without an internal scroller, and let it claim its natural content
+     height. The dashboard <main> handles the page-level scroll. */
   const responsiveInsightsWrap: React.CSSProperties = {
     ...insightsWrap,
     width: isNarrow ? "100%" : "320px",
     flexShrink: isNarrow ? 1 : 0,
     order: isNarrow ? 2 : 0,
+    overflow: isNarrow ? "visible" : insightsWrap.overflow,
+    minHeight: isNarrow ? "180px" : undefined,
   };
   const responsiveSidebarStyle: React.CSSProperties = {
     ...sidebarStyle,

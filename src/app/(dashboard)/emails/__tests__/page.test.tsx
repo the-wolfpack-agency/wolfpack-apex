@@ -168,6 +168,75 @@ function setBodyHtml(html: string) {
   fireEvent.input(body);
 }
 
+describe("EmailsPage — narrow-viewport responsive layout", () => {
+  /* Regression for /emails on viewports < 1100px: the Recipient Context
+     pane was rendered but the page set its own height:100% + overflow:auto
+     which created an inner scroll container nested inside the dashboard
+     <main>'s overflow-y:auto, hiding the third pane below the fold. */
+  function setInnerWidth(px: number): void {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: px,
+    });
+    window.dispatchEvent(new Event("resize"));
+  }
+
+  afterEach(() => {
+    setInnerWidth(1280);
+  });
+
+  it("renders the Recipient Context pane on narrow viewports (800px wide)", async () => {
+    setInnerWidth(800);
+    render(<EmailsPage />);
+    await flushPromises();
+
+    const insights = screen.getByTestId("insights-panel");
+    expect(insights).toBeInTheDocument();
+    // The pane's wrapper must NOT clip its own content on narrow — clipping
+    // is the row-mode behavior for desktop only. On narrow we want the
+    // pane to expand to its natural height so the dashboard <main>
+    // scrolls the whole stack.
+    expect(insights.style.overflow).toBe("visible");
+  });
+
+  it("on narrow viewports, the page wrap does NOT create a second scroll container", async () => {
+    setInnerWidth(800);
+    render(<EmailsPage />);
+    await flushPromises();
+
+    const pageEl = screen.getByTestId("emails-page");
+    // height auto + overflow visible = the dashboard <main> handles
+    // scrolling. height:100% + overflow:auto = trapped inner scroll.
+    expect(pageEl.style.overflow).toBe("visible");
+    expect(pageEl.style.height).toBe("auto");
+  });
+
+  it("on desktop viewports (>=1100px), retains the row-mode hidden overflow", async () => {
+    setInnerWidth(1280);
+    render(<EmailsPage />);
+    await flushPromises();
+
+    const pageEl = screen.getByTestId("emails-page");
+    expect(pageEl.style.flexDirection).toBe("row");
+    expect(pageEl.style.overflow).toBe("hidden");
+  });
+
+  it("emits layout_mode insight tagged with viewport bucket on mount", async () => {
+    setInnerWidth(800);
+    render(<EmailsPage />);
+    await flushPromises();
+
+    const events = mockEmitInsight.mock.calls.map((c) => c[0]);
+    const layout = events.find(
+      (e: any) => e.surface === "email" && e.action === "layout_mode",
+    );
+    expect(layout).toBeTruthy();
+    expect(layout.payload.mode).toBe("narrow");
+    expect(layout.payload.width).toBe(800);
+  });
+});
+
 describe("EmailsPage — inline composer", () => {
   it("renders inline composer fields (To, Subject, Body, Send, AI Draft)", async () => {
     render(<EmailsPage />);
@@ -679,7 +748,12 @@ describe("EmailsPage — responsive layout", () => {
     });
     const narrow = screen.getByTestId("emails-page");
     expect(narrow.style.flexDirection).toBe("column");
-    expect(narrow.style.overflow).toBe("auto");
+    /* Previously asserted overflow:"auto" (an inner scroll container).
+       That trapped the third pane below the fold because it nested
+       inside the dashboard <main>'s overflow-y:auto. The page now
+       defers scrolling to <main> by going overflow:visible + height:auto
+       on narrow viewports. */
+    expect(narrow.style.overflow).toBe("visible");
   });
 
   it("insights panel takes full width on narrow screens (so it actually shows)", async () => {
