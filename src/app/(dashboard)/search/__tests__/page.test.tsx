@@ -102,6 +102,13 @@ describe("/search page", () => {
     expect(screen.queryByTestId("search-meta")).not.toBeInTheDocument();
   });
 
+  it("autofocuses the search input on mount so the user can type immediately", () => {
+    render(<SearchPage />);
+    const input = screen.getByTestId("search-input");
+    // jsdom tracks document.activeElement for autoFocus / .focus() calls.
+    expect(document.activeElement).toBe(input);
+  });
+
   it("renders results from the API mock, grouped by type", async () => {
     render(<SearchPage />);
 
