@@ -69,6 +69,31 @@ jobs:
         continue-on-error: true
         run: npx playwright test tests/e2e/feature-requests-data-flow.spec.ts --config=playwright.config.ts --reporter=github
 
+      # Real-browser specs for /emails /messages /dashboard /search.
+      # These cover regressions jsdom missed: layout/wrap, focus,
+      # computed styles, IntersectionObserver / scroll. Soft gate
+      # until creds are in secrets; promote to hard gate after a few
+      # green runs.
+      - name: Search autofocus spec (soft)
+        continue-on-error: true
+        run: npx playwright test tests/e2e/search-autofocus.spec.ts --config=playwright.config.ts --reporter=github
+
+      - name: Dashboard quick-actions spec (soft)
+        continue-on-error: true
+        run: npx playwright test tests/e2e/dashboard-quick-actions.spec.ts --config=playwright.config.ts --reporter=github
+
+      # Hard gate as of fix/inbox-panel-folder-refetch — the folder
+      # refetch assertion catches the silent regression where clicking
+      # Drafts/Sent/Archived only moves the highlight without changing
+      # the data. Other /emails/messages/dashboard/search specs stay
+      # soft until they earn the same green-streak.
+      - name: Emails inbox flow spec (gate)
+        run: npx playwright test tests/e2e/emails-inbox-flow.spec.ts --config=playwright.config.ts --reporter=github
+
+      - name: Messages bug-fix spec (soft)
+        continue-on-error: true
+        run: npx playwright test tests/e2e/messages-bugs.spec.ts --config=playwright.config.ts --reporter=github
+
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
