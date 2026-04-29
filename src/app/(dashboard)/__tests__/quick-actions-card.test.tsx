@@ -148,14 +148,28 @@ describe("Quick Actions card — render + click", () => {
     // Wait for the personalized fetch to land + the card to swap out
     // of fallback into personalized.
     await waitFor(() => {
-      const card = screen.getByTestId("quick-actions");
+      const card = screen.getByTestId("quick-actions-card");
       expect(card.getAttribute("data-source")).toBe("personalized");
     });
 
-    const tiles = screen.getAllByTestId("quick-action-tile");
+    // Per-position testids: every tile gets its own `quick-action-${idx}`
+    // so tests can target a specific tile by its rendered index. This
+    // couples the analytics `position` field (which is per-tile) to a
+    // DOM identifier the test framework can verify.
+    const tiles = [
+      screen.getByTestId("quick-action-0"),
+      screen.getByTestId("quick-action-1"),
+      screen.getByTestId("quick-action-2"),
+      screen.getByTestId("quick-action-3"),
+    ];
     expect(tiles).toHaveLength(4);
     expect(tiles[0].textContent).toContain("Messages");
     expect(tiles[0].getAttribute("data-href")).toBe("/messages");
+    // Every tile's testid encodes its 0-based position.
+    tiles.forEach((tile, idx) => {
+      expect(tile.getAttribute("data-testid")).toBe(`quick-action-${idx}`);
+      expect(tile.getAttribute("data-position")).toBe(String(idx));
+    });
 
     // The "rendered" analytics event must have fired exactly once,
     // with source=personalized.
@@ -183,13 +197,16 @@ describe("Quick Actions card — render + click", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("quick-actions").getAttribute("data-source")).toBe("personalized");
+      expect(screen.getByTestId("quick-actions-card").getAttribute("data-source")).toBe(
+        "personalized",
+      );
     });
 
-    const tiles = screen.getAllByTestId("quick-action-tile");
-    expect(tiles[1].getAttribute("data-href")).toBe("/calendar");
+    const tile1 = screen.getByTestId("quick-action-1");
+    expect(tile1.getAttribute("data-href")).toBe("/calendar");
+    expect(tile1.getAttribute("data-position")).toBe("1");
 
-    fireEvent.click(tiles[1]);
+    fireEvent.click(tile1);
 
     await waitFor(() => {
       const clickCall = fetchMock.mock.calls.find(([url, opts]) => {
@@ -246,10 +263,13 @@ describe("Quick Actions card — render + click", () => {
     // After the dashboard stats land we know loading is done; the
     // quick-actions endpoint rejected so the card stays on fallback.
     await waitFor(() => {
-      const card = screen.getByTestId("quick-actions");
+      const card = screen.getByTestId("quick-actions-card");
       expect(card.getAttribute("data-source")).toBe("fallback");
-      const tiles = screen.getAllByTestId("quick-action-tile");
-      expect(tiles).toHaveLength(4);
+      // All four fallback tiles render with per-position testids.
+      expect(screen.getByTestId("quick-action-0")).toBeInTheDocument();
+      expect(screen.getByTestId("quick-action-1")).toBeInTheDocument();
+      expect(screen.getByTestId("quick-action-2")).toBeInTheDocument();
+      expect(screen.getByTestId("quick-action-3")).toBeInTheDocument();
     });
   });
 });

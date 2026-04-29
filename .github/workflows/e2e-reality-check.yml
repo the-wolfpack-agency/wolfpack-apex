@@ -78,8 +78,12 @@ jobs:
         continue-on-error: true
         run: npx playwright test tests/e2e/search-autofocus.spec.ts --config=playwright.config.ts --reporter=github
 
-      - name: Dashboard quick-actions spec (soft)
-        continue-on-error: true
+      # Promoted to hard gate after the per-position testid fix —
+      # tests now pin every tile by its rendered index, so a regression
+      # that re-introduces a shared testid (or drops a tile) will fail
+      # the suite.
+      - name: Dashboard quick-actions spec (gate)
+        continue-on-error: false
         run: npx playwright test tests/e2e/dashboard-quick-actions.spec.ts --config=playwright.config.ts --reporter=github
 
       # Emails inbox flow — HARD GATE. Locks in the Gmail-style 3-

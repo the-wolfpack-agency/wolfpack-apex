@@ -10,13 +10,11 @@
  *   4. Click fires the analytics POST `event: "dashboard.quick_action_clicked"`
  *      with `{ position, source }` in metadata.
  *
- * NOTE on testid shape: the user spec called for
- * `data-testid="quick-action-<position>"`, but the production code
- * uses the same testid for every tile (`quick-action-tile`). This
- * spec asserts the as-built shape, asserts the position via the
- * tile's index in the list, AND records this divergence as a PR
- * finding so the testid can be promoted to per-position later
- * without breaking this test.
+ * Testid shape: the parent card carries `quick-actions-card`; every
+ * tile carries `quick-action-${position}` where `position` is the
+ * 0-based index in the rendered list. This couples the analytics
+ * `position` field (which is per-tile) to a DOM identifier the test
+ * framework can verify.
  */
 import { test, expect, type Request } from "@playwright/test";
 import { resolveSmokeTarget, signInIfPossible } from "./helpers/smoke-helpers";
@@ -38,27 +36,34 @@ test.describe("dashboard quick actions (real browser)", () => {
     expect(signedIn).toBe(true);
   });
 
-  test("renders 4 tiles with labels and hrefs", async ({ page }) => {
+  test("renders 4 tiles with labels, hrefs, and per-position testids", async ({ page }) => {
     const response = await page.goto(`${target.baseUrl}/dashboard`, {
       waitUntil: "domcontentloaded",
     });
     expect(response?.status()).toBe(200);
     await settle(page);
 
-    const card = page.getByTestId("quick-actions");
+    const card = page.getByTestId("quick-actions-card");
     await expect(card).toBeVisible({ timeout: 10_000 });
 
-    const tiles = page.getByTestId("quick-action-tile");
-    await expect.poll(async () => tiles.count(), { timeout: 5_000 }).toBe(4);
-
+    // Every tile must be addressable by its 0-based position.
     for (let i = 0; i < 4; i++) {
-      const tile = tiles.nth(i);
+      const tile = page.getByTestId(`quick-action-${i}`);
+      await expect(tile, `tile #${i} present`).toBeVisible({ timeout: 5_000 });
+
       const label = (await tile.innerText()).trim();
       expect(label.length, `tile #${i} label`).toBeGreaterThan(0);
+
       const href = await tile.getAttribute("data-href");
       expect(href, `tile #${i} data-href`).toBeTruthy();
       expect(href ?? "", `tile #${i} href is non-empty`).not.toEqual("");
+
+      const position = await tile.getAttribute("data-position");
+      expect(position, `tile #${i} data-position`).toBe(String(i));
     }
+
+    // No 5th tile should exist — the card is capped at 4.
+    await expect(page.getByTestId("quick-action-4")).toHaveCount(0);
   });
 
   test("clicking a tile fires analytics with position+source and navigates", async ({
@@ -75,15 +80,14 @@ test.describe("dashboard quick actions (real browser)", () => {
     await page.goto(`${target.baseUrl}/dashboard`, { waitUntil: "domcontentloaded" });
     await settle(page);
 
-    const tiles = page.getByTestId("quick-action-tile");
-    await expect.poll(async () => tiles.count(), { timeout: 5_000 }).toBe(4);
-
     // Pick tile #2 to vary the position from the trivial #0.
     const POSITION = 2;
-    const tile = tiles.nth(POSITION);
+    const tile = page.getByTestId(`quick-action-${POSITION}`);
+    await expect(tile).toBeVisible({ timeout: 5_000 });
     const expectedHref = await tile.getAttribute("data-href");
     expect(expectedHref).toBeTruthy();
     const expectedSource = await tile.getAttribute("data-source");
+    expect(expectedSource).toBeTruthy();
 
     // Click — but intercept navigation, since the analytics POST is
     // fire-and-forget and we want to inspect it before the page swaps.
@@ -123,12 +127,8 @@ test.describe("dashboard quick actions (real browser)", () => {
       matched,
       `analytics POST with event=dashboard.quick_action_clicked observed (saw ${analyticsRequests.length} analytics requests)`,
     ).not.toBeNull();
-    if (matched) {
-      expect(matched.position).toBe(POSITION);
-      expect(matched.href).toBe(expectedHref);
-      if (expectedSource) {
-        expect(matched.source).toBe(expectedSource);
-      }
-    }
+    expect(matched!.position).toBe(POSITION);
+    expect(matched!.href).toBe(expectedHref);
+    expect(matched!.source).toBe(expectedSource);
   });
 });
