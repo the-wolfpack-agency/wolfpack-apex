@@ -203,7 +203,7 @@ export default function EmailReader({ id, onClose, onMutated, _now }: EmailReade
               .filter(Boolean)
           : undefined;
       const res = await fetchWithRefresh(
-        `/api/emails/${encodeURIComponent(state.message.id)}/reply`,
+        `/api/emails/messages/${encodeURIComponent(state.message.id)}/reply`,
         {
           method: "POST",
           headers: jsonHeaders(),
@@ -271,7 +271,7 @@ export default function EmailReader({ id, onClose, onMutated, _now }: EmailReade
     setActionState({ kind: "busy", action: "archive" });
     try {
       const res = await fetchWithRefresh(
-        `/api/emails/${encodeURIComponent(state.message.id)}`,
+        `/api/emails/messages/${encodeURIComponent(state.message.id)}`,
         {
           method: "PATCH",
           headers: jsonHeaders(),
@@ -309,7 +309,7 @@ export default function EmailReader({ id, onClose, onMutated, _now }: EmailReade
     setActionState({ kind: "busy", action: "delete" });
     try {
       const res = await fetchWithRefresh(
-        `/api/emails/${encodeURIComponent(state.message.id)}`,
+        `/api/emails/messages/${encodeURIComponent(state.message.id)}`,
         { method: "DELETE", headers: jsonHeaders() },
       );
       if (res.status === 200) {
@@ -343,7 +343,7 @@ export default function EmailReader({ id, onClose, onMutated, _now }: EmailReade
     setActionState({ kind: "busy", action: "markUnread" });
     try {
       const res = await fetchWithRefresh(
-        `/api/emails/${encodeURIComponent(state.message.id)}`,
+        `/api/emails/messages/${encodeURIComponent(state.message.id)}`,
         {
           method: "PATCH",
           headers: jsonHeaders(),

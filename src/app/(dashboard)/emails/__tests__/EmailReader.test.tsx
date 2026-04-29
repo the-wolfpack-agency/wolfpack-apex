@@ -187,7 +187,7 @@ describe("<EmailReader />", () => {
       expect(screen.getByTestId("email-reader-reply-status").textContent).toMatch(/sent/i);
     });
     const replyCall = mockFetchWithRefresh.mock.calls[1];
-    expect(replyCall[0]).toBe(`/api/emails/${encodeURIComponent("msg-1")}/reply`);
+    expect(replyCall[0]).toBe(`/api/emails/messages/${encodeURIComponent("msg-1")}/reply`);
     const body = JSON.parse(replyCall[1].body);
     expect(body.kind).toBe("reply");
     expect(body.bodyText).toBe("Sounds good.");
@@ -314,7 +314,7 @@ describe("<EmailReader />", () => {
     });
     await waitFor(() => {
       const call = mockFetchWithRefresh.mock.calls[1];
-      expect(call[0]).toBe(`/api/emails/${encodeURIComponent("msg-1")}`);
+      expect(call[0]).toBe(`/api/emails/messages/${encodeURIComponent("msg-1")}`);
       expect(call[1].method).toBe("PATCH");
       expect(JSON.parse(call[1].body)).toEqual({ archive: true });
     });

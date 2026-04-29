@@ -25,7 +25,7 @@ jest.mock("@/lib/integrations/microsoft-mail", () => ({
 
 import { NextRequest } from "next/server";
 import { PATCH, DELETE } from "../route";
-import { _resetRateLimit } from "../../inbox/route";
+import { _resetRateLimit } from "../../../inbox/route";
 
 function makePatch(id: string, body: unknown, withAuth = true): NextRequest {
   const headers: Record<string, string> = { "Content-Type": "application/json" };

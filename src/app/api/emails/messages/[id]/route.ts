@@ -24,7 +24,7 @@ import {
   archiveMessage,
   deleteMessage,
 } from "@/lib/integrations/microsoft-mail";
-import { _isRateLimited as inboxLimited } from "../inbox/route";
+import { _isRateLimited as inboxLimited } from "../../inbox/route";
 
 type AnyResult = Awaited<ReturnType<typeof setMessageReadState>>;
 
