@@ -254,6 +254,7 @@ function SearchContents() {
           placeholder="Search chats, emails, calendar..."
           aria-label="Universal search"
           data-testid="search-input"
+          autoFocus
           style={{
             width: "100%",
             padding: "12px 16px 12px 44px",
