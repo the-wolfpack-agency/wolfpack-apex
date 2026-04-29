@@ -54,12 +54,64 @@ export interface Chat {
   lastMessagePreview?: ChatLastMessagePreview;
 }
 
+/**
+ * Microsoft Graph chatMessage attachment summary. Teams emits one
+ * `attachments[]` entry per file/card/meeting/etc. We only surface the
+ * fields the renderer needs (kind + name); the raw payload is left in
+ * Graph because Instinct never executes adaptive cards directly.
+ */
+export interface ChatMessageAttachment {
+  /**
+   * Graph `contentType`. Common values:
+   *   - `messageReference`              quoted reply
+   *   - `application/vnd.microsoft.card.adaptive`
+   *   - `application/vnd.microsoft.card.codesnippet`
+   *   - `application/vnd.microsoft.teams.file.download.info`
+   *   - `meetingReference` / `application/vnd.microsoft.card.meeting`
+   *   - `reference` (file share)
+   * Treated opaquely; renderer maps to plain language.
+   */
+  contentType: string;
+  name: string;
+}
+
+/**
+ * `eventDetail` is what Graph attaches to `messageType: 'systemEventMessage'`.
+ * `@odata.type` on the wire identifies the subtype. We carry it as
+ * `subtype` (no `@`) for ergonomic access in client code.
+ */
+export interface ChatMessageEventDetail {
+  /**
+   * Graph `@odata.type` minus the namespace + `EventMessageDetail` suffix.
+   * Examples: "callStarted", "callEnded", "callRecording", "membersAdded",
+   * "membersDeleted", "topicUpdated", "historyDisclosed", "meetingStarted",
+   * "meetingEnded", "chatRenamed", "tabAdded", "tabRemoved".
+   */
+  subtype: string;
+  /** Display names of members added/removed when applicable. */
+  memberNames?: string[];
+  /** Updated topic for `topicUpdated` / `chatRenamed`. */
+  newTopic?: string;
+  /** Initiator display name (e.g. who added members). */
+  initiatorName?: string;
+}
+
 export interface ChatMessage {
   id: string;
   from: ChatMessageFrom;
   body: { content: string; contentType: "html" | "text" };
   bodyText: string;
   createdDateTime: string;
+  /**
+   * `message` for normal user messages, `systemEventMessage` for call /
+   * member / topic events. Older Graph payloads omit it; renderers should
+   * treat missing as `message`.
+   */
+  messageType?: string;
+  /** Attachment-only messages (meeting cards, file shares, codesnippets). */
+  attachments?: ChatMessageAttachment[];
+  /** Populated for systemEventMessage. */
+  eventDetail?: ChatMessageEventDetail;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,11 +153,28 @@ interface RawChat {
   lastMessagePreview?: RawLastMessagePreview | null;
 }
 
+interface RawAttachment {
+  contentType?: unknown;
+  name?: unknown;
+}
+
+interface RawEventDetail {
+  "@odata.type"?: unknown;
+  members?: Array<{ displayName?: unknown }> | unknown;
+  initiator?: RawIdentitySet | unknown;
+  chatTopic?: unknown;
+  callDuration?: unknown;
+  callEventType?: unknown;
+}
+
 interface RawChatMessage {
   id: string;
   from?: RawIdentitySet;
   body?: RawBody;
   createdDateTime?: string;
+  messageType?: unknown;
+  attachments?: RawAttachment[] | unknown;
+  eventDetail?: RawEventDetail | unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,15 +257,87 @@ function normalizeChat(raw: RawChat): Chat {
   return chat;
 }
 
+/**
+ * Normalize Graph `eventDetail.@odata.type` into the bare subtype name.
+ *
+ * Graph emits values like `#microsoft.graph.callEndedEventMessageDetail`.
+ * Strip the namespace prefix and the `EventMessageDetail` suffix so the
+ * renderer keys off `callEnded`, `membersAdded`, etc. Returns null when
+ * the value is missing or malformed; the renderer treats that as a
+ * generic system pill.
+ */
+export function normalizeEventSubtype(odataType: unknown): string | null {
+  if (typeof odataType !== "string" || odataType.length === 0) return null;
+  // Strip "#microsoft.graph." prefix variants.
+  const idx = odataType.lastIndexOf(".");
+  const tail = idx >= 0 ? odataType.slice(idx + 1) : odataType;
+  const trimmed = tail.replace(/EventMessageDetail$/, "");
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeAttachments(
+  raw: unknown,
+): ChatMessageAttachment[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const out: ChatMessageAttachment[] = [];
+  for (const a of raw) {
+    if (!a || typeof a !== "object") continue;
+    const r = a as RawAttachment;
+    out.push({
+      contentType: typeof r.contentType === "string" ? r.contentType : "",
+      name: typeof r.name === "string" ? r.name : "",
+    });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+function normalizeEventDetail(
+  raw: unknown,
+): ChatMessageEventDetail | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as RawEventDetail;
+  const subtype = normalizeEventSubtype(r["@odata.type"]);
+  if (!subtype) return undefined;
+  const memberNames: string[] = Array.isArray(r.members)
+    ? r.members
+        .map((m) =>
+          m && typeof m === "object" && typeof (m as { displayName?: unknown }).displayName === "string"
+            ? ((m as { displayName: string }).displayName)
+            : "",
+        )
+        .filter((s): s is string => s.length > 0)
+    : [];
+  const newTopic = typeof r.chatTopic === "string" ? r.chatTopic : undefined;
+  const initiator =
+    r.initiator && typeof r.initiator === "object"
+      ? normalizeFrom(r.initiator as RawIdentitySet)
+      : undefined;
+  const detail: ChatMessageEventDetail = { subtype };
+  if (memberNames.length > 0) detail.memberNames = memberNames;
+  if (newTopic) detail.newTopic = newTopic;
+  if (initiator?.displayName) detail.initiatorName = initiator.displayName;
+  return detail;
+}
+
 function normalizeMessage(raw: RawChatMessage): ChatMessage {
   const { body, bodyText } = normalizeBody(raw.body);
-  return {
+  const messageType =
+    typeof raw.messageType === "string" && raw.messageType.length > 0
+      ? raw.messageType
+      : undefined;
+  const attachments = normalizeAttachments(raw.attachments);
+  const eventDetail = normalizeEventDetail(raw.eventDetail);
+  const out: ChatMessage = {
     id: raw.id,
     from: normalizeFrom(raw.from),
     body,
     bodyText,
     createdDateTime: typeof raw.createdDateTime === "string" ? raw.createdDateTime : "",
   };
+  if (messageType) out.messageType = messageType;
+  if (attachments) out.attachments = attachments;
+  if (eventDetail) out.eventDetail = eventDetail;
+  return out;
 }
 
 // ---------------------------------------------------------------------------

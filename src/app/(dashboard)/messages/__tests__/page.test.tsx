@@ -50,6 +50,8 @@ import MessagesPage, {
   colorForSender,
   buildTeamsDeepLink,
   BASIC_EMOJIS,
+  isChatUnread,
+  cssEscape,
 } from "@/app/(dashboard)/messages/page";
 
 interface MockResponse {
@@ -176,6 +178,63 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime("2026-04-23T11:30:00Z", base)).toBe("30m");
     expect(formatRelativeTime("2026-04-23T10:00:00Z", base)).toBe("2h");
     expect(formatRelativeTime("2026-04-21T12:00:00Z", base)).toBe("2d");
+  });
+});
+
+describe("isChatUnread (Bug 2 helper)", () => {
+  const chat = {
+    id: "c1",
+    lastUpdatedDateTime: "2026-04-29T10:00:00.000Z",
+    lastMessagePreview: undefined,
+  };
+
+  test("no cursor → unread (new user, every chat starts unread)", () => {
+    expect(isChatUnread(chat, new Map())).toBe(true);
+  });
+
+  test("cursor older than lastUpdatedDateTime → unread", () => {
+    expect(
+      isChatUnread(
+        chat,
+        new Map([["c1", "2026-04-29T09:00:00.000Z"]]),
+      ),
+    ).toBe(true);
+  });
+
+  test("cursor equal to lastUpdatedDateTime → read (not strictly newer)", () => {
+    expect(
+      isChatUnread(
+        chat,
+        new Map([["c1", "2026-04-29T10:00:00.000Z"]]),
+      ),
+    ).toBe(false);
+  });
+
+  test("cursor newer than lastUpdatedDateTime → read", () => {
+    expect(
+      isChatUnread(
+        chat,
+        new Map([["c1", "2026-04-29T11:00:00.000Z"]]),
+      ),
+    ).toBe(false);
+  });
+
+  test("malformed cursor → fall back to unread", () => {
+    expect(
+      isChatUnread(chat, new Map([["c1", "not-a-date"]])),
+    ).toBe(true);
+  });
+});
+
+describe("cssEscape (Bug 3 helper)", () => {
+  test("returns the input verbatim for plain alphanumerics", () => {
+    expect(cssEscape("abc123")).toBe("abc123");
+  });
+  test("escapes via CSS.escape when available", () => {
+    // jsdom provides CSS.escape; just verify we round-trip through it.
+    const out = cssEscape('a"b');
+    expect(out).not.toBe('a"b');
+    expect(out).toMatch(/a/);
   });
 });
 
@@ -2018,5 +2077,288 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("channel-thread-body")).toBeNull();
     });
+  });
+});
+
+/**
+ * Bug-fix bundle 2026-04-29: empty bubbles, unread state, deep-link.
+ */
+describe("MessagesPage — Bug fix 2026-04-29 (bubbles + unread + deep-link)", () => {
+  beforeEach(() => {
+    mockFetchWithRefresh.mockReset();
+    try {
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        "instinct_user",
+        JSON.stringify({ email: "me@wolfpack.test" }),
+      );
+      window.localStorage.setItem("instinct.messages.chats_open", "1");
+      window.localStorage.setItem("instinct.messages.teams_open", "1");
+    } catch {
+      /* noop */
+    }
+    try {
+      window.history.replaceState({}, "", "/messages");
+    } catch {
+      /* noop */
+    }
+  });
+
+  test("Bug 1: systemEventMessage rows render as a centered pill, not an empty bubble", async () => {
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1")
+        return ok({
+          messages: [
+            {
+              id: "m-text",
+              createdDateTime: "2026-04-23T11:00:00Z",
+              from: { displayName: "Jane" },
+              body: { contentType: "text", content: "hello" },
+              bodyText: "hello",
+            },
+            {
+              id: "m-call",
+              createdDateTime: "2026-04-23T11:30:00Z",
+              from: { displayName: "Jane" },
+              body: { contentType: "text", content: "" },
+              bodyText: "",
+              messageType: "systemEventMessage",
+              eventDetail: { subtype: "callEnded" },
+            },
+            {
+              id: "m-members",
+              createdDateTime: "2026-04-23T12:00:00Z",
+              from: { displayName: "Jane" },
+              body: { contentType: "text", content: "" },
+              bodyText: "",
+              messageType: "systemEventMessage",
+              eventDetail: {
+                subtype: "membersAdded",
+                memberNames: ["Ashley"],
+              },
+            },
+          ],
+        });
+      return ok({});
+    });
+
+    await renderMessagesOpen();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("chat-row-chat-1"));
+    });
+
+    await waitFor(() => screen.getByTestId("system-event-m-call"));
+    expect(screen.getByTestId("system-event-m-call").textContent).toMatch(
+      /Call ended/,
+    );
+    expect(screen.getByTestId("system-event-m-members").textContent).toMatch(
+      /Ashley joined the chat/,
+    );
+    // Normal message bubble still renders.
+    expect(screen.getByTestId("message-m-text")).toBeInTheDocument();
+  });
+
+  test("Bug 1: attachment-only messages render as an attachment summary pill", async () => {
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1")
+        return ok({
+          messages: [
+            {
+              id: "m-attach",
+              createdDateTime: "2026-04-23T11:00:00Z",
+              from: { displayName: "Jane" },
+              body: { contentType: "text", content: "" },
+              bodyText: "",
+              attachments: [
+                { contentType: "reference", name: "budget.xlsx" },
+              ],
+            },
+          ],
+        });
+      return ok({});
+    });
+    await renderMessagesOpen();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("chat-row-chat-1"));
+    });
+    await waitFor(() => screen.getByTestId("attachment-summary-m-attach"));
+    expect(
+      screen.getByTestId("attachment-summary-m-attach").textContent,
+    ).toMatch(/budget\.xlsx/);
+  });
+
+  test("Bug 2: chat row shows bold + dot when last message is newer than read-state cursor", async () => {
+    // Read-state has chat-1 read 1 minute BEFORE its lastUpdatedDateTime,
+    // chat-2 read AFTER its lastUpdatedDateTime. chat-1 should be unread,
+    // chat-2 should be read. chat-old has no cursor → unread by default.
+    wireApiRouter((url) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/messages/read-state")
+        return ok({
+          state: {
+            "chat-1": "2026-04-23T09:59:00Z", // older than 10:00:00Z → unread
+            "chat-2": "2026-04-22T08:00:00Z", // equal → read
+          },
+        });
+      return ok({});
+    });
+
+    await renderMessagesOpen();
+    await waitFor(() => screen.getByTestId("chat-row-chat-1"));
+
+    // chat-1: unread by cursor
+    await waitFor(() => {
+      expect(screen.getByTestId("chat-row-chat-1")).toHaveAttribute(
+        "data-unread",
+        "true",
+      );
+    });
+    // unread dot indicator visible
+    expect(screen.queryByTestId("chat-unread-dot-chat-1")).toBeInTheDocument();
+
+    // chat-2: read (cursor >= lastUpdatedDateTime)
+    expect(screen.getByTestId("chat-row-chat-2")).toHaveAttribute(
+      "data-unread",
+      "false",
+    );
+    expect(screen.queryByTestId("chat-unread-dot-chat-2")).toBeNull();
+
+    // chat-old: no cursor → unread by default
+    expect(screen.getByTestId("chat-row-chat-old")).toHaveAttribute(
+      "data-unread",
+      "true",
+    );
+  });
+
+  test("Bug 2: opening an unread chat POSTs read-state and the row flips to read", async () => {
+    let readStatePost: { chat_id: string; kind: string } | null = null;
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1")
+        return ok({
+          messages: [
+            {
+              id: "m1",
+              createdDateTime: "2026-04-23T11:00:00Z",
+              from: { displayName: "Jane" },
+              body: { contentType: "text", content: "hi" },
+              bodyText: "hi",
+            },
+          ],
+        });
+      if (url === "/api/messages/read-state") {
+        if (init?.method === "POST") {
+          const body = JSON.parse((init?.body as string) ?? "{}") as {
+            chat_id: string;
+            last_read_at: string;
+            kind: string;
+          };
+          readStatePost = body;
+          return ok({ ok: true, last_read_at: body.last_read_at });
+        }
+        return ok({ state: {} });
+      }
+      return ok({});
+    });
+
+    await renderMessagesOpen();
+    await waitFor(() => screen.getByTestId("chat-row-chat-1"));
+    expect(screen.getByTestId("chat-row-chat-1")).toHaveAttribute(
+      "data-unread",
+      "true",
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("chat-row-chat-1"));
+    });
+
+    // The selected chat row is no longer flagged unread (data-unread="false")
+    // because selectChat sets isSelected and the bold+dot suppresses while
+    // selected.
+    await waitFor(() => {
+      expect(screen.getByTestId("chat-row-chat-1")).toHaveAttribute(
+        "data-unread",
+        "false",
+      );
+    });
+
+    // POST fired with chat_id + kind:"chat".
+    await waitFor(() => {
+      expect(readStatePost).not.toBeNull();
+    });
+    expect(readStatePost!.chat_id).toBe("chat-1");
+    expect(readStatePost!.kind).toBe("chat");
+  });
+
+  test("Bug 3: ?chat=X&message=Y opens the chat and scrolls + flashes the target message", async () => {
+    const scrollSpy = jest.fn();
+    (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView =
+      scrollSpy;
+
+    // RAFs run synchronously in tests via setImmediate fallback below.
+    const realRAF = window.requestAnimationFrame;
+    window.requestAnimationFrame = (cb) => {
+      cb(0);
+      return 0;
+    };
+
+    try {
+      window.history.replaceState({}, "", "/messages?chat=chat-1&message=m-target");
+
+      wireApiRouter((url) => {
+        if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+        if (url === "/api/ms/chats/chat-1")
+          return ok({
+            messages: [
+              {
+                id: "m-other",
+                createdDateTime: "2026-04-23T10:00:00Z",
+                from: { displayName: "Jane" },
+                body: { contentType: "text", content: "hi" },
+                bodyText: "hi",
+              },
+              {
+                id: "m-target",
+                createdDateTime: "2026-04-23T11:00:00Z",
+                from: { displayName: "Jane" },
+                body: { contentType: "text", content: "look here" },
+                bodyText: "look here",
+              },
+            ],
+          });
+        return ok({});
+      });
+
+      await renderMessagesOpen();
+
+      // The chat auto-selects via the existing pendingDeepLink handler.
+      await waitFor(() => screen.getByTestId("message-m-target"));
+
+      // The deep-link useEffect calls scrollIntoView + applies flash class.
+      await waitFor(() => {
+        expect(scrollSpy).toHaveBeenCalled();
+      });
+      const target = screen.getByTestId("message-m-target");
+      expect(target.classList.contains("message-flash")).toBe(true);
+
+      // messages.deep_link_landed analytics fired with scroll_succeeded:true.
+      const analyticsCalls = mockFetchWithRefresh.mock.calls.filter((c) => {
+        if (c[0] !== "/api/analytics") return false;
+        try {
+          return JSON.parse(c[1].body).event === "messages.deep_link_landed";
+        } catch {
+          return false;
+        }
+      });
+      expect(analyticsCalls.length).toBeGreaterThan(0);
+      const payload = JSON.parse(analyticsCalls[0][1].body);
+      expect(payload.metadata.chat_id).toBe("chat-1");
+      expect(payload.metadata.message_id).toBe("m-target");
+      expect(payload.metadata.scroll_succeeded).toBe(true);
+    } finally {
+      window.requestAnimationFrame = realRAF;
+    }
   });
 });

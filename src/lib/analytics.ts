@@ -1280,6 +1280,38 @@ export type InstinctEventType =
   | "ms_chats.mentions_sent"
   | "messages.mention_added"
   | "messages.mention_completed"
+  // Bug-fix bundle 2026-04-29: empty-bubble renderer + read-state +
+  // notification deep-link. Each event feeds a specific learning loop:
+  //
+  //   messages.system_event_rendered     { subtype }
+  //     fires every time SystemEventPill renders. `subtype` is the
+  //     normalized Graph subtype (callEnded, membersAdded, …) so the
+  //     learning loop can rank the most-common subtypes and tell us
+  //     which renderers to invest in next. "unknown" buckets every
+  //     subtype the renderer hasn't been taught yet.
+  //
+  //   messages.attachment_summary_rendered  { attachment_kind }
+  //     fires every time AttachmentSummaryPill renders an attachment-
+  //     only message. `attachment_kind` is the Graph contentType
+  //     (adaptive card, file reference, meeting card, etc.) so the
+  //     learning loop can prioritize first-class previews for the
+  //     most-common kinds.
+  //
+  //   messages.read_state_advanced       { chat_id, kind }
+  //     fires server-side when the read-state lib upserts a row.
+  //     `kind` ∈ "chat" | "channel" | "team" — same table backs all
+  //     three surfaces, this metadata lets the dashboard split them.
+  //
+  //   messages.deep_link_landed          { chat_id, message_id, scroll_succeeded }
+  //     fires client-side after the page consumes
+  //     `?chat=…&message=…`. `scroll_succeeded` distinguishes "the
+  //     target message was in the loaded thread" from "we opened the
+  //     chat but couldn't find the row" so we can size notification
+  //     deep-link UX.
+  | "messages.system_event_rendered"
+  | "messages.attachment_summary_rendered"
+  | "messages.read_state_advanced"
+  | "messages.deep_link_landed"
   // Automations — modular workflow surface. Stream A (porsche-classes)
   // is the first concrete automation. Every meaningful ingest and human
   // intervention emits one of these so the learning loop can see how

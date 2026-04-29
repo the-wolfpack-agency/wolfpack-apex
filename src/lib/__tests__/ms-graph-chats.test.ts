@@ -30,6 +30,7 @@ import {
   sendChatMessage,
   sanitizeComposeHtml,
   stripHtml,
+  normalizeEventSubtype,
 } from "@/lib/ms-graph-chats";
 
 function okJson(data: any) {
@@ -393,5 +394,77 @@ describe("getChat", () => {
     const res = await getChat("T", "c1", "u");
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.code).toBe("scope_missing");
+  });
+});
+
+describe("normalizeEventSubtype (Bug 1)", () => {
+  it("strips namespace + EventMessageDetail suffix", () => {
+    expect(
+      normalizeEventSubtype("#microsoft.graph.callEndedEventMessageDetail"),
+    ).toBe("callEnded");
+    expect(
+      normalizeEventSubtype("#microsoft.graph.membersAddedEventMessageDetail"),
+    ).toBe("membersAdded");
+    expect(
+      normalizeEventSubtype("#microsoft.graph.topicUpdatedEventMessageDetail"),
+    ).toBe("topicUpdated");
+  });
+
+  it("returns null for missing / non-string", () => {
+    expect(normalizeEventSubtype(undefined)).toBeNull();
+    expect(normalizeEventSubtype(null)).toBeNull();
+    expect(normalizeEventSubtype(42)).toBeNull();
+    expect(normalizeEventSubtype("")).toBeNull();
+  });
+
+  it("handles bare values (no namespace)", () => {
+    expect(normalizeEventSubtype("callEnded")).toBe("callEnded");
+  });
+});
+
+describe("normalizeMessage extensions (Bug 1)", () => {
+  it("surfaces messageType + attachments + eventDetail through getChatMessagesResult", async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJson({
+        value: [
+          {
+            id: "m-call",
+            createdDateTime: "2026-04-29T10:00:00Z",
+            messageType: "systemEventMessage",
+            eventDetail: {
+              "@odata.type": "#microsoft.graph.callEndedEventMessageDetail",
+            },
+            from: null,
+            body: { content: "", contentType: "html" },
+          },
+          {
+            id: "m-attach",
+            createdDateTime: "2026-04-29T10:05:00Z",
+            messageType: "message",
+            attachments: [
+              { contentType: "reference", name: "budget.xlsx" },
+            ],
+            from: null,
+            body: { content: "", contentType: "html" },
+          },
+          {
+            id: "m-text",
+            createdDateTime: "2026-04-29T10:10:00Z",
+            messageType: "message",
+            from: null,
+            body: { content: "hello", contentType: "text" },
+          },
+        ],
+      }),
+    );
+    const res = await getChatMessagesResult("T", "c1", 30, "u");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const byId = Object.fromEntries(res.messages.map((m) => [m.id, m]));
+    expect(byId["m-call"].messageType).toBe("systemEventMessage");
+    expect(byId["m-call"].eventDetail?.subtype).toBe("callEnded");
+    expect(byId["m-attach"].attachments?.[0].name).toBe("budget.xlsx");
+    expect(byId["m-text"].messageType).toBe("message");
+    expect(byId["m-text"].attachments).toBeUndefined();
   });
 });

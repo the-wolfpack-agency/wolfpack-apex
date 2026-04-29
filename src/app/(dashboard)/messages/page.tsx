@@ -46,6 +46,15 @@ import { emitInsight } from "@/lib/insights/emit";
 import { useAdaptivePoll } from "@/lib/hooks/useAdaptivePoll";
 import PresenceDot from "@/components/PresenceDot";
 import DeepLinkButton from "@/components/DeepLinkButton";
+import {
+  SystemEventPill,
+  AttachmentSummaryPill,
+  shouldRenderAsPill,
+} from "@/lib/messages/system-event-renderer";
+import type {
+  ChatMessageAttachment,
+  ChatMessageEventDetail,
+} from "@/lib/ms-graph-chats";
 
 export interface ChatMember {
   id: string;
@@ -97,6 +106,51 @@ export function effectiveChatTimestamp(chat: {
   return previewTimeOf(chat.lastMessagePreview) || chat.lastUpdatedDateTime;
 }
 
+/**
+ * Minimal CSS attribute-selector escape — works in environments where
+ * `CSS.escape` is unavailable (older jsdom). Escapes the characters
+ * that would terminate or be parsed specially inside an attribute
+ * selector. Graph message ids are typically `<long-token>=` triplets;
+ * the `=` is the actual hazard here.
+ */
+export function cssEscape(value: string): string {
+  if (typeof globalThis !== "undefined") {
+    const css = (globalThis as unknown as { CSS?: { escape?: (s: string) => string } }).CSS;
+    if (css && typeof css.escape === "function") return css.escape(value);
+  }
+  return value.replace(/(["'\\\]\\[\\s])/g, "\\$1");
+}
+
+/**
+ * Bug 2 helper — true when the chat has activity newer than the
+ * caller's read-state cursor for it (or no cursor exists). Pure
+ * function: same input → same output. Renderer-agnostic so the chat-
+ * list test can exercise it without mounting React.
+ *
+ * Returns false when the most-recent activity is `<=` the read-state
+ * cursor — that's the "fully read" state. Empty cursor map (new user)
+ * counts every chat as unread by definition; the user catches up on
+ * each open.
+ */
+export function isChatUnread(
+  chat: {
+    id: string;
+    lastUpdatedDateTime: string;
+    lastMessagePreview?: ChatLastMessagePreview;
+  },
+  readState: Map<string, string>,
+): boolean {
+  const ts = effectiveChatTimestamp(chat);
+  if (!ts) return false;
+  const last = Date.parse(ts);
+  if (Number.isNaN(last)) return false;
+  const cursor = readState.get(chat.id);
+  if (!cursor) return true;
+  const cursorMs = Date.parse(cursor);
+  if (Number.isNaN(cursorMs)) return true;
+  return last > cursorMs;
+}
+
 // Teams collaboration surface — list of joined teams, lazily expand
 // to channels, then click a channel to load its messages on the right
 // pane (read-only for now). Mirrors the Teams desktop "Teams &
@@ -136,6 +190,22 @@ export interface ChatMessage {
   from?: { displayName?: string };
   createdDateTime: string;
   body?: { content?: string; contentType?: "text" | "html" };
+  /**
+   * Optional plain-text mirror of `body.content` — Graph-side strip is
+   * performed in the lib. Renderers prefer this when present; fall back
+   * to body.content otherwise.
+   */
+  bodyText?: string;
+  /**
+   * `message` for normal user messages, `systemEventMessage` for call /
+   * member / topic events. Older Graph payloads omit it; renderers
+   * treat missing as `message`.
+   */
+  messageType?: string;
+  /** Attachment-only messages (meeting cards, file shares, code snippets). */
+  attachments?: ChatMessageAttachment[];
+  /** Populated for `systemEventMessage`. */
+  eventDetail?: ChatMessageEventDetail;
   /**
    * Set to "me" on optimistic messages appended by the composer before
    * the server round-trip resolves. Allows the UI to distinguish
@@ -476,6 +546,7 @@ function fireAnalytics(
     | "messages.channel_selected"
     | "messages.channel_compose_sent"
     | "messages.channel_compose_failed"
+    | "messages.deep_link_landed"
     | "assistant.draft_accepted"
     | "assistant.draft_modified"
     | "assistant.draft_discarded",
@@ -514,6 +585,31 @@ export default function MessagesPage() {
   const [selfEmail, setSelfEmail] = useState<string | undefined>(selfUserInit.email);
   const [selfName, setSelfName] = useState<string | undefined>(selfUserInit.name);
   const [selfId, setSelfId] = useState<string | undefined>(undefined);
+
+  /* Per-user-per-chat last-read cursor map (Bug 2 fix).
+     Map<chat_id, ISO timestamp>. Drives bold + dot vs plain on the
+     chat list. Loaded once on mount via GET /api/messages/read-state;
+     advanced on every selectChat() via POST. The synthetic Graph
+     unreadCount stays as-is — when present, we OR it with this
+     cursor comparison so chats stay highlighted whether the badge
+     comes from Graph or our own table. */
+  const [readState, setReadState] = useState<Map<string, string>>(new Map());
+
+  /* Notification deep-link target: highlight + scroll a specific
+     message after the chat opens. Set once at mount from
+     `?chat=<id>&message=<id>`; cleared after the row is found OR
+     after we determine the message isn't in the loaded thread. */
+  const [pendingMessageHighlight, setPendingMessageHighlight] = useState<
+    | { chatId: string; messageId: string }
+    | null
+  >(() => {
+    if (typeof window === "undefined") return null;
+    const params = new URLSearchParams(window.location.search);
+    const chatId = params.get("chat");
+    const messageId = params.get("message");
+    if (chatId && messageId) return { chatId, messageId };
+    return null;
+  });
 
   // Mobile responsive: at <640px widths, show either the list OR the
   // thread, not both. Desktop (>=640px) keeps the split view.
@@ -763,6 +859,31 @@ export default function MessagesPage() {
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "messages" } }),
     }).catch(() => undefined);
   }, [loadChatList]);
+
+  /* Bug 2 fix: load every read-state cursor for the caller on mount.
+     The chat-list row compares lastMessage.createdDateTime against the
+     cursor we got back to decide bold + dot vs plain. Empty Map for
+     new users; never blocks render — read-state is a UI driver only. */
+  const loadReadState = useCallback(async () => {
+    try {
+      const res = await fetchWithRefresh("/api/messages/read-state", {
+        method: "GET",
+      });
+      if (!res.ok) return;
+      const data = (await res.json().catch(() => ({}))) as {
+        state?: Record<string, string>;
+      };
+      if (data?.state && typeof data.state === "object") {
+        setReadState(new Map(Object.entries(data.state)));
+      }
+    } catch {
+      // Silent — UI driver only, never block.
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadReadState();
+  }, [loadReadState]);
 
   // Deep-link target captured at mount from `?chat=<id>` or
   // `?team=<id>&channel=<id>`. Search results, email handoffs, and
@@ -1233,6 +1354,38 @@ export default function MessagesPage() {
     setMentionMatch(null);
     setMentionHighlight(0);
     void loadThread(chat);
+    // Bug 2 fix: advance the read-state cursor so the chat list re-
+    // renders without bold + dot. Optimistic update first so the UI
+    // flips instantly; the POST is fire-and-forget but failures don't
+    // roll back (worst case the cursor catches up on next mount).
+    advanceReadState(chat.id, "chat");
+  }
+
+  /**
+   * Bug 2 helper: optimistically advance the local read-state map and
+   * POST to /api/messages/read-state. Same fn handles chats / channels
+   * / teams via the `kind` param — storage is shared, the analytics
+   * dimension splits adoption per surface.
+   */
+  function advanceReadState(
+    chatOrChannelId: string,
+    kind: "chat" | "channel" | "team",
+  ): void {
+    const now = new Date().toISOString();
+    setReadState((prev) => {
+      const next = new Map(prev);
+      next.set(chatOrChannelId, now);
+      return next;
+    });
+    fetchWithRefresh("/api/messages/read-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatOrChannelId,
+        last_read_at: now,
+        kind,
+      }),
+    }).catch(() => undefined);
   }
 
   // Scroll a deep-linked row in the LEFT panel into view. Some users
@@ -1253,6 +1406,52 @@ export default function MessagesPage() {
       });
     });
   }
+
+  /* Bug 3 fix: Notification deep-link to a specific message inside a
+     chat. Fires after the thread loads — looks up the row by
+     `data-message-id`, scrolls into view, applies a 2s flash class,
+     then clears the pending state so re-renders don't re-flash.
+     Always emits `messages.deep_link_landed` analytics with
+     `scroll_succeeded` so the dashboard can size notification UX. */
+  useEffect(() => {
+    if (!pendingMessageHighlight) return;
+    if (!selectedChat || selectedChat.id !== pendingMessageHighlight.chatId) return;
+    if (loadingThread) return;
+    if (messages === null) return; // wait for the thread fetch to land
+    const target = pendingMessageHighlight;
+    let scrollSucceeded = false;
+    if (typeof window !== "undefined") {
+      // Two RAFs match the sibling left-panel handler — the bubble has
+      // to exist in the DOM after React paints.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const el = document.querySelector<HTMLElement>(
+            `[data-message-id="${cssEscape(target.messageId)}"]`,
+          );
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+            el.classList.add("message-flash");
+            window.setTimeout(() => {
+              el.classList.remove("message-flash");
+            }, 2000);
+            scrollSucceeded = true;
+          }
+          fireAnalytics("messages.deep_link_landed", {
+            chat_id: target.chatId,
+            message_id: target.messageId,
+            scroll_succeeded: scrollSucceeded,
+          });
+        });
+      });
+    } else {
+      fireAnalytics("messages.deep_link_landed", {
+        chat_id: target.chatId,
+        message_id: target.messageId,
+        scroll_succeeded: false,
+      });
+    }
+    setPendingMessageHighlight(null);
+  }, [pendingMessageHighlight, selectedChat, loadingThread, messages]);
 
   // Resolve a `?chat=<id>` deep-link as soon as the chat list lands.
   // Auto-expands the Chats section so the selected row is visible.
@@ -1822,6 +2021,17 @@ export default function MessagesPage() {
               const title = getChatTitle(chat, selfEmail, selfName, selfId);
               const otherUserId = getOtherMemberUserId(chat, selfEmail, selfName, selfId);
               const isSelected = chat.id === selectedId;
+              /* Bug 2 fix: bold + dot when the chat's last message is
+                 newer than the user's read-state cursor for that chat
+                 (or no cursor exists). Once the user opens the chat,
+                 selectChat() POSTs the new cursor and the row reverts
+                 to plain on the next render. The Graph-side
+                 `unreadCount` stays as a fallback signal so chats
+                 stay highlighted whether the badge comes from Graph
+                 or our own cursor table. */
+              const isUnreadByCursor = isChatUnread(chat, readState);
+              const isUnread =
+                !isSelected && (isUnreadByCursor || (chat.unreadCount ?? 0) > 0);
               return (
                 <li key={chat.id}>
                   <button
@@ -1829,6 +2039,7 @@ export default function MessagesPage() {
                     onClick={() => selectChat(chat)}
                     data-testid={`chat-row-${chat.id}`}
                     data-selected={isSelected ? "true" : "false"}
+                    data-unread={isUnread ? "true" : "false"}
                     style={{
                       display: "flex",
                       width: "100%",
@@ -1857,7 +2068,7 @@ export default function MessagesPage() {
                             display: "inline-flex",
                             alignItems: "center",
                             gap: 8,
-                            fontWeight: 600,
+                            fontWeight: isUnread ? 700 : 600,
                             fontSize: 14,
                             overflow: "hidden",
                             textOverflow: "ellipsis",
@@ -1870,6 +2081,20 @@ export default function MessagesPage() {
                             <span style={{ flex: "0 0 auto", display: "inline-flex" }}>
                               <PresenceDot userId={otherUserId} />
                             </span>
+                          ) : null}
+                          {isUnread ? (
+                            <span
+                              data-testid={`chat-unread-dot-${chat.id}`}
+                              aria-label="Unread"
+                              style={{
+                                flex: "0 0 auto",
+                                display: "inline-block",
+                                width: 8,
+                                height: 8,
+                                borderRadius: "50%",
+                                background: "var(--wp-gold, #eab308)",
+                              }}
+                            />
                           ) : null}
                           <span
                             style={{
@@ -1897,8 +2122,11 @@ export default function MessagesPage() {
                       >
                         <span
                           style={{
-                            color: "var(--wp-text-muted, #9ca3af)",
+                            color: isUnread
+                              ? "var(--wp-text, #eee)"
+                              : "var(--wp-text-muted, #9ca3af)",
                             fontSize: 13,
+                            fontWeight: isUnread ? 600 : 400,
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                             whiteSpace: "nowrap",
@@ -1908,7 +2136,7 @@ export default function MessagesPage() {
                         >
                           {previewTextOf(chat.lastMessagePreview)}
                         </span>
-                        {chat.unreadCount && chat.unreadCount > 0 ? (
+                        {chat.unreadCount && chat.unreadCount > 0 && !isSelected ? (
                           <span
                             data-testid={`chat-unread-${chat.id}`}
                             style={{
@@ -2343,6 +2571,40 @@ export default function MessagesPage() {
                   </div>
                 ) : (messages ?? []).length === 0 ? null : (
                   (messages ?? []).map((m) => {
+                    /* Bug fix 2026-04-29: Teams emits non-text rows
+                       (call started/ended, members added, topic
+                       updated, attachment-only) inline with user
+                       messages. Without this branch they rendered as
+                       empty bubbles with only "15h" — the screenshot
+                       bug. Render those via the system-event /
+                       attachment pill renderers; user-text messages
+                       continue through the normal bubble below. */
+                    if (shouldRenderAsPill(m) && !m.pending) {
+                      const rel = formatRelativeTime(m.createdDateTime);
+                      if (m.messageType === "systemEventMessage") {
+                        return (
+                          <div
+                            key={m.id}
+                            data-message-id={m.id}
+                            style={{ display: "flex", justifyContent: "center" }}
+                          >
+                            <SystemEventPill message={m} relativeTime={rel} />
+                          </div>
+                        );
+                      }
+                      return (
+                        <div
+                          key={m.id}
+                          data-message-id={m.id}
+                          style={{ display: "flex" }}
+                        >
+                          <AttachmentSummaryPill
+                            message={m}
+                            relativeTime={rel}
+                          />
+                        </div>
+                      );
+                    }
                     const text =
                       m.body?.contentType === "text"
                         ? m.body?.content ?? ""
@@ -2359,6 +2621,7 @@ export default function MessagesPage() {
                       <div
                         key={m.id}
                         data-testid={`message-${m.id}`}
+                        data-message-id={m.id}
                         data-pending={m.pending ? "true" : "false"}
                         data-role={m.role ?? "other"}
                         data-sender-color={senderColor}
