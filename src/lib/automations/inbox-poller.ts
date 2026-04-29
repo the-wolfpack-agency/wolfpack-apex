@@ -25,12 +25,12 @@
 
 import { listMailDelta, type GraphMailMessage, GraphClientError } from "@/lib/ms-graph/client";
 import { getValidToken } from "@/lib/microsoft-graph";
-import { query, writeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { getAutomation } from "./registry";
 import { ingestArtifact, type IngestResult } from "./porsche-classes/ingest";
 import { ingestMeetingMessage } from "./meeting-insights/ingest";
 import { runAnalyzer } from "./meeting-insights/run-analyzer";
+import { getCursor, setCursor } from "./mailbox-cursors";
 import type { AutomationDefinition, AutomationId, AutomationSourceType } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -98,38 +98,18 @@ export function getMailboxBases(): string[] {
 /* ------------------------------------------------------------------ */
 /* Cursor helpers                                                      */
 /* ------------------------------------------------------------------ */
-
-async function loadDeltaLink(
-  automationId: AutomationId,
-  userId: string,
-): Promise<string | null> {
-  const r = await query<{ delta_link: string | null }>(
-    `SELECT delta_link
-       FROM instinct_automation_porsche_poll_state
-      WHERE automation_id = $1 AND user_id = $2`,
-    [automationId, userId],
-  );
-  return r.rows[0]?.delta_link ?? null;
-}
-
-async function saveDeltaLink(
-  automationId: AutomationId,
-  userId: string,
-  deltaLink: string | null,
-): Promise<void> {
-  await writeQuery(
-    `INSERT INTO instinct_automation_porsche_poll_state
-       (automation_id, user_id, delta_link, last_polled_at, updated_at)
-     VALUES ($1, $2, $3, NOW(), NOW())
-     ON CONFLICT (automation_id, user_id) DO UPDATE SET
-       delta_link     = EXCLUDED.delta_link,
-       last_polled_at = NOW(),
-       updated_at     = NOW()
-     RETURNING automation_id`,
-    [automationId, userId, deltaLink],
-    { expectRows: 1 },
-  );
-}
+//
+// Cursor reads/writes go through the per-base `mailbox_poll_cursors` table
+// (see ./mailbox-cursors.ts and migration 106). The legacy
+// `instinct_automation_porsche_poll_state` table is preserved for one
+// release window — `getCursor` falls back to it when the new table has
+// no row, so cursors written before migration 106 keep resolving until
+// the first new write promotes them. Tagged
+// `// TODO(2026-Q3): remove legacy delta_link fallback after 2026-06-01.`
+// inside mailbox-cursors.ts where the fallback actually lives.
+//
+// `mailboxBase = ""` is the legacy-default sentinel for callers that
+// didn't have a /users/{upn} routing — i.e. the single-mailbox /me path.
 
 /* ------------------------------------------------------------------ */
 /* Delta fallback — direct inbox listing when delta returns 0 items    */
@@ -612,7 +592,11 @@ async function pollInboxByDelta(args: {
     };
   }
 
-  const cursor = await loadDeltaLink(args.automationId, args.userId);
+  const cursor = await getCursor({
+    automationId: args.automationId,
+    userId: args.userId,
+    mailboxBase: "",
+  });
   let items: Awaited<ReturnType<typeof listMailDelta>>["items"];
   let nextDeltaLink: string | undefined;
   try {
@@ -699,7 +683,16 @@ async function pollInboxByDelta(args: {
      that cursor would let the empty state stick across polls and keep
      the fallback from ever firing again. */
   if (nextDeltaLink && !triedFallback) {
-    await saveDeltaLink(args.automationId, args.userId, nextDeltaLink);
+    await setCursor({
+      key: {
+        automationId: args.automationId,
+        userId: args.userId,
+        mailboxBase: "",
+      },
+      deltaLink: nextDeltaLink,
+      cursorKind: "delta",
+      userRole: args.userRole,
+    });
   }
 
   const duration_ms = Date.now() - start;
@@ -968,12 +961,18 @@ async function pollInboxBySearch(
     };
   }
 
-  /* Per-base cursor: when an explicit base is provided (multi-mailbox
-     mode), suffix the cursor key with the base so each mailbox tracks
-     its own newest-received timestamp. Single-base callers keep the
-     legacy plain-userId key — no schema change. */
-  const cursorKey = baseOverride ? `${args.userId}::${baseOverride}` : args.userId;
-  const stored = await loadDeltaLink(args.automationId, cursorKey);
+  /* Per-base cursor on `mailbox_poll_cursors` (composite key on
+     automation_id + user_id + mailbox_base). Empty string '' is the
+     legacy default sentinel for single-mailbox callers — preserves the
+     historical "plain userId" semantics under the new schema. The
+     synthetic `userId::base` string trick that this code used to do is
+     gone; mailboxBase is a first-class column now. */
+  const mailboxBase = baseOverride ?? "";
+  const stored = await getCursor({
+    automationId: args.automationId,
+    userId: args.userId,
+    mailboxBase,
+  });
   const since = parseSearchCursor(stored);
 
   /* Compose the Graph URL: /{base}/mailFolders/inbox/messages with
@@ -1189,7 +1188,16 @@ async function pollInboxBySearch(
      with zero matches must not move the cursor forward (would skip
      mail that arrives between the search and the next tick). */
   if (newestSeen && newestSeen !== since) {
-    await saveDeltaLink(args.automationId, cursorKey, formatSearchCursor(newestSeen));
+    await setCursor({
+      key: {
+        automationId: args.automationId,
+        userId: args.userId,
+        mailboxBase,
+      },
+      deltaLink: formatSearchCursor(newestSeen),
+      cursorKind: "search",
+      userRole: args.userRole,
+    });
   }
 
   const duration_ms = Date.now() - start;

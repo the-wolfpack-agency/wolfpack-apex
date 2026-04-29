@@ -1257,6 +1257,18 @@ export type InstinctEventType =
   | "automations.poll_run"
   | "automations.poll_historical"
   | "automations.poll_skipped"
+  //
+  //   automations.cursor_advanced     { automation_id, mailbox_base,
+  //                                      cursor_kind, ms_since_last_poll }
+  //     — fires every time the inbox poller writes a new cursor for
+  //       (automation_id, user_id, mailbox_base). cursor_kind is
+  //       "delta" | "search" so the learning loop can tell which Graph
+  //       access mode is running. ms_since_last_poll is the elapsed time
+  //       since the previous successful cursor write for THIS mailbox
+  //       base (null on first write); over time the system can detect a
+  //       stalled mailbox by watching this drift past the cron interval.
+  //       Empty mailbox_base ('') represents the legacy default mailbox.
+  | "automations.cursor_advanced"
   // Meeting Insights — multi-feed recurring-meeting ingest (Stream A).
   //
   //   automations.feed_created      { automation_id, feed_id, feed_slug,
