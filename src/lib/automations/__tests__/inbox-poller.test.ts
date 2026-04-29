@@ -684,12 +684,14 @@ describe("pollInboxByDelta · inbox-list fallback when delta returns 0", () => {
       userRole: "ops",
     });
 
-    /* Inspect writeQuery — only the saveDeltaLink path goes through it.
-       If fallback was used, no INSERT INTO instinct_automation_porsche_poll_state
-       call should have happened. */
+    /* Inspect writeQuery — only the setCursor path goes through it.
+       If fallback was used, no INSERT INTO mailbox_poll_cursors call
+       should have happened. (Migration 106 moved cursors from
+       `instinct_automation_porsche_poll_state` to `mailbox_poll_cursors`;
+       this assertion targets the new table.) */
     const wroteDeltaLink = writeQuery.mock.calls.some((args: unknown[]) =>
       typeof args[0] === "string" &&
-      (args[0] as string).includes("instinct_automation_porsche_poll_state"),
+      (args[0] as string).includes("mailbox_poll_cursors"),
     );
     expect(wroteDeltaLink).toBe(false);
   });
@@ -779,5 +781,110 @@ describe("pollInboxByDelta · inbox-list fallback when delta returns 0", () => {
 
     expect(result.messages_seen).toBe(0);
     expect(result.fallback_error).toContain("no_valid_token");
+  });
+});
+
+describe("multi-mailbox · AUTOMATION_POLL_MAILBOX_UPNS spans both mailboxes per tick", () => {
+  /* End-to-end through pollInbox: when AUTOMATION_POLL_MAILBOX_UPNS lists
+     two upns, the dispatcher iterates both bases sequentially via
+     pollInboxAcrossBases. Each base resolves an INDEPENDENT cursor on
+     mailbox_poll_cursors (composite key on automation_id + user_id +
+     mailbox_base). The previous synthetic-string cursor key is gone —
+     this test pins the new mailbox_base column shape. */
+  const ORIGINAL_UPNS = process.env.AUTOMATION_POLL_MAILBOX_UPNS;
+  const realFetch = global.fetch;
+
+  beforeEach(() => {
+    (getAutomation as jest.Mock).mockReturnValue(automation);
+    (getValidToken as jest.Mock).mockReset();
+  });
+  afterEach(() => {
+    if (ORIGINAL_UPNS === undefined)
+      delete process.env.AUTOMATION_POLL_MAILBOX_UPNS;
+    else process.env.AUTOMATION_POLL_MAILBOX_UPNS = ORIGINAL_UPNS;
+    global.fetch = realFetch;
+  });
+
+  it("polls both mailboxes and writes one cursor row per (user_id, mailbox_base)", async () => {
+    process.env.AUTOMATION_POLL_MAILBOX_UPNS =
+      "alicia@thewolfpack.agency,homyk@thewolfpack.agency";
+
+    /* getValidToken is called multiple times per base (preToken at the
+       top of pollInboxBySearch + fresh fetches inside fetchAttachments).
+       Unconditional mock so every call sees a valid token. */
+    (getValidToken as jest.Mock).mockResolvedValue({ accessToken: "tok" });
+
+    const fetchUrls: string[] = [];
+    global.fetch = jest.fn(async (url: string) => {
+      fetchUrls.push(String(url));
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          value: [
+            {
+              id: `m-${fetchUrls.length}`,
+              subject: "Scheduled Report Notification",
+              from: {
+                emailAddress: { address: "porsche-academy-notification@porsche.de" },
+              },
+              receivedDateTime: `2026-04-28T1${fetchUrls.length}:00:00Z`,
+              hasAttachments: false,
+            },
+          ],
+        }),
+      } as Response;
+    }) as unknown as typeof fetch;
+
+    const { writeQuery } = jest.requireMock("@/lib/db") as {
+      writeQuery: jest.Mock;
+    };
+    writeQuery.mockClear();
+
+    const r = await pollInbox({
+      automationId: "porsche-classes",
+      userId: "u1",
+      userRole: "ops",
+    });
+
+    /* Both bases were polled. */
+    expect(r.bases_polled).toBeDefined();
+    expect(r.bases_polled!.length).toBe(2);
+    /* The driver routed each base through a separate Graph search call. */
+    const aliciaCall = fetchUrls.find((u) =>
+      u.includes("/users/alicia%40thewolfpack.agency"),
+    );
+    const homykCall = fetchUrls.find((u) =>
+      u.includes("/users/homyk%40thewolfpack.agency"),
+    );
+    expect(aliciaCall).toBeDefined();
+    expect(homykCall).toBeDefined();
+
+    /* Cursor writes go to mailbox_poll_cursors. Capture the mailbox_base
+       parameter from each INSERT to prove the two bases got independent
+       rows. INSERT signature: (automation_id, user_id, mailbox_base,
+       delta_link). */
+    const cursorWrites = writeQuery.mock.calls.filter((args: unknown[]) =>
+      typeof args[0] === "string" &&
+      (args[0] as string).includes("INSERT INTO mailbox_poll_cursors"),
+    );
+    expect(cursorWrites.length).toBeGreaterThanOrEqual(2);
+    const basesWritten = cursorWrites.map(
+      (args: unknown[]) => ((args[1] as unknown[]) ?? [])[2],
+    );
+    expect(basesWritten).toEqual(
+      expect.arrayContaining([
+        "/users/alicia%40thewolfpack.agency",
+        "/users/homyk%40thewolfpack.agency",
+      ]),
+    );
+    /* And critically — the legacy synthetic-string trick is gone. No
+       cursor write should embed "::" in the user_id parameter. */
+    const userIdsWritten = cursorWrites.map(
+      (args: unknown[]) => ((args[1] as unknown[]) ?? [])[1],
+    );
+    for (const u of userIdsWritten) {
+      expect(typeof u === "string" && u.includes("::")).toBe(false);
+    }
   });
 });
