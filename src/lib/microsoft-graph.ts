@@ -171,6 +171,15 @@ const MS_SCOPES: string[] = [
   // Tier 2 · Stream F (tenant directory + mailbox settings)
   "User.Read.All",
   "MailboxSettings.Read",
+  // Tier 2 · Stream G (assistant context resolver — SharePoint search
+  // + MS Project / Planner / To Do task lookup). Sites.Read.All is the
+  // delegated permission required by Graph's /search/query endpoint
+  // when entityTypes includes "site" / "listItem". Tasks.Read is the
+  // To Do fallback used by microsoft-project.searchProjectTasks. Both
+  // require admin consent on first deploy — see PR
+  // feat/assistant-sharepoint-msproject-context for the deploy note.
+  "Sites.Read.All",
+  "Tasks.Read",
   "offline_access",
 ];
 const MS_SCOPES_STRING = MS_SCOPES.join(" ");

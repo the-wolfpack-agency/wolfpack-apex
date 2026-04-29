@@ -1549,7 +1549,37 @@ export type InstinctEventType =
   //   ai.completion { feature, provider, model, tier, input_tokens,
   //                   output_tokens, cost_usd, latency_ms, fallback_used,
   //                   sensitivity? }
-  | "ai.completion";
+  | "ai.completion"
+  // Assistant context resolver (src/lib/assistant/context-resolver.ts).
+  // Combines SharePoint search hits + MS Project / Planner / To Do tasks
+  // into a single prompt block injected into the LLM call so answers
+  // stay grounded in the team's content rather than the model's training
+  // data. Together with `support.cache_hit`, the two streams give a full
+  // picture of how grounded the assistant is.
+  //
+  //   assistant.context_resolved   { surface, sharepoint_count,
+  //                                  project_count, total_chars, took_ms }
+  //     - surface is "knowledge" | "assistant_support". Fired whenever
+  //       getRelevantContext runs (including empty results) so the
+  //       learning loop can score "did context help?" against the
+  //       answer-feedback stream the cache agent owns.
+  //
+  //   assistant.context_truncated  { surface, dropped_count, reason,
+  //                                  dropped_sharepoint, dropped_project }
+  //     - reason is currently always "max_chars". Fires when entries had
+  //       to be dropped to fit `maxChars` (default 6000). High rates
+  //       here signal we should raise the budget or improve relevance
+  //       ranking before injection.
+  //
+  //   assistant.sharepoint_lookup_failed  { status, scope_missing, code }
+  //   assistant.project_lookup_failed     { status, scope_missing, code }
+  //     - One per failed surface. `scope_missing` is true when Graph
+  //       returned 403 with an authorization error code. Used to drive
+  //       the "Reconnect Microsoft 365" banner in the assistant UI.
+  | "assistant.context_resolved"
+  | "assistant.context_truncated"
+  | "assistant.sharepoint_lookup_failed"
+  | "assistant.project_lookup_failed";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;
