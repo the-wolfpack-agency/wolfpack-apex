@@ -1087,6 +1087,74 @@ describe("EmailsPage — nav rail", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Folder switching (Drafts / Sent / Archived)
+// ---------------------------------------------------------------------------
+
+describe("EmailsPage — nav rail folder switching", () => {
+  it("clicking Drafts updates the inbox header to Drafts and refetches with folder=drafts", async () => {
+    render(<EmailsPage />);
+    await flushPromises();
+
+    expect(screen.getByTestId("inbox-header-label")).toHaveTextContent("Inbox");
+
+    fireEvent.click(screen.getByTestId("nav-folder-drafts"));
+    await flushPromises();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("inbox-header-label")).toHaveTextContent("Drafts");
+    });
+    const inboxFetches = mockFetchWithRefresh.mock.calls
+      .map((c: any[]) => String(c[0]))
+      .filter((u) => u.startsWith("/api/emails/inbox"));
+    expect(inboxFetches.some((u) => u.includes("folder=drafts"))).toBe(true);
+  });
+
+  it("clicking Sent hides the All/Unread filter row", async () => {
+    render(<EmailsPage />);
+    await flushPromises();
+    expect(screen.getByTestId("inbox-filter-row")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("nav-folder-sent"));
+    await flushPromises();
+    await waitFor(() => {
+      expect(screen.queryByTestId("inbox-filter-row")).toBeNull();
+    });
+  });
+
+  it("emits insight.email.folder_changed with from + to", async () => {
+    render(<EmailsPage />);
+    await flushPromises();
+    mockEmitInsight.mockClear();
+    fireEvent.click(screen.getByTestId("nav-folder-archived"));
+    await flushPromises();
+    const evt = mockEmitInsight.mock.calls
+      .map((c) => c[0])
+      .find((e: any) => e.action === "folder_changed");
+    expect(evt).toBeTruthy();
+    expect(evt.payload.from).toBe("inbox");
+    expect(evt.payload.to).toBe("archived");
+  });
+
+  it("clicking the same active folder is a no-op (no folder_changed emitted, no extra fetch)", async () => {
+    render(<EmailsPage />);
+    await flushPromises();
+    const beforeCount = mockFetchWithRefresh.mock.calls.filter((c: any[]) =>
+      String(c[0]).startsWith("/api/emails/inbox"),
+    ).length;
+    mockEmitInsight.mockClear();
+    fireEvent.click(screen.getByTestId("nav-folder-inbox"));
+    await flushPromises();
+    const evt = mockEmitInsight.mock.calls
+      .map((c) => c[0])
+      .find((e: any) => e.action === "folder_changed");
+    expect(evt).toBeUndefined();
+    const afterCount = mockFetchWithRefresh.mock.calls.filter((c: any[]) =>
+      String(c[0]).startsWith("/api/emails/inbox"),
+    ).length;
+    expect(afterCount).toBe(beforeCount);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Recipient context drawer telemetry
 // ---------------------------------------------------------------------------
 

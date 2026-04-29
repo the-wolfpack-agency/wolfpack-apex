@@ -1,15 +1,21 @@
 "use client";
 
 /**
- * /emails — left-rail inbox list. Replaces Outlook for triage:
+ * /emails — left-rail message list. Replaces Outlook for triage:
  *
- *   - GET /api/emails/inbox on mount + on toggle (unread vs all).
+ *   - GET /api/emails/inbox?folder=<folder> on mount + on toggle.
  *   - Virtualized scroll (windowed render) once the list exceeds 100 rows.
  *   - Per-thread preview: subject + sender + 1-line snippet + relative
- *     timestamp. Unread = bold + dot indicator.
+ *     timestamp. Unread = bold + dot indicator (inbox + archived only).
  *   - Click → navigate to /emails?id=<id> (parent picks this up and
  *     opens EmailReader).
  *   - "New email" CTA opens the composer drawer (parent controls).
+ *
+ * Folder-aware: drives the same panel from any of the four well-known
+ * Microsoft Graph folders (inbox, drafts, sent, archived). When the
+ * folder changes, the list refetches and the header label / empty
+ * state copy / All-vs-Unread toggle adjust accordingly. Drafts + sent
+ * have no useful "unread" concept so the toggle is hidden there.
  *
  * All Graph access is server-side via /api/emails/inbox; this component
  * never touches Microsoft Graph directly.
@@ -18,6 +24,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { emitInsight } from "@/lib/insights/emit";
+
+export type InboxFolder = "inbox" | "drafts" | "sent" | "archived";
 
 export interface InboxRow {
   id: string;
@@ -29,7 +37,25 @@ export interface InboxRow {
   hasAttachments: boolean;
   importance: "low" | "normal" | "high";
   webLink: string;
+  /** Present on rows from drafts/sent. Drives draft-click branching. */
+  isDraft?: boolean;
 }
+
+const FOLDER_LABEL: Record<InboxFolder, string> = {
+  inbox: "Inbox",
+  drafts: "Drafts",
+  sent: "Sent",
+  archived: "Archived",
+};
+
+const EMPTY_LABEL: Record<InboxFolder, string> = {
+  inbox: "Inbox is empty.",
+  drafts: "No drafts.",
+  sent: "No sent items.",
+  archived: "No archived messages.",
+};
+
+const FOLDERS_WITH_UNREAD_FILTER: ReadonlySet<InboxFolder> = new Set(["inbox", "archived"]);
 
 interface InboxPanelProps {
   /** Selected message id (highlighted in the list). */
@@ -42,6 +68,11 @@ interface InboxPanelProps {
   userRole: string;
   /** When true, the panel hides the templates collapse toggle. */
   isMobile?: boolean;
+  /**
+   * Which folder to list. Defaults to "inbox" for backwards compat with
+   * existing call sites.
+   */
+  folder?: InboxFolder;
 }
 
 const PAGE_SIZE = 50;
@@ -87,6 +118,7 @@ export default function InboxPanel({
   userId,
   userRole,
   isMobile,
+  folder = "inbox",
 }: InboxPanelProps) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [unreadOnly, setUnreadOnly] = useState<boolean>(false);
@@ -95,15 +127,25 @@ export default function InboxPanel({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const openedEmittedRef = useRef<boolean>(false);
 
+  const showUnreadFilter = FOLDERS_WITH_UNREAD_FILTER.has(folder);
+
   const load = useCallback(
-    async (opts: { unread: boolean }) => {
+    async (opts: { unread: boolean; folder: InboxFolder }) => {
       setState({ kind: "loading" });
+      const startMs = (typeof performance !== "undefined" && performance.now)
+        ? performance.now()
+        : Date.now();
       try {
         const params = new URLSearchParams({
           top: String(PAGE_SIZE),
           skip: "0",
+          folder: opts.folder,
         });
-        if (opts.unread) params.set("unread", "true");
+        // Drafts + sent ignore unreadOnly server-side, but we also avoid
+        // sending it so the URL accurately reflects intent.
+        if (opts.unread && FOLDERS_WITH_UNREAD_FILTER.has(opts.folder)) {
+          params.set("unread", "true");
+        }
         const res = await fetchWithRefresh(`/api/emails/inbox?${params.toString()}`, {
           headers: jsonHeaders(),
         });
@@ -116,7 +158,22 @@ export default function InboxPanel({
             nextSkip: typeof body.nextSkip === "number" ? body.nextSkip : null,
             unreadCount: typeof body.unreadCount === "number" ? body.unreadCount : undefined,
           });
-          if (!openedEmittedRef.current) {
+          const endMs = (typeof performance !== "undefined" && performance.now)
+            ? performance.now()
+            : Date.now();
+          emitInsight({
+            actor: userId,
+            role: userRole,
+            surface: "email",
+            action: "folder_loaded",
+            tier: "personal",
+            payload: {
+              folder: opts.folder,
+              count: rows.length,
+              took_ms: Math.max(0, Math.round(endMs - startMs)),
+            },
+          });
+          if (!openedEmittedRef.current && opts.folder === "inbox") {
             openedEmittedRef.current = true;
             emitInsight({
               actor: userId,
@@ -160,14 +217,14 @@ export default function InboxPanel({
   );
 
   useEffect(() => {
-    // Initial fetch + refetch on filter / reloadKey change. The setState
-    // inside `load` is intentional — same pattern as EmailReader. The
-    // alternative (suspending render on a promise) would force the whole
-    // /emails page into a Suspense boundary that breaks the existing
-    // composer-first tests.
+    // Initial fetch + refetch on filter / folder / reloadKey change.
+    // The setState inside `load` is intentional — same pattern as
+    // EmailReader. The alternative (suspending render on a promise)
+    // would force the whole /emails page into a Suspense boundary that
+    // breaks the existing composer-first tests.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load({ unread: unreadOnly });
-  }, [load, unreadOnly, reloadKey]);
+    void load({ unread: unreadOnly, folder });
+  }, [load, unreadOnly, reloadKey, folder]);
 
   // Virtualization math — windowed slicing only when the list is large.
   const { renderedRows, totalHeight, offsetTop } = useMemo(() => {
@@ -194,7 +251,31 @@ export default function InboxPanel({
   }, [state, scrollTop, containerH]);
 
   function onClickRow(row: InboxRow) {
+    // Drafts: in v1 we surface the row through onOpen exactly like inbox
+    // rows. The parent decides whether to open the reader or pivot into
+    // the composer. We emit a learning event so we can measure how often
+    // drafts get clicked while the composer-pivot is still TODO.
+    //
+    // TODO(emails-folders-v2): when the parent opts to wire the
+    // composer-pivot, replace `draft_clicked_skipped` with
+    // `draft_opened_in_composer` and stop firing the skipped event.
+    const isDraftRow = folder === "drafts" || Boolean(row.isDraft);
     onOpen(row);
+    if (isDraftRow) {
+      emitInsight({
+        actor: userId,
+        role: userRole,
+        surface: "email",
+        action: "draft_clicked_skipped",
+        tier: "personal",
+        target: row.id,
+        payload: {
+          message_id: row.id,
+          folder,
+        },
+      });
+      return;
+    }
     emitInsight({
       actor: userId,
       role: userRole,
@@ -222,10 +303,18 @@ export default function InboxPanel({
   }
 
   return (
-    <aside style={asideStyle} aria-label="Inbox" data-testid="inbox-panel">
+    <aside
+      style={asideStyle}
+      aria-label={FOLDER_LABEL[folder]}
+      data-testid="inbox-panel"
+      data-folder={folder}
+    >
       <header style={headerStyle}>
-        <span style={{ color: "var(--wp-gold)", fontWeight: 600, fontSize: "0.92rem" }}>
-          Inbox
+        <span
+          style={{ color: "var(--wp-gold)", fontWeight: 600, fontSize: "0.92rem" }}
+          data-testid="inbox-header-label"
+        >
+          {FOLDER_LABEL[folder]}
         </span>
         <button
           type="button"
@@ -238,28 +327,35 @@ export default function InboxPanel({
         </button>
       </header>
 
-      <div style={filterRow} role="tablist" aria-label="Inbox filter">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={!unreadOnly}
-          onClick={() => setUnreadOnly(false)}
-          data-testid="inbox-filter-all"
-          style={{ ...filterBtn, ...(unreadOnly ? {} : filterBtnActive) }}
+      {showUnreadFilter ? (
+        <div
+          style={filterRow}
+          role="tablist"
+          aria-label={`${FOLDER_LABEL[folder]} filter`}
+          data-testid="inbox-filter-row"
         >
-          All
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={unreadOnly}
-          onClick={() => setUnreadOnly(true)}
-          data-testid="inbox-filter-unread"
-          style={{ ...filterBtn, ...(unreadOnly ? filterBtnActive : {}) }}
-        >
-          Unread{state.kind === "ready" && typeof state.unreadCount === "number" ? ` (${state.unreadCount})` : ""}
-        </button>
-      </div>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!unreadOnly}
+            onClick={() => setUnreadOnly(false)}
+            data-testid="inbox-filter-all"
+            style={{ ...filterBtn, ...(unreadOnly ? {} : filterBtnActive) }}
+          >
+            All
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={unreadOnly}
+            onClick={() => setUnreadOnly(true)}
+            data-testid="inbox-filter-unread"
+            style={{ ...filterBtn, ...(unreadOnly ? filterBtnActive : {}) }}
+          >
+            Unread{state.kind === "ready" && typeof state.unreadCount === "number" ? ` (${state.unreadCount})` : ""}
+          </button>
+        </div>
+      ) : null}
 
       <div
         ref={(el) => {
@@ -277,12 +373,14 @@ export default function InboxPanel({
         data-testid="inbox-scroll"
       >
         {state.kind === "loading" ? (
-          <p style={emptyStateStyle} data-testid="inbox-loading">Loading inbox…</p>
+          <p style={emptyStateStyle} data-testid="inbox-loading">
+            Loading {FOLDER_LABEL[folder].toLowerCase()}…
+          </p>
         ) : state.kind === "error" ? (
           <div style={emptyStateStyle} data-testid="inbox-error" data-code={state.code}>
             {state.code === "not_connected" || state.code === "unauthorized" ? (
               <>
-                <p>Connect Microsoft 365 to see your inbox.</p>
+                <p>Connect Microsoft 365 to see your {FOLDER_LABEL[folder].toLowerCase()}.</p>
                 <a href="/settings" style={ctaLinkStyle}>Open Settings</a>
               </>
             ) : state.code === "scope_missing" ? (
@@ -296,10 +394,10 @@ export default function InboxPanel({
               <p>Slow down — try again in {state.retryAfter ?? 60}s.</p>
             ) : (
               <>
-                <p>Couldn&apos;t load your inbox. {state.message ?? ""}</p>
+                <p>Couldn&apos;t load your {FOLDER_LABEL[folder].toLowerCase()}. {state.message ?? ""}</p>
                 <button
                   type="button"
-                  onClick={() => void load({ unread: unreadOnly })}
+                  onClick={() => void load({ unread: unreadOnly, folder })}
                   style={ctaButtonStyle}
                   data-testid="inbox-retry"
                 >
@@ -310,7 +408,7 @@ export default function InboxPanel({
           </div>
         ) : state.rows.length === 0 ? (
           <p style={emptyStateStyle} data-testid="inbox-empty">
-            {unreadOnly ? "No unread messages." : "Inbox is empty."}
+            {unreadOnly && showUnreadFilter ? "No unread messages." : EMPTY_LABEL[folder]}
           </p>
         ) : (
           <div

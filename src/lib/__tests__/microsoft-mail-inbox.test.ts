@@ -111,6 +111,9 @@ describe("listInbox", () => {
       hasAttachments: true,
       importance: "high",
       webLink: "https://outlook.office.com/m/m1",
+      // isDraft is now part of the normalized row (defaults to false
+      // when Graph doesn't return the field).
+      isDraft: false,
     });
     expect(r.value.unreadCount).toBe(1);
     // Asserts the URL includes the unread filter + select

@@ -959,9 +959,23 @@ export default function EmailsPage() {
           onCompose={handleNewEmail}
           activeFolder={activeFolder}
           onSelectFolder={(f) => {
+            if (f === activeFolder) return;
+            const previous = activeFolder;
             setActiveFolder(f);
-            // v1: only "inbox" has data wired; clicking another folder
-            // is a no-op other than the highlight + analytics.
+            // Drop back to the empty state on folder switch — no thread
+            // carry-over from a different folder, no half-typed compose
+            // hanging around once the user pivots away. The user can
+            // always reopen the composer from the new folder header.
+            closeReader();
+            setComposeOpen(false);
+            emitInsight({
+              actor: user.id,
+              role: user.role,
+              surface: "email",
+              action: "folder_changed",
+              tier: "personal",
+              payload: { from: previous, to: f },
+            });
           }}
           templates={templates}
           templatesLoading={templatesLoading}
@@ -980,6 +994,7 @@ export default function EmailsPage() {
             userId={user.id}
             userRole={user.role}
             isMobile={isMobile}
+            folder={activeFolder}
           />
         </div>
       ) : null}
