@@ -286,7 +286,7 @@ describe("EmailsPage — 3-column layout (Gmail-style)", () => {
     expect(screen.queryByTestId("composer-wrap")).toBeNull();
   });
 
-  it("clicking an inbox row mid-compose with unsaved content prompts for confirmation", async () => {
+  it("clicking an inbox row mid-compose with unsaved content shows the styled UnsavedDraftDialog (not window.confirm)", async () => {
     mockFetchWithRefresh.mockImplementation((url: string) => {
       if (url === "/api/mail/row-1") {
         return Promise.resolve(
@@ -315,14 +315,126 @@ describe("EmailsPage — 3-column layout (Gmail-style)", () => {
     fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "WIP" } });
     await flushPromises();
 
+    // Spy on window.confirm and verify it is NOT called any more —
+    // the styled dialog has fully replaced it.
     const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(false);
     const row = await screen.findByTestId("inbox-row-row-1");
     fireEvent.click(row);
     await flushPromises();
-    expect(confirmSpy).toHaveBeenCalled();
-    // Composer stayed (user clicked Cancel).
+    expect(confirmSpy).not.toHaveBeenCalled();
+    // The styled dialog is now visible.
+    expect(screen.getByTestId("unsaved-draft-dialog")).toBeInTheDocument();
+    // Composer is still rendered behind the dialog (no navigation yet).
     expect(screen.getByTestId("composer-wrap")).toBeInTheDocument();
     confirmSpy.mockRestore();
+  });
+
+  it("choosing Keep editing on the dialog leaves the user on the original draft", async () => {
+    mockFetchWithRefresh.mockImplementation((url: string) =>
+      Promise.resolve(defaultRouter(url)),
+    );
+    render(<EmailsPage />);
+    await flushPromises();
+    await openComposer();
+    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "WIP" } });
+    await flushPromises();
+
+    const row = await screen.findByTestId("inbox-row-row-1");
+    fireEvent.click(row);
+    await flushPromises();
+
+    expect(screen.getByTestId("unsaved-draft-dialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("unsaved-draft-keep"));
+    await flushPromises();
+
+    // Dialog dismissed, composer + subject preserved.
+    expect(screen.queryByTestId("unsaved-draft-dialog")).toBeNull();
+    expect(screen.getByTestId("composer-wrap")).toBeInTheDocument();
+    expect(screen.queryByTestId("email-reader")).toBeNull();
+    expect(
+      (screen.getByLabelText("Subject") as HTMLInputElement).value,
+    ).toBe("WIP");
+  });
+
+  it("choosing Discard on the dialog executes the pending navigation", async () => {
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      if (url === "/api/mail/row-1") {
+        return Promise.resolve(
+          ok({
+            message: {
+              id: "row-1",
+              subject: "x",
+              from: { name: "Jane", email: "jane@example.com" },
+              toRecipients: [],
+              ccRecipients: [],
+              receivedDateTime: new Date().toISOString(),
+              bodyContentType: "text",
+              bodyContent: "x",
+              bodyPreview: "x",
+              webLink: "",
+            },
+          }),
+        );
+      }
+      return Promise.resolve(defaultRouter(url));
+    });
+    render(<EmailsPage />);
+    await flushPromises();
+    await openComposer();
+    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "WIP" } });
+    await flushPromises();
+
+    const row = await screen.findByTestId("inbox-row-row-1");
+    fireEvent.click(row);
+    await flushPromises();
+
+    expect(screen.getByTestId("unsaved-draft-dialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("unsaved-draft-discard"));
+    await flushPromises();
+
+    // Dialog dismissed; reader took over the right pane.
+    expect(screen.queryByTestId("unsaved-draft-dialog")).toBeNull();
+    await waitFor(() => screen.getByTestId("email-reader"));
+    expect(screen.queryByTestId("composer-wrap")).toBeNull();
+  });
+
+  it("emits insight.email.unsaved_draft_dialog_shown when the dialog opens and ..._resolved with the chosen action", async () => {
+    mockFetchWithRefresh.mockImplementation((url: string) =>
+      Promise.resolve(defaultRouter(url)),
+    );
+    render(<EmailsPage />);
+    await flushPromises();
+    await openComposer();
+    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "WIP" } });
+    await flushPromises();
+
+    mockEmitInsight.mockClear();
+    const row = await screen.findByTestId("inbox-row-row-1");
+    fireEvent.click(row);
+    await flushPromises();
+
+    const events = mockEmitInsight.mock.calls.map((c) => c[0] as any);
+    const shown = events.find(
+      (e) => e.surface === "email" && e.action === "unsaved_draft_dialog_shown",
+    );
+    expect(shown).toBeTruthy();
+    expect(shown.tier).toBe("personal");
+    expect(shown.payload.trigger).toBe("thread_open");
+
+    // Wait a beat so shown_for_ms is non-zero, then resolve.
+    await new Promise((r) => setTimeout(r, 5));
+    fireEvent.click(screen.getByTestId("unsaved-draft-keep"));
+    await flushPromises();
+
+    const events2 = mockEmitInsight.mock.calls.map((c) => c[0] as any);
+    const resolved = events2.find(
+      (e) =>
+        e.surface === "email" && e.action === "unsaved_draft_dialog_resolved",
+    );
+    expect(resolved).toBeTruthy();
+    expect(resolved.payload.choice).toBe("keep");
+    expect(typeof resolved.payload.shown_for_ms).toBe("number");
+    expect(resolved.payload.shown_for_ms).toBeGreaterThanOrEqual(0);
   });
 
   it("only one of empty / composer / reader is rendered at any viewport width", async () => {

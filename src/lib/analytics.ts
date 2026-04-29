@@ -649,6 +649,18 @@ export type InstinctEventType =
   | "insight.email.recipient_context_toggled"
   | "insight.email.marked_unread"
   | "insight.email.forwarded"
+  // Folder switching surface — Drafts / Sent / Archived feed the learning
+  // loop's per-folder usage + load-latency views.
+  | "insight.email.folder_changed"
+  | "insight.email.folder_loaded"
+  | "insight.email.draft_opened_in_composer"
+  | "insight.email.draft_clicked_skipped"
+  // Unsaved-draft dialog (replaces window.confirm). The "shown" event
+  // fires once per dialog open; the "resolved" event fires once when
+  // the user picks an action. shown_for_ms feeds the learning loop —
+  // long hesitation = the draft-detection heuristic likely too aggressive.
+  | "insight.email.unsaved_draft_dialog_shown"
+  | "insight.email.unsaved_draft_dialog_resolved"
   // Microsoft 365 Calendar (Calendars.ReadWrite)
   | "system.ms_calendar_event_created"
   | "system.ms_calendar_event_updated"

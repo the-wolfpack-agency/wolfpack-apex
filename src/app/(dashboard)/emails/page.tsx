@@ -38,6 +38,7 @@ import EmailReader from "./EmailReader";
 import InboxPanel from "./InboxPanel";
 import EmailNavRail, { type EmailFolder, type EmailTemplate } from "./EmailNavRail";
 import EmptyState from "./EmptyState";
+import UnsavedDraftDialog from "./UnsavedDraftDialog";
 import RecipientContextDrawer, {
   AGGREGATE_THRESHOLD,
   type CalendarEventLite,
@@ -226,6 +227,17 @@ export default function EmailsPage() {
   // pane state is derived: reader > composer > empty.
   const [composeOpen, setComposeOpen] = useState<boolean>(false);
   const [inboxReloadKey, setInboxReloadKey] = useState<number>(0);
+
+  // Unsaved-draft confirmation. When set, the styled dialog renders;
+  // pendingAction runs only if the user picks "Discard draft". The
+  // shownAtMs timestamp feeds the analytics resolved-event so the
+  // learning loop sees how long users hesitate before deciding.
+  const [unsavedPrompt, setUnsavedPrompt] = useState<{
+    pendingAction: () => void;
+    preview: string;
+    shownAtMs: number;
+    trigger: "thread_open" | "folder_change" | "logout" | "navigation";
+  } | null>(null);
 
   const [draft, setDraft] = useState<DraftState>(() => loadDraft());
   const [toInput, setToInput] = useState("");
@@ -755,27 +767,65 @@ export default function EmailsPage() {
   }
 
   // -------------------------------------------------------------------------
-  // Compose / inbox-row interaction (with unsaved-draft confirm)
+  // Compose / inbox-row interaction (with unsaved-draft dialog)
   // -------------------------------------------------------------------------
 
-  function tryConfirmDiscardForRowOpen(): boolean {
-    // Only prompt if we're currently composing AND the draft has
-    // meaningful content. v1: window.confirm — v2 should swap in a
-    // styled dialog (logged in PR body).
-    if (!composeOpen) return true;
-    if (!draftHasContent(draft)) return true;
-    if (typeof window === "undefined") return true;
-    return window.confirm(
-      "You have an unsaved draft. Switch threads and discard it?",
-    );
+  /**
+   * If the user has a non-empty draft, defer `action` behind the
+   * styled UnsavedDraftDialog. Otherwise run it immediately. Returns
+   * true if `action` ran synchronously (no prompt was needed).
+   */
+  function guardWithUnsavedDraftPrompt(
+    trigger: "thread_open" | "folder_change" | "logout" | "navigation",
+    action: () => void,
+  ): boolean {
+    if (!composeOpen || !draftHasContent(draft)) {
+      action();
+      return true;
+    }
+    const preview = htmlToPlainText(draft.body).trim();
+    setUnsavedPrompt({
+      pendingAction: action,
+      preview,
+      shownAtMs: Date.now(),
+      trigger,
+    });
+    emitInsight({
+      actor: user.id,
+      role: user.role,
+      surface: "email",
+      action: "unsaved_draft_dialog_shown",
+      tier: "personal",
+      payload: { trigger },
+    });
+    return false;
+  }
+
+  function resolveUnsavedPrompt(choice: "keep" | "discard") {
+    if (!unsavedPrompt) return;
+    const shownForMs = Math.max(0, Date.now() - unsavedPrompt.shownAtMs);
+    emitInsight({
+      actor: user.id,
+      role: user.role,
+      surface: "email",
+      action: "unsaved_draft_dialog_resolved",
+      tier: "personal",
+      payload: { choice, shown_for_ms: shownForMs },
+    });
+    const pending = unsavedPrompt.pendingAction;
+    setUnsavedPrompt(null);
+    if (choice === "discard") {
+      pending();
+    }
   }
 
   function handleInboxRowOpen(id: string) {
-    if (!tryConfirmDiscardForRowOpen()) return;
-    // Close the composer when the user navigates into a thread, so
-    // the right pane is the reader (not reader-stacked-on-composer).
-    setComposeOpen(false);
-    openReader(id);
+    guardWithUnsavedDraftPrompt("thread_open", () => {
+      // Close the composer when the user navigates into a thread, so
+      // the right pane is the reader (not reader-stacked-on-composer).
+      setComposeOpen(false);
+      openReader(id);
+    });
   }
 
   function handleNewEmail() {
@@ -984,6 +1034,13 @@ export default function EmailsPage() {
           )}
         </section>
       ) : null}
+
+      <UnsavedDraftDialog
+        open={!!unsavedPrompt}
+        draftPreview={unsavedPrompt?.preview || undefined}
+        onConfirm={() => resolveUnsavedPrompt("discard")}
+        onCancel={() => resolveUnsavedPrompt("keep")}
+      />
     </div>
   );
 }
