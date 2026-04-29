@@ -192,16 +192,109 @@ test.describe("emails inbox flow (real browser)", () => {
     await expect(firstRow).toBeVisible();
     await firstRow.click();
 
-    // The reader replaces the entire emails-page surface (per the
-    // current implementation: when readingId is set, the page returns
-    // an EmailReader-only wrapper). The right-pane element should no
-    // longer be the empty/composer marker.
+    // Gmail-style invariant — opening a thread swaps the RIGHT PANE
+    // to the reader, but does NOT replace the 3-column shell. The
+    // inbox list and nav rail must stay visible so the user can
+    // switch threads without going Back.
     await page.waitForTimeout(500);
-    // The original inbox-panel may still be present if the reader is
-    // rendered alongside; what we DO assert is that the empty-state
-    // is gone and either the reader or the right-pane has flipped to
-    // a non-empty state.
+    await expect(page.getByTestId("right-pane")).toHaveAttribute(
+      "data-state",
+      "reader",
+    );
+    await expect(page.getByTestId("email-reader")).toBeVisible();
+
+    // The empty state is gone (mutually-exclusive panes).
     expect(await page.getByTestId("emails-empty-state").count()).toBe(0);
+    expect(await page.getByTestId("composer-wrap").count()).toBe(0);
+
+    // Inbox list + nav rail stay mounted at tablet+ widths. We
+    // already settled at the default test viewport (>=1100), so
+    // both should still be visible alongside the reader.
+    await expect(page.getByTestId("inbox-panel")).toBeVisible();
+    await expect(page.getByTestId("inbox-list")).toBeVisible();
+    await expect(page.getByTestId("email-nav-rail")).toBeVisible();
+
+    // Layout: the reader sits to the RIGHT of the inbox column,
+    // matching the empty/composer geometry. Defends against any
+    // future regression that puts the reader full-width on desktop.
+    const inboxBox = await page.getByTestId("inbox-panel").boundingBox();
+    const readerBox = await page.getByTestId("email-reader").boundingBox();
+    expect(inboxBox).not.toBeNull();
+    expect(readerBox).not.toBeNull();
+    if (inboxBox && readerBox) {
+      expect(readerBox.x).toBeGreaterThan(inboxBox.x + inboxBox.width / 2);
+    }
+
+    // Clicking a different row swaps the reader content WITHOUT
+    // re-mounting the page-root or the inbox. We assert the inbox
+    // is still around after a second click.
+    const allRows = page.locator('[data-testid^="inbox-row-"]');
+    const rowCount = await allRows.count();
+    if (rowCount >= 2) {
+      await allRows.nth(1).click();
+      await page.waitForTimeout(400);
+      await expect(page.getByTestId("inbox-panel")).toBeVisible();
+      await expect(page.getByTestId("right-pane")).toHaveAttribute(
+        "data-state",
+        "reader",
+      );
+    }
+  });
+
+  test("mobile (600px) — reader takes full width and the back button is reachable", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 600, height: 900 });
+    await page.goto(`${target.baseUrl}/emails`, { waitUntil: "domcontentloaded" });
+    await settle(page);
+
+    const list = page.getByTestId("inbox-list");
+    const settled = await list
+      .first()
+      .waitFor({ state: "visible", timeout: 10_000 })
+      .then(() => "list")
+      .catch(() => "timeout");
+
+    if (settled !== "list") {
+      test.info().annotations.push({
+        type: "skip",
+        description: "inbox-list not visible at 600px — cannot exercise mobile reader",
+      });
+      test.skip();
+      return;
+    }
+
+    const firstRow = page.locator('[data-testid^="inbox-row-"]').first();
+    await expect(firstRow).toBeVisible();
+    await firstRow.click();
+    await page.waitForTimeout(500);
+
+    // Reader is open and full-width on mobile (the inbox column
+    // collapses behind it — that's the carve-out).
+    await expect(page.getByTestId("right-pane")).toHaveAttribute(
+      "data-state",
+      "reader",
+    );
+    await expect(page.getByTestId("email-reader")).toBeVisible();
+
+    // Inbox is hidden on mobile while the reader is open.
+    expect(await page.getByTestId("inbox-panel").count()).toBe(0);
+    // Nav rail is hidden on mobile (the existing invariant).
+    expect(await page.getByTestId("email-nav-rail").count()).toBe(0);
+
+    // The back button is reachable — the user can return to the
+    // inbox list.
+    const back = page.getByTestId("email-reader-back").first();
+    await expect(back).toBeVisible();
+
+    // Clicking back drops the reader and re-mounts the inbox.
+    await back.click();
+    await page.waitForTimeout(400);
+    await expect(page.getByTestId("right-pane")).toHaveAttribute(
+      "data-state",
+      "empty",
+    );
+    await expect(page.getByTestId("inbox-panel")).toBeVisible();
   });
 
   test("folder click updates aria-current and (if wired) refetches the inbox", async ({

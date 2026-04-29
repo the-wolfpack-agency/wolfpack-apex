@@ -250,7 +250,7 @@ describe("EmailsPage — 3-column layout (Gmail-style)", () => {
     expect(screen.getByTestId("right-pane").getAttribute("data-state")).toBe("empty");
   });
 
-  it("clicking an inbox row opens the EmailReader in the right pane", async () => {
+  it("clicking an inbox row opens the EmailReader in the right pane while keeping the inbox + nav rail mounted", async () => {
     // Add a /api/mail/<id> response so the reader can hydrate.
     mockFetchWithRefresh.mockImplementation((url: string) => {
       if (url === "/api/mail/row-1") {
@@ -284,6 +284,25 @@ describe("EmailsPage — 3-column layout (Gmail-style)", () => {
     await waitFor(() => screen.getByTestId("email-reader"));
     expect(screen.queryByTestId("emails-empty-state")).toBeNull();
     expect(screen.queryByTestId("composer-wrap")).toBeNull();
+
+    // Gmail-style invariant — opening a thread does NOT replace the
+    // 3-column shell. Inbox list, nav rail, and the page-root
+    // wrapper all stay mounted so the user can switch threads
+    // without going Back.
+    expect(screen.getByTestId("emails-page")).toBeInTheDocument();
+    expect(screen.getByTestId("inbox-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("inbox-list")).toBeInTheDocument();
+    expect(screen.getByTestId("email-nav-rail")).toBeInTheDocument();
+
+    // The right pane carries data-state=reader and the reader sits
+    // inside the data-pane="reader" wrapper.
+    expect(screen.getByTestId("right-pane").getAttribute("data-state")).toBe(
+      "reader",
+    );
+    const readerPane = screen
+      .getByTestId("right-pane")
+      .querySelector('[data-pane="reader"]');
+    expect(readerPane).not.toBeNull();
   });
 
   it("clicking an inbox row mid-compose with unsaved content shows the styled UnsavedDraftDialog (not window.confirm)", async () => {
@@ -458,6 +477,95 @@ describe("EmailsPage — 3-column layout (Gmail-style)", () => {
       unmount();
     }
   });
+
+  it("on tablet+ viewports the inbox and nav rail stay visible while a thread is open", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: 1280,
+    });
+    window.history.replaceState({}, "", "/emails?id=row-deep-1");
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      if (url === "/api/mail/row-deep-1") {
+        return Promise.resolve(
+          ok({
+            message: {
+              id: "row-deep-1",
+              subject: "Tablet-open thread",
+              from: { name: "Jane", email: "jane@example.com" },
+              toRecipients: [],
+              ccRecipients: [],
+              receivedDateTime: new Date().toISOString(),
+              bodyContentType: "text",
+              bodyContent: "Body",
+              bodyPreview: "Body",
+              webLink: "",
+            },
+          }),
+        );
+      }
+      return Promise.resolve(defaultRouter(url));
+    });
+
+    render(<EmailsPage />);
+    await waitFor(() => screen.getByTestId("email-reader"));
+
+    // Reader is open, but inbox + nav are still mounted alongside.
+    expect(screen.getByTestId("inbox-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("inbox-list")).toBeInTheDocument();
+    expect(screen.getByTestId("email-nav-rail")).toBeInTheDocument();
+    expect(screen.getByTestId("right-pane").getAttribute("data-state")).toBe(
+      "reader",
+    );
+  });
+
+  it("on mobile (600px) reader takes full width and inbox is hidden but the back button is reachable", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: 600,
+    });
+    window.history.replaceState({}, "", "/emails?id=row-mobile-1");
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      if (url === "/api/mail/row-mobile-1") {
+        return Promise.resolve(
+          ok({
+            message: {
+              id: "row-mobile-1",
+              subject: "Mobile-open thread",
+              from: { name: "Jane", email: "jane@example.com" },
+              toRecipients: [],
+              ccRecipients: [],
+              receivedDateTime: new Date().toISOString(),
+              bodyContentType: "text",
+              bodyContent: "Body",
+              bodyPreview: "Body",
+              webLink: "",
+            },
+          }),
+        );
+      }
+      return Promise.resolve(defaultRouter(url));
+    });
+
+    render(<EmailsPage />);
+    await waitFor(() => screen.getByTestId("email-reader"));
+
+    // Inbox is collapsed behind the reader so the user gets full
+    // width on mobile (the existing mobile drawer pattern).
+    expect(screen.queryByTestId("inbox-panel")).toBeNull();
+    // Nav rail is also hidden on mobile (matches the existing
+    // `does NOT render the nav rail on mobile viewport` invariant).
+    expect(screen.queryByTestId("email-nav-rail")).toBeNull();
+    // BUT the reader's back button is reachable — that's the
+    // mobile escape hatch back to the inbox list.
+    expect(screen.getByTestId("email-reader-back")).toBeInTheDocument();
+    // Page root + right-pane + reader all rendered.
+    expect(screen.getByTestId("emails-page")).toBeInTheDocument();
+    expect(screen.getByTestId("right-pane").getAttribute("data-state")).toBe(
+      "reader",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -488,6 +596,44 @@ describe("EmailsPage — right_pane_state telemetry", () => {
       .filter((e: any) => e.action === "right_pane_state")
       .map((e: any) => e.payload.state);
     expect(transitions).toEqual(["composer", "empty"]);
+  });
+
+  it("emits right_pane_state=reader when an inbox row is clicked (no longer fires from a hidden surface)", async () => {
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      if (url === "/api/mail/row-1") {
+        return Promise.resolve(
+          ok({
+            message: {
+              id: "row-1",
+              subject: "Re: Onboarding deck",
+              from: { name: "Jane Doe", email: "jane@example.com" },
+              toRecipients: [],
+              ccRecipients: [],
+              receivedDateTime: new Date().toISOString(),
+              bodyContentType: "text",
+              bodyContent: "Body",
+              bodyPreview: "Body",
+              webLink: "",
+            },
+          }),
+        );
+      }
+      return Promise.resolve(defaultRouter(url));
+    });
+
+    render(<EmailsPage />);
+    await flushPromises();
+    mockEmitInsight.mockClear();
+
+    const row = await screen.findByTestId("inbox-row-row-1");
+    fireEvent.click(row);
+    await flushPromises();
+
+    const transitions = mockEmitInsight.mock.calls
+      .map((c) => c[0])
+      .filter((e: any) => e.action === "right_pane_state")
+      .map((e: any) => e.payload.state);
+    expect(transitions[transitions.length - 1]).toBe("reader");
   });
 });
 

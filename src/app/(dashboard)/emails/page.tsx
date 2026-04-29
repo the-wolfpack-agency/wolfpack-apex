@@ -916,39 +916,18 @@ export default function EmailsPage() {
     paddingBottom: isMobile ? "6rem" : pageWrap.padding,
   };
 
-  // Mobile pane visibility — only one pane at a time.
+  // Mobile pane visibility — only one pane at a time. On mobile the
+  // inbox is the default surface and only collapses when the right
+  // pane is showing reader-or-composer (reader takes over via the
+  // mobile drawer pattern; the back button on EmailReader returns
+  // the user to the inbox list).
   const showInboxOnMobile = !isMobile || rightPaneState === "empty";
   const showRightOnMobile = !isMobile || rightPaneState !== "empty";
 
-  if (readingId) {
-    // Reader takes the whole surface. We rebuild the wrapper from
-    // scratch (instead of spreading responsivePageWrap) so the
-    // shorthand `overflow` doesn't fight overflowX/Y in dev — React
-    // warns when shorthand + non-shorthand land on the same node.
-    return (
-      <div
-        style={{
-          height: "100%",
-          width: "100%",
-          padding: "0.6rem",
-          background: "var(--wp-dark)",
-          boxSizing: "border-box",
-          display: "block",
-          overflowX: "hidden",
-          overflowY: "auto",
-          maxWidth: "100%",
-        }}
-        data-testid="emails-page"
-      >
-        <EmailReader
-          id={readingId}
-          onClose={closeReader}
-          onMutated={() => setInboxReloadKey((k) => k + 1)}
-        />
-      </div>
-    );
-  }
-
+  // The 3-column shell stays mounted at all times. The reader does
+  // NOT replace the page — it's rendered inside the right pane,
+  // alongside (visually) the inbox list and nav rail. This is the
+  // Gmail-style behaviour: switch threads without losing the inbox.
   return (
     <div style={responsivePageWrap} data-testid="emails-page">
       {/* Left nav rail */}
@@ -987,7 +966,7 @@ export default function EmailsPage() {
       {showInboxOnMobile ? (
         <div style={inboxColStyle(isMobile)}>
           <InboxPanel
-            activeId={null}
+            activeId={readingId}
             onOpen={(row) => handleInboxRowOpen(row.id)}
             onCompose={handleNewEmail}
             reloadKey={inboxReloadKey}
@@ -999,7 +978,7 @@ export default function EmailsPage() {
         </div>
       ) : null}
 
-      {/* Right pane — Empty | Composer (Reader is handled above) */}
+      {/* Right pane — Empty | Reader | Composer (mutually exclusive) */}
       {showRightOnMobile ? (
         <section
           style={rightColStyle(isMobile)}
@@ -1007,45 +986,60 @@ export default function EmailsPage() {
           data-state={rightPaneState}
           aria-label="Email content"
         >
-          {rightPaneState === "empty" ? (
-            <EmptyState onCompose={handleNewEmail} />
+          {rightPaneState === "reader" && readingId ? (
+            <div
+              data-pane="reader"
+              style={readerWrap}
+            >
+              <EmailReader
+                id={readingId}
+                onClose={closeReader}
+                onMutated={() => setInboxReloadKey((k) => k + 1)}
+              />
+            </div>
+          ) : rightPaneState === "empty" ? (
+            <div data-pane="empty" style={paneFill}>
+              <EmptyState onCompose={handleNewEmail} />
+            </div>
           ) : (
-            <ComposerPane
-              isMobile={isMobile}
-              onClose={() => setComposeOpen(false)}
-              draft={draft}
-              setDraft={setDraft}
-              toInput={toInput}
-              setToInput={setToInput}
-              ccInput={ccInput}
-              setCcInput={setCcInput}
-              bccInput={bccInput}
-              setBccInput={setBccInput}
-              showCc={showCc}
-              setShowCc={setShowCc}
-              showBcc={showBcc}
-              setShowBcc={setShowBcc}
-              addChip={addChip}
-              removeChip={removeChip}
-              handleChipKey={handleChipKey}
-              applyFormat={applyFormat}
-              bodyRef={bodyRef}
-              error={error}
-              success={success}
-              busy={busy}
-              aiDrafting={aiDrafting}
-              canSend={canSend}
-              onDiscard={discard}
-              onSend={send}
-              onAiDraft={requestAiDraft}
-              contextOpen={contextOpen}
-              onToggleContext={toggleRecipientContext}
-              recipients={draft.to}
-              insightsCache={insightsCache}
-              expandedRecipients={expandedRecipients}
-              onToggleRecipientCard={toggleRecipientCard}
-              calendarEvents={calendarYearCacheRef.current?.events ?? []}
-            />
+            <div data-pane="composer" style={paneFill}>
+              <ComposerPane
+                isMobile={isMobile}
+                onClose={() => setComposeOpen(false)}
+                draft={draft}
+                setDraft={setDraft}
+                toInput={toInput}
+                setToInput={setToInput}
+                ccInput={ccInput}
+                setCcInput={setCcInput}
+                bccInput={bccInput}
+                setBccInput={setBccInput}
+                showCc={showCc}
+                setShowCc={setShowCc}
+                showBcc={showBcc}
+                setShowBcc={setShowBcc}
+                addChip={addChip}
+                removeChip={removeChip}
+                handleChipKey={handleChipKey}
+                applyFormat={applyFormat}
+                bodyRef={bodyRef}
+                error={error}
+                success={success}
+                busy={busy}
+                aiDrafting={aiDrafting}
+                canSend={canSend}
+                onDiscard={discard}
+                onSend={send}
+                onAiDraft={requestAiDraft}
+                contextOpen={contextOpen}
+                onToggleContext={toggleRecipientContext}
+                recipients={draft.to}
+                insightsCache={insightsCache}
+                expandedRecipients={expandedRecipients}
+                onToggleRecipientCard={toggleRecipientCard}
+                calendarEvents={calendarYearCacheRef.current?.events ?? []}
+              />
+            </div>
           )}
         </section>
       ) : null}
@@ -1533,6 +1527,31 @@ function rightColStyle(isMobile: boolean): React.CSSProperties {
     background: "var(--wp-dark)",
   };
 }
+
+// Wrapper inside the right-pane <section> for empty/composer/reader.
+// flex:1 + minHeight:0 lets each child fill the available column.
+const paneFill: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  minHeight: 0,
+  display: "flex",
+  flexDirection: "column",
+};
+
+// Reader-specific wrapper. Same fill behaviour as paneFill, plus a
+// scroll boundary so long emails scroll inside the right pane
+// instead of the whole page. Mirrors the previous full-screen
+// reader wrapper but scoped to the right column.
+const readerWrap: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  minHeight: 0,
+  display: "flex",
+  flexDirection: "column",
+  overflowX: "hidden",
+  overflowY: "auto",
+  background: "var(--wp-dark)",
+};
 
 const composerWithDrawerWrap: React.CSSProperties = {
   flex: 1,

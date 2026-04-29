@@ -82,13 +82,21 @@ jobs:
         continue-on-error: true
         run: npx playwright test tests/e2e/dashboard-quick-actions.spec.ts --config=playwright.config.ts --reporter=github
 
-      - name: Emails inbox flow spec (soft)
-        continue-on-error: true
+      # Emails inbox flow — HARD GATE. Locks in the Gmail-style 3-
+      # column shell (inbox + nav rail stay mounted while a thread
+      # is open), pane mutual exclusion, layout geometry, the
+      # styled UnsavedDraftDialog regression guard, and the mobile
+      # carve-out where the reader takes full width. Promoted from
+      # soft to hard because the page-root reader-takeover bug
+      # (fix/emails-reader-stays-in-right-pane) was exactly the
+      # kind of regression jsdom unit tests cannot catch.
+      - name: Emails inbox flow spec (gate)
         run: npx playwright test tests/e2e/emails-inbox-flow.spec.ts --config=playwright.config.ts --reporter=github
 
       - name: Messages bug-fix spec (soft)
         continue-on-error: true
         run: npx playwright test tests/e2e/messages-bugs.spec.ts --config=playwright.config.ts --reporter=github
+
 
       - name: Upload Playwright report
         if: always()
