@@ -707,6 +707,506 @@ export async function getMessage(userId: string, id: string): Promise<Result<Mes
 }
 
 // ---------------------------------------------------------------------------
+// Inbox listing + mutation helpers (Reply-All / Forward / Archive / Delete /
+// Mark-Read). Used by the /emails inbox view to make Instinct a credible
+// Outlook replacement — every action below is a single, typed Graph call so
+// the UI never has to talk to Graph directly.
+// ---------------------------------------------------------------------------
+
+export interface InboxMessageSummary {
+  id: string;
+  subject: string;
+  from: { name: string; email: string };
+  receivedDateTime: string;
+  bodyPreview: string;
+  isRead: boolean;
+  hasAttachments: boolean;
+  importance: "low" | "normal" | "high";
+  webLink: string;
+}
+
+export interface ListInboxOptions {
+  /** Default 25, capped at 100 to keep payload sane. */
+  top?: number;
+  /** Filter on isRead=false (unread only). */
+  unreadOnly?: boolean;
+  /** OData $skip for paging — cheap because we $orderby receivedDateTime. */
+  skip?: number;
+  /** Folder. Defaults to "inbox". */
+  folder?: string;
+}
+
+export interface ListInboxPage {
+  messages: InboxMessageSummary[];
+  /** Next $skip value, or null when the page is the tail. */
+  nextSkip: number | null;
+  unreadCount?: number;
+}
+
+interface RawInboxMessage {
+  id: string;
+  subject?: string | null;
+  from?: RawRecipient | null;
+  receivedDateTime?: string | null;
+  bodyPreview?: string | null;
+  isRead?: boolean | null;
+  hasAttachments?: boolean | null;
+  importance?: string | null;
+  webLink?: string | null;
+}
+
+function normalizeImportance(v: string | null | undefined): "low" | "normal" | "high" {
+  const s = String(v ?? "").toLowerCase();
+  if (s === "low" || s === "high") return s;
+  return "normal";
+}
+
+function normalizeInboxRow(m: RawInboxMessage): InboxMessageSummary {
+  return {
+    id: m.id,
+    subject: m.subject ?? "",
+    from: {
+      name: m.from?.emailAddress?.name ?? "",
+      email: m.from?.emailAddress?.address ?? "",
+    },
+    receivedDateTime: m.receivedDateTime ?? "",
+    bodyPreview: m.bodyPreview ?? "",
+    isRead: Boolean(m.isRead),
+    hasAttachments: Boolean(m.hasAttachments),
+    importance: normalizeImportance(m.importance),
+    webLink: m.webLink ?? "",
+  };
+}
+
+/**
+ * List messages from the user's inbox folder. Mail.Read scope only.
+ * Returns up to `top` rows ordered newest-first. Pagination is `$skip`
+ * based — Graph's `@odata.nextLink` would also work but `$skip` keeps
+ * the cursor stateless on the client.
+ */
+export async function listInbox(
+  userId: string,
+  opts: ListInboxOptions = {},
+): Promise<Result<ListInboxPage>> {
+  const top = Math.min(Math.max(Number.isFinite(opts.top) ? Number(opts.top) : 25, 1), 100);
+  const skip = Math.max(Number.isFinite(opts.skip) ? Number(opts.skip) : 0, 0);
+  const folder = (opts.folder ?? "inbox").replace(/[^a-zA-Z0-9_-]/g, "") || "inbox";
+
+  const token = await getValidToken(userId);
+  if (!token) {
+    return { ok: false, code: "not_connected", message: "microsoft_not_connected" };
+  }
+
+  const select =
+    "id,subject,from,receivedDateTime,bodyPreview,isRead,hasAttachments,importance,webLink";
+  const order = "receivedDateTime desc";
+  const filter = opts.unreadOnly ? "isRead eq false" : "";
+  const params: string[] = [
+    `$top=${top}`,
+    `$skip=${skip}`,
+    `$orderby=${encodeURIComponent(order)}`,
+    `$select=${encodeURIComponent(select)}`,
+    `$count=true`,
+  ];
+  if (filter) params.push(`$filter=${encodeURIComponent(filter)}`);
+
+  const path = `me/mailFolders/${folder}/messages?${params.join("&")}`;
+  const res = await graphGet<{ value?: RawInboxMessage[]; "@odata.count"?: number }>(
+    path,
+    token.accessToken,
+    "Mail.Read",
+  );
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      code: res.code,
+      scope: res.scope,
+      retryAfter: res.retryAfter,
+      status: res.status,
+      message: res.message,
+    };
+  }
+
+  const rows = Array.isArray(res.data?.value) ? res.data!.value! : [];
+  const messages = rows.map(normalizeInboxRow);
+  const totalCount =
+    typeof res.data?.["@odata.count"] === "number" ? res.data!["@odata.count"] : undefined;
+  const nextSkip = messages.length === top ? skip + top : null;
+
+  trackEvent("system.ms_mail_listed", userId, "system", {
+    folder,
+    count: messages.length,
+    unread_only: Boolean(opts.unreadOnly),
+    top,
+    skip,
+  });
+
+  return {
+    ok: true,
+    value: {
+      messages,
+      nextSkip,
+      unreadCount: opts.unreadOnly ? totalCount : undefined,
+    },
+  };
+}
+
+/**
+ * PATCH a single Outlook message — used to flip isRead.
+ *
+ * Mail.ReadWrite scope. Falls under the same scope_missing surface so
+ * the UI can prompt the user to reconnect when needed.
+ */
+async function graphPatch<T = unknown>(
+  endpoint: string,
+  accessToken: string,
+  body: unknown,
+  expectedScope: string,
+): Promise<GraphCallSuccess<T> | GraphCallError> {
+  const url = endpoint.startsWith("http") ? endpoint : `${GRAPH_BASE_URL}/${endpoint}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    return { ok: false, status: 0, code: "internal", message: `network_error: ${(err as Error).message}` };
+  }
+  if (res.status === 429) {
+    const ra = parseInt(res.headers.get("Retry-After") || "0", 10);
+    return { ok: false, status: 429, code: "rate_limited", retryAfter: Number.isFinite(ra) && ra > 0 ? ra : 1, message: "rate_limited" };
+  }
+  if (res.status === 401) {
+    return { ok: false, status: 401, code: "not_connected", message: "microsoft_not_connected" };
+  }
+  if (res.status === 403) {
+    const body = await safeJson(res);
+    const c = classify403(body, expectedScope);
+    return { ok: false, status: 403, code: c.code, scope: c.scope, message: c.message };
+  }
+  if (res.status === 404) {
+    return { ok: false, status: 404, code: "graph_error", message: "not_found" };
+  }
+  if (!res.ok) {
+    const text = await safeText(res);
+    return { ok: false, status: res.status, code: "graph_error", message: `graph_${res.status}: ${text.slice(0, 200)}` };
+  }
+  let data: T | null = null;
+  if (res.status !== 204) {
+    data = (await safeJson(res)) as T;
+  }
+  return { ok: true, status: res.status, headers: res.headers, data, messageId: null };
+}
+
+async function graphDelete(
+  endpoint: string,
+  accessToken: string,
+  expectedScope: string,
+): Promise<GraphCallSuccess<unknown> | GraphCallError> {
+  const url = endpoint.startsWith("http") ? endpoint : `${GRAPH_BASE_URL}/${endpoint}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+    });
+  } catch (err) {
+    return { ok: false, status: 0, code: "internal", message: `network_error: ${(err as Error).message}` };
+  }
+  if (res.status === 429) {
+    const ra = parseInt(res.headers.get("Retry-After") || "0", 10);
+    return { ok: false, status: 429, code: "rate_limited", retryAfter: Number.isFinite(ra) && ra > 0 ? ra : 1, message: "rate_limited" };
+  }
+  if (res.status === 401) {
+    return { ok: false, status: 401, code: "not_connected", message: "microsoft_not_connected" };
+  }
+  if (res.status === 403) {
+    const body = await safeJson(res);
+    const c = classify403(body, expectedScope);
+    return { ok: false, status: 403, code: c.code, scope: c.scope, message: c.message };
+  }
+  if (res.status === 404) {
+    return { ok: false, status: 404, code: "graph_error", message: "not_found" };
+  }
+  if (!res.ok) {
+    const text = await safeText(res);
+    return { ok: false, status: res.status, code: "graph_error", message: `graph_${res.status}: ${text.slice(0, 200)}` };
+  }
+  return { ok: true, status: res.status, headers: res.headers, data: null, messageId: null };
+}
+
+/**
+ * Mark a message read or unread. Wraps PATCH /me/messages/{id} with
+ * { isRead: boolean }.
+ */
+export async function setMessageReadState(
+  userId: string,
+  id: string,
+  isRead: boolean,
+): Promise<Result<{ id: string; isRead: boolean }>> {
+  const cleanId = String(id || "").trim();
+  if (!cleanId) return { ok: false, code: "invalid_input", message: "id required" };
+  const token = await getValidToken(userId);
+  if (!token) return { ok: false, code: "not_connected", message: "microsoft_not_connected" };
+
+  const res = await graphPatch<unknown>(
+    `me/messages/${encodeURIComponent(cleanId)}`,
+    token.accessToken,
+    { isRead },
+    "Mail.ReadWrite",
+  );
+  if (!res.ok) {
+    return {
+      ok: false,
+      code: res.code,
+      scope: res.scope,
+      retryAfter: res.retryAfter,
+      status: res.status,
+      message: res.message,
+    };
+  }
+  trackEvent("system.ms_mail_read_state_changed", userId, "system", { id: cleanId, is_read: isRead });
+  return { ok: true, value: { id: cleanId, isRead } };
+}
+
+/**
+ * Move the message to the Archive folder via Graph's /move action. A move
+ * is two operations server-side (copy + delete) but the API surface is
+ * one POST. Returns the new message id Graph hands back.
+ */
+export async function archiveMessage(
+  userId: string,
+  id: string,
+): Promise<Result<{ id: string }>> {
+  const cleanId = String(id || "").trim();
+  if (!cleanId) return { ok: false, code: "invalid_input", message: "id required" };
+  const token = await getValidToken(userId);
+  if (!token) return { ok: false, code: "not_connected", message: "microsoft_not_connected" };
+
+  // Graph's well-known Archive folder is reachable via /mailFolders/archive.
+  const res = await graphPost<{ id?: string }>(
+    `me/messages/${encodeURIComponent(cleanId)}/move`,
+    token.accessToken,
+    { destinationId: "archive" },
+    "Mail.ReadWrite",
+  );
+  if (!res.ok) {
+    return {
+      ok: false,
+      code: res.code,
+      scope: res.scope,
+      retryAfter: res.retryAfter,
+      status: res.status,
+      message: res.message,
+    };
+  }
+  const newId = String((res.data as { id?: string })?.id ?? cleanId);
+  trackEvent("system.ms_mail_archived", userId, "system", { id: cleanId, new_id: newId });
+  await recordAudit({
+    actor: { user_id: userId, role: "system" },
+    action: "mail.archived",
+    resourceType: "mail",
+    resourceId: cleanId,
+    afterState: { new_id: newId },
+  }).catch(() => {});
+  return { ok: true, value: { id: newId } };
+}
+
+/**
+ * Delete (move to Deleted Items) a single Outlook message. Mail.ReadWrite.
+ * Graph's DELETE /me/messages/{id} performs a soft-delete to the user's
+ * Deleted Items folder — recoverable from the Outlook UI.
+ */
+export async function deleteMessage(
+  userId: string,
+  id: string,
+): Promise<Result<{ id: string }>> {
+  const cleanId = String(id || "").trim();
+  if (!cleanId) return { ok: false, code: "invalid_input", message: "id required" };
+  const token = await getValidToken(userId);
+  if (!token) return { ok: false, code: "not_connected", message: "microsoft_not_connected" };
+
+  const res = await graphDelete(
+    `me/messages/${encodeURIComponent(cleanId)}`,
+    token.accessToken,
+    "Mail.ReadWrite",
+  );
+  if (!res.ok) {
+    return {
+      ok: false,
+      code: res.code,
+      scope: res.scope,
+      retryAfter: res.retryAfter,
+      status: res.status,
+      message: res.message,
+    };
+  }
+  trackEvent("system.ms_mail_deleted", userId, "system", { id: cleanId });
+  await recordAudit({
+    actor: { user_id: userId, role: "system" },
+    action: "mail.deleted",
+    resourceType: "mail",
+    resourceId: cleanId,
+  }).catch(() => {});
+  return { ok: true, value: { id: cleanId } };
+}
+
+/**
+ * Reply-all to an existing message. Same Graph endpoint as /reply but
+ * the /replyAll alternative — preserves the recipient set automatically.
+ */
+export async function replyAllToMessage(
+  userId: string,
+  originalMessageId: string,
+  input: ReplyInput,
+  role = "system",
+): Promise<Result<ReplySummary>> {
+  if (!originalMessageId || typeof originalMessageId !== "string") {
+    return { ok: false, code: "invalid_input", message: "original_message_id_required" };
+  }
+  if (!input || (!input.bodyHtml && !input.bodyText)) {
+    return { ok: false, code: "invalid_input", message: "body_required" };
+  }
+  const token = await getValidToken(userId);
+  if (!token) return { ok: false, code: "not_connected", message: "microsoft_not_connected" };
+
+  const body: Record<string, unknown> = {};
+  if (input.bodyHtml && input.bodyHtml.length > 0) {
+    body.message = { body: { contentType: "HTML", content: input.bodyHtml } };
+  } else {
+    body.comment = input.bodyText ?? "";
+  }
+  const res = await graphPost<unknown>(
+    `me/messages/${encodeURIComponent(originalMessageId)}/replyAll`,
+    token.accessToken,
+    body,
+    "Mail.Send",
+  );
+  if (!res.ok) {
+    return {
+      ok: false,
+      code: res.code,
+      scope: res.scope,
+      retryAfter: res.retryAfter,
+      status: res.status,
+      message: res.message,
+    };
+  }
+  const msMessageId = res.messageId ?? `replyall:${Date.now()}`;
+  await recordSendHistory({
+    userId,
+    msMessageId,
+    to: [],
+    cc: [],
+    bcc: [],
+    subject: `(reply-all to ${originalMessageId})`,
+    bodyPreview: truncateBodyPreview(input),
+    inReplyTo: originalMessageId,
+  });
+  await auditMailSent({
+    userId,
+    role,
+    action: "mail.replied",
+    msMessageId,
+    subject: `(reply-all to ${originalMessageId})`,
+    to: [],
+    inReplyTo: originalMessageId,
+  });
+  trackEvent("system.ms_mail_reply_all_sent", userId, role, {
+    in_reply_to: originalMessageId,
+    body_len: truncateBodyPreview(input).length,
+  });
+  return { ok: true, value: { id: msMessageId } };
+}
+
+/**
+ * Forward an existing message to one or more new recipients. Mail.Send.
+ */
+export async function forwardMessage(
+  userId: string,
+  originalMessageId: string,
+  toRecipients: string[],
+  input: ReplyInput,
+  role = "system",
+): Promise<Result<ReplySummary>> {
+  if (!originalMessageId || typeof originalMessageId !== "string") {
+    return { ok: false, code: "invalid_input", message: "original_message_id_required" };
+  }
+  const recips = normalizeRecipients(toRecipients);
+  if (recips.length === 0) {
+    return { ok: false, code: "invalid_input", message: "to_required" };
+  }
+  if (!input || (!input.bodyHtml && !input.bodyText)) {
+    return { ok: false, code: "invalid_input", message: "body_required" };
+  }
+  const token = await getValidToken(userId);
+  if (!token) return { ok: false, code: "not_connected", message: "microsoft_not_connected" };
+
+  // Graph's /forward takes { comment, toRecipients } or message override.
+  const body: Record<string, unknown> = {
+    toRecipients: recips,
+  };
+  if (input.bodyHtml && input.bodyHtml.length > 0) {
+    body.message = { body: { contentType: "HTML", content: input.bodyHtml } };
+  } else {
+    body.comment = input.bodyText ?? "";
+  }
+
+  const res = await graphPost<unknown>(
+    `me/messages/${encodeURIComponent(originalMessageId)}/forward`,
+    token.accessToken,
+    body,
+    "Mail.Send",
+  );
+  if (!res.ok) {
+    return {
+      ok: false,
+      code: res.code,
+      scope: res.scope,
+      retryAfter: res.retryAfter,
+      status: res.status,
+      message: res.message,
+    };
+  }
+  const msMessageId = res.messageId ?? `forward:${Date.now()}`;
+  await recordSendHistory({
+    userId,
+    msMessageId,
+    to: toRecipients,
+    cc: [],
+    bcc: [],
+    subject: `(forward of ${originalMessageId})`,
+    bodyPreview: truncateBodyPreview(input),
+    inReplyTo: originalMessageId,
+  });
+  await auditMailSent({
+    userId,
+    role,
+    action: "mail.replied",
+    msMessageId,
+    subject: `(forward of ${originalMessageId})`,
+    to: toRecipients,
+    inReplyTo: originalMessageId,
+  });
+  trackEvent("system.ms_mail_forward_sent", userId, role, {
+    in_reply_to: originalMessageId,
+    to_count: toRecipients.length,
+    body_len: truncateBodyPreview(input).length,
+  });
+  return { ok: true, value: { id: msMessageId } };
+}
+
+// ---------------------------------------------------------------------------
 // Test-only helpers
 // ---------------------------------------------------------------------------
 
@@ -714,5 +1214,6 @@ export const __internal = {
   truncateBodyPreview,
   validateSendInput,
   normalizeRecipients,
+  normalizeInboxRow,
   BODY_PREVIEW_MAX,
 };

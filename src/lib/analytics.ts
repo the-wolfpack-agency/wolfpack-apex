@@ -611,11 +611,41 @@ export type InstinctEventType =
   | "system.capability_granted_override"
   | "system.capability_revoked_override"
   | "system.role_changed"
-  // Microsoft 365 Mail (Mail.Send)
+  // Microsoft 365 Mail (Mail.Send + Mail.ReadWrite for inbox surface)
   | "system.ms_mail_sent"
   | "system.ms_mail_reply_sent"
+  | "system.ms_mail_reply_all_sent"
+  | "system.ms_mail_forward_sent"
   | "system.ms_mail_send_failed"
   | "system.ms_mail_read"
+  | "system.ms_mail_listed"
+  | "system.ms_mail_read_state_changed"
+  | "system.ms_mail_archived"
+  | "system.ms_mail_deleted"
+  // /emails inbox surface — user-facing actions emitted via emitInsight().
+  // The strings carry the `insight.email.<action>` prefix at the wire so
+  // they group with the rest of the email surface in analytics queries,
+  // but we also accept the bare `email.<action>` form when surfaces use
+  // trackEvent directly. Keep both shapes typed so neither path widens to
+  // string and silently drops events.
+  | "insight.email.inbox_opened"
+  | "insight.email.thread_read"
+  | "insight.email.replied"
+  | "insight.email.archived"
+  | "insight.email.deleted"
+  | "insight.email.compose_drawer_opened"
+  | "insight.email.message_viewed"
+  | "insight.email.reply_sent"
+  | "insight.email.reply_failed"
+  | "insight.email.compose_opened"
+  | "insight.email.recipient_set"
+  | "insight.email.template_inserted"
+  | "insight.email.format_applied"
+  | "insight.email.insights_loaded"
+  | "insight.email.recipient_card_expanded"
+  | "insight.email.layout_mode"
+  | "insight.email.marked_unread"
+  | "insight.email.forwarded"
   // Microsoft 365 Calendar (Calendars.ReadWrite)
   | "system.ms_calendar_event_created"
   | "system.ms_calendar_event_updated"

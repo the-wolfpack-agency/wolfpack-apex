@@ -145,6 +145,20 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "email template fetch + draft — no outbound send audit here",
   },
   {
+    route: "src/app/api/emails/[id]/route.ts",
+    reason:
+      "PATCH/DELETE inbox surface — archiveMessage + deleteMessage in src/lib/integrations/microsoft-mail.ts audit via mail.archived / mail.deleted",
+  },
+  {
+    route: "src/app/api/emails/[id]/reply/route.ts",
+    reason:
+      "reply / replyAll / forward — replyToMessage / replyAllToMessage / forwardMessage in src/lib/integrations/microsoft-mail.ts audit via mail.replied",
+  },
+  {
+    route: "src/app/api/emails/inbox/route.ts",
+    reason: "GET-only inbox listing — no mutation; trackEvent system.ms_mail_listed only",
+  },
+  {
     route: "src/app/api/clients/route.ts",
     reason: "client CRM — analytics-tracked; no PII/compliance per current requirements",
   },

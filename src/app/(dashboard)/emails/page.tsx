@@ -44,6 +44,7 @@ import {
 } from "@/lib/client-auth";
 import { emitInsight } from "@/lib/insights/emit";
 import EmailReader from "./EmailReader";
+import InboxPanel from "./InboxPanel";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -244,6 +245,17 @@ export default function EmailsPage() {
     const v = params.get("id");
     return v && v.trim() ? v.trim() : null;
   });
+  const openReader = useCallback((id: string) => {
+    setReadingId(id);
+    if (typeof window !== "undefined") {
+      try {
+        const next = `/emails?id=${encodeURIComponent(id)}`;
+        window.history.replaceState({}, "", next);
+      } catch {
+        /* noop */
+      }
+    }
+  }, []);
   const closeReader = useCallback(() => {
     setReadingId(null);
     if (typeof window !== "undefined") {
@@ -256,6 +268,14 @@ export default function EmailsPage() {
       }
     }
   }, []);
+
+  // Compose drawer state — mobile hides the composer until the user
+  // taps "New email"; desktop shows it inline next to the inbox so the
+  // existing test suite (and the preferred desktop layout) stays
+  // unchanged. `inboxReloadKey` is bumped after archive/delete/send
+  // so the inbox refetches without a manual refresh.
+  const [composeOpen, setComposeOpen] = useState<boolean>(false);
+  const [inboxReloadKey, setInboxReloadKey] = useState<number>(0);
 
   const [draft, setDraft] = useState<DraftState>(() => loadDraft());
   const [toInput, setToInput] = useState("");
@@ -739,6 +759,10 @@ export default function EmailsPage() {
       if (bodyRef.current) bodyRef.current.innerHTML = "";
       setShowCc(false);
       setShowBcc(false);
+      // Refresh the inbox so the sent reply / new thread appears in
+      // the rail, and (on mobile) close the compose drawer.
+      setInboxReloadKey((k) => k + 1);
+      if (isMobile) setComposeOpen(false);
       setTimeout(() => setSuccess(null), 2000);
     } catch (err) {
       setError((err as Error).message || "Network error");
@@ -1068,13 +1092,48 @@ export default function EmailsPage() {
         }}
         data-testid="emails-page"
       >
-        <EmailReader id={readingId} onClose={closeReader} />
+        <EmailReader
+          id={readingId}
+          onClose={closeReader}
+          onMutated={() => setInboxReloadKey((k) => k + 1)}
+        />
       </div>
     );
   }
 
+  // Inbox rail width — fixed-ish on desktop, full-width on mobile so
+  // it stays the primary surface (Outlook replacement).
+  const inboxRailStyle: React.CSSProperties = {
+    width: isMobile ? "100%" : "320px",
+    minWidth: isMobile ? "0" : "260px",
+    flexShrink: 0,
+    order: isNarrow ? 0 : 0,
+    display: "flex",
+    flexDirection: "column",
+    minHeight: isMobile ? "auto" : 0,
+    maxHeight: isMobile ? "60vh" : undefined,
+  };
+
+  // On mobile, hide the composer until the user taps "New email" so the
+  // inbox stays the primary surface. Desktop keeps the existing 3-pane
+  // layout (inbox rail + composer + insights) intact.
+  const composerVisible = !isMobile || composeOpen;
+
   return (
     <div style={responsivePageWrap} data-testid="emails-page">
+      {/* Inbox rail — primary surface, replaces Outlook for triage */}
+      <div style={inboxRailStyle}>
+        <InboxPanel
+          activeId={null}
+          onOpen={(row) => openReader(row.id)}
+          onCompose={() => setComposeOpen(true)}
+          reloadKey={inboxReloadKey}
+          userId={user.id}
+          userRole={user.role}
+          isMobile={isMobile}
+        />
+      </div>
+
       {/* Templates sidebar */}
       <aside
         style={responsiveSidebarStyle}
@@ -1138,9 +1197,14 @@ export default function EmailsPage() {
         )}
       </aside>
 
-      {/* Composer (main) */}
+      {/* Composer (main) — on mobile this is the slide-over drawer
+          opened by the inbox "New email" button; on desktop it sits
+          inline beside the inbox. */}
       <section
-        style={responsiveComposerWrap}
+        style={{
+          ...responsiveComposerWrap,
+          display: composerVisible ? "flex" : "none",
+        }}
         data-testid="composer-wrap"
         aria-label="Email composer"
       >
@@ -1148,9 +1212,22 @@ export default function EmailsPage() {
           <h1 style={{ fontSize: "1.05rem", fontWeight: 600, color: "var(--wp-gold)", margin: 0 }}>
             New email
           </h1>
-          <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim)" }}>
-            Drafts auto-save
-          </span>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim)" }}>
+              Drafts auto-save
+            </span>
+            {isMobile ? (
+              <button
+                type="button"
+                aria-label="Close compose drawer"
+                data-testid="compose-close"
+                onClick={() => setComposeOpen(false)}
+                style={iconBtn}
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
         </header>
 
         <div style={composerBody}>
