@@ -60,15 +60,25 @@ type LoadState =
       scope?: string;
     };
 
+type ReplyKind = "reply" | "replyAll" | "forward";
+
 type ReplyState =
   | { kind: "idle" }
   | { kind: "sending" }
   | { kind: "sent" }
   | { kind: "error"; reason: "scope_missing" | "rate_limited" | "graph_error" | "network"; message?: string };
 
+type ActionState =
+  | { kind: "idle" }
+  | { kind: "busy"; action: "archive" | "delete" | "markUnread" }
+  | { kind: "done"; action: "archive" | "delete" | "markUnread" }
+  | { kind: "error"; action: "archive" | "delete" | "markUnread"; message: string };
+
 interface EmailReaderProps {
   id: string;
   onClose: () => void;
+  /** Bumped by the parent after archive/delete so the inbox refreshes. */
+  onMutated?: () => void;
   /** Override hooks for tests; never used in production. */
   _now?: () => number;
 }
@@ -115,10 +125,13 @@ function htmlToSafeText(html: string): string {
     .trim();
 }
 
-export default function EmailReader({ id, onClose, _now }: EmailReaderProps) {
+export default function EmailReader({ id, onClose, onMutated, _now }: EmailReaderProps) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [reply, setReply] = useState<string>("");
+  const [replyKind, setReplyKind] = useState<ReplyKind>("reply");
+  const [forwardTo, setForwardTo] = useState<string>("");
   const [replyState, setReplyState] = useState<ReplyState>({ kind: "idle" });
+  const [actionState, setActionState] = useState<ActionState>({ kind: "idle" });
 
   const loadMessage = useCallback(async () => {
     setState({ kind: "loading" });
@@ -172,28 +185,54 @@ export default function EmailReader({ id, onClose, _now }: EmailReaderProps) {
     if (state.kind !== "ready") return;
     const trimmed = reply.trim();
     if (!trimmed) return;
+    if (replyKind === "forward" && !forwardTo.trim()) {
+      setReplyState({
+        kind: "error",
+        reason: "graph_error",
+        message: "Add at least one recipient to forward to.",
+      });
+      return;
+    }
     setReplyState({ kind: "sending" });
     try {
-      const res = await fetchWithRefresh("/api/mail/reply", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify({
-          originalMessageId: state.message.id,
-          bodyText: trimmed,
-        }),
-      });
+      const recipients =
+        replyKind === "forward"
+          ? forwardTo
+              .split(/[,;\s]+/)
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : undefined;
+      const res = await fetchWithRefresh(
+        `/api/emails/messages/${encodeURIComponent(state.message.id)}/reply`,
+        {
+          method: "POST",
+          headers: jsonHeaders(),
+          body: JSON.stringify({
+            kind: replyKind,
+            bodyText: trimmed,
+            ...(recipients && recipients.length > 0 ? { to: recipients } : {}),
+          }),
+        },
+      );
       const body = await res.json().catch(() => ({}));
       if (res.status === 202 || res.status === 200) {
         setReplyState({ kind: "sent" });
         setReply("");
+        if (replyKind === "forward") setForwardTo("");
         emitInsight({
           actor: "self",
           role: "user",
           surface: "email",
-          action: "reply_sent",
+          action: "replied",
           tier: "personal",
-          payload: { id: state.message.id },
+          target: state.message.id,
+          payload: {
+            thread_id: state.message.id,
+            reply_kind: replyKind,
+            body_length: trimmed.length,
+          },
         });
+        onMutated?.();
         return;
       }
       if (res.status === 403 && body?.code === "scope_missing") {
@@ -211,7 +250,7 @@ export default function EmailReader({ id, onClose, _now }: EmailReaderProps) {
       setReplyState({
         kind: "error",
         reason: "graph_error",
-        message: body?.message ?? `request_failed_${res.status}`,
+        message: body?.detail ?? body?.message ?? `request_failed_${res.status}`,
       });
       emitInsight({
         actor: "self",
@@ -219,12 +258,122 @@ export default function EmailReader({ id, onClose, _now }: EmailReaderProps) {
         surface: "email",
         action: "reply_failed",
         tier: "personal",
-        payload: { id: state.message.id, status: res.status },
+        target: state.message.id,
+        payload: { thread_id: state.message.id, status: res.status, reply_kind: replyKind },
       });
     } catch (err) {
       setReplyState({ kind: "error", reason: "network", message: (err as Error).message });
     }
-  }, [reply, state]);
+  }, [reply, replyKind, forwardTo, state, onMutated]);
+
+  const archive = useCallback(async () => {
+    if (state.kind !== "ready") return;
+    setActionState({ kind: "busy", action: "archive" });
+    try {
+      const res = await fetchWithRefresh(
+        `/api/emails/messages/${encodeURIComponent(state.message.id)}`,
+        {
+          method: "PATCH",
+          headers: jsonHeaders(),
+          body: JSON.stringify({ archive: true }),
+        },
+      );
+      if (res.status === 200) {
+        setActionState({ kind: "done", action: "archive" });
+        emitInsight({
+          actor: "self",
+          role: "user",
+          surface: "email",
+          action: "archived",
+          tier: "personal",
+          target: state.message.id,
+          payload: { thread_id: state.message.id },
+        });
+        onMutated?.();
+        onClose();
+        return;
+      }
+      const body = await res.json().catch(() => ({}));
+      setActionState({
+        kind: "error",
+        action: "archive",
+        message: body?.detail ?? body?.message ?? `request_failed_${res.status}`,
+      });
+    } catch (err) {
+      setActionState({ kind: "error", action: "archive", message: (err as Error).message });
+    }
+  }, [state, onMutated, onClose]);
+
+  const remove = useCallback(async () => {
+    if (state.kind !== "ready") return;
+    setActionState({ kind: "busy", action: "delete" });
+    try {
+      const res = await fetchWithRefresh(
+        `/api/emails/messages/${encodeURIComponent(state.message.id)}`,
+        { method: "DELETE", headers: jsonHeaders() },
+      );
+      if (res.status === 200) {
+        setActionState({ kind: "done", action: "delete" });
+        emitInsight({
+          actor: "self",
+          role: "user",
+          surface: "email",
+          action: "deleted",
+          tier: "personal",
+          target: state.message.id,
+          payload: { thread_id: state.message.id },
+        });
+        onMutated?.();
+        onClose();
+        return;
+      }
+      const body = await res.json().catch(() => ({}));
+      setActionState({
+        kind: "error",
+        action: "delete",
+        message: body?.detail ?? body?.message ?? `request_failed_${res.status}`,
+      });
+    } catch (err) {
+      setActionState({ kind: "error", action: "delete", message: (err as Error).message });
+    }
+  }, [state, onMutated, onClose]);
+
+  const markUnread = useCallback(async () => {
+    if (state.kind !== "ready") return;
+    setActionState({ kind: "busy", action: "markUnread" });
+    try {
+      const res = await fetchWithRefresh(
+        `/api/emails/messages/${encodeURIComponent(state.message.id)}`,
+        {
+          method: "PATCH",
+          headers: jsonHeaders(),
+          body: JSON.stringify({ isRead: false }),
+        },
+      );
+      if (res.status === 200) {
+        setActionState({ kind: "done", action: "markUnread" });
+        emitInsight({
+          actor: "self",
+          role: "user",
+          surface: "email",
+          action: "marked_unread",
+          tier: "personal",
+          target: state.message.id,
+          payload: { thread_id: state.message.id },
+        });
+        onMutated?.();
+        return;
+      }
+      const body = await res.json().catch(() => ({}));
+      setActionState({
+        kind: "error",
+        action: "markUnread",
+        message: body?.detail ?? body?.message ?? `request_failed_${res.status}`,
+      });
+    } catch (err) {
+      setActionState({ kind: "error", action: "markUnread", message: (err as Error).message });
+    }
+  }, [state, onMutated]);
 
   if (state.kind === "loading") {
     return (
@@ -314,7 +463,11 @@ export default function EmailReader({ id, onClose, _now }: EmailReaderProps) {
   const m = state.message;
   const bodyText =
     m.bodyContentType === "html" ? htmlToSafeText(m.bodyContent) : m.bodyContent;
-  const canSend = reply.trim().length > 0 && replyState.kind !== "sending";
+  const canSend =
+    reply.trim().length > 0 &&
+    replyState.kind !== "sending" &&
+    (replyKind !== "forward" || forwardTo.trim().length > 0);
+  const actionBusy = actionState.kind === "busy";
 
   return (
     <div data-testid="email-reader" style={containerStyle}>
@@ -360,6 +513,85 @@ export default function EmailReader({ id, onClose, _now }: EmailReaderProps) {
         ) : null}
       </header>
 
+      {/* Message action toolbar — Reply / Reply-all / Forward / Mark unread / Archive / Delete */}
+      <div
+        role="toolbar"
+        aria-label="Email actions"
+        data-testid="email-reader-actions"
+        style={actionsToolbarStyle}
+      >
+        <button
+          type="button"
+          data-testid="email-reader-action-reply"
+          onClick={() => setReplyKind("reply")}
+          aria-pressed={replyKind === "reply"}
+          style={{ ...actionBtnStyle, ...(replyKind === "reply" ? actionBtnActive : {}) }}
+        >
+          Reply
+        </button>
+        <button
+          type="button"
+          data-testid="email-reader-action-replyall"
+          onClick={() => setReplyKind("replyAll")}
+          aria-pressed={replyKind === "replyAll"}
+          style={{ ...actionBtnStyle, ...(replyKind === "replyAll" ? actionBtnActive : {}) }}
+        >
+          Reply all
+        </button>
+        <button
+          type="button"
+          data-testid="email-reader-action-forward"
+          onClick={() => setReplyKind("forward")}
+          aria-pressed={replyKind === "forward"}
+          style={{ ...actionBtnStyle, ...(replyKind === "forward" ? actionBtnActive : {}) }}
+        >
+          Forward
+        </button>
+        <span style={{ flex: 1 }} />
+        <button
+          type="button"
+          data-testid="email-reader-action-mark-unread"
+          onClick={() => void markUnread()}
+          disabled={actionBusy}
+          style={actionBtnStyle}
+        >
+          {actionState.kind === "busy" && actionState.action === "markUnread"
+            ? "Marking…"
+            : "Mark unread"}
+        </button>
+        <button
+          type="button"
+          data-testid="email-reader-action-archive"
+          onClick={() => void archive()}
+          disabled={actionBusy}
+          style={actionBtnStyle}
+        >
+          {actionState.kind === "busy" && actionState.action === "archive"
+            ? "Archiving…"
+            : "Archive"}
+        </button>
+        <button
+          type="button"
+          data-testid="email-reader-action-delete"
+          onClick={() => void remove()}
+          disabled={actionBusy}
+          style={{ ...actionBtnStyle, color: "#ff7878", borderColor: "#ff7878" }}
+        >
+          {actionState.kind === "busy" && actionState.action === "delete"
+            ? "Deleting…"
+            : "Delete"}
+        </button>
+      </div>
+      {actionState.kind === "error" ? (
+        <p
+          role="alert"
+          data-testid="email-reader-action-error"
+          style={{ fontSize: 12, color: "#ff7878", margin: "4px 0 0" }}
+        >
+          Couldn&apos;t {actionState.action === "markUnread" ? "mark unread" : actionState.action}: {actionState.message}
+        </p>
+      ) : null}
+
       <article
         data-testid="email-reader-body"
         style={{
@@ -398,8 +630,33 @@ export default function EmailReader({ id, onClose, _now }: EmailReaderProps) {
             marginBottom: 6,
           }}
         >
-          Reply to {m.from.name || m.from.email}
+          {replyKind === "forward"
+            ? "Forward to"
+            : replyKind === "replyAll"
+              ? `Reply all (${m.toRecipients.length + m.ccRecipients.length + 1} people)`
+              : `Reply to ${m.from.name || m.from.email}`}
         </label>
+        {replyKind === "forward" ? (
+          <input
+            type="text"
+            data-testid="email-reader-forward-to"
+            value={forwardTo}
+            onChange={(e) => setForwardTo(e.target.value)}
+            placeholder="recipient1@example.com, recipient2@example.com"
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              padding: 10,
+              borderRadius: 6,
+              border: "1px solid var(--wp-border)",
+              background: "var(--wp-surface)",
+              color: "var(--wp-text)",
+              fontSize: 14,
+              marginBottom: 8,
+            }}
+            aria-label="Forward recipients"
+          />
+        ) : null}
         <textarea
           id="email-reader-reply-input"
           data-testid="email-reader-reply-input"
@@ -453,7 +710,13 @@ export default function EmailReader({ id, onClose, _now }: EmailReaderProps) {
               cursor: canSend ? "pointer" : "not-allowed",
             }}
           >
-            {replyState.kind === "sending" ? "Sending…" : "Send reply"}
+            {replyState.kind === "sending"
+              ? "Sending…"
+              : replyKind === "forward"
+                ? "Send forward"
+                : replyKind === "replyAll"
+                  ? "Send reply all"
+                  : "Send reply"}
           </button>
         </div>
         {replyState.kind === "error" && replyState.reason === "scope_missing" ? (
@@ -533,4 +796,33 @@ const errorCardStyle: React.CSSProperties = {
   border: "1px solid var(--wp-border)",
   borderRadius: 8,
   padding: 16,
+};
+
+const actionsToolbarStyle: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+  alignItems: "center",
+  background: "var(--wp-surface)",
+  border: "1px solid var(--wp-border)",
+  borderRadius: 8,
+  padding: 8,
+  margin: "8px 0",
+};
+
+const actionBtnStyle: React.CSSProperties = {
+  background: "transparent",
+  border: "1px solid var(--wp-border)",
+  color: "var(--wp-text)",
+  padding: "6px 10px",
+  borderRadius: 6,
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 600,
+};
+
+const actionBtnActive: React.CSSProperties = {
+  background: "var(--wp-gold)",
+  color: "var(--wp-dark, #1a1a1a)",
+  borderColor: "var(--wp-gold)",
 };

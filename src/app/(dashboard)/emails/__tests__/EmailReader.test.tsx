@@ -187,13 +187,13 @@ describe("<EmailReader />", () => {
       expect(screen.getByTestId("email-reader-reply-status").textContent).toMatch(/sent/i);
     });
     const replyCall = mockFetchWithRefresh.mock.calls[1];
-    expect(replyCall[0]).toBe("/api/mail/reply");
+    expect(replyCall[0]).toBe(`/api/emails/messages/${encodeURIComponent("msg-1")}/reply`);
     const body = JSON.parse(replyCall[1].body);
-    expect(body.originalMessageId).toBe("msg-1");
+    expect(body.kind).toBe("reply");
     expect(body.bodyText).toBe("Sounds good.");
     expect((screen.getByTestId("email-reader-reply-input") as HTMLTextAreaElement).value).toBe("");
     expect(mockEmit).toHaveBeenCalledWith(
-      expect.objectContaining({ surface: "email", action: "reply_sent" }),
+      expect.objectContaining({ surface: "email", action: "replied" }),
     );
   });
 
@@ -299,5 +299,112 @@ describe("<EmailReader />", () => {
     render(<EmailReader id="msg-1" onClose={() => {}} />);
     await waitFor(() => screen.getByTestId("email-reader"));
     expect(screen.getByTestId("email-reader-body").textContent).toContain("Preview text only.");
+  });
+
+  test("archive: clicking Archive PATCHes archive=true, fires insight, calls onMutated + onClose", async () => {
+    mockFetchWithRefresh
+      .mockResolvedValueOnce(ok({ message: SAMPLE_MESSAGE }))
+      .mockResolvedValueOnce(ok({ id: "moved-1", archived: true }, 200));
+    const onClose = jest.fn();
+    const onMutated = jest.fn();
+    render(<EmailReader id="msg-1" onClose={onClose} onMutated={onMutated} />);
+    await waitFor(() => screen.getByTestId("email-reader"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("email-reader-action-archive"));
+    });
+    await waitFor(() => {
+      const call = mockFetchWithRefresh.mock.calls[1];
+      expect(call[0]).toBe(`/api/emails/messages/${encodeURIComponent("msg-1")}`);
+      expect(call[1].method).toBe("PATCH");
+      expect(JSON.parse(call[1].body)).toEqual({ archive: true });
+    });
+    expect(onClose).toHaveBeenCalled();
+    expect(onMutated).toHaveBeenCalled();
+    expect(mockEmit).toHaveBeenCalledWith(
+      expect.objectContaining({ surface: "email", action: "archived" }),
+    );
+  });
+
+  test("delete: clicking Delete sends DELETE, fires insight, calls onClose", async () => {
+    mockFetchWithRefresh
+      .mockResolvedValueOnce(ok({ message: SAMPLE_MESSAGE }))
+      .mockResolvedValueOnce(ok({ id: "msg-1", deleted: true }, 200));
+    const onClose = jest.fn();
+    render(<EmailReader id="msg-1" onClose={onClose} />);
+    await waitFor(() => screen.getByTestId("email-reader"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("email-reader-action-delete"));
+    });
+    await waitFor(() => {
+      const call = mockFetchWithRefresh.mock.calls[1];
+      expect(call[1].method).toBe("DELETE");
+    });
+    expect(onClose).toHaveBeenCalled();
+    expect(mockEmit).toHaveBeenCalledWith(
+      expect.objectContaining({ surface: "email", action: "deleted" }),
+    );
+  });
+
+  test("mark unread: PATCHes isRead=false and emits marked_unread", async () => {
+    mockFetchWithRefresh
+      .mockResolvedValueOnce(ok({ message: SAMPLE_MESSAGE }))
+      .mockResolvedValueOnce(ok({ id: "msg-1", isRead: false }, 200));
+    render(<EmailReader id="msg-1" onClose={() => {}} />);
+    await waitFor(() => screen.getByTestId("email-reader"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("email-reader-action-mark-unread"));
+    });
+    await waitFor(() => {
+      const call = mockFetchWithRefresh.mock.calls[1];
+      expect(JSON.parse(call[1].body)).toEqual({ isRead: false });
+    });
+    expect(mockEmit).toHaveBeenCalledWith(
+      expect.objectContaining({ surface: "email", action: "marked_unread" }),
+    );
+  });
+
+  test("reply-all: switching to Reply all sends kind=replyAll", async () => {
+    mockFetchWithRefresh
+      .mockResolvedValueOnce(ok({ message: SAMPLE_MESSAGE }))
+      .mockResolvedValueOnce(ok({ id: "rall-1" }, 202));
+    render(<EmailReader id="msg-1" onClose={() => {}} />);
+    await waitFor(() => screen.getByTestId("email-reader"));
+    fireEvent.click(screen.getByTestId("email-reader-action-replyall"));
+    fireEvent.change(screen.getByTestId("email-reader-reply-input"), {
+      target: { value: "Thanks all" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("email-reader-reply-send"));
+    });
+    await waitFor(() => {
+      const call = mockFetchWithRefresh.mock.calls[1];
+      const body = JSON.parse(call[1].body);
+      expect(body.kind).toBe("replyAll");
+      expect(body.bodyText).toBe("Thanks all");
+    });
+  });
+
+  test("forward: switching to Forward shows the To input and sends kind=forward with parsed recipients", async () => {
+    mockFetchWithRefresh
+      .mockResolvedValueOnce(ok({ message: SAMPLE_MESSAGE }))
+      .mockResolvedValueOnce(ok({ id: "fwd-1" }, 202));
+    render(<EmailReader id="msg-1" onClose={() => {}} />);
+    await waitFor(() => screen.getByTestId("email-reader"));
+    fireEvent.click(screen.getByTestId("email-reader-action-forward"));
+    fireEvent.change(screen.getByTestId("email-reader-forward-to"), {
+      target: { value: "a@x.co, b@x.co" },
+    });
+    fireEvent.change(screen.getByTestId("email-reader-reply-input"), {
+      target: { value: "FYI" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("email-reader-reply-send"));
+    });
+    await waitFor(() => {
+      const call = mockFetchWithRefresh.mock.calls[1];
+      const body = JSON.parse(call[1].body);
+      expect(body.kind).toBe("forward");
+      expect(body.to).toEqual(["a@x.co", "b@x.co"]);
+    });
   });
 });
