@@ -644,6 +644,9 @@ export type InstinctEventType =
   | "insight.email.insights_loaded"
   | "insight.email.recipient_card_expanded"
   | "insight.email.layout_mode"
+  | "insight.email.right_pane_state"
+  | "insight.email.nav_rail_toggled"
+  | "insight.email.recipient_context_toggled"
   | "insight.email.marked_unread"
   | "insight.email.forwarded"
   // Microsoft 365 Calendar (Calendars.ReadWrite)

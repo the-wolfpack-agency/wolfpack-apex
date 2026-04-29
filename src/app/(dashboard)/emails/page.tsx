@@ -1,39 +1,30 @@
 "use client";
 
 /**
- * /emails — Inline email composer designed to replace browser Outlook
- * for everyday sends. Three-pane layout:
+ * /emails — Gmail/Outlook-style 3-column email surface.
  *
- *   [ Templates sidebar ]  [ Composer (main) ]  [ Recipient insights ]
+ *   ┌────────┬────────────┬──────────────────────────────────┐
+ *   │  Nav   │  Inbox     │  Right pane (one of:             │
+ *   │  rail  │  list      │    EmptyState | Reader | Composer)│
+ *   │ (240/  │ (~340 px)  │  When the composer is active, an │
+ *   │  56 px)│            │  inline RecipientContextDrawer   │
+ *   │        │            │  hangs off its right edge.       │
+ *   └────────┴────────────┴──────────────────────────────────┘
  *
- * - Templates collapse to a top "Insert template ▾" dropdown on narrow
- *   screens so the composer stays primary.
- * - The composer always renders inline — never a modal/drawer. CC/BCC
- *   sections are togglable via × buttons (chips keep their own ×).
- * - Body is a contentEditable rich-text div with a tiny toolbar
- *   (Bold/Italic/Underline/UL/OL) wired through document.execCommand.
- *   Send POSTs both bodyHtml + bodyText. Persisted as HTML in
- *   sessionStorage.
- * - Recipient insights panel:
- *     * 1 recipient  → full panel (recent threads + last meeting).
- *     * 2-5 recipients → compact stack of per-recipient cards; click
- *                        a card to expand its full insights inline.
- *     * 6+ recipients → aggregate summary only (earliest last-meeting,
- *                        most-recent thread); per-recipient Graph
- *                        fetches are skipped to protect quota.
- * - Calendar window for "last meeting with recipient" is a year-wide
- *   lookup (view=year), client-cached by recipient email so flipping
- *   between recipients doesn't re-hit the endpoint.
- * - Send wires through POST /api/mail/send.
- * - AI draft via POST /api/assistant/draft-reply (surface: "email").
- *   Model output is HTML-escaped + newlines→<br> before being placed
- *   into the editable body — never trust raw model output as HTML.
- * - Draft persistence: sessionStorage key `mail.compose.draft` (HTML).
+ * Replaces the previous 4-pane wrap layout where the composer
+ * silently dropped to a hidden second flex row on common laptop
+ * widths. The new layout is single-column on the right (mutually
+ * exclusive states), so "+ New email" can never appear to do
+ * nothing.
+ *
+ * Notes:
  * - All authenticated fetches go through fetchWithRefresh.
- * - All actions emit through emitInsight().
- *
- * Honours the dashboard chrome: page itself does not scroll
- * (height:100% + overflow:hidden); inner sections scroll.
+ * - The composer body is contentEditable + execCommand-driven; the
+ *   AI Draft path HTML-escapes model output before injecting.
+ * - Drafts persist to sessionStorage as HTML.
+ * - Calendar/year + per-recipient inbox lookups are cached so
+ *   adding/removing recipients does not re-hit Graph.
+ * - The page itself never scrolls; inner sections do.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -45,18 +36,18 @@ import {
 import { emitInsight } from "@/lib/insights/emit";
 import EmailReader from "./EmailReader";
 import InboxPanel from "./InboxPanel";
+import EmailNavRail, { type EmailFolder, type EmailTemplate } from "./EmailNavRail";
+import EmptyState from "./EmptyState";
+import RecipientContextDrawer, {
+  AGGREGATE_THRESHOLD,
+  type CalendarEventLite,
+  type RecentEmail,
+  type RecipientInsight,
+} from "./RecipientContextDrawer";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface EmailTemplate {
-  id: string;
-  name: string;
-  description: string;
-  requiredVariables: string[];
-  optionalVariables: string[];
-}
 
 interface DraftState {
   to: string[];
@@ -67,33 +58,6 @@ interface DraftState {
   body: string;
 }
 
-interface RecentEmail {
-  id: string;
-  subject: string;
-  from: string;
-  fromEmail: string;
-  receivedDateTime: string;
-  bodyPreview: string;
-  isRead: boolean;
-}
-
-interface CalendarEventLite {
-  id: string;
-  subject: string;
-  start: string;
-  end: string;
-  attendees: string[];
-  attendeeEmails: string[];
-}
-
-interface RecipientInsight {
-  loading: boolean;
-  recentThreads: RecentEmail[];
-  lastMeeting: CalendarEventLite | null;
-  summary: string;
-  error: string | null;
-}
-
 interface AuthedUser {
   id: string;
   role: string;
@@ -101,10 +65,10 @@ interface AuthedUser {
   email?: string;
 }
 
+type RightPaneState = "empty" | "reader" | "composer";
+
 const DRAFT_KEY = "mail.compose.draft";
 const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const AGGREGATE_THRESHOLD = 6; // ≥ this many To: → aggregate-only mode
-const MULTI_THRESHOLD = 2; // ≥ this and < AGGREGATE_THRESHOLD → per-recipient cards
 
 // ---------------------------------------------------------------------------
 // HTML helpers
@@ -123,20 +87,17 @@ function plainTextToHtml(s: string): string {
 function htmlToPlainText(html: string): string {
   if (!html) return "";
   if (typeof document === "undefined") {
-    // Server-side fallback: strip tags lossy-but-safe.
     return html.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "");
   }
   const tmp = document.createElement("div");
   tmp.innerHTML = html;
-  // jsdom doesn't compute innerText reliably (returns undefined). Fall
-  // back to textContent + a <br>→\n shim.
   const text = (tmp as HTMLDivElement).innerText;
   if (typeof text === "string") return text;
   return html.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "");
 }
 
 // ---------------------------------------------------------------------------
-// Draft persistence (sessionStorage)
+// Draft persistence
 // ---------------------------------------------------------------------------
 
 function emptyDraft(): DraftState {
@@ -181,26 +142,11 @@ function isPlausibleEmail(s: string): boolean {
   return EMAIL_RX.test(s.trim());
 }
 
-// ---------------------------------------------------------------------------
-// Time helpers
-// ---------------------------------------------------------------------------
-
-function daysAgo(iso: string): number {
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return -1;
-  return Math.max(0, Math.round((Date.now() - t) / (1000 * 60 * 60 * 24)));
-}
-
-function formatRelative(iso: string): string {
-  const d = daysAgo(iso);
-  if (d < 0) return "—";
-  if (d === 0) return "today";
-  if (d === 1) return "1 day ago";
-  if (d < 30) return `${d} days ago`;
-  const months = Math.round(d / 30);
-  if (months < 12) return months <= 1 ? "1 month ago" : `${months} months ago`;
-  const years = Math.round(d / 365);
-  return years <= 1 ? "1 year ago" : `${years} years ago`;
+function draftHasContent(d: DraftState): boolean {
+  if (d.to.length || d.cc.length || d.bcc.length) return true;
+  if (d.subject.trim()) return true;
+  if (htmlToPlainText(d.body).trim()) return true;
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,10 +156,8 @@ function formatRelative(iso: string): string {
 export default function EmailsPage() {
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(true);
-  const [templatesOpen, setTemplatesOpen] = useState(true);
-  // Responsive breakpoints — narrow = mobile + cramped laptops where the
-  // 3-column row layout doesn't fit. We stack vertically and let the
-  // page scroll instead of clipping the insights panel.
+
+  // Viewport breakpoints. wide ≥ 1100, narrow < 1100, mobile < 640.
   const [isNarrow, setIsNarrow] = useState<boolean>(() =>
     typeof window !== "undefined" ? window.innerWidth < 1100 : false,
   );
@@ -229,16 +173,27 @@ export default function EmailsPage() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-  // On mobile the templates rail eats too much space — collapse by
-  // default and let the user expand on demand.
-  useEffect(() => {
-    if (isMobile) setTemplatesOpen(false);
-  }, [isMobile]);
 
-  // Deep-link reading mode: `/emails?id=<graphMessageId>` switches the
-  // page from compose to a single-email read+reply view (search results,
-  // notification clicks, etc. land here). Captured on mount so toggling
-  // back to compose is a state flip — no router round-trip.
+  // Nav rail. Default expanded on desktop, collapsed on narrow.
+  const [navExpanded, setNavExpanded] = useState<boolean>(() =>
+    typeof window !== "undefined" ? window.innerWidth >= 1100 : true,
+  );
+  // Reflect viewport changes onto nav rail default — but never override
+  // an explicit user toggle within a session (we'd need a ref to track
+  // that; simple version: keep current state on resize).
+
+  // Recipient context drawer — open by default on wide, closed on
+  // narrow/mobile.
+  const [contextOpen, setContextOpen] = useState<boolean>(() =>
+    typeof window !== "undefined" ? window.innerWidth >= 1100 : true,
+  );
+
+  // Active folder. Only "inbox" is fully wired in v1; the others are
+  // visual placeholders that swap the inbox into a known empty state.
+  const [activeFolder, setActiveFolder] = useState<EmailFolder>("inbox");
+
+  // Deep-link reading mode: `/emails?id=<graphMessageId>` opens a
+  // single-message reader.
   const [readingId, setReadingId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
     const params = new URLSearchParams(window.location.search);
@@ -259,8 +214,6 @@ export default function EmailsPage() {
   const closeReader = useCallback(() => {
     setReadingId(null);
     if (typeof window !== "undefined") {
-      // Drop the query string so a refresh / share keeps users on
-      // the compose surface they just navigated back to.
       try {
         window.history.replaceState({}, "", "/emails");
       } catch {
@@ -269,11 +222,8 @@ export default function EmailsPage() {
     }
   }, []);
 
-  // Compose drawer state — mobile hides the composer until the user
-  // taps "New email"; desktop shows it inline next to the inbox so the
-  // existing test suite (and the preferred desktop layout) stays
-  // unchanged. `inboxReloadKey` is bumped after archive/delete/send
-  // so the inbox refetches without a manual refresh.
+  // Compose state. composeOpen is independent of reading; the right
+  // pane state is derived: reader > composer > empty.
   const [composeOpen, setComposeOpen] = useState<boolean>(false);
   const [inboxReloadKey, setInboxReloadKey] = useState<number>(0);
 
@@ -289,23 +239,31 @@ export default function EmailsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Per-recipient insights cache. Key: recipient email (lowercase).
   const [insightsCache, setInsightsCache] = useState<Record<string, RecipientInsight>>({});
-  // Which recipient cards are expanded inline (multi-recipient mode).
   const [expandedRecipients, setExpandedRecipients] = useState<Set<string>>(() => new Set());
-  // Calendar fetch is shared across recipients within a single load batch —
-  // but we cache the whole event list once per session via this ref.
   const calendarYearCacheRef = useRef<{ events: CalendarEventLite[]; loadedAtMs: number } | null>(null);
   const calendarYearInflightRef = useRef<Promise<CalendarEventLite[]> | null>(null);
 
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(false);
   const insightsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track previous right-pane state so we only emit the transition
+  // event on actual changes, not every render.
+  const prevRightPaneRef = useRef<RightPaneState | null>(null);
 
   const user = useMemo<AuthedUser>(() => {
     const u = getInstinctUser<AuthedUser>();
     return u ?? { id: "anon", role: "user" };
   }, []);
+
+  // Derived right-pane state. reader takes precedence (deep-link or
+  // explicit row click), then composer (user clicked + New email),
+  // else the empty state.
+  const rightPaneState: RightPaneState = readingId
+    ? "reader"
+    : composeOpen
+      ? "composer"
+      : "empty";
 
   // -------------------------------------------------------------------------
   // Mount: load templates + emit compose_opened, hydrate body
@@ -315,7 +273,6 @@ export default function EmailsPage() {
     if (mountedRef.current) return;
     mountedRef.current = true;
 
-    // Hydrate the contentEditable from the persisted HTML draft.
     if (bodyRef.current && draft.body && bodyRef.current.innerHTML !== draft.body) {
       bodyRef.current.innerHTML = draft.body;
     }
@@ -346,6 +303,34 @@ export default function EmailsPage() {
       }
     })();
   }, [user.id, user.role, draft.body]);
+
+  // Hydrate the contentEditable from `draft.body` whenever the
+  // composer pane becomes visible (composeOpen flipping true). This
+  // covers both the post-mount path AND template insertion that
+  // *opens* the composer and writes a fresh HTML body in one shot.
+  useEffect(() => {
+    if (!composeOpen) return;
+    if (!bodyRef.current) return;
+    if (bodyRef.current.innerHTML === draft.body) return;
+    bodyRef.current.innerHTML = draft.body;
+  }, [composeOpen, draft.body]);
+
+  // -------------------------------------------------------------------------
+  // Right-pane state transition emitter
+  // -------------------------------------------------------------------------
+
+  useEffect(() => {
+    if (prevRightPaneRef.current === rightPaneState) return;
+    prevRightPaneRef.current = rightPaneState;
+    emitInsight({
+      actor: user.id,
+      role: user.role,
+      surface: "email",
+      action: "right_pane_state",
+      tier: "personal",
+      payload: { state: rightPaneState },
+    });
+  }, [rightPaneState, user.id, user.role]);
 
   // -------------------------------------------------------------------------
   // Draft persistence
@@ -390,9 +375,6 @@ export default function EmailsPage() {
   const loadRecipientInsight = useCallback(
     async (recipient: string): Promise<RecipientInsight> => {
       const key = recipient.toLowerCase();
-
-      // Already cached? Return cached entry. Set loading flag only when
-      // we actually need to fetch.
       const existing = insightsCache[key];
       if (existing && !existing.loading) return existing;
       if (existing && existing.loading) return existing;
@@ -483,12 +465,8 @@ export default function EmailsPage() {
         let perRecipientFetched = 0;
 
         if (mode === "aggregate") {
-          // Skip per-recipient fetches entirely; calendar still loaded
-          // once for aggregate "earliest last-meeting" calc.
           await loadCalendarYear();
         } else {
-          // single + multi: fetch each recipient (cached so unchanged
-          // recipients are no-ops).
           const results = await Promise.all(
             recipients.map((r) => {
               const key = r.toLowerCase();
@@ -498,7 +476,6 @@ export default function EmailsPage() {
               return loadRecipientInsight(r);
             }),
           );
-          // Touch results so the linter knows we used them.
           void results;
         }
 
@@ -512,7 +489,6 @@ export default function EmailsPage() {
             recipient_count: recipientCount,
             mode,
             per_recipient_fetched: perRecipientFetched,
-            // Backwards-compat scalars consumers (warehouse) already key off:
             recipient: recipients[0] ?? "",
           },
         });
@@ -525,9 +501,6 @@ export default function EmailsPage() {
         insightsTimerRef.current = null;
       }
     };
-    // We intentionally exclude insightsCache + loadRecipientInsight from
-    // deps — re-running on cache mutations would loop forever. The
-    // recipient list is the canonical trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.to.join("|"), user.id, user.role]);
 
@@ -609,9 +582,6 @@ export default function EmailsPage() {
             : format === "ul"
               ? "insertUnorderedList"
               : "insertOrderedList";
-    // Focus the editor first so execCommand operates on the right
-    // selection; otherwise toolbar clicks blur it and the command
-    // becomes a no-op.
     bodyRef.current?.focus();
     try {
       document.execCommand(cmd, false);
@@ -632,7 +602,7 @@ export default function EmailsPage() {
   }
 
   // -------------------------------------------------------------------------
-  // Template insertion
+  // Template insertion — also opens the composer pane.
   // -------------------------------------------------------------------------
 
   function applyTemplate(t: EmailTemplate) {
@@ -644,6 +614,7 @@ export default function EmailsPage() {
     const html = plainTextToHtml(plain);
     setDraft((prev) => ({ ...prev, subject: t.name, body: html }));
     if (bodyRef.current) bodyRef.current.innerHTML = html;
+    setComposeOpen(true);
     emitInsight({
       actor: user.id,
       role: user.role,
@@ -684,8 +655,6 @@ export default function EmailsPage() {
       const data = (await res.json()) as { text?: string };
       const suggested = (data.text ?? "").trim();
       if (suggested) {
-        // Escape any HTML in the model output and convert newlines to
-        // <br>. Never trust raw model output as HTML.
         const html = plainTextToHtml(suggested);
         setBodyHtml(html);
       }
@@ -759,10 +728,9 @@ export default function EmailsPage() {
       if (bodyRef.current) bodyRef.current.innerHTML = "";
       setShowCc(false);
       setShowBcc(false);
-      // Refresh the inbox so the sent reply / new thread appears in
-      // the rail, and (on mobile) close the compose drawer.
       setInboxReloadKey((k) => k + 1);
-      if (isMobile) setComposeOpen(false);
+      // Drop back to empty state on send.
+      setComposeOpen(false);
       setTimeout(() => setSuccess(null), 2000);
     } catch (err) {
       setError((err as Error).message || "Network error");
@@ -783,10 +751,40 @@ export default function EmailsPage() {
     setShowBcc(false);
     setError(null);
     setSuccess(null);
+    setComposeOpen(false);
   }
 
   // -------------------------------------------------------------------------
-  // Recipient card expand/collapse (multi mode)
+  // Compose / inbox-row interaction (with unsaved-draft confirm)
+  // -------------------------------------------------------------------------
+
+  function tryConfirmDiscardForRowOpen(): boolean {
+    // Only prompt if we're currently composing AND the draft has
+    // meaningful content. v1: window.confirm — v2 should swap in a
+    // styled dialog (logged in PR body).
+    if (!composeOpen) return true;
+    if (!draftHasContent(draft)) return true;
+    if (typeof window === "undefined") return true;
+    return window.confirm(
+      "You have an unsaved draft. Switch threads and discard it?",
+    );
+  }
+
+  function handleInboxRowOpen(id: string) {
+    if (!tryConfirmDiscardForRowOpen()) return;
+    // Close the composer when the user navigates into a thread, so
+    // the right pane is the reader (not reader-stacked-on-composer).
+    setComposeOpen(false);
+    openReader(id);
+  }
+
+  function handleNewEmail() {
+    setComposeOpen(true);
+    closeReader();
+  }
+
+  // -------------------------------------------------------------------------
+  // Recipient card expand/collapse
   // -------------------------------------------------------------------------
 
   function toggleRecipientCard(recipient: string) {
@@ -799,7 +797,6 @@ export default function EmailsPage() {
       return next;
     });
     if (willExpand) {
-      // Ensure the card has data even if it was loaded only as a stub.
       void loadRecipientInsight(recipient);
       emitInsight({
         actor: user.id,
@@ -814,281 +811,82 @@ export default function EmailsPage() {
   }
 
   // -------------------------------------------------------------------------
-  // Render helpers — recipient panels
+  // Nav rail toggle (with telemetry)
   // -------------------------------------------------------------------------
 
-  const recipientCount = draft.to.length;
-  const mode: "empty" | "single" | "multi" | "aggregate" =
-    recipientCount === 0
-      ? "empty"
-      : recipientCount === 1
-        ? "single"
-        : recipientCount >= AGGREGATE_THRESHOLD
-          ? "aggregate"
-          : "multi";
-
-  function getCachedInsight(email: string): RecipientInsight | undefined {
-    return insightsCache[email.toLowerCase()];
+  function toggleNavRail() {
+    setNavExpanded((v) => {
+      const next = !v;
+      emitInsight({
+        actor: user.id,
+        role: user.role,
+        surface: "email",
+        action: "nav_rail_toggled",
+        tier: "personal",
+        payload: { expanded: next },
+      });
+      return next;
+    });
   }
 
-  function renderSinglePanel(recipient: string) {
-    const ins = getCachedInsight(recipient);
-    if (!ins || ins.loading) {
-      return (
-        <p style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>
-          Loading insights for {recipient}…
-        </p>
-      );
-    }
-    return (
-      <>
-        <div style={insightCell} data-testid="insight-recipient">
-          <span style={cellLabel}>Recipient</span>
-          <span style={cellValue}>{recipient}</span>
-        </div>
-
-        <div style={insightCell} data-testid="insight-recent-threads">
-          <span style={cellLabel}>
-            Recent threads ({ins.recentThreads.length})
-          </span>
-          {ins.recentThreads.length === 0 ? (
-            <span style={{ ...cellValue, color: "var(--wp-text-dim)" }}>
-              No prior emails found.
-            </span>
-          ) : (
-            <ul style={threadList}>
-              {ins.recentThreads.map((t) => (
-                <li key={t.id} style={threadItem}>
-                  <span style={threadSubject}>{t.subject || "(no subject)"}</span>
-                  <span style={threadMeta}>
-                    {formatRelative(t.receivedDateTime)} · {t.from}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div style={insightCell} data-testid="insight-last-meeting">
-          <span style={cellLabel}>Last meeting</span>
-          {ins.lastMeeting ? (
-            <>
-              <span style={cellValue}>{ins.lastMeeting.subject}</span>
-              <span style={{ ...cellValue, color: "var(--wp-text-dim)", fontSize: "0.75rem" }}>
-                {formatRelative(ins.lastMeeting.start)}
-              </span>
-            </>
-          ) : (
-            <span style={{ ...cellValue, color: "var(--wp-text-dim)" }}>
-              No past meeting in the last year.
-            </span>
-          )}
-        </div>
-
-        {ins.summary && (
-          <div style={insightCell} data-testid="insight-summary">
-            <span style={cellLabel}>Last message preview</span>
-            <span style={{ ...cellValue, color: "var(--wp-text-dim)", fontSize: "0.78rem" }}>
-              {ins.summary}
-            </span>
-          </div>
-        )}
-      </>
-    );
-  }
-
-  function renderMultiPanel(recipients: string[]) {
-    return (
-      <div data-testid="insight-multi" style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-        <span style={{ fontSize: "0.72rem", color: "var(--wp-text-dim)" }}>
-          {recipients.length} recipients · click a card to expand
-        </span>
-        {recipients.map((r) => {
-          const key = r.toLowerCase();
-          const ins = getCachedInsight(r);
-          const expanded = expandedRecipients.has(key);
-          const threadCount = ins?.recentThreads.length ?? 0;
-          const lastMtg = ins?.lastMeeting?.start ?? null;
-          return (
-            <div
-              key={r}
-              data-testid={`recipient-card-${r}`}
-              style={{
-                ...insightCell,
-                padding: "0.5rem 0.6rem",
-                cursor: "pointer",
-              }}
-              onClick={() => toggleRecipientCard(r)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  toggleRecipientCard(r);
-                }
-              }}
-            >
-              <span style={cellValue}>{r}</span>
-              <span style={{ fontSize: "0.7rem", color: "var(--wp-text-dim)" }}>
-                {ins?.loading
-                  ? "loading…"
-                  : `${threadCount} recent thread${threadCount === 1 ? "" : "s"} · last meeting: ${
-                      lastMtg ? formatRelative(lastMtg) : "—"
-                    }`}
-              </span>
-              {expanded && ins && !ins.loading && (
-                <div
-                  data-testid={`recipient-card-expanded-${r}`}
-                  style={{ marginTop: "0.5rem", display: "flex", flexDirection: "column", gap: "0.4rem" }}
-                >
-                  {ins.recentThreads.length > 0 && (
-                    <ul style={threadList}>
-                      {ins.recentThreads.slice(0, 3).map((t) => (
-                        <li key={t.id} style={threadItem}>
-                          <span style={threadSubject}>{t.subject || "(no subject)"}</span>
-                          <span style={threadMeta}>
-                            {formatRelative(t.receivedDateTime)} · {t.from}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {ins.lastMeeting && (
-                    <span style={{ fontSize: "0.75rem", color: "var(--wp-text-dim)" }}>
-                      Last meeting: {ins.lastMeeting.subject} ({formatRelative(ins.lastMeeting.start)})
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  function renderAggregatePanel(recipients: string[]) {
-    // Aggregate uses calendar year-window cache only (no per-recipient
-    // email fetches). Compute earliest last-meeting + most-recent
-    // thread across whatever cache rows already exist.
-    const events = calendarYearCacheRef.current?.events ?? [];
-    const recipLowers = new Set(recipients.map((r) => r.toLowerCase()));
-    const matching = events
-      .filter((ev) => {
-        const emails = (ev.attendeeEmails ?? []).map((e) => e.toLowerCase());
-        return emails.some((e) => recipLowers.has(e));
-      })
-      .filter((ev) => {
-        const t = Date.parse(ev.start);
-        return !Number.isNaN(t) && t <= Date.now();
-      })
-      .sort((a, b) => Date.parse(b.start) - Date.parse(a.start));
-
-    const earliestLastMeeting = matching[matching.length - 1] ?? null;
-    const mostRecentMeeting = matching[0] ?? null;
-
-    return (
-      <div data-testid="insight-aggregate" style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-        <div style={insightCell}>
-          <span style={cellLabel}>Recipients</span>
-          <span style={cellValue}>
-            {recipients.length}+ recipients
-          </span>
-          <span style={{ fontSize: "0.72rem", color: "var(--wp-text-dim)" }}>
-            Per-recipient context skipped to protect Graph quota.
-          </span>
-        </div>
-        <div style={insightCell}>
-          <span style={cellLabel}>Earliest last-meeting</span>
-          <span style={cellValue}>
-            {earliestLastMeeting
-              ? `${earliestLastMeeting.subject} (${formatRelative(earliestLastMeeting.start)})`
-              : "—"}
-          </span>
-        </div>
-        <div style={insightCell}>
-          <span style={cellLabel}>Most recent meeting</span>
-          <span style={cellValue}>
-            {mostRecentMeeting
-              ? `${mostRecentMeeting.subject} (${formatRelative(mostRecentMeeting.start)})`
-              : "—"}
-          </span>
-        </div>
-      </div>
-    );
+  function toggleRecipientContext() {
+    setContextOpen((v) => {
+      const next = !v;
+      const viewport: "mobile" | "narrow" | "wide" = isMobile
+        ? "mobile"
+        : isNarrow
+          ? "narrow"
+          : "wide";
+      emitInsight({
+        actor: user.id,
+        role: user.role,
+        surface: "email",
+        action: "recipient_context_toggled",
+        tier: "personal",
+        payload: { open: next, viewport },
+      });
+      return next;
+    });
   }
 
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
 
-  // Build responsive page styles. On narrow screens we stack the 3
-  // panes vertically and let the page scroll — the previous fixed
-  // 3-column row clipped the insights panel below the fold and made
-  // it invisible on mobile entirely.
-  // On mobile the global assistant FAB (bottom-6 right-6, ~56px square)
-  // sits directly on top of the Send button when the page is scrolled to
-  // the bottom of the composer. Reserve ~6rem of scroll tail so Send
-  // stays reachable above the FAB's footprint.
+  // Page wrapper. On wide viewports: 3 columns side-by-side, page does
+  // not scroll. On narrow: same flex row (so the existing test that
+  // asserts `flexDirection: row` keeps passing for desktop sizes), but
+  // we narrow the column widths. On mobile we collapse to a single
+  // visible pane (controlled by which-pane below).
   const responsivePageWrap: React.CSSProperties = {
     ...pageWrap,
-    flexDirection: isNarrow ? "column" : "row",
-    overflow: isNarrow ? "auto" : "hidden",
-    flexWrap: isNarrow ? "nowrap" : "wrap",
+    flexDirection: isMobile ? "column" : "row",
+    overflow: isMobile ? "auto" : "hidden",
+    flexWrap: "nowrap",
     paddingBottom: isMobile ? "6rem" : pageWrap.padding,
   };
-  // Narrow-viewport pane order: composer first (primary action), then
-  // recipient insights (context), then templates (secondary). Users who
-  // land on /emails expect to compose — templates shouldn't push the
-  // form below the fold.
-  const responsiveComposerWrap: React.CSSProperties = {
-    ...composerWrap,
-    width: isNarrow ? "100%" : undefined,
-    minWidth: isNarrow ? "0" : "320px",
-    flex: isNarrow ? "1 0 auto" : "1 1 480px",
-    order: isNarrow ? 1 : 0,
-    // On narrow viewports, the composer must expand to its natural
-    // height and let the PAGE scroll. The default composerWrap has
-    // overflow:hidden + an internal scrolling composerBody, which
-    // traps the To field above the fold and makes it unreachable on
-    // mobile. Drop the inner clipping when stacked.
-    overflow: isNarrow ? "visible" : composerWrap.overflow,
-    boxSizing: "border-box",
-    maxWidth: "100%",
-  };
-  const responsiveInsightsWrap: React.CSSProperties = {
-    ...insightsWrap,
-    width: isNarrow ? "100%" : "320px",
-    flexShrink: isNarrow ? 1 : 0,
-    order: isNarrow ? 2 : 0,
-  };
-  const responsiveSidebarStyle: React.CSSProperties = {
-    ...sidebarStyle,
-    width: isMobile
-      ? "100%"
-      : templatesOpen
-        ? "260px"
-        : "44px",
-    maxHeight: isMobile && templatesOpen ? "260px" : undefined,
-    flexShrink: isMobile ? 0 : 0,
-    order: isNarrow ? 3 : 0,
-  };
+
+  // Mobile pane visibility — only one pane at a time.
+  const showInboxOnMobile = !isMobile || rightPaneState === "empty";
+  const showRightOnMobile = !isMobile || rightPaneState !== "empty";
 
   if (readingId) {
+    // Reader takes the whole surface. We rebuild the wrapper from
+    // scratch (instead of spreading responsivePageWrap) so the
+    // shorthand `overflow` doesn't fight overflowX/Y in dev — React
+    // warns when shorthand + non-shorthand land on the same node.
     return (
       <div
         style={{
-          ...responsivePageWrap,
-          // Reading view doesn't need the three-pane layout — give it
-          // a single column. Vertical scroll only; long URLs / wide
-          // tables in the message body must wrap, never push the
-          // page sideways.
+          height: "100%",
+          width: "100%",
+          padding: "0.6rem",
+          background: "var(--wp-dark)",
+          boxSizing: "border-box",
           display: "block",
           overflowX: "hidden",
           overflowY: "auto",
-          width: "100%",
           maxWidth: "100%",
-          boxSizing: "border-box",
         }}
         data-testid="emails-page"
       >
@@ -1101,110 +899,184 @@ export default function EmailsPage() {
     );
   }
 
-  // Inbox rail width — fixed-ish on desktop, full-width on mobile so
-  // it stays the primary surface (Outlook replacement).
-  const inboxRailStyle: React.CSSProperties = {
-    width: isMobile ? "100%" : "320px",
-    minWidth: isMobile ? "0" : "260px",
-    flexShrink: 0,
-    order: isNarrow ? 0 : 0,
-    display: "flex",
-    flexDirection: "column",
-    minHeight: isMobile ? "auto" : 0,
-    maxHeight: isMobile ? "60vh" : undefined,
-  };
-
-  // On mobile, hide the composer until the user taps "New email" so the
-  // inbox stays the primary surface. Desktop keeps the existing 3-pane
-  // layout (inbox rail + composer + insights) intact.
-  const composerVisible = !isMobile || composeOpen;
-
   return (
     <div style={responsivePageWrap} data-testid="emails-page">
-      {/* Inbox rail — primary surface, replaces Outlook for triage */}
-      <div style={inboxRailStyle}>
-        <InboxPanel
-          activeId={null}
-          onOpen={(row) => openReader(row.id)}
-          onCompose={() => setComposeOpen(true)}
-          reloadKey={inboxReloadKey}
-          userId={user.id}
-          userRole={user.role}
-          isMobile={isMobile}
+      {/* Left nav rail */}
+      {!isMobile ? (
+        <EmailNavRail
+          expanded={navExpanded}
+          onToggle={toggleNavRail}
+          onCompose={handleNewEmail}
+          activeFolder={activeFolder}
+          onSelectFolder={(f) => {
+            setActiveFolder(f);
+            // v1: only "inbox" has data wired; clicking another folder
+            // is a no-op other than the highlight + analytics.
+          }}
+          templates={templates}
+          templatesLoading={templatesLoading}
+          onApplyTemplate={applyTemplate}
         />
-      </div>
+      ) : null}
 
-      {/* Templates sidebar */}
-      <aside
-        style={responsiveSidebarStyle}
-        aria-label="Email templates"
-      >
-        <div style={sidebarHeader}>
-          {templatesOpen ? (
-            <>
-              <span style={{ color: "var(--wp-gold)", fontWeight: 600, fontSize: "0.85rem" }}>
-                Templates
-              </span>
-              <button
-                type="button"
-                onClick={() => setTemplatesOpen(false)}
-                aria-label="Collapse templates"
-                style={iconBtn}
-              >
-                ‹
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setTemplatesOpen(true)}
-              aria-label="Expand templates"
-              style={{ ...iconBtn, margin: "0 auto" }}
-            >
-              ›
-            </button>
-          )}
+      {/* Inbox column */}
+      {showInboxOnMobile ? (
+        <div style={inboxColStyle(isMobile)}>
+          <InboxPanel
+            activeId={null}
+            onOpen={(row) => handleInboxRowOpen(row.id)}
+            onCompose={handleNewEmail}
+            reloadKey={inboxReloadKey}
+            userId={user.id}
+            userRole={user.role}
+            isMobile={isMobile}
+          />
         </div>
-        {templatesOpen && (
-          <div style={sidebarBody}>
-            {templatesLoading ? (
-              <p style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>
-                Loading…
-              </p>
-            ) : templates.length === 0 ? (
-              <p style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>
-                No templates available
-              </p>
-            ) : (
-              templates.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  data-testid={`template-${t.id}`}
-                  onClick={() => applyTemplate(t)}
-                  style={templateBtn}
-                >
-                  <span style={{ fontWeight: 600, fontSize: "0.82rem", color: "var(--wp-text)" }}>
-                    {t.name}
-                  </span>
-                  <span style={{ fontSize: "0.72rem", color: "var(--wp-text-dim)", marginTop: "2px" }}>
-                    {t.description}
-                  </span>
-                </button>
-              ))
-            )}
-          </div>
-        )}
-      </aside>
+      ) : null}
 
-      {/* Composer (main) — on mobile this is the slide-over drawer
-          opened by the inbox "New email" button; on desktop it sits
-          inline beside the inbox. */}
+      {/* Right pane — Empty | Composer (Reader is handled above) */}
+      {showRightOnMobile ? (
+        <section
+          style={rightColStyle(isMobile)}
+          data-testid="right-pane"
+          data-state={rightPaneState}
+          aria-label="Email content"
+        >
+          {rightPaneState === "empty" ? (
+            <EmptyState onCompose={handleNewEmail} />
+          ) : (
+            <ComposerPane
+              isMobile={isMobile}
+              onClose={() => setComposeOpen(false)}
+              draft={draft}
+              setDraft={setDraft}
+              toInput={toInput}
+              setToInput={setToInput}
+              ccInput={ccInput}
+              setCcInput={setCcInput}
+              bccInput={bccInput}
+              setBccInput={setBccInput}
+              showCc={showCc}
+              setShowCc={setShowCc}
+              showBcc={showBcc}
+              setShowBcc={setShowBcc}
+              addChip={addChip}
+              removeChip={removeChip}
+              handleChipKey={handleChipKey}
+              applyFormat={applyFormat}
+              bodyRef={bodyRef}
+              error={error}
+              success={success}
+              busy={busy}
+              aiDrafting={aiDrafting}
+              canSend={canSend}
+              onDiscard={discard}
+              onSend={send}
+              onAiDraft={requestAiDraft}
+              contextOpen={contextOpen}
+              onToggleContext={toggleRecipientContext}
+              recipients={draft.to}
+              insightsCache={insightsCache}
+              expandedRecipients={expandedRecipients}
+              onToggleRecipientCard={toggleRecipientCard}
+              calendarEvents={calendarYearCacheRef.current?.events ?? []}
+            />
+          )}
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Composer pane (extracted for clarity)
+// ---------------------------------------------------------------------------
+
+interface ComposerPaneProps {
+  isMobile: boolean;
+  onClose: () => void;
+  draft: DraftState;
+  setDraft: React.Dispatch<React.SetStateAction<DraftState>>;
+  toInput: string;
+  setToInput: (s: string) => void;
+  ccInput: string;
+  setCcInput: (s: string) => void;
+  bccInput: string;
+  setBccInput: (s: string) => void;
+  showCc: boolean;
+  setShowCc: (v: boolean) => void;
+  showBcc: boolean;
+  setShowBcc: (v: boolean) => void;
+  addChip: (field: "to" | "cc" | "bcc", value: string) => void;
+  removeChip: (field: "to" | "cc" | "bcc", value: string) => void;
+  handleChipKey: (
+    field: "to" | "cc" | "bcc",
+    input: string,
+    setInput: (s: string) => void,
+    e: React.KeyboardEvent<HTMLInputElement>,
+  ) => void;
+  applyFormat: (
+    format: "bold" | "italic" | "underline" | "ul" | "ol",
+  ) => void;
+  bodyRef: React.MutableRefObject<HTMLDivElement | null>;
+  error: string | null;
+  success: string | null;
+  busy: boolean;
+  aiDrafting: boolean;
+  canSend: () => boolean;
+  onDiscard: () => void;
+  onSend: () => void;
+  onAiDraft: () => void;
+  contextOpen: boolean;
+  onToggleContext: () => void;
+  recipients: string[];
+  insightsCache: Record<string, RecipientInsight>;
+  expandedRecipients: Set<string>;
+  onToggleRecipientCard: (recipient: string) => void;
+  calendarEvents: CalendarEventLite[];
+}
+
+function ComposerPane({
+  isMobile,
+  onClose,
+  draft,
+  setDraft,
+  toInput,
+  setToInput,
+  ccInput,
+  setCcInput,
+  bccInput,
+  setBccInput,
+  showCc,
+  setShowCc,
+  showBcc,
+  setShowBcc,
+  addChip,
+  removeChip,
+  handleChipKey,
+  applyFormat,
+  bodyRef,
+  error,
+  success,
+  busy,
+  aiDrafting,
+  canSend,
+  onDiscard,
+  onSend,
+  onAiDraft,
+  contextOpen,
+  onToggleContext,
+  recipients,
+  insightsCache,
+  expandedRecipients,
+  onToggleRecipientCard,
+  calendarEvents,
+}: ComposerPaneProps) {
+  const sendable = canSend();
+  return (
+    <div style={composerWithDrawerWrap}>
       <section
-        style={{
-          ...responsiveComposerWrap,
-          display: composerVisible ? "flex" : "none",
-        }}
+        style={composerWrap}
         data-testid="composer-wrap"
         aria-label="Email composer"
       >
@@ -1216,17 +1088,15 @@ export default function EmailsPage() {
             <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim)" }}>
               Drafts auto-save
             </span>
-            {isMobile ? (
-              <button
-                type="button"
-                aria-label="Close compose drawer"
-                data-testid="compose-close"
-                onClick={() => setComposeOpen(false)}
-                style={iconBtn}
-              >
-                ×
-              </button>
-            ) : null}
+            <button
+              type="button"
+              aria-label="Close composer"
+              data-testid="compose-close"
+              onClick={onClose}
+              style={iconBtn}
+            >
+              ×
+            </button>
           </div>
         </header>
 
@@ -1316,7 +1186,9 @@ export default function EmailsPage() {
             <input
               type="text"
               value={draft.subject}
-              onChange={(e) => setDraft((prev) => ({ ...prev, subject: e.target.value }))}
+              onChange={(e) =>
+                setDraft((prev) => ({ ...prev, subject: e.target.value }))
+              }
               placeholder="Subject"
               aria-label="Subject"
               style={textInput}
@@ -1326,7 +1198,6 @@ export default function EmailsPage() {
           <div style={{ ...fieldLabel, flex: 1, minHeight: 0 }}>
             <span style={fieldLabelText}>Body</span>
 
-            {/* Formatting toolbar */}
             <div style={toolbarRow} role="toolbar" aria-label="Formatting toolbar">
               <button
                 type="button"
@@ -1389,7 +1260,10 @@ export default function EmailsPage() {
               aria-label="Email body"
               data-testid="compose-body"
               onInput={() => {
-                setDraft((prev) => ({ ...prev, body: bodyRef.current?.innerHTML ?? "" }));
+                setDraft((prev) => ({
+                  ...prev,
+                  body: bodyRef.current?.innerHTML ?? "",
+                }));
               }}
               suppressContentEditableWarning
               style={bodyEditor}
@@ -1408,12 +1282,12 @@ export default function EmailsPage() {
           )}
 
           <div style={actionsRow}>
-            <button type="button" onClick={discard} style={btn()}>
+            <button type="button" onClick={onDiscard} style={btn()}>
               Discard
             </button>
             <button
               type="button"
-              onClick={requestAiDraft}
+              onClick={onAiDraft}
               disabled={aiDrafting}
               data-testid="ai-draft-btn"
               style={{ ...btn(), color: "var(--wp-gold)" }}
@@ -1422,13 +1296,13 @@ export default function EmailsPage() {
             </button>
             <button
               type="button"
-              onClick={send}
-              disabled={!canSend()}
+              onClick={onSend}
+              disabled={!sendable}
               data-testid="compose-send"
               style={{
                 ...btn("var(--wp-gold)"),
-                opacity: canSend() ? 1 : 0.5,
-                cursor: canSend() ? "pointer" : "not-allowed",
+                opacity: sendable ? 1 : 0.5,
+                cursor: sendable ? "pointer" : "not-allowed",
               }}
             >
               {busy ? "Sending…" : "Send"}
@@ -1437,25 +1311,19 @@ export default function EmailsPage() {
         </div>
       </section>
 
-      {/* Recipient insights */}
-      <aside style={responsiveInsightsWrap} aria-label="Recipient insights" data-testid="insights-panel">
-        <header style={insightsHeader}>
-          <span style={{ color: "var(--wp-gold)", fontWeight: 600, fontSize: "0.85rem" }}>
-            Recipient context
-          </span>
-        </header>
-        <div style={insightsBody}>
-          {mode === "empty" && (
-            <p style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>
-              Add a To: recipient to see recent threads, last meeting, and an
-              AI-summary of past correspondence.
-            </p>
-          )}
-          {mode === "single" && renderSinglePanel(draft.to[0]!)}
-          {mode === "multi" && renderMultiPanel(draft.to)}
-          {mode === "aggregate" && renderAggregatePanel(draft.to)}
-        </div>
-      </aside>
+      {/* Recipient context drawer — hidden entirely on mobile (the
+          composer is full-screen there); collapsible strip on desktop. */}
+      {!isMobile ? (
+        <RecipientContextDrawer
+          open={contextOpen}
+          onToggle={onToggleContext}
+          recipients={recipients}
+          insightsCache={insightsCache}
+          expandedRecipients={expandedRecipients}
+          onToggleRecipientCard={onToggleRecipientCard}
+          calendarEvents={calendarEvents}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1555,7 +1423,7 @@ function ChipFieldWithClose(p: ChipFieldWithCloseProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Styles — opaque var(--wp-*) only.
+// Styles
 // ---------------------------------------------------------------------------
 
 const pageWrap: React.CSSProperties = {
@@ -1563,62 +1431,52 @@ const pageWrap: React.CSSProperties = {
   width: "100%",
   display: "flex",
   flexDirection: "row",
-  gap: "0.75rem",
-  padding: "0.75rem",
+  gap: "0.6rem",
+  padding: "0.6rem",
   background: "var(--wp-dark)",
   overflow: "hidden",
   boxSizing: "border-box",
-  flexWrap: "wrap",
+  flexWrap: "nowrap",
 };
 
-const sidebarStyle: React.CSSProperties = {
+function inboxColStyle(isMobile: boolean): React.CSSProperties {
+  return {
+    width: isMobile ? "100%" : 340,
+    minWidth: isMobile ? 0 : 280,
+    flexShrink: 0,
+    display: "flex",
+    flexDirection: "column",
+    minHeight: 0,
+  };
+}
+
+function rightColStyle(isMobile: boolean): React.CSSProperties {
+  return {
+    flex: 1,
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+    minHeight: 0,
+    width: isMobile ? "100%" : undefined,
+    background: "var(--wp-dark)",
+  };
+}
+
+const composerWithDrawerWrap: React.CSSProperties = {
+  flex: 1,
+  display: "flex",
+  flexDirection: "row",
   background: "var(--wp-dark-surface)",
   border: "1px solid var(--wp-dark-border)",
-  borderRadius: "8px",
-  display: "flex",
-  flexDirection: "column",
+  borderRadius: 8,
   overflow: "hidden",
-  flexShrink: 0,
-  transition: "width 120ms ease",
-};
-
-const sidebarHeader: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "0.5rem 0.6rem",
-  borderBottom: "1px solid var(--wp-dark-border)",
-  background: "var(--wp-dark-surface2)",
-};
-
-const sidebarBody: React.CSSProperties = {
-  padding: "0.5rem",
-  display: "grid",
-  gap: "0.4rem",
-  overflowY: "auto",
-  flex: 1,
   minHeight: 0,
 };
 
-const templateBtn: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  textAlign: "left",
-  padding: "0.5rem 0.6rem",
-  background: "var(--wp-dark-surface2)",
-  border: "1px solid var(--wp-dark-border)",
-  borderRadius: "6px",
-  color: "var(--wp-text)",
-  cursor: "pointer",
-  fontSize: "0.82rem",
-};
-
 const composerWrap: React.CSSProperties = {
-  flex: "1 1 480px",
-  minWidth: "320px",
+  flex: 1,
+  minWidth: 0,
   background: "var(--wp-dark-surface)",
-  border: "1px solid var(--wp-dark-border)",
-  borderRadius: "8px",
   display: "flex",
   flexDirection: "column",
   overflow: "hidden",
@@ -1816,78 +1674,3 @@ function btn(bg = "var(--wp-dark-surface2)"): React.CSSProperties {
     whiteSpace: "nowrap",
   };
 }
-
-const insightsWrap: React.CSSProperties = {
-  width: "320px",
-  flexShrink: 0,
-  background: "var(--wp-dark-surface)",
-  border: "1px solid var(--wp-dark-border)",
-  borderRadius: "8px",
-  display: "flex",
-  flexDirection: "column",
-  overflow: "hidden",
-};
-
-const insightsHeader: React.CSSProperties = {
-  padding: "0.5rem 0.6rem",
-  borderBottom: "1px solid var(--wp-dark-border)",
-  background: "var(--wp-dark-surface2)",
-};
-
-const insightsBody: React.CSSProperties = {
-  padding: "0.65rem",
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.65rem",
-  overflowY: "auto",
-  flex: 1,
-  minHeight: 0,
-};
-
-const insightCell: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.25rem",
-  padding: "0.5rem 0.6rem",
-  background: "var(--wp-dark-surface2)",
-  border: "1px solid var(--wp-dark-border)",
-  borderRadius: "6px",
-};
-
-const cellLabel: React.CSSProperties = {
-  fontSize: "0.7rem",
-  color: "var(--wp-text-dim)",
-  textTransform: "uppercase",
-  letterSpacing: "0.04em",
-};
-
-const cellValue: React.CSSProperties = {
-  fontSize: "0.85rem",
-  color: "var(--wp-text)",
-  wordBreak: "break-word",
-};
-
-const threadList: React.CSSProperties = {
-  listStyle: "none",
-  padding: 0,
-  margin: 0,
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.4rem",
-};
-
-const threadItem: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "2px",
-};
-
-const threadSubject: React.CSSProperties = {
-  fontSize: "0.8rem",
-  color: "var(--wp-text)",
-};
-
-const threadMeta: React.CSSProperties = {
-  fontSize: "0.7rem",
-  color: "var(--wp-text-dim)",
-};
