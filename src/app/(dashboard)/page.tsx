@@ -1,10 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import IntegrationStatusBanner from "@/components/IntegrationStatusBanner";
 import MorningBriefing from "@/components/MorningBriefing";
 import MsInsightsPanel from "@/components/MsInsightsPanel";
 import { getInstinctToken, authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import {
+  FALLBACK_ACTIONS,
+  type QuickAction,
+} from "@/lib/insights/quick-actions";
 
 interface DashboardData {
   shadow_mode: boolean;
@@ -120,6 +124,49 @@ export function buildOnboardingSteps(status: SetupStatus | null): OnboardingStep
   ];
 }
 
+// Build the immediate cold-start tile list from FALLBACK_ACTIONS so
+// the card never renders empty during the first paint.
+const FALLBACK_QUICK_ACTIONS: QuickAction[] = FALLBACK_ACTIONS.map((a) => ({
+  label: a.label,
+  href: a.href,
+  score: 0,
+  source: "fallback" as const,
+}));
+
+/**
+ * Build the analytics payload for a Quick Action click. Pure function
+ * so the UI test can assert the exact payload shape without rendering
+ * the whole dashboard page.
+ */
+export function buildQuickActionClickPayload(
+  action: QuickAction,
+  position: number,
+): { event: "dashboard.quick_action_clicked"; metadata: { href: string; position: number; source: "personalized" | "fallback" } } {
+  return {
+    event: "dashboard.quick_action_clicked",
+    metadata: {
+      href: action.href,
+      position,
+      source: action.source,
+    },
+  };
+}
+
+/**
+ * Build the analytics payload for the once-per-mount "rendered" event.
+ */
+export function buildQuickActionsRenderedPayload(
+  actions: QuickAction[],
+): { event: "dashboard.quick_actions_rendered"; metadata: { source: "personalized" | "fallback"; action_count: number } } {
+  return {
+    event: "dashboard.quick_actions_rendered",
+    metadata: {
+      source: actions[0]?.source ?? "fallback",
+      action_count: actions.length,
+    },
+  };
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardData | null>(null);
   const [events, setEvents] = useState<RecentEvent[]>([]);
@@ -127,6 +174,13 @@ export default function DashboardPage() {
   const [showBriefing, setShowBriefing] = useState(false);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [setupComplete, setSetupComplete] = useState(true); // default true to avoid flash
+  // Personalized Quick Actions — initialised to the static fallback so the
+  // tile is never empty. Replaced once /api/insights/quick-actions resolves.
+  const [quickActions, setQuickActions] = useState<QuickAction[]>(FALLBACK_QUICK_ACTIONS);
+  // Ref guard — fire the rendered analytics event exactly once per mount.
+  // Using a ref (vs. state) avoids a setState-in-effect lint rule and a
+  // cascading render that would just toggle a flag.
+  const quickActionsRenderedRef = useRef(false);
 
   useEffect(() => {
     // Briefing available to all users; respects localStorage preference.
@@ -195,7 +249,46 @@ export default function DashboardPage() {
         }
       })
       .catch(() => {});
+
+    // Personalized Quick Actions — replaces the four hard-coded tiles
+    // with the user's most-used routes (decayed half-life over 30 days).
+    // Falls back silently to the static four on error. Fires the
+    // `dashboard.quick_actions_rendered` analytics event exactly once,
+    // after we know whether we're showing personalized or fallback —
+    // so click-through rate is grouped against the right cohort.
+    const fireRendered = (actions: QuickAction[]) => {
+      if (quickActionsRenderedRef.current) return;
+      quickActionsRenderedRef.current = true;
+      fetchWithRefresh("/api/analytics", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify(buildQuickActionsRenderedPayload(actions)),
+      }).catch(() => {});
+    };
+
+    fetchWithRefresh("/api/insights/quick-actions", { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((data: { actions?: QuickAction[] }) => {
+        if (Array.isArray(data?.actions) && data.actions.length > 0) {
+          setQuickActions(data.actions);
+          fireRendered(data.actions);
+        } else {
+          fireRendered(FALLBACK_QUICK_ACTIONS);
+        }
+      })
+      .catch(() => {
+        fireRendered(FALLBACK_QUICK_ACTIONS);
+      });
   }, []);
+
+  function handleQuickActionClick(action: QuickAction, position: number) {
+    // Fire-and-forget. Do NOT await — link navigation must not block.
+    fetchWithRefresh("/api/analytics", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify(buildQuickActionClickPayload(action, position)),
+    }).catch(() => {});
+  }
 
   if (loading) {
     return (
@@ -210,13 +303,6 @@ export default function DashboardPage() {
     { label: "Active Discussions", value: stats?.discussion_count ?? 0, color: "var(--wp-info)" },
     { label: "Feature Requests", value: stats?.feature_count ?? 0, color: "var(--wp-success)" },
     { label: "Team Members", value: stats?.team_count ?? 0, color: "var(--wp-warning)" },
-  ];
-
-  const quickActions = [
-    { label: "Ask a Question", href: "/knowledge" },
-    { label: "Create Discussion", href: "/discussions" },
-    { label: "Submit Feature", href: "/features" },
-    { label: "View Journal", href: "/journal" },
   ];
 
   return (
@@ -391,19 +477,28 @@ export default function DashboardPage() {
       )}
 
 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Quick Actions */}
+        {/* Quick Actions — personalized from page-view analytics with a
+            half-life of 14 days, top 4. Cold-start (insufficient history)
+            falls back to the four static tiles the dashboard ships with
+            so the card never looks broken to a brand-new user. */}
         <div
           className="rounded-lg p-5 border"
+          data-testid="quick-actions"
+          data-source={quickActions[0]?.source ?? "fallback"}
           style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
         >
           <h2 className="text-lg font-semibold mb-4" style={{ color: "var(--wp-gold)" }}>
             Quick Actions
           </h2>
           <div className="grid grid-cols-2 gap-3">
-            {quickActions.map((action) => (
+            {quickActions.map((action, idx) => (
               <a
-                key={action.label}
+                key={`${action.href}-${idx}`}
                 href={action.href}
+                data-testid="quick-action-tile"
+                data-source={action.source}
+                data-href={action.href}
+                onClick={() => handleQuickActionClick(action, idx)}
                 className="flex items-center gap-2 rounded-lg p-3 border transition-colors hover:border-[var(--wp-gold)]"
                 style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
               >

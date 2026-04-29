@@ -317,6 +317,22 @@ export type InstinctEventType =
   | "system.ai_call_skipped"
   | "system.search_performed"
   | "system.analytics_queried"
+  // Dashboard — personalized Quick Actions tile.
+  //
+  //   dashboard.quick_actions_rendered
+  //     { source: "personalized" | "fallback", action_count }
+  //     — fired once on mount when the Quick Actions card hydrates so
+  //       the learning loop knows which users got personalized vs. the
+  //       static cold-start list.
+  //
+  //   dashboard.quick_action_clicked
+  //     { href, position, source: "personalized" | "fallback" }
+  //     — fired when a tile is clicked. Click-through rate per
+  //       personalized recommendation closes the loop on the half-life
+  //       ranker: personalized rendered ÷ personalized clicked is the
+  //       direct CTR signal we use to evaluate the algorithm.
+  | "dashboard.quick_actions_rendered"
+  | "dashboard.quick_action_clicked"
   // Assistant
   | "assistant.file_attached"
   | "assistant.doc_quality_checked"
