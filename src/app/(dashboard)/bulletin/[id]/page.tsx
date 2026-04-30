@@ -71,9 +71,13 @@ interface Note {
   width_pct: number;
   height_pct: number;
   rotation_deg: number;
-  association_kind: AssociationKind | null;
-  association_id: string | null;
-  association_label: string | null;
+  /* Lib returns these in camelCase; the API forwards the lib row
+     verbatim. The original spec used snake_case here which never
+     matched what the server actually returned — confirmed by
+     inspecting `BulletinNote` in src/lib/bulletin/notes.ts. */
+  associationKind: AssociationKind | null;
+  associationId: string | null;
+  associationLabel: string | null;
   createdByUserId: string;
   createdByUserRole: string | null;
   createdByUserName: string | null;
@@ -84,9 +88,9 @@ interface Note {
 interface Snapshot {
   id: string;
   boardId: string;
-  association_kind: AssociationKind | null;
-  association_id: string | null;
-  association_label: string | null;
+  associationKind: AssociationKind | null;
+  associationId: string | null;
+  associationLabel: string | null;
   createdByUserId: string;
   createdAt: string;
 }
@@ -436,7 +440,16 @@ export default function BulletinBoardPage({
   }
 
   /* ── notes: patch (debounced for high-frequency updates) ────────── */
-  function patchNoteServer(id: string, patch: Partial<Note>): Promise<void> {
+  /* The PATCH endpoint accepts the in-memory note fields PLUS an
+     `association: {kind,id,label}|null` setter (which the server
+     translates into the three association_* columns). The Partial<Note>
+     type doesn't carry that setter, so we widen here. */
+  type NotePatchInput = Partial<Note> & {
+    association?:
+      | { kind: AssociationKind; id: string; label: string }
+      | null;
+  };
+  function patchNoteServer(id: string, patch: NotePatchInput): Promise<void> {
     return fetchWithRefresh(
       `/api/bulletin/notes/${encodeURIComponent(id)}`,
       {
@@ -541,7 +554,14 @@ export default function BulletinBoardPage({
         },
       );
       if (!res.ok) {
-        setSnapshotError("Failed to save snapshot.");
+        const errBody = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        setSnapshotError(
+          errBody.error
+            ? `Save failed (${res.status}): ${errBody.error}`
+            : `Save failed (${res.status})`,
+        );
         return;
       }
       const data = (await res.json()) as { snapshot: Snapshot };
@@ -861,7 +881,7 @@ export default function BulletinBoardPage({
                 }}
               >
                 <div>{formatDate(s.createdAt)}</div>
-                {s.association_label ? (
+                {s.associationLabel ? (
                   <div
                     style={{
                       color: "var(--wp-text)",
@@ -869,7 +889,7 @@ export default function BulletinBoardPage({
                       marginTop: 2,
                     }}
                   >
-                    [{s.association_kind}] {s.association_label}
+                    [{s.associationKind}] {s.associationLabel}
                   </div>
                 ) : null}
                 <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
@@ -1111,8 +1131,17 @@ function NoteView({
   onActivate: () => void;
   onDeactivate: () => void;
   onPatchOptimistic: (id: string, patch: Partial<Note>) => void;
+  // patchNoteServer accepts a wider input that includes the server's
+  // `association` setter; cast at the call site.
   onPatchDebounced: (id: string, patch: Partial<Note>, ms?: number) => void;
-  onPatchImmediate: (id: string, patch: Partial<Note>) => Promise<void>;
+  onPatchImmediate: (
+    id: string,
+    patch: Partial<Note> & {
+      association?:
+        | { kind: AssociationKind; id: string; label: string }
+        | null;
+    },
+  ) => Promise<void>;
   onDelete: () => void;
   canvasRef: React.RefObject<HTMLDivElement | null>;
 }) {
@@ -1206,15 +1235,22 @@ function NoteView({
     id: string;
     label: string;
   }) {
+    /* Optimistic — local state still uses camelCase fields per the
+       lib's response shape. */
     onPatchOptimistic(note.id, {
-      association_kind: p.kind,
-      association_id: p.kind ? p.id : null,
-      association_label: p.kind ? p.label : null,
+      associationKind: p.kind,
+      associationId: p.kind ? p.id : null,
+      associationLabel: p.kind ? p.label : null,
     });
+    /* Server PATCH — endpoint expects `association: {kind,id,label} | null`
+       (verified in src/app/api/bulletin/notes/[id]/route.ts). The
+       previous payload sent `association_kind` etc as top-level keys
+       which the route silently dropped, so note associations never
+       persisted. */
     void onPatchImmediate(note.id, {
-      association_kind: p.kind,
-      association_id: p.kind ? p.id : null,
-      association_label: p.kind ? p.label : null,
+      association: p.kind
+        ? { kind: p.kind, id: p.id, label: p.label }
+        : null,
     });
   }
 
@@ -1352,7 +1388,7 @@ function NoteView({
               cursor: "pointer",
             }}
           >
-            {note.association_label ? "linked" : "link"}
+            {note.associationLabel ? "linked" : "link"}
           </button>
         </div>
         <span
@@ -1423,9 +1459,9 @@ function NoteView({
           }}
         >
           <AssociationPicker
-            kind={note.association_kind}
-            id={note.association_id || ""}
-            label={note.association_label || ""}
+            kind={note.associationKind}
+            id={note.associationId || ""}
+            label={note.associationLabel || ""}
             onChange={setAssociation}
             testIdPrefix={`bulletin-note-assoc-${note.id}`}
           />

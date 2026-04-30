@@ -363,16 +363,17 @@ describe("/bulletin/[id]", () => {
           return false;
         try {
           const body = JSON.parse(c[1].body);
-          return body.association_id === "t1";
+          /* PATCH endpoint shape: { association: {kind, id, label} } */
+          return body.association?.id === "t1";
         } catch {
           return false;
         }
       });
       expect(patchCall).toBeTruthy();
       const body = JSON.parse(patchCall![1].body);
-      expect(body.association_kind).toBe("task");
-      expect(body.association_id).toBe("t1");
-      expect(body.association_label).toBe("Buy milk");
+      expect(body.association.kind).toBe("task");
+      expect(body.association.id).toBe("t1");
+      expect(body.association.label).toBe("Buy milk");
     });
   });
 
