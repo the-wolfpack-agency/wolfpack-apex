@@ -785,13 +785,53 @@ export default function QrPage() {
   }
 
   return (
-    <div data-testid="qr-page" style={{ display: "grid", gap: "1.5rem" }}>
+    <div
+      data-testid="qr-page"
+      style={{
+        display: "grid",
+        gap: "1.5rem",
+        maxWidth: "100%",
+        minWidth: 0,
+        overflowX: "hidden",
+        padding: "0 1rem",
+      }}
+    >
+      <style jsx global>{`
+        [data-testid="qr-page"] h1 {
+          font-size: 1.5rem;
+          line-height: 1.2;
+          word-break: break-word;
+          overflow-wrap: anywhere;
+        }
+        [data-testid="qr-page"] input,
+        [data-testid="qr-page"] textarea {
+          max-width: 100%;
+          min-width: 0;
+          box-sizing: border-box;
+        }
+        [data-testid="qr-page"] .qr-create-grid {
+          display: grid;
+          gap: 0.75rem;
+          grid-template-columns: 1fr 1fr;
+        }
+        @media (max-width: 640px) {
+          [data-testid="qr-page"] {
+            padding: 0 0.75rem;
+          }
+          [data-testid="qr-page"] h1 {
+            font-size: 1.25rem;
+          }
+          [data-testid="qr-page"] .qr-create-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+      `}</style>
       <header>
         <h1
           className="text-2xl font-bold mb-1"
           style={{ color: "var(--wp-gold)" }}
         >
-          QR Codes — generate, share, track
+          QR Codes
         </h1>
         <p
           style={{
@@ -800,8 +840,9 @@ export default function QrPage() {
             margin: 0,
           }}
         >
-          Create QR codes for posters, business cards, and handouts.
-          Change the destination anytime. The printed code keeps working.
+          Generate, share, and track. Create QR codes for posters,
+          business cards, and handouts. Change the destination anytime.
+          The printed code keeps working.
         </p>
       </header>
 
@@ -812,14 +853,8 @@ export default function QrPage() {
           onSubmit={handleCreate}
           style={{ display: "grid", gap: "0.75rem" }}
         >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "0.75rem",
-            }}
-          >
-            <label style={{ display: "grid", gap: 4 }}>
+          <div className="qr-create-grid">
+            <label style={{ display: "grid", gap: 4, minWidth: 0 }}>
               <span
                 style={{
                   fontSize: "0.75rem",
