@@ -265,8 +265,17 @@ export default function KnowledgePage() {
     /* Server-side semantic cache + LLM fallback. Migration 108 +
        /api/knowledge/ask. We try this FIRST so a cache hit is free; the
        offline RAG wrapper is only consulted when the server path fails
-       (typically: offline). */
+       (typically: offline). When the browser is offline we skip the
+       network call entirely — the offline-aware wrapper below is the
+       authoritative path in that case (preserves the snapshot badge +
+       offline-miss copy that the offline-mode tests lock in). */
+    const shouldTryServer =
+      typeof navigator === "undefined" || navigator.onLine !== false;
     try {
+      if (!shouldTryServer) {
+        /* Skip into the legacy wrapper below. */
+        throw new Error("offline — skip server cache call");
+      }
       const res = await fetchWithRefresh("/api/knowledge/ask", {
         method: "POST",
         headers: authHeaders(),
@@ -1055,7 +1064,14 @@ export default function KnowledgePage() {
           className="rounded-lg border p-8 text-center"
           style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
         >
-          <p style={{ color: "var(--wp-text-muted)" }}>
+          <p
+            className="font-medium"
+            style={{ color: "var(--wp-text)" }}
+            data-testid="knowledge-empty-state"
+          >
+            No knowledge entries found.
+          </p>
+          <p className="mt-2 text-sm" style={{ color: "var(--wp-text-muted)" }}>
             Search our knowledge base, or ask a new question. AI will answer if we don&apos;t have it indexed yet — and the answer joins the knowledge base for everyone.
           </p>
         </div>
