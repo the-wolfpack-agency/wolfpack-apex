@@ -47,10 +47,13 @@ const GOALS_RE = /\b(okr|okrs|north star|kr\b|key result|goals?)\b/i;
 const MAIL_RE = /\bemail\b.*\b(from|about|regarding)\b|\bfind\s+(the\s+)?email\b/i;
 const HISTORY_RE = /\b(how (?:long|many|much)|summary of|tell me about|history of|when was|how did)\b/i;
 // Third-person / org-wide meeting questions bound to a specific date.
-// "which meetings did wolfpack have on April 21, 2026"
-// "what meetings did we have yesterday"
-// "meetings on 2026-04-21"
-const MEETINGS_ON_DATE_RE = /\b(?:which|what|any)\s+meetings?\b|\bmeetings?\s+(?:on|at|for)\b/i;
+// Match ANY message containing the word meeting/meetings — once the
+// caller mentions "meetings" plus a date, we always want the tool. The
+// previous narrower form ("which/what/any meetings" or "meetings
+// on/at/for") missed real prod queries like "april 30th meetings?" and
+// let them fall through to the LLM, which then hallucinated "no
+// meetings recorded" because the system prompt had no grounding.
+const MEETINGS_ON_DATE_RE = /\bmeetings?\b/i;
 const EXPLICIT_DATE_RE = /\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)(?:uary|ruary|ch|il|e|y|ust|tember|ember|ober)?\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*,\s*|\s+)?\d{0,4})\b/i;
 const RELATIVE_DATE_RE = /\b(yesterday|today|tomorrow|last\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i;
 
