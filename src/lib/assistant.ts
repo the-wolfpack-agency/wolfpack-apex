@@ -191,6 +191,32 @@ interface OrgQACacheHit {
   originalMessageId: string;
 }
 
+/** Stop-words removed from the fuzzy-match token set. */
+const STOPWORDS = new Set([
+  "the","a","an","of","and","or","but","is","are","was","were","be","been",
+  "do","did","does","have","has","had","this","that","these","those","i",
+  "you","we","they","my","our","their","on","in","at","to","for","with",
+  "about","what","which","who","whom","when","where","why","how","please",
+  "tell","me","show","get","give","could","would","should","can","may",
+]);
+
+function tokenSet(text: string): Set<string> {
+  return new Set(
+    normalizeQuestionForCache(text)
+      .split(" ")
+      .filter((t) => t.length >= 2 && !STOPWORDS.has(t)),
+  );
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const t of a) if (b.has(t)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+
+const FUZZY_SIM_THRESHOLD = 0.8;
+
 async function findOrgQACacheHit(
   message: string,
 ): Promise<OrgQACacheHit | null> {
@@ -235,13 +261,62 @@ async function findOrgQACacheHit(
       [normalized, ttlMs],
     );
     const row = r.rows[0];
-    if (!row) return null;
-    return {
-      answer: row.answer,
-      source: (row.source ?? "ai") as AssistantSource,
-      originalTokens: row.tokens_used ?? 0,
-      originalMessageId: row.message_id,
-    };
+    if (row) {
+      return {
+        answer: row.answer,
+        source: (row.source ?? "ai") as AssistantSource,
+        originalTokens: row.tokens_used ?? 0,
+        originalMessageId: row.message_id,
+      };
+    }
+
+    /* No exact match. Pull a window of recent user→assistant pairs and
+       rank them by token-set Jaccard similarity to the incoming
+       question. ALL answered questions become potential cache hits —
+       supports paraphrases and trivial reformatting differences. */
+    const fuzzy = await safeQuery<{
+      message_id: string;
+      question: string;
+      answer: string;
+      source: AssistantSource | null;
+      tokens_used: number;
+    }>(
+      `SELECT a.id AS message_id, u.content AS question, a.content AS answer,
+              a.source, a.tokens_used
+         FROM instinct_messages u
+         JOIN LATERAL (
+           SELECT m2.id, m2.content, m2.source, m2.tokens_used, m2.created_at
+             FROM instinct_messages m2
+            WHERE m2.conversation_id = u.conversation_id
+              AND m2.role = 'assistant'
+              AND m2.created_at > u.created_at
+            ORDER BY m2.created_at ASC
+            LIMIT 1
+         ) a ON TRUE
+        WHERE u.role = 'user'
+          AND u.created_at > NOW() - ($1::bigint || ' milliseconds')::interval
+          AND a.source IS DISTINCT FROM 'fallback'
+          AND a.tokens_used > 0
+        ORDER BY u.created_at DESC
+        LIMIT 200`,
+      [ttlMs],
+    );
+
+    const incomingTokens = tokenSet(message);
+    let best: { row: typeof fuzzy.rows[number]; score: number } | null = null;
+    for (const candidate of fuzzy.rows) {
+      const score = jaccard(incomingTokens, tokenSet(candidate.question));
+      if (!best || score > best.score) best = { row: candidate, score };
+    }
+    if (best && best.score >= FUZZY_SIM_THRESHOLD) {
+      return {
+        answer: best.row.answer,
+        source: (best.row.source ?? "ai") as AssistantSource,
+        originalTokens: best.row.tokens_used ?? 0,
+        originalMessageId: best.row.message_id,
+      };
+    }
+    return null;
   } catch {
     return null;
   }
