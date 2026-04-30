@@ -1576,10 +1576,25 @@ export type InstinctEventType =
   //     - One per failed surface. `scope_missing` is true when Graph
   //       returned 403 with an authorization error code. Used to drive
   //       the "Reconnect Microsoft 365" banner in the assistant UI.
+  //
+  //   assistant.meeting_lookup_failed     { status, scope_missing }
+  //     - Fired when the meeting-transcripts surface fails (Plaud/DB
+  //       errored, query parse failed, etc.). Mirrors the SharePoint /
+  //       Project failure events so the same dashboard can show all
+  //       three context surfaces side-by-side.
+  //
+  //   assistant.knowledge_cache_bypassed  { reason }
+  //     - Fired when the assistant intentionally skips the knowledge
+  //       cache lookup (e.g. date-bound or meeting-bound questions).
+  //       Cache hit-rate is already tracked. This event closes the
+  //       loop so we can see how often the cache is routed around and
+  //       why.
   | "assistant.context_resolved"
   | "assistant.context_truncated"
   | "assistant.sharepoint_lookup_failed"
-  | "assistant.project_lookup_failed";
+  | "assistant.project_lookup_failed"
+  | "assistant.meeting_lookup_failed"
+  | "assistant.knowledge_cache_bypassed";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;
