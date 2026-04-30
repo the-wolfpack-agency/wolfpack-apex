@@ -32,6 +32,7 @@ import {
   jsonHeaders,
   getInstinctToken,
 } from "@/lib/client-auth";
+import { downloadQr, QR_FORMATS, type QrFormat } from "./download";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -388,6 +389,110 @@ function HourHeatmap({
 /* ------------------------------------------------------------------ */
 /* Section card                                                        */
 /* ------------------------------------------------------------------ */
+
+/**
+ * DownloadMenu — single-line: format <select> + size <select> (raster
+ * formats only) + Download button. Pure client; no analytics tokens
+ * burned. Defaults to PNG @ 1024 — the size most people want for
+ * print + slides without thinking.
+ */
+function DownloadMenu({
+  testId,
+  svg,
+  slug,
+}: {
+  testId: string;
+  svg: string;
+  slug: string;
+}) {
+  const [format, setFormat] = useState<QrFormat>("png");
+  const [size, setSize] = useState<number>(1024);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const isRaster = format === "png" || format === "jpg";
+
+  async function go() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await downloadQr({
+        svg,
+        slug,
+        format,
+        size: isRaster ? (size as 256 | 512 | 1024 | 2048) : undefined,
+      });
+    } catch (e) {
+      setErr((e as Error).message || "Download failed");
+    }
+    setBusy(false);
+  }
+
+  const selectStyle: React.CSSProperties = {
+    padding: "6px 8px",
+    borderRadius: 6,
+    border: "1px solid var(--wp-dark-border)",
+    background: "var(--wp-dark-surface2)",
+    color: "var(--wp-text)",
+    fontSize: 12,
+    minWidth: 0,
+  };
+
+  return (
+    <div data-testid={testId} style={{ display: "grid", gap: 6 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        <select
+          data-testid={`${testId}-format`}
+          value={format}
+          onChange={(e) => setFormat(e.target.value as QrFormat)}
+          style={selectStyle}
+          aria-label="Download format"
+        >
+          {QR_FORMATS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        {isRaster ? (
+          <select
+            data-testid={`${testId}-size`}
+            value={size}
+            onChange={(e) => setSize(Number(e.target.value))}
+            style={selectStyle}
+            aria-label="Image size"
+          >
+            <option value={256}>256 px</option>
+            <option value={512}>512 px</option>
+            <option value={1024}>1024 px</option>
+            <option value={2048}>2048 px (print)</option>
+          </select>
+        ) : null}
+        <button
+          type="button"
+          data-testid={`${testId}-go`}
+          onClick={go}
+          disabled={busy}
+          style={{
+            padding: "6px 14px",
+            borderRadius: 6,
+            border: "1px solid var(--wp-gold)",
+            background: "var(--wp-gold)",
+            color: "var(--wp-dark)",
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: busy ? "wait" : "pointer",
+          }}
+        >
+          {busy ? "Saving…" : "Download"}
+        </button>
+      </div>
+      {err ? (
+        <span style={{ color: "var(--wp-error)", fontSize: 11 }}>{err}</span>
+      ) : null}
+    </div>
+  );
+}
 
 function SectionCard({
   title,
@@ -1025,16 +1130,11 @@ export default function QrPage() {
                 >
                   Copy short link
                 </button>
-                <button
-                  data-testid="qr-latest-download"
-                  type="button"
-                  onClick={() =>
-                    downloadSvg(latestCreated.qrSvg, latestCreated.code.slug)
-                  }
-                  style={btnSecondary}
-                >
-                  Download SVG
-                </button>
+                <DownloadMenu
+                  testId="qr-latest-download"
+                  svg={latestCreated.qrSvg}
+                  slug={latestCreated.code.slug}
+                />
               </div>
             </div>
           </div>
@@ -1255,14 +1355,13 @@ export default function QrPage() {
                             }}
                           />
                           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                            <button
-                              type="button"
-                              data-testid={`qr-row-svg-download-${c.slug}`}
-                              onClick={() => row.qrSvg && downloadSvg(row.qrSvg, c.slug)}
-                              style={btnSecondary}
-                            >
-                              Download SVG
-                            </button>
+                            {row.qrSvg ? (
+                              <DownloadMenu
+                                testId={`qr-row-svg-download-${c.slug}`}
+                                svg={row.qrSvg}
+                                slug={c.slug}
+                              />
+                            ) : null}
                             <span style={{ fontSize: 12, color: "var(--wp-text-dim)" }}>
                               Scans to <strong>/q/{c.slug}</strong>
                             </span>
