@@ -1606,7 +1606,15 @@ export type InstinctEventType =
      `assistant.context_resolved` (which fires inside the resolver on
      every assistant call) so triage dashboards can isolate "user is
      debugging grounding" runs from regular traffic. */
-  | "assistant.context_debug_invoked";
+  | "assistant.context_debug_invoked"
+  /* grounding_debug_invoked: emitted by GET /api/assistant/grounding-debug
+     each time the /admin/assistant-debug self-service diagnostic page
+     loads. Distinct from `assistant.context_debug_invoked` (which only
+     reflects the resolver bundle); this event additionally captures
+     whether the user's stored Microsoft token decoded, what scopes it
+     carried, and whether live Graph probes succeeded. Drives "user is
+     stuck on grounding" triage dashboards. */
+  | "assistant.grounding_debug_invoked";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;
