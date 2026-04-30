@@ -45,6 +45,18 @@ interface AskResult {
   similarity?: number;
   /** True when the server replied but has no cached answer for this question. */
   offlineMiss?: boolean;
+  /**
+   * Server-side semantic cache fields (migration 108 — /api/knowledge/ask).
+   * When the LLM-fallback path was used we surface the AI badge so the
+   * user always knows whether the answer came from a curated source or
+   * from a model. `qaId` is the row id used by the feedback endpoint.
+   */
+  qaId?: string;
+  isAiGenerated?: boolean;
+  aiModel?: string | null;
+  aiGeneratedAt?: string | null;
+  wasServerCacheHit?: boolean;
+  feedbackSubmitted?: "helpful" | "not_helpful" | null;
 }
 
 function mkEntryId(): string {
@@ -217,11 +229,91 @@ export default function KnowledgePage() {
     fetchEntries(search || undefined);
   }
 
+  /**
+   * Submit thumbs-up / thumbs-down on the most recent AI answer.
+   * Hits /api/knowledge/feedback so the cache lib can auto-flag bad
+   * rows once not_helpful_count > 5 with no helpful votes.
+   */
+  async function handleQaFeedback(helpful: boolean) {
+    if (!askResult || !askResult.qaId) return;
+    if (askResult.feedbackSubmitted) return;
+    setAskResult((prev) =>
+      prev
+        ? { ...prev, feedbackSubmitted: helpful ? "helpful" : "not_helpful" }
+        : prev,
+    );
+    try {
+      await fetchWithRefresh("/api/knowledge/feedback", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          qa_id: askResult.qaId,
+          helpful,
+          surface: "knowledge",
+        }),
+      });
+    } catch {
+      // best-effort — leave the optimistic UI in place even on failure
+    }
+  }
+
   async function handleAsk(e: FormEvent, forceRefresh = false) {
     e.preventDefault();
     if (!question.trim()) return;
     setAsking(true);
     setAskResult(null);
+    /* Server-side semantic cache + LLM fallback. Migration 108 +
+       /api/knowledge/ask. We try this FIRST so a cache hit is free; the
+       offline RAG wrapper is only consulted when the server path fails
+       (typically: offline). */
+    try {
+      const res = await fetchWithRefresh("/api/knowledge/ask", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ question, surface: "knowledge" }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          qa_id: string;
+          answer: string;
+          source: "ai_generated" | "internal_doc" | "human_curated";
+          ai_model: string | null;
+          ai_generated_at: string | null;
+          was_cache_hit: boolean;
+          similarity?: number;
+        };
+        const synthetic: KnowledgeEntry = {
+          id: data.qa_id,
+          question,
+          answer: data.answer,
+          source: data.source === "ai_generated" ? "ai" : data.source === "internal_doc" ? "docs" : "human",
+          asked_by: "",
+          confidence: data.similarity ?? 1,
+          rating: null,
+          view_count: 0,
+          tokens_used: 0,
+          tags: [],
+          created_at: new Date().toISOString(),
+        };
+        setAskResult({
+          answer: synthetic,
+          source: synthetic.source,
+          qaId: data.qa_id,
+          isAiGenerated: data.source === "ai_generated",
+          aiModel: data.ai_model,
+          aiGeneratedAt: data.ai_generated_at,
+          wasServerCacheHit: data.was_cache_hit,
+          feedbackSubmitted: null,
+        });
+        setAsking(false);
+        return;
+      }
+      /* Non-200 — fall through to the offline-aware wrapper so the user
+         still sees a cached answer when one exists locally. */
+    } catch {
+      /* Network error — same fall-through. */
+    }
+
     try {
       const result = await queryKnowledgeWithCache(question, { forceRefresh });
       if (result.from_cache) {
@@ -837,7 +929,7 @@ export default function KnowledgePage() {
                       />
                     </div>
                   )}
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
                     <span
                       className="text-xs px-2 py-0.5 rounded font-medium"
                       style={{
@@ -847,11 +939,94 @@ export default function KnowledgePage() {
                     >
                       {askResult.source}
                     </span>
+                    {askResult.isAiGenerated && (
+                      <span
+                        data-testid="knowledge-ai-badge"
+                        className="text-xs px-2 py-0.5 rounded font-semibold"
+                        style={{
+                          background: "var(--wp-gold)",
+                          color: "var(--wp-dark)",
+                        }}
+                      >
+                        AI-generated answer
+                        {askResult.aiModel ? ` • ${askResult.aiModel}` : ""}
+                        {askResult.aiGeneratedAt
+                          ? ` • ${new Date(askResult.aiGeneratedAt).toLocaleString()}`
+                          : ""}
+                      </span>
+                    )}
+                    {askResult.wasServerCacheHit && (
+                      <span
+                        data-testid="knowledge-cache-badge"
+                        className="text-xs px-2 py-0.5 rounded"
+                        style={{
+                          background: "var(--wp-success)20",
+                          color: "var(--wp-success)",
+                        }}
+                      >
+                        cached
+                      </span>
+                    )}
                     <span className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
                       0 tokens used
                     </span>
                   </div>
                   <p className="text-sm">{askResult.answer.answer}</p>
+                  {askResult.qaId && (
+                    <div
+                      className="mt-3 flex items-center gap-2"
+                      data-testid="knowledge-feedback-row"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleQaFeedback(true)}
+                        disabled={!!askResult.feedbackSubmitted}
+                        data-testid="knowledge-feedback-helpful"
+                        className="text-xs px-2 py-1 rounded border transition-colors disabled:opacity-50"
+                        style={{
+                          background:
+                            askResult.feedbackSubmitted === "helpful"
+                              ? "var(--wp-success)20"
+                              : "var(--wp-dark-surface)",
+                          borderColor: "var(--wp-dark-border)",
+                          color:
+                            askResult.feedbackSubmitted === "helpful"
+                              ? "var(--wp-success)"
+                              : "var(--wp-text)",
+                        }}
+                      >
+                        Helpful
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQaFeedback(false)}
+                        disabled={!!askResult.feedbackSubmitted}
+                        data-testid="knowledge-feedback-not-helpful"
+                        className="text-xs px-2 py-1 rounded border transition-colors disabled:opacity-50"
+                        style={{
+                          background:
+                            askResult.feedbackSubmitted === "not_helpful"
+                              ? "var(--wp-error)20"
+                              : "var(--wp-dark-surface)",
+                          borderColor: "var(--wp-dark-border)",
+                          color:
+                            askResult.feedbackSubmitted === "not_helpful"
+                              ? "var(--wp-error)"
+                              : "var(--wp-text)",
+                        }}
+                      >
+                        Not helpful
+                      </button>
+                      {askResult.feedbackSubmitted && (
+                        <span
+                          className="text-xs"
+                          style={{ color: "var(--wp-text-dim)" }}
+                        >
+                          Thanks — recorded.
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : askResult.offlineMiss ? (
                 <p
@@ -880,7 +1055,9 @@ export default function KnowledgePage() {
           className="rounded-lg border p-8 text-center"
           style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
         >
-          <p style={{ color: "var(--wp-text-muted)" }}>No knowledge entries found.</p>
+          <p style={{ color: "var(--wp-text-muted)" }}>
+            Search our knowledge base, or ask a new question. AI will answer if we don&apos;t have it indexed yet — and the answer joins the knowledge base for everyone.
+          </p>
         </div>
       ) : (
         <div className="space-y-2">

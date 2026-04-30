@@ -101,6 +101,14 @@ jobs:
         continue-on-error: true
         run: npx playwright test tests/e2e/messages-bugs.spec.ts --config=playwright.config.ts --reporter=github
 
+      # Knowledge semantic Q&A cache + LLM fallback (migration 108).
+      # Soft gate while we wait for the embed key in CI; promote once
+      # OPENAI_API_KEY + a primed knowledge_qa_entries table are
+      # reliably available against the smoke target.
+      - name: Knowledge Q&A cache spec (soft)
+        continue-on-error: true
+        run: npx playwright test tests/e2e/knowledge-qa-cache.spec.ts --config=playwright.config.ts --reporter=github
+
 
       - name: Upload Playwright report
         if: always()
