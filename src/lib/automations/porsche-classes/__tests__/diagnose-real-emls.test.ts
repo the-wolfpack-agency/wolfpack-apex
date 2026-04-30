@@ -88,7 +88,7 @@ function findSurveyFiles(root: string): string[] {
 
       // Surface the structured failure when it fails — diff-friendly.
       if (!result.ok) {
-        // eslint-disable-next-line no-console
+         
         console.error(
           `[${f}] parser returned !ok: ${result.error}`,
           result.detail ?? {},
@@ -106,7 +106,7 @@ function findSurveyFiles(root: string): string[] {
         expect(s.source_payload?.class_key).toMatch(/.+\|.+\|.+/);
         expect(s.class?.course_type).toBeTruthy();
         expect(s.class?.class_date).toBeTruthy();
-        // eslint-disable-next-line no-console
+         
         console.log(
           `[${f}] ok class_key=${s.source_payload.class_key} course=${s.class.course_type} date=${s.class.class_date} location="${s.class.location}"`,
         );
@@ -124,12 +124,12 @@ function findSurveyFiles(root: string): string[] {
       const bytes = fs.readFileSync(full);
       const decoded = decodeSurveyRows(bytes);
       if ("error" in decoded) {
-        // eslint-disable-next-line no-console
+         
         console.error(`[${path.basename(full)}] decodeSurveyRows failed:`, decoded.error);
       }
       expect("error" in decoded).toBe(false);
       if (!("error" in decoded)) {
-        // eslint-disable-next-line no-console
+         
         console.log(
           `[${path.basename(full)}] rows=${decoded.rows.length}`,
         );
@@ -168,7 +168,7 @@ function findSurveyFiles(root: string): string[] {
             source_message_id: `diagnostic:${filename}`,
             source_artifact_id: `diagnostic:${filename}:body`,
           } as any);
-          // eslint-disable-next-line no-console
+           
           console.log(
             `[${filename}] multi-class detected (sameCourseMultiLocation=${isSameCourseMultiLocation}) parseSurvey.ok=${result.ok}`,
           );
@@ -186,7 +186,7 @@ function findSurveyFiles(root: string): string[] {
             source_artifact_id: `diagnostic:${filename}:body`,
           } as any);
           if (!result.ok) {
-            // eslint-disable-next-line no-console
+             
             console.error(
               `[${filename}] parseSurvey returned !ok: ${result.error}`,
               (result as any).detail ?? {},
@@ -197,7 +197,7 @@ function findSurveyFiles(root: string): string[] {
             const snaps = (result as any).snapshots;
             const s = snaps[0];
             const survey = s.source_payload?.survey;
-            // eslint-disable-next-line no-console
+             
             console.log(
               `[${filename}] ok class_key=${s.class.course_type}|${s.class.class_date}|${s.class.location} respondents=${survey?.response_count ?? "?"} questions=${survey?.questions?.length ?? "?"}`,
             );
@@ -234,7 +234,7 @@ function findSurveyFiles(root: string): string[] {
       } as Parameters<typeof parseXlsx>[0]);
 
       if (!result.ok) {
-        // eslint-disable-next-line no-console
+         
         console.error(
           `[${f}] parseXlsx returned !ok: ${result.error}`,
           (result as any).detail ?? {},
@@ -245,7 +245,7 @@ function findSurveyFiles(root: string): string[] {
         const snaps = (result as any).snapshots;
         expect(Array.isArray(snaps)).toBe(true);
         expect(snaps.length).toBeGreaterThan(0);
-        // eslint-disable-next-line no-console
+         
         console.log(
           `[${f}] ok snapshot_count=${snaps.length} first_class=${snaps[0]?.class?.course_type}|${snaps[0]?.class?.class_date}|${snaps[0]?.class?.location} participants=${snaps[0]?.class?.participants?.length ?? 0}`,
         );

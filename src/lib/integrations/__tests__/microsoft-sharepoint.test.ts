@@ -61,7 +61,7 @@ function err(status: number, body: any = {}, headers: Record<string, string> = {
 
 describe("toWebViewerUrl", () => {
   /* Late require so the module is loaded with the mocked analytics import. */
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { toWebViewerUrl } = require("@/lib/integrations/microsoft-sharepoint");
 
   test.each([

@@ -80,7 +80,7 @@ export interface CategorizeResult {
  */
 const CONFIDENCE_FLOOR = 0.6;
 
-/* eslint-disable max-len */
+ 
 const SYSTEM_PROMPT = `You are a support-ticket classifier for the Wolfpack Agency operator team. Your job is to read one ticket and pick exactly one category from this list:
 
 - "m365": Microsoft 365 issues (email, Outlook, calendar, Teams, OneDrive, SharePoint, Entra ID / Azure AD sign-in errors like AADSTSxxxxx, MFA, license assignment).
@@ -100,7 +100,7 @@ Rules:
 5. If you are not sure, return "general" with confidence below 0.6 — do not guess wildly.
 
 Output exactly: {"category":"...","confidence":0.0,"reasoning":"..."}`;
-/* eslint-enable max-len */
+ 
 
 /**
  * Build the user message payload from a ticket. Title and body are

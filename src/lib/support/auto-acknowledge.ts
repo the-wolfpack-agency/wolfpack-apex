@@ -110,7 +110,7 @@ const FORBIDDEN_OUTPUT_PHRASES: readonly string[] = [
   "your password is",
 ];
 
-/* eslint-disable max-len */
+ 
 const SYSTEM_PROMPT = [
   "You are auto-replying to a support email. NEVER assert facts about the user's account state. NEVER claim a fix has been or will be performed. Only acknowledge receipt + offer GENERAL self-serve steps from the provided pattern template + commit to human follow-up.",
   "",
@@ -124,7 +124,7 @@ const SYSTEM_PROMPT = [
   "5. Use a warm professional tone. No em dashes. No exclamation points. No emojis.",
   "6. Output the email body only. No subject line, no greeting prefix outside the body, no commentary outside the body.",
 ].join("\n");
-/* eslint-enable max-len */
+ 
 
 /**
  * Generic fallback used when:

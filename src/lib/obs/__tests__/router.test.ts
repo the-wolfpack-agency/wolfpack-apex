@@ -259,7 +259,7 @@ describe("Multi-backend fan-out", () => {
       }
       const obs = new ObsClient();
       // Inject a probe alongside ConsoleBackend.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (obs as unknown as { backends: ObservabilityBackend[] | null }).backends =
         [new Probe()];
       obs.recordError(new Error("x"));
