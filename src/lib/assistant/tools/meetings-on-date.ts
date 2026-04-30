@@ -247,13 +247,81 @@ export async function runMeetingsOnDate(args: {
     return ta - tb;
   });
 
-  /* Empty result must NOT short-circuit with a confident "No meetings"
-     answer — the answer might live in SharePoint, the user's personal
-     Outlook calendar, or anywhere else getRelevantContext can reach.
-     Returning null lets the orchestrator fall through to the LLM with
-     full grounding context. */
+  /* Empty result: return a precise, source-aware answer from the tool
+     itself rather than falling through to the LLM. The LLM has no way
+     to know the system DID query MS Teams + the user's Outlook calendar
+     — when the grounding block is empty it hallucinates "we don't store
+     meeting records", which is wrong. Listing the surfaces we ACTUALLY
+     queried turns the empty result into actionable information.
+
+     We probe integration status rather than blindly listing every
+     surface — Plaud isn't always wired, and naming a surface that
+     wasn't actually queried would be its own form of misleading. */
   if (meetings.length === 0) {
-    return null;
+    const surfaces: string[] = [];
+
+    /* Plaud: integrated if instinct_meeting_transcripts has ANY row.
+       Cheap one-row probe; the table is tiny in practice. */
+    try {
+      const probe = await safeQuery<{ exists: boolean }>(
+        `SELECT EXISTS(SELECT 1 FROM instinct_meeting_transcripts LIMIT 1) AS exists`,
+        [],
+      );
+      if (probe.rows[0]?.exists) surfaces.push("Plaud transcripts");
+    } catch {
+      /* table missing or query failed — treat as not integrated */
+    }
+
+    /* MS Teams: integrated if instinct_online_meetings has ANY row. */
+    try {
+      const probe = await safeQuery<{ exists: boolean }>(
+        `SELECT EXISTS(SELECT 1 FROM instinct_online_meetings LIMIT 1) AS exists`,
+        [],
+      );
+      if (probe.rows[0]?.exists) surfaces.push("Microsoft Teams meetings");
+    } catch {
+      /* table missing — treat as not integrated */
+    }
+
+    /* Outlook calendar: integrated if we actually got a Graph response
+       for the caller. We can't distinguish "no events on this date" from
+       "no Graph token" cleanly post-hoc, so we only claim Outlook when
+       the user explicitly passed userId AND has any cached MS token row.
+       Worst case: we under-claim and the user sees a shorter list. */
+    if (args.userId) {
+      try {
+        const probe = await safeQuery<{ exists: boolean }>(
+          `SELECT EXISTS(
+             SELECT 1 FROM instinct_microsoft_tokens
+             WHERE user_id = $1 LIMIT 1
+           ) AS exists`,
+          [args.userId],
+        );
+        if (probe.rows[0]?.exists) surfaces.push("your Outlook calendar");
+      } catch {
+        /* table missing — treat as not integrated */
+      }
+    }
+
+    const surfacesText =
+      surfaces.length > 0
+        ? `across ${surfaces.join(", ")}`
+        : "in any connected source";
+    const settingsHint =
+      surfaces.length === 0
+        ? `No meeting integrations are connected yet. Connect Microsoft 365 in [Settings](/settings) to surface calendar + Teams meetings here.`
+        : `If meetings happened that day, confirm your integrations are connected in [Settings](/settings).`;
+    const answer =
+      `No meetings found on ${range.label} ${surfacesText}.\n\n` +
+      `${settingsHint}\n\n` +
+      `Go to: [Meetings](/meetings)`;
+    return {
+      answer,
+      meetings,
+      dateLabel: range.label,
+      startMs: range.startMs,
+      endMs: range.endMs,
+    };
   }
 
   const lines = meetings.map((m) => {

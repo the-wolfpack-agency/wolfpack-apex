@@ -136,13 +136,46 @@ describe("runMeetingsOnDate", () => {
     expect(r!.answer).toContain("Jorge Colon");
   });
 
-  test("returns null when ALL three sources are empty (lets LLM grounding run)", async () => {
-    mockSafeQuery.mockResolvedValue({ rows: [] });
+  test("empty result lists ONLY integrated surfaces (Plaud not integrated → not listed)", async () => {
+    /* Sequence of queries the tool runs:
+       1) instinct_meeting_transcripts SELECT  → rows: []
+       2) instinct_online_meetings SELECT      → rows: []
+       3) Plaud probe (EXISTS)                 → exists: false (not integrated)
+       4) Teams probe  (EXISTS)                → exists: true  (integrated)
+       5) Outlook token probe (EXISTS)         → exists: true  (user has MS token) */
+    mockSafeQuery
+      .mockResolvedValueOnce({ rows: [] }) // transcripts
+      .mockResolvedValueOnce({ rows: [] }) // online_meetings
+      .mockResolvedValueOnce({ rows: [{ exists: false }] }) // Plaud probe
+      .mockResolvedValueOnce({ rows: [{ exists: true }] })  // Teams probe
+      .mockResolvedValueOnce({ rows: [{ exists: true }] }); // MS token probe
     mockListEvents.mockResolvedValue([]);
     const r = await runMeetingsOnDate({
       question: "meetings on 2026-04-21",
       userId: "u-1",
     });
-    expect(r).toBeNull();
+    expect(r).not.toBeNull();
+    expect(r!.meetings).toEqual([]);
+    expect(r!.answer).toMatch(/^No meetings found/);
+    expect(r!.answer).not.toContain("Plaud");
+    expect(r!.answer).toContain("Microsoft Teams meetings");
+    expect(r!.answer).toContain("Outlook calendar");
+  });
+
+  test("empty result with NO integrations connected says so plainly", async () => {
+    mockSafeQuery
+      .mockResolvedValueOnce({ rows: [] }) // transcripts
+      .mockResolvedValueOnce({ rows: [] }) // online_meetings
+      .mockResolvedValueOnce({ rows: [{ exists: false }] }) // Plaud probe
+      .mockResolvedValueOnce({ rows: [{ exists: false }] }) // Teams probe
+      .mockResolvedValueOnce({ rows: [{ exists: false }] }); // MS token probe
+    mockListEvents.mockResolvedValue([]);
+    const r = await runMeetingsOnDate({
+      question: "meetings on 2026-04-21",
+      userId: "u-1",
+    });
+    expect(r).not.toBeNull();
+    expect(r!.answer).toMatch(/in any connected source/);
+    expect(r!.answer).toMatch(/No meeting integrations are connected/);
   });
 });
