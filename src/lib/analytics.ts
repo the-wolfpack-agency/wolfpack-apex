@@ -1594,7 +1594,12 @@ export type InstinctEventType =
   | "assistant.sharepoint_lookup_failed"
   | "assistant.project_lookup_failed"
   | "assistant.meeting_lookup_failed"
-  | "assistant.knowledge_cache_bypassed";
+  | "assistant.knowledge_cache_bypassed"
+  /* page_facts is a separate static lookup that fires BEFORE the
+     knowledge cache. Bypass it for the same query categories so a
+     "what's in the TWA agenda doc" question doesn't get short-circuited
+     to a generic "Docs page" page-facts blurb. */
+  | "assistant.page_facts_bypassed";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

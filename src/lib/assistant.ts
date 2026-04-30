@@ -123,6 +123,16 @@ export const MEETING_OR_DATE_BYPASS_PATTERNS: RegExp[] = [
   /\b(yesterday|today|tomorrow|this week|last week|next week)\b/i,
   /\b\d{4}-\d{2}-\d{2}\b/,
   /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
+  /* Document-name patterns: questions referencing a specific file by
+     extension or naming pattern must skip page-facts/knowledge so the
+     LLM gets the SharePoint context. The previous regression: asking
+     "what's in the TWA Agenda 4.20 doc?" matched the page-facts entry
+     for the Instinct Docs page on the substring "doc", returning a
+     canned blurb about Instinct's Docs UI instead of grounding the
+     answer in the actual SharePoint file. */
+  /\.(docx?|xlsx?|pptx?|pdf|md|txt|csv)\b/i,
+  /\bthe\s+\S+\s+(doc|document|report|deck|spec|spreadsheet|file|memo)\b/i,
+  /\b(spreadsheet|deck|memo)\b/i,
 ];
 
 /**
@@ -338,7 +348,19 @@ export async function chat(
   // rich description of the actual Instinct page — plus an embedded
   // markdown link so detectRelatedPagesFromExchange picks up the route
   // and renders the chip naturally.
-  const pageFactsMatch = matchPageFacts(message);
+  /* Page-facts is a static lookup table for "what is the Calendar page?"
+     style questions. It must NEVER fire for date-bound, meeting-bound,
+     or document-name queries — those need fresh LLM grounding from
+     SharePoint + Project + meetings. We reuse the same bypass regex
+     so the rule is codified in one place. */
+  const pageFactsBypass = shouldBypassKnowledgeCache(message);
+  if (pageFactsBypass) {
+    trackEvent("assistant.page_facts_bypassed", userId, userRole, {
+      reason: "meeting_or_date_or_document_query",
+      module: "assistant",
+    });
+  }
+  const pageFactsMatch = pageFactsBypass ? null : matchPageFacts(message);
   if (pageFactsMatch && pageFactsMatch.confidence >= 0.6) {
     const answer = formatPageFactsAnswer(pageFactsMatch.page);
     trackEvent("assistant.page_facts_hit", userId, userRole, {

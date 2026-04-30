@@ -958,6 +958,18 @@ describe("shouldBypassKnowledgeCache", () => {
     ["short slash date", "schedule for 4/20/26"],
     ["original prod symptom", "which meetings did wolfpack have on April 20, 2026?"],
     ["other prod symptom", "what was discussed in meetings on April 20, 2026"],
+    /* New prod symptom (2026-04-30): "what's in the TWA Agenda 4.20 doc?"
+       was caught by page-facts (matched on "doc"), returning a canned
+       Instinct Docs blurb. The bypass regex now catches document-name
+       queries so the LLM gets the SharePoint context instead. */
+    ["docx extension", "what's in the TWA Agenda 4.20.docx?"],
+    ["pdf extension", "summarize the Q1 report.pdf"],
+    ["xlsx extension with dot", "open the budget.xlsx"],
+    ["the X doc pattern", "what's in the TWA agenda doc"],
+    ["the X document pattern", "summarize the onboarding document"],
+    ["the X report pattern", "what does the Q1 report say"],
+    ["spreadsheet noun", "show the spreadsheet from last quarter"],
+    ["deck noun", "what was in the pitch deck"],
   ];
 
   for (const [name, q] of positives) {
