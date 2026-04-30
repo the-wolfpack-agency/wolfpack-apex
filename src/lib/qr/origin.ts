@@ -1,17 +1,18 @@
 /**
- * Resolve the absolute origin a QR code should encode.
+ * Resolve the absolute public origin a QR code should encode.
  *
- * The QR encoder MUST receive an absolute https URL. A relative path
- * like `/q/abc1234` decodes fine on a desktop browser but a phone
- * camera has no base URL — it falls back to a Google search of the
- * literal string, which is exactly what hit production today
- * (scanning a code landed users on `google.com/search?q=/q/w4ge9r4`).
+ * QR codes are scanned by anonymous phones — the encoded URL MUST
+ * point at the public production alias, not a per-deployment Vercel
+ * URL like `wolfpack-instinct-kua7jbj5f-nhomyks-projects.vercel.app`
+ * (which is gated by Vercel team auth and 401s for outside visitors).
  *
- * Resolution order:
- *   1. `NEXT_PUBLIC_BASE_URL` if set (canonical)
- *   2. `VERCEL_URL` if set (Vercel always populates this on deployed
- *      builds; format is "host" without a scheme, so we prepend https)
- *   3. The request URL's own origin (works in any runtime)
+ * Resolution order, most-public first:
+ *   1. `NEXT_PUBLIC_BASE_URL`            — explicit override (canonical)
+ *   2. `VERCEL_PROJECT_PRODUCTION_URL`   — stable production alias
+ *   3. `VERCEL_BRANCH_URL`               — stable branch alias
+ *   4. `VERCEL_URL`                      — per-deployment URL (LAST resort;
+ *                                          team-auth-gated, do not share)
+ *   5. The request URL's own origin      — local dev / unit tests
  *
  * Throws if none can be derived. We prefer a loud failure over an
  * encoded-but-broken QR.
@@ -20,9 +21,15 @@ export function resolvePublicOrigin(req: Request): string {
   const fromEnv = process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/+$/, "");
   if (fromEnv && /^https?:\/\//i.test(fromEnv)) return fromEnv;
 
-  const vercel = process.env.VERCEL_URL?.replace(/\/+$/, "");
-  if (vercel) {
-    return vercel.startsWith("http") ? vercel : `https://${vercel}`;
+  const candidates = [
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    process.env.VERCEL_BRANCH_URL,
+    process.env.VERCEL_URL,
+  ];
+  for (const raw of candidates) {
+    const v = raw?.replace(/\/+$/, "");
+    if (!v) continue;
+    return v.startsWith("http") ? v : `https://${v}`;
   }
 
   try {
