@@ -71,7 +71,11 @@ export async function tryToolAnswer(
   }
 
   if (match.intent === "meetings_on_date") {
-    const result = await runMeetingsOnDate({ question, nowMs: ctx.nowMs });
+    const result = await runMeetingsOnDate({
+      question,
+      nowMs: ctx.nowMs,
+      userId: ctx.userId,
+    });
     if (!result) return null;
     return { intent: match.intent, answer: result.answer, data: result, source: "tool" };
   }

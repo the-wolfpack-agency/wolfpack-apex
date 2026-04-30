@@ -256,6 +256,12 @@ async function findOrgQACacheHit(
           AND u.created_at > NOW() - ($2::bigint || ' milliseconds')::interval
           AND a.source IS DISTINCT FROM 'fallback'
           AND a.tokens_used > 0
+          /* Sentinel guard: never serve a "No X recorded" empty-tool
+             answer from cache. Those came from narrow tool paths that
+             didn't see the full data sources. The follow-up call must
+             rerun the tool (now broader) or fall through to the LLM. */
+          AND a.content NOT ILIKE 'No meetings recorded%'
+          AND a.content NOT ILIKE 'No results found%'
         ORDER BY u.created_at DESC
         LIMIT 1`,
       [normalized, ttlMs],
@@ -305,6 +311,13 @@ async function findOrgQACacheHit(
     const incomingTokens = tokenSet(message);
     let best: { row: typeof fuzzy.rows[number]; score: number } | null = null;
     for (const candidate of fuzzy.rows) {
+      /* Same sentinel guard as the exact-match path. */
+      if (
+        /^no meetings recorded/i.test(candidate.answer) ||
+        /^no results found/i.test(candidate.answer)
+      ) {
+        continue;
+      }
       const score = jaccard(incomingTokens, tokenSet(candidate.question));
       if (!best || score > best.score) best = { row: candidate, score };
     }
