@@ -1,7 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const mockSafeQuery = jest.fn();
+const mockListEvents = jest.fn();
 jest.mock("@/lib/db", () => ({
   safeQuery: (...a: any[]) => mockSafeQuery(...a),
+}));
+jest.mock("@/lib/integrations/microsoft-calendar", () => ({
+  listEvents: (...a: any[]) => mockListEvents(...a),
 }));
 
 import {
@@ -12,6 +16,8 @@ import {
 const ORIGINAL_DB_URL = process.env.DATABASE_URL;
 beforeEach(() => {
   mockSafeQuery.mockReset();
+  mockListEvents.mockReset();
+  mockListEvents.mockResolvedValue([]);
   process.env.DATABASE_URL = "postgres://test";
 });
 afterAll(() => {
@@ -56,19 +62,21 @@ describe("runMeetingsOnDate", () => {
     expect(mockSafeQuery).not.toHaveBeenCalled();
   });
 
-  test("formats answer with the matched meetings", async () => {
-    mockSafeQuery.mockResolvedValue({
-      rows: [
-        {
-          id: "m1",
-          title: "PCBA_E4_Content Weekly Status Call",
-          summary: null,
-          recorded_at: "2026-04-21T19:30:00Z",
-          duration_seconds: 4500,
-          owner_name: "Jorge Colon",
-        },
-      ],
-    });
+  test("formats answer with the matched meetings (transcript source)", async () => {
+    mockSafeQuery
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: "m1",
+            title: "PCBA_E4_Content Weekly Status Call",
+            summary: null,
+            recorded_at: "2026-04-21T19:30:00Z",
+            duration_seconds: 4500,
+            owner_name: "Jorge Colon",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ rows: [] });
     const r = await runMeetingsOnDate({
       question: "which meetings did wolfpack have on April 21, 2026 ?",
     });
@@ -79,12 +87,62 @@ describe("runMeetingsOnDate", () => {
     expect(r!.answer).toContain("[Meetings](/meetings)");
   });
 
-  test("returns 'No meetings recorded' when DB has none", async () => {
+  test("merges Teams meetings (instinct_online_meetings) into the answer", async () => {
+    mockSafeQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: "om1",
+            ms_meeting_id: "ms-1",
+            subject: "Wolfpack Weekly Kickoff",
+            start_at: "2026-04-20T18:00:00Z",
+            end_at: "2026-04-20T19:00:00Z",
+            owner_name: "Nick Hoxsie",
+          },
+        ],
+      });
+    const r = await runMeetingsOnDate({
+      question: "which meetings did wolfpack have on April 20, 2026 ?",
+    });
+    expect(r).not.toBeNull();
+    expect(r!.meetings.map((m) => m.title)).toEqual([
+      "Wolfpack Weekly Kickoff",
+    ]);
+  });
+
+  test("merges live MS calendar events when userId is supplied", async () => {
     mockSafeQuery.mockResolvedValue({ rows: [] });
+    mockListEvents.mockResolvedValue([
+      {
+        id: "ev1",
+        subject: "Pre-Meeting - Kate Nelson",
+        start: "2026-04-20T19:00:00Z",
+        end: "2026-04-20T19:30:00Z",
+        location: "",
+        attendees: ["Jorge Colon", "Nick Hoxsie", "Nick Homyk"],
+        attendeeEmails: [],
+        isOnlineMeeting: true,
+      },
+    ]);
+    const r = await runMeetingsOnDate({
+      question: "which meetings did wolfpack have on April 20, 2026 ?",
+      userId: "u-nick",
+    });
+    expect(r).not.toBeNull();
+    expect(r!.meetings.map((m) => m.title)).toEqual([
+      "Pre-Meeting - Kate Nelson",
+    ]);
+    expect(r!.answer).toContain("Jorge Colon");
+  });
+
+  test("returns null when ALL three sources are empty (lets LLM grounding run)", async () => {
+    mockSafeQuery.mockResolvedValue({ rows: [] });
+    mockListEvents.mockResolvedValue([]);
     const r = await runMeetingsOnDate({
       question: "meetings on 2026-04-21",
+      userId: "u-1",
     });
-    expect(r?.meetings).toEqual([]);
-    expect(r?.answer).toMatch(/No meetings recorded/);
+    expect(r).toBeNull();
   });
 });

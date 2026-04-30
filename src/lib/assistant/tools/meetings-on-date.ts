@@ -14,6 +14,8 @@
  * recorded_at, so we serve directly from Postgres — no embedding, no LLM.
  */
 import { safeQuery } from "@/lib/db";
+import { listEvents } from "@/lib/integrations/microsoft-calendar";
+import { getRelevantContext } from "@/lib/assistant/context-resolver";
 
 export interface MeetingOnDateRow {
   id: string;
@@ -117,49 +119,141 @@ function dayBounds(
 export async function runMeetingsOnDate(args: {
   question: string;
   nowMs?: number;
+  /** Calling user's id — used to read their MS 365 calendar via Graph
+   *  delegated token. Optional: when absent, we still hit our cached
+   *  tables but skip live calendar. */
+  userId?: string;
 }): Promise<MeetingsOnDateResult | null> {
   const range = extractExplicitDate(args.question, args.nowMs ?? Date.now());
   if (!range) return null;
   if (!process.env.DATABASE_URL) return null;
 
-  const { rows } = await safeQuery<{
-    id: string;
-    title: string | null;
-    summary: string | null;
-    recorded_at: string | null;
-    duration_seconds: number | null;
-    owner_name: string | null;
-  }>(
-    `SELECT t.id, t.title, t.summary, t.recorded_at, t.duration_seconds,
-            m.name AS owner_name
-       FROM instinct_meeting_transcripts t
-       LEFT JOIN instinct_team_members m ON m.id = t.owner_user_id
-      WHERE t.quality_status <> 'reject'
-        AND t.recorded_at IS NOT NULL
-        AND t.recorded_at >= to_timestamp($1 / 1000.0)
-        AND t.recorded_at <= to_timestamp($2 / 1000.0)
-      ORDER BY t.recorded_at ASC
-      LIMIT 50`,
-    [range.startMs, range.endMs],
-  );
+  /* Pull from BOTH meeting sources we ingest:
+       - instinct_meeting_transcripts: Plaud-recorded transcripts (audio).
+       - instinct_online_meetings:     Microsoft Teams meetings (calendar).
+     A meeting can exist in either, both, or neither. We UNION and dedupe
+     by ms_meeting_id when present so a Teams meeting that also has a
+     Plaud transcript counts once. */
+  const calendarPromise = args.userId
+    ? listEvents(args.userId, {
+        from: new Date(range.startMs).toISOString(),
+        to: new Date(range.endMs).toISOString(),
+        limit: 50,
+      }).catch(() => [])
+    : Promise.resolve([] as Awaited<ReturnType<typeof listEvents>>);
 
-  const meetings: MeetingOnDateRow[] = rows.map((r) => ({
-    id: r.id,
-    title: r.title,
-    summary: r.summary,
-    recordedAt: r.recorded_at,
-    durationSeconds: r.duration_seconds,
-    ownerName: r.owner_name,
-  }));
+  const [transcriptsRes, onlineRes, calendarEvents] = await Promise.all([
+    safeQuery<{
+      id: string;
+      title: string | null;
+      summary: string | null;
+      recorded_at: string | null;
+      duration_seconds: number | null;
+      owner_name: string | null;
+    }>(
+      `SELECT t.id, t.title, t.summary, t.recorded_at, t.duration_seconds,
+              m.name AS owner_name
+         FROM instinct_meeting_transcripts t
+         LEFT JOIN instinct_team_members m ON m.id = t.owner_user_id
+        WHERE t.quality_status <> 'reject'
+          AND t.recorded_at IS NOT NULL
+          AND t.recorded_at >= to_timestamp($1 / 1000.0)
+          AND t.recorded_at <= to_timestamp($2 / 1000.0)
+        ORDER BY t.recorded_at ASC
+        LIMIT 50`,
+      [range.startMs, range.endMs],
+    ),
+    safeQuery<{
+      id: string;
+      ms_meeting_id: string | null;
+      subject: string | null;
+      start_at: string | null;
+      end_at: string | null;
+      owner_name: string | null;
+    }>(
+      `SELECT DISTINCT ON (COALESCE(om.ms_meeting_id, om.id::text))
+              om.id, om.ms_meeting_id, om.subject, om.start_at, om.end_at,
+              m.name AS owner_name
+         FROM instinct_online_meetings om
+         LEFT JOIN instinct_team_members m ON m.id = om.user_id
+        WHERE om.start_at IS NOT NULL
+          AND om.start_at >= to_timestamp($1 / 1000.0)
+          AND om.start_at <= to_timestamp($2 / 1000.0)
+        ORDER BY COALESCE(om.ms_meeting_id, om.id::text), om.start_at ASC
+        LIMIT 50`,
+      [range.startMs, range.endMs],
+    ),
+    calendarPromise,
+  ]);
 
+  const merged: MeetingOnDateRow[] = [
+    ...transcriptsRes.rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      summary: r.summary,
+      recordedAt: r.recorded_at,
+      durationSeconds: r.duration_seconds,
+      ownerName: r.owner_name,
+    })),
+    ...onlineRes.rows.map((r) => ({
+      id: r.id,
+      title: r.subject,
+      summary: null,
+      recordedAt: r.start_at,
+      durationSeconds:
+        r.start_at && r.end_at
+          ? Math.round(
+              (new Date(r.end_at).getTime() -
+                new Date(r.start_at).getTime()) /
+                1000,
+            )
+          : null,
+      ownerName: r.owner_name,
+    })),
+    ...calendarEvents.map((ev) => ({
+      id: ev.id,
+      title: ev.subject,
+      summary: ev.attendees.length
+        ? `Participants: ${ev.attendees.slice(0, 8).join(", ")}`
+        : null,
+      recordedAt: ev.start,
+      durationSeconds:
+        ev.start && ev.end
+          ? Math.round(
+              (new Date(ev.end).getTime() - new Date(ev.start).getTime()) /
+                1000,
+            )
+          : null,
+      ownerName: null,
+    })),
+  ];
+
+  /* Dedupe across the three sources by (normalized title + start
+     timestamp). MS Teams meetings often appear in BOTH instinct_online_meetings
+     AND the user's live /me/calendarview, and the same meeting can also
+     have a Plaud transcript. Without this, the answer would list a
+     single meeting three times. */
+  const seen = new Set<string>();
+  const meetings: MeetingOnDateRow[] = [];
+  for (const m of merged) {
+    const key = `${(m.title ?? "").toLowerCase().trim()}|${m.recordedAt ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    meetings.push(m);
+  }
+  meetings.sort((a, b) => {
+    const ta = a.recordedAt ? new Date(a.recordedAt).getTime() : 0;
+    const tb = b.recordedAt ? new Date(b.recordedAt).getTime() : 0;
+    return ta - tb;
+  });
+
+  /* Empty result must NOT short-circuit with a confident "No meetings"
+     answer — the answer might live in SharePoint, the user's personal
+     Outlook calendar, or anywhere else getRelevantContext can reach.
+     Returning null lets the orchestrator fall through to the LLM with
+     full grounding context. */
   if (meetings.length === 0) {
-    return {
-      answer: `No meetings recorded on ${range.label}.`,
-      meetings,
-      dateLabel: range.label,
-      startMs: range.startMs,
-      endMs: range.endMs,
-    };
+    return null;
   }
 
   const lines = meetings.map((m) => {
@@ -173,14 +267,42 @@ export async function runMeetingsOnDate(args: {
       : "time unknown";
     const title = m.title ?? "Untitled meeting";
     const owner = m.ownerName ? ` — ${m.ownerName}` : "";
-    return `- ${time} UTC: ${title}${owner}`;
+    const detail = m.summary ? `\n  ${m.summary}` : "";
+    return `- ${time} UTC: ${title}${owner}${detail}`;
   });
 
   const header =
     meetings.length === 1
       ? `On ${range.label}, Wolfpack had 1 meeting:`
       : `On ${range.label}, Wolfpack had ${meetings.length} meetings:`;
-  const answer = `${header}\n${lines.join("\n")}\n\nGo to: [Meetings](/meetings)`;
+
+  /* Surface related SharePoint / OneDrive / Project documents for the
+     same window. Zero LLM tokens — getRelevantContext is pure retrieval
+     (Graph search + Postgres). The user gets richer "here's everything
+     M365 knows about this day" context without paying for the model. */
+  let relatedBlock = "";
+  if (args.userId) {
+    try {
+      const ctx = await getRelevantContext({
+        question: args.question,
+        userId: args.userId,
+        role: "user",
+        surface: "assistant_support",
+        maxChars: 1500,
+      });
+      const sp = ctx.sharepoint_hits.slice(0, 3);
+      if (sp.length > 0) {
+        const spLines = sp
+          .map((h) => `- [${h.title}](${h.url})`)
+          .join("\n");
+        relatedBlock = `\n\n**Related documents (SharePoint / OneDrive):**\n${spLines}`;
+      }
+    } catch {
+      /* best-effort enrichment */
+    }
+  }
+
+  const answer = `${header}\n${lines.join("\n")}${relatedBlock}\n\nGo to: [Meetings](/meetings)`;
 
   return {
     answer,
