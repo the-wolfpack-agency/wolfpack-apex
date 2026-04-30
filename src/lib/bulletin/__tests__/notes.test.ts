@@ -96,15 +96,32 @@ describe("createNote", () => {
     ).rejects.toThrow(/board not found/);
   });
 
-  test("rejects empty body", async () => {
+  /* Empty body is INTENTIONALLY allowed — UI drops a blank sticky and
+     the user types into it inline. Regression test enforces this. */
+  test("accepts empty-string body (blank starter sticky)", async () => {
+    queueBoardLookup(false);
+    mockWriteQuery.mockResolvedValueOnce({
+      rows: [{ ...noteRow, body: "" }],
+    });
+    const note = await createNote({
+      boardId: "board-1",
+      body: "",
+      userId: "u1",
+      userRole: "ceo",
+    });
+    expect(note.body).toBe("");
+  });
+
+  test("rejects non-string body", async () => {
     await expect(
       createNote({
         boardId: "board-1",
-        body: "",
+        // @ts-expect-error testing wrong type
+        body: 42,
         userId: "u1",
         userRole: "ceo",
       }),
-    ).rejects.toThrow(/body is required/);
+    ).rejects.toThrow(/body must be a string/);
   });
 
   test("accepts position overrides", async () => {
