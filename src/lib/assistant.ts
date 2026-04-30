@@ -20,6 +20,7 @@ import { safeQuery } from "@/lib/db";
 import { matchPageFacts } from "@/lib/assistant/page-facts-matcher";
 import { formatPageFactsAnswer } from "@/lib/assistant/page-facts";
 import { getRelevantContext } from "@/lib/assistant/context-resolver";
+import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -123,6 +124,16 @@ export const MEETING_OR_DATE_BYPASS_PATTERNS: RegExp[] = [
   /\b(yesterday|today|tomorrow|this week|last week|next week)\b/i,
   /\b\d{4}-\d{2}-\d{2}\b/,
   /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
+  /* Document-name patterns: questions referencing a specific file by
+     extension or naming pattern must skip page-facts/knowledge so the
+     LLM gets the SharePoint context. The previous regression: asking
+     "what's in the TWA Agenda 4.20 doc?" matched the page-facts entry
+     for the Instinct Docs page on the substring "doc", returning a
+     canned blurb about Instinct's Docs UI instead of grounding the
+     answer in the actual SharePoint file. */
+  /\.(docx?|xlsx?|pptx?|pdf|md|txt|csv)\b/i,
+  /\bthe\s+\S+\s+(doc|document|report|deck|spec|spreadsheet|file|memo)\b/i,
+  /\b(spreadsheet|deck|memo)\b/i,
 ];
 
 /**
@@ -338,7 +349,19 @@ export async function chat(
   // rich description of the actual Instinct page — plus an embedded
   // markdown link so detectRelatedPagesFromExchange picks up the route
   // and renders the chip naturally.
-  const pageFactsMatch = matchPageFacts(message);
+  /* Page-facts is a static lookup table for "what is the Calendar page?"
+     style questions. It must NEVER fire for date-bound, meeting-bound,
+     or document-name queries — those need fresh LLM grounding from
+     SharePoint + Project + meetings. We reuse the same bypass regex
+     so the rule is codified in one place. */
+  const pageFactsBypass = shouldBypassKnowledgeCache(message);
+  if (pageFactsBypass) {
+    trackEvent("assistant.page_facts_bypassed", userId, userRole, {
+      reason: "meeting_or_date_or_document_query",
+      module: "assistant",
+    });
+  }
+  const pageFactsMatch = pageFactsBypass ? null : matchPageFacts(message);
   if (pageFactsMatch && pageFactsMatch.confidence >= 0.6) {
     const answer = formatPageFactsAnswer(pageFactsMatch.page);
     trackEvent("assistant.page_facts_hit", userId, userRole, {
@@ -1046,19 +1069,24 @@ async function callAI(
   userRole: string,
   pageContext?: string,
 ): Promise<{ content: string; tokensUsed: number } | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-
+  /* Use the AI router (src/lib/ai/router.ts) so this works whether prod
+     is configured for Anthropic OR Azure OpenAI. The previous direct-
+     fetch-to-Anthropic path required ANTHROPIC_API_KEY, which is NOT
+     set on Instinct's Vercel env (Azure-only). That made callAI return
+     null on every request, and chat() fell through to the "I don't
+     have information / Zero tokens / No match found" canned reply —
+     so the LLM was effectively unreachable from /assistant on prod
+     and PR #40's getRelevantContext wiring was dead code there. */
   try {
-    const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
     const baseSystemPrompt = buildSystemPrompt(userRole, userMemory);
 
     /* Best-effort: ground the assistant's answer in the user's
-       SharePoint + MS Project content via their delegated Graph token.
-       Failures here (403 scope_missing, Graph 5xx, missing OAuth token,
-       getRelevantContext throwing) MUST never block the AI call — the
-       resolver emits its own typed analytics on failure and we fall back
-       to an ungrounded answer rather than 500'ing the chat. */
+       SharePoint + MS Project + meeting content via their delegated
+       Graph token. Failures here (403 scope_missing, Graph 5xx,
+       missing OAuth token, getRelevantContext throwing) MUST never
+       block the AI call — the resolver emits its own typed analytics
+       on failure and we fall back to an ungrounded answer rather than
+       500'ing the chat. */
     let contextBlock = "";
     try {
       const ctx = await getRelevantContext({
@@ -1077,8 +1105,7 @@ async function callAI(
       ? `${contextBlock}\n${baseSystemPrompt}`
       : baseSystemPrompt;
 
-    // Build conversation messages for context
-    const messages = history
+    const aiMessages = history
       .filter((m) => m.role === "user" || m.role === "assistant")
       .slice(-10)
       .map((m) => ({
@@ -1086,49 +1113,54 @@ async function callAI(
         content: m.content,
       }));
 
-    // Add current message with page context if provided
     const currentContent = pageContext
       ? `[Context: ${pageContext}]\n\n${message}`
       : message;
 
-    messages.push({ role: "user", content: currentContent });
+    aiMessages.push({ role: "user", content: currentContent });
 
     const start = Date.now();
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+    const client = getAIClient();
+    const aiResponse = await client.complete({
+      messages: aiMessages,
+      system: systemPrompt,
+      max_tokens: 2048,
+      model_tier: "standard",
+      latency_target: "real_time",
+      metadata: {
+        feature: "assistant_chat",
+        user_id: userId,
+        user_role: userRole,
       },
-      body: JSON.stringify({
-        model,
-        max_tokens: 2048,
-        system: systemPrompt,
-        messages,
-      }),
     });
 
     const latencyMs = Date.now() - start;
-
-    if (!response.ok) return null;
-
-    const data = await response.json();
-    const content = data.content?.[0]?.text || "";
-    const tokensUsed =
-      (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0);
+    const content = aiResponse.content;
+    const tokensUsed = aiResponse.input_tokens + aiResponse.output_tokens;
 
     trackEvent("client.doc_generated", userId, userRole, {
       source: "assistant",
       tokens_used: tokensUsed,
       latency_ms: latencyMs,
-      model,
+      model: aiResponse.model_used,
+      provider: aiResponse.provider_used,
       module: "assistant",
     });
 
     return { content, tokensUsed };
-  } catch {
+  } catch (err) {
+    /* NoProviderAvailableError = router has no configured provider
+       (neither ANTHROPIC_API_KEY nor AZURE_OPENAI_API_KEY set). Falling
+       back to null preserves the historical "I don't have information"
+       UX rather than 500'ing the chat. Other errors (network, rate
+       limit) also fall back. */
+    if (process.env.NODE_ENV !== "production") {
+      const isProviderMissing = err instanceof NoProviderAvailableError;
+      console.warn(
+        `[assistant.callAI] returning null — ${isProviderMissing ? "no AI provider configured" : "AI call failed"}: ${(err as Error).message}`,
+      );
+    }
     return null;
   }
 }

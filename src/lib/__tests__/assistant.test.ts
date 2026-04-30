@@ -52,6 +52,23 @@ jest.mock("@/lib/assistant/context-resolver", () => ({
   getRelevantContext: (...args: any[]) => mockGetRelevantContext(...args),
 }));
 
+/* AI router mock — `callAI` calls getAIClient().complete() instead of
+   talking to api.anthropic.com directly, so tests substitute a fake
+   client and assert what was passed to `complete`. The default mock
+   returns a generic AI response; tests exercising the "no provider"
+   case override `mockAIComplete` to throw NoProviderAvailableError. */
+const mockAIComplete = jest.fn();
+class TestNoProviderError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NoProviderAvailableError";
+  }
+}
+jest.mock("@/lib/ai", () => ({
+  getAIClient: () => ({ complete: (...args: any[]) => mockAIComplete(...args) }),
+  NoProviderAvailableError: TestNoProviderError,
+}));
+
 import {
   chat,
   getConversations,
@@ -115,6 +132,12 @@ beforeEach(() => {
     total_chars: 0,
     took_ms: 1,
   });
+
+  /* Default AI client mock — tests that exercise the "no provider"
+     fallback override this to throw, and tests that exercise an actual
+     AI completion override the resolved value as needed. */
+  mockAIComplete.mockReset();
+  mockAIComplete.mockRejectedValue(new TestNoProviderError("no providers configured"));
 
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.WOLFPACK_AUTO_REPO;
@@ -185,16 +208,15 @@ describe("AI fallback", () => {
   });
 
   test("returns source=ai when API key is set and AI responds", async () => {
-    process.env.ANTHROPIC_API_KEY = "test-key";
-
-    const mockFetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        content: [{ text: "Quantum computing uses qubits." }],
-        usage: { input_tokens: 100, output_tokens: 50 },
-      }),
+    mockAIComplete.mockResolvedValueOnce({
+      content: "Quantum computing uses qubits.",
+      model_used: "test-model",
+      provider_used: "test-provider",
+      input_tokens: 100,
+      output_tokens: 50,
+      cost_usd: 0,
+      latency_ms: 1,
     });
-    global.fetch = mockFetch as any;
 
     const result = await chat("What is quantum computing?", "u1", "dev");
 
@@ -215,15 +237,15 @@ describe("AI fallback", () => {
   });
 
   test("tracks system.ai_call_made on AI call", async () => {
-    process.env.ANTHROPIC_API_KEY = "test-key";
-
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        content: [{ text: "Answer" }],
-        usage: { input_tokens: 10, output_tokens: 5 },
-      }),
-    }) as any;
+    mockAIComplete.mockResolvedValueOnce({
+      content: "Answer",
+      model_used: "test-model",
+      provider_used: "test-provider",
+      input_tokens: 10,
+      output_tokens: 5,
+      cost_usd: 0,
+      latency_ms: 1,
+    });
 
     await chat("Random question no keywords", "u1", "dev");
 
@@ -837,14 +859,15 @@ describe("zero-token tracking", () => {
   });
 
   test("AI response tokens are tracked", async () => {
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        content: [{ text: "AI response" }],
-        usage: { input_tokens: 200, output_tokens: 100 },
-      }),
-    }) as any;
+    mockAIComplete.mockResolvedValueOnce({
+      content: "AI response",
+      model_used: "test-model",
+      provider_used: "test-provider",
+      input_tokens: 200,
+      output_tokens: 100,
+      cost_usd: 0,
+      latency_ms: 1,
+    });
 
     const result = await chat("Generic question", "u1", "dev");
     expect(result.tokensUsed).toBe(300);
@@ -858,8 +881,6 @@ describe("zero-token tracking", () => {
 
 describe("context grounding via getRelevantContext", () => {
   test("AI call prepends rendered_prompt_block to system prompt", async () => {
-    process.env.ANTHROPIC_API_KEY = "test-key";
-
     const groundingBlock =
       "Internal context (cite if you use it):\n\n[SharePoint] TWA Agenda 4.20 - https://netorg9503444.sharepoint.com/sites/WolfpackInternal/TWA_Agenda_4.20.docx\nDiscuss Q2 OKRs.\n";
     mockGetRelevantContext.mockResolvedValueOnce({
@@ -872,14 +893,15 @@ describe("context grounding via getRelevantContext", () => {
       took_ms: 5,
     });
 
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        content: [{ text: "Per the agenda, Q2 OKRs were discussed." }],
-        usage: { input_tokens: 50, output_tokens: 20 },
-      }),
+    mockAIComplete.mockResolvedValueOnce({
+      content: "Per the agenda, Q2 OKRs were discussed.",
+      model_used: "test-model",
+      provider_used: "test-provider",
+      input_tokens: 50,
+      output_tokens: 20,
+      cost_usd: 0,
+      latency_ms: 1,
     });
-    global.fetch = fetchMock as any;
 
     const result = await chat(
       "what was on the wolfpack internal agenda for 4/20",
@@ -899,12 +921,12 @@ describe("context grounding via getRelevantContext", () => {
       }),
     );
 
-    /* The fetch payload's `system` field must contain the grounding block. */
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body.system).toContain(groundingBlock);
+    /* The AI router request's `system` field must contain the grounding block. */
+    expect(mockAIComplete).toHaveBeenCalledTimes(1);
+    const req = mockAIComplete.mock.calls[0][0];
+    expect(req.system).toContain(groundingBlock);
     /* Base assistant prompt must still be present. */
-    expect(body.system).toContain("Wolfpack Assistant");
+    expect(req.system).toContain("Wolfpack Assistant");
   });
 
   test("AI call still fires with unchanged system prompt when getRelevantContext throws", async () => {
@@ -912,23 +934,24 @@ describe("context grounding via getRelevantContext", () => {
 
     mockGetRelevantContext.mockRejectedValueOnce(new Error("graph 503"));
 
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        content: [{ text: "Generic answer." }],
-        usage: { input_tokens: 10, output_tokens: 5 },
-      }),
+    mockAIComplete.mockResolvedValueOnce({
+      content: "Generic answer.",
+      model_used: "test-model",
+      provider_used: "test-provider",
+      input_tokens: 10,
+      output_tokens: 5,
+      cost_usd: 0,
+      latency_ms: 1,
     });
-    global.fetch = fetchMock as any;
 
     const result = await chat("a generic question", "user-2", "dev");
 
     expect(result.source).toBe("ai");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(mockAIComplete).toHaveBeenCalledTimes(1);
+    const req = mockAIComplete.mock.calls[0][0];
     /* No grounding header was prepended. */
-    expect(body.system).not.toContain("Internal context");
-    expect(body.system).toContain("Wolfpack Assistant");
+    expect(req.system).not.toContain("Internal context");
+    expect(req.system).toContain("Wolfpack Assistant");
   });
 });
 
@@ -958,6 +981,18 @@ describe("shouldBypassKnowledgeCache", () => {
     ["short slash date", "schedule for 4/20/26"],
     ["original prod symptom", "which meetings did wolfpack have on April 20, 2026?"],
     ["other prod symptom", "what was discussed in meetings on April 20, 2026"],
+    /* New prod symptom (2026-04-30): "what's in the TWA Agenda 4.20 doc?"
+       was caught by page-facts (matched on "doc"), returning a canned
+       Instinct Docs blurb. The bypass regex now catches document-name
+       queries so the LLM gets the SharePoint context instead. */
+    ["docx extension", "what's in the TWA Agenda 4.20.docx?"],
+    ["pdf extension", "summarize the Q1 report.pdf"],
+    ["xlsx extension with dot", "open the budget.xlsx"],
+    ["the X doc pattern", "what's in the TWA agenda doc"],
+    ["the X document pattern", "summarize the onboarding document"],
+    ["the X report pattern", "what does the Q1 report say"],
+    ["spreadsheet noun", "show the spreadsheet from last quarter"],
+    ["deck noun", "what was in the pitch deck"],
   ];
 
   for (const [name, q] of positives) {
@@ -1001,15 +1036,15 @@ describe("knowledge cache bypass for meeting / date queries", () => {
       },
     ]);
 
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        content: [{ text: "Per the meeting on April 20, we discussed Q2 OKRs." }],
-        usage: { input_tokens: 30, output_tokens: 20 },
-      }),
+    mockAIComplete.mockResolvedValueOnce({
+      content: "Per the meeting on April 20, we discussed Q2 OKRs.",
+      model_used: "test-model",
+      provider_used: "test-provider",
+      input_tokens: 30,
+      output_tokens: 20,
+      cost_usd: 0,
+      latency_ms: 1,
     });
-    global.fetch = fetchMock as any;
 
     /* Provide a meeting-grounded bundle so the LLM has fresh context. */
     const groundingBlock =
@@ -1051,10 +1086,10 @@ describe("knowledge cache bypass for meeting / date queries", () => {
     );
     /* LLM was reached and the meeting block was in the system prompt. */
     expect(result.source).toBe("ai");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body.system).toContain("[Meeting]");
-    expect(body.system).toContain("Wolfpack sync");
+    expect(mockAIComplete).toHaveBeenCalledTimes(1);
+    const req = mockAIComplete.mock.calls[0][0];
+    expect(req.system).toContain("[Meeting]");
+    expect(req.system).toContain("Wolfpack sync");
   });
 
   test("non-bypass questions still go through searchKnowledge (no regression)", async () => {
@@ -1078,5 +1113,95 @@ describe("knowledge cache bypass for meeting / date queries", () => {
       (c: any[]) => c[0] === "assistant.knowledge_cache_bypassed",
     );
     expect(bypassed).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Prod regression guard (2026-04-30): callAI uses the AI router, not a
+// hard-coded Anthropic fetch. Before this fix, callAI returned null on
+// Instinct prod (Azure-only env, no ANTHROPIC_API_KEY), causing every
+// /assistant query to fall through to the "I don't have information"
+// canned reply with badge "Zero tokens / No match found". This test
+// pins the contract: when a provider IS configured, the meeting query
+// reaches the LLM and the meeting context block is in the system prompt.
+// ---------------------------------------------------------------------------
+
+describe("regression 2026-04-30 — callAI routes through AI router", () => {
+  test("meeting query with provider configured reaches LLM via getAIClient", async () => {
+    mockAIComplete.mockResolvedValueOnce({
+      content: "Discussed Q2 OKRs at the April 20 meeting.",
+      model_used: "azure-gpt-4o",
+      provider_used: "azure-openai",
+      input_tokens: 25,
+      output_tokens: 15,
+      cost_usd: 0,
+      latency_ms: 1,
+    });
+
+    const groundingBlock =
+      "Internal context (cite if you use it):\n\n[Meeting] April 20 sync — 2026-04-20T15:00:00Z\nDiscussed Q2 OKRs.\n";
+    mockGetRelevantContext.mockResolvedValueOnce({
+      question: "what did we discuss in the March porsche meetings?",
+      surface: "assistant_support",
+      sharepoint_hits: [],
+      project_tasks: [],
+      meeting_notes: [
+        {
+          id: "m-1",
+          title: "April 20 sync",
+          occurred_at: "2026-04-20T15:00:00Z",
+          snippet: "Discussed Q2 OKRs.",
+          source_kind: "plaud",
+        },
+      ],
+      rendered_prompt_block: groundingBlock,
+      total_chars: groundingBlock.length,
+      took_ms: 6,
+    });
+
+    const result = await chat(
+      "what did we discuss in the March porsche meetings?",
+      "u-real",
+      "cto",
+    );
+
+    /* The exact prod symptom that triggered this fix:
+       source must NOT be "fallback" / "page_facts" / "knowledge_cache". */
+    expect(result.source).toBe("ai");
+    expect(result.tokensUsed).toBe(40);
+
+    /* getAIClient().complete() is the only path now — no direct fetch
+       to api.anthropic.com. We assert via the mock that received the
+       call that it carried the grounding block. */
+    expect(mockAIComplete).toHaveBeenCalledTimes(1);
+    const req = mockAIComplete.mock.calls[0][0];
+    expect(req.system).toContain("[Meeting]");
+    expect(req.system).toContain("April 20 sync");
+    /* Provider-agnostic: the request shape is the AI router contract,
+       not the Anthropic-specific shape. */
+    expect(req).toEqual(
+      expect.objectContaining({
+        max_tokens: 2048,
+        model_tier: "standard",
+        latency_target: "real_time",
+      }),
+    );
+  });
+
+  test("meeting query with NO provider configured still falls back to canned reply (preserves UX)", async () => {
+    /* Default mock setup makes getAIClient throw NoProviderAvailableError
+       (see beforeEach). This test confirms the historical fallback
+       behavior is preserved when neither Anthropic nor Azure is wired. */
+    const result = await chat(
+      "which meetings did wolfpack have on April 20, 2026?",
+      "u-1",
+      "cto",
+    );
+
+    expect(result.source).toBe("fallback");
+    expect(result.tokensUsed).toBe(0);
+    /* AI client WAS attempted (we no longer short-circuit on missing
+       ANTHROPIC_API_KEY env var). */
+    expect(mockAIComplete).toHaveBeenCalledTimes(1);
   });
 });
