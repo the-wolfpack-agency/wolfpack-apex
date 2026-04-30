@@ -34,6 +34,7 @@ import {
   useState,
   use,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   fetchWithRefresh,
   jsonHeaders,
@@ -1440,33 +1441,85 @@ function NoteView({
         </div>
       ) : null}
 
-      {assocOpen ? (
-        <div
-          data-testid={`bulletin-note-assoc-panel-${note.id}`}
-          data-role="noninteractive"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            position: "absolute",
-            bottom: 16,
-            left: 4,
-            right: 4,
-            background: "rgba(0,0,0,0.85)",
-            color: "#fff",
-            padding: 6,
-            borderRadius: 4,
-            zIndex: 6,
-          }}
-        >
-          <AssociationPicker
-            kind={note.associationKind}
-            id={note.associationId || ""}
-            label={note.associationLabel || ""}
-            onChange={setAssociation}
-            testIdPrefix={`bulletin-note-assoc-${note.id}`}
-          />
-        </div>
-      ) : null}
+      {assocOpen && typeof document !== "undefined"
+        ? createPortal(
+            /* Portal to document.body — the note has `transform: rotate()`
+               which becomes a containing block for ALL positioned
+               descendants (even position:fixed). The picker rendered
+               inline ended up tilted, tiny, and partly off-screen on
+               mobile. A portal escapes the transform context entirely
+               and lets us render a proper centered sheet. */
+            <div
+              data-role="noninteractive"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setAssocOpen(false);
+              }}
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.55)",
+                zIndex: 100,
+                display: "flex",
+                alignItems: "flex-end",
+                justifyContent: "center",
+                padding: "1rem",
+              }}
+            >
+              <div
+                data-testid={`bulletin-note-assoc-panel-${note.id}`}
+                style={{
+                  background: "var(--wp-dark-surface)",
+                  border: "1px solid var(--wp-dark-border)",
+                  borderRadius: 8,
+                  padding: "1rem",
+                  width: "100%",
+                  maxWidth: 480,
+                  maxHeight: "70vh",
+                  overflowY: "auto",
+                  fontSize: "0.95rem",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: 8,
+                  }}
+                >
+                  <strong style={{ color: "var(--wp-gold)" }}>
+                    Link this note
+                  </strong>
+                  <button
+                    type="button"
+                    data-testid={`bulletin-note-assoc-close-${note.id}`}
+                    onClick={() => setAssocOpen(false)}
+                    style={{
+                      background: "transparent",
+                      color: "var(--wp-text)",
+                      border: "1px solid var(--wp-dark-border)",
+                      borderRadius: 4,
+                      padding: "2px 10px",
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+                <AssociationPicker
+                  kind={note.associationKind}
+                  id={note.associationId || ""}
+                  label={note.associationLabel || ""}
+                  onChange={setAssociation}
+                  testIdPrefix={`bulletin-note-assoc-${note.id}`}
+                />
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       <div
         className="bulletin-resize"
