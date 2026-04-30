@@ -1604,6 +1604,10 @@ export type InstinctEventType =
   | "assistant.calendar_lookup_failed"
   | "assistant.email_lookup_failed"
   | "assistant.knowledge_cache_bypassed"
+  /* org_qa_cache_hit: an identical normalized question by any user in
+     the org was answered before (within TTL), and we served the prior
+     answer at zero tokens. Drives the "tokens saved by cache" metric. */
+  | "assistant.org_qa_cache_hit"
   /* page_facts is a separate static lookup that fires BEFORE the
      knowledge cache. Bypass it for the same query categories so a
      "what's in the TWA agenda doc" question doesn't get short-circuited

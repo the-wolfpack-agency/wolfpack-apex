@@ -19,6 +19,7 @@ import { runBrainHistory } from "@/lib/assistant/tools/brain-history";
 import { runMailSearch } from "@/lib/assistant/tools/mail-search";
 import { runGoalsLookup } from "@/lib/assistant/tools/goals-lookup";
 import { runFinancialsMetric } from "@/lib/assistant/tools/financials-metric";
+import { runMeetingsOnDate } from "@/lib/assistant/tools/meetings-on-date";
 import { resolveTimeframe } from "@/lib/assistant/timeframe";
 
 export interface ToolAnswer {
@@ -65,6 +66,12 @@ export async function tryToolAnswer(
       selfUser,
       timeZone: ctx.timeZone,
     });
+    if (!result) return null;
+    return { intent: match.intent, answer: result.answer, data: result, source: "tool" };
+  }
+
+  if (match.intent === "meetings_on_date") {
+    const result = await runMeetingsOnDate({ question, nowMs: ctx.nowMs });
     if (!result) return null;
     return { intent: match.intent, answer: result.answer, data: result, source: "tool" };
   }

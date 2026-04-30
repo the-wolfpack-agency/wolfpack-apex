@@ -33,6 +33,9 @@ interface AskResponse {
   similarity?: number;
   low_confidence: boolean;
   latency_ms: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
 }
 
 export function AssistantSupportPanel() {
@@ -191,6 +194,24 @@ export function AssistantSupportPanel() {
                 cached
               </span>
             )}
+            <span
+              data-testid="assistant-support-tokens-badge"
+              className="text-xs px-2 py-0.5 rounded"
+              style={{
+                background: "var(--wp-dark-surface2)",
+                color: "var(--wp-text-dim)",
+                border: "1px solid var(--wp-dark-border)",
+              }}
+              title={
+                answer.was_cache_hit
+                  ? "Served from cache — no model tokens used"
+                  : `prompt ${answer.prompt_tokens ?? 0} + completion ${answer.completion_tokens ?? 0}`
+              }
+            >
+              {answer.was_cache_hit
+                ? "Zero tokens"
+                : `${answer.total_tokens ?? 0} tokens`}
+            </span>
           </div>
           <p
             className="text-sm whitespace-pre-wrap"

@@ -29,6 +29,7 @@ import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
 export type AssistantSource =
   | "page_facts"
   | "knowledge_cache"
+  | "user_qa_cache"
   | "analytics"
   | "meeting_transcripts"
   | "brain"
@@ -143,6 +144,182 @@ export const MEETING_OR_DATE_BYPASS_PATTERNS: RegExp[] = [
 export function shouldBypassKnowledgeCache(question: string): boolean {
   if (!question) return false;
   return MEETING_OR_DATE_BYPASS_PATTERNS.some((p) => p.test(question));
+}
+
+// ---------------------------------------------------------------------------
+// Org-wide exact-match Q/A cache.
+//
+// The Wolfpack Assistant is the org's shared knowledge base: a question
+// answered once benefits every team member. The shared knowledge cache is
+// intentionally bypassed for date-bound and document-name questions
+// because loose token-overlap matching used to return stale rows
+// ("wolfpack team members" for "meetings on April 20"). But a verbatim
+// repeat of the same normalized question — by anyone in the org — should
+// always be served from cache: the date itself is in the question, so
+// the answer is deterministic. Re-burning tokens for it is indefensible.
+//
+// We solve this with a strict ORG-wide, exact-match-on-normalized-text
+// cache backed by `instinct_messages`. Single-tenant deployment (one
+// agency = one org), so any prior answer in the table is fair game. The
+// originating message id is recorded in metadata so we can attribute the
+// cached answer if anyone asks "where did this come from?".
+//
+// TTL: 7 days for date-bound queries (date in the question). 60 minutes
+// for everything else (hedge against underlying-data updates landing
+// during the day).
+// ---------------------------------------------------------------------------
+
+/** Normalize a question for exact-match cache hits. */
+export function normalizeQuestionForCache(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[?!.,;:'"()]/g, "")
+    .trim();
+}
+
+const ORG_QA_TTL_MS_DEFAULT = 60 * 60 * 1000;          // 1 hour
+const ORG_QA_TTL_MS_DATE_BOUND = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+interface OrgQACacheHit {
+  answer: string;
+  source: AssistantSource;
+  /** Original tokens spent on the cached answer — telemetry only;
+   *  the cache hit itself costs zero. */
+  originalTokens: number;
+  /** Original assistant message id, for attribution. */
+  originalMessageId: string;
+}
+
+/** Stop-words removed from the fuzzy-match token set. */
+const STOPWORDS = new Set([
+  "the","a","an","of","and","or","but","is","are","was","were","be","been",
+  "do","did","does","have","has","had","this","that","these","those","i",
+  "you","we","they","my","our","their","on","in","at","to","for","with",
+  "about","what","which","who","whom","when","where","why","how","please",
+  "tell","me","show","get","give","could","would","should","can","may",
+]);
+
+function tokenSet(text: string): Set<string> {
+  return new Set(
+    normalizeQuestionForCache(text)
+      .split(" ")
+      .filter((t) => t.length >= 2 && !STOPWORDS.has(t)),
+  );
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const t of a) if (b.has(t)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+
+const FUZZY_SIM_THRESHOLD = 0.8;
+
+async function findOrgQACacheHit(
+  message: string,
+): Promise<OrgQACacheHit | null> {
+  if (!process.env.DATABASE_URL) return null;
+  const normalized = normalizeQuestionForCache(message);
+  if (!normalized) return null;
+  const ttlMs = shouldBypassKnowledgeCache(message)
+    ? ORG_QA_TTL_MS_DATE_BOUND
+    : ORG_QA_TTL_MS_DEFAULT;
+
+  try {
+    /* Find the most recent USER message in ANY conversation matching the
+       normalized text, then return the assistant message that immediately
+       follows it. Org-wide: a question answered once benefits everyone.
+       We deliberately do NOT scope by user_id — single-tenant agency
+       deployment, no cross-tenant concerns. The originating message id
+       is captured so the cached answer is attributable. */
+    const r = await safeQuery<{
+      message_id: string;
+      answer: string;
+      source: AssistantSource | null;
+      tokens_used: number;
+    }>(
+      `SELECT a.id AS message_id, a.content AS answer, a.source, a.tokens_used
+         FROM instinct_messages u
+         JOIN LATERAL (
+           SELECT m2.id, m2.content, m2.source, m2.tokens_used, m2.created_at
+             FROM instinct_messages m2
+            WHERE m2.conversation_id = u.conversation_id
+              AND m2.role = 'assistant'
+              AND m2.created_at > u.created_at
+            ORDER BY m2.created_at ASC
+            LIMIT 1
+         ) a ON TRUE
+        WHERE u.role = 'user'
+          AND lower(regexp_replace(regexp_replace(u.content, '[?!.,;:''"()]', '', 'g'), '\\s+', ' ', 'g')) = $1
+          AND u.created_at > NOW() - ($2::bigint || ' milliseconds')::interval
+          AND a.source IS DISTINCT FROM 'fallback'
+          AND a.tokens_used > 0
+        ORDER BY u.created_at DESC
+        LIMIT 1`,
+      [normalized, ttlMs],
+    );
+    const row = r.rows[0];
+    if (row) {
+      return {
+        answer: row.answer,
+        source: (row.source ?? "ai") as AssistantSource,
+        originalTokens: row.tokens_used ?? 0,
+        originalMessageId: row.message_id,
+      };
+    }
+
+    /* No exact match. Pull a window of recent user→assistant pairs and
+       rank them by token-set Jaccard similarity to the incoming
+       question. ALL answered questions become potential cache hits —
+       supports paraphrases and trivial reformatting differences. */
+    const fuzzy = await safeQuery<{
+      message_id: string;
+      question: string;
+      answer: string;
+      source: AssistantSource | null;
+      tokens_used: number;
+    }>(
+      `SELECT a.id AS message_id, u.content AS question, a.content AS answer,
+              a.source, a.tokens_used
+         FROM instinct_messages u
+         JOIN LATERAL (
+           SELECT m2.id, m2.content, m2.source, m2.tokens_used, m2.created_at
+             FROM instinct_messages m2
+            WHERE m2.conversation_id = u.conversation_id
+              AND m2.role = 'assistant'
+              AND m2.created_at > u.created_at
+            ORDER BY m2.created_at ASC
+            LIMIT 1
+         ) a ON TRUE
+        WHERE u.role = 'user'
+          AND u.created_at > NOW() - ($1::bigint || ' milliseconds')::interval
+          AND a.source IS DISTINCT FROM 'fallback'
+          AND a.tokens_used > 0
+        ORDER BY u.created_at DESC
+        LIMIT 200`,
+      [ttlMs],
+    );
+
+    const incomingTokens = tokenSet(message);
+    let best: { row: typeof fuzzy.rows[number]; score: number } | null = null;
+    for (const candidate of fuzzy.rows) {
+      const score = jaccard(incomingTokens, tokenSet(candidate.question));
+      if (!best || score > best.score) best = { row: candidate, score };
+    }
+    if (best && best.score >= FUZZY_SIM_THRESHOLD) {
+      return {
+        answer: best.row.answer,
+        source: (best.row.source ?? "ai") as AssistantSource,
+        originalTokens: best.row.tokens_used ?? 0,
+        originalMessageId: best.row.message_id,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 const TOPIC_KEYWORDS: Record<string, string[]> = {
@@ -341,6 +518,53 @@ export async function chat(
     module: "assistant",
     topics: topics.join(","),
   });
+
+  // --- Priority -1: Org-wide exact-match Q/A cache ---
+  // The assistant is the organization's shared knowledge base. ANY
+  // identical normalized question that has been answered before — by
+  // anyone in the org, within the TTL — is served back at zero tokens.
+  // This is the structural guard against "the same question costs us
+  // again every time". Bypasses are inapplicable here because the
+  // cached answer was generated from the same exact question (so any
+  // date markers in the question already constrained the original
+  // answer's freshness window).
+  const orgCacheHit = await findOrgQACacheHit(message);
+  if (orgCacheHit) {
+    trackEvent("assistant.org_qa_cache_hit", userId, userRole, {
+      module: "assistant",
+      original_tokens_saved: orgCacheHit.originalTokens,
+      original_source: orgCacheHit.source,
+      original_message_id: orgCacheHit.originalMessageId,
+    });
+    trackEvent("knowledge.answer_found", userId, userRole, {
+      source: "user_qa_cache",
+      tokens_used: 0,
+      module: "assistant",
+    });
+    trackEvent("system.ai_call_skipped", userId, userRole, {
+      reason: "org_qa_cache_hit",
+      module: "assistant",
+    });
+    const msgId = await dbSaveMessage(
+      convId,
+      "assistant",
+      orgCacheHit.answer,
+      "user_qa_cache",
+      0,
+      {
+        original_source: orgCacheHit.source,
+        original_message_id: orgCacheHit.originalMessageId,
+      },
+    );
+    await dbUpdateConversationStats(convId, 0);
+    return {
+      response: orgCacheHit.answer,
+      source: "user_qa_cache",
+      tokensUsed: 0,
+      conversationId: convId,
+      messageId: msgId,
+    };
+  }
 
   // --- Priority 0: Page facts (zero-token, static page descriptions) ---
   // Users constantly ask "what is the Calendar page?" or "how do I use

@@ -38,6 +38,21 @@ interface PlaudStatus {
   connectedAt?: string;
 }
 
+interface UsageWindow {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cache_hits: number;
+  ai_calls: number;
+}
+
+interface UsageResponse {
+  user_id_hint: string;
+  lifetime: UsageWindow;
+  last_30_days: UsageWindow;
+  generated_at: string;
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -68,6 +83,8 @@ export default function SettingsPage() {
   const [loadingMicrosoft, setLoadingMicrosoft] = useState(true);
   const [loadingQuickbooks, setLoadingQuickbooks] = useState(true);
   const [loadingPlaud, setLoadingPlaud] = useState(true);
+  const [usage, setUsage] = useState<UsageResponse | null>(null);
+  const [loadingUsage, setLoadingUsage] = useState(true);
   const [briefingEnabled, setBriefingEnabled] = useState(true);
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
@@ -139,6 +156,19 @@ export default function SettingsPage() {
     setLoadingPlaud(false);
   }, []);
 
+  const fetchUsage = useCallback(async () => {
+    try {
+      const res = await fetchWithRefresh("/api/usage", { headers: authHeaders() });
+      if (res.ok) {
+        const data = (await res.json()) as UsageResponse;
+        setUsage(data);
+      }
+    } catch {
+      /* non-fatal */
+    }
+    setLoadingUsage(false);
+  }, []);
+
   const fetchQuickbooksStatus = useCallback(async () => {
     try {
       const res = await fetchWithRefresh("/api/quickbooks?action=status", {
@@ -195,7 +225,8 @@ export default function SettingsPage() {
     fetchMicrosoftStatus();
     fetchQuickbooksStatus();
     fetchPlaudStatus();
-  }, [fetchMicrosoftStatus, fetchQuickbooksStatus, fetchPlaudStatus]);
+    fetchUsage();
+  }, [fetchMicrosoftStatus, fetchQuickbooksStatus, fetchPlaudStatus, fetchUsage]);
 
   const [connectError, setConnectError] = useState<string | null>(null);
 
@@ -313,6 +344,76 @@ export default function SettingsPage() {
           Manage your profile, integrations, and preferences
         </p>
       </div>
+
+      {/* Token Usage */}
+      <SectionCard title="Token usage">
+        {loadingUsage ? (
+          <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>
+            Loading usage…
+          </p>
+        ) : !usage ? (
+          <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>
+            Usage data unavailable.
+          </p>
+        ) : (
+          <div data-testid="settings-usage" className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p
+                  className="text-xs uppercase tracking-wide"
+                  style={{ color: "var(--wp-text-muted)" }}
+                >
+                  Last 30 days
+                </p>
+                <p
+                  className="text-2xl font-semibold mt-1"
+                  style={{ color: "var(--wp-text)" }}
+                  data-testid="settings-usage-30d-total"
+                >
+                  {usage.last_30_days.total_tokens.toLocaleString()}
+                </p>
+                <p
+                  className="text-xs mt-1"
+                  style={{ color: "var(--wp-text-dim)" }}
+                >
+                  tokens • {usage.last_30_days.ai_calls} AI calls •{" "}
+                  {usage.last_30_days.cache_hits} cache hits
+                </p>
+              </div>
+              <div>
+                <p
+                  className="text-xs uppercase tracking-wide"
+                  style={{ color: "var(--wp-text-muted)" }}
+                >
+                  Lifetime
+                </p>
+                <p
+                  className="text-2xl font-semibold mt-1"
+                  style={{ color: "var(--wp-text)" }}
+                  data-testid="settings-usage-lifetime-total"
+                >
+                  {usage.lifetime.total_tokens.toLocaleString()}
+                </p>
+                <p
+                  className="text-xs mt-1"
+                  style={{ color: "var(--wp-text-dim)" }}
+                >
+                  tokens • {usage.lifetime.ai_calls} AI calls •{" "}
+                  {usage.lifetime.cache_hits} cache hits
+                </p>
+              </div>
+            </div>
+            <p
+              className="text-xs"
+              style={{ color: "var(--wp-text-muted)" }}
+            >
+              Cache hits cost zero tokens. The Wolfpack Assistant routes
+              calendar, meeting, goal, and financial questions through
+              deterministic tools first — those also cost zero tokens.
+            </p>
+          </div>
+        )}
+      </SectionCard>
 
       {/* Profile */}
       <SectionCard title="Profile">

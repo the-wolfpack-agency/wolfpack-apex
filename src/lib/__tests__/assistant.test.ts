@@ -1188,6 +1188,41 @@ describe("regression 2026-04-30 — callAI routes through AI router", () => {
     );
   });
 
+  test("identical org-wide question is served from instinct_messages cache at zero tokens", async () => {
+    /* The cache helper short-circuits when DATABASE_URL is missing — set
+       a dummy value so the SELECT actually runs against our SQL mock. */
+    process.env.DATABASE_URL = "postgres://test";
+    /* Seed the SQL mock so the exact-match SELECT against
+       instinct_messages returns a prior assistant answer with
+       tokens_used > 0. The cache lookup query contains the literal
+       'JOIN LATERAL' string and 'NOT (not_helpful_count' is NOT in
+       it, so we key the override on a uniquely-identifying token. */
+    queryResponses = new Map();
+    queryResponses.set("LATERAL", {
+      rows: [
+        {
+          message_id: "msg-prev-1",
+          answer: "On April 21, 2026, Wolfpack had 1 meeting:\n- Status call",
+          source: "ai",
+          tokens_used: 944,
+        },
+      ],
+      fromCache: false,
+    });
+
+    const result = await chat(
+      "which meetings did wolfpack have on April 21, 2026?",
+      "u-second-asker",
+      "cto",
+    );
+
+    expect(result.source).toBe("user_qa_cache");
+    expect(result.tokensUsed).toBe(0);
+    expect(result.response).toContain("Wolfpack had 1 meeting");
+    /* AI must NOT have been called — the whole point is zero tokens. */
+    expect(mockAIComplete).not.toHaveBeenCalled();
+  });
+
   test("meeting query with NO provider configured still falls back to canned reply (preserves UX)", async () => {
     /* Default mock setup makes getAIClient throw NoProviderAvailableError
        (see beforeEach). This test confirms the historical fallback
