@@ -824,6 +824,26 @@ export default function QrPage() {
           [data-testid="qr-page"] .qr-create-grid {
             grid-template-columns: 1fr;
           }
+          /* Show-QR panel: stack the SVG above the Download button on
+             narrow screens so the 192px QR + adjacent button block
+             never exceeds viewport width. */
+          [data-testid="qr-page"] .qr-row-svg-panel {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          [data-testid="qr-page"] .qr-row-svg-wrapper {
+            width: 100% !important;
+            max-width: 280px;
+            height: auto !important;
+            aspect-ratio: 1 / 1;
+          }
+          /* Force long slugs / URLs in row headers + edit form to wrap
+             instead of pushing the row past viewport. */
+          [data-testid="qr-page"] code,
+          [data-testid="qr-page"] strong {
+            word-break: break-all;
+            overflow-wrap: anywhere;
+          }
         }
       `}</style>
       <header>
@@ -1194,6 +1214,7 @@ export default function QrPage() {
                   {row.showingQr ? (
                     <div
                       data-testid={`qr-row-svg-${c.slug}`}
+                      className="qr-row-svg-panel"
                       style={{
                         marginTop: 10,
                         padding: 12,
@@ -1203,6 +1224,9 @@ export default function QrPage() {
                         display: "flex",
                         gap: 16,
                         alignItems: "center",
+                        flexWrap: "wrap",
+                        maxWidth: "100%",
+                        minWidth: 0,
                       }}
                     >
                       {row.loadingQr ? (
