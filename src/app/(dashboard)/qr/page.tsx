@@ -80,10 +80,12 @@ interface RowState {
   editTargetUrl: string;
   savingEdit: boolean;
   editError: string | null;
-  /* Cached SVG for non-newly-created codes (re-rendered client-side
-     from a tiny lib so we don't need a server roundtrip). New codes
-     keep the SVG returned by POST. Map keyed by code id. */
+  /* QR SVG for an existing (non-just-created) code. Lazily fetched
+     from GET /api/qr/[id]/svg when the user clicks "Show QR". null =
+     not fetched; "" = fetched-but-failed (let the user retry). */
   qrSvg: string | null;
+  showingQr: boolean;
+  loadingQr: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -455,6 +457,8 @@ export default function QrPage() {
           savingEdit: false,
           editError: null,
           qrSvg: data.qrSvg,
+          showingQr: false,
+          loadingQr: false,
         },
       }));
       /* Reset the form for the next code. */
@@ -484,6 +488,8 @@ export default function QrPage() {
         savingEdit: false,
         editError: null,
         qrSvg: null,
+        showingQr: false,
+        loadingQr: false,
       }
     );
   }
@@ -502,6 +508,8 @@ export default function QrPage() {
           savingEdit: false,
           editError: null,
           qrSvg: null,
+        showingQr: false,
+        loadingQr: false,
         };
       return {
         ...prev,
@@ -546,6 +554,32 @@ export default function QrPage() {
     patchRow(code.id, { expanded: next });
     if (next && !row.analytics && !row.loadingAnalytics) {
       void loadAnalytics(code);
+    }
+  }
+
+  async function toggleQr(code: QrCode) {
+    const row = rowStates[code.id];
+    if (row?.showingQr) {
+      patchRow(code.id, { showingQr: false });
+      return;
+    }
+    if (row?.qrSvg) {
+      patchRow(code.id, { showingQr: true });
+      return;
+    }
+    patchRow(code.id, { showingQr: true, loadingQr: true });
+    try {
+      const res = await fetchWithRefresh(
+        `/api/qr/${encodeURIComponent(code.id)}/svg`,
+      );
+      if (!res.ok) {
+        patchRow(code.id, { loadingQr: false, qrSvg: "" });
+        return;
+      }
+      const svg = await res.text();
+      patchRow(code.id, { loadingQr: false, qrSvg: svg });
+    } catch {
+      patchRow(code.id, { loadingQr: false, qrSvg: "" });
     }
   }
 
@@ -970,6 +1004,14 @@ export default function QrPage() {
                         </span>
                       ) : null}
                       <button
+                        data-testid={`qr-row-show-qr-${c.slug}`}
+                        type="button"
+                        onClick={() => toggleQr(c)}
+                        style={btnSecondary}
+                      >
+                        {row.showingQr ? "Hide QR" : "Show QR"}
+                      </button>
+                      <button
                         data-testid={`qr-row-copy-${c.slug}`}
                         type="button"
                         onClick={() => copyShort(c)}
@@ -1013,6 +1055,67 @@ export default function QrPage() {
                       </button>
                     </div>
                   </div>
+
+                  {row.showingQr ? (
+                    <div
+                      data-testid={`qr-row-svg-${c.slug}`}
+                      style={{
+                        marginTop: 10,
+                        padding: 12,
+                        border: "1px solid var(--wp-dark-border)",
+                        borderRadius: 6,
+                        background: "var(--wp-dark-surface2)",
+                        display: "flex",
+                        gap: 16,
+                        alignItems: "center",
+                      }}
+                    >
+                      {row.loadingQr ? (
+                        <div style={{ color: "var(--wp-text-dim)", fontSize: 13 }}>
+                          Loading QR…
+                        </div>
+                      ) : row.qrSvg ? (
+                        <>
+                          <div
+                            data-testid={`qr-row-svg-render-${c.slug}`}
+                            style={{
+                              width: 192,
+                              height: 192,
+                              background: "#fff",
+                              padding: 8,
+                              borderRadius: 4,
+                              flexShrink: 0,
+                            }}
+                            dangerouslySetInnerHTML={{ __html: row.qrSvg }}
+                          />
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            <button
+                              type="button"
+                              data-testid={`qr-row-svg-download-${c.slug}`}
+                              onClick={() => row.qrSvg && downloadSvg(row.qrSvg, c.slug)}
+                              style={btnSecondary}
+                            >
+                              Download SVG
+                            </button>
+                            <span style={{ fontSize: 12, color: "var(--wp-text-dim)" }}>
+                              Scans to <strong>/q/{c.slug}</strong>
+                            </span>
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ color: "var(--wp-error)", fontSize: 13 }}>
+                          Couldn&apos;t load QR.{" "}
+                          <button
+                            type="button"
+                            onClick={() => toggleQr(c)}
+                            style={{ ...btnSecondary, padding: "2px 8px" }}
+                          >
+                            Retry
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
 
                   {row.editing ? (
                     <div
