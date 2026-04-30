@@ -247,13 +247,30 @@ export async function runMeetingsOnDate(args: {
     return ta - tb;
   });
 
-  /* Empty result must NOT short-circuit with a confident "No meetings"
-     answer — the answer might live in SharePoint, the user's personal
-     Outlook calendar, or anywhere else getRelevantContext can reach.
-     Returning null lets the orchestrator fall through to the LLM with
-     full grounding context. */
+  /* Empty result: return a precise, source-aware answer from the tool
+     itself rather than falling through to the LLM. The LLM has no way
+     to know the system DID query Plaud transcripts, MS Teams, and the
+     user's Outlook calendar — when the grounding block is empty it
+     hallucinates "we don't store meeting records", which is wrong and
+     undermines user trust. Listing the surfaces we checked turns the
+     empty result into actionable information. */
   if (meetings.length === 0) {
-    return null;
+    const surfaces: string[] = [
+      "Plaud transcripts",
+      "Microsoft Teams meetings",
+    ];
+    if (args.userId) surfaces.push("your Outlook calendar");
+    const answer =
+      `No meetings found on ${range.label} across ${surfaces.join(", ")}.\n\n` +
+      `If meetings happened that day, confirm Microsoft 365 is connected in [Settings](/settings).\n\n` +
+      `Go to: [Meetings](/meetings)`;
+    return {
+      answer,
+      meetings,
+      dateLabel: range.label,
+      startMs: range.startMs,
+      endMs: range.endMs,
+    };
   }
 
   const lines = meetings.map((m) => {

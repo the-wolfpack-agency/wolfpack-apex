@@ -136,13 +136,20 @@ describe("runMeetingsOnDate", () => {
     expect(r!.answer).toContain("Jorge Colon");
   });
 
-  test("returns null when ALL three sources are empty (lets LLM grounding run)", async () => {
+  test("returns precise 'no meetings found' answer listing surfaces checked when ALL sources empty", async () => {
     mockSafeQuery.mockResolvedValue({ rows: [] });
     mockListEvents.mockResolvedValue([]);
     const r = await runMeetingsOnDate({
       question: "meetings on 2026-04-21",
       userId: "u-1",
     });
-    expect(r).toBeNull();
+    expect(r).not.toBeNull();
+    expect(r!.meetings).toEqual([]);
+    expect(r!.answer).toMatch(/^No meetings found/);
+    /* Must name the surfaces actually queried so the LLM never has a
+       chance to hallucinate "we don't store meetings". */
+    expect(r!.answer).toContain("Plaud transcripts");
+    expect(r!.answer).toContain("Microsoft Teams meetings");
+    expect(r!.answer).toContain("Outlook calendar");
   });
 });
