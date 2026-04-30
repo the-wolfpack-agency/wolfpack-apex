@@ -33,6 +33,11 @@ jest.mock("@/lib/obs", () => ({
   getObsClient: () => ({ recordError: jest.fn() }),
 }));
 
+const mockGetRelevantContext = jest.fn();
+jest.mock("@/lib/assistant/context-resolver", () => ({
+  getRelevantContext: (...args: unknown[]) => mockGetRelevantContext(...args),
+}));
+
 import {
   askWithCache,
   cosineSimilarity,
@@ -44,6 +49,17 @@ import {
 beforeEach(() => {
   jest.clearAllMocks();
   process.env.DATABASE_URL = "postgres://test";
+  /* Default: context resolver returns an empty bundle so the existing
+     miss-path tests stay untouched. Individual tests override as needed. */
+  mockGetRelevantContext.mockResolvedValue({
+    question: "",
+    surface: "knowledge",
+    sharepoint_hits: [],
+    project_tasks: [],
+    rendered_prompt_block: "",
+    total_chars: 0,
+    took_ms: 1,
+  });
 });
 
 afterAll(() => {
@@ -257,5 +273,104 @@ describe("askWithCache — empty question is rejected", () => {
     await expect(
       askWithCache({ question: "   ", surface: "knowledge" }),
     ).rejects.toThrow(/required/i);
+  });
+});
+
+describe("askWithCache — SharePoint + MS Project context grounding", () => {
+  /* Helper: stage a guaranteed cache miss so the LLM call always fires. */
+  function stageCacheMiss() {
+    mockQuery.mockResolvedValueOnce({ rows: [] }); // exact miss
+    mockEmbedBatch.mockResolvedValueOnce({
+      vectors: [[1, 0, 0, 0]],
+      tokensUsed: 1,
+      model: "test-model",
+    });
+    mockQuery.mockResolvedValueOnce({ rows: [] }); // no candidates
+    mockComplete.mockResolvedValueOnce({
+      content: "answer",
+      model_used: "haiku",
+      provider_used: "anthropic",
+      input_tokens: 5,
+      output_tokens: 5,
+      cost_usd: 0,
+      latency_ms: 10,
+    });
+    mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "qa-new" }] });
+  }
+
+  it("injects rendered_prompt_block from getRelevantContext into the LLM system prompt", async () => {
+    const groundingBlock =
+      "Internal context (cite if you use it):\n\n[SharePoint] TWA Agenda 4.20 - https://netorg9503444.sharepoint.com/sites/WolfpackInternal/TWA_Agenda_4.20.docx\nDiscuss Q2 OKRs and AI roadmap.\n";
+    mockGetRelevantContext.mockResolvedValueOnce({
+      question: "what is on the wolfpack internal agenda",
+      surface: "knowledge",
+      sharepoint_hits: [{}],
+      project_tasks: [],
+      rendered_prompt_block: groundingBlock,
+      total_chars: groundingBlock.length,
+      took_ms: 5,
+    });
+    stageCacheMiss();
+
+    const result = await askWithCache({
+      question: "what is on the wolfpack internal agenda",
+      surface: "knowledge",
+      userId: "user-1",
+    });
+
+    expect(result.was_cache_hit).toBe(false);
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+    const completeArgs = mockComplete.mock.calls[0][0] as { system: string };
+    expect(completeArgs.system).toContain(groundingBlock);
+    expect(completeArgs.system).toContain("Wolfpack Agency"); // base prompt still present
+
+    /* Resolver was called with the right shape. */
+    expect(mockGetRelevantContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: "what is on the wolfpack internal agenda",
+        userId: "user-1",
+        surface: "knowledge",
+      }),
+    );
+  });
+
+  it("calls the LLM with unchanged base prompt when getRelevantContext throws", async () => {
+    mockGetRelevantContext.mockRejectedValueOnce(new Error("graph 503"));
+    stageCacheMiss();
+
+    const result = await askWithCache({
+      question: "another brand-new question",
+      surface: "knowledge",
+      userId: "user-2",
+    });
+
+    expect(result.was_cache_hit).toBe(false);
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+    const completeArgs = mockComplete.mock.calls[0][0] as { system: string };
+    /* No grounding header was prepended. */
+    expect(completeArgs.system).not.toContain("Internal context");
+    expect(completeArgs.system).toContain("Wolfpack Agency");
+  });
+
+  it("calls the LLM with unchanged base prompt when bundle is empty (no M365 token)", async () => {
+    mockGetRelevantContext.mockResolvedValueOnce({
+      question: "q",
+      surface: "knowledge",
+      sharepoint_hits: [],
+      project_tasks: [],
+      rendered_prompt_block: "",
+      total_chars: 0,
+      took_ms: 1,
+    });
+    stageCacheMiss();
+
+    await askWithCache({
+      question: "yet another question",
+      surface: "knowledge",
+      userId: "user-3",
+    });
+
+    const completeArgs = mockComplete.mock.calls[0][0] as { system: string };
+    expect(completeArgs.system).not.toContain("Internal context");
   });
 });

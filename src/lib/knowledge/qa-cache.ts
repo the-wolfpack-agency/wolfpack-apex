@@ -37,6 +37,7 @@ import { query, writeQuery } from "@/lib/db";
 import { embedBatch, isEmbeddingConfigured } from "@/lib/brain/embedder";
 import { getAIClient } from "@/lib/ai";
 import { getObsClient } from "@/lib/obs";
+import { getRelevantContext } from "@/lib/assistant/context-resolver";
 
 /* ------------------------------------------------------------------ */
 /* Public types                                                        */
@@ -312,11 +313,22 @@ interface LLMOutcome {
   completionTokens: number;
 }
 
-async function callLLM(question: string, surface: QASurface): Promise<LLMOutcome> {
+async function callLLM(
+  question: string,
+  surface: QASurface,
+  contextBlock = "",
+): Promise<LLMOutcome> {
   const client = getAIClient();
+  /* Prepend the SharePoint + MS Project grounding block to the system
+     prompt. When contextBlock is empty (resolver failed, or user has no
+     M365 token, or no hits), the prompt is unchanged. */
+  const baseSystem = pickSystemPrompt(surface);
+  const system = contextBlock
+    ? `${contextBlock}\n${baseSystem}`
+    : baseSystem;
   const result = await client.complete({
     messages: [{ role: "user", content: question }],
-    system: pickSystemPrompt(surface),
+    system,
     max_tokens: 350,
     temperature: 0.2,
     model_tier: "cheap",
@@ -416,8 +428,29 @@ export async function askWithCache(
     }
   }
 
-  /* 3. Miss → LLM. */
-  const outcome = await callLLM(args.question, args.surface);
+  /* 3. Miss → LLM. Best-effort fetch of SharePoint + MS Project grounding
+     so the answer is grounded in the team's internal documents. Failures
+     here (403 scope_missing, Graph 5xx, missing OAuth token) MUST never
+     block the LLM call — getRelevantContext emits its own typed analytics
+     and the fallback is to answer ungrounded rather than 500. */
+  let contextBlock = "";
+  try {
+    const ctx = await getRelevantContext({
+      question: args.question,
+      userId: args.userId ?? "",
+      role: "" /* qa-cache doesn't carry role; resolver defaults to "user" */,
+      surface: args.surface,
+      maxChars: 6000,
+    });
+    contextBlock = ctx.rendered_prompt_block;
+  } catch (err) {
+    getObsClient().recordError(
+      err instanceof Error ? err : new Error(String(err)),
+      { stage: "qa_cache.context_resolve" },
+    );
+  }
+
+  const outcome = await callLLM(args.question, args.surface, contextBlock);
   let qaId = "";
   try {
     qaId = await insertAIGenerated({
