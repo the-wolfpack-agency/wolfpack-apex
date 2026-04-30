@@ -1608,6 +1608,12 @@ export type InstinctEventType =
      the org was answered before (within TTL), and we served the prior
      answer at zero tokens. Drives the "tokens saved by cache" metric. */
   | "assistant.org_qa_cache_hit"
+  /* org_fact_captured: a user follow-up corrected a prior assistant
+     answer ("no, the client is Porsche"). The correction is stored in
+     instinct_org_facts and injected into all subsequent prompts whose
+     question text references the same subject. Drives the "team is
+     teaching the assistant" learning-loop dashboard. */
+  | "assistant.org_fact_captured"
   /* page_facts is a separate static lookup that fires BEFORE the
      knowledge cache. Bypass it for the same query categories so a
      "what's in the TWA agenda doc" question doesn't get short-circuited
