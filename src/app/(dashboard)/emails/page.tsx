@@ -1159,6 +1159,15 @@ export default function EmailsPage() {
   const showInboxOnMobile = !isMobile || rightPaneState === "empty";
   const showRightOnMobile = !isMobile || rightPaneState !== "empty";
 
+  /* Compose mode takes over the surface — when the composer is open,
+     hide the inbox list so the composer gets the entire remaining
+     width. The nav rail stays (already collapsible) for switching
+     folders mid-compose. Discard or Send returns to the normal
+     3-pane shell. The Recipient-context drawer is conditionally
+     hidden inside ComposerPane itself via the same flag. */
+  const isComposing = rightPaneState === "composer";
+  const showInbox = showInboxOnMobile && !isComposing;
+
   // The 3-column shell stays mounted at all times. The reader does
   // NOT replace the page — it's rendered inside the right pane,
   // alongside (visually) the inbox list and nav rail. This is the
@@ -1198,7 +1207,7 @@ export default function EmailsPage() {
       ) : null}
 
       {/* Inbox column */}
-      {showInboxOnMobile ? (
+      {showInbox ? (
         <div
           style={inboxColStyle(isMobile, effectiveInboxWidth)}
           data-testid="inbox-column"
@@ -1739,19 +1748,10 @@ function ComposerPane({
         </div>
       </section>
 
-      {/* Recipient context drawer — hidden entirely on mobile (the
-          composer is full-screen there); collapsible strip on desktop. */}
-      {!isMobile ? (
-        <RecipientContextDrawer
-          open={contextOpen}
-          onToggle={onToggleContext}
-          recipients={recipients}
-          insightsCache={insightsCache}
-          expandedRecipients={expandedRecipients}
-          onToggleRecipientCard={onToggleRecipientCard}
-          calendarEvents={calendarEvents}
-        />
-      ) : null}
+      {/* Recipient context drawer removed from compose view — the
+          composer needs the full remaining width to be actually
+          usable. Recipient context is still available from the inbox
+          reader where it has room to render. */}
     </div>
   );
 }
