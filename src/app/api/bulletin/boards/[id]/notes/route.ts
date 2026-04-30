@@ -37,8 +37,14 @@ export async function POST(
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
 
-  if (!body?.body || typeof body.body !== "string") {
-    return NextResponse.json({ error: "body is required" }, { status: 400 });
+  /* Accept empty-string body — the UI's "Add note" button drops a blank
+     sticky on the board so the user can immediately click in to type.
+     We only reject when the field is missing or the wrong type. */
+  if (typeof body?.body !== "string") {
+    return NextResponse.json(
+      { error: "body must be a string" },
+      { status: 400 },
+    );
   }
 
   /* Coerce a partial association into the lib's expected shape; let

@@ -72,6 +72,14 @@ describe("POST /api/bulletin/boards/[id]/notes", () => {
     expect(res.status).toBe(400);
   });
 
+  /* Regression 2026-04-30: Add note button drops a blank sticky and
+     the user types into it. Empty string MUST be accepted. */
+  test("200 when body is empty string (blank starter sticky)", async () => {
+    mockCreateNote.mockResolvedValueOnce(sampleNote);
+    const res = await POST(postBody("board-1", { body: "" }), ctx("board-1"));
+    expect(res.status).toBe(200);
+  });
+
   test("200 happy path returns note + tracks event without assoc", async () => {
     mockCreateNote.mockResolvedValueOnce(sampleNote);
     const res = await POST(postBody("board-1", { body: "hello" }), ctx("board-1"));
