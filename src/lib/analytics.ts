@@ -1599,7 +1599,14 @@ export type InstinctEventType =
      knowledge cache. Bypass it for the same query categories so a
      "what's in the TWA agenda doc" question doesn't get short-circuited
      to a generic "Docs page" page-facts blurb. */
-  | "assistant.page_facts_bypassed";
+  | "assistant.page_facts_bypassed"
+  /* context_debug_invoked: emitted by GET /api/assistant/context-debug
+     each time an authorized user inspects EXACTLY what grounding
+     `getRelevantContext` returned for a question. Distinct from
+     `assistant.context_resolved` (which fires inside the resolver on
+     every assistant call) so triage dashboards can isolate "user is
+     debugging grounding" runs from regular traffic. */
+  | "assistant.context_debug_invoked";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;
