@@ -17,13 +17,14 @@ import { renderQrSvg } from "@/lib/qr/svg";
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  context: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const code = await getCodeById(params.id);
+  const { id } = await context.params;
+  const code = await getCodeById(id);
   if (!code) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
