@@ -1608,6 +1608,20 @@ export type InstinctEventType =
      the org was answered before (within TTL), and we served the prior
      answer at zero tokens. Drives the "tokens saved by cache" metric. */
   | "assistant.org_qa_cache_hit"
+  /* qr_code_created: a wolfpack member generated a new offline QR
+     code targeting an authenticated URL. Metadata captures whether a
+     UTM campaign / expiry was attached + the target hostname so the
+     learning loop can spot which campaigns drive scans. */
+  | "assistant.qr_code_created"
+  /* qr_scan_recorded: a public scan hit /q/[slug] and was either
+     redirected (blocked=false) or short-circuited because the code
+     was missing/archived/expired (blocked=true). The redirect handler
+     fires this fire-and-forget — never blocks the 302. */
+  | "assistant.qr_scan_recorded"
+  /* qr_analytics_viewed: an authorized member opened the analytics
+     dashboard for a specific QR code. Distinct from system.page_viewed
+     so QR-specific drill-in is reportable. */
+  | "assistant.qr_analytics_viewed"
   /* org_fact_captured: a user follow-up corrected a prior assistant
      answer ("no, the client is Porsche"). The correction is stored in
      instinct_org_facts and injected into all subsequent prompts whose
