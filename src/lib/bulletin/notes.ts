@@ -174,8 +174,10 @@ export async function createNote(args: {
   userName?: string | null;
 }): Promise<BulletinNote> {
   if (!args.boardId) throw new Error("boardId is required");
-  if (!args.body || typeof args.body !== "string") {
-    throw new Error("body is required");
+  /* Accept empty body — UI drops a blank sticky on the board so the
+     user can immediately click in to type. Only reject non-string. */
+  if (typeof args.body !== "string") {
+    throw new Error("body must be a string");
   }
   if (!args.userId) throw new Error("userId is required");
 
