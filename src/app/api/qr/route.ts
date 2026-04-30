@@ -15,6 +15,7 @@ import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import { createCode, listCodes, validateTargetUrl } from "@/lib/qr/codes";
 import { renderQrSvg } from "@/lib/qr/svg";
+import { resolvePublicOrigin } from "@/lib/qr/origin";
 
 export async function POST(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
@@ -57,9 +58,12 @@ export async function POST(req: NextRequest) {
     });
 
     const shortUrl = `/q/${code.slug}`;
-    const base = process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/+$/, "") ?? "";
-    const fullRedirectUrl = `${base}${shortUrl}`;
-    const qrSvg = renderQrSvg(fullRedirectUrl || `https://${parsedTarget.host}${shortUrl}`);
+    const origin = resolvePublicOrigin(req);
+    const fullRedirectUrl = `${origin}${shortUrl}`;
+    /* The encoder needs an absolute URL — never pass `shortUrl` alone.
+       A relative path encoded into a QR makes phone cameras
+       Google-search the literal string. */
+    const qrSvg = renderQrSvg(fullRedirectUrl);
 
     trackEvent("assistant.qr_code_created", user.id, user.role, {
       slug: code.slug,

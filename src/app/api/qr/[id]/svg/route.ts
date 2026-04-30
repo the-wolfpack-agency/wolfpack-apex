@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { getCodeById } from "@/lib/qr/codes";
 import { renderQrSvg } from "@/lib/qr/svg";
+import { resolvePublicOrigin } from "@/lib/qr/origin";
 
 export async function GET(
   req: NextRequest,
@@ -29,11 +30,7 @@ export async function GET(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  const base =
-    process.env.NEXT_PUBLIC_BASE_URL ||
-    process.env.VERCEL_URL ||
-    new URL(req.url).origin;
-  const fullRedirectUrl = `${base.startsWith("http") ? base : `https://${base}`}/q/${code.slug}`;
+  const fullRedirectUrl = `${resolvePublicOrigin(req)}/q/${code.slug}`;
 
   const url = new URL(req.url);
   const sizeParam = url.searchParams.get("size");
