@@ -1353,47 +1353,17 @@ export default function QrPage() {
                           {row.analyticsError}
                         </div>
                       ) : row.analytics ? (
-                        <>
-                          <AnalyticsPanel a={row.analytics} />
-                          <div
-                            style={{
-                              display: "flex",
-                              justifyContent: "flex-end",
-                              gap: 8,
-                              borderTop: "1px solid var(--wp-dark-border)",
-                              paddingTop: 10,
-                              marginTop: 4,
-                            }}
-                          >
-                            <button
-                              data-testid={`qr-row-view-all-scans-${c.slug}`}
-                              type="button"
-                              onClick={() => toggleScanDetail(c)}
-                              style={{
-                                ...btnSecondary,
-                                color: "var(--wp-gold)",
-                                borderColor: "var(--wp-gold)",
-                              }}
-                            >
-                              {row.detailOpen
-                                ? "Hide all-scan detail"
-                                : "View all scans (full detail)"}
-                            </button>
-                          </div>
-                          {row.detailOpen ? (
-                            <ScanDetailPanel
-                              codeSlug={c.slug}
-                              row={row}
-                              onSort={(k) => setScanSort(c.id, k)}
-                              onToggleGrouping={() =>
-                                patchRow(c.id, {
-                                  groupByVisitor: !row.groupByVisitor,
-                                })
-                              }
-                            />
-                          ) : null}
-                        </>
+                        <AnalyticsPanel a={row.analytics} />
                       ) : null}
+                      {/* "View all scans (full detail)" button + ScanDetailPanel
+                          temporarily hidden — the per-scan API endpoint
+                          (/api/qr/[id]/scans) and the matching DB columns
+                          (migration 112) were the work of an agent run that
+                          stalled. The UI was committed without its backend,
+                          so clicking the button always errored "Failed to load
+                          scan details." Aggregated analytics above still work.
+                          Re-enable when migration 112 + the scans endpoint
+                          land. */}
                     </div>
                   ) : null}
                 </div>
