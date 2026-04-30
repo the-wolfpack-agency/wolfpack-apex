@@ -130,6 +130,15 @@ const MS_SCOPES: string[] = [
   // requires this delegated scope on top of Mail.Read. Tenant admin
   // consent typically required.
   "Mail.Read.Shared",
+  // Mail.ReadWrite — required for the inbox-action surface in /emails:
+  // mark read/unread (PATCH /me/messages/{id} with isRead),
+  // archive (POST /me/messages/{id}/move → archive folder),
+  // and delete (DELETE /me/messages/{id} → Deleted Items). Mail.Send
+  // does NOT cover any of these. Without this scope Graph returns
+  // 403 ErrorAccessDenied and the UI surfaces "scope_missing". Existing
+  // users connected before this scope was added must reconnect M365 via
+  // Settings > Integrations.
+  "Mail.ReadWrite",
   "Mail.Send",
   "Calendars.ReadWrite",
   "Contacts.ReadWrite",

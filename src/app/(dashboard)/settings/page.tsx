@@ -57,9 +57,18 @@ interface UsageResponse {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
+function SectionCard({
+  title,
+  id,
+  children,
+}: {
+  title: string;
+  id?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div
+      id={id}
       className="rounded-lg border p-5"
       style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
     >
@@ -67,6 +76,396 @@ function SectionCard({ title, children }: { title: string; children: React.React
         {title}
       </h2>
       {children}
+    </div>
+  );
+}
+
+interface EmailSignature {
+  id: string;
+  label: string;
+  body: string;
+  isDefault: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+function EmailSignaturesCard() {
+  const [signatures, setSignatures] = useState<EmailSignature[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [newLabel, setNewLabel] = useState<string>("");
+  const [newBody, setNewBody] = useState<string>("");
+  const [newIsDefault, setNewIsDefault] = useState<boolean>(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editLabel, setEditLabel] = useState<string>("");
+  const [editBody, setEditBody] = useState<string>("");
+
+  const fetchSignatures = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetchWithRefresh("/api/email-signatures", {
+        headers: authHeaders(),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { signatures?: EmailSignature[] };
+        setSignatures(Array.isArray(data.signatures) ? data.signatures : []);
+      } else if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      } else {
+        setError("Couldn't load signatures.");
+      }
+    } catch {
+      setError("Network error loading signatures.");
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchSignatures();
+  }, [fetchSignatures]);
+
+  async function createSig() {
+    if (!newLabel.trim() || !newBody.trim()) {
+      setError("Label and body are required.");
+      return;
+    }
+    setBusy("create");
+    setError(null);
+    try {
+      const res = await fetchWithRefresh("/api/email-signatures", {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          label: newLabel.trim(),
+          body: newBody.trim(),
+          isDefault: newIsDefault,
+        }),
+      });
+      if (res.ok) {
+        setNewLabel("");
+        setNewBody("");
+        setNewIsDefault(false);
+        await fetchSignatures();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data?.error ?? "Failed to create signature.");
+      }
+    } catch {
+      setError("Network error creating signature.");
+    }
+    setBusy(null);
+  }
+
+  async function patchSig(id: string, patch: Record<string, unknown>) {
+    setBusy(id);
+    setError(null);
+    try {
+      const res = await fetchWithRefresh(
+        `/api/email-signatures/${encodeURIComponent(id)}`,
+        {
+          method: "PATCH",
+          headers: { ...authHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        },
+      );
+      if (res.ok) {
+        await fetchSignatures();
+        setEditingId(null);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data?.error ?? "Failed to update signature.");
+      }
+    } catch {
+      setError("Network error updating signature.");
+    }
+    setBusy(null);
+  }
+
+  async function deleteSig(id: string) {
+    setBusy(id);
+    setError(null);
+    try {
+      const res = await fetchWithRefresh(
+        `/api/email-signatures/${encodeURIComponent(id)}`,
+        {
+          method: "DELETE",
+          headers: authHeaders(),
+        },
+      );
+      if (res.ok) {
+        await fetchSignatures();
+      } else {
+        setError("Failed to delete signature.");
+      }
+    } catch {
+      setError("Network error deleting signature.");
+    }
+    setBusy(null);
+  }
+
+  function startEdit(sig: EmailSignature) {
+    setEditingId(sig.id);
+    setEditLabel(sig.label);
+    setEditBody(sig.body);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditLabel("");
+    setEditBody("");
+  }
+
+  return (
+    <div data-testid="settings-email-signatures" className="space-y-4">
+      {error && (
+        <p
+          role="alert"
+          className="text-xs"
+          style={{ color: "var(--wp-warning)" }}
+        >
+          {error}
+        </p>
+      )}
+      <p className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
+        Saved signatures appear in the /emails composer toolbar. Mark one as
+        default to have it pre-fill every fresh email.
+      </p>
+
+      {loading ? (
+        <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>
+          Loading signatures…
+        </p>
+      ) : signatures.length === 0 ? (
+        <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>
+          No signatures yet. Add one below.
+        </p>
+      ) : (
+        <ul className="space-y-3" data-testid="signatures-list">
+          {signatures.map((sig) => {
+            const isEditing = editingId === sig.id;
+            return (
+              <li
+                key={sig.id}
+                className="rounded border p-3"
+                style={{
+                  borderColor: "var(--wp-dark-border)",
+                  background: "var(--wp-dark)",
+                }}
+                data-testid={`signature-row-${sig.id}`}
+              >
+                {isEditing ? (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      aria-label="Edit signature label"
+                      data-testid={`signature-edit-label-${sig.id}`}
+                      value={editLabel}
+                      onChange={(e) => setEditLabel(e.target.value)}
+                      className="w-full px-2 py-1 text-sm rounded border"
+                      style={{
+                        background: "var(--wp-dark-surface2)",
+                        borderColor: "var(--wp-dark-border)",
+                        color: "var(--wp-text)",
+                      }}
+                    />
+                    <textarea
+                      aria-label="Edit signature body"
+                      data-testid={`signature-edit-body-${sig.id}`}
+                      value={editBody}
+                      onChange={(e) => setEditBody(e.target.value)}
+                      rows={4}
+                      className="w-full px-2 py-1 text-sm rounded border"
+                      style={{
+                        background: "var(--wp-dark-surface2)",
+                        borderColor: "var(--wp-dark-border)",
+                        color: "var(--wp-text)",
+                        fontFamily: "inherit",
+                      }}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        data-testid={`signature-save-${sig.id}`}
+                        disabled={busy === sig.id}
+                        onClick={() =>
+                          patchSig(sig.id, {
+                            label: editLabel,
+                            body: editBody,
+                          })
+                        }
+                        className="px-3 py-1 rounded text-xs font-medium"
+                        style={{
+                          background: "var(--wp-gold)",
+                          color: "var(--wp-dark)",
+                        }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelEdit}
+                        className="px-3 py-1 rounded text-xs"
+                        style={{
+                          background: "var(--wp-dark-surface2)",
+                          color: "var(--wp-text)",
+                          border: "1px solid var(--wp-dark-border)",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p
+                        className="text-sm font-medium"
+                        style={{ color: "var(--wp-text)" }}
+                      >
+                        {sig.label}
+                        {sig.isDefault && (
+                          <span
+                            className="ml-2 text-xs px-1.5 py-0.5 rounded"
+                            style={{
+                              background: "var(--wp-gold)",
+                              color: "var(--wp-dark)",
+                            }}
+                          >
+                            default
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    <pre
+                      className="text-xs whitespace-pre-wrap"
+                      style={{
+                        color: "var(--wp-text-dim)",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      {sig.body}
+                    </pre>
+                    <div className="flex gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        data-testid={`signature-edit-${sig.id}`}
+                        onClick={() => startEdit(sig)}
+                        className="px-3 py-1 rounded text-xs"
+                        style={{
+                          background: "var(--wp-dark-surface2)",
+                          color: "var(--wp-text)",
+                          border: "1px solid var(--wp-dark-border)",
+                        }}
+                      >
+                        Edit
+                      </button>
+                      {!sig.isDefault && (
+                        <button
+                          type="button"
+                          data-testid={`signature-set-default-${sig.id}`}
+                          disabled={busy === sig.id}
+                          onClick={() =>
+                            patchSig(sig.id, { isDefault: true })
+                          }
+                          className="px-3 py-1 rounded text-xs"
+                          style={{
+                            background: "var(--wp-dark-surface2)",
+                            color: "var(--wp-gold)",
+                            border: "1px solid var(--wp-gold)",
+                          }}
+                        >
+                          Set as default
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        data-testid={`signature-delete-${sig.id}`}
+                        disabled={busy === sig.id}
+                        onClick={() => deleteSig(sig.id)}
+                        className="px-3 py-1 rounded text-xs"
+                        style={{
+                          background: "transparent",
+                          color: "var(--wp-error)",
+                          border: "1px solid var(--wp-error)",
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <div
+        className="rounded border p-3 space-y-2"
+        style={{
+          borderColor: "var(--wp-dark-border)",
+          background: "var(--wp-dark)",
+        }}
+        data-testid="signature-create-form"
+      >
+        <p className="text-xs font-medium" style={{ color: "var(--wp-text)" }}>
+          Add a signature
+        </p>
+        <input
+          type="text"
+          aria-label="New signature label"
+          data-testid="signature-new-label"
+          placeholder="Label (e.g. Default, Short, Demo)"
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+          className="w-full px-2 py-1 text-sm rounded border"
+          style={{
+            background: "var(--wp-dark-surface2)",
+            borderColor: "var(--wp-dark-border)",
+            color: "var(--wp-text)",
+          }}
+        />
+        <textarea
+          aria-label="New signature body"
+          data-testid="signature-new-body"
+          placeholder={"Nick Homyk — CTO\nWolfpack Agency"}
+          value={newBody}
+          onChange={(e) => setNewBody(e.target.value)}
+          rows={4}
+          className="w-full px-2 py-1 text-sm rounded border"
+          style={{
+            background: "var(--wp-dark-surface2)",
+            borderColor: "var(--wp-dark-border)",
+            color: "var(--wp-text)",
+            fontFamily: "inherit",
+          }}
+        />
+        <label
+          className="flex items-center gap-2 text-xs"
+          style={{ color: "var(--wp-text-dim)" }}
+        >
+          <input
+            type="checkbox"
+            data-testid="signature-new-default"
+            checked={newIsDefault}
+            onChange={(e) => setNewIsDefault(e.target.checked)}
+          />
+          Make this my default signature
+        </label>
+        <button
+          type="button"
+          data-testid="signature-create-btn"
+          disabled={busy === "create"}
+          onClick={createSig}
+          className="px-3 py-1 rounded text-xs font-medium"
+          style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+        >
+          {busy === "create" ? "Saving…" : "Add signature"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -440,6 +839,11 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+      </SectionCard>
+
+      {/* Email signatures */}
+      <SectionCard title="Email signatures" id="email-signatures">
+        <EmailSignaturesCard />
       </SectionCard>
 
       {/* Microsoft 365 Integration */}

@@ -412,6 +412,17 @@ export type InstinctEventType =
   | "microsoft.token_refresh_failed"
   | "microsoft.fetch_failed"
   | "microsoft.sync_completed"
+  // Email signatures (composer toolbar). Counted under the "microsoft."
+  // namespace because they are inserted into Outlook-bound emails sent
+  // through the Microsoft Graph mail surface.
+  //   microsoft.signature_created  { signature_id, is_default }
+  //   microsoft.signature_inserted { signature_id, surface, is_default,
+  //                                  insert_mode: 'cursor'|'append'|'above_quote' }
+  | "microsoft.signature_created"
+  | "microsoft.signature_inserted"
+  // Inbound-email surface awareness
+  | "microsoft.email_unread_polled"
+  | "microsoft.email_arrived_notified"
   // Microsoft 365 Tasks (To Do)
   | "system.ms_tasks_synced"
   | "system.ms_tasks_sync_failed"
@@ -1622,6 +1633,13 @@ export type InstinctEventType =
      dashboard for a specific QR code. Distinct from system.page_viewed
      so QR-specific drill-in is reportable. */
   | "assistant.qr_analytics_viewed"
+  /* qr_scan_detail_viewed: an authorized member opened the per-scan
+     attribution detail (the "View all scans" panel that surfaces every
+     captured datapoint per scan, incl. client-match heuristics). Drives
+     the "team is using attribution" learning-loop dashboard so we know
+     whether this view is paying for the storage cost of the extended
+     columns in migration 112. */
+  | "assistant.qr_scan_detail_viewed"
   /* org_fact_captured: a user follow-up corrected a prior assistant
      answer ("no, the client is Porsche"). The correction is stored in
      instinct_org_facts and injected into all subsequent prompts whose

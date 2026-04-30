@@ -66,10 +66,39 @@ interface AuthedUser {
   email?: string;
 }
 
+interface EmailSignatureLite {
+  id: string;
+  label: string;
+  body: string;
+  isDefault: boolean;
+}
+
 type RightPaneState = "empty" | "reader" | "composer";
 
 const DRAFT_KEY = "mail.compose.draft";
 const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** localStorage key for the user's preferred inbox-pane width in pixels. */
+export const INBOX_WIDTH_KEY = "instinct_emails_inbox_px";
+export const INBOX_WIDTH_MIN = 280;
+export const INBOX_WIDTH_MAX = 720;
+export const INBOX_WIDTH_DEFAULT = 340;
+
+export function clampInboxWidth(px: number): number {
+  if (!Number.isFinite(px)) return INBOX_WIDTH_DEFAULT;
+  return Math.max(INBOX_WIDTH_MIN, Math.min(INBOX_WIDTH_MAX, Math.round(px)));
+}
+
+function readSavedInboxWidth(): number {
+  if (typeof window === "undefined") return INBOX_WIDTH_DEFAULT;
+  try {
+    const raw = window.localStorage.getItem(INBOX_WIDTH_KEY);
+    if (!raw) return INBOX_WIDTH_DEFAULT;
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) ? clampInboxWidth(n) : INBOX_WIDTH_DEFAULT;
+  } catch {
+    return INBOX_WIDTH_DEFAULT;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // HTML helpers
@@ -228,6 +257,31 @@ export default function EmailsPage() {
   const [composeOpen, setComposeOpen] = useState<boolean>(false);
   const [inboxReloadKey, setInboxReloadKey] = useState<number>(0);
 
+  // Signatures (per-user, fetched on mount). The composer reads the
+  // default to pre-fill a fresh email and exposes the full list as a
+  // dropdown in the toolbar.
+  const [signatures, setSignatures] = useState<EmailSignatureLite[]>([]);
+  const [signaturesLoaded, setSignaturesLoaded] = useState<boolean>(false);
+  const defaultSignature = useMemo(
+    () => signatures.find((s) => s.isDefault) ?? null,
+    [signatures],
+  );
+
+  // Inbox-pane width. Persisted to localStorage. Drag handle between
+  // the inbox column and the right pane mutates this value.
+  const [inboxWidth, setInboxWidth] = useState<number>(() =>
+    readSavedInboxWidth(),
+  );
+  // Track whether we're actively dragging so the right pane can disable
+  // pointer events on its children (prevents accidental clicks while
+  // resizing) and the cursor stays consistent.
+  const [resizing, setResizing] = useState<boolean>(false);
+  // When the composer opens, collapse the inbox to its minimum so the
+  // composer has room. We restore `inboxWidth` from localStorage when
+  // the composer closes — the *saved* value is the user's preference,
+  // not whatever transient value drag-during-compose might produce.
+  const effectiveInboxWidth = composeOpen ? INBOX_WIDTH_MIN : inboxWidth;
+
   // Unsaved-draft confirmation. When set, the styled dialog renders;
   // pendingAction runs only if the user picks "Discard draft". The
   // shownAtMs timestamp feeds the analytics resolved-event so the
@@ -314,7 +368,61 @@ export default function EmailsPage() {
         setTemplatesLoading(false);
       }
     })();
+
+    /* Fetch the user's saved signatures. Non-fatal — composer still
+       works without them. */
+    (async () => {
+      try {
+        const res = await fetchWithRefresh("/api/email-signatures", {
+          headers: jsonHeaders(),
+        });
+        if (res.ok) {
+          const data = (await res.json()) as {
+            signatures?: EmailSignatureLite[];
+          };
+          const list = Array.isArray(data.signatures) ? data.signatures : [];
+          setSignatures(
+            list.map((s) => ({
+              id: s.id,
+              label: s.label,
+              body: s.body,
+              isDefault: !!s.isDefault,
+            })),
+          );
+        }
+      } catch {
+        /* signatures are optional */
+      } finally {
+        setSignaturesLoaded(true);
+      }
+    })();
   }, [user.id, user.role, draft.body]);
+
+  // -------------------------------------------------------------------------
+  // Signature: pre-fill default on a fresh, empty compose
+  // -------------------------------------------------------------------------
+  // When the composer opens AND the body is empty AND the user has a
+  // default signature, prepend "\n\n${defaultSignature}" to the body.
+  // We deliberately gate on `composeOpen` (not on mount) so opening a
+  // composer mid-session — after the user discards a draft, after a
+  // template insert, etc. — still pre-fills.
+  const signaturePrefilledRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (!composeOpen) {
+      signaturePrefilledRef.current = false;
+      return;
+    }
+    if (!signaturesLoaded || !defaultSignature) return;
+    if (signaturePrefilledRef.current) return;
+    /* Only pre-fill when the body is genuinely empty — replies/forwards
+       and template inserts have already populated draft.body. */
+    const text = htmlToPlainText(draft.body).trim();
+    if (text) return;
+    signaturePrefilledRef.current = true;
+    const html = plainTextToHtml(`\n\n${defaultSignature.body}`);
+    setDraft((prev) => ({ ...prev, body: html }));
+    if (bodyRef.current) bodyRef.current.innerHTML = html;
+  }, [composeOpen, signaturesLoaded, defaultSignature, draft.body]);
 
   // Hydrate the contentEditable from `draft.body` whenever the
   // composer pane becomes visible (composeOpen flipping true). This
@@ -617,6 +725,74 @@ export default function EmailsPage() {
   // Template insertion — also opens the composer pane.
   // -------------------------------------------------------------------------
 
+  // -------------------------------------------------------------------------
+  // Signature insertion
+  // -------------------------------------------------------------------------
+  // When the user clicks an entry in the Signature dropdown we insert
+  // the selected signature into the body. We try contentEditable's
+  // selection API first so the signature lands at the cursor; if the
+  // composer body has lost focus we append at the end with two
+  // newlines of separation (the same default insertSignatureAtCursor
+  // uses for `cursorPos === null`).
+  function insertSignatureBody(sig: EmailSignatureLite) {
+    if (!sig.body.trim()) return;
+    const sigHtml = plainTextToHtml(sig.body);
+    let mode: "cursor" | "append" = "append";
+
+    /* Capture the body's HTML before we attempt insertion so we can
+       tell whether execCommand actually mutated the document. In jsdom
+       (and any environment where execCommand is a no-op) the HTML will
+       be unchanged and we fall back to append. */
+    const before = bodyRef.current?.innerHTML ?? "";
+
+    if (typeof document !== "undefined" && bodyRef.current) {
+      bodyRef.current.focus();
+      const sel = window.getSelection?.();
+      if (
+        sel &&
+        sel.rangeCount > 0 &&
+        bodyRef.current.contains(sel.anchorNode)
+      ) {
+        try {
+          /* execCommand('insertHTML', false, html) inserts at the
+             current selection inside a contentEditable. Deprecated but
+             supported across every modern browser; the existing
+             applyFormat() helper already relies on it. */
+          document.execCommand("insertHTML", false, sigHtml);
+          if (bodyRef.current.innerHTML !== before) {
+            mode = "cursor";
+          }
+        } catch {
+          /* fall through to append */
+        }
+      }
+    }
+
+    if (mode === "append") {
+      const html = before
+        ? `${before}<br><br>${sigHtml}`
+        : `<br><br>${sigHtml}`;
+      if (bodyRef.current) bodyRef.current.innerHTML = html;
+      setDraft((prev) => ({ ...prev, body: html }));
+    } else if (bodyRef.current) {
+      setDraft((prev) => ({ ...prev, body: bodyRef.current!.innerHTML }));
+    }
+
+    emitInsight({
+      actor: user.id,
+      role: user.role,
+      surface: "email",
+      action: "signature_inserted",
+      tier: "personal",
+      target: sig.id,
+      payload: {
+        signature_id: sig.id,
+        is_default: sig.isDefault,
+        insert_mode: mode,
+      },
+    });
+  }
+
   function applyTemplate(t: EmailTemplate) {
     const variableLines = [
       ...t.requiredVariables.map((v) => `${v}: `),
@@ -900,6 +1076,65 @@ export default function EmailsPage() {
   }
 
   // -------------------------------------------------------------------------
+  // Resize: drag handle between inbox column and right pane
+  // -------------------------------------------------------------------------
+  // The drag mounts mousemove/mouseup on window so the user can drag
+  // outside the handle's bounding box without the gesture cancelling.
+  // We persist the final width to localStorage on mouseup, not on every
+  // tick, so we don't thrash storage. v1 is mouse-only — touch devices
+  // get the saved width but no drag handle interaction.
+  const onStartResize = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (isMobile) return;
+      e.preventDefault();
+      setResizing(true);
+      const startX = e.clientX;
+      const startWidth = inboxWidth;
+
+      function onMove(ev: MouseEvent) {
+        const delta = ev.clientX - startX;
+        const next = clampInboxWidth(startWidth + delta);
+        setInboxWidth(next);
+      }
+      function onUp() {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        setResizing(false);
+        try {
+          /* Read the freshest value via setInboxWidth's closure: we
+             read state again via setState callback to avoid persisting
+             a stale value if React batched updates. */
+          setInboxWidth((current) => {
+            const clamped = clampInboxWidth(current);
+            try {
+              window.localStorage.setItem(
+                INBOX_WIDTH_KEY,
+                String(clamped),
+              );
+            } catch {
+              /* quota / private mode — non-fatal */
+            }
+            emitInsight({
+              actor: user.id,
+              role: user.role,
+              surface: "email",
+              action: "inbox_pane_resized",
+              tier: "personal",
+              payload: { width_px: clamped },
+            });
+            return clamped;
+          });
+        } catch {
+          /* noop */
+        }
+      }
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [inboxWidth, isMobile, user.id, user.role],
+  );
+
+  // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
 
@@ -964,7 +1199,11 @@ export default function EmailsPage() {
 
       {/* Inbox column */}
       {showInboxOnMobile ? (
-        <div style={inboxColStyle(isMobile)}>
+        <div
+          style={inboxColStyle(isMobile, effectiveInboxWidth)}
+          data-testid="inbox-column"
+          data-width={effectiveInboxWidth}
+        >
           <InboxPanel
             activeId={readingId}
             onOpen={(row) => handleInboxRowOpen(row.id)}
@@ -975,6 +1214,45 @@ export default function EmailsPage() {
             isMobile={isMobile}
             folder={activeFolder}
           />
+        </div>
+      ) : null}
+
+      {/* Drag handle between inbox column and the right pane. Hidden on
+          mobile (single-pane layout) and while the composer is open
+          (we auto-collapse the inbox to its minimum). */}
+      {!isMobile && showInboxOnMobile && showRightOnMobile && !composeOpen ? (
+        <div
+          data-testid="emails-resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize inbox pane"
+          aria-valuenow={inboxWidth}
+          aria-valuemin={INBOX_WIDTH_MIN}
+          aria-valuemax={INBOX_WIDTH_MAX}
+          tabIndex={0}
+          onMouseDown={onStartResize}
+          onKeyDown={(e) => {
+            /* Keyboard nudge — accessibility. Arrow keys move 16px. */
+            if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+              e.preventDefault();
+              const delta = e.key === "ArrowLeft" ? -16 : 16;
+              setInboxWidth((w) => {
+                const next = clampInboxWidth(w + delta);
+                try {
+                  window.localStorage.setItem(
+                    INBOX_WIDTH_KEY,
+                    String(next),
+                  );
+                } catch {
+                  /* noop */
+                }
+                return next;
+              });
+            }
+          }}
+          style={resizeHandleStyle(resizing)}
+        >
+          <span aria-hidden="true" style={resizeHandleGripStyle} />
         </div>
       ) : null}
 
@@ -1038,6 +1316,8 @@ export default function EmailsPage() {
                 expandedRecipients={expandedRecipients}
                 onToggleRecipientCard={toggleRecipientCard}
                 calendarEvents={calendarYearCacheRef.current?.events ?? []}
+                signatures={signatures}
+                onInsertSignature={insertSignatureBody}
               />
             </div>
           )}
@@ -1100,6 +1380,8 @@ interface ComposerPaneProps {
   expandedRecipients: Set<string>;
   onToggleRecipientCard: (recipient: string) => void;
   calendarEvents: CalendarEventLite[];
+  signatures: EmailSignatureLite[];
+  onInsertSignature: (sig: EmailSignatureLite) => void;
 }
 
 function ComposerPane({
@@ -1137,8 +1419,11 @@ function ComposerPane({
   expandedRecipients,
   onToggleRecipientCard,
   calendarEvents,
+  signatures,
+  onInsertSignature,
 }: ComposerPaneProps) {
   const sendable = canSend();
+  const [signatureMenuOpen, setSignatureMenuOpen] = useState<boolean>(false);
   return (
     <div style={composerWithDrawerWrap}>
       <section
@@ -1316,6 +1601,83 @@ function ComposerPane({
               >
                 1.
               </button>
+              <span style={toolbarDivider} />
+              <div style={{ position: "relative" }}>
+                <button
+                  type="button"
+                  aria-label="Insert signature"
+                  aria-haspopup="menu"
+                  aria-expanded={signatureMenuOpen}
+                  data-testid="signature-menu-toggle"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => setSignatureMenuOpen((v) => !v)}
+                  style={toolbarBtn}
+                >
+                  Signature ▾
+                </button>
+                {signatureMenuOpen ? (
+                  <div
+                    role="menu"
+                    data-testid="signature-menu"
+                    style={signatureMenuStyle}
+                    onMouseLeave={() => setSignatureMenuOpen(false)}
+                  >
+                    {signatures.length === 0 ? (
+                      <div style={signatureMenuEmptyStyle}>
+                        No signatures saved yet.
+                      </div>
+                    ) : (
+                      signatures.map((sig) => (
+                        <button
+                          key={sig.id}
+                          type="button"
+                          role="menuitem"
+                          data-testid={`signature-menu-item-${sig.id}`}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setSignatureMenuOpen(false);
+                            onInsertSignature(sig);
+                          }}
+                          style={signatureMenuItemStyle}
+                        >
+                          <span
+                            style={{
+                              fontWeight: 600,
+                              color: "var(--wp-text)",
+                            }}
+                          >
+                            {sig.label}
+                            {sig.isDefault ? (
+                              <span
+                                style={{
+                                  marginLeft: 6,
+                                  color: "var(--wp-gold)",
+                                  fontSize: "0.7rem",
+                                }}
+                              >
+                                default
+                              </span>
+                            ) : null}
+                          </span>
+                          <span style={signatureMenuPreviewStyle}>
+                            {sig.body.length > 60
+                              ? `${sig.body.slice(0, 60)}…`
+                              : sig.body}
+                          </span>
+                        </button>
+                      ))
+                    )}
+                    <a
+                      href="/settings#email-signatures"
+                      data-testid="signature-menu-manage"
+                      style={signatureMenuManageStyle}
+                      onClick={() => setSignatureMenuOpen(false)}
+                    >
+                      Manage signatures →
+                    </a>
+                  </div>
+                ) : null}
+              </div>
             </div>
 
             <div
@@ -1505,16 +1867,47 @@ const pageWrap: React.CSSProperties = {
   flexWrap: "nowrap",
 };
 
-function inboxColStyle(isMobile: boolean): React.CSSProperties {
+function inboxColStyle(
+  isMobile: boolean,
+  widthPx: number = INBOX_WIDTH_DEFAULT,
+): React.CSSProperties {
   return {
-    width: isMobile ? "100%" : 340,
-    minWidth: isMobile ? 0 : 280,
+    width: isMobile ? "100%" : widthPx,
+    minWidth: isMobile ? 0 : INBOX_WIDTH_MIN,
     flexShrink: 0,
     display: "flex",
     flexDirection: "column",
     minHeight: 0,
+    /* Smooth animation when the composer collapses the inbox; the
+       transition is suppressed during an active drag (the resizing
+       state below) so the handle feels responsive. */
+    transition: "width 160ms ease",
   };
 }
+
+function resizeHandleStyle(active: boolean): React.CSSProperties {
+  return {
+    width: 6,
+    flexShrink: 0,
+    cursor: "col-resize",
+    background: active ? "var(--wp-gold)" : "transparent",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    /* Keep the handle inside the page padding gap; visually it sits
+       between the inbox column and the right pane. */
+    margin: "0 -2px",
+    zIndex: 5,
+  };
+}
+
+const resizeHandleGripStyle: React.CSSProperties = {
+  display: "block",
+  width: 2,
+  height: 32,
+  background: "var(--wp-dark-border)",
+  borderRadius: 2,
+};
 
 function rightColStyle(isMobile: boolean): React.CSSProperties {
   return {
@@ -1640,6 +2033,59 @@ const toolbarDivider: React.CSSProperties = {
   height: "16px",
   background: "var(--wp-dark-border)",
   margin: "0 0.25rem",
+};
+
+const signatureMenuStyle: React.CSSProperties = {
+  position: "absolute",
+  top: "calc(100% + 4px)",
+  left: 0,
+  zIndex: 20,
+  minWidth: 240,
+  maxWidth: 320,
+  background: "var(--wp-dark-surface)",
+  border: "1px solid var(--wp-dark-border)",
+  borderRadius: 6,
+  boxShadow: "0 6px 24px rgba(0,0,0,0.35)",
+  padding: 4,
+  display: "flex",
+  flexDirection: "column",
+  gap: 2,
+};
+
+const signatureMenuItemStyle: React.CSSProperties = {
+  background: "transparent",
+  border: "none",
+  textAlign: "left",
+  padding: "0.5rem 0.6rem",
+  borderRadius: 4,
+  cursor: "pointer",
+  display: "flex",
+  flexDirection: "column",
+  gap: 2,
+};
+
+const signatureMenuPreviewStyle: React.CSSProperties = {
+  fontSize: "0.7rem",
+  color: "var(--wp-text-dim)",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+const signatureMenuEmptyStyle: React.CSSProperties = {
+  fontSize: "0.78rem",
+  color: "var(--wp-text-dim)",
+  padding: "0.5rem 0.6rem",
+};
+
+const signatureMenuManageStyle: React.CSSProperties = {
+  display: "block",
+  marginTop: 4,
+  padding: "0.45rem 0.6rem",
+  borderTop: "1px solid var(--wp-dark-border)",
+  fontSize: "0.78rem",
+  color: "var(--wp-gold)",
+  textDecoration: "none",
 };
 
 const bodyEditor: React.CSSProperties = {
