@@ -22,6 +22,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { emitInsight } from "@/lib/insights/emit";
 
@@ -110,6 +111,66 @@ type LoadState =
       retryAfter?: number;
     };
 
+/**
+ * Per-row delete state. The inbox-row delete affordance is a 4-state
+ * machine — `idle` (the kebab × button), `confirm` (inline two-tap
+ * confirm), `deleting` (after the API call fires), `error` (typed
+ * scope_missing / graph_error surface). Errors render inline next to
+ * the row so the user does not lose context.
+ */
+type RowDeleteState =
+  | { kind: "idle" }
+  | { kind: "confirm" }
+  | { kind: "deleting" }
+  | {
+      kind: "error";
+      reason: "scope_missing" | "not_connected" | "rate_limited" | "graph_error";
+      message: string;
+      scope?: string;
+    };
+
+/**
+ * Surface a structured 4xx/5xx body from /api/emails/messages/[id] as
+ * a typed RowDeleteState error. Mirrors the EmailReader buildActionError
+ * helper so both surfaces use identical copy on the scope_missing path.
+ */
+function rowDeleteErrorFromResponse(
+  status: number,
+  body: { error?: string; code?: string; scope?: string; detail?: string; message?: string; retryAfter?: number } | null,
+): Extract<RowDeleteState, { kind: "error" }> {
+  if (status === 403 && body?.code === "scope_missing") {
+    const scope = body?.scope || "Mail.ReadWrite";
+    return {
+      kind: "error",
+      reason: "scope_missing",
+      scope,
+      message:
+        `Microsoft denied this delete — the ${scope} permission is missing. ` +
+        "Reconnect Microsoft 365 in Settings.",
+    };
+  }
+  if (status === 401 || body?.error === "microsoft_not_connected") {
+    return {
+      kind: "error",
+      reason: "not_connected",
+      message: "Microsoft 365 isn't connected. Reconnect in Settings.",
+    };
+  }
+  if (status === 429) {
+    const ra = typeof body?.retryAfter === "number" ? body.retryAfter : 60;
+    return {
+      kind: "error",
+      reason: "rate_limited",
+      message: `Slow down — try again in ${ra}s.`,
+    };
+  }
+  return {
+    kind: "error",
+    reason: "graph_error",
+    message: body?.detail || body?.message || `request_failed_${status}`,
+  };
+}
+
 export default function InboxPanel({
   activeId,
   onOpen,
@@ -126,6 +187,100 @@ export default function InboxPanel({
   const [containerH, setContainerH] = useState<number>(600);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const openedEmittedRef = useRef<boolean>(false);
+  /**
+   * Row-level delete state, keyed by message id. Only rows in idle,
+   * confirm, deleting, or error appear in the map; otherwise the row
+   * renders the kebab × button on hover.
+   */
+  const [rowDelete, setRowDelete] = useState<Record<string, RowDeleteState>>({});
+  /** Optimistically-removed row ids — fade-out + drop on success. */
+  const [removedIds, setRemovedIds] = useState<Set<string>>(() => new Set());
+
+  function setRowDeleteState(id: string, next: RowDeleteState | null) {
+    setRowDelete((prev) => {
+      const copy = { ...prev };
+      if (next === null) delete copy[id];
+      else copy[id] = next;
+      return copy;
+    });
+  }
+
+  const deleteRow = useCallback(
+    async (row: InboxRow) => {
+      setRowDeleteState(row.id, { kind: "deleting" });
+      try {
+        const res = await fetchWithRefresh(
+          `/api/emails/messages/${encodeURIComponent(row.id)}`,
+          { method: "DELETE", headers: jsonHeaders() },
+        );
+        if (res.status === 200) {
+          // Optimistic fade-out: mark id as removed, drop from list
+          // after the 200ms transition.
+          setRemovedIds((prev) => {
+            const next = new Set(prev);
+            next.add(row.id);
+            return next;
+          });
+          emitInsight({
+            actor: userId,
+            role: userRole,
+            surface: "email",
+            action: "deleted",
+            tier: "personal",
+            target: row.id,
+            payload: {
+              thread_id: row.id,
+              folder,
+              source: "inbox_row",
+            },
+          });
+          setTimeout(() => {
+            setState((prev) => {
+              if (prev.kind !== "ready") return prev;
+              return {
+                ...prev,
+                rows: prev.rows.filter((r) => r.id !== row.id),
+                unreadCount:
+                  typeof prev.unreadCount === "number" && !row.isRead
+                    ? Math.max(0, prev.unreadCount - 1)
+                    : prev.unreadCount,
+              };
+            });
+            setRemovedIds((prev) => {
+              const next = new Set(prev);
+              next.delete(row.id);
+              return next;
+            });
+            setRowDeleteState(row.id, null);
+          }, 200);
+          return;
+        }
+        const body = await res.json().catch(() => null);
+        setRowDeleteState(row.id, rowDeleteErrorFromResponse(res.status, body));
+        emitInsight({
+          actor: userId,
+          role: userRole,
+          surface: "email",
+          action: "delete_failed",
+          tier: "personal",
+          target: row.id,
+          payload: {
+            thread_id: row.id,
+            folder,
+            source: "inbox_row",
+            status: res.status,
+          },
+        });
+      } catch (err) {
+        setRowDeleteState(row.id, {
+          kind: "error",
+          reason: "graph_error",
+          message: (err as Error).message || "Network error",
+        });
+      }
+    },
+    [userId, userRole, folder],
+  );
 
   const showUnreadFilter = FOLDERS_WITH_UNREAD_FILTER.has(folder);
 
@@ -309,6 +464,22 @@ export default function InboxPanel({
       data-testid="inbox-panel"
       data-folder={folder}
     >
+      {/* Hover-reveal for the per-row × delete button. Inline styles
+          can't express `:hover`, so we attach a tiny stylesheet scoped
+          via the .wp-inbox-row classname. The button is rendered in the
+          DOM (so jest can target it) but visually hidden until the row
+          (or button) is hovered/focused. The confirm/deleting/error
+          slots stay visible because they aren't ".wp-inbox-row-delete". */}
+      <style jsx>{`
+        :global(.wp-inbox-row .wp-inbox-row-delete) {
+          opacity: 0;
+          transition: opacity 120ms ease-in;
+        }
+        :global(.wp-inbox-row:hover .wp-inbox-row-delete),
+        :global(.wp-inbox-row:focus-within .wp-inbox-row-delete) {
+          opacity: 1;
+        }
+      `}</style>
       <header style={headerStyle}>
         <span
           style={{ color: "var(--wp-gold)", fontWeight: 600, fontSize: "0.92rem" }}
@@ -418,45 +589,152 @@ export default function InboxPanel({
             <div style={{ position: "absolute", top: offsetTop, left: 0, right: 0 }}>
               {renderedRows.map(({ row }) => {
                 const active = activeId === row.id;
+                const removing = removedIds.has(row.id);
+                const delState: RowDeleteState = rowDelete[row.id] ?? { kind: "idle" };
                 return (
-                  <button
+                  <div
                     key={row.id}
-                    type="button"
-                    onClick={() => onClickRow(row)}
-                    data-testid={`inbox-row-${row.id}`}
-                    data-unread={!row.isRead}
+                    data-testid={`inbox-row-wrap-${row.id}`}
+                    data-row-delete-state={delState.kind}
+                    className="wp-inbox-row"
                     style={{
-                      ...rowStyle,
+                      ...rowWrapStyle,
                       ...(active ? rowStyleActive : {}),
                       height: ROW_HEIGHT_PX,
+                      opacity: removing ? 0 : 1,
+                      transition: "opacity 200ms ease-out",
+                      pointerEvents: removing ? "none" : "auto",
                     }}
                   >
-                    <div style={rowTopRow}>
-                      <span
-                        style={{
-                          ...senderStyle,
-                          fontWeight: row.isRead ? 500 : 700,
-                        }}
-                      >
-                        {row.from.name || row.from.email || "(unknown sender)"}
-                      </span>
-                      <span style={timeStyle}>{formatRelative(row.receivedDateTime)}</span>
+                    <button
+                      type="button"
+                      onClick={() => onClickRow(row)}
+                      data-testid={`inbox-row-${row.id}`}
+                      data-unread={!row.isRead}
+                      style={rowClickAreaStyle}
+                      aria-label={`Open email from ${row.from.name || row.from.email || "(unknown sender)"}: ${row.subject || "(no subject)"}`}
+                    >
+                      <div style={rowTopRow}>
+                        <span
+                          style={{
+                            ...senderStyle,
+                            fontWeight: row.isRead ? 500 : 700,
+                          }}
+                        >
+                          {row.from.name || row.from.email || "(unknown sender)"}
+                        </span>
+                        <span style={timeStyle}>{formatRelative(row.receivedDateTime)}</span>
+                      </div>
+                      <div style={rowBottomRow}>
+                        {!row.isRead ? (
+                          <span style={dotStyle} aria-label="Unread" data-testid={`inbox-row-dot-${row.id}`} />
+                        ) : null}
+                        <span
+                          style={{
+                            ...subjectStyle,
+                            fontWeight: row.isRead ? 400 : 600,
+                          }}
+                        >
+                          {row.subject || "(no subject)"}
+                        </span>
+                      </div>
+                      <span style={previewStyle}>{snippet(row.bodyPreview)}</span>
+                    </button>
+
+                    {/* Per-row delete affordance — visible on hover (idle)
+                        or always-visible while in confirm/deleting/error.
+                        Drafts can be deleted directly; sent items + archived
+                        + inbox all use the same DELETE /api/emails/messages/[id]. */}
+                    <div style={rowDeleteSlotStyle}>
+                      {delState.kind === "idle" ? (
+                        <button
+                          type="button"
+                          aria-label={`Delete email: ${row.subject || "(no subject)"}`}
+                          data-testid={`inbox-row-delete-${row.id}`}
+                          className="wp-inbox-row-delete"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRowDeleteState(row.id, { kind: "confirm" });
+                          }}
+                          style={rowDeleteIconBtn}
+                          title="Delete email"
+                        >
+                          ×
+                        </button>
+                      ) : delState.kind === "confirm" ? (
+                        <span
+                          data-testid={`inbox-row-confirm-${row.id}`}
+                          style={confirmGroupStyle}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            data-testid={`inbox-row-confirm-yes-${row.id}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void deleteRow(row);
+                            }}
+                            style={confirmYesBtn}
+                          >
+                            Delete
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`inbox-row-confirm-no-${row.id}`}
+                            aria-label="Cancel delete"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRowDeleteState(row.id, null);
+                            }}
+                            style={confirmNoBtn}
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      ) : delState.kind === "deleting" ? (
+                        <span
+                          data-testid={`inbox-row-deleting-${row.id}`}
+                          style={{ fontSize: "0.7rem", color: "var(--wp-text-dim)" }}
+                        >
+                          Deleting…
+                        </span>
+                      ) : (
+                        <div
+                          role="alert"
+                          data-testid={`inbox-row-delete-error-${row.id}`}
+                          data-reason={delState.reason}
+                          style={rowDeleteErrorStyle}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <span>{delState.message}</span>
+                          {delState.reason === "scope_missing" || delState.reason === "not_connected" ? (
+                            <>
+                              {" "}
+                              <Link
+                                href="/settings"
+                                data-testid={`inbox-row-delete-error-cta-${row.id}`}
+                                style={{ color: "var(--wp-gold)" }}
+                              >
+                                Reconnect
+                              </Link>
+                            </>
+                          ) : null}
+                          {" "}
+                          <button
+                            type="button"
+                            aria-label="Dismiss delete error"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRowDeleteState(row.id, null);
+                            }}
+                            style={dismissErrorBtn}
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    <div style={rowBottomRow}>
-                      {!row.isRead ? (
-                        <span style={dotStyle} aria-label="Unread" data-testid={`inbox-row-dot-${row.id}`} />
-                      ) : null}
-                      <span
-                        style={{
-                          ...subjectStyle,
-                          fontWeight: row.isRead ? 400 : 600,
-                        }}
-                      >
-                        {row.subject || "(no subject)"}
-                      </span>
-                    </div>
-                    <span style={previewStyle}>{snippet(row.bodyPreview)}</span>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -565,6 +843,107 @@ const rowStyle: React.CSSProperties = {
   borderBottom: "1px solid var(--wp-dark-border)",
   color: "var(--wp-text)",
   cursor: "pointer",
+};
+
+const rowWrapStyle: React.CSSProperties = {
+  position: "relative",
+  display: "flex",
+  width: "100%",
+  background: "transparent",
+  borderBottom: "1px solid var(--wp-dark-border)",
+};
+
+const rowClickAreaStyle: React.CSSProperties = {
+  flex: 1,
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+  textAlign: "left",
+  padding: "0.55rem 0.75rem",
+  background: "transparent",
+  border: "none",
+  color: "var(--wp-text)",
+  cursor: "pointer",
+  minWidth: 0,
+};
+
+const rowDeleteSlotStyle: React.CSSProperties = {
+  position: "absolute",
+  right: 6,
+  top: "50%",
+  transform: "translateY(-50%)",
+  display: "flex",
+  alignItems: "center",
+  gap: 4,
+  zIndex: 1,
+  maxWidth: "75%",
+};
+
+const rowDeleteIconBtn: React.CSSProperties = {
+  background: "var(--wp-dark-surface2)",
+  color: "var(--wp-text-dim)",
+  border: "1px solid var(--wp-dark-border)",
+  borderRadius: 4,
+  width: 22,
+  height: 22,
+  fontSize: 14,
+  lineHeight: 1,
+  padding: 0,
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+
+const confirmGroupStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+  background: "var(--wp-dark-surface2)",
+  borderRadius: 4,
+  padding: "2px 4px",
+};
+
+const confirmYesBtn: React.CSSProperties = {
+  background: "#ff7878",
+  color: "var(--wp-dark)",
+  border: "none",
+  borderRadius: 3,
+  padding: "2px 8px",
+  fontSize: "0.7rem",
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const confirmNoBtn: React.CSSProperties = {
+  background: "transparent",
+  color: "var(--wp-text)",
+  border: "1px solid var(--wp-dark-border)",
+  borderRadius: 3,
+  padding: "2px 6px",
+  fontSize: "0.7rem",
+  cursor: "pointer",
+};
+
+const rowDeleteErrorStyle: React.CSSProperties = {
+  background: "var(--wp-dark-surface2)",
+  border: "1px solid #ff7878",
+  borderRadius: 4,
+  color: "#ff7878",
+  fontSize: "0.7rem",
+  padding: "2px 6px",
+  maxWidth: 320,
+  lineHeight: 1.3,
+};
+
+const dismissErrorBtn: React.CSSProperties = {
+  background: "transparent",
+  border: "none",
+  color: "var(--wp-text-dim)",
+  cursor: "pointer",
+  fontSize: "0.7rem",
+  textDecoration: "underline",
+  padding: 0,
 };
 
 const rowStyleActive: React.CSSProperties = {

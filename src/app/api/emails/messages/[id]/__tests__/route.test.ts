@@ -167,4 +167,37 @@ describe("DELETE /api/emails/[id]", () => {
     const res = await DELETE(makeDelete("x"), { params: Promise.resolve({ id: "x" }) });
     expect(res.status).toBe(404);
   });
+
+  it("forwards Mail.ReadWrite-scoped 403 from Graph as a structured scope_missing error", async () => {
+    // Reproduces the "Couldn't delete: request_failed_403" production
+    // bug: the OAuth consent set never included Mail.ReadWrite, so
+    // Graph returned 403 ErrorAccessDenied. The route layer must
+    // surface this as a typed code so the UI can render a reconnect
+    // CTA instead of the raw 403.
+    mockDelete.mockResolvedValueOnce({
+      ok: false,
+      code: "scope_missing",
+      scope: "Mail.ReadWrite",
+      status: 403,
+    });
+    const res = await DELETE(makeDelete("x"), { params: Promise.resolve({ id: "x" }) });
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toBe("forbidden");
+    expect(body.code).toBe("scope_missing");
+    expect(body.scope).toBe("Mail.ReadWrite");
+  });
+
+  it("defaults the scope_missing scope to Mail.ReadWrite if Graph omitted it", async () => {
+    mockDelete.mockResolvedValueOnce({
+      ok: false,
+      code: "scope_missing",
+      // scope omitted by lib — route should fall back.
+      status: 403,
+    });
+    const res = await DELETE(makeDelete("x"), { params: Promise.resolve({ id: "x" }) });
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.scope).toBe("Mail.ReadWrite");
+  });
 });

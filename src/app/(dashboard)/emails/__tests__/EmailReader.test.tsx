@@ -345,6 +345,38 @@ describe("<EmailReader />", () => {
     );
   });
 
+  test("delete: 403 scope_missing renders human copy + Reconnect CTA (no raw request_failed_403)", async () => {
+    mockFetchWithRefresh
+      .mockResolvedValueOnce(ok({ message: SAMPLE_MESSAGE }))
+      .mockResolvedValueOnce(
+        ok(
+          { error: "forbidden", code: "scope_missing", scope: "Mail.ReadWrite" },
+          403,
+        ),
+      );
+    const onClose = jest.fn();
+    render(<EmailReader id="msg-1" onClose={onClose} />);
+    await waitFor(() => screen.getByTestId("email-reader"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("email-reader-action-delete"));
+    });
+    await waitFor(() => {
+      const err = screen.getByTestId("email-reader-action-error");
+      expect(err.getAttribute("data-reason")).toBe("scope_missing");
+    });
+    const errEl = screen.getByTestId("email-reader-action-error");
+    // Human-readable copy, NOT the raw "request_failed_403" surfaced
+    // before the fix.
+    expect(errEl.textContent).not.toMatch(/request_failed_403/);
+    expect(errEl.textContent).toMatch(/Mail\.ReadWrite/);
+    expect(errEl.textContent).toMatch(/Reconnect Microsoft 365/);
+    // Reconnect CTA links to /settings.
+    expect(screen.getByTestId("email-reader-action-reconnect-cta")).toBeInTheDocument();
+    // onClose must NOT fire on a failed delete (the message is still
+    // there in Outlook).
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   test("mark unread: PATCHes isRead=false and emits marked_unread", async () => {
     mockFetchWithRefresh
       .mockResolvedValueOnce(ok({ message: SAMPLE_MESSAGE }))

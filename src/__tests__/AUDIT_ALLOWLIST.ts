@@ -159,6 +159,16 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "GET-only inbox listing — no mutation; trackEvent system.ms_mail_listed only",
   },
   {
+    route: "src/app/api/email-signatures/route.ts",
+    reason:
+      "per-user signature CRUD scoped by JWT user.id. POST fires microsoft.signature_created analytics with signature_id + is_default + body_length — that event IS the audit trail. Signatures are personal preferences (no PII/compliance concern); same low-sensitivity-UGC rationale as journal/knowledge/feature-requests above.",
+  },
+  {
+    route: "src/app/api/email-signatures/[id]/route.ts",
+    reason:
+      "PATCH/DELETE delegate to lib/email-signatures.ts which scopes every write by user_id. The composer-side microsoft.signature_inserted insight + the row's updated_at column form the audit ledger; PATCH-on-default-promotion is wrapped in a SQL transaction with a partial-unique index guarantee.",
+  },
+  {
     route: "src/app/api/clients/route.ts",
     reason: "client CRM — analytics-tracked; no PII/compliance per current requirements",
   },

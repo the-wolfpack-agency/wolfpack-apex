@@ -13,6 +13,7 @@ import NotificationBell from "@/components/NotificationBell";
 import TeamsUnreadBadge from "@/components/TeamsUnreadBadge";
 import NewMessageToast from "@/components/NewMessageToast";
 import MessagesNavBadge from "@/components/MessagesNavBadge";
+import EmailNavBadge from "@/components/EmailNavBadge";
 import InstinctChat from "@/components/InstinctChat";
 import WelcomeTooltip from "@/components/WelcomeTooltip";
 import { useAmbientRefresh } from "@/lib/hooks/useAmbientRefresh";
@@ -224,6 +225,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 </svg>
                 {item.label}
                 {item.href === "/messages" ? <MessagesNavBadge /> : null}
+                {item.href === "/emails" ? <EmailNavBadge /> : null}
               </a>
             );
           })}

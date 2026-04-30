@@ -53,4 +53,22 @@ describe("microsoft-graph scope list — delegated OAuth compatibility", () => {
       expect(scopes).toContain("OnlineMeetings.ReadWrite");
     }
   });
+
+  // 2026-04-30 incident: the inbox-action surface (mark read/unread,
+  // archive, delete) calls Graph endpoints that require Mail.ReadWrite,
+  // but the consent set only had Mail.Read + Mail.Send. Every delete
+  // returned 403 ErrorAccessDenied and the UI surfaced
+  // "Couldn't delete: request_failed_403". Regression guard.
+  it("requests Mail.ReadWrite (required for delete/archive/mark-read on /me/messages)", () => {
+    expect(scopes).toContain("Mail.ReadWrite");
+  });
+
+  it("Mail.Read remains in the set even after Mail.ReadWrite was added (Mail.ReadWrite does NOT subsume Mail.Read in the delegated consent UI)", () => {
+    // Microsoft's Mail.ReadWrite is a superset of Mail.Read at the
+    // permission level, but keeping both in the requested scope list
+    // means newly-connected users are explicitly informed of read
+    // access in the consent dialog. Removing Mail.Read would change
+    // the consent UX.
+    expect(scopes).toContain("Mail.Read");
+  });
 });

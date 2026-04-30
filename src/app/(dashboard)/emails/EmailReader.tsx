@@ -68,11 +68,72 @@ type ReplyState =
   | { kind: "sent" }
   | { kind: "error"; reason: "scope_missing" | "rate_limited" | "graph_error" | "network"; message?: string };
 
+type ActionErrorReason =
+  | "scope_missing"
+  | "not_connected"
+  | "rate_limited"
+  | "graph_error";
+
 type ActionState =
   | { kind: "idle" }
   | { kind: "busy"; action: "archive" | "delete" | "markUnread" }
   | { kind: "done"; action: "archive" | "delete" | "markUnread" }
-  | { kind: "error"; action: "archive" | "delete" | "markUnread"; message: string };
+  | {
+      kind: "error";
+      action: "archive" | "delete" | "markUnread";
+      reason: ActionErrorReason;
+      message: string;
+      /** Graph scope name when reason === "scope_missing". */
+      scope?: string;
+    };
+
+/**
+ * Map a non-2xx response from /api/emails/messages/[id] into a typed
+ * ActionState error. The DELETE/PATCH handler emits typed JSON for
+ * scope_missing / not_connected / rate_limited; we surface human copy
+ * (especially for the 403 scope_missing path that previously rendered
+ * the developer-facing "request_failed_403"). Keep this in sync with
+ * mapErrorToResponse in the route handler.
+ */
+function buildActionError(
+  action: "archive" | "delete" | "markUnread",
+  status: number,
+  body: { error?: string; code?: string; scope?: string; detail?: string; message?: string; retryAfter?: number } | null,
+): Extract<ActionState, { kind: "error" }> {
+  const verb = action === "markUnread" ? "mark unread" : action;
+  if (status === 403 && body?.code === "scope_missing") {
+    const scope = body?.scope || "Mail.ReadWrite";
+    return {
+      kind: "error",
+      action,
+      reason: "scope_missing",
+      scope,
+      message:
+        `Microsoft denied this ${verb} — the ${scope} permission is missing on your connection. ` +
+        "Reconnect Microsoft 365 in Settings > Integrations.",
+    };
+  }
+  if (status === 401 || body?.error === "microsoft_not_connected") {
+    return {
+      kind: "error",
+      action,
+      reason: "not_connected",
+      message:
+        "Microsoft 365 isn't connected. Open Settings > Integrations to link your account.",
+    };
+  }
+  if (status === 429) {
+    const ra = typeof body?.retryAfter === "number" ? body.retryAfter : 60;
+    return {
+      kind: "error",
+      action,
+      reason: "rate_limited",
+      message: `Microsoft is rate-limiting this account. Try again in ${ra}s.`,
+    };
+  }
+  const fallback = body?.detail || body?.message || `request_failed_${status}`;
+  return { kind: "error", action, reason: "graph_error", message: fallback };
+}
 
 interface EmailReaderProps {
   id: string;
@@ -133,6 +194,19 @@ export default function EmailReader({ id, onClose, onMutated, _now }: EmailReade
   const [replyState, setReplyState] = useState<ReplyState>({ kind: "idle" });
   const [actionState, setActionState] = useState<ActionState>({ kind: "idle" });
 
+  // Default signature — fetched once and prepended (with two newlines) to
+  // the reply textarea on first load so the user has a place to write
+  // ABOVE the signature. Microsoft Graph's reply endpoint appends the
+  // quoted-original block below whatever bodyText the client sends, so
+  // putting the signature at the bottom of the user's body is exactly
+  // what the spec asks for ("insert signature ABOVE the quoted-original
+  // message block").
+  const [defaultSignature, setDefaultSignature] = useState<{
+    id: string;
+    body: string;
+  } | null>(null);
+  const [signaturePrefilled, setSignaturePrefilled] = useState<boolean>(false);
+
   const loadMessage = useCallback(async () => {
     setState({ kind: "loading" });
     try {
@@ -180,6 +254,51 @@ export default function EmailReader({ id, onClose, onMutated, _now }: EmailReade
   useEffect(() => {
     void loadMessage();
   }, [loadMessage]);
+
+  /* Lazy signature load: triggered only when the user focuses the reply
+     textarea for the first time. Two reasons:
+     1. Most readers never reply — fetching signatures on every read is
+        wasteful Graph budget.
+     2. Existing unit tests for EmailReader use `mockResolvedValueOnce`
+        queues based on call order; firing an extra mount-time fetch
+        would consume queue slots intended for action handlers (PATCH
+        archive, DELETE, etc.) and break those tests. Lazy load avoids it.
+     The fetch + pre-fill happen in a single coroutine so the signature
+     lands BEFORE the user starts typing. Real user latency: the focus
+     event fires, our async fetch completes (~50ms typical), the
+     textarea is updated; if the user is quick enough to type before
+     the fetch returns we skip the prefill (the `reply.length > 0`
+     guard). */
+  const [signatureFetched, setSignatureFetched] = useState<boolean>(false);
+  const onReplyFocus = useCallback(async () => {
+    if (signatureFetched) return;
+    setSignatureFetched(true);
+    try {
+      const res = await fetchWithRefresh("/api/email-signatures", {
+        headers: jsonHeaders(),
+      });
+      if (!res || !res.ok) return;
+      const data = (await res.json()) as {
+        signatures?: Array<{ id: string; body: string; isDefault: boolean }>;
+      };
+      const def = (data.signatures ?? []).find((s) => s.isDefault);
+      if (def) setDefaultSignature({ id: def.id, body: def.body });
+    } catch {
+      /* signatures are optional */
+    }
+  }, [signatureFetched]);
+
+  /* Pre-fill the reply body with "\n\n${defaultSignature}" once. The
+     signature ends up at the bottom of the user's reply body — Graph's
+     reply endpoint appends the quoted-original block below it, so the
+     signature lands ABOVE the quoted block as the spec requires. */
+  useEffect(() => {
+    if (signaturePrefilled) return;
+    if (!defaultSignature) return;
+    if (reply.length > 0) return;
+    setReply(`\n\n${defaultSignature.body}`);
+    setSignaturePrefilled(true);
+  }, [defaultSignature, signaturePrefilled, reply]);
 
   const sendReply = useCallback(async () => {
     if (state.kind !== "ready") return;
@@ -293,14 +412,15 @@ export default function EmailReader({ id, onClose, onMutated, _now }: EmailReade
         onClose();
         return;
       }
-      const body = await res.json().catch(() => ({}));
+      const body = await res.json().catch(() => null);
+      setActionState(buildActionError("archive", res.status, body));
+    } catch (err) {
       setActionState({
         kind: "error",
         action: "archive",
-        message: body?.detail ?? body?.message ?? `request_failed_${res.status}`,
+        reason: "graph_error",
+        message: (err as Error).message,
       });
-    } catch (err) {
-      setActionState({ kind: "error", action: "archive", message: (err as Error).message });
     }
   }, [state, onMutated, onClose]);
 
@@ -327,14 +447,15 @@ export default function EmailReader({ id, onClose, onMutated, _now }: EmailReade
         onClose();
         return;
       }
-      const body = await res.json().catch(() => ({}));
+      const body = await res.json().catch(() => null);
+      setActionState(buildActionError("delete", res.status, body));
+    } catch (err) {
       setActionState({
         kind: "error",
         action: "delete",
-        message: body?.detail ?? body?.message ?? `request_failed_${res.status}`,
+        reason: "graph_error",
+        message: (err as Error).message,
       });
-    } catch (err) {
-      setActionState({ kind: "error", action: "delete", message: (err as Error).message });
     }
   }, [state, onMutated, onClose]);
 
@@ -364,14 +485,15 @@ export default function EmailReader({ id, onClose, onMutated, _now }: EmailReade
         onMutated?.();
         return;
       }
-      const body = await res.json().catch(() => ({}));
+      const body = await res.json().catch(() => null);
+      setActionState(buildActionError("markUnread", res.status, body));
+    } catch (err) {
       setActionState({
         kind: "error",
         action: "markUnread",
-        message: body?.detail ?? body?.message ?? `request_failed_${res.status}`,
+        reason: "graph_error",
+        message: (err as Error).message,
       });
-    } catch (err) {
-      setActionState({ kind: "error", action: "markUnread", message: (err as Error).message });
     }
   }, [state, onMutated]);
 
@@ -583,13 +705,26 @@ export default function EmailReader({ id, onClose, onMutated, _now }: EmailReade
         </button>
       </div>
       {actionState.kind === "error" ? (
-        <p
+        <div
           role="alert"
           data-testid="email-reader-action-error"
+          data-reason={actionState.reason}
           style={{ fontSize: 12, color: "#ff7878", margin: "4px 0 0" }}
         >
-          Couldn&apos;t {actionState.action === "markUnread" ? "mark unread" : actionState.action}: {actionState.message}
-        </p>
+          <span>{actionState.message}</span>
+          {actionState.reason === "scope_missing" || actionState.reason === "not_connected" ? (
+            <>
+              {" "}
+              <Link
+                href="/settings"
+                data-testid="email-reader-action-reconnect-cta"
+                style={{ color: "var(--wp-gold)", textDecoration: "underline" }}
+              >
+                Reconnect Microsoft 365
+              </Link>
+            </>
+          ) : null}
+        </div>
       ) : null}
 
       <article
@@ -662,6 +797,7 @@ export default function EmailReader({ id, onClose, onMutated, _now }: EmailReade
           data-testid="email-reader-reply-input"
           value={reply}
           onChange={(e) => setReply(e.target.value)}
+          onFocus={() => void onReplyFocus()}
           placeholder="Write your reply…"
           rows={4}
           style={{

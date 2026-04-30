@@ -355,6 +355,135 @@ describe("InboxPanel — folder awareness", () => {
     });
   });
 
+  it("renders a per-row delete button on every inbox row", async () => {
+    render(
+      <InboxPanel
+        activeId={null}
+        onOpen={jest.fn()}
+        onCompose={jest.fn()}
+        userId="u1"
+        userRole="ceo"
+      />,
+    );
+    await flush();
+    await waitFor(() => screen.getByTestId("inbox-row-m1"));
+    expect(screen.getByTestId("inbox-row-delete-m1")).toBeInTheDocument();
+    expect(screen.getByTestId("inbox-row-delete-m2")).toBeInTheDocument();
+  });
+
+  it("two-tap delete: × → Delete fires DELETE /api/emails/messages/[id] and removes the row", async () => {
+    mockFetchWithRefresh.mockReset();
+    mockFetchWithRefresh
+      .mockImplementationOnce(() => Promise.resolve(ok(SAMPLE_INBOX)))
+      .mockImplementationOnce(() => Promise.resolve(ok({ id: "m1", deleted: true }, 200)));
+    const onOpen = jest.fn();
+    render(
+      <InboxPanel
+        activeId={null}
+        onOpen={onOpen}
+        onCompose={jest.fn()}
+        userId="u1"
+        userRole="ceo"
+      />,
+    );
+    await flush();
+    await waitFor(() => screen.getByTestId("inbox-row-delete-m1"));
+
+    // First click reveals confirm; row click handler must NOT fire.
+    fireEvent.click(screen.getByTestId("inbox-row-delete-m1"));
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(screen.getByTestId("inbox-row-confirm-m1")).toBeInTheDocument();
+
+    // Confirm → fires DELETE.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("inbox-row-confirm-yes-m1"));
+    });
+
+    await waitFor(() => {
+      const deleteCall = mockFetchWithRefresh.mock.calls.find(
+        (c: any[]) => c[1]?.method === "DELETE",
+      );
+      expect(deleteCall).toBeDefined();
+      expect(String(deleteCall![0])).toContain("/api/emails/messages/m1");
+    });
+
+    // Insight emitted with source: inbox_row.
+    const evt = mockEmitInsight.mock.calls
+      .map((c) => c[0])
+      .find((e: any) => e.action === "deleted" && e.target === "m1");
+    expect(evt).toBeTruthy();
+    expect(evt.payload.source).toBe("inbox_row");
+
+    // Row is removed (after the 200ms fade).
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 220));
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("inbox-row-m1")).not.toBeInTheDocument();
+    });
+  });
+
+  it("clicking the × Cancel collapses the affordance back to idle", async () => {
+    render(
+      <InboxPanel
+        activeId={null}
+        onOpen={jest.fn()}
+        onCompose={jest.fn()}
+        userId="u1"
+        userRole="ceo"
+      />,
+    );
+    await flush();
+    await waitFor(() => screen.getByTestId("inbox-row-delete-m1"));
+    fireEvent.click(screen.getByTestId("inbox-row-delete-m1"));
+    expect(screen.getByTestId("inbox-row-confirm-m1")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("inbox-row-confirm-no-m1"));
+    expect(screen.queryByTestId("inbox-row-confirm-m1")).not.toBeInTheDocument();
+    expect(screen.getByTestId("inbox-row-delete-m1")).toBeInTheDocument();
+  });
+
+  it("renders a clear scope_missing message when the API returns 403", async () => {
+    mockFetchWithRefresh.mockReset();
+    mockFetchWithRefresh
+      .mockImplementationOnce(() => Promise.resolve(ok(SAMPLE_INBOX)))
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          ok(
+            { error: "forbidden", code: "scope_missing", scope: "Mail.ReadWrite" },
+            403,
+          ),
+        ),
+      );
+    render(
+      <InboxPanel
+        activeId={null}
+        onOpen={jest.fn()}
+        onCompose={jest.fn()}
+        userId="u1"
+        userRole="ceo"
+      />,
+    );
+    await flush();
+    await waitFor(() => screen.getByTestId("inbox-row-delete-m1"));
+    fireEvent.click(screen.getByTestId("inbox-row-delete-m1"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("inbox-row-confirm-yes-m1"));
+    });
+    await waitFor(() => {
+      const err = screen.getByTestId("inbox-row-delete-error-m1");
+      expect(err).toBeInTheDocument();
+      expect(err.getAttribute("data-reason")).toBe("scope_missing");
+    });
+    // Surfaces a reconnect CTA — never the raw "request_failed_403".
+    expect(screen.getByTestId("inbox-row-delete-error-cta-m1")).toBeInTheDocument();
+    expect(screen.getByTestId("inbox-row-delete-error-m1").textContent).toMatch(
+      /Mail\.ReadWrite/,
+    );
+    expect(screen.getByTestId("inbox-row-delete-error-m1").textContent).not.toMatch(
+      /request_failed_403/,
+    );
+  });
+
   it("clicking a row in drafts emits draft_clicked_skipped (NOT thread_read)", async () => {
     mockFetchWithRefresh.mockReset();
     mockFetchWithRefresh.mockImplementation(() =>
