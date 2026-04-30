@@ -96,6 +96,21 @@ describe("classifyIntent (token-free)", () => {
     expect(m.intent).not.toBe("meetings_on_date");
   });
 
+  // Regression 2026-04-30 evening: "april 30th meetings?>" fell through
+  // to the LLM because the regex required "which/what/any" or "on/at/for".
+  // Production users asked it with bare "DATE meetings" and got
+  // hallucinated "no meetings recorded" answers.
+  test.each([
+    "april 30th meetings?",
+    "April 30th meetings",
+    "April 29 2026 meetings",
+    "meetings April 30",
+    "show me meetings 2026-04-30",
+  ])("bare date+meetings phrasing %p routes to meetings_on_date", (q) => {
+    const m = classifyIntent(q);
+    expect(m.intent).toBe("meetings_on_date");
+  });
+
   test("is deterministic — no LLM call path involved", () => {
     const a = classifyIntent("Is Hoxsie busy this afternoon?");
     const b = classifyIntent("Is Hoxsie busy this afternoon?");
