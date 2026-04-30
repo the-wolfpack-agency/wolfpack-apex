@@ -290,3 +290,137 @@ describe("replyToMessage", () => {
     expect(result.code).toBe("scope_missing");
   });
 });
+
+// ---------------------------------------------------------------------------
+// searchMessages — Graph /search/query wrapper used by the assistant
+// context resolver.
+// ---------------------------------------------------------------------------
+
+describe("searchMessages", () => {
+  it("posts to /search/query with entityTypes=['message'] and maps hits", async () => {
+    fetchMockMail.mockResolvedValueOnce(okJsonResMail({
+      value: [{
+        hitsContainers: [{
+          total: 2,
+          hits: [
+            {
+              hitId: "h1",
+              summary: "<b>Porsche</b> dealer pipeline status",
+              resource: {
+                id: "msg-1",
+                subject: "Porsche pipeline",
+                bodyPreview: "Update on the Porsche dealer pipeline",
+                from: { emailAddress: { name: "Aidan", address: "aidan@example.com" } },
+                receivedDateTime: "2026-03-12T15:00:00Z",
+                webLink: "https://outlook.office.com/m/msg-1",
+              },
+            },
+            {
+              hitId: "h2",
+              summary: "Ad-hoc Q2 review",
+              resource: {
+                id: "msg-2",
+                subject: "Q2 review",
+                bodyPreview: "Final review",
+                from: { emailAddress: { address: "ops@example.com" } },
+                receivedDateTime: "2026-03-15T09:00:00Z",
+              },
+            },
+          ],
+        }],
+      }],
+    }));
+
+    const { searchMessages } = await import("@/lib/integrations/microsoft-mail");
+    const r = await searchMessages("user-1", { query: "porsche dealer" });
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error();
+    expect(r.value.hits).toHaveLength(2);
+    expect(r.value.total).toBe(2);
+
+    const first = r.value.hits[0];
+    expect(first.id).toBe("msg-1");
+    expect(first.from).toBe("Aidan");
+    expect(first.subject).toBe("Porsche pipeline");
+    expect(first.received_at).toBe("2026-03-12T15:00:00Z");
+    expect(first.snippet).not.toContain("<b>");
+    expect(first.snippet).toContain("Porsche");
+    expect(first.url).toBe("https://outlook.office.com/m/msg-1");
+    expect(first.source_kind).toBe("email");
+
+    /* Falls back to the address when no name. */
+    expect(r.value.hits[1].from).toBe("ops@example.com");
+    expect(r.value.hits[1].url).toBeUndefined();
+
+    const url = fetchMockMail.mock.calls[0][0] as string;
+    expect(url).toBe("https://graph.microsoft.com/v1.0/search/query");
+    const init = fetchMockMail.mock.calls[0][1];
+    const body = JSON.parse(init.body as string);
+    expect(body.requests[0].entityTypes).toEqual(["message"]);
+    expect(body.requests[0].query.queryString).toBe("porsche dealer");
+  });
+
+  it("respects topN cap (default 5)", async () => {
+    /* Graph already obeys size in our request body, but the helper also
+       slices defensively if Graph returns more. Verify the request size.  */
+    fetchMockMail.mockResolvedValueOnce(okJsonResMail({
+      value: [{ hitsContainers: [{ total: 0, hits: [] }] }],
+    }));
+    const { searchMessages } = await import("@/lib/integrations/microsoft-mail");
+    await searchMessages("u", { query: "anything", topN: 7 });
+    const init = fetchMockMail.mock.calls[0][1];
+    const body = JSON.parse(init.body as string);
+    expect(body.requests[0].size).toBe(7);
+  });
+
+  it("returns scope_missing on 403 and never throws", async () => {
+    fetchMockMail.mockResolvedValueOnce(errResMail(403, {
+      error: { code: "ErrorAccessDenied", message: "scope missing" },
+    }));
+    const { searchMessages } = await import("@/lib/integrations/microsoft-mail");
+    const r = await searchMessages("u", { query: "x" });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.code).toBe("scope_missing");
+    expect(r.scope).toBe("Mail.Read");
+    expect(r.status).toBe(403);
+  });
+
+  it("returns graph_error on unexpected 500", async () => {
+    fetchMockMail.mockResolvedValueOnce(errResMail(500, "boom"));
+    const { searchMessages } = await import("@/lib/integrations/microsoft-mail");
+    const r = await searchMessages("u", { query: "x" });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.code).toBe("graph_error");
+  });
+
+  it("returns invalid_input when query is empty", async () => {
+    const { searchMessages } = await import("@/lib/integrations/microsoft-mail");
+    const r = await searchMessages("u", { query: "  " });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.code).toBe("invalid_input");
+    expect(fetchMockMail).not.toHaveBeenCalled();
+  });
+
+  it("returns not_connected when token is missing", async () => {
+    mockGetValidTokenMail.mockResolvedValueOnce(null);
+    const { searchMessages } = await import("@/lib/integrations/microsoft-mail");
+    const r = await searchMessages("u", { query: "x" });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.code).toBe("not_connected");
+  });
+
+  it("trackEmailLookupFailure emits assistant.email_lookup_failed", async () => {
+    const { trackEmailLookupFailure } = await import("@/lib/integrations/microsoft-mail");
+    trackEmailLookupFailure("u", "cto", { ok: false, code: "scope_missing", status: 403 });
+    expect(mockTrackMail).toHaveBeenCalledWith(
+      "assistant.email_lookup_failed",
+      "u",
+      "cto",
+      expect.objectContaining({ status: 403, scope_missing: true, code: "scope_missing" }),
+    );
+  });
+});

@@ -1583,6 +1583,13 @@ export type InstinctEventType =
   //       Project failure events so the same dashboard can show all
   //       three context surfaces side-by-side.
   //
+  //   assistant.calendar_lookup_failed    { status, scope_missing, code }
+  //   assistant.email_lookup_failed       { status, scope_missing, code }
+  //     - One per failed Outlook surface (calendar, mail). `scope_missing`
+  //       is true when Graph returned 403 with an authorization error
+  //       code (e.g. user revoked Calendars.Read or Mail.Read). Used to
+  //       drive the same "Reconnect Microsoft 365" banner.
+  //
   //   assistant.knowledge_cache_bypassed  { reason }
   //     - Fired when the assistant intentionally skips the knowledge
   //       cache lookup (e.g. date-bound or meeting-bound questions).
@@ -1594,6 +1601,8 @@ export type InstinctEventType =
   | "assistant.sharepoint_lookup_failed"
   | "assistant.project_lookup_failed"
   | "assistant.meeting_lookup_failed"
+  | "assistant.calendar_lookup_failed"
+  | "assistant.email_lookup_failed"
   | "assistant.knowledge_cache_bypassed"
   /* page_facts is a separate static lookup that fires BEFORE the
      knowledge cache. Bypass it for the same query categories so a

@@ -49,7 +49,22 @@ import {
   type ProjectTaskSummary,
   type ProjectErrorResult,
 } from "@/lib/integrations/microsoft-project";
+import {
+  searchCalendarEvents,
+  trackCalendarLookupFailure,
+  type CalendarEventHit,
+  type CalendarErrorResult,
+} from "@/lib/integrations/microsoft-calendar";
+import {
+  searchMessages,
+  trackEmailLookupFailure,
+  type EmailThreadHit,
+  type MailErrorResult,
+} from "@/lib/integrations/microsoft-mail";
 import { searchMeetingTranscripts } from "@/lib/plaud";
+
+// Re-export for downstream consumers + tests.
+export type { CalendarEventHit, EmailThreadHit };
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -104,6 +119,17 @@ export interface ContextBundle {
    * matches or no DB was reachable.
    */
   meeting_notes: MeetingNoteHit[];
+  /**
+   * Outlook calendar events matching the question — pulled from
+   * /me/calendarView in the date range extracted from the question
+   * (or a sensible default of [now-180d, now+30d]).
+   */
+  calendar_events: CalendarEventHit[];
+  /**
+   * Outlook email threads matching the question — pulled via Graph
+   * /search/query with entityTypes=["message"].
+   */
+  email_threads: EmailThreadHit[];
   /** Ready-to-inject string for the LLM. Always <= maxChars. */
   rendered_prompt_block: string;
   total_chars: number;
@@ -117,6 +143,8 @@ export interface ContextBundle {
     sharepoint?: SharePointErrorResult;
     project?: ProjectErrorResult;
     meeting?: MeetingNoteErrorResult;
+    calendar?: CalendarErrorResult;
+    email?: MailErrorResult;
   };
 }
 
@@ -144,6 +172,10 @@ const PROJECT_TOP_N = 8;
 const MEETING_TOP_N = 5;
 /** Hard cap on snippet length surfaced into the prompt — keeps budget tight. */
 const MEETING_SNIPPET_MAX = 300;
+/** How many calendar event hits we surface. */
+const CALENDAR_TOP_N = 5;
+/** How many email thread hits we surface. */
+const EMAIL_TOP_N = 5;
 
 // ---------------------------------------------------------------------------
 // Date extraction (zero-token, regex-based)
@@ -354,7 +386,7 @@ interface RenderableEntry {
   /** Stable index used to break ties when sorting by length. */
   ix: number;
   /** Source kind for analytics + truncation telemetry. */
-  source: "sharepoint" | "project" | "meeting";
+  source: "sharepoint" | "project" | "meeting" | "calendar" | "email";
   /** The fully-formatted block including its trailing newline. */
   text: string;
 }
@@ -384,13 +416,61 @@ function renderMeetingEntry(hit: MeetingNoteHit, ix: number): RenderableEntry {
   return { ix, source: "meeting", text: lines.join("\n") + "\n" };
 }
 
+function renderCalendarEntry(hit: CalendarEventHit, ix: number): RenderableEntry {
+  const lines: string[] = [];
+  const attendees =
+    hit.attendees && hit.attendees.length > 0
+      ? ` — with ${hit.attendees.slice(0, 5).join(", ")}`
+      : "";
+  lines.push(`[Calendar] ${hit.subject} — ${hit.start}${attendees}`);
+  if (hit.snippet) lines.push(hit.snippet);
+  if (hit.url) lines.push(hit.url);
+  return { ix, source: "calendar", text: lines.join("\n") + "\n" };
+}
+
+function renderEmailEntry(hit: EmailThreadHit, ix: number): RenderableEntry {
+  const lines: string[] = [];
+  const when = hit.received_at ? ` — ${hit.received_at}` : "";
+  lines.push(`[Email] ${hit.subject} — from ${hit.from}${when}`);
+  if (hit.snippet) lines.push(hit.snippet);
+  if (hit.url) lines.push(hit.url);
+  return { ix, source: "email", text: lines.join("\n") + "\n" };
+}
+
 const PROMPT_HEADER = "Internal context (cite if you use it):\n\n";
+
+export interface RenderDropped {
+  sharepoint: number;
+  project: number;
+  meeting: number;
+  calendar: number;
+  email: number;
+  total: number;
+}
+
+export interface RenderInputs {
+  hits?: SharePointSearchHit[];
+  tasks?: ProjectTaskSummary[];
+  meetings?: MeetingNoteHit[];
+  calendar?: CalendarEventHit[];
+  emails?: EmailThreadHit[];
+  maxChars?: number;
+}
 
 /**
  * Build the rendered prompt block. Truncates entries (longest first) to
  * keep the result <= maxChars. Returns the rendered string + a count of
  * how many entries were dropped per source.
+ *
+ * Two call shapes for backwards-compat with existing tests:
+ *   renderPromptBlock(hits, tasks, maxChars)
+ *   renderPromptBlock(hits, tasks, meetings, maxChars)
+ *   renderPromptBlock({ hits, tasks, meetings, calendar, emails, maxChars })
  */
+export function renderPromptBlock(inputs: RenderInputs): {
+  rendered: string;
+  dropped: RenderDropped;
+};
 export function renderPromptBlock(
   hits: SharePointSearchHit[],
   tasks: ProjectTaskSummary[],
@@ -398,47 +478,81 @@ export function renderPromptBlock(
   maxCharsArg?: number,
 ): {
   rendered: string;
-  dropped: { sharepoint: number; project: number; meeting: number; total: number };
+  dropped: RenderDropped;
+};
+export function renderPromptBlock(
+  hitsOrInputs: SharePointSearchHit[] | RenderInputs,
+  tasks?: ProjectTaskSummary[],
+  meetingsOrMaxChars?: MeetingNoteHit[] | number,
+  maxCharsArg?: number,
+): {
+  rendered: string;
+  dropped: RenderDropped;
 } {
-  /* Accept both 3-arg (legacy: hits, tasks, maxChars) and 4-arg
-     (hits, tasks, meetings, maxChars) shapes so existing callers and
-     tests keep working without churn. */
-  const meetings: MeetingNoteHit[] = Array.isArray(meetingsOrMaxChars)
-    ? meetingsOrMaxChars
-    : [];
-  const maxChars: number = Array.isArray(meetingsOrMaxChars)
-    ? Number(maxCharsArg ?? DEFAULT_MAX_CHARS)
-    : (meetingsOrMaxChars as number);
+  /* Normalize input shape — support both the new {inputs} object and the
+     legacy positional shapes used by existing tests + callers. */
+  let hits: SharePointSearchHit[] = [];
+  let taskList: ProjectTaskSummary[] = [];
+  let meetings: MeetingNoteHit[] = [];
+  let calendar: CalendarEventHit[] = [];
+  let emails: EmailThreadHit[] = [];
+  let maxChars = DEFAULT_MAX_CHARS;
+
+  if (!Array.isArray(hitsOrInputs) && typeof hitsOrInputs === "object" && hitsOrInputs !== null) {
+    const ip = hitsOrInputs as RenderInputs;
+    hits = ip.hits ?? [];
+    taskList = ip.tasks ?? [];
+    meetings = ip.meetings ?? [];
+    calendar = ip.calendar ?? [];
+    emails = ip.emails ?? [];
+    maxChars = Number.isFinite(ip.maxChars) ? Number(ip.maxChars) : DEFAULT_MAX_CHARS;
+  } else {
+    hits = (hitsOrInputs as SharePointSearchHit[]) ?? [];
+    taskList = tasks ?? [];
+    if (Array.isArray(meetingsOrMaxChars)) {
+      meetings = meetingsOrMaxChars;
+      maxChars = Number(maxCharsArg ?? DEFAULT_MAX_CHARS);
+    } else if (typeof meetingsOrMaxChars === "number") {
+      maxChars = meetingsOrMaxChars;
+    } else {
+      maxChars = DEFAULT_MAX_CHARS;
+    }
+  }
+
   const cap = Math.max(MIN_MAX_CHARS, maxChars);
+
+  let ix = 0;
   const entries: RenderableEntry[] = [
-    ...hits.map((h, i) => renderSharePointEntry(h, i)),
-    ...tasks.map((t, i) => renderProjectEntry(t, i + hits.length)),
-    ...meetings.map((m, i) =>
-      renderMeetingEntry(m, i + hits.length + tasks.length),
-    ),
+    ...hits.map((h) => renderSharePointEntry(h, ix++)),
+    ...taskList.map((t) => renderProjectEntry(t, ix++)),
+    ...meetings.map((m) => renderMeetingEntry(m, ix++)),
+    ...calendar.map((c) => renderCalendarEntry(c, ix++)),
+    ...emails.map((e) => renderEmailEntry(e, ix++)),
   ];
+
+  const emptyDropped: RenderDropped = {
+    sharepoint: 0, project: 0, meeting: 0, calendar: 0, email: 0, total: 0,
+  };
 
   /* No entries at all → no header. Avoids injecting an empty stub
      into the LLM prompt (and keeps existing "empty bundle" semantics
      for callers that still rely on rendered_prompt_block === "").  */
   if (entries.length === 0) {
-    return {
-      rendered: "",
-      dropped: { sharepoint: 0, project: 0, meeting: 0, total: 0 },
-    };
+    return { rendered: "", dropped: emptyDropped };
   }
 
   // Total length budget = cap minus the header.
   const budget = cap - PROMPT_HEADER.length;
   if (budget < 0) {
-    // Caller passed an absurdly small cap. Return just the header.
     return {
       rendered: PROMPT_HEADER.slice(0, cap),
       dropped: {
         sharepoint: hits.length,
-        project: tasks.length,
+        project: taskList.length,
         meeting: meetings.length,
-        total: hits.length + tasks.length + meetings.length,
+        calendar: calendar.length,
+        email: emails.length,
+        total: hits.length + taskList.length + meetings.length + calendar.length + emails.length,
       },
     };
   }
@@ -472,11 +586,15 @@ export function renderPromptBlock(
   let droppedSp = 0;
   let droppedProj = 0;
   let droppedMtg = 0;
+  let droppedCal = 0;
+  let droppedMail = 0;
   for (const e of entries) {
     if (kept.has(e.ix)) continue;
     if (e.source === "sharepoint") droppedSp += 1;
     else if (e.source === "project") droppedProj += 1;
-    else droppedMtg += 1;
+    else if (e.source === "meeting") droppedMtg += 1;
+    else if (e.source === "calendar") droppedCal += 1;
+    else droppedMail += 1;
   }
   return {
     rendered,
@@ -484,7 +602,9 @@ export function renderPromptBlock(
       sharepoint: droppedSp,
       project: droppedProj,
       meeting: droppedMtg,
-      total: droppedSp + droppedProj + droppedMtg,
+      calendar: droppedCal,
+      email: droppedMail,
+      total: droppedSp + droppedProj + droppedMtg + droppedCal + droppedMail,
     },
   };
 }
@@ -531,6 +651,8 @@ export async function getRelevantContext(
       sharepoint_hits: [],
       project_tasks: [],
       meeting_notes: [],
+      calendar_events: [],
+      email_threads: [],
       rendered_prompt_block: rendered,
       total_chars: rendered.length,
       took_ms: Date.now() - t0,
@@ -541,6 +663,8 @@ export async function getRelevantContext(
       sharepoint_count: 0,
       project_count: 0,
       meeting_count: 0,
+      calendar_count: 0,
+      email_count: 0,
       total_chars: rendered.length,
       took_ms: bundle.took_ms,
     });
@@ -551,7 +675,8 @@ export async function getRelevantContext(
 
   /* Meetings live in our own DB and don't depend on a Graph token, so we
      ALWAYS fan out to them — even if the user hasn't connected M365 yet.
-     SharePoint + Project still require the delegated token. */
+     SharePoint + Project + Calendar + Email still require the delegated
+     token. */
   const meetingPromise = searchMeetingNotes({
     question,
     userId,
@@ -561,20 +686,36 @@ export async function getRelevantContext(
   const token = await getValidToken(userId);
 
   /* Parallel surface fan-out. searchMeetingNotes already returns typed
-     errors instead of throwing, so Promise.allSettled is overkill, but we
-     use it on the Graph helpers in case a future change starts throwing. */
+     errors instead of throwing; the Graph helpers do too, but we wrap
+     them in Promise.allSettled in case a future change starts throwing. */
   type GraphSpRes = Awaited<ReturnType<typeof searchSharePoint>> | null;
   type GraphProjRes = Awaited<ReturnType<typeof searchProjectTasks>> | null;
+  type GraphCalRes = Awaited<ReturnType<typeof searchCalendarEvents>> | null;
+  type GraphMailRes = Awaited<ReturnType<typeof searchMessages>> | null;
   let spRes: GraphSpRes = null;
   let projRes: GraphProjRes = null;
+  let calRes: GraphCalRes = null;
+  let mailRes: GraphMailRes = null;
+
+  /* Date range is shared by calendar (and informs which events to pull)
+     so we extract it once. searchMeetingNotes already extracts internally. */
+  const range = extractDateRange(question);
 
   if (token) {
-    const [spSettled, projSettled] = await Promise.allSettled([
+    const [spSettled, projSettled, calSettled, mailSettled] = await Promise.allSettled([
       searchSharePoint(token.accessToken, { query: question, topN: SHAREPOINT_TOP_N }),
       searchProjectTasks(token.accessToken, { query: question, topN: PROJECT_TOP_N }),
+      searchCalendarEvents(token.accessToken, {
+        query: question,
+        topN: CALENDAR_TOP_N,
+        ...(range ? { startDateTime: range.startISO, endDateTime: range.endISO } : {}),
+      }),
+      searchMessages(userId, { query: question, topN: EMAIL_TOP_N }),
     ]);
     spRes = spSettled.status === "fulfilled" ? spSettled.value : null;
     projRes = projSettled.status === "fulfilled" ? projSettled.value : null;
+    calRes = calSettled.status === "fulfilled" ? calSettled.value : null;
+    mailRes = mailSettled.status === "fulfilled" ? mailSettled.value : null;
   }
 
   const meetingRes = await meetingPromise;
@@ -583,6 +724,8 @@ export async function getRelevantContext(
   let sharepoint_hits: SharePointSearchHit[] = [];
   let project_tasks: ProjectTaskSummary[] = [];
   let meeting_notes: MeetingNoteHit[] = [];
+  let calendar_events: CalendarEventHit[] = [];
+  let email_threads: EmailThreadHit[] = [];
 
   if (spRes && spRes.ok) {
     sharepoint_hits = spRes.value.hits;
@@ -602,13 +745,27 @@ export async function getRelevantContext(
     errors.meeting = meetingRes;
     trackMeetingLookupFailure(userId, role, meetingRes);
   }
+  if (calRes && calRes.ok) {
+    calendar_events = calRes.value.hits;
+  } else if (calRes && !calRes.ok) {
+    errors.calendar = calRes;
+    trackCalendarLookupFailure(userId, role, calRes);
+  }
+  if (mailRes && mailRes.ok) {
+    email_threads = mailRes.value.hits;
+  } else if (mailRes && !mailRes.ok) {
+    errors.email = mailRes;
+    trackEmailLookupFailure(userId, role, mailRes);
+  }
 
-  const { rendered, dropped } = renderPromptBlock(
-    sharepoint_hits,
-    project_tasks,
-    meeting_notes,
+  const { rendered, dropped } = renderPromptBlock({
+    hits: sharepoint_hits,
+    tasks: project_tasks,
+    meetings: meeting_notes,
+    calendar: calendar_events,
+    emails: email_threads,
     maxChars,
-  );
+  });
 
   if (dropped.total > 0) {
     trackEvent("assistant.context_truncated", userId, role, {
@@ -617,6 +774,8 @@ export async function getRelevantContext(
       dropped_sharepoint: dropped.sharepoint,
       dropped_project: dropped.project,
       dropped_meeting: dropped.meeting,
+      dropped_calendar: dropped.calendar,
+      dropped_email: dropped.email,
       reason: "max_chars",
     });
   }
@@ -627,6 +786,8 @@ export async function getRelevantContext(
     sharepoint_hits,
     project_tasks,
     meeting_notes,
+    calendar_events,
+    email_threads,
     rendered_prompt_block: rendered,
     total_chars: rendered.length,
     took_ms: Date.now() - t0,
@@ -638,6 +799,8 @@ export async function getRelevantContext(
     sharepoint_count: sharepoint_hits.length,
     project_count: project_tasks.length,
     meeting_count: meeting_notes.length,
+    calendar_count: calendar_events.length,
+    email_count: email_threads.length,
     total_chars: rendered.length,
     took_ms: bundle.took_ms,
   });
@@ -654,6 +817,8 @@ export const __internal = {
   renderSharePointEntry,
   renderProjectEntry,
   renderMeetingEntry,
+  renderCalendarEntry,
+  renderEmailEntry,
   extractDateRange,
   PROMPT_HEADER,
   DEFAULT_MAX_CHARS,
@@ -662,4 +827,6 @@ export const __internal = {
   PROJECT_TOP_N,
   MEETING_TOP_N,
   MEETING_SNIPPET_MAX,
+  CALENDAR_TOP_N,
+  EMAIL_TOP_N,
 };

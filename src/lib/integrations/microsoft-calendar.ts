@@ -604,6 +604,280 @@ export async function listEvents(
 }
 
 // ---------------------------------------------------------------------------
+// Search (read-only) — used by the assistant context resolver.
+//
+// We expose a thin keyword-aware search wrapper over `/me/calendarView` so the
+// assistant can ground meeting questions ("what did we discuss in the porsche
+// meetings?") in the user's own calendar. Same scope as the read path
+// (`Calendars.Read`) — no separate consent needed.
+//
+// Strategy:
+//   1. Take a date range (extracted from the question by the resolver, or a
+//      sensible default of [now-180d, now+30d]).
+//   2. Pull up to ~50 events in that window via Graph $top.
+//   3. Score each event in JS by simple substring match against subject,
+//      bodyPreview/body, and attendee display names. No tokenizer — we keep
+//      this zero-cost; the resolver passes the raw question.
+//   4. Return the top N (default 5) hits in CalendarEventHit shape.
+// ---------------------------------------------------------------------------
+
+import { trackEvent as trackEventForSearch } from "@/lib/analytics";
+
+/**
+ * Hit shape the context resolver consumes. Stable + minimal — Outlook deep
+ * link + ISO datetimes so the LLM can ground date claims rather than
+ * paraphrase.
+ */
+export interface CalendarEventHit {
+  id: string;
+  subject: string;
+  start: string;        // ISO datetime
+  end: string;          // ISO datetime
+  organizer?: string;
+  attendees?: string[]; // display names, deduped
+  snippet: string;      // <= 300 char body excerpt
+  url?: string;         // Outlook web deep link (webLink)
+  source_kind: "calendar";
+}
+
+export interface SearchCalendarEventsOptions {
+  /** Free-text query — typically the raw question. */
+  query: string;
+  /** ISO start of the window. Defaults to 180 days ago. */
+  startDateTime?: string;
+  /** ISO end of the window. Defaults to 30 days ahead. */
+  endDateTime?: string;
+  /** How many hits to return. Default 5, capped at 25. */
+  topN?: number;
+}
+
+export interface SearchCalendarEventsValue {
+  hits: CalendarEventHit[];
+  total: number;
+  took_ms: number;
+}
+
+/** Hard cap on snippet length surfaced into the prompt — matches resolver. */
+const CALENDAR_SNIPPET_MAX = 300;
+const CALENDAR_DEFAULT_TOP_N = 5;
+const CALENDAR_TOP_N_CAP = 25;
+/** How many candidates to pull from Graph before keyword-ranking. */
+const CALENDAR_FETCH_TOP = 50;
+
+interface RawCalendarEvent {
+  id: string;
+  subject?: string | null;
+  start?: { dateTime?: string; timeZone?: string } | null;
+  end?: { dateTime?: string; timeZone?: string } | null;
+  bodyPreview?: string | null;
+  body?: { contentType?: string; content?: string } | null;
+  organizer?: { emailAddress?: { name?: string; address?: string } } | null;
+  attendees?: Array<{ emailAddress?: { name?: string; address?: string } }> | null;
+  webLink?: string | null;
+}
+
+function clipCalendarSnippet(s: string): string {
+  if (!s) return "";
+  const stripped = s.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  return stripped.length <= CALENDAR_SNIPPET_MAX
+    ? stripped
+    : stripped.slice(0, CALENDAR_SNIPPET_MAX - 1).trim() + "…";
+}
+
+/**
+ * Tokenize a raw question into lowercase tokens of length >= 3, dropping the
+ * most generic English stop words. We don't need a real stemmer — for
+ * "porsche meetings march" we just want "porsche", "meetings", "march" so
+ * subject substring matches them.
+ */
+const STOP_WORDS = new Set([
+  "the", "and", "for", "what", "did", "was", "were", "been", "have", "has",
+  "with", "about", "from", "this", "that", "they", "them", "their", "there",
+  "when", "which", "who", "whose", "why", "how", "are", "you", "your", "our",
+  "all", "any", "into", "out", "of", "in", "on", "at", "to", "by", "or", "as",
+  "be", "is", "we", "i", "a", "an", "do", "does", "did", "had", "but", "not",
+  "discuss", "discussed", "meeting", "meetings", "talk", "talked", "talks",
+]);
+
+function tokenize(question: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const lower = String(question || "").toLowerCase();
+  const matches = lower.match(/[a-z0-9]+/g) || [];
+  for (const tok of matches) {
+    if (tok.length < 3) continue;
+    if (STOP_WORDS.has(tok)) continue;
+    if (seen.has(tok)) continue;
+    seen.add(tok);
+    out.push(tok);
+  }
+  return out;
+}
+
+function scoreEvent(ev: RawCalendarEvent, tokens: string[]): number {
+  if (tokens.length === 0) return 1; // no filter — keep ordering
+  const subject = String(ev.subject || "").toLowerCase();
+  const preview = String(ev.bodyPreview || "").toLowerCase();
+  const body = String(ev.body?.content || "").toLowerCase();
+  const attNames = (ev.attendees || [])
+    .map((a) => String(a.emailAddress?.name || a.emailAddress?.address || "").toLowerCase())
+    .join(" ");
+  let score = 0;
+  for (const t of tokens) {
+    // Subject hits weigh most — they are short + intentional.
+    if (subject.includes(t)) score += 5;
+    if (preview.includes(t)) score += 2;
+    if (body.includes(t)) score += 2;
+    if (attNames.includes(t)) score += 3;
+  }
+  return score;
+}
+
+function dedupeAttendeeNames(raw: RawCalendarEvent): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const a of raw.attendees || []) {
+    const name = a.emailAddress?.name || a.emailAddress?.address || "";
+    const trimmed = name.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+function normalizeCalendarHit(raw: RawCalendarEvent): CalendarEventHit | null {
+  if (!raw || !raw.id) return null;
+  const start = raw.start?.dateTime || "";
+  const end = raw.end?.dateTime || "";
+  if (!start || !end) return null;
+  const snippetSource = raw.bodyPreview || raw.body?.content || "";
+  const organizerName =
+    raw.organizer?.emailAddress?.name || raw.organizer?.emailAddress?.address || "";
+  const hit: CalendarEventHit = {
+    id: raw.id,
+    subject: raw.subject || "(no subject)",
+    start,
+    end,
+    snippet: clipCalendarSnippet(snippetSource),
+    source_kind: "calendar",
+  };
+  if (organizerName) hit.organizer = organizerName;
+  const attendees = dedupeAttendeeNames(raw);
+  if (attendees.length > 0) hit.attendees = attendees;
+  if (raw.webLink) hit.url = raw.webLink;
+  return hit;
+}
+
+/**
+ * Search the user's calendar for events matching `query` within an ISO date
+ * window. Pulls /me/calendarView, then keyword-ranks in JS so we never hit
+ * Graph beyond a single read call.
+ *
+ * Returns a typed Result. On 403 returns `scope_missing` with `Calendars.Read`
+ * so the assistant UI can prompt the user to reconnect their Microsoft
+ * account if the consent has been revoked.
+ *
+ * Privacy: token MUST be the calling user's delegated token. Graph already
+ * scopes /me/calendarView to that user.
+ */
+export async function searchCalendarEvents(
+  token: string,
+  opts: SearchCalendarEventsOptions,
+): Promise<Result<SearchCalendarEventsValue>> {
+  const t0 = Date.now();
+  const q = String(opts?.query ?? "").trim();
+  if (!q) return { ok: false, code: "invalid_input", message: "query_required" };
+  if (!token || typeof token !== "string") {
+    return { ok: false, code: "not_connected", message: "missing_token" };
+  }
+
+  const requested = Number.isFinite(opts.topN) ? Number(opts.topN) : CALENDAR_DEFAULT_TOP_N;
+  const topN = Math.min(Math.max(requested, 1), CALENDAR_TOP_N_CAP);
+
+  // Default window: 180 days back, 30 days forward — covers "porsche
+  // meetings in March" today, plus the upcoming agenda.
+  const now = Date.now();
+  const fromISO =
+    opts.startDateTime && !isNaN(new Date(opts.startDateTime).getTime())
+      ? new Date(opts.startDateTime).toISOString()
+      : new Date(now - 180 * 24 * 3600 * 1000).toISOString();
+  const toISO =
+    opts.endDateTime && !isNaN(new Date(opts.endDateTime).getTime())
+      ? new Date(opts.endDateTime).toISOString()
+      : new Date(now + 30 * 24 * 3600 * 1000).toISOString();
+
+  const select =
+    "id,subject,start,end,bodyPreview,body,organizer,attendees,webLink";
+  const endpoint =
+    `me/calendarView?startDateTime=${encodeURIComponent(fromISO)}` +
+    `&endDateTime=${encodeURIComponent(toISO)}` +
+    `&$orderby=${encodeURIComponent("start/dateTime desc")}` +
+    `&$top=${CALENDAR_FETCH_TOP}` +
+    `&$select=${encodeURIComponent(select)}`;
+
+  const res = await graphCall<{ value?: RawCalendarEvent[] }>(
+    "GET",
+    endpoint,
+    token,
+  );
+
+  if (!res.ok) {
+    /* The shared graphCall helper classifies 403s with the write scope
+       label since that's the broader requirement; for the read-only search
+       path we surface Calendars.Read so the UI prompt is accurate. */
+    const scope =
+      res.code === "scope_missing"
+        ? "Calendars.Read"
+        : res.scope;
+    return {
+      ok: false,
+      code: res.code,
+      scope,
+      retryAfter: res.retryAfter,
+      status: res.status,
+      message: res.message,
+    };
+  }
+
+  const raw = Array.isArray(res.data?.value) ? res.data!.value! : [];
+  const tokens = tokenize(q);
+  const scored = raw
+    .map((ev) => ({ ev, score: scoreEvent(ev, tokens) }))
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  const hits = scored
+    .slice(0, topN)
+    .map((s) => normalizeCalendarHit(s.ev))
+    .filter((h): h is CalendarEventHit => h !== null);
+
+  return {
+    ok: true,
+    value: { hits, total: scored.length, took_ms: Date.now() - t0 },
+  };
+}
+
+/**
+ * Track a calendar-lookup failure as a typed analytics event so the
+ * assistant dashboard can show "calendar context surface failed" alongside
+ * the SharePoint / Project surfaces.
+ */
+export function trackCalendarLookupFailure(
+  userId: string,
+  role: string,
+  error: CalendarErrorResult,
+): void {
+  trackEventForSearch("assistant.calendar_lookup_failed", userId, role, {
+    status: error.status ?? 0,
+    scope_missing: error.code === "scope_missing",
+    code: error.code,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Test-only helpers
 // ---------------------------------------------------------------------------
 
@@ -611,4 +885,12 @@ export const __internal = {
   validateCreate,
   buildGraphBody,
   isoOrNull,
+  tokenize,
+  scoreEvent,
+  normalizeCalendarHit,
+  clipCalendarSnippet,
+  CALENDAR_SNIPPET_MAX,
+  CALENDAR_DEFAULT_TOP_N,
+  CALENDAR_TOP_N_CAP,
+  CALENDAR_FETCH_TOP,
 };

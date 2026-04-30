@@ -1308,6 +1308,193 @@ export async function forwardMessage(
 }
 
 // ---------------------------------------------------------------------------
+// Search (read-only) — used by the assistant context resolver.
+//
+// Wraps Graph's POST /search/query for entityTypes=["message"] so the
+// assistant can find email threads relevant to a user question. Same scope
+// as the rest of the read path (`Mail.Read`) — no separate consent needed.
+// Per-user delegated token (Graph automatically scopes /search to the
+// caller's mailbox).
+// ---------------------------------------------------------------------------
+
+export interface EmailThreadHit {
+  id: string;
+  subject: string;
+  from: string;
+  received_at: string;  // ISO datetime
+  snippet: string;      // <= 300 char preview
+  url?: string;         // webLink deep link
+  source_kind: "email";
+}
+
+export interface SearchMessagesOptions {
+  query: string;
+  /** Cap on returned hits. Default 5, max 25. */
+  topN?: number;
+}
+
+export interface SearchMessagesValue {
+  hits: EmailThreadHit[];
+  total: number;
+  took_ms: number;
+}
+
+const EMAIL_SNIPPET_MAX = 300;
+const EMAIL_DEFAULT_TOP_N = 5;
+const EMAIL_TOP_N_CAP = 25;
+
+interface RawSearchHitMessage {
+  hitId?: string;
+  rank?: number;
+  summary?: string;
+  resource?: {
+    id?: string;
+    subject?: string;
+    bodyPreview?: string;
+    from?: RawRecipient | null;
+    sender?: RawRecipient | null;
+    receivedDateTime?: string;
+    webLink?: string;
+    "@odata.type"?: string;
+  };
+}
+
+interface RawSearchResponseMessages {
+  value?: Array<{
+    hitsContainers?: Array<{
+      hits?: RawSearchHitMessage[];
+      total?: number;
+    }>;
+  }>;
+}
+
+function clipMailSnippet(s: string | null | undefined): string {
+  if (!s) return "";
+  const stripped = String(s)
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped.length <= EMAIL_SNIPPET_MAX
+    ? stripped
+    : stripped.slice(0, EMAIL_SNIPPET_MAX - 1).trim() + "…";
+}
+
+function normalizeMessageHit(raw: RawSearchHitMessage): EmailThreadHit | null {
+  const r = raw?.resource;
+  if (!r || !r.id) return null;
+  const fromRecord = r.from?.emailAddress || r.sender?.emailAddress || {};
+  const fromLabel =
+    (fromRecord.name && fromRecord.name.trim()) ||
+    (fromRecord.address && fromRecord.address.trim()) ||
+    "(unknown sender)";
+  const snippet = clipMailSnippet(raw.summary || r.bodyPreview || "");
+  const hit: EmailThreadHit = {
+    id: r.id,
+    subject: r.subject || "(no subject)",
+    from: fromLabel,
+    received_at: r.receivedDateTime || "",
+    snippet,
+    source_kind: "email",
+  };
+  if (r.webLink) hit.url = r.webLink;
+  return hit;
+}
+
+/**
+ * Keyword search across the calling user's mailbox via Graph's
+ * `/search/query` with entityTypes=["message"]. Mail.Read scope.
+ *
+ * The query string is passed through verbatim; the resolver chooses what to
+ * pass (typically the raw question, sometimes augmented with extracted noun
+ * phrases). Graph's KQL handles tokenization + relevance.
+ *
+ * Returns a typed Result. On 403 returns `scope_missing` with `Mail.Read`
+ * so the UI can prompt for a Microsoft 365 reconnect.
+ *
+ * Privacy: per-user delegated token only — never service principal.
+ */
+export async function searchMessages(
+  userId: string,
+  opts: SearchMessagesOptions,
+): Promise<Result<SearchMessagesValue>> {
+  const t0 = Date.now();
+  const q = String(opts?.query ?? "").trim();
+  if (!q) return { ok: false, code: "invalid_input", message: "query_required" };
+
+  const token = await getValidToken(userId);
+  if (!token) {
+    return { ok: false, code: "not_connected", message: "microsoft_not_connected" };
+  }
+
+  const requested = Number.isFinite(opts.topN) ? Number(opts.topN) : EMAIL_DEFAULT_TOP_N;
+  const topN = Math.min(Math.max(requested, 1), EMAIL_TOP_N_CAP);
+
+  const body = {
+    requests: [
+      {
+        entityTypes: ["message"],
+        query: { queryString: q },
+        from: 0,
+        size: topN,
+      },
+    ],
+  };
+
+  const res = await graphPost<RawSearchResponseMessages>(
+    "search/query",
+    token.accessToken,
+    body,
+    "Mail.Read",
+  );
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      code: res.code,
+      scope: res.scope ?? (res.code === "scope_missing" ? "Mail.Read" : undefined),
+      retryAfter: res.retryAfter,
+      status: res.status,
+      message: res.message,
+    };
+  }
+
+  const containers = res.data?.value?.[0]?.hitsContainers ?? [];
+  const rawHits: RawSearchHitMessage[] = [];
+  let total = 0;
+  for (const c of containers) {
+    if (Array.isArray(c.hits)) rawHits.push(...c.hits);
+    if (typeof c.total === "number") total += c.total;
+  }
+  const hits = rawHits
+    .map(normalizeMessageHit)
+    .filter((h): h is EmailThreadHit => h !== null)
+    .slice(0, topN);
+  if (!total) total = hits.length;
+
+  return {
+    ok: true,
+    value: { hits, total, took_ms: Date.now() - t0 },
+  };
+}
+
+/**
+ * Track an email-lookup failure as a typed analytics event. Mirrors the
+ * SharePoint / Project / Calendar failure helpers so the assistant
+ * dashboard can render all surfaces uniformly.
+ */
+export function trackEmailLookupFailure(
+  userId: string,
+  role: string,
+  error: MailErrorResult,
+): void {
+  trackEvent("assistant.email_lookup_failed", userId, role, {
+    status: error.status ?? 0,
+    scope_missing: error.code === "scope_missing",
+    code: error.code,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Test-only helpers
 // ---------------------------------------------------------------------------
 
@@ -1317,6 +1504,11 @@ export const __internal = {
   normalizeRecipients,
   normalizeInboxRow,
   resolveFolder,
+  normalizeMessageHit,
+  clipMailSnippet,
   BODY_PREVIEW_MAX,
   FOLDER_TO_GRAPH,
+  EMAIL_SNIPPET_MAX,
+  EMAIL_DEFAULT_TOP_N,
+  EMAIL_TOP_N_CAP,
 };

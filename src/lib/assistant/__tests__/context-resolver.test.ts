@@ -18,6 +18,10 @@ const mockSearchProjectTasks = jest.fn();
 const mockTrackSpFail = jest.fn();
 const mockTrackProjFail = jest.fn();
 const mockSearchMeetingTranscripts = jest.fn();
+const mockSearchCalendarEvents = jest.fn();
+const mockSearchMessages = jest.fn();
+const mockTrackCalFail = jest.fn();
+const mockTrackEmailFail = jest.fn();
 
 jest.mock("@/lib/analytics", () => ({
   trackEvent: (...args: any[]) => mockTrack(...args),
@@ -37,6 +41,16 @@ jest.mock("@/lib/integrations/microsoft-project", () => ({
   trackProjectLookupFailure: (...args: any[]) => mockTrackProjFail(...args),
 }));
 
+jest.mock("@/lib/integrations/microsoft-calendar", () => ({
+  searchCalendarEvents: (...args: any[]) => mockSearchCalendarEvents(...args),
+  trackCalendarLookupFailure: (...args: any[]) => mockTrackCalFail(...args),
+}));
+
+jest.mock("@/lib/integrations/microsoft-mail", () => ({
+  searchMessages: (...args: any[]) => mockSearchMessages(...args),
+  trackEmailLookupFailure: (...args: any[]) => mockTrackEmailFail(...args),
+}));
+
 jest.mock("@/lib/plaud", () => ({
   searchMeetingTranscripts: (...args: any[]) => mockSearchMeetingTranscripts(...args),
 }));
@@ -46,6 +60,17 @@ beforeEach(() => {
   mockGetValidToken.mockResolvedValue({ accessToken: "tok-abc", userEmail: "u@example.com" });
   /* Default: meetings surface returns no hits unless a test overrides. */
   mockSearchMeetingTranscripts.mockResolvedValue([]);
+  /* Default: calendar + email return empty success unless a test overrides.
+     This keeps the existing 3-source tests honest about the "errors should
+     be undefined when surfaces succeed-empty" contract. */
+  mockSearchCalendarEvents.mockResolvedValue({
+    ok: true,
+    value: { hits: [], total: 0, took_ms: 1 },
+  });
+  mockSearchMessages.mockResolvedValue({
+    ok: true,
+    value: { hits: [], total: 0, took_ms: 1 },
+  });
 });
 
 const baseHit = (i: number, snippetLen = 50) => ({
@@ -329,6 +354,44 @@ describe("renderPromptBlock", () => {
     const { rendered, dropped } = __internal.renderPromptBlock(hits, [], 1000);
     expect(rendered.length).toBeLessThanOrEqual(1000);
     expect(dropped.total).toBeGreaterThan(0);
+  });
+
+  it("renders [Calendar] and [Email] entries via the new inputs object", async () => {
+    const { __internal } = await import("@/lib/assistant/context-resolver");
+    const cal = {
+      id: "ev-1",
+      subject: "Porsche dealer sync",
+      start: "2026-03-12T15:00:00Z",
+      end: "2026-03-12T16:00:00Z",
+      attendees: ["Aidan", "Hoxsie"],
+      snippet: "Walked through dealer pipeline",
+      url: "https://outlook/ev-1",
+      source_kind: "calendar" as const,
+    };
+    const email = {
+      id: "m-1",
+      subject: "Porsche pipeline",
+      from: "Aidan",
+      received_at: "2026-03-15T09:00:00Z",
+      snippet: "Update on dealer pipeline",
+      url: "https://outlook/m-1",
+      source_kind: "email" as const,
+    };
+    const { rendered, dropped } = __internal.renderPromptBlock({
+      hits: [],
+      tasks: [],
+      meetings: [],
+      calendar: [cal],
+      emails: [email],
+      maxChars: 6000,
+    });
+    expect(rendered).toMatch(/\[Calendar\] Porsche dealer sync — 2026-03-12T15:00:00Z — with Aidan, Hoxsie/);
+    expect(rendered).toContain("[Email] Porsche pipeline — from Aidan — 2026-03-15T09:00:00Z");
+    expect(rendered).toContain("https://outlook/ev-1");
+    expect(rendered).toContain("https://outlook/m-1");
+    expect(dropped.calendar).toBe(0);
+    expect(dropped.email).toBe(0);
+    expect(dropped.total).toBe(0);
   });
 
   it("renders [Meeting] entries when meeting hits are passed", async () => {
@@ -651,5 +714,280 @@ describe("getRelevantContext - meeting integration", () => {
     for (const hit of b.meeting_notes) {
       expect(hit.snippet.length).toBeLessThanOrEqual(300);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getRelevantContext - calendar + email integration (Outlook surfaces)
+// ---------------------------------------------------------------------------
+
+describe("getRelevantContext - calendar + email integration", () => {
+  const calendarHit = {
+    id: "ev-1",
+    subject: "Porsche dealer sync",
+    start: "2026-03-12T15:00:00Z",
+    end: "2026-03-12T16:00:00Z",
+    organizer: "Nick",
+    attendees: ["Aidan", "Hoxsie"],
+    snippet: "Walked through dealer pipeline and Q2 incentives",
+    url: "https://outlook.office.com/calendar/item/ev-1",
+    source_kind: "calendar" as const,
+  };
+
+  const emailHit = {
+    id: "msg-1",
+    subject: "Porsche pipeline",
+    from: "Aidan",
+    received_at: "2026-03-15T09:00:00Z",
+    snippet: "Update on the Porsche dealer pipeline status",
+    url: "https://outlook.office.com/mail/msg-1",
+    source_kind: "email" as const,
+  };
+
+  it("includes calendar + email as the 4th and 5th sources and renders both blocks", async () => {
+    mockSearchSharePoint.mockResolvedValueOnce({
+      ok: true, value: { hits: [baseHit(1)], total: 1, took_ms: 1 },
+    });
+    mockSearchProjectTasks.mockResolvedValueOnce({
+      ok: true, value: { tasks: [baseTask(1)], took_ms: 1 },
+    });
+    mockSearchCalendarEvents.mockResolvedValueOnce({
+      ok: true, value: { hits: [calendarHit], total: 1, took_ms: 1 },
+    });
+    mockSearchMessages.mockResolvedValueOnce({
+      ok: true, value: { hits: [emailHit], total: 1, took_ms: 1 },
+    });
+
+    const { getRelevantContext } = await import("@/lib/assistant/context-resolver");
+    const b = await getRelevantContext({
+      question: "what did we discuss in the porsche meetings this month",
+      userId: "u-1",
+      role: "cto",
+      surface: "assistant_support",
+    });
+
+    expect(b.calendar_events).toHaveLength(1);
+    expect(b.email_threads).toHaveLength(1);
+    expect(b.rendered_prompt_block).toContain("[Calendar] Porsche dealer sync");
+    expect(b.rendered_prompt_block).toContain("[Email] Porsche pipeline");
+    expect(b.rendered_prompt_block).toContain("with Aidan, Hoxsie");
+    expect(b.rendered_prompt_block).toContain("from Aidan");
+    /* The other 3 surfaces still render unchanged. */
+    expect(b.rendered_prompt_block).toContain("[SharePoint]");
+    expect(b.rendered_prompt_block).toContain("[Project task]");
+
+    /* Analytics fired with calendar_count + email_count. */
+    expect(mockTrack).toHaveBeenCalledWith(
+      "assistant.context_resolved",
+      "u-1",
+      "cto",
+      expect.objectContaining({
+        calendar_count: 1,
+        email_count: 1,
+        sharepoint_count: 1,
+        project_count: 1,
+      }),
+    );
+  });
+
+  it("returns the other 4 surfaces when calendar 403s; emits assistant.calendar_lookup_failed", async () => {
+    mockSearchSharePoint.mockResolvedValueOnce({
+      ok: true, value: { hits: [baseHit(1)], total: 1, took_ms: 1 },
+    });
+    mockSearchProjectTasks.mockResolvedValueOnce({
+      ok: true, value: { tasks: [baseTask(1)], took_ms: 1 },
+    });
+    mockSearchCalendarEvents.mockResolvedValueOnce({
+      ok: false, code: "scope_missing", scope: "Calendars.Read", status: 403,
+    });
+    mockSearchMessages.mockResolvedValueOnce({
+      ok: true, value: { hits: [emailHit], total: 1, took_ms: 1 },
+    });
+
+    const { getRelevantContext } = await import("@/lib/assistant/context-resolver");
+    const b = await getRelevantContext({
+      question: "porsche review",
+      userId: "u-1",
+      role: "cto",
+      surface: "knowledge",
+    });
+    expect(b.calendar_events).toHaveLength(0);
+    expect(b.email_threads).toHaveLength(1);
+    expect(b.sharepoint_hits).toHaveLength(1);
+    expect(b.project_tasks).toHaveLength(1);
+    expect(b.errors?.calendar?.code).toBe("scope_missing");
+    expect(mockTrackCalFail).toHaveBeenCalled();
+    expect(mockTrackEmailFail).not.toHaveBeenCalled();
+  });
+
+  it("returns the other 4 surfaces when email 403s; emits assistant.email_lookup_failed", async () => {
+    mockSearchSharePoint.mockResolvedValueOnce({
+      ok: true, value: { hits: [baseHit(1)], total: 1, took_ms: 1 },
+    });
+    mockSearchProjectTasks.mockResolvedValueOnce({
+      ok: true, value: { tasks: [baseTask(1)], took_ms: 1 },
+    });
+    mockSearchCalendarEvents.mockResolvedValueOnce({
+      ok: true, value: { hits: [calendarHit], total: 1, took_ms: 1 },
+    });
+    mockSearchMessages.mockResolvedValueOnce({
+      ok: false, code: "scope_missing", scope: "Mail.Read", status: 403,
+    });
+
+    const { getRelevantContext } = await import("@/lib/assistant/context-resolver");
+    const b = await getRelevantContext({
+      question: "porsche pipeline",
+      userId: "u-1",
+      role: "cto",
+      surface: "knowledge",
+    });
+    expect(b.email_threads).toHaveLength(0);
+    expect(b.calendar_events).toHaveLength(1);
+    expect(b.errors?.email?.code).toBe("scope_missing");
+    expect(mockTrackEmailFail).toHaveBeenCalled();
+  });
+
+  it("never throws when all 4 Graph surfaces fail — returns bundle with errors only", async () => {
+    mockSearchSharePoint.mockResolvedValueOnce({
+      ok: false, code: "scope_missing", scope: "Sites.Read.All", status: 403,
+    });
+    mockSearchProjectTasks.mockResolvedValueOnce({
+      ok: false, code: "rate_limited", retryAfter: 5, status: 429,
+    });
+    mockSearchCalendarEvents.mockResolvedValueOnce({
+      ok: false, code: "scope_missing", scope: "Calendars.Read", status: 403,
+    });
+    mockSearchMessages.mockResolvedValueOnce({
+      ok: false, code: "scope_missing", scope: "Mail.Read", status: 403,
+    });
+
+    const { getRelevantContext } = await import("@/lib/assistant/context-resolver");
+    await expect(
+      getRelevantContext({
+        question: "anything",
+        userId: "u-1",
+        role: "cto",
+        surface: "knowledge",
+      }),
+    ).resolves.toMatchObject({
+      sharepoint_hits: [],
+      project_tasks: [],
+      calendar_events: [],
+      email_threads: [],
+      errors: expect.objectContaining({
+        sharepoint: expect.objectContaining({ code: "scope_missing" }),
+        project: expect.objectContaining({ code: "rate_limited" }),
+        calendar: expect.objectContaining({ code: "scope_missing" }),
+        email: expect.objectContaining({ code: "scope_missing" }),
+      }),
+    });
+  });
+
+  it("truncates longest entries first when 5 surfaces overflow maxChars", async () => {
+    mockSearchSharePoint.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        hits: Array.from({ length: 4 }, (_, i) => baseHit(i, 600)),
+        total: 4, took_ms: 1,
+      },
+    });
+    mockSearchProjectTasks.mockResolvedValueOnce({
+      ok: true, value: { tasks: [], took_ms: 1 },
+    });
+    mockSearchCalendarEvents.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        hits: Array.from({ length: 3 }, (_, i) => ({
+          ...calendarHit,
+          id: `ev-${i}`,
+          snippet: "z".repeat(300),
+        })),
+        total: 3, took_ms: 1,
+      },
+    });
+    mockSearchMessages.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        hits: Array.from({ length: 3 }, (_, i) => ({
+          ...emailHit,
+          id: `msg-${i}`,
+          snippet: "y".repeat(300),
+        })),
+        total: 3, took_ms: 1,
+      },
+    });
+
+    const { getRelevantContext } = await import("@/lib/assistant/context-resolver");
+    const b = await getRelevantContext({
+      question: "porsche review march",
+      userId: "u-1",
+      role: "cto",
+      surface: "knowledge",
+      maxChars: 1500,
+    });
+    expect(b.rendered_prompt_block.length).toBeLessThanOrEqual(1500);
+    /* Truncation event must be tagged with the new dropped_calendar +
+       dropped_email surfaces so the dashboard can attribute drops. */
+    expect(mockTrack).toHaveBeenCalledWith(
+      "assistant.context_truncated",
+      "u-1",
+      "cto",
+      expect.objectContaining({
+        reason: "max_chars",
+        dropped_calendar: expect.any(Number),
+        dropped_email: expect.any(Number),
+      }),
+    );
+  });
+
+  it("skips Graph surfaces (calendar + email) when token is missing but still returns bundle", async () => {
+    mockGetValidToken.mockResolvedValueOnce(null);
+    const { getRelevantContext } = await import("@/lib/assistant/context-resolver");
+    const b = await getRelevantContext({
+      question: "porsche meetings march",
+      userId: "u-1",
+      role: "cto",
+      surface: "assistant_support",
+    });
+    expect(b.calendar_events).toHaveLength(0);
+    expect(b.email_threads).toHaveLength(0);
+    expect(mockSearchCalendarEvents).not.toHaveBeenCalled();
+    expect(mockSearchMessages).not.toHaveBeenCalled();
+    /* Analytics still emitted with zeros so the learning loop sees the call. */
+    expect(mockTrack).toHaveBeenCalledWith(
+      "assistant.context_resolved",
+      "u-1",
+      "cto",
+      expect.objectContaining({ calendar_count: 0, email_count: 0 }),
+    );
+  });
+
+  it("forwards extracted date range to calendar search", async () => {
+    mockSearchSharePoint.mockResolvedValueOnce({
+      ok: true, value: { hits: [], total: 0, took_ms: 1 },
+    });
+    mockSearchProjectTasks.mockResolvedValueOnce({
+      ok: true, value: { tasks: [], took_ms: 1 },
+    });
+    mockSearchCalendarEvents.mockResolvedValueOnce({
+      ok: true, value: { hits: [], total: 0, took_ms: 1 },
+    });
+    mockSearchMessages.mockResolvedValueOnce({
+      ok: true, value: { hits: [], total: 0, took_ms: 1 },
+    });
+    const { getRelevantContext } = await import("@/lib/assistant/context-resolver");
+    await getRelevantContext({
+      question: "what did we discuss in March 2026 porsche meetings",
+      userId: "u-1",
+      role: "cto",
+      surface: "knowledge",
+    });
+    expect(mockSearchCalendarEvents).toHaveBeenCalledWith(
+      "tok-abc",
+      expect.objectContaining({
+        startDateTime: "2026-03-01T00:00:00.000Z",
+        endDateTime: "2026-03-31T23:59:59.999Z",
+      }),
+    );
   });
 });
