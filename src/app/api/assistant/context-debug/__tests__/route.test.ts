@@ -95,13 +95,19 @@ beforeEach(() => {
 });
 
 describe("GET /api/assistant/context-debug — auth gating", () => {
-  it("401 when unauthenticated", async () => {
-    mockGetUserFromRequest.mockReturnValueOnce(null);
+  /* Auth pattern matches /api/assistant: Bearer token via
+     getUserFromRequest is the primary path. requireCapability is the
+     fallback for cookie-based sessions (the original PR #43 gate). */
+  it("401 when no auth at all (no Bearer + no capability)", async () => {
+    /* Both the primary Bearer path AND the requireCapability fallback
+       (which internally also calls getUserFromRequest) need to see a
+       null user. mockReturnValue (not Once) covers both calls. */
+    mockGetUserFromRequest.mockReturnValue(null);
     const res = await GET(makeReq("?q=hello"));
     expect(res.status).toBe(401);
     const body: any = await res.json();
     expect(body.error).toBe("unauthorized");
-    // requireCapability records the denial.
+    /* requireCapability fired as the fallback and recorded the denial. */
     expect(mockTrack).toHaveBeenCalledWith(
       "system.capability_denied",
       "anonymous",
@@ -110,23 +116,19 @@ describe("GET /api/assistant/context-debug — auth gating", () => {
     );
   });
 
-  it("403 when authed but lacking assistant.use capability", async () => {
+  it("authorizes with Bearer token (matches /api/assistant)", async () => {
+    /* Anyone who can chat with the assistant can debug their own
+       grounding context. Same access level as /api/assistant. */
     mockGetUserFromRequest.mockReturnValueOnce({
-      id: "u-out",
-      role: "outsider",
-      name: "X",
-      email: "x@y.co",
+      id: "u-cto",
+      role: "cto",
+      name: "Nick",
+      email: "homyk@thewolfpack.agency",
     });
     const res = await GET(makeReq("?q=hello"));
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
     const body: any = await res.json();
-    expect(body.error).toBe("forbidden");
-    expect(mockTrack).toHaveBeenCalledWith(
-      "system.capability_denied",
-      "u-out",
-      "outsider",
-      expect.objectContaining({ capability: "assistant.use" }),
-    );
+    expect(body.question).toBe("hello");
   });
 });
 

@@ -46,6 +46,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
+import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import {
   getRelevantContext,
@@ -127,9 +128,21 @@ function flattenFailures(errors: ContextBundle["errors"]): ContextDebugFailure[]
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const auth = await requireCapability(req, "assistant.use");
-  if (!auth.ok) return auth.response;
-  const user = auth.user;
+  /* Auth — match the existing /api/assistant route exactly so anyone who
+     can chat can debug their own grounding context. The previous gate
+     (requireCapability assistant.use) hit a session/cookie path that
+     diverged from the Bearer-token flow the assistant UI actually uses,
+     making the endpoint unreachable from the address bar. We accept
+     EITHER Authorization Bearer (preferred, what the chat UI sends) OR
+     fall back to requireCapability for sessions where the helper does
+     read the cookie. */
+  let user: { id: string; role: string } | null =
+    getUserFromRequest(req.headers.get("authorization"));
+  if (!user) {
+    const auth = await requireCapability(req, "assistant.use");
+    if (!auth.ok) return auth.response;
+    user = { id: auth.user.id, role: auth.user.role };
+  }
 
   const url = new URL(req.url);
   const q = (url.searchParams.get("q") || "").trim();
