@@ -94,6 +94,46 @@ export interface UserMemoryEntry {
 const STALE_CONVERSATION_MS = 2 * 60 * 60 * 1000; // 2 hours
 const MAX_CONTEXT_MESSAGES = 20;
 
+// ---------------------------------------------------------------------------
+// Knowledge-cache bypass for meeting / date-bound queries.
+//
+// The existing `instinct_knowledge` cache is keyed on a coarse text-match
+// over the question. That was acceptable for "what is our pricing model"
+// style questions, but it broke badly on date-bound questions: asking
+// "which meetings did wolfpack have on April 20" matched a cached
+// "wolfpack team members" answer (loose token overlap on "wolfpack")
+// and returned stale, wrong content with a "Zero tokens" badge.
+//
+// Rule: when the question contains explicit date / meeting / temporal
+// markers, NEVER serve from the existing knowledge cache — these
+// queries need fresh data from SharePoint + Project + meetings.
+//
+// The list is the codified version of the user's invariant: "tooling
+// first." Adding a new pattern means appending to this array. No
+// per-call hand-tuning.
+// ---------------------------------------------------------------------------
+
+export const MEETING_OR_DATE_BYPASS_PATTERNS: RegExp[] = [
+  /\bmeeting(s)?\b/i,
+  /\bdiscussed?\b/i,
+  /\bagenda\b/i,
+  /\btranscript\b/i,
+  /\bcall(s)? (with|on|about)\b/i,
+  /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(uary|ruary|ch|il|e|y|ust|tember|ober|ember)?\b/i,
+  /\b(yesterday|today|tomorrow|this week|last week|next week)\b/i,
+  /\b\d{4}-\d{2}-\d{2}\b/,
+  /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
+];
+
+/**
+ * Return true when the question is meeting- or date-bound and must NOT
+ * be served from the stale knowledge cache. Pure regex check — zero-cost.
+ */
+export function shouldBypassKnowledgeCache(question: string): boolean {
+  if (!question) return false;
+  return MEETING_OR_DATE_BYPASS_PATTERNS.some((p) => p.test(question));
+}
+
 const TOPIC_KEYWORDS: Record<string, string[]> = {
   inventory: ["inventory", "stock", "vin", "vehicle", "car", "listing"],
   leads: ["lead", "leads", "prospect", "customer", "crm"],
@@ -331,8 +371,20 @@ export async function chat(
     };
   }
 
-  // --- Priority 1: Knowledge base ---
-  const knowledgeResult = await tryKnowledgeBase(message);
+  // --- Priority 1: Knowledge base (skipped for meeting / date-bound queries) ---
+  // Date-bound or meeting-bound questions must NEVER serve from the
+  // stale knowledge cache — `searchKnowledge` does loose token matching
+  // and will happily return a "team members" answer for a "what
+  // meetings on April 20" question. Bypass and let the LLM see fresh
+  // SharePoint + Project + meeting context via getRelevantContext.
+  const bypassCache = shouldBypassKnowledgeCache(message);
+  if (bypassCache) {
+    trackEvent("assistant.knowledge_cache_bypassed", userId, userRole, {
+      reason: "meeting_or_date_query",
+      module: "assistant",
+    });
+  }
+  const knowledgeResult = bypassCache ? null : await tryKnowledgeBase(message);
   if (knowledgeResult) {
     trackEvent("knowledge.answer_found", userId, userRole, {
       source: "knowledge_cache",

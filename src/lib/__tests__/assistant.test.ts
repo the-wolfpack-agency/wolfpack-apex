@@ -63,6 +63,7 @@ import {
   autoDetectTopics,
   generateConversationSummary,
   getConversationHistory,
+  shouldBypassKnowledgeCache,
   type AssistantMessage,
 } from "@/lib/assistant";
 
@@ -109,6 +110,7 @@ beforeEach(() => {
     surface: "assistant_support",
     sharepoint_hits: [],
     project_tasks: [],
+    meeting_notes: [],
     rendered_prompt_block: "",
     total_chars: 0,
     took_ms: 1,
@@ -927,5 +929,154 @@ describe("context grounding via getRelevantContext", () => {
     /* No grounding header was prepended. */
     expect(body.system).not.toContain("Internal context");
     expect(body.system).toContain("Wolfpack Assistant");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shouldBypassKnowledgeCache — meeting / date-bound query detector
+// ---------------------------------------------------------------------------
+
+describe("shouldBypassKnowledgeCache", () => {
+  const positives: Array<[string, string]> = [
+    ["meeting keyword", "what did we cover in the meeting"],
+    ["plural meetings", "list our meetings this quarter"],
+    ["discussed verb", "what was discussed last sprint"],
+    ["agenda", "share the agenda for the kickoff"],
+    ["transcript", "find the transcript from yesterday"],
+    ["call with", "summarize my call with Aidan"],
+    ["call on", "what was the call on Tuesday about"],
+    ["full month name", "what happened in April"],
+    ["short month name", "anything from Mar 2026?"],
+    ["yesterday", "what did I miss yesterday"],
+    ["today", "what's on the schedule today"],
+    ["tomorrow", "anything tomorrow morning"],
+    ["this week", "what's happening this week"],
+    ["last week", "summary from last week"],
+    ["next week", "next week's plan"],
+    ["ISO date", "notes from 2026-04-20"],
+    ["US slash date", "anything on 4/20/2026"],
+    ["short slash date", "schedule for 4/20/26"],
+    ["original prod symptom", "which meetings did wolfpack have on April 20, 2026?"],
+    ["other prod symptom", "what was discussed in meetings on April 20, 2026"],
+  ];
+
+  for (const [name, q] of positives) {
+    test(`bypasses for ${name}: "${q}"`, () => {
+      expect(shouldBypassKnowledgeCache(q)).toBe(true);
+    });
+  }
+
+  const negatives: Array<[string, string]> = [
+    ["empty", ""],
+    ["pricing question", "how does our pricing work"],
+    ["auth question", "how does auth work"],
+    ["team question", "who is on the engineering team"],
+    ["no date or meeting", "what does Wolfpack do"],
+  ];
+
+  for (const [name, q] of negatives) {
+    test(`does not bypass for ${name}: "${q}"`, () => {
+      expect(shouldBypassKnowledgeCache(q)).toBe(false);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Knowledge cache bypass integration
+// ---------------------------------------------------------------------------
+
+describe("knowledge cache bypass for meeting / date queries", () => {
+  test("does NOT call searchKnowledge when bypass triggers, AND fires bypass event", async () => {
+    /* Even if a stale knowledge entry would have matched, we never look. */
+    mockSearchKnowledge.mockResolvedValue([
+      {
+        id: "k-stale",
+        question: "wolfpack team",
+        answer: "Stale team list",
+        source: "docs",
+        rating: 5,
+        view_count: 99,
+        tokens_used: 0,
+        tags: ["wolfpack"],
+      },
+    ]);
+
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        content: [{ text: "Per the meeting on April 20, we discussed Q2 OKRs." }],
+        usage: { input_tokens: 30, output_tokens: 20 },
+      }),
+    });
+    global.fetch = fetchMock as any;
+
+    /* Provide a meeting-grounded bundle so the LLM has fresh context. */
+    const groundingBlock =
+      "Internal context (cite if you use it):\n\n[Meeting] Wolfpack sync — 2026-04-20T15:00:00Z\nDiscussed Q2 OKRs.\n";
+    mockGetRelevantContext.mockResolvedValueOnce({
+      question: "which meetings did wolfpack have on April 20, 2026?",
+      surface: "assistant_support",
+      sharepoint_hits: [],
+      project_tasks: [],
+      meeting_notes: [
+        {
+          id: "m-1",
+          title: "Wolfpack sync",
+          occurred_at: "2026-04-20T15:00:00Z",
+          snippet: "Discussed Q2 OKRs.",
+          source_kind: "plaud",
+          url: "/meetings/m-1",
+        },
+      ],
+      rendered_prompt_block: groundingBlock,
+      total_chars: groundingBlock.length,
+      took_ms: 6,
+    });
+
+    const result = await chat(
+      "which meetings did wolfpack have on April 20, 2026?",
+      "u-1",
+      "cto",
+    );
+
+    /* Cache must NOT have been touched. */
+    expect(mockSearchKnowledge).not.toHaveBeenCalled();
+    /* Bypass analytics fired. */
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "assistant.knowledge_cache_bypassed",
+      "u-1",
+      "cto",
+      expect.objectContaining({ reason: "meeting_or_date_query" }),
+    );
+    /* LLM was reached and the meeting block was in the system prompt. */
+    expect(result.source).toBe("ai");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.system).toContain("[Meeting]");
+    expect(body.system).toContain("Wolfpack sync");
+  });
+
+  test("non-bypass questions still go through searchKnowledge (no regression)", async () => {
+    mockSearchKnowledge.mockResolvedValue([
+      {
+        id: "k-1",
+        question: "How does auth work?",
+        answer: "JWT-based auth.",
+        source: "docs",
+        rating: 5,
+        view_count: 1,
+        tokens_used: 0,
+        tags: [],
+      },
+    ]);
+    const result = await chat("How does auth work?", "u-1", "cto");
+    expect(mockSearchKnowledge).toHaveBeenCalledTimes(1);
+    expect(result.source).toBe("knowledge_cache");
+    /* Bypass event NOT emitted. */
+    const bypassed = mockTrackEvent.mock.calls.filter(
+      (c: any[]) => c[0] === "assistant.knowledge_cache_bypassed",
+    );
+    expect(bypassed).toHaveLength(0);
   });
 });

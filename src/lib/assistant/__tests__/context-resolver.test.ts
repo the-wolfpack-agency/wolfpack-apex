@@ -17,6 +17,7 @@ const mockSearchSharePoint = jest.fn();
 const mockSearchProjectTasks = jest.fn();
 const mockTrackSpFail = jest.fn();
 const mockTrackProjFail = jest.fn();
+const mockSearchMeetingTranscripts = jest.fn();
 
 jest.mock("@/lib/analytics", () => ({
   trackEvent: (...args: any[]) => mockTrack(...args),
@@ -36,9 +37,15 @@ jest.mock("@/lib/integrations/microsoft-project", () => ({
   trackProjectLookupFailure: (...args: any[]) => mockTrackProjFail(...args),
 }));
 
+jest.mock("@/lib/plaud", () => ({
+  searchMeetingTranscripts: (...args: any[]) => mockSearchMeetingTranscripts(...args),
+}));
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetValidToken.mockResolvedValue({ accessToken: "tok-abc", userEmail: "u@example.com" });
+  /* Default: meetings surface returns no hits unless a test overrides. */
+  mockSearchMeetingTranscripts.mockResolvedValue([]);
 });
 
 const baseHit = (i: number, snippetLen = 50) => ({
@@ -322,5 +329,327 @@ describe("renderPromptBlock", () => {
     const { rendered, dropped } = __internal.renderPromptBlock(hits, [], 1000);
     expect(rendered.length).toBeLessThanOrEqual(1000);
     expect(dropped.total).toBeGreaterThan(0);
+  });
+
+  it("renders [Meeting] entries when meeting hits are passed", async () => {
+    const { __internal } = await import("@/lib/assistant/context-resolver");
+    const meetingHit = {
+      id: "m-1",
+      title: "Wolfpack standup",
+      occurred_at: "2026-04-20T15:00:00Z",
+      snippet: "Discussed Q2 OKRs and the dashboard rebuild.",
+      source_kind: "plaud" as const,
+      url: "/meetings/m-1",
+    };
+    const { rendered, dropped } = __internal.renderPromptBlock(
+      [],
+      [],
+      [meetingHit],
+      6000,
+    );
+    expect(rendered).toMatch(/\[Meeting\] Wolfpack standup — 2026-04-20T15:00:00Z/);
+    expect(rendered).toContain("Discussed Q2 OKRs");
+    expect(rendered).toContain("/meetings/m-1");
+    expect(dropped.total).toBe(0);
+    expect(dropped.meeting).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractDateRange
+// ---------------------------------------------------------------------------
+
+describe("extractDateRange", () => {
+  const NOW = new Date(Date.UTC(2026, 3, 29, 12, 0, 0));
+
+  it("parses 'April 20, 2026' to a single-day UTC range", async () => {
+    const { __internal } = await import("@/lib/assistant/context-resolver");
+    const r = __internal.extractDateRange("which meetings on April 20, 2026", NOW);
+    expect(r).not.toBeNull();
+    expect(r!.kind).toBe("day");
+    expect(r!.startISO).toBe("2026-04-20T00:00:00.000Z");
+    expect(r!.endISO).toBe("2026-04-20T23:59:59.999Z");
+  });
+
+  it("parses bare 'April 20' using current year", async () => {
+    const { __internal } = await import("@/lib/assistant/context-resolver");
+    const r = __internal.extractDateRange("what was discussed on April 20", NOW);
+    expect(r).not.toBeNull();
+    expect(r!.kind).toBe("day");
+    expect(r!.startISO.startsWith("2026-04-20")).toBe(true);
+  });
+
+  it("parses 'March 2026' as a whole-month range", async () => {
+    const { __internal } = await import("@/lib/assistant/context-resolver");
+    const r = __internal.extractDateRange("what happened in March 2026", NOW);
+    expect(r).not.toBeNull();
+    expect(r!.kind).toBe("month");
+    expect(r!.startISO).toBe("2026-03-01T00:00:00.000Z");
+    expect(r!.endISO).toBe("2026-03-31T23:59:59.999Z");
+  });
+
+  it("parses ISO date 2026-04-20", async () => {
+    const { __internal } = await import("@/lib/assistant/context-resolver");
+    const r = __internal.extractDateRange("notes from 2026-04-20", NOW);
+    expect(r).not.toBeNull();
+    expect(r!.kind).toBe("day");
+    expect(r!.startISO.startsWith("2026-04-20")).toBe(true);
+  });
+
+  it("parses US-style 4/20/2026", async () => {
+    const { __internal } = await import("@/lib/assistant/context-resolver");
+    const r = __internal.extractDateRange("anything from 4/20/2026?", NOW);
+    expect(r).not.toBeNull();
+    expect(r!.kind).toBe("day");
+    expect(r!.startISO.startsWith("2026-04-20")).toBe(true);
+  });
+
+  it("returns null when no date is present", async () => {
+    const { __internal } = await import("@/lib/assistant/context-resolver");
+    expect(__internal.extractDateRange("how does auth work", NOW)).toBeNull();
+    expect(__internal.extractDateRange("", NOW)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// searchMeetingNotes
+// ---------------------------------------------------------------------------
+
+describe("searchMeetingNotes", () => {
+  const baseTranscript = (over: Record<string, unknown> = {}) => ({
+    id: "m-1",
+    fileId: "plaud-1",
+    ownerUserId: "u-1",
+    ownerName: "Nick",
+    title: "Wolfpack sync",
+    summary: "Q2 plans",
+    transcriptText: "we discussed the dashboard rebuild and the demo on April 20",
+    recordedAt: "2026-04-20T15:00:00Z",
+    durationSeconds: 1800,
+    qualityStatus: "pass" as const,
+    ingestedAt: "2026-04-20T16:00:00Z",
+    snippet: "discussed the dashboard rebuild and the demo on April 20",
+    score: 5,
+    ...over,
+  });
+
+  it("returns hits with clamped 300-char snippets", async () => {
+    mockSearchMeetingTranscripts.mockResolvedValueOnce([
+      baseTranscript({
+        snippet: "x".repeat(800),
+        summary: null,
+      }),
+    ]);
+    const { searchMeetingNotes } = await import("@/lib/assistant/context-resolver");
+    const r = await searchMeetingNotes({
+      question: "what did we discuss",
+      userId: "u-1",
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.hits).toHaveLength(1);
+    expect(r.hits[0].snippet.length).toBeLessThanOrEqual(300);
+    expect(r.hits[0].source_kind).toBe("plaud");
+    expect(r.hits[0].occurred_at).toBe("2026-04-20T15:00:00Z");
+  });
+
+  it("filters out hits outside the extracted date range", async () => {
+    mockSearchMeetingTranscripts.mockResolvedValueOnce([
+      baseTranscript({ id: "m-on", recordedAt: "2026-04-20T15:00:00Z" }),
+      baseTranscript({ id: "m-off", recordedAt: "2026-03-15T10:00:00Z" }),
+    ]);
+    const { searchMeetingNotes } = await import("@/lib/assistant/context-resolver");
+    const r = await searchMeetingNotes({
+      question: "meetings on April 20, 2026",
+      userId: "u-1",
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.hits).toHaveLength(1);
+    expect(r.hits[0].id).toBe("m-on");
+  });
+
+  it("filters by month when only month+year is in the question", async () => {
+    mockSearchMeetingTranscripts.mockResolvedValueOnce([
+      baseTranscript({ id: "in", recordedAt: "2026-03-12T15:00:00Z" }),
+      baseTranscript({ id: "out", recordedAt: "2026-04-12T15:00:00Z" }),
+    ]);
+    const { searchMeetingNotes } = await import("@/lib/assistant/context-resolver");
+    const r = await searchMeetingNotes({
+      question: "what happened in March 2026",
+      userId: "u-1",
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.hits.map((h) => h.id)).toEqual(["in"]);
+  });
+
+  it("returns typed error result when the lookup throws", async () => {
+    mockSearchMeetingTranscripts.mockRejectedValueOnce(new Error("DB exploded"));
+    const { searchMeetingNotes } = await import("@/lib/assistant/context-resolver");
+    const r = await searchMeetingNotes({
+      question: "anything",
+      userId: "u-1",
+    });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.code).toBe("internal");
+    expect(r.status).toBe(500);
+  });
+
+  it("returns no_query error for an empty question", async () => {
+    const { searchMeetingNotes } = await import("@/lib/assistant/context-resolver");
+    const r = await searchMeetingNotes({ question: "  ", userId: "u-1" });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.code).toBe("no_query");
+    expect(mockSearchMeetingTranscripts).not.toHaveBeenCalled();
+  });
+
+  it("respects custom topN parameter", async () => {
+    const transcripts = Array.from({ length: 8 }, (_, i) =>
+      baseTranscript({ id: `m-${i}`, recordedAt: "2026-04-20T15:00:00Z" }),
+    );
+    mockSearchMeetingTranscripts.mockResolvedValueOnce(transcripts);
+    const { searchMeetingNotes } = await import("@/lib/assistant/context-resolver");
+    const r = await searchMeetingNotes({
+      question: "meetings on April 20, 2026",
+      userId: "u-1",
+      topN: 3,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.hits).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getRelevantContext meeting integration
+// ---------------------------------------------------------------------------
+
+describe("getRelevantContext - meeting integration", () => {
+  const meetingTranscript = {
+    id: "m-1",
+    fileId: "plaud-1",
+    ownerUserId: "u-1",
+    ownerName: "Nick",
+    title: "Wolfpack sync 4/20",
+    summary: "Q2 OKRs and demo timing",
+    transcriptText: "we walked through Q2 OKRs and the demo schedule",
+    recordedAt: "2026-04-20T15:00:00Z",
+    durationSeconds: 1800,
+    qualityStatus: "pass" as const,
+    ingestedAt: "2026-04-20T16:00:00Z",
+    snippet: "we walked through Q2 OKRs and the demo schedule",
+    score: 5,
+  };
+
+  it("includes meetings as a 3rd source and emits meeting_count in analytics", async () => {
+    mockSearchSharePoint.mockResolvedValueOnce({
+      ok: true, value: { hits: [baseHit(1)], total: 1, took_ms: 4 },
+    });
+    mockSearchProjectTasks.mockResolvedValueOnce({
+      ok: true, value: { tasks: [baseTask(1)], took_ms: 4 },
+    });
+    mockSearchMeetingTranscripts.mockResolvedValueOnce([meetingTranscript]);
+
+    const { getRelevantContext } = await import("@/lib/assistant/context-resolver");
+    const b = await getRelevantContext({
+      question: "what was discussed in meetings on April 20, 2026",
+      userId: "u-1",
+      role: "cto",
+      surface: "assistant_support",
+    });
+    expect(b.meeting_notes).toHaveLength(1);
+    expect(b.meeting_notes[0].id).toBe("m-1");
+    expect(b.rendered_prompt_block).toContain("[Meeting]");
+    expect(b.rendered_prompt_block).toContain("Wolfpack sync 4/20");
+    expect(b.rendered_prompt_block).toContain("[SharePoint]");
+    expect(b.rendered_prompt_block).toContain("[Project task]");
+    expect(mockTrack).toHaveBeenCalledWith(
+      "assistant.context_resolved",
+      "u-1",
+      "cto",
+      expect.objectContaining({
+        meeting_count: 1,
+        sharepoint_count: 1,
+        project_count: 1,
+      }),
+    );
+  });
+
+  it("still pulls meetings when the Graph token is missing", async () => {
+    mockGetValidToken.mockResolvedValueOnce(null);
+    mockSearchMeetingTranscripts.mockResolvedValueOnce([meetingTranscript]);
+    const { getRelevantContext } = await import("@/lib/assistant/context-resolver");
+    const b = await getRelevantContext({
+      question: "what did we discuss on April 20, 2026",
+      userId: "u-1",
+      role: "cto",
+      surface: "assistant_support",
+    });
+    /* SharePoint + Project skipped because no token, but meetings still flow. */
+    expect(b.sharepoint_hits).toHaveLength(0);
+    expect(b.project_tasks).toHaveLength(0);
+    expect(b.meeting_notes).toHaveLength(1);
+    expect(b.rendered_prompt_block).toContain("[Meeting]");
+    expect(mockSearchSharePoint).not.toHaveBeenCalled();
+  });
+
+  it("emits assistant.meeting_lookup_failed and returns empty meetings when the lookup throws", async () => {
+    mockSearchSharePoint.mockResolvedValueOnce({
+      ok: true, value: { hits: [], total: 0, took_ms: 1 },
+    });
+    mockSearchProjectTasks.mockResolvedValueOnce({
+      ok: true, value: { tasks: [], took_ms: 1 },
+    });
+    mockSearchMeetingTranscripts.mockRejectedValueOnce(new Error("PG down"));
+    const { getRelevantContext } = await import("@/lib/assistant/context-resolver");
+    const b = await getRelevantContext({
+      question: "meetings on April 20, 2026",
+      userId: "u-1",
+      role: "cto",
+      surface: "assistant_support",
+    });
+    expect(b.meeting_notes).toHaveLength(0);
+    expect(b.errors?.meeting?.code).toBe("internal");
+    expect(mockTrack).toHaveBeenCalledWith(
+      "assistant.meeting_lookup_failed",
+      "u-1",
+      "cto",
+      expect.objectContaining({ status: 500 }),
+    );
+  });
+
+  it("respects per-source budget — long meeting hits get truncated", async () => {
+    const fatMeeting = {
+      ...meetingTranscript,
+      summary: "x".repeat(2000),
+      snippet: "y".repeat(2000),
+    };
+    mockSearchSharePoint.mockResolvedValueOnce({
+      ok: true, value: { hits: [], total: 0, took_ms: 1 },
+    });
+    mockSearchProjectTasks.mockResolvedValueOnce({
+      ok: true, value: { tasks: [], took_ms: 1 },
+    });
+    mockSearchMeetingTranscripts.mockResolvedValueOnce([
+      fatMeeting,
+      { ...fatMeeting, id: "m-2", recordedAt: "2026-04-20T16:00:00Z" },
+      { ...fatMeeting, id: "m-3", recordedAt: "2026-04-20T17:00:00Z" },
+    ]);
+    const { getRelevantContext } = await import("@/lib/assistant/context-resolver");
+    const b = await getRelevantContext({
+      question: "April 20, 2026 meetings",
+      userId: "u-1",
+      role: "cto",
+      surface: "assistant_support",
+      maxChars: 800,
+    });
+    expect(b.rendered_prompt_block.length).toBeLessThanOrEqual(800);
+    /* Per-hit snippet capped at 300 even before global truncation. */
+    for (const hit of b.meeting_notes) {
+      expect(hit.snippet.length).toBeLessThanOrEqual(300);
+    }
   });
 });
