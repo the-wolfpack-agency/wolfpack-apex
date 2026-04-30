@@ -59,6 +59,54 @@ function err(status: number, body: any = {}, headers: Record<string, string> = {
 // searchSharePoint
 // ---------------------------------------------------------------------------
 
+describe("toWebViewerUrl", () => {
+  /* Late require so the module is loaded with the mocked analytics import. */
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  const { toWebViewerUrl } = require("@/lib/integrations/microsoft-sharepoint");
+
+  test.each([
+    ["https://wpa.sharepoint.com/sites/x/Shared%20Documents/file.docx",
+     "https://wpa.sharepoint.com/sites/x/Shared%20Documents/file.docx?web=1"],
+    ["https://wpa.sharepoint.com/sites/x/Shared%20Documents/file.xlsx",
+     "https://wpa.sharepoint.com/sites/x/Shared%20Documents/file.xlsx?web=1"],
+    ["https://wpa.sharepoint.com/sites/x/Shared%20Documents/file.pptx",
+     "https://wpa.sharepoint.com/sites/x/Shared%20Documents/file.pptx?web=1"],
+  ])("%p forces SharePoint online viewer", (input, expected) => {
+    expect(toWebViewerUrl(input)).toBe(expected);
+  });
+
+  test("appends with & when URL already has a query string", () => {
+    expect(
+      toWebViewerUrl(
+        "https://wpa.sharepoint.com/sites/x/file.docx?source=share",
+      ),
+    ).toBe("https://wpa.sharepoint.com/sites/x/file.docx?source=share&web=1");
+  });
+
+  test("idempotent — never adds web=1 twice", () => {
+    const u =
+      "https://wpa.sharepoint.com/sites/x/file.docx?source=share&web=1";
+    expect(toWebViewerUrl(u)).toBe(u);
+  });
+
+  test("non-Office files (PDF, page links) pass through unchanged", () => {
+    expect(toWebViewerUrl("https://wpa.sharepoint.com/sites/x/file.pdf"))
+      .toBe("https://wpa.sharepoint.com/sites/x/file.pdf");
+    expect(toWebViewerUrl("https://wpa.sharepoint.com/sites/x/SitePages/Home.aspx"))
+      .toBe("https://wpa.sharepoint.com/sites/x/SitePages/Home.aspx");
+  });
+
+  test("preserves URL fragments", () => {
+    expect(
+      toWebViewerUrl("https://wpa.sharepoint.com/sites/x/file.docx#page=2"),
+    ).toBe("https://wpa.sharepoint.com/sites/x/file.docx?web=1#page=2");
+  });
+
+  test("empty string returns empty", () => {
+    expect(toWebViewerUrl("")).toBe("");
+  });
+});
+
 describe("searchSharePoint", () => {
   it("maps Graph /search/query response to SharePointSearchHit[] with correct kinds", async () => {
     fetchMock.mockResolvedValueOnce(ok({

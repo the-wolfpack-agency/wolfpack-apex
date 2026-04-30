@@ -25,6 +25,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { trackEvent } from "@/lib/analytics";
+import { buildSearchQueryString } from "@/lib/integrations/microsoft-search-keywords";
 
 // ---------------------------------------------------------------------------
 // Result + error types
@@ -83,6 +84,13 @@ export interface SharePointSearchResult {
   hits: SharePointSearchHit[];
   total: number;
   took_ms: number;
+  /**
+   * Final keyword string sent to Graph as `query.queryString`. Surfaced so
+   * the diagnostic page (and integration tests) can assert exactly what
+   * was searched. Often differs from the user's verbatim question because
+   * `buildSearchQueryString` strips natural-language filler.
+   */
+  query_string_sent: string;
 }
 
 export interface SharePointFileText {
@@ -314,6 +322,50 @@ function classifyResource(odataType: string | undefined): SharePointSearchHit["s
   return "sharepoint_page";
 }
 
+const OFFICE_EXTENSIONS = [
+  ".docx", ".doc", ".docm",
+  ".xlsx", ".xls", ".xlsm", ".csv",
+  ".pptx", ".ppt", ".pptm",
+];
+
+/**
+ * Convert a raw Graph webUrl into a URL that opens in the SharePoint /
+ * OneDrive online viewer rather than triggering a download.
+ *
+ * Without `?web=1`, Office document URLs from Graph often serve the
+ * file with `Content-Disposition: attachment`, so the browser
+ * downloads the .docx / .xlsx / .pptx instead of rendering it in
+ * Word / Excel / PowerPoint Online. The user reported this in
+ * production today: every "related document" link saved to disk.
+ *
+ * Rule:
+ *   * Office formats (Word/Excel/PowerPoint variants + CSV) → append
+ *     `web=1` so SharePoint loads the online viewer.
+ *   * Everything else (PDFs, images, .txt, .md, page links) → leave
+ *     the URL untouched. SharePoint already renders these inline.
+ *   * Already-parameterized URLs are preserved (`&web=1` instead of
+ *     `?web=1`).
+ */
+export function toWebViewerUrl(rawUrl: string): string {
+  if (!rawUrl) return rawUrl;
+  let withoutHash = rawUrl;
+  let hash = "";
+  const hashIdx = rawUrl.indexOf("#");
+  if (hashIdx >= 0) {
+    withoutHash = rawUrl.slice(0, hashIdx);
+    hash = rawUrl.slice(hashIdx);
+  }
+  const lower = withoutHash.toLowerCase();
+  // Trim any trailing query for the extension check; we only care about
+  // the path's actual file ext, not "?download=1".
+  const pathPart = lower.split("?")[0];
+  const isOffice = OFFICE_EXTENSIONS.some((ext) => pathPart.endsWith(ext));
+  if (!isOffice) return rawUrl;
+  if (/[?&]web=1\b/i.test(withoutHash)) return rawUrl;
+  const sep = withoutHash.includes("?") ? "&" : "?";
+  return `${withoutHash}${sep}web=1${hash}`;
+}
+
 /**
  * Map a raw Graph hit into our normalized hit shape. Exported via __internal
  * so tests can exercise the mapping directly without going through fetch.
@@ -321,8 +373,9 @@ function classifyResource(odataType: string | undefined): SharePointSearchHit["s
 function normalizeHit(hit: RawGraphHit): SharePointSearchHit | null {
   const r = hit?.resource;
   if (!r) return null;
-  const url = r.webUrl ?? "";
-  if (!url) return null;
+  const rawUrl = r.webUrl ?? "";
+  if (!rawUrl) return null;
+  const url = toWebViewerUrl(rawUrl);
   const title = r.name ?? r.title ?? r.displayName ?? "(untitled)";
   const snippet = clipSnippet(hit.summary ?? "");
   const kind = classifyResource(r["@odata.type"]);
@@ -379,10 +432,16 @@ export async function searchSharePoint(
   const requested = Number.isFinite(opts.topN) ? Number(opts.topN) : DEFAULT_TOP_N;
   const topN = Math.min(Math.max(requested, 1), TOP_N_CAP);
 
-  // Build a Graph KQL query string. If a siteId is provided, scope it.
+  /* Build a Graph KQL query string. Microsoft's /search/query is keyword/
+     phrase based; passing a verbatim user question like
+       "What's in the TWA Agenda 4.20 doc?"
+     against a doc named TWA_Agenda_4.20.docx returns 0 hits. Extract the
+     load-bearing tokens first so Graph can actually find the document.
+     See: src/lib/integrations/microsoft-search-keywords.ts */
+  const keywordQuery = buildSearchQueryString(q);
   const queryString = opts.siteId
-    ? `${q} site:"${opts.siteId.replace(/"/g, "")}"`
-    : q;
+    ? `${keywordQuery} site:"${opts.siteId.replace(/"/g, "")}"`
+    : keywordQuery;
 
   const body = {
     requests: [
@@ -431,7 +490,7 @@ export async function searchSharePoint(
 
   return {
     ok: true,
-    value: { hits, total, took_ms: Date.now() - t0 },
+    value: { hits, total, took_ms: Date.now() - t0, query_string_sent: queryString },
   };
 }
 
