@@ -20,6 +20,11 @@ import { safeQuery } from "@/lib/db";
 import { matchPageFacts } from "@/lib/assistant/page-facts-matcher";
 import { formatPageFactsAnswer } from "@/lib/assistant/page-facts";
 import { getRelevantContext } from "@/lib/assistant/context-resolver";
+import {
+  captureFactFromCorrection,
+  findRelevantFacts,
+  renderFactsBlock,
+} from "@/lib/assistant/learning";
 import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
 
 // ---------------------------------------------------------------------------
@@ -519,6 +524,33 @@ export async function chat(
   // --- Save user message ---
   await dbSaveMessage(convId, "user", message, null, 0, msgMetadata);
   await dbUpdateConversationStats(convId, 0);
+
+  /* Learning loop: if the new user message looks like a correction of
+     the previous assistant turn, capture it as an org fact so future
+     prompts across the team are grounded with it. Pure regex + SQL,
+     zero LLM tokens. Best-effort — failures must not block the chat. */
+  const lastAssistant = [...history]
+    .reverse()
+    .find((m) => m.role === "assistant");
+  if (lastAssistant) {
+    captureFactFromCorrection({
+      userMessage: message,
+      priorAssistantContent: lastAssistant.content,
+      priorAssistantMessageId: lastAssistant.id ?? null,
+      userId,
+      userRole,
+    })
+      .then((fact) => {
+        if (fact) {
+          trackEvent("assistant.org_fact_captured", userId, userRole, {
+            module: "assistant",
+            attribute: fact.attribute,
+            subject_length: fact.subject.length,
+          });
+        }
+      })
+      .catch(() => {});
+  }
 
   // --- Auto-generate title from first message ---
   if (history.length === 0) {
@@ -1340,9 +1372,15 @@ async function callAI(
       /* swallow — keep the chat working without grounding. */
     }
 
-    const systemPrompt = contextBlock
-      ? `${contextBlock}\n${baseSystemPrompt}`
-      : baseSystemPrompt;
+    /* Inject org-learned facts (from prior user corrections) so the
+       LLM treats them as ground truth. Zero LLM tokens to look up —
+       it's a single indexed SQL select. */
+    const facts = await findRelevantFacts(message);
+    const factsBlock = renderFactsBlock(facts);
+
+    const systemPrompt = [factsBlock, contextBlock, baseSystemPrompt]
+      .filter((s) => s && s.trim().length > 0)
+      .join("\n");
 
     const aiMessages = history
       .filter((m) => m.role === "user" || m.role === "assistant")
