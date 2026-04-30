@@ -13,6 +13,7 @@
 export type Intent =
   | "calendar_availability"  // "is Hoxsie busy this afternoon"
   | "calendar_schedule"      // "what's on Hoxsie's calendar tomorrow"
+  | "meetings_on_date"       // "which meetings did wolfpack have on April 21"
   | "brain_history"          // "how long was the Porsche engagement"
   | "mail_search"            // "find the email from James about Q2"
   | "financials_metric"      // "what's our MRR this quarter"
@@ -45,6 +46,13 @@ const FINANCIAL_RE = /\b(mrr|arr|cash|revenue|net profit|unpaid|invoice|expense|
 const GOALS_RE = /\b(okr|okrs|north star|kr\b|key result|goals?)\b/i;
 const MAIL_RE = /\bemail\b.*\b(from|about|regarding)\b|\bfind\s+(the\s+)?email\b/i;
 const HISTORY_RE = /\b(how (?:long|many|much)|summary of|tell me about|history of|when was|how did)\b/i;
+// Third-person / org-wide meeting questions bound to a specific date.
+// "which meetings did wolfpack have on April 21, 2026"
+// "what meetings did we have yesterday"
+// "meetings on 2026-04-21"
+const MEETINGS_ON_DATE_RE = /\b(?:which|what|any)\s+meetings?\b|\bmeetings?\s+(?:on|at|for)\b/i;
+const EXPLICIT_DATE_RE = /\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)(?:uary|ruary|ch|il|e|y|ust|tember|ember|ober)?\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*,\s*|\s+)?\d{0,4})\b/i;
+const RELATIVE_DATE_RE = /\b(yesterday|today|tomorrow|last\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i;
 
 const TIME_HINTS: Record<string, string> = {
   "this morning": "morning_today",
@@ -92,6 +100,18 @@ export function classifyIntent(text: string): IntentMatch {
   if (SELF_SCHEDULE_RE.test(q) || SELF_MEETINGS_RE.test(q)) {
     slots.person = SELF_TOKEN;
     return { intent: "calendar_schedule", slots, confidence: 0.85 };
+  }
+
+  // Third-person/org meeting question with an explicit or relative
+  // date marker. "which meetings did wolfpack have on April 21, 2026"
+  // routes here so the meeting-transcript table answers it directly,
+  // not the LLM. We require BOTH the meeting cue AND a date marker so
+  // we don't hijack open-ended "any meetings about pricing" queries.
+  if (
+    MEETINGS_ON_DATE_RE.test(q) &&
+    (EXPLICIT_DATE_RE.test(q) || RELATIVE_DATE_RE.test(q))
+  ) {
+    return { intent: "meetings_on_date", slots, confidence: 0.9 };
   }
 
   const busy = BUSY_RE.exec(q);

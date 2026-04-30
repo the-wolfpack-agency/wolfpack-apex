@@ -143,6 +143,9 @@ export async function POST(req: NextRequest) {
       was_cache_hit: result.was_cache_hit,
       similarity: result.similarity,
       latency_ms: result.latency_ms,
+      prompt_tokens: result.prompt_tokens ?? 0,
+      completion_tokens: result.completion_tokens ?? 0,
+      total_tokens: (result.prompt_tokens ?? 0) + (result.completion_tokens ?? 0),
       low_confidence: isLowConfidenceAnswer(result.answer),
     });
   } catch (err) {

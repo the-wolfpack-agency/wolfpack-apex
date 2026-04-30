@@ -76,6 +76,26 @@ describe("classifyIntent (token-free)", () => {
     expect(m.confidence).toBe(0);
   });
 
+  // Regression 2026-04-30: identical org-wide meeting questions burned
+  // tokens twice because nothing matched and the cache was bypassed for
+  // date-bound queries. Now they route to the meetings_on_date tool.
+  test.each([
+    "which meetings did wolfpack have on April 21, 2026?",
+    "what meetings did we have on 2026-04-21",
+    "meetings on 4/21/2026",
+    "what meetings were on April 21",
+    "any meetings yesterday",
+  ])("meetings_on_date: %p", (q) => {
+    const m = classifyIntent(q);
+    expect(m.intent).toBe("meetings_on_date");
+    expect(m.confidence).toBeGreaterThanOrEqual(0.8);
+  });
+
+  test("meeting question with no date stays unknown (don't hijack RAG)", () => {
+    const m = classifyIntent("any meetings about the porsche pitch");
+    expect(m.intent).not.toBe("meetings_on_date");
+  });
+
   test("is deterministic — no LLM call path involved", () => {
     const a = classifyIntent("Is Hoxsie busy this afternoon?");
     const b = classifyIntent("Is Hoxsie busy this afternoon?");
