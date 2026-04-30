@@ -424,4 +424,49 @@ describe("/bulletin/[id]", () => {
       screen.getByTestId("bulletin-note-assoc-note-1-manual-label"),
     ).toBeInTheDocument();
   });
+
+  /* Regression 2026-04-30: when the list endpoint succeeds but returns
+     zero items, the dropdown was empty + the manual fallback was hidden,
+     so the user got stuck — couldn't proceed. Empty list must drop to
+     manual entry just like a 404 does. */
+  test("association picker falls back to manual when list endpoint returns []", async () => {
+    mockBoardDetail([makeNote()]);
+
+    mockFetchWithRefresh.mockImplementation((url: string, init?: any) => {
+      if (typeof url === "string" && url.startsWith("/api/tasks")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ tasks: [] }),
+        });
+      }
+      if (init?.method === "PATCH") {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ note: makeNote() }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+      });
+    });
+
+    renderBoard();
+    await waitFor(() =>
+      expect(screen.getByTestId("bulletin-note-note-1")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByTestId("bulletin-note-assoc-toggle-note-1"));
+    fireEvent.change(
+      screen.getByTestId("bulletin-note-assoc-note-1-kind"),
+      { target: { value: "task" } },
+    );
+
+    await screen.findByTestId("bulletin-note-assoc-note-1-manual");
+    expect(
+      screen.getByTestId("bulletin-note-assoc-note-1-manual-id"),
+    ).toBeInTheDocument();
+  });
 });
