@@ -1665,7 +1665,36 @@ export type InstinctEventType =
      whether the user's stored Microsoft token decoded, what scopes it
      carried, and whether live Graph probes succeeded. Drives "user is
      stuck on grounding" triage dashboards. */
-  | "assistant.grounding_debug_invoked";
+  | "assistant.grounding_debug_invoked"
+  // Bulletin boards — multi-user sticky-note board surface.
+  //
+  //   bulletin.board_created    { board_id, has_description }
+  //     — fires when /api/bulletin/boards POST inserts a row. Drives
+  //       the "boards-per-week" panel on the analytics dashboard.
+  //
+  //   bulletin.board_archived   { board_id }
+  //     — DELETE on a board flips archived_at; the board becomes a
+  //       frozen meeting artifact (read-only). Distinct from a hard
+  //       delete: notes/snapshots remain queryable.
+  //
+  //   bulletin.note_created     { board_id, has_association, kind }
+  //   bulletin.note_updated     { note_id }
+  //   bulletin.note_deleted     { note_id }
+  //     — sticky-note CRUD churn. has_association/kind let the learning
+  //       loop see which surfaces (task/meeting/...) drive note creation.
+  //
+  //   bulletin.snapshot_saved   { board_id, has_association, kind }
+  //   bulletin.snapshot_viewed  { snapshot_id }
+  //     — snapshot lifecycle. saved is per-write; viewed fires from the
+  //       PNG-streaming endpoint each time a meeting page or task surface
+  //       loads its attached snapshot.
+  | "bulletin.board_created"
+  | "bulletin.board_archived"
+  | "bulletin.note_created"
+  | "bulletin.note_updated"
+  | "bulletin.note_deleted"
+  | "bulletin.snapshot_saved"
+  | "bulletin.snapshot_viewed";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;
