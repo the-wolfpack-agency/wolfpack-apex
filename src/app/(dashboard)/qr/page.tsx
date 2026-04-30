@@ -16,6 +16,14 @@
  * 200 page when the user has no token.
  *
  * Charts: hand-rolled inline SVG/HTML — no Recharts dependency.
+ *
+ * Apr 30, 2026: per-scan attribution detail panel ("View all scans")
+ * surfaces every column captured by migrations 110+112 — country,
+ * region, city, postal, lat/lng (with map link), language, UTMs from
+ * the incoming URL, bot/blocked flags, the matched-client name (if
+ * the heuristic in scans.ts.matchClient correlated geo/referrer to
+ * an instinct_clients row), and the visitor_hash so repeat scans are
+ * recognisable. Sortable columns + group-by-visitor toggle.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -70,6 +78,44 @@ interface QrAnalytics {
   }>;
 }
 
+/* One row per scan, rendered in the "View all scans" detail panel.
+   Mirrors `ScanRow` exported by src/lib/qr/scans.ts — kept structurally
+   similar so the API contract is obvious from the UI side too. */
+interface ScanDetail {
+  id: string;
+  scanned_at: string;
+  visitor_hash: string | null;
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  postal_code: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  device: string | null;
+  os: string | null;
+  browser: string | null;
+  language: string | null;
+  timezone_offset_minutes: number | null;
+  screen_size: string | null;
+  is_bot: boolean;
+  referrer: string | null;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  blocked: boolean;
+  client_id: string | null;
+  client_match_score: number | null;
+  client_name: string | null;
+}
+
+type ScanSortKey =
+  | "scanned_at"
+  | "country"
+  | "city"
+  | "device"
+  | "browser"
+  | "client_name";
+
 interface RowState {
   expanded: boolean;
   loadingAnalytics: boolean;
@@ -86,6 +132,14 @@ interface RowState {
   qrSvg: string | null;
   showingQr: boolean;
   loadingQr: boolean;
+  /* All-scans detail state — lazy-loaded the first time the user opens
+     the modal so we don't pay the egress for codes nobody drills into. */
+  detailOpen: boolean;
+  loadingDetail: boolean;
+  detailError: string | null;
+  scans: ScanDetail[] | null;
+  scanSort: { key: ScanSortKey; dir: "asc" | "desc" };
+  groupByVisitor: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -118,6 +172,21 @@ function formatDate(iso: string | null | undefined): string {
 
 function truncate(s: string, n = 56): string {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
+}
+
+function relativeTime(iso: string): string {
+  try {
+    const d = new Date(iso).getTime();
+    const now = Date.now();
+    const diffSec = Math.round((now - d) / 1000);
+    const abs = Math.abs(diffSec);
+    if (abs < 60) return `${diffSec}s ago`;
+    if (abs < 3600) return `${Math.round(diffSec / 60)}m ago`;
+    if (abs < 86400) return `${Math.round(diffSec / 3600)}h ago`;
+    return `${Math.round(diffSec / 86400)}d ago`;
+  } catch {
+    return "";
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -353,6 +422,29 @@ function SectionCard({
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
+function defaultRowState(): RowState {
+  return {
+    expanded: false,
+    loadingAnalytics: false,
+    analyticsError: null,
+    analytics: null,
+    scanCount: null,
+    editing: false,
+    editTargetUrl: "",
+    savingEdit: false,
+    editError: null,
+    qrSvg: null,
+    showingQr: false,
+    loadingQr: false,
+    detailOpen: false,
+    loadingDetail: false,
+    detailError: null,
+    scans: null,
+    scanSort: { key: "scanned_at", dir: "desc" },
+    groupByVisitor: false,
+  };
+}
+
 export default function QrPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [codes, setCodes] = useState<QrCode[]>([]);
@@ -447,18 +539,10 @@ export default function QrPage() {
       setRowStates((prev) => ({
         ...prev,
         [data.code.id]: {
-          expanded: false,
-          loadingAnalytics: false,
-          analyticsError: null,
-          analytics: null,
-          scanCount: 0,
-          editing: false,
+          ...defaultRowState(),
           editTargetUrl: data.code.targetUrl,
-          savingEdit: false,
-          editError: null,
           qrSvg: data.qrSvg,
-          showingQr: false,
-          loadingQr: false,
+          scanCount: 0,
         },
       }));
       /* Reset the form for the next code. */
@@ -476,41 +560,12 @@ export default function QrPage() {
 
   /* ── row helpers ──────────────────────────────────────────────── */
   function getRow(id: string): RowState {
-    return (
-      rowStates[id] ?? {
-        expanded: false,
-        loadingAnalytics: false,
-        analyticsError: null,
-        analytics: null,
-        scanCount: null,
-        editing: false,
-        editTargetUrl: "",
-        savingEdit: false,
-        editError: null,
-        qrSvg: null,
-        showingQr: false,
-        loadingQr: false,
-      }
-    );
+    return rowStates[id] ?? defaultRowState();
   }
 
   function patchRow(id: string, patch: Partial<RowState>) {
     setRowStates((prev) => {
-      const current =
-        prev[id] ?? {
-          expanded: false,
-          loadingAnalytics: false,
-          analyticsError: null,
-          analytics: null,
-          scanCount: null,
-          editing: false,
-          editTargetUrl: "",
-          savingEdit: false,
-          editError: null,
-          qrSvg: null,
-        showingQr: false,
-        loadingQr: false,
-        };
+      const current = prev[id] ?? defaultRowState();
       return {
         ...prev,
         [id]: { ...current, ...patch },
@@ -557,6 +612,52 @@ export default function QrPage() {
     }
   }
 
+  async function loadScanDetails(code: QrCode) {
+    patchRow(code.id, { loadingDetail: true, detailError: null });
+    try {
+      const res = await fetchWithRefresh(
+        `/api/qr/${encodeURIComponent(code.id)}/scans`,
+      );
+      if (!res.ok) {
+        patchRow(code.id, {
+          loadingDetail: false,
+          detailError: "Failed to load scan details.",
+        });
+        return;
+      }
+      const data = (await res.json()) as { scans: ScanDetail[] };
+      patchRow(code.id, {
+        loadingDetail: false,
+        scans: Array.isArray(data.scans) ? data.scans : [],
+      });
+    } catch (err) {
+      patchRow(code.id, {
+        loadingDetail: false,
+        detailError: `Network error: ${(err as Error).message}`,
+      });
+    }
+  }
+
+  function toggleScanDetail(code: QrCode) {
+    const row = getRow(code.id);
+    const next = !row.detailOpen;
+    patchRow(code.id, { detailOpen: next });
+    if (next && !row.scans && !row.loadingDetail) {
+      void loadScanDetails(code);
+    }
+  }
+
+  function setScanSort(codeId: string, key: ScanSortKey) {
+    const row = getRow(codeId);
+    if (row.scanSort.key === key) {
+      patchRow(codeId, {
+        scanSort: { key, dir: row.scanSort.dir === "asc" ? "desc" : "asc" },
+      });
+    } else {
+      patchRow(codeId, { scanSort: { key, dir: "asc" } });
+    }
+  }
+
   async function toggleQr(code: QrCode) {
     const row = rowStates[code.id];
     if (row?.showingQr) {
@@ -570,7 +671,7 @@ export default function QrPage() {
     patchRow(code.id, { showingQr: true, loadingQr: true });
     try {
       const res = await fetchWithRefresh(
-        `/api/qr/${encodeURIComponent(code.id)}/svg`,
+        `/api/qr/${encodeURIComponent(code.id)}/svg?size=192`,
       );
       if (!res.ok) {
         patchRow(code.id, { loadingQr: false, qrSvg: "" });
@@ -1078,6 +1179,7 @@ export default function QrPage() {
                         <>
                           <div
                             data-testid={`qr-row-svg-render-${c.slug}`}
+                            className="qr-row-svg-wrapper"
                             style={{
                               width: 192,
                               height: 192,
@@ -1085,8 +1187,14 @@ export default function QrPage() {
                               padding: 8,
                               borderRadius: 4,
                               flexShrink: 0,
+                              overflow: "hidden",
                             }}
-                            dangerouslySetInnerHTML={{ __html: row.qrSvg }}
+                            dangerouslySetInnerHTML={{
+                              __html: row.qrSvg.replace(
+                                /<svg([^>]*)>/,
+                                '<svg$1 style="width:100%;height:100%;display:block">',
+                              ),
+                            }}
                           />
                           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                             <button
@@ -1211,7 +1319,46 @@ export default function QrPage() {
                           {row.analyticsError}
                         </div>
                       ) : row.analytics ? (
-                        <AnalyticsPanel a={row.analytics} />
+                        <>
+                          <AnalyticsPanel a={row.analytics} />
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "flex-end",
+                              gap: 8,
+                              borderTop: "1px solid var(--wp-dark-border)",
+                              paddingTop: 10,
+                              marginTop: 4,
+                            }}
+                          >
+                            <button
+                              data-testid={`qr-row-view-all-scans-${c.slug}`}
+                              type="button"
+                              onClick={() => toggleScanDetail(c)}
+                              style={{
+                                ...btnSecondary,
+                                color: "var(--wp-gold)",
+                                borderColor: "var(--wp-gold)",
+                              }}
+                            >
+                              {row.detailOpen
+                                ? "Hide all-scan detail"
+                                : "View all scans (full detail)"}
+                            </button>
+                          </div>
+                          {row.detailOpen ? (
+                            <ScanDetailPanel
+                              codeSlug={c.slug}
+                              row={row}
+                              onSort={(k) => setScanSort(c.id, k)}
+                              onToggleGrouping={() =>
+                                patchRow(c.id, {
+                                  groupByVisitor: !row.groupByVisitor,
+                                })
+                              }
+                            />
+                          ) : null}
+                        </>
                       ) : null}
                     </div>
                   ) : null}
@@ -1520,6 +1667,341 @@ function KPI({
         {value}
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* ScanDetailPanel — every captured datapoint per scan, sortable, with */
+/* a "Group by visitor" toggle so the team can answer "did the same    */
+/* anonymous person scan twice?" at a glance.                          */
+/* ------------------------------------------------------------------ */
+
+function ScanDetailPanel({
+  codeSlug,
+  row,
+  onSort,
+  onToggleGrouping,
+}: {
+  codeSlug: string;
+  row: RowState;
+  onSort: (key: ScanSortKey) => void;
+  onToggleGrouping: () => void;
+}) {
+  if (row.loadingDetail) {
+    return (
+      <div
+        data-testid={`qr-scan-detail-loading-${codeSlug}`}
+        style={{ color: "var(--wp-text-dim)", fontSize: "0.85rem" }}
+      >
+        Loading every-scan detail…
+      </div>
+    );
+  }
+  if (row.detailError) {
+    return (
+      <div
+        data-testid={`qr-scan-detail-error-${codeSlug}`}
+        style={{ color: "var(--wp-error)", fontSize: "0.85rem" }}
+      >
+        {row.detailError}
+      </div>
+    );
+  }
+  const scans = row.scans ?? [];
+  if (scans.length === 0) {
+    return (
+      <div
+        data-testid={`qr-scan-detail-empty-${codeSlug}`}
+        style={{ color: "var(--wp-text-muted)", fontSize: "0.85rem" }}
+      >
+        No scans yet — once someone scans this code the per-scan
+        attribution will appear here.
+      </div>
+    );
+  }
+
+  /* Client-side sort. Server already returns scanned_at DESC; users
+     can re-sort by another column if they want to spot e.g. all
+     scans from one country. */
+  const sorted = [...scans].sort((a, b) => {
+    const k = row.scanSort.key;
+    const dir = row.scanSort.dir === "asc" ? 1 : -1;
+    const av = (a[k] ?? "") as string;
+    const bv = (b[k] ?? "") as string;
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    return 0;
+  });
+
+  /* Group-by-visitor toggle. Maintains sort order WITHIN each group
+     by visitor_hash; visitors with no hash bucket together in
+     "(unknown visitor)". */
+  const groups: Array<{ visitor: string; rows: ScanDetail[] }> = [];
+  if (row.groupByVisitor) {
+    const map = new Map<string, ScanDetail[]>();
+    for (const s of sorted) {
+      const key = s.visitor_hash ?? "(unknown)";
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(s);
+    }
+    for (const [visitor, rows] of map) {
+      groups.push({ visitor, rows });
+    }
+    /* Sort groups by row count desc — busiest visitors first. */
+    groups.sort((a, b) => b.rows.length - a.rows.length);
+  }
+
+  return (
+    <div
+      data-testid={`qr-scan-detail-${codeSlug}`}
+      style={{
+        marginTop: 8,
+        padding: 10,
+        border: "1px solid var(--wp-dark-border)",
+        borderRadius: 6,
+        background: "var(--wp-dark)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 8,
+          fontSize: "0.75rem",
+          color: "var(--wp-text-dim)",
+        }}
+      >
+        <div>
+          Showing {scans.length} of last 500 scans · click a column header
+          to sort
+        </div>
+        <label
+          style={{ display: "flex", gap: 6, alignItems: "center" }}
+          data-testid={`qr-scan-detail-group-toggle-${codeSlug}`}
+        >
+          <input
+            type="checkbox"
+            checked={row.groupByVisitor}
+            onChange={onToggleGrouping}
+          />
+          Group by visitor
+        </label>
+      </div>
+
+      <div style={{ overflowX: "auto", maxHeight: 480, overflowY: "auto" }}>
+        <table
+          data-testid={`qr-scan-detail-table-${codeSlug}`}
+          style={{
+            width: "100%",
+            fontSize: "0.72rem",
+            borderCollapse: "collapse",
+            color: "var(--wp-text-dim)",
+          }}
+        >
+          <thead style={{ position: "sticky", top: 0, background: "var(--wp-dark)" }}>
+            <tr style={{ textAlign: "left" }}>
+              <SortableTh
+                label="When"
+                k="scanned_at"
+                row={row}
+                onSort={onSort}
+              />
+              <SortableTh label="Country" k="country" row={row} onSort={onSort} />
+              <th style={thStyle}>Region</th>
+              <SortableTh label="City" k="city" row={row} onSort={onSort} />
+              <th style={thStyle}>Postal</th>
+              <th style={thStyle}>Coords</th>
+              <SortableTh label="Device" k="device" row={row} onSort={onSort} />
+              <th style={thStyle}>OS</th>
+              <SortableTh label="Browser" k="browser" row={row} onSort={onSort} />
+              <th style={thStyle}>Lang</th>
+              <th style={thStyle}>Referrer</th>
+              <th style={thStyle}>UTM</th>
+              <th style={thStyle}>Flags</th>
+              <SortableTh
+                label="Client match"
+                k="client_name"
+                row={row}
+                onSort={onSort}
+              />
+              <th style={thStyle}>Visitor</th>
+            </tr>
+          </thead>
+          <tbody>
+            {row.groupByVisitor
+              ? groups.map((g, gi) => (
+                  <GroupBlock key={`${g.visitor}-${gi}`} group={g} />
+                ))
+              : sorted.map((s) => <ScanDetailRow key={s.id} s={s} />)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function SortableTh({
+  label,
+  k,
+  row,
+  onSort,
+}: {
+  label: string;
+  k: ScanSortKey;
+  row: RowState;
+  onSort: (key: ScanSortKey) => void;
+}) {
+  const active = row.scanSort.key === k;
+  const arrow = active ? (row.scanSort.dir === "asc" ? " ↑" : " ↓") : "";
+  return (
+    <th
+      style={{
+        ...thStyle,
+        cursor: "pointer",
+        userSelect: "none",
+        color: active ? "var(--wp-gold)" : thStyle.color,
+      }}
+      onClick={() => onSort(k)}
+      data-testid={`qr-scan-detail-sort-${k}`}
+    >
+      {label}
+      {arrow}
+    </th>
+  );
+}
+
+function GroupBlock({
+  group,
+}: {
+  group: { visitor: string; rows: ScanDetail[] };
+}) {
+  const short =
+    group.visitor === "(unknown)"
+      ? "(unknown)"
+      : group.visitor.slice(0, 8);
+  return (
+    <>
+      <tr>
+        <td
+          colSpan={15}
+          style={{
+            padding: "8px 6px 4px 6px",
+            color: "var(--wp-gold)",
+            fontWeight: 600,
+            background: "var(--wp-dark-surface)",
+          }}
+        >
+          Visitor {short} · {group.rows.length} scan
+          {group.rows.length === 1 ? "" : "s"}
+        </td>
+      </tr>
+      {group.rows.map((s) => (
+        <ScanDetailRow key={s.id} s={s} />
+      ))}
+    </>
+  );
+}
+
+function ScanDetailRow({ s }: { s: ScanDetail }) {
+  const utmText = [s.utm_source, s.utm_medium, s.utm_campaign]
+    .filter(Boolean)
+    .join("·");
+  const flags: string[] = [];
+  if (s.is_bot) flags.push("BOT");
+  if (s.blocked) flags.push("BLOCKED");
+  return (
+    <tr data-testid={`qr-scan-row-${s.id}`}>
+      <td style={tdStyle}>
+        <div style={{ whiteSpace: "nowrap" }}>{formatDate(s.scanned_at)}</div>
+        <div style={{ fontSize: "0.65rem", color: "var(--wp-text-muted)" }}>
+          {relativeTime(s.scanned_at)}
+        </div>
+      </td>
+      <td style={tdStyle}>{s.country || "—"}</td>
+      <td style={tdStyle}>{s.region || "—"}</td>
+      <td style={tdStyle}>{s.city || "—"}</td>
+      <td style={tdStyle}>{s.postal_code || "—"}</td>
+      <td style={tdStyle}>
+        {s.latitude && s.longitude ? (
+          <a
+            data-testid={`qr-scan-map-${s.id}`}
+            href={`https://www.openstreetmap.org/?mlat=${encodeURIComponent(
+              s.latitude,
+            )}&mlon=${encodeURIComponent(
+              s.longitude,
+            )}#map=14/${encodeURIComponent(s.latitude)}/${encodeURIComponent(s.longitude)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "var(--wp-gold)" }}
+            title="View on map"
+          >
+            map
+          </a>
+        ) : (
+          "—"
+        )}
+      </td>
+      <td style={tdStyle}>{s.device || "—"}</td>
+      <td style={tdStyle}>{s.os || "—"}</td>
+      <td style={tdStyle}>{s.browser || "—"}</td>
+      <td style={tdStyle}>{s.language || "—"}</td>
+      <td
+        style={{
+          ...tdStyle,
+          maxWidth: 160,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+        title={s.referrer || ""}
+      >
+        {s.referrer || "(direct)"}
+      </td>
+      <td
+        style={{
+          ...tdStyle,
+          maxWidth: 140,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+        title={utmText || ""}
+      >
+        {utmText || "—"}
+      </td>
+      <td style={tdStyle}>
+        {flags.length === 0 ? (
+          "—"
+        ) : (
+          <span
+            data-testid={`qr-scan-flags-${s.id}`}
+            style={{ color: "var(--wp-error)", fontWeight: 600 }}
+          >
+            {flags.join(" ")}
+          </span>
+        )}
+      </td>
+      <td style={tdStyle}>
+        {s.client_id && s.client_name ? (
+          <a
+            data-testid={`qr-scan-client-${s.id}`}
+            href={`/clients/${encodeURIComponent(s.client_id)}`}
+            style={{ color: "var(--wp-gold)" }}
+            title={`Match score ${s.client_match_score ?? "?"}`}
+          >
+            {s.client_name}
+          </a>
+        ) : (
+          <span style={{ color: "var(--wp-text-muted)" }}>no match</span>
+        )}
+      </td>
+      <td
+        style={{ ...tdStyle, fontFamily: "monospace", color: "var(--wp-text-muted)" }}
+      >
+        {s.visitor_hash ? s.visitor_hash.slice(0, 8) : "—"}
+      </td>
+    </tr>
   );
 }
 
