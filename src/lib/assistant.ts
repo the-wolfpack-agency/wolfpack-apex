@@ -19,6 +19,7 @@ import { trackEvent } from "@/lib/analytics";
 import { safeQuery } from "@/lib/db";
 import { matchPageFacts } from "@/lib/assistant/page-facts-matcher";
 import { formatPageFactsAnswer } from "@/lib/assistant/page-facts";
+import { getRelevantContext } from "@/lib/assistant/context-resolver";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -998,7 +999,31 @@ async function callAI(
 
   try {
     const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
-    const systemPrompt = buildSystemPrompt(userRole, userMemory);
+    const baseSystemPrompt = buildSystemPrompt(userRole, userMemory);
+
+    /* Best-effort: ground the assistant's answer in the user's
+       SharePoint + MS Project content via their delegated Graph token.
+       Failures here (403 scope_missing, Graph 5xx, missing OAuth token,
+       getRelevantContext throwing) MUST never block the AI call — the
+       resolver emits its own typed analytics on failure and we fall back
+       to an ungrounded answer rather than 500'ing the chat. */
+    let contextBlock = "";
+    try {
+      const ctx = await getRelevantContext({
+        question: message,
+        userId,
+        role: userRole,
+        surface: "assistant_support",
+        maxChars: 6000,
+      });
+      contextBlock = ctx.rendered_prompt_block;
+    } catch {
+      /* swallow — keep the chat working without grounding. */
+    }
+
+    const systemPrompt = contextBlock
+      ? `${contextBlock}\n${baseSystemPrompt}`
+      : baseSystemPrompt;
 
     // Build conversation messages for context
     const messages = history

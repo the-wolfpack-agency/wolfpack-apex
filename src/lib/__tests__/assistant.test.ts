@@ -47,6 +47,11 @@ jest.mock("@/lib/neo4j", () => ({
   recordKnowledgeInteraction: jest.fn().mockResolvedValue(undefined),
 }));
 
+const mockGetRelevantContext = jest.fn();
+jest.mock("@/lib/assistant/context-resolver", () => ({
+  getRelevantContext: (...args: any[]) => mockGetRelevantContext(...args),
+}));
+
 import {
   chat,
   getConversations,
@@ -96,6 +101,18 @@ beforeEach(() => {
 
   mockSaveAnswer.mockResolvedValue(null);
   setupQueryMock();
+
+  /* Default: empty grounding bundle so existing tests stay untouched.
+     Individual tests override as needed to exercise grounding paths. */
+  mockGetRelevantContext.mockResolvedValue({
+    question: "",
+    surface: "assistant_support",
+    sharepoint_hits: [],
+    project_tasks: [],
+    rendered_prompt_block: "",
+    total_chars: 0,
+    took_ms: 1,
+  });
 
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.WOLFPACK_AUTO_REPO;
@@ -830,5 +847,85 @@ describe("zero-token tracking", () => {
     const result = await chat("Generic question", "u1", "dev");
     expect(result.tokensUsed).toBe(300);
     expect(result.source).toBe("ai");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SharePoint + MS Project context grounding (callAI path)
+// ---------------------------------------------------------------------------
+
+describe("context grounding via getRelevantContext", () => {
+  test("AI call prepends rendered_prompt_block to system prompt", async () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+
+    const groundingBlock =
+      "Internal context (cite if you use it):\n\n[SharePoint] TWA Agenda 4.20 - https://netorg9503444.sharepoint.com/sites/WolfpackInternal/TWA_Agenda_4.20.docx\nDiscuss Q2 OKRs.\n";
+    mockGetRelevantContext.mockResolvedValueOnce({
+      question: "what was on the wolfpack internal agenda for 4/20",
+      surface: "assistant_support",
+      sharepoint_hits: [{}],
+      project_tasks: [],
+      rendered_prompt_block: groundingBlock,
+      total_chars: groundingBlock.length,
+      took_ms: 5,
+    });
+
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        content: [{ text: "Per the agenda, Q2 OKRs were discussed." }],
+        usage: { input_tokens: 50, output_tokens: 20 },
+      }),
+    });
+    global.fetch = fetchMock as any;
+
+    const result = await chat(
+      "what was on the wolfpack internal agenda for 4/20",
+      "user-1",
+      "cto",
+    );
+
+    expect(result.source).toBe("ai");
+
+    /* Resolver invoked with the user's actual id + role + question. */
+    expect(mockGetRelevantContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: "what was on the wolfpack internal agenda for 4/20",
+        userId: "user-1",
+        role: "cto",
+        surface: "assistant_support",
+      }),
+    );
+
+    /* The fetch payload's `system` field must contain the grounding block. */
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.system).toContain(groundingBlock);
+    /* Base assistant prompt must still be present. */
+    expect(body.system).toContain("Wolfpack Assistant");
+  });
+
+  test("AI call still fires with unchanged system prompt when getRelevantContext throws", async () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+
+    mockGetRelevantContext.mockRejectedValueOnce(new Error("graph 503"));
+
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        content: [{ text: "Generic answer." }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    });
+    global.fetch = fetchMock as any;
+
+    const result = await chat("a generic question", "user-2", "dev");
+
+    expect(result.source).toBe("ai");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    /* No grounding header was prepended. */
+    expect(body.system).not.toContain("Internal context");
+    expect(body.system).toContain("Wolfpack Assistant");
   });
 });
