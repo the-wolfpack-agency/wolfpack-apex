@@ -800,9 +800,8 @@ export default function QrPage() {
             margin: 0,
           }}
         >
-          Mint short-link QR codes for billboards, business cards, and
-          handouts. Edit the destination anytime — the printed QR keeps
-          working.
+          Create QR codes for posters, business cards, and handouts.
+          Change the destination anytime. The printed code keeps working.
         </p>
       </header>
 
