@@ -1510,9 +1510,11 @@ function AssociationPicker({
         display: "grid",
         gap: 6,
         fontSize: "0.75rem",
+        minWidth: 0,
+        maxWidth: "100%",
       }}
     >
-      <label style={{ display: "grid", gap: 2 }}>
+      <label style={{ display: "grid", gap: 2, minWidth: 0 }}>
         <span style={{ color: "var(--wp-text-dim)" }}>Associate with</span>
         <select
           data-testid={`${testIdPrefix}-kind`}
@@ -1551,7 +1553,7 @@ function AssociationPicker({
           >
             Loading…
           </div>
-        ) : endpointAvailable && options && options.length > 0 ? (
+        ) : options && options.length > 0 ? (
           <label style={{ display: "grid", gap: 2 }}>
             <span style={{ color: "var(--wp-text-dim)" }}>Pick one</span>
             <select
@@ -1589,7 +1591,11 @@ function AssociationPicker({
           >
             <label style={{ display: "grid", gap: 2 }}>
               <span style={{ color: "var(--wp-text-dim)" }}>
-                ID (manual — list endpoint unavailable)
+                {endpointAvailable === false
+                  ? "ID (manual — list endpoint unavailable)"
+                  : options && options.length === 0
+                    ? "No items found. Enter ID manually:"
+                    : "ID (manual)"}
               </span>
               <input
                 data-testid={`${testIdPrefix}-manual-id`}
