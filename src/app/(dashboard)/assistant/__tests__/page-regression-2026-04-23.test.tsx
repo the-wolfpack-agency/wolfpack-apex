@@ -39,18 +39,24 @@ describe("/assistant page.tsx — bug #1: must mount the reusable InstinctChat",
     expect(screen.getByTestId("instinct-chat-mount")).toBeInTheDocument();
   });
 
-  it("page.tsx is the thin shim — no inline chat state or fetches", () => {
+  it("page.tsx is the thin shim — no inline CHAT state or chat fetches", () => {
     // Read the page source off disk so we catch any future inline
     // rewrite that removes the InstinctChat import. The page has ONE
-    // job: import InstinctChat and render it. If the source ever
-    // contains its own `useState` / `fetchWithRefresh`, the left-panel
-    // conversation history is at risk again.
+    // job for chat: import InstinctChat and render it. The page MAY
+    // host small local UI state for the support-mode pill (added
+    // 2026-04-29 — semantic Q&A cache), but it MUST NOT recreate
+    // chat-side state (messages / conversationId / input) or call
+    // fetchWithRefresh — those belong inside InstinctChat where the
+    // left-panel conversation history is wired.
     const source = readFileSync(
       resolve(__dirname, "../page.tsx"),
       "utf8",
     );
     expect(source).toMatch(/import\s+InstinctChat\s+from\s+["']@\/components\/InstinctChat["']/);
-    expect(source).not.toMatch(/useState/);
+    /* Forbid the chat-state names that previously caused the regression. */
+    expect(source).not.toMatch(/setMessages\b/);
+    expect(source).not.toMatch(/conversationId\b/);
+    expect(source).not.toMatch(/setInput\b/);
     expect(source).not.toMatch(/fetchWithRefresh/);
   });
 });

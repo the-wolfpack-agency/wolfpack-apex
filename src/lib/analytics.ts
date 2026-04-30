@@ -148,6 +148,23 @@ export type InstinctEventType =
   //   knowledge.quick_add: { used_title: boolean, content_length: number,
   //                           classified_as: "qa"|"note" }
   | "knowledge.quick_add"
+  // Semantic Q&A cache (migration 108) — powers /knowledge "Ask a
+  // Question" + /assistant Support mode. The learning-loop story:
+  //   * qa_lookup tells us cache-hit rate over time. If hit-rate climbs
+  //     the cache is paying off; if it stalls we know to seed more
+  //     internal-doc rows.
+  //   * qa_ai_generated only fires on a MISS, with token cost. The
+  //     dashboard subtracts (lookup_count * cached cost) - (miss costs)
+  //     to show "tokens saved by the cache".
+  //   * qa_feedback drives auto-flagging — qa-cache.askWithCache refuses
+  //     to serve rows where not_helpful_count > 5 and helpful_count = 0,
+  //     so a bad answer stops poisoning future requests.
+  //   * assistant.support_query measures whether self-serve actually
+  //     deflects tickets (fell_back_to_ticket=false on first lookup,
+  //     true if the user later clicks the ticket CTA).
+  | "knowledge.qa_lookup"
+  | "knowledge.qa_ai_generated"
+  | "knowledge.qa_feedback"
   // Goals (company OKRs / KRs / contributions — migration 079).
   // Fires from Goals dashboard tile, OKR cards, Friday-sync commitment
   // flow, auto-linker, and offline queue. All are consumed by the
@@ -367,6 +384,11 @@ export type InstinctEventType =
   // loop can see where users invoke the assistant most.
   //   assistant.floating_opened: { pathname }
   | "assistant.floating_opened"
+  // Support-mode lookup against the Q&A cache (migration 108). Fires on
+  // every /assistant support pill query and again when the user clicks
+  // the "Submit a support ticket" CTA below a low-confidence answer.
+  // Metadata: { qa_id, was_cache_hit, fell_back_to_ticket }.
+  | "assistant.support_query"
   // Welcome tooltip on first dashboard visit — points users at the
   // floating FAB + the Knowledge Add-info flow. Three events form
   // the funnel so the learning loop can grade activation:
