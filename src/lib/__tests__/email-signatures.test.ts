@@ -47,7 +47,8 @@ const dbRow = (override: Partial<Record<string, unknown>> = {}) => ({
   id: "sig-1",
   user_id: "u1",
   label: "Default",
-  body: "Nick — CTO",
+  body: "Nick - CTO",
+  body_format: "text",
   is_default: false,
   created_at: "2026-04-30T00:00:00.000Z",
   updated_at: "2026-04-30T00:00:00.000Z",
@@ -83,19 +84,34 @@ describe("validateSignatureInput", () => {
     expect(() => validateSignatureInput({ label: "  ", body: "x" })).toThrow(/label is required/);
     expect(() => validateSignatureInput({ label: "x", body: "  " })).toThrow(/body is required/);
   });
-  test("trims label/body", () => {
+  test("trims label/body and defaults bodyFormat to text", () => {
     expect(validateSignatureInput({ label: "  L  ", body: "  B  " })).toEqual({
       label: "L",
       body: "B",
+      bodyFormat: "text",
     });
   });
   test("rejects label over 80 chars", () => {
     const long = "a".repeat(81);
     expect(() => validateSignatureInput({ label: long, body: "x" })).toThrow(/label is too long/);
   });
-  test("rejects body over 8000 chars", () => {
-    const long = "a".repeat(8001);
+  test("rejects body over 200_000 chars", () => {
+    const long = "a".repeat(200_001);
     expect(() => validateSignatureInput({ label: "x", body: long })).toThrow(/body is too long/);
+  });
+  test("accepts body up to 200_000 chars (HTML signatures with inline images)", () => {
+    const long = "a".repeat(150_000);
+    expect(validateSignatureInput({ label: "x", body: long }).body.length).toBe(150_000);
+  });
+  test("accepts bodyFormat='html'", () => {
+    expect(
+      validateSignatureInput({ label: "L", body: "<p>hi</p>", bodyFormat: "html" }),
+    ).toEqual({ label: "L", body: "<p>hi</p>", bodyFormat: "html" });
+  });
+  test("rejects unknown bodyFormat", () => {
+    expect(() =>
+      validateSignatureInput({ label: "L", body: "B", bodyFormat: "markdown" }),
+    ).toThrow(/bodyFormat must be/);
   });
 });
 

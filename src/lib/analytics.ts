@@ -420,6 +420,7 @@ export type InstinctEventType =
   //                                  insert_mode: 'cursor'|'append'|'above_quote' }
   | "microsoft.signature_created"
   | "microsoft.signature_inserted"
+  | "microsoft.signature_detected"
   // Inbound-email surface awareness
   | "microsoft.email_unread_polled"
   | "microsoft.email_arrived_notified"

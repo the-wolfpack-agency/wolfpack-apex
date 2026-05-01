@@ -27,11 +27,14 @@
 import { pool, safeQuery, writeQuery, WriteQueryError } from "@/lib/db";
 import type { PoolClient } from "pg";
 
+export type SignatureBodyFormat = "text" | "html";
+
 export interface EmailSignature {
   id: string;
   userId: string;
   label: string;
   body: string;
+  bodyFormat: SignatureBodyFormat;
   isDefault: boolean;
   createdAt: string;
   updatedAt: string;
@@ -42,13 +45,14 @@ interface EmailSignatureRow {
   user_id: string;
   label: string;
   body: string;
+  body_format: SignatureBodyFormat;
   is_default: boolean;
   created_at: string;
   updated_at: string;
 }
 
 const SELECT_COLS =
-  "id, user_id, label, body, is_default, created_at, updated_at";
+  "id, user_id, label, body, body_format, is_default, created_at, updated_at";
 
 function rowToSignature(row: EmailSignatureRow): EmailSignature {
   return {
@@ -56,6 +60,10 @@ function rowToSignature(row: EmailSignatureRow): EmailSignature {
     userId: row.user_id,
     label: row.label,
     body: row.body,
+    /* Older rows pre-migration 114 had no body_format column. The
+       SELECT will return undefined for those; default to 'text' so
+       the composer keeps treating them as plain text. */
+    bodyFormat: row.body_format === "html" ? "html" : "text",
     isDefault: row.is_default,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -67,12 +75,17 @@ function rowToSignature(row: EmailSignatureRow): EmailSignature {
 /* ------------------------------------------------------------------ */
 
 const LABEL_MAX = 80;
-const BODY_MAX = 8000;
+/* 200KB ceiling. HTML signatures with inlined data: URIs (logo +
+   social icons base64 embedded) routinely run 30–80KB; 200KB gives
+   headroom for retina logos. The DB column is plain TEXT so this is
+   purely a validation guard against runaway input. */
+const BODY_MAX = 200_000;
 
 export function validateSignatureInput(input: {
   label?: unknown;
   body?: unknown;
-}): { label: string; body: string } {
+  bodyFormat?: unknown;
+}): { label: string; body: string; bodyFormat: SignatureBodyFormat } {
   if (typeof input.label !== "string" || !input.label.trim()) {
     throw new Error("label is required");
   }
@@ -87,7 +100,12 @@ export function validateSignatureInput(input: {
   if (body.length > BODY_MAX) {
     throw new Error(`body is too long (max ${BODY_MAX})`);
   }
-  return { label, body };
+  let bodyFormat: SignatureBodyFormat = "text";
+  if (input.bodyFormat === "html") bodyFormat = "html";
+  else if (input.bodyFormat === "text" || input.bodyFormat === undefined)
+    bodyFormat = "text";
+  else throw new Error("bodyFormat must be 'text' or 'html'");
+  return { label, body, bodyFormat };
 }
 
 /* ------------------------------------------------------------------ */
@@ -170,6 +188,7 @@ export async function createSignature(args: {
   userId: string;
   label: string;
   body: string;
+  bodyFormat?: SignatureBodyFormat;
   isDefault?: boolean;
 }): Promise<EmailSignature> {
   if (!process.env.DATABASE_URL) {
@@ -179,7 +198,7 @@ export async function createSignature(args: {
     );
   }
   if (!args.userId) throw new Error("userId is required");
-  const { label, body } = validateSignatureInput(args);
+  const { label, body, bodyFormat } = validateSignatureInput(args);
   const isDefault = !!args.isDefault;
 
   const client = await pool.connect();
@@ -190,10 +209,10 @@ export async function createSignature(args: {
     }
     const result = await client.query<EmailSignatureRow>(
       `INSERT INTO instinct_email_signatures
-         (user_id, label, body, is_default)
-       VALUES ($1, $2, $3, $4)
+         (user_id, label, body, body_format, is_default)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING ${SELECT_COLS}`,
-      [args.userId, label, body, isDefault],
+      [args.userId, label, body, bodyFormat, isDefault],
     );
     await client.query("COMMIT");
     return rowToSignature(result.rows[0]);
@@ -215,6 +234,7 @@ export async function updateSignature(
   patch: {
     label?: string;
     body?: string;
+    bodyFormat?: SignatureBodyFormat;
     isDefault?: boolean;
   },
 ): Promise<EmailSignature> {
@@ -248,6 +268,13 @@ export async function updateSignature(
     }
     params.push(patch.body.trim());
     sets.push(`body = $${params.length}`);
+  }
+  if (patch.bodyFormat !== undefined) {
+    if (patch.bodyFormat !== "text" && patch.bodyFormat !== "html") {
+      throw new Error("bodyFormat must be 'text' or 'html'");
+    }
+    params.push(patch.bodyFormat);
+    sets.push(`body_format = $${params.length}`);
   }
 
   const promoteToDefault = patch.isDefault === true;

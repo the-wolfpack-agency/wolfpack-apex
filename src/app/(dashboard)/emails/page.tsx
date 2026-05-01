@@ -70,6 +70,7 @@ interface EmailSignatureLite {
   id: string;
   label: string;
   body: string;
+  bodyFormat?: "text" | "html";
   isDefault: boolean;
 }
 
@@ -736,7 +737,12 @@ export default function EmailsPage() {
   // uses for `cursorPos === null`).
   function insertSignatureBody(sig: EmailSignatureLite) {
     if (!sig.body.trim()) return;
-    const sigHtml = plainTextToHtml(sig.body);
+    /* HTML signatures (imported from Outlook) are inserted verbatim so
+       images, links, and styling survive. Text signatures still go
+       through plainTextToHtml which handles newlines and escapes any
+       stray angle brackets. */
+    const sigHtml =
+      sig.bodyFormat === "html" ? sig.body : plainTextToHtml(sig.body);
     let mode: "cursor" | "append" = "append";
 
     /* Capture the body's HTML before we attempt insertion so we can
@@ -798,7 +804,11 @@ export default function EmailsPage() {
       ...t.requiredVariables.map((v) => `${v}: `),
       ...t.optionalVariables.map((v) => `${v} (optional): `),
     ];
-    const plain = `${t.description}\n\n${variableLines.join("\n")}`.trim();
+    /* Description is shown in the template picker UI as a label —
+       inserting it into the email body itself just gives the user
+       boilerplate they have to delete every time. The variable
+       placeholder lines stay so the user knows what to fill in. */
+    const plain = variableLines.join("\n").trim();
     const html = plainTextToHtml(plain);
     setDraft((prev) => ({ ...prev, subject: t.name, body: html }));
     if (bodyRef.current) bodyRef.current.innerHTML = html;

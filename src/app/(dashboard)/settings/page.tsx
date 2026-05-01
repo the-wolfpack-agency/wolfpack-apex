@@ -84,9 +84,71 @@ interface EmailSignature {
   id: string;
   label: string;
   body: string;
+  bodyFormat?: "text" | "html";
   isDefault: boolean;
   createdAt?: string;
   updatedAt?: string;
+}
+
+interface DetectedHtmlSignaturePreview {
+  html: string;
+  text: string;
+  sampledCount: number;
+  matchedCount: number;
+  confidence: number;
+}
+
+/**
+ * Sandboxed HTML preview for an email signature. Uses srcdoc + sandbox
+ * so the embedded HTML can show its inlined logos and links without
+ * being able to run scripts or read the parent's auth state. Height
+ * auto-fits in a `ResizeObserver` round-trip via postMessage on load.
+ */
+function SignatureHtmlPreview({
+  html,
+  testId,
+}: {
+  html: string;
+  testId?: string;
+}) {
+  const [height, setHeight] = useState<number>(180);
+
+  /* Wrap the user's HTML in a minimal document with a sane base font
+     and word-wrap so long URLs don't push out the iframe horizontally.
+     `script` is stripped before render for defense in depth — even
+     though `sandbox=""` already disables scripts, it's cheap insurance. */
+  const safeHtml = html.replace(
+    /<\s*script\b[^<]*(?:(?!<\s*\/\s*script\s*>)<[^<]*)*<\s*\/\s*script\s*>/gi,
+    "",
+  );
+  const srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:8px;font-family:Arial,sans-serif;font-size:14px;color:#222;background:#fff;word-wrap:break-word}img{max-width:100%}a{color:#0a66c2}</style></head><body>${safeHtml}<script>parent.postMessage({type:'instinct-sig-preview-h',h:document.body.scrollHeight+16},'*')<\/script></body></html>`;
+
+  useEffect(() => {
+    function onMsg(e: MessageEvent) {
+      const data = e.data as { type?: string; h?: number } | undefined;
+      if (data?.type === "instinct-sig-preview-h" && typeof data.h === "number") {
+        setHeight(Math.min(Math.max(data.h, 80), 600));
+      }
+    }
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
+  return (
+    <iframe
+      data-testid={testId}
+      title="Signature preview"
+      srcDoc={srcdoc}
+      sandbox=""
+      style={{
+        width: "100%",
+        height,
+        border: "1px solid var(--wp-dark-border)",
+        borderRadius: 4,
+        background: "#fff",
+      }}
+    />
+  );
 }
 
 function EmailSignaturesCard() {
@@ -100,6 +162,14 @@ function EmailSignaturesCard() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState<string>("");
   const [editBody, setEditBody] = useState<string>("");
+  /* Outlook-import workflow state. The detected HTML is held only in
+     component state until the user clicks Save, at which point we POST
+     it as a new signature with bodyFormat='html'. */
+  const [detected, setDetected] =
+    useState<DetectedHtmlSignaturePreview | null>(null);
+  const [detectedLabel, setDetectedLabel] = useState<string>("Outlook signature");
+  const [detectedIsDefault, setDetectedIsDefault] = useState<boolean>(false);
+  const [importHint, setImportHint] = useState<string | null>(null);
 
   const fetchSignatures = useCallback(async () => {
     setLoading(true);
@@ -216,6 +286,96 @@ function EmailSignaturesCard() {
     setEditingId(null);
     setEditLabel("");
     setEditBody("");
+  }
+
+  async function detectFromOutlook() {
+    setBusy("detect");
+    setError(null);
+    setImportHint(null);
+    try {
+      const res = await fetchWithRefresh(
+        "/api/email-signatures/detect-from-outlook",
+        {
+          method: "POST",
+          headers: { ...authHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({ format: "html" }),
+        },
+      );
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (data?.ok && data.signature?.html) {
+        setDetected({
+          html: data.signature.html,
+          text: data.signature.text ?? "",
+          sampledCount: data.signature.sampledCount ?? 0,
+          matchedCount: data.signature.matchedCount ?? 0,
+          confidence: data.signature.confidence ?? 0,
+        });
+      } else if (data?.code === "scope_missing") {
+        setImportHint(
+          "Reconnect Microsoft 365 to grant the Mail.Read scope, then try again.",
+        );
+      } else if (data?.code === "not_connected") {
+        setImportHint(
+          "Connect Microsoft 365 in the integrations card above to import.",
+        );
+      } else if (data?.code === "no_sent_mail") {
+        setImportHint(
+          "No sent messages found in your Outlook — send one with your signature, then retry.",
+        );
+      } else if (data?.code === "no_signature_detected") {
+        setImportHint(
+          "Couldn't detect a signature in your recent sent messages. Add one below manually.",
+        );
+      } else {
+        setError(data?.message || "Detection failed.");
+      }
+    } catch {
+      setError("Network error detecting signature.");
+    }
+    setBusy(null);
+  }
+
+  function discardDetected() {
+    setDetected(null);
+    setDetectedLabel("Outlook signature");
+    setDetectedIsDefault(false);
+    setImportHint(null);
+  }
+
+  async function saveDetected() {
+    if (!detected) return;
+    if (!detectedLabel.trim()) {
+      setError("Label is required for the imported signature.");
+      return;
+    }
+    setBusy("save-detected");
+    setError(null);
+    try {
+      const res = await fetchWithRefresh("/api/email-signatures", {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          label: detectedLabel.trim(),
+          body: detected.html,
+          bodyFormat: "html",
+          isDefault: detectedIsDefault,
+        }),
+      });
+      if (res.ok) {
+        discardDetected();
+        await fetchSignatures();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data?.error ?? "Failed to save imported signature.");
+      }
+    } catch {
+      setError("Network error saving imported signature.");
+    }
+    setBusy(null);
   }
 
   return (
@@ -339,15 +499,22 @@ function EmailSignaturesCard() {
                         )}
                       </p>
                     </div>
-                    <pre
-                      className="text-xs whitespace-pre-wrap"
-                      style={{
-                        color: "var(--wp-text-dim)",
-                        fontFamily: "inherit",
-                      }}
-                    >
-                      {sig.body}
-                    </pre>
+                    {sig.bodyFormat === "html" ? (
+                      <SignatureHtmlPreview
+                        html={sig.body}
+                        testId={`signature-body-html-${sig.id}`}
+                      />
+                    ) : (
+                      <pre
+                        className="text-xs whitespace-pre-wrap"
+                        style={{
+                          color: "var(--wp-text-dim)",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        {sig.body}
+                      </pre>
+                    )}
                     <div className="flex gap-2 flex-wrap">
                       <button
                         type="button"
@@ -402,6 +569,126 @@ function EmailSignaturesCard() {
           })}
         </ul>
       )}
+
+      {/* Outlook import block. Pulls the user's animated/HTML signature
+          straight out of their most recent sent message — preserves
+          images, links, and formatting that the manual textarea below
+          would strip. */}
+      <div
+        className="rounded border p-3 space-y-2"
+        style={{
+          borderColor: "var(--wp-dark-border)",
+          background: "var(--wp-dark)",
+        }}
+        data-testid="signature-import-block"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <p
+            className="text-xs font-medium"
+            style={{ color: "var(--wp-text)" }}
+          >
+            Import from Outlook
+          </p>
+          {!detected && (
+            <button
+              type="button"
+              data-testid="signature-import-btn"
+              disabled={busy === "detect"}
+              onClick={detectFromOutlook}
+              className="px-3 py-1 rounded text-xs font-medium"
+              style={{
+                background: "var(--wp-gold)",
+                color: "var(--wp-dark)",
+              }}
+            >
+              {busy === "detect"
+                ? "Detecting…"
+                : "Detect my Outlook signature"}
+            </button>
+          )}
+        </div>
+        <p className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
+          Pulls the trailing block of your most recent sent message,
+          including images and links. Review before saving.
+        </p>
+        {importHint && (
+          <p
+            data-testid="signature-import-hint"
+            className="text-xs"
+            style={{ color: "var(--wp-warning)" }}
+          >
+            {importHint}
+          </p>
+        )}
+        {detected && (
+          <div className="space-y-2" data-testid="signature-detected-preview">
+            <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+              Detected from {detected.sampledCount} recent sent message
+              {detected.sampledCount === 1 ? "" : "s"}
+              {detected.confidence > 0
+                ? ` · ${(detected.confidence * 100).toFixed(0)}% suffix-match confidence`
+                : ""}
+            </p>
+            <SignatureHtmlPreview
+              html={detected.html}
+              testId="signature-detected-iframe"
+            />
+            <input
+              type="text"
+              aria-label="Imported signature label"
+              data-testid="signature-detected-label"
+              value={detectedLabel}
+              onChange={(e) => setDetectedLabel(e.target.value)}
+              className="w-full px-2 py-1 text-sm rounded border"
+              style={{
+                background: "var(--wp-dark-surface2)",
+                borderColor: "var(--wp-dark-border)",
+                color: "var(--wp-text)",
+              }}
+            />
+            <label
+              className="flex items-center gap-2 text-xs"
+              style={{ color: "var(--wp-text-dim)" }}
+            >
+              <input
+                type="checkbox"
+                data-testid="signature-detected-default"
+                checked={detectedIsDefault}
+                onChange={(e) => setDetectedIsDefault(e.target.checked)}
+              />
+              Make this my default signature
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                data-testid="signature-detected-save"
+                disabled={busy === "save-detected"}
+                onClick={saveDetected}
+                className="px-3 py-1 rounded text-xs font-medium"
+                style={{
+                  background: "var(--wp-gold)",
+                  color: "var(--wp-dark)",
+                }}
+              >
+                {busy === "save-detected" ? "Saving…" : "Save signature"}
+              </button>
+              <button
+                type="button"
+                data-testid="signature-detected-discard"
+                onClick={discardDetected}
+                className="px-3 py-1 rounded text-xs"
+                style={{
+                  background: "transparent",
+                  color: "var(--wp-text)",
+                  border: "1px solid var(--wp-dark-border)",
+                }}
+              >
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       <div
         className="rounded border p-3 space-y-2"
