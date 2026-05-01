@@ -326,18 +326,21 @@ export function resolveCidImages(
   );
 }
 
-async function fetchSentMessagesWithAttachments(
+async function fetchSentMessages(
   token: string,
   top: number,
 ): Promise<{ rows: RawSentMessage[]; status: number }> {
+  /* Don't $expand=attachments here — Microsoft Graph rejects nested
+     $select on the messages collection ($expand=attachments($select=...)
+     returns 400 in production). We fetch the message list cheap, then
+     pull attachments for ONLY the latest message that has any. */
   const select = "id,body,bodyPreview,sentDateTime,hasAttachments";
   const order = "sentDateTime desc";
   const path =
     `me/mailFolders/sentitems/messages` +
     `?$top=${top}` +
     `&$orderby=${encodeURIComponent(order)}` +
-    `&$select=${encodeURIComponent(select)}` +
-    `&$expand=${encodeURIComponent("attachments($select=id,name,contentId,contentType,isInline,contentBytes)")}`;
+    `&$select=${encodeURIComponent(select)}`;
   const res = await fetch(`${GRAPH_BASE}/${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -346,6 +349,21 @@ async function fetchSentMessagesWithAttachments(
     value?: RawSentMessage[];
   };
   return { rows: Array.isArray(data.value) ? data.value : [], status: 200 };
+}
+
+async function fetchMessageAttachments(
+  token: string,
+  messageId: string,
+): Promise<RawAttachment[]> {
+  const path = `me/messages/${encodeURIComponent(messageId)}/attachments`;
+  const res = await fetch(`${GRAPH_BASE}/${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return [];
+  const data = (await res.json().catch(() => ({}))) as {
+    value?: RawAttachment[];
+  };
+  return Array.isArray(data.value) ? data.value : [];
 }
 
 /**
@@ -378,7 +396,7 @@ export async function detectSignatureHtmlFromOutlook(
 
   let result: { rows: RawSentMessage[]; status: number };
   try {
-    result = await fetchSentMessagesWithAttachments(token.accessToken, top);
+    result = await fetchSentMessages(token.accessToken, top);
   } catch (err) {
     return {
       ok: false,
@@ -436,7 +454,23 @@ export async function detectSignatureHtmlFromOutlook(
   }
 
   const stripped = stripHtmlQuotedBlock(latest.body.content);
-  const resolved = resolveCidImages(stripped, latest.attachments ?? []);
+  /* Attachments fetched lazily — only when the latest message actually
+     references inline images (cid:) AND Graph reports it has attachments.
+     Most plain-text/no-image signatures skip this round-trip entirely. */
+  let attachments: RawAttachment[] = [];
+  if (latest.hasAttachments && /["']cid:/i.test(stripped)) {
+    try {
+      attachments = await fetchMessageAttachments(
+        token.accessToken,
+        latest.id,
+      );
+    } catch {
+      /* Best-effort: if attachment fetch fails, fall back to the cid:
+         refs as-is. The HTML preview will show broken images but the
+         user can still edit + save. */
+    }
+  }
+  const resolved = resolveCidImages(stripped, attachments);
   if (resolved.replace(/<[^>]+>/g, "").trim().length < 6) {
     return {
       ok: false,

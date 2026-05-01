@@ -234,15 +234,17 @@ describe("detectSignatureHtmlFromOutlook", () => {
       '<div id="appendonsend"></div><blockquote>orig</blockquote>';
     const sigText = "\nBest,\nAlicia Zulker\nProgram Director\n";
     const fullText = "Hi team!\n" + sigText;
-    global.fetch = jest.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        value: [
-          {
-            id: "1",
-            body: { contentType: "html", content: fullHtml },
-            attachments: [
+    /* Two-call pattern now: first the messages list (no $expand), then
+       a separate per-message attachments fetch only when the latest
+       has hasAttachments=true AND the stripped body references cid:.
+       Mock both calls in sequence. */
+    const fetchMock = jest.fn(async (url: string) => {
+      if (url.includes("/attachments")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            value: [
               {
                 isInline: true,
                 contentId: "logo",
@@ -250,25 +252,40 @@ describe("detectSignatureHtmlFromOutlook", () => {
                 contentBytes: "AAAA",
               },
             ],
-          },
-          {
-            id: "2",
-            body: {
-              contentType: "html",
-              content: "<p>Yo.</p>" + sigHtml,
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          value: [
+            {
+              id: "msg-1",
+              hasAttachments: true,
+              body: { contentType: "html", content: fullHtml },
             },
-            attachments: [],
-          },
-          {
-            id: "3",
-            body: {
-              contentType: "text",
-              content: "Hello." + sigText,
+            {
+              id: "msg-2",
+              hasAttachments: false,
+              body: {
+                contentType: "html",
+                content: "<p>Yo.</p>" + sigHtml,
+              },
             },
-          },
-        ],
-      }),
-    })) as any;
+            {
+              id: "msg-3",
+              hasAttachments: false,
+              body: {
+                contentType: "text",
+                content: "Hello." + sigText,
+              },
+            },
+          ],
+        }),
+      };
+    });
+    global.fetch = fetchMock as any;
     const out = await detectSignatureHtmlFromOutlook("u1");
     if (!out.ok) throw new Error(`expected ok, got ${JSON.stringify(out)}`);
     expect(out.signature.html).toContain("Alicia Zulker");
@@ -303,7 +320,7 @@ describe("detectSignatureHtmlFromOutlook", () => {
     const out = await detectSignatureHtmlFromOutlook("u1");
     expect(out).toMatchObject({ ok: false, code: "no_signature_detected" });
   });
-  test("forwards $expand=attachments to Graph", async () => {
+  test("messages list call does NOT use $expand=attachments — Graph rejects nested $select with 400 (regression for prod bug)", async () => {
     mockGetValidToken.mockResolvedValueOnce({ accessToken: "tk" });
     const fetchMock = jest.fn(async () => ({
       ok: true,
@@ -313,10 +330,11 @@ describe("detectSignatureHtmlFromOutlook", () => {
     global.fetch = fetchMock as any;
     await detectSignatureHtmlFromOutlook("u1");
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("$expand="),
+      expect.stringContaining("/sentitems/messages?"),
       expect.objectContaining({ headers: { Authorization: "Bearer tk" } }),
     );
     const firstCall = fetchMock.mock.calls[0] as unknown as [string, ...unknown[]];
-    expect(String(firstCall[0])).toContain("attachments");
+    expect(String(firstCall[0])).not.toContain("$expand=");
+    expect(String(firstCall[0])).not.toContain("expand=attachments");
   });
 });

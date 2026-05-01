@@ -1728,7 +1728,7 @@ function ComposerPane({
             </div>
           )}
 
-          <div style={actionsRow}>
+          <div className="compose-actions" data-testid="compose-actions">
             <button type="button" onClick={onDiscard} style={btn()}>
               Discard
             </button>
@@ -2201,12 +2201,8 @@ const successBox: React.CSSProperties = {
   fontSize: "0.82rem",
 };
 
-const actionsRow: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "flex-end",
-  gap: "0.5rem",
-  flexWrap: "wrap",
-};
+/* actionsRow removed — replaced by .compose-actions in globals.css so a
+   media query can stack the buttons full-width on <560px viewports. */
 
 function btn(bg = "var(--wp-dark-surface2)"): React.CSSProperties {
   return {
