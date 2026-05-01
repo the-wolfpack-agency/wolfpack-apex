@@ -205,15 +205,23 @@ export function slugify(title: string): string {
     .slice(0, 80);
 }
 
-/** Split markdown into top-level sections delimited by `## ` (level 2)
- *  headings. Anything before the first `## ` is preamble and ignored. */
+/** Split markdown into top-level sections.
+ *
+ *  Section starters (any of these starts a new section):
+ *    - `## ...` (Heading 2 — Word's normal way)
+ *    - `Principle: <title>` standalone — for users who type plainly
+ *      without applying Heading 2 style.
+ *
+ *  Anything before the first starter is preamble and ignored. */
 function splitIntoSections(md: string): string[] {
   const lines = md.split(/\r?\n/);
   const sections: string[] = [];
   let current: string[] = [];
   let inSection = false;
   for (const line of lines) {
-    if (/^##\s+/.test(line)) {
+    const isStart =
+      /^##\s+/.test(line) || /^\s*Principle\s*:\s*\S/i.test(line);
+    if (isStart) {
       if (inSection) sections.push(current.join("\n"));
       current = [line];
       inSection = true;
@@ -225,13 +233,35 @@ function splitIntoSections(md: string): string[] {
   return sections;
 }
 
-/** Match a `**Field:** value` line, case-insensitive. Tolerant of both
- *  `**Field:** value` (colon inside bold) and `**Field**: value`
- *  (colon outside bold) — Word's markdown export emits the former,
- *  hand-typed markdown often emits the latter. */
+/** Pre-process a section to normalize inline-listed fields onto their
+ *  own lines. Users routinely write
+ *    `Domain: mail Owner: Hoxsie Scoreboard weight: 3`
+ *  on a single line; the per-line field extractors only see the first
+ *  match. Inserting a newline before each subsequent known field name
+ *  splits them into one-per-line so the existing extractors work. */
+function normalizeInlineFields(section: string): string {
+  const fieldNames = [
+    "Domain",
+    "Owner",
+    "Effective",
+    "Scoreboard\\s+weight",
+    "Signal",
+    "Counter[\\s-]signal",
+  ];
+  const pat = `\\s+(?=(?:\\*\\*)?\\s*(?:${fieldNames.join("|")})\\s*:?\\s*(?:\\*\\*)?\\s*:?\\s)`;
+  return section.replace(new RegExp(pat, "gi"), "\n");
+}
+
+/** Match a `Field: value` line, case-insensitive. Bold delimiters are
+ *  optional — accepts every common variant:
+ *    `**Field:** value`  (bold around field+colon, Word md export)
+ *    `**Field**: value`  (bold around field, colon outside)
+ *    `Field: value`      (plain text — what most users actually type)
+ *    `Field : value`     (stray space before colon)
+ */
 function extractField(section: string, field: string): string | null {
   const re = new RegExp(
-    `^\\s*\\*\\*${field}\\s*:?\\s*\\*\\*\\s*:?\\s*(.+?)\\s*$`,
+    `^\\s*(?:\\*\\*)?\\s*${field}\\s*:?\\s*(?:\\*\\*)?\\s*:?\\s+(.+?)\\s*$`,
     "im",
   );
   const m = re.exec(section);
@@ -241,7 +271,7 @@ function extractField(section: string, field: string): string | null {
 /** Same tolerance, repeated occurrences. */
 function extractAllFields(section: string, field: string): string[] {
   const re = new RegExp(
-    `^\\s*\\*\\*${field}\\s*:?\\s*\\*\\*\\s*:?\\s*(.+?)\\s*$`,
+    `^\\s*(?:\\*\\*)?\\s*${field}\\s*:?\\s*(?:\\*\\*)?\\s*:?\\s+(.+?)\\s*$`,
     "gim",
   );
   const out: string[] = [];
@@ -253,14 +283,17 @@ function extractAllFields(section: string, field: string): string[] {
   return out;
 }
 
-/** Strip every field-marker line from the section to leave the prose
- *  body. Same tolerance as extractField. */
+/** Strip every field-marker line (with or without bold) from the
+ *  section to leave the prose body. */
 function stripFieldLines(section: string): string {
+  const knownFields =
+    /^(?:Domain|Owner|Effective|Scoreboard\s+weight|Signal|Counter[\s-]signal)\b/i;
   return section
     .split(/\r?\n/)
-    .filter(
-      (l) => !/^\s*\*\*[A-Za-z][A-Za-z\- ]+\s*:?\s*\*\*\s*:?/.test(l),
-    )
+    .filter((l) => {
+      const stripped = l.replace(/\*\*/g, "").trim();
+      return !knownFields.test(stripped);
+    })
     .join("\n")
     .replace(/^\s*\n+/, "")
     .replace(/\n+\s*$/, "");
@@ -282,10 +315,14 @@ interface ParseSectionResult {
  * (e.g. an unrelated `## Background` block in the doc).
  */
 export function parseSection(section: string): ParseSectionResult {
-  /* Match "## Principle:" with possibly-empty title so we can warn
-     when the title is missing rather than silently dropping the
-     section as "not a principle". */
-  const headingMatch = /^##\s+Principle:\s*(.*?)\s*$/im.exec(section);
+  /* Match "## Principle:" or "Principle:" (heading style optional).
+     Possibly-empty title so we can warn when the title is missing
+     rather than silently dropping the section as "not a principle".
+     We pre-normalize the section so inline-listed fields each end up
+     on their own line. */
+  section = normalizeInlineFields(section);
+  const headingMatch =
+    /^(?:##\s+)?Principle\s*:\s*(.*?)\s*$/im.exec(section);
   if (!headingMatch) return { principle: null, warnings: [] };
 
   const title = headingMatch[1].trim();
