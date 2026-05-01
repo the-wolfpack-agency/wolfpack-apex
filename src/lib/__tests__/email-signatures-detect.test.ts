@@ -88,9 +88,13 @@ describe("stripHtmlQuotedBlock", () => {
     const html = '<p>Reply.</p><div id="appendonsend"></div><blockquote>orig</blockquote>';
     expect(stripHtmlQuotedBlock(html)).toBe("<p>Reply.</p>");
   });
-  test("strips bare blockquote", () => {
-    const html = "<p>Reply.</p><blockquote>old message</blockquote>";
+  test("strips Apple Mail blockquote with type='cite'", () => {
+    const html = '<p>Reply.</p><blockquote type="cite">old message</blockquote>';
     expect(stripHtmlQuotedBlock(html)).toBe("<p>Reply.</p>");
+  });
+  test("does NOT strip a bare blockquote (marketing layouts use them legitimately)", () => {
+    const html = "<p>Reply.</p><blockquote>quoted styling, not a reply</blockquote>";
+    expect(stripHtmlQuotedBlock(html)).toBe(html);
   });
   test("strips gmail_quote div", () => {
     const html = '<p>Reply.</p><div class="gmail_quote">orig</div>';
@@ -99,6 +103,22 @@ describe("stripHtmlQuotedBlock", () => {
   test("returns input unchanged when no marker found", () => {
     const html = "<p>Just a fresh send with my signature.</p>";
     expect(stripHtmlQuotedBlock(html)).toBe(html);
+  });
+  test("preserves the body when a marker matches near the start (would have stripped the signature)", () => {
+    /* Real production case: signature contains 'From: Nick Homyk' as
+       a contact line — the previous <div>From: pattern matched it
+       and zeroed the body. Guardrail keeps the full body intact. */
+    const sigBody =
+      '<div style="padding:20px">' +
+      '<p style="font-weight:bold">Nick Homyk</p>' +
+      '<p>From: nick@thewolfpack.agency</p>' +
+      '<p>Wolfpack Agency · CTO</p>' +
+      '<img src="cid:logo" alt="logo">' +
+      '<p>Phone: 555-0100 · Web: thewolfpack.agency</p>' +
+      "</div>";
+    /* Even with the over-eager <div>From: pattern removed, this also
+       exercises the guardrail. Result: full body preserved. */
+    expect(stripHtmlQuotedBlock(sigBody)).toBe(sigBody);
   });
 });
 
