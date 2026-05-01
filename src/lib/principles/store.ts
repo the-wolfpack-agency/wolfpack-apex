@@ -10,6 +10,7 @@
 
 import { pool, safeQuery, writeQuery, WriteQueryError } from "@/lib/db";
 import type { ParsedPrinciple } from "@/lib/principles/parser";
+import { slugifyForStore } from "@/lib/principles/parser-slug";
 
 export type SignalKind = "signal" | "counter";
 
@@ -513,6 +514,273 @@ export async function listAllObservations(opts: {
     params,
   );
   return result.rows.map(rowToObservation);
+}
+
+/* ------------------------------------------------------------------ */
+/* Native CRUD                                                         */
+/*                                                                     */
+/* Lets leadership create / edit / retire principles directly in the   */
+/* UI instead of round-tripping through SharePoint. The sync flow      */
+/* (syncPrinciplesFromParsed) still works for orgs that prefer to      */
+/* mirror an existing doc — these helpers operate on the same tables   */
+/* and respect the same retired_at soft-delete contract.               */
+/* ------------------------------------------------------------------ */
+
+export interface NativePrincipleInput {
+  title: string;
+  domains: string[];
+  owner: string | null;
+  bodyMd: string;
+  scoreboardWeight: number;
+  effectiveAt: string | null;
+  signals: string[];
+  counterSignals: string[];
+}
+
+export interface NativePrinciplePatch {
+  id: string;
+  title?: string;
+  domains?: string[];
+  owner?: string | null;
+  bodyMd?: string;
+  scoreboardWeight?: number;
+  effectiveAt?: string | null;
+  /** When provided, all signals/counter-signals for the principle are
+   *  replaced. To leave them untouched, omit the field entirely. */
+  signals?: string[];
+  counterSignals?: string[];
+}
+
+/** Insert a brand-new principle. Throws when an active row with the
+ *  same slug already exists. */
+export async function createPrincipleNative(
+  input: NativePrincipleInput,
+): Promise<PrincipleRecord> {
+  if (!process.env.DATABASE_URL) {
+    throw new WriteQueryError(
+      "createPrincipleNative requires DATABASE_URL",
+      "no_database",
+    );
+  }
+  const title = input.title.trim();
+  if (!title) {
+    throw new Error("title required");
+  }
+  const slug = slugifyForStore(title);
+  if (!slug) {
+    throw new Error("title must produce a non-empty slug");
+  }
+  const domains = (input.domains || []).map((d) => d.trim()).filter(Boolean);
+  const signals = (input.signals || []).map((s) => s.trim()).filter(Boolean);
+  const counterSignals = (input.counterSignals || [])
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const weight = Number.isFinite(input.scoreboardWeight)
+    ? input.scoreboardWeight
+    : 1;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const dup = await client.query(
+      `SELECT id FROM instinct_principles
+        WHERE slug = $1 AND retired_at IS NULL
+        LIMIT 1`,
+      [slug],
+    );
+    if (dup.rows.length > 0) {
+      throw new Error(`principle with slug "${slug}" already exists`);
+    }
+    const ins = await client.query<PrincipleRow>(
+      `INSERT INTO instinct_principles
+         (slug, title, domains, owner, body_md, scoreboard_weight,
+          source_url, source_doc_hash, effective_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7)
+       RETURNING ${SELECT_COLS}`,
+      [
+        slug,
+        title,
+        domains,
+        input.owner,
+        input.bodyMd || "",
+        weight,
+        input.effectiveAt,
+      ],
+    );
+    const row = ins.rows[0];
+    for (const desc of signals) {
+      await client.query(
+        `INSERT INTO instinct_principle_signals
+           (principle_id, kind, description)
+         VALUES ($1, 'signal', $2)`,
+        [row.id, desc],
+      );
+    }
+    for (const desc of counterSignals) {
+      await client.query(
+        `INSERT INTO instinct_principle_signals
+           (principle_id, kind, description)
+         VALUES ($1, 'counter', $2)`,
+        [row.id, desc],
+      );
+    }
+    await client.query("COMMIT");
+    return rowToPrinciple(row);
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch { /* ignore */ }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Update an existing principle in-place. Only fields present on the
+ *  patch are touched. If signals or counterSignals is provided, ALL
+ *  signal rows for the principle are replaced atomically. */
+export async function patchPrincipleNative(
+  patch: NativePrinciplePatch,
+): Promise<PrincipleRecord> {
+  if (!process.env.DATABASE_URL) {
+    throw new WriteQueryError(
+      "patchPrincipleNative requires DATABASE_URL",
+      "no_database",
+    );
+  }
+  if (!patch.id) {
+    throw new Error("id required");
+  }
+
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  function add(col: string, value: unknown) {
+    params.push(value);
+    sets.push(`${col} = $${params.length}`);
+  }
+  if (patch.title !== undefined) {
+    const title = patch.title.trim();
+    if (!title) throw new Error("title cannot be empty");
+    add("title", title);
+    const slug = slugifyForStore(title);
+    if (!slug) throw new Error("title must produce a non-empty slug");
+    add("slug", slug);
+  }
+  if (patch.domains !== undefined) {
+    add(
+      "domains",
+      patch.domains.map((d) => d.trim()).filter(Boolean),
+    );
+  }
+  if (patch.owner !== undefined) add("owner", patch.owner);
+  if (patch.bodyMd !== undefined) add("body_md", patch.bodyMd);
+  if (patch.scoreboardWeight !== undefined) {
+    add(
+      "scoreboard_weight",
+      Number.isFinite(patch.scoreboardWeight) ? patch.scoreboardWeight : 1,
+    );
+  }
+  if (patch.effectiveAt !== undefined) add("effective_at", patch.effectiveAt);
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    /* Slug-uniqueness guard when title changes — make sure another
+       active row hasn't already claimed the new slug. */
+    if (patch.title !== undefined) {
+      const newSlug = slugifyForStore(patch.title.trim());
+      const dup = await client.query(
+        `SELECT id FROM instinct_principles
+          WHERE slug = $1 AND retired_at IS NULL AND id <> $2
+          LIMIT 1`,
+        [newSlug, patch.id],
+      );
+      if (dup.rows.length > 0) {
+        throw new Error(`principle with slug "${newSlug}" already exists`);
+      }
+    }
+
+    let row: PrincipleRow;
+    if (sets.length > 0) {
+      sets.push("updated_at = NOW()");
+      params.push(patch.id);
+      const sql = `UPDATE instinct_principles
+                      SET ${sets.join(", ")}
+                    WHERE id = $${params.length} AND retired_at IS NULL
+                    RETURNING ${SELECT_COLS}`;
+      const res = await client.query<PrincipleRow>(sql, params);
+      if (res.rows.length === 0) {
+        throw new Error("principle not found or already retired");
+      }
+      row = res.rows[0];
+    } else {
+      const res = await client.query<PrincipleRow>(
+        `SELECT ${SELECT_COLS} FROM instinct_principles
+          WHERE id = $1 AND retired_at IS NULL
+          LIMIT 1`,
+        [patch.id],
+      );
+      if (res.rows.length === 0) {
+        throw new Error("principle not found or already retired");
+      }
+      row = res.rows[0];
+    }
+
+    if (patch.signals !== undefined || patch.counterSignals !== undefined) {
+      await client.query(
+        `DELETE FROM instinct_principle_signals WHERE principle_id = $1`,
+        [row.id],
+      );
+      const sigs = (patch.signals || [])
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const counters = (patch.counterSignals || [])
+        .map((s) => s.trim())
+        .filter(Boolean);
+      for (const desc of sigs) {
+        await client.query(
+          `INSERT INTO instinct_principle_signals
+             (principle_id, kind, description)
+           VALUES ($1, 'signal', $2)`,
+          [row.id, desc],
+        );
+      }
+      for (const desc of counters) {
+        await client.query(
+          `INSERT INTO instinct_principle_signals
+             (principle_id, kind, description)
+           VALUES ($1, 'counter', $2)`,
+          [row.id, desc],
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+    return rowToPrinciple(row);
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch { /* ignore */ }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Soft-delete a principle. Existing observations stay so the
+ *  scoreboard keeps history. Reversible only by inserting a new row
+ *  with the same slug. */
+export async function retirePrincipleNative(id: string): Promise<void> {
+  if (!process.env.DATABASE_URL) {
+    throw new WriteQueryError(
+      "retirePrincipleNative requires DATABASE_URL",
+      "no_database",
+    );
+  }
+  if (!id) throw new Error("id required");
+  await writeQuery(
+    `UPDATE instinct_principles
+        SET retired_at = NOW(), updated_at = NOW()
+      WHERE id = $1 AND retired_at IS NULL`,
+    [id],
+  );
 }
 
 export async function recordDocVersion(args: {

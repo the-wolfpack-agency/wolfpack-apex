@@ -297,8 +297,25 @@ export default function PrinciplesPage() {
         <MeView data={me} />
       ) : (
         <>
-          {/* SharePoint connection: collapsed-by-default once configured.
-              Set-and-forget — only leadership ever sees this section. */}
+          {/* Native principle CRUD — primary path. */}
+          <NativePrincipleManager onChange={() => void load()} />
+
+          {/* SharePoint connection: collapsed by default; optional path
+              for orgs that want to mirror an existing doc. */}
+          <details
+            className="rounded border"
+            style={{
+              background: "var(--wp-dark-surface)",
+              borderColor: "var(--wp-dark-border)",
+            }}
+          >
+            <summary
+              className="text-xs px-3 py-2 cursor-pointer"
+              style={{ color: "var(--wp-text-muted)" }}
+            >
+              Optional: import from SharePoint doc
+            </summary>
+            <div className="p-3 pt-0">
           <section
             data-testid="principles-setup"
             className="rounded border p-3 space-y-2"
@@ -434,6 +451,8 @@ export default function PrinciplesPage() {
               </p>
             )}
           </section>
+            </div>
+          </details>
           {report && (
             <details
               data-testid="principles-weekly-report"
@@ -776,5 +795,413 @@ function TeamView({
         );
       })}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Native CRUD manager (leadership only)                              */
+/* ------------------------------------------------------------------ */
+
+interface PrincipleFull {
+  id: string;
+  slug: string;
+  title: string;
+  domains: string[];
+  owner: string | null;
+  bodyMd: string;
+  scoreboardWeight: number;
+  effectiveAt: string | null;
+  signals: string[];
+  counterSignals: string[];
+}
+
+function NativePrincipleManager({ onChange }: { onChange: () => void }) {
+  const [items, setItems] = useState<PrincipleFull[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<PrincipleFull | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetchWithRefresh("/api/principles/me?full=1");
+      if (!res.ok) throw new Error(`load ${res.status}`);
+      const j = (await res.json()) as { principles: PrincipleFull[] };
+      setItems(j.principles || []);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  async function handleRetire(p: PrincipleFull) {
+    if (!confirm(`Retire "${p.title}"? Existing observations stay for history.`)) return;
+    const res = await fetchWithRefresh(
+      `/api/principles/${encodeURIComponent(p.id)}/retire`,
+      { method: "POST" },
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(`Retire failed: ${err.error || res.status}`);
+      return;
+    }
+    await reload();
+    onChange();
+  }
+
+  if (loading) {
+    return (
+      <div data-testid="principles-native-loading" style={{ color: "var(--wp-text-dim)" }}>
+        Loading principles…
+      </div>
+    );
+  }
+
+  if (editing || creating) {
+    return (
+      <PrincipleForm
+        initial={editing}
+        onCancel={() => {
+          setEditing(null);
+          setCreating(false);
+        }}
+        onSaved={async () => {
+          setEditing(null);
+          setCreating(false);
+          await reload();
+          onChange();
+        }}
+      />
+    );
+  }
+
+  return (
+    <section
+      data-testid="principles-native-manager"
+      className="rounded border p-3 space-y-3"
+      style={{
+        background: "var(--wp-dark-surface)",
+        borderColor: "var(--wp-dark-border)",
+      }}
+    >
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <h2 className="text-sm font-semibold" style={{ color: "var(--wp-text)" }}>
+            Manage principles
+          </h2>
+          <p className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
+            Edit principles directly. Changes are versioned in the audit log.
+          </p>
+        </div>
+        <button
+          type="button"
+          data-testid="principle-new"
+          onClick={() => setCreating(true)}
+          className="px-3 py-1.5 rounded text-xs font-medium"
+          style={{
+            background: "var(--wp-gold)",
+            color: "var(--wp-dark)",
+          }}
+        >
+          + New principle
+        </button>
+      </div>
+      {error && (
+        <div
+          data-testid="principles-native-error"
+          className="text-xs"
+          style={{ color: "var(--wp-error)" }}
+        >
+          {error}
+        </div>
+      )}
+      {items.length === 0 ? (
+        <div
+          data-testid="principles-native-empty"
+          className="text-xs py-3"
+          style={{ color: "var(--wp-text-muted)" }}
+        >
+          No principles yet. Click + New principle to add the first one.
+        </div>
+      ) : (
+        <ul className="space-y-1.5">
+          {items.map((p) => (
+            <li
+              key={p.id}
+              data-testid={`principle-row-${p.slug}`}
+              className="flex items-center justify-between gap-3 rounded px-2 py-1.5 text-xs"
+              style={{ background: "var(--wp-dark)" }}
+            >
+              <span className="flex-1 truncate">
+                <strong style={{ color: "var(--wp-text)" }}>{p.title}</strong>
+                <span className="ml-2" style={{ color: "var(--wp-text-muted)" }}>
+                  {p.domains.join(", ") || "no domains"}
+                  {p.owner ? ` · ${p.owner}` : ""}
+                </span>
+              </span>
+              <button
+                type="button"
+                data-testid={`principle-edit-${p.slug}`}
+                onClick={() => setEditing(p)}
+                className="px-2 py-0.5 rounded text-xs"
+                style={{
+                  background: "var(--wp-dark-surface2)",
+                  color: "var(--wp-text)",
+                  border: "1px solid var(--wp-dark-border)",
+                }}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                data-testid={`principle-retire-${p.slug}`}
+                onClick={() => void handleRetire(p)}
+                className="px-2 py-0.5 rounded text-xs"
+                style={{
+                  background: "transparent",
+                  color: "var(--wp-text-muted)",
+                  border: "1px solid var(--wp-dark-border)",
+                }}
+              >
+                Retire
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function PrincipleForm({
+  initial,
+  onCancel,
+  onSaved,
+}: {
+  initial: PrincipleFull | null;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const isEdit = !!initial;
+  const [title, setTitle] = useState(initial?.title || "");
+  const [domains, setDomains] = useState((initial?.domains || []).join(", "));
+  const [owner, setOwner] = useState(initial?.owner || "");
+  const [bodyMd, setBodyMd] = useState(initial?.bodyMd || "");
+  const [weight, setWeight] = useState(String(initial?.scoreboardWeight ?? 1));
+  const [effectiveAt, setEffectiveAt] = useState(
+    initial?.effectiveAt ? initial.effectiveAt.slice(0, 10) : "",
+  );
+  const [signals, setSignals] = useState((initial?.signals || []).join("\n"));
+  const [counterSignals, setCounterSignals] = useState(
+    (initial?.counterSignals || []).join("\n"),
+  );
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function splitLines(v: string): string[] {
+    return v
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  function splitCsv(v: string): string[] {
+    return v
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setErr(null);
+    const payload: Record<string, unknown> = {
+      title: title.trim(),
+      domains: splitCsv(domains),
+      owner: owner.trim() || null,
+      bodyMd,
+      scoreboardWeight: Number(weight) || 1,
+      effectiveAt: effectiveAt ? new Date(effectiveAt).toISOString() : null,
+      signals: splitLines(signals),
+      counterSignals: splitLines(counterSignals),
+    };
+    const url = isEdit
+      ? `/api/principles/${encodeURIComponent(initial!.id)}`
+      : "/api/principles";
+    const method = isEdit ? "PATCH" : "POST";
+    try {
+      const res = await fetchWithRefresh(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setErr(j.error || `${method} ${res.status}`);
+        setSaving(false);
+        return;
+      }
+      onSaved();
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+    setSaving(false);
+  }
+
+  const inputStyle = {
+    background: "var(--wp-dark)",
+    color: "var(--wp-text)",
+    border: "1px solid var(--wp-dark-border)",
+  } as const;
+
+  return (
+    <section
+      data-testid="principle-form"
+      className="rounded border p-4 space-y-3"
+      style={{
+        background: "var(--wp-dark-surface)",
+        borderColor: "var(--wp-dark-border)",
+      }}
+    >
+      <h2 className="text-sm font-semibold" style={{ color: "var(--wp-text)" }}>
+        {isEdit ? "Edit principle" : "New principle"}
+      </h2>
+      <label className="block text-xs" style={{ color: "var(--wp-text-muted)" }}>
+        Title
+        <input
+          data-testid="principle-form-title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="block w-full mt-1 px-2 py-1.5 rounded text-sm"
+          style={inputStyle}
+        />
+      </label>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="block text-xs" style={{ color: "var(--wp-text-muted)" }}>
+          Domains (comma-separated, e.g. mail, calendar)
+          <input
+            data-testid="principle-form-domains"
+            value={domains}
+            onChange={(e) => setDomains(e.target.value)}
+            className="block w-full mt-1 px-2 py-1.5 rounded text-sm"
+            style={inputStyle}
+          />
+        </label>
+        <label className="block text-xs" style={{ color: "var(--wp-text-muted)" }}>
+          Owner (name, optional)
+          <input
+            data-testid="principle-form-owner"
+            value={owner}
+            onChange={(e) => setOwner(e.target.value)}
+            className="block w-full mt-1 px-2 py-1.5 rounded text-sm"
+            style={inputStyle}
+          />
+        </label>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="block text-xs" style={{ color: "var(--wp-text-muted)" }}>
+          Scoreboard weight
+          <input
+            data-testid="principle-form-weight"
+            type="number"
+            step="0.1"
+            value={weight}
+            onChange={(e) => setWeight(e.target.value)}
+            className="block w-full mt-1 px-2 py-1.5 rounded text-sm"
+            style={inputStyle}
+          />
+        </label>
+        <label className="block text-xs" style={{ color: "var(--wp-text-muted)" }}>
+          Effective from (optional)
+          <input
+            data-testid="principle-form-effective"
+            type="date"
+            value={effectiveAt}
+            onChange={(e) => setEffectiveAt(e.target.value)}
+            className="block w-full mt-1 px-2 py-1.5 rounded text-sm"
+            style={inputStyle}
+          />
+        </label>
+      </div>
+      <label className="block text-xs" style={{ color: "var(--wp-text-muted)" }}>
+        Body (markdown — what the principle means in practice)
+        <textarea
+          data-testid="principle-form-body"
+          value={bodyMd}
+          onChange={(e) => setBodyMd(e.target.value)}
+          rows={6}
+          className="block w-full mt-1 px-2 py-1.5 rounded text-sm"
+          style={inputStyle}
+        />
+      </label>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="block text-xs" style={{ color: "var(--wp-text-muted)" }}>
+          Signals (one per line — adherence patterns)
+          <textarea
+            data-testid="principle-form-signals"
+            value={signals}
+            onChange={(e) => setSignals(e.target.value)}
+            rows={4}
+            className="block w-full mt-1 px-2 py-1.5 rounded text-sm"
+            style={inputStyle}
+          />
+        </label>
+        <label className="block text-xs" style={{ color: "var(--wp-text-muted)" }}>
+          Counter-signals (one per line — drift patterns)
+          <textarea
+            data-testid="principle-form-counter"
+            value={counterSignals}
+            onChange={(e) => setCounterSignals(e.target.value)}
+            rows={4}
+            className="block w-full mt-1 px-2 py-1.5 rounded text-sm"
+            style={inputStyle}
+          />
+        </label>
+      </div>
+      {err && (
+        <div
+          data-testid="principle-form-error"
+          className="text-xs"
+          style={{ color: "var(--wp-error)" }}
+        >
+          {err}
+        </div>
+      )}
+      <div className="flex gap-2 justify-end">
+        <button
+          type="button"
+          data-testid="principle-form-cancel"
+          onClick={onCancel}
+          disabled={saving}
+          className="px-3 py-1.5 rounded text-xs"
+          style={{
+            background: "var(--wp-dark-surface2)",
+            color: "var(--wp-text)",
+            border: "1px solid var(--wp-dark-border)",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          data-testid="principle-form-save"
+          onClick={() => void handleSave()}
+          disabled={saving || !title.trim()}
+          className="px-3 py-1.5 rounded text-xs font-medium"
+          style={{
+            background: "var(--wp-gold)",
+            color: "var(--wp-dark)",
+            opacity: saving || !title.trim() ? 0.5 : 1,
+          }}
+        >
+          {saving ? "Saving…" : isEdit ? "Save changes" : "Create"}
+        </button>
+      </div>
+    </section>
   );
 }

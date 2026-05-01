@@ -24,6 +24,9 @@ import {
   syncPrinciplesFromParsed,
   recordDocVersion,
   getLatestDocVersion,
+  createPrincipleNative,
+  patchPrincipleNative,
+  retirePrincipleNative,
 } from "@/lib/principles/store";
 import type { ParsedPrinciple } from "@/lib/principles/parser";
 
@@ -198,6 +201,187 @@ describe("syncPrinciplesFromParsed", () => {
     const allSql = mockClientQuery.mock.calls.map((c) => String(c[0]));
     expect(allSql).toContain("ROLLBACK");
     expect(mockClientRelease).toHaveBeenCalled();
+  });
+});
+
+describe("createPrincipleNative", () => {
+  test("rejects when DATABASE_URL is unset", async () => {
+    delete process.env.DATABASE_URL;
+    await expect(
+      createPrincipleNative({
+        title: "X",
+        domains: [],
+        owner: null,
+        bodyMd: "",
+        scoreboardWeight: 1,
+        effectiveAt: null,
+        signals: [],
+        counterSignals: [],
+      }),
+    ).rejects.toThrow(/DATABASE_URL/);
+  });
+
+  test("rejects empty title", async () => {
+    await expect(
+      createPrincipleNative({
+        title: "   ",
+        domains: [],
+        owner: null,
+        bodyMd: "",
+        scoreboardWeight: 1,
+        effectiveAt: null,
+        signals: [],
+        counterSignals: [],
+      }),
+    ).rejects.toThrow(/title required/);
+  });
+
+  test("inserts row + signals + counter-signals; returns mapped record", async () => {
+    mockClientQuery
+      .mockResolvedValueOnce(undefined as any) // BEGIN
+      .mockResolvedValueOnce({ rows: [] }) // dup check
+      .mockResolvedValueOnce({ rows: [principleRow()] }) // INSERT principle
+      .mockResolvedValueOnce(undefined as any) // INSERT signal
+      .mockResolvedValueOnce(undefined as any) // INSERT counter
+      .mockResolvedValueOnce(undefined as any); // COMMIT
+
+    const out = await createPrincipleNative({
+      title: "Ship before perfect",
+      domains: ["code"],
+      owner: "Hoxsie",
+      bodyMd: "body",
+      scoreboardWeight: 3,
+      effectiveAt: "2026-05-01",
+      signals: ["PR cycle time < 48h"],
+      counterSignals: ["weekend pushes"],
+    });
+    expect(out.slug).toBe("ship-before-perfect");
+    const sql = mockClientQuery.mock.calls.map((c) => String(c[0]));
+    expect(sql.some((s) => /INSERT INTO instinct_principles/.test(s))).toBe(true);
+    expect(sql.filter((s) => /INSERT INTO instinct_principle_signals/.test(s))).toHaveLength(2);
+  });
+
+  test("rejects duplicate active slug", async () => {
+    mockClientQuery
+      .mockResolvedValueOnce(undefined as any) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: "existing" }] }); // dup check hits
+
+    await expect(
+      createPrincipleNative({
+        title: "Ship before perfect",
+        domains: [],
+        owner: null,
+        bodyMd: "",
+        scoreboardWeight: 1,
+        effectiveAt: null,
+        signals: [],
+        counterSignals: [],
+      }),
+    ).rejects.toThrow(/already exists/);
+    const sql = mockClientQuery.mock.calls.map((c) => String(c[0]));
+    expect(sql).toContain("ROLLBACK");
+  });
+});
+
+describe("patchPrincipleNative", () => {
+  test("rejects when no id", async () => {
+    await expect(
+      patchPrincipleNative({ id: "" }),
+    ).rejects.toThrow(/id required/);
+  });
+
+  test("partial update: only sets the columns provided", async () => {
+    mockClientQuery
+      .mockResolvedValueOnce(undefined as any) // BEGIN
+      .mockResolvedValueOnce({ rows: [principleRow({ title: "New title" })] }) // UPDATE returning
+      .mockResolvedValueOnce(undefined as any); // COMMIT
+
+    const out = await patchPrincipleNative({ id: "p1", bodyMd: "fresh body" });
+    expect(out.id).toBe("p1");
+    const updateCall = mockClientQuery.mock.calls.find((c) =>
+      /UPDATE instinct_principles/.test(String(c[0])),
+    );
+    expect(updateCall).toBeDefined();
+    expect(String(updateCall![0])).toMatch(/body_md = \$1/);
+    /* No DELETE on signals because signals was untouched. */
+    const sql = mockClientQuery.mock.calls.map((c) => String(c[0]));
+    expect(sql.some((s) => /DELETE FROM instinct_principle_signals/.test(s))).toBe(false);
+  });
+
+  test("title change re-derives slug + checks uniqueness", async () => {
+    mockClientQuery
+      .mockResolvedValueOnce(undefined as any) // BEGIN
+      .mockResolvedValueOnce({ rows: [] }) // slug uniqueness check
+      .mockResolvedValueOnce({ rows: [principleRow({ title: "Renamed" })] }) // UPDATE
+      .mockResolvedValueOnce(undefined as any); // COMMIT
+
+    const out = await patchPrincipleNative({ id: "p1", title: "Renamed" });
+    expect(out).toBeDefined();
+    const sql = mockClientQuery.mock.calls.map((c) => String(c[0]));
+    expect(sql.some((s) => /slug = \$1 AND retired_at IS NULL AND id <> \$2/.test(s))).toBe(true);
+    expect(sql.some((s) => /UPDATE instinct_principles[\s\S]*slug = /.test(s))).toBe(true);
+  });
+
+  test("title rename hitting a different active slug rolls back", async () => {
+    mockClientQuery
+      .mockResolvedValueOnce(undefined as any) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: "other" }] }); // dup hit
+
+    await expect(
+      patchPrincipleNative({ id: "p1", title: "Conflicts" }),
+    ).rejects.toThrow(/already exists/);
+    const sql = mockClientQuery.mock.calls.map((c) => String(c[0]));
+    expect(sql).toContain("ROLLBACK");
+  });
+
+  test("signals replace: deletes old + inserts new", async () => {
+    mockClientQuery
+      .mockResolvedValueOnce(undefined as any) // BEGIN
+      .mockResolvedValueOnce({ rows: [principleRow()] }) // SELECT (no field updates → load row)
+      .mockResolvedValueOnce(undefined as any) // DELETE signals
+      .mockResolvedValueOnce(undefined as any) // INSERT signal
+      .mockResolvedValueOnce(undefined as any) // INSERT counter
+      .mockResolvedValueOnce(undefined as any); // COMMIT
+
+    await patchPrincipleNative({
+      id: "p1",
+      signals: ["s1"],
+      counterSignals: ["c1"],
+    });
+    const sql = mockClientQuery.mock.calls.map((c) => String(c[0]));
+    expect(sql.some((s) => /DELETE FROM instinct_principle_signals/.test(s))).toBe(true);
+    expect(sql.filter((s) => /INSERT INTO instinct_principle_signals/.test(s))).toHaveLength(2);
+  });
+
+  test("rejects when row already retired", async () => {
+    mockClientQuery
+      .mockResolvedValueOnce(undefined as any) // BEGIN
+      .mockResolvedValueOnce({ rows: [] }); // UPDATE returns 0 rows
+
+    await expect(
+      patchPrincipleNative({ id: "gone", bodyMd: "x" }),
+    ).rejects.toThrow(/not found or already retired/);
+  });
+});
+
+describe("retirePrincipleNative", () => {
+  test("rejects when no id", async () => {
+    await expect(retirePrincipleNative("")).rejects.toThrow(/id required/);
+  });
+
+  test("rejects when DATABASE_URL is unset", async () => {
+    delete process.env.DATABASE_URL;
+    await expect(retirePrincipleNative("p1")).rejects.toThrow(/DATABASE_URL/);
+  });
+
+  test("issues UPDATE with retired_at = NOW() filtered to active row", async () => {
+    mockWriteQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    await retirePrincipleNative("p1");
+    expect(mockWriteQuery).toHaveBeenCalledTimes(1);
+    expect(String(mockWriteQuery.mock.calls[0][0])).toMatch(
+      /UPDATE instinct_principles[\s\S]*retired_at = NOW\(\)[\s\S]*retired_at IS NULL/,
+    );
+    expect(mockWriteQuery.mock.calls[0][1]).toEqual(["p1"]);
   });
 });
 
