@@ -150,6 +150,48 @@ client surface is the only place perfection matters.
   });
 });
 
+describe("parseSection — lenient format (what users actually type)", () => {
+  test("plain-text 'Principle:' (no ## prefix) is recognized", () => {
+    const md = `Principle: Respect off-hours
+Domain: mail
+Owner: Hoxsie
+Counter-signal: outbound mail/Teams sent 9pm-7am local`;
+    const { principle } = parseSection(md);
+    expect(principle).not.toBeNull();
+    expect(principle!.title).toBe("Respect off-hours");
+    expect(principle!.domains).toEqual(["mail"]);
+    expect(principle!.owner).toBe("Hoxsie");
+    expect(principle!.counterSignals).toEqual([
+      "outbound mail/Teams sent 9pm-7am local",
+    ]);
+  });
+
+  test("inline-listed fields on one line are split properly", () => {
+    const md = `Principle: Respect off-hours
+Domain: mail Owner: Hoxsie Scoreboard weight: 3
+We protect each other's evenings.
+Counter-signal: outbound mail/Teams sent 9pm-7am local`;
+    const { principle } = parseSection(md);
+    expect(principle).not.toBeNull();
+    expect(principle!.domains).toEqual(["mail"]);
+    expect(principle!.owner).toBe("Hoxsie");
+    expect(principle!.scoreboardWeight).toBe(3);
+    expect(principle!.counterSignals).toHaveLength(1);
+    expect(principle!.bodyMd).toContain("We protect each other");
+  });
+
+  test("plain (no bold) and bold-wrapped fields produce the same result", () => {
+    const plain = parseSection(
+      `Principle: X\nDomain: code\nSignal: foo`,
+    );
+    const bold = parseSection(
+      `## Principle: X\n**Domain:** code\n**Signal:** foo`,
+    );
+    expect(plain.principle?.domains).toEqual(bold.principle?.domains);
+    expect(plain.principle?.signals).toEqual(bold.principle?.signals);
+  });
+});
+
 describe("parseSection — defaults + warnings", () => {
   test("missing Domain → cross_cutting + warning", () => {
     const md = `## Principle: Trust the data
