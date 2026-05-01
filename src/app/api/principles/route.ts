@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { canReadTeamEvidence } from "@/lib/principles/authz";
 import { createPrincipleNative } from "@/lib/principles/store";
+import { evaluatePrinciples } from "@/lib/principles/evaluate-runner";
 import { trackEvent } from "@/lib/analytics";
 
 export async function POST(req: NextRequest) {
@@ -54,6 +55,21 @@ export async function POST(req: NextRequest) {
           ? body.counterSignals.length
           : 0),
     });
+    /* Fan out evaluation across the org immediately so the scoreboard
+       starts populating without waiting for the next 4h cron tick.
+       Fire-and-forget: a network error against M365 shouldn't fail
+       the create response — the cron will retry on schedule. The
+       wide bootstrap window makes sure the principle gets a real
+       month-to-date baseline on first save. */
+    void evaluatePrinciples([principle], { forceBootstrap: true }).catch(
+      (err) => {
+        trackEvent("principle.evaluation_failed", user.id, user.role, {
+          stage: "post_create",
+          principle_id: principle.id,
+          error: (err as Error).message,
+        });
+      },
+    );
     return NextResponse.json({ principle }, { status: 201 });
   } catch (err) {
     const msg = (err as Error).message;

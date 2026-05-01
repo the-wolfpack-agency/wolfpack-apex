@@ -3,6 +3,13 @@ const mockCreate = jest.fn();
 const mockPatch = jest.fn();
 const mockRetire = jest.fn();
 const mockTrack = jest.fn();
+const mockEvaluate = jest.fn(async () => ({
+  bindingCount: 0,
+  userCount: 0,
+  observationCount: 0,
+  failureCount: 0,
+  perValidator: {},
+}));
 let authUser: { id: string; role: string; name?: string } | null = {
   id: "u-cto",
   role: "cto",
@@ -20,6 +27,9 @@ jest.mock("@/lib/auth", () => ({
 jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: any[]) => mockTrack(...a),
 }));
+jest.mock("@/lib/principles/evaluate-runner", () => ({
+  evaluatePrinciples: (...a: unknown[]) => mockEvaluate(...(a as [])),
+}));
 
 import { NextRequest } from "next/server";
 import { POST as postCreate } from "../route";
@@ -31,6 +41,14 @@ beforeEach(() => {
   mockPatch.mockReset();
   mockRetire.mockReset();
   mockTrack.mockReset();
+  mockEvaluate.mockReset();
+  mockEvaluate.mockResolvedValue({
+    bindingCount: 0,
+    userCount: 0,
+    observationCount: 0,
+    failureCount: 0,
+    perValidator: {},
+  });
   authUser = { id: "u-cto", role: "cto", name: "Nick" };
 });
 
@@ -74,7 +92,7 @@ describe("POST /api/principles (create)", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  test("201 + analytics event on success", async () => {
+  test("201 + analytics event on success + immediate org fan-out", async () => {
     mockCreate.mockResolvedValueOnce({
       id: "p1",
       slug: "ship-fast",
@@ -108,6 +126,14 @@ describe("POST /api/principles (create)", () => {
       "cto",
       expect.objectContaining({ principle_id: "p1", slug: "ship-fast" }),
     );
+    /* Fan-out should kick off (fire-and-forget) with the freshly-saved
+       principle + bootstrap window, so the scoreboard populates
+       without waiting for the next cron tick. */
+    await new Promise((r) => setImmediate(r));
+    expect(mockEvaluate).toHaveBeenCalledWith(
+      [expect.objectContaining({ id: "p1" })],
+      expect.objectContaining({ forceBootstrap: true }),
+    );
   });
 
   test("409 on duplicate-slug error from store", async () => {
@@ -140,7 +166,7 @@ describe("PATCH /api/principles/[id]", () => {
     expect(res.status).toBe(403);
   });
 
-  test("200 + tracks updated event with slug", async () => {
+  test("200 + tracks updated event + re-fans-out when signals changed", async () => {
     mockPatch.mockResolvedValueOnce({
       id: "p1",
       slug: "ship-fast",
@@ -169,6 +195,22 @@ describe("PATCH /api/principles/[id]", () => {
       "cto",
       expect.objectContaining({ principle_id: "p1", slug: "ship-fast" }),
     );
+    await new Promise((r) => setImmediate(r));
+    expect(mockEvaluate).toHaveBeenCalledTimes(1);
+  });
+
+  test("cosmetic edit (no signal change) does NOT re-fan-out", async () => {
+    mockPatch.mockResolvedValueOnce({
+      id: "p1",
+      slug: "ship-fast",
+      title: "Ship fast (typo fix)",
+    });
+    await patchOne(
+      patch("/api/principles/p1", { title: "Ship fast (typo fix)" }),
+      ctx,
+    );
+    await new Promise((r) => setImmediate(r));
+    expect(mockEvaluate).not.toHaveBeenCalled();
   });
 
   test("400 when store throws", async () => {

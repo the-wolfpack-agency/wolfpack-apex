@@ -126,6 +126,20 @@ export async function getActivePrincipleBySlug(
   return result.rows[0] ? rowToPrinciple(result.rows[0]) : null;
 }
 
+export async function getActivePrincipleById(
+  id: string,
+): Promise<PrincipleRecord | null> {
+  if (!id) return null;
+  const result = await safeQuery<PrincipleRow>(
+    `SELECT ${SELECT_COLS}
+       FROM instinct_principles
+      WHERE id = $1 AND retired_at IS NULL
+      LIMIT 1`,
+    [id],
+  );
+  return result.rows[0] ? rowToPrinciple(result.rows[0]) : null;
+}
+
 export async function listSignalsForPrinciple(
   principleId: string,
 ): Promise<PrincipleSignalRecord[]> {
