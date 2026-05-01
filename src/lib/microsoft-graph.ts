@@ -83,6 +83,10 @@ export interface Email {
   bodyPreview: string;
   isRead: boolean;
   importance: "low" | "normal" | "high";
+  /** Outlook Web webLink — direct deep-link to open the message in
+   *  Outlook on the web. Used by the dashboard to make Action Items
+   *  clickable when we don't have an in-app reader for the id. */
+  webLink?: string;
 }
 
 export interface Contact {
@@ -743,9 +747,10 @@ async function fetchLiveRecentEmails(userId: string, count: number, folderId?: s
       bodyPreview: string;
       isRead: boolean;
       importance: string;
+      webLink?: string;
     }[];
   }>(
-    `me/mailFolders/${folder}/messages?$top=${count}&$orderby=receivedDateTime desc&$select=id,subject,from,receivedDateTime,bodyPreview,isRead,importance`,
+    `me/mailFolders/${folder}/messages?$top=${count}&$orderby=receivedDateTime desc&$select=id,subject,from,receivedDateTime,bodyPreview,isRead,importance,webLink`,
     token.accessToken,
     userId,
   );
@@ -761,6 +766,7 @@ async function fetchLiveRecentEmails(userId: string, count: number, folderId?: s
     bodyPreview: msg.bodyPreview,
     isRead: msg.isRead,
     importance: (msg.importance?.toLowerCase() || "normal") as "low" | "normal" | "high",
+    webLink: msg.webLink,
   }));
 }
 

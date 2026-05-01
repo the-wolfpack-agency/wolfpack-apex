@@ -421,6 +421,10 @@ export type InstinctEventType =
   | "microsoft.signature_created"
   | "microsoft.signature_inserted"
   | "microsoft.signature_detected"
+  // Per-user dashboard nav customization (instinct_user_nav_prefs).
+  | "user.nav_pref_updated"
+  // Dashboard action-items click-through (learning-loop signal).
+  | "dashboard.action_item_clicked"
   // Inbound-email surface awareness
   | "microsoft.email_unread_polled"
   | "microsoft.email_arrived_notified"
