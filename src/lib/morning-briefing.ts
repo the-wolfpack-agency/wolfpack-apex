@@ -36,12 +36,24 @@ export interface ImportantEmail {
   subject: string;
   receivedAt: string;
   preview: string;
+  /** Microsoft Graph message id, when available. Used to deep-link the
+   *  ActionItem into the inbox reader. */
+  id?: string;
+  /** Outlook webLink fallback when in-app deep-link is unavailable. */
+  webLink?: string;
 }
 
 export interface ActionItem {
   priority: "high" | "medium" | "low";
   text: string;
   context: string;
+  /** Optional URL the dashboard renders as a click-through. Internal
+   *  paths (/emails?messageId=...) are preferred over external Outlook
+   *  webLinks; both formats are accepted by the renderer. */
+  link?: string;
+  /** Stable analytics key for this action item — `email`, `meeting`,
+   *  `invoice`, etc. Tied into dashboard.action_item_clicked. */
+  source?: "email" | "meeting" | "invoice" | "client" | "receivable";
 }
 
 export interface ClientAttention {
@@ -126,7 +138,14 @@ function getGreeting(name: string): string {
 
 async function fetchMsGraphData(userId: string): Promise<{
   calendar: CalendarEvent[];
-  emails: { from: string; subject: string; receivedDateTime: string; bodyPreview: string }[];
+  emails: {
+    id?: string;
+    from: string;
+    subject: string;
+    receivedDateTime: string;
+    bodyPreview: string;
+    webLink?: string;
+  }[];
   unreadCount: number;
 } | null> {
   try {
@@ -152,12 +171,23 @@ async function fetchMsGraphData(userId: string): Promise<{
         attendees: e.attendees || [],
         location: e.location,
       })),
-      emails: (emails || []).map((e: { from: string; subject: string; receivedDateTime: string; bodyPreview: string }) => ({
-        from: e.from,
-        subject: e.subject,
-        receivedDateTime: e.receivedDateTime,
-        bodyPreview: e.bodyPreview,
-      })),
+      emails: (emails || []).map(
+        (e: {
+          id?: string;
+          from: string;
+          subject: string;
+          receivedDateTime: string;
+          bodyPreview: string;
+          webLink?: string;
+        }) => ({
+          id: e.id,
+          from: e.from,
+          subject: e.subject,
+          receivedDateTime: e.receivedDateTime,
+          bodyPreview: e.bodyPreview,
+          webLink: e.webLink,
+        }),
+      ),
       unreadCount: unreadCount ?? 0,
     };
   } catch {
@@ -341,10 +371,18 @@ function generateActionItems(
 
   // Medium priority: important unread emails
   for (const email of emails.slice(0, 2)) {
+    /* Prefer in-app /emails deep-link by message id; fall back to the
+       Outlook webLink (opens in a new tab) when we don't have an id.
+       The dashboard renderer treats absolute URLs as target=_blank. */
+    const link = email.id
+      ? `/emails?messageId=${encodeURIComponent(email.id)}`
+      : email.webLink || undefined;
     items.push({
       priority: "medium",
       text: `Respond to ${email.from}`,
       context: email.subject,
+      source: "email",
+      link,
     });
   }
 
@@ -612,12 +650,23 @@ export async function generateBriefing(
 
   // Build from live data with fallbacks
   const calendar: CalendarEvent[] = msGraphData?.calendar || [];
-  const emails: ImportantEmail[] = (msGraphData?.emails || []).map((e: { from: string; subject: string; receivedDateTime: string; bodyPreview: string }) => ({
-    from: e.from,
-    subject: e.subject,
-    receivedAt: e.receivedDateTime,
-    preview: e.bodyPreview,
-  }));
+  const emails: ImportantEmail[] = (msGraphData?.emails || []).map(
+    (e: {
+      id?: string;
+      from: string;
+      subject: string;
+      receivedDateTime: string;
+      bodyPreview: string;
+      webLink?: string;
+    }) => ({
+      from: e.from,
+      subject: e.subject,
+      receivedAt: e.receivedDateTime,
+      preview: e.bodyPreview,
+      id: e.id,
+      webLink: e.webLink,
+    }),
+  );
   const unreadCount = msGraphData?.unreadCount ?? 0;
 
   const financial = financialData

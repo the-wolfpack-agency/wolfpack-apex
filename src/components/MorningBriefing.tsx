@@ -27,6 +27,11 @@ interface ActionItem {
   priority: "high" | "medium" | "low";
   text: string;
   context: string;
+  /** Optional click-through URL — internal path or external Outlook
+   *  webLink. Internal paths get pushed into the SPA; external (http/https)
+   *  open in a new tab. */
+  link?: string;
+  source?: "email" | "meeting" | "invoice" | "client" | "receivable";
 }
 
 interface ClientAttention {
@@ -345,12 +350,32 @@ export default function MorningBriefing() {
             <div className="space-y-2">
               {briefing.actionItems.map((item, i) => {
                 const style = PRIORITY_STYLES[item.priority];
-                return (
-                  <div
-                    key={i}
-                    className="flex items-start gap-3 rounded-lg p-3 border"
-                    style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
-                  >
+                /* External links open in a new tab; internal paths use the
+                   browser's default navigation. Both fire a fire-and-forget
+                   analytics POST so dashboard.action_item_clicked makes it
+                   into the learning loop. */
+                const isExternal = !!item.link && /^https?:\/\//i.test(item.link);
+                const handleClick = () => {
+                  if (!item.link) return;
+                  void fetch("/api/analytics", {
+                    method: "POST",
+                    headers: {
+                      ...authHeaders(),
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      event: "dashboard.action_item_clicked",
+                      metadata: {
+                        priority: item.priority,
+                        source: item.source ?? "unknown",
+                        is_external: isExternal,
+                      },
+                    }),
+                    keepalive: true,
+                  }).catch(() => undefined);
+                };
+                const cardInner = (
+                  <>
                     <span
                       className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full mt-0.5"
                       style={{ background: style.bg, color: style.text }}
@@ -358,13 +383,61 @@ export default function MorningBriefing() {
                       {style.label}
                     </span>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium" style={{ color: "var(--wp-text)" }}>
+                      <p
+                        className="text-sm font-medium"
+                        style={{ color: "var(--wp-text)" }}
+                      >
                         {item.text}
+                        {item.link ? (
+                          <span
+                            aria-hidden="true"
+                            className="ml-2 text-xs"
+                            style={{ color: "var(--wp-gold)" }}
+                          >
+                            ↗
+                          </span>
+                        ) : null}
                       </p>
-                      <p className="text-xs mt-0.5" style={{ color: "var(--wp-text-muted)" }}>
+                      <p
+                        className="text-xs mt-0.5"
+                        style={{ color: "var(--wp-text-muted)" }}
+                      >
                         {item.context}
                       </p>
                     </div>
+                  </>
+                );
+                const cardClass =
+                  "flex items-start gap-3 rounded-lg p-3 border" +
+                  (item.link ? " hover:opacity-90 cursor-pointer transition-opacity" : "");
+                const cardStyle = {
+                  background: "var(--wp-dark-surface)",
+                  borderColor: "var(--wp-dark-border)",
+                };
+                if (item.link) {
+                  return (
+                    <a
+                      key={i}
+                      href={item.link}
+                      target={isExternal ? "_blank" : undefined}
+                      rel={isExternal ? "noopener noreferrer" : undefined}
+                      onClick={handleClick}
+                      data-testid={`action-item-link-${i}`}
+                      className={cardClass}
+                      style={{ ...cardStyle, textDecoration: "none" }}
+                    >
+                      {cardInner}
+                    </a>
+                  );
+                }
+                return (
+                  <div
+                    key={i}
+                    data-testid={`action-item-static-${i}`}
+                    className={cardClass}
+                    style={cardStyle}
+                  >
+                    {cardInner}
                   </div>
                 );
               })}

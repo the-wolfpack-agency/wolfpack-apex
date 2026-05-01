@@ -69,11 +69,21 @@ const ROLE_COLORS: Record<string, string> = {
   ops: "var(--wp-warning)",
 };
 
+/* Hrefs every user keeps no matter what — recovery surface (Dashboard)
+   + the Settings page where the customizer lives. The customize-nav
+   modal greys these out so they can't be unchecked. */
+const PINNED_NAV_HREFS = ["/", "/settings"];
+
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  /* Per-user nav prefs. Hidden hrefs are filtered out of the rendered
+     sidebar. Lazy-loaded after auth so unauthenticated visitors don't
+     fire the API call. Empty array = current behavior (show all). */
+  const [hiddenHrefs, setHiddenHrefs] = useState<string[]>([]);
+  const [navCustomizerOpen, setNavCustomizerOpen] = useState(false);
 
   // Ambient RAG refresh orchestrator (Path C · Stream U6). Silent by
   // design — runs a session-start warm pass of recent cached queries
@@ -97,6 +107,37 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     }
     setUser(parsed);
   }, [router]);
+
+  // Load per-user nav prefs once we have a token. Fire-and-forget; on
+  // any failure we fall through with the default (all visible) so a
+  // bad fetch doesn't block dashboard render.
+  useEffect(() => {
+    if (!user) return;
+    void fetchWithRefresh("/api/user-nav-prefs")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { hiddenHrefs?: string[] } | null) => {
+        if (data && Array.isArray(data.hiddenHrefs)) {
+          setHiddenHrefs(data.hiddenHrefs);
+        }
+      })
+      .catch(() => undefined);
+  }, [user]);
+
+  async function saveNavPrefs(next: string[]) {
+    /* Optimistic update — UI flips immediately; rollback if PUT fails. */
+    const prev = hiddenHrefs;
+    setHiddenHrefs(next);
+    try {
+      const res = await fetchWithRefresh("/api/user-nav-prefs", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hiddenHrefs: next }),
+      });
+      if (!res.ok) throw new Error(`PUT ${res.status}`);
+    } catch {
+      setHiddenHrefs(prev);
+    }
+  }
 
   // Register the Instinct service worker + listen for the PWA install
   // prompt. Scoped to root so it controls every dashboard page; fires
@@ -204,7 +245,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
         {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(user.role)).map((item) => {
+          {NAV_ITEMS.filter(
+            (item) =>
+              (!item.roles || item.roles.includes(user.role)) &&
+              !hiddenHrefs.includes(item.href),
+          ).map((item) => {
             const active = isActive(item.href);
             return (
               <a
@@ -236,6 +281,33 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               </a>
             );
           })}
+
+          {/* Customize nav — opens the checkbox modal. */}
+          <button
+            type="button"
+            onClick={() => setNavCustomizerOpen(true)}
+            data-testid="nav-customize-btn"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors hover:opacity-80 mt-2"
+            style={{
+              background: "transparent",
+              color: "var(--wp-text-muted)",
+            }}
+          >
+            <svg
+              className="w-5 h-5 shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={1.5}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+              />
+            </svg>
+            Customize nav
+          </button>
         </nav>
 
         {/* User */}
@@ -278,6 +350,21 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
       </aside>
+
+      {/* Customize-nav modal */}
+      {navCustomizerOpen ? (
+        <NavCustomizerModal
+          allItems={NAV_ITEMS.filter(
+            (item) => !item.roles || item.roles.includes(user.role),
+          )}
+          hiddenHrefs={hiddenHrefs}
+          onSave={async (next) => {
+            await saveNavPrefs(next);
+            setNavCustomizerOpen(false);
+          }}
+          onClose={() => setNavCustomizerOpen(false)}
+        />
+      ) : null}
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
@@ -344,6 +431,160 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           isn't growing — costs ~1 poll piggybacking on the existing
           adaptive-poll cadence. */}
       <NewMessageToast />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Nav customizer — checkbox modal                                     */
+/* ------------------------------------------------------------------ */
+
+interface NavCustomizerModalProps {
+  allItems: { label: string; href: string; icon: string; roles?: string[] }[];
+  hiddenHrefs: string[];
+  onSave: (nextHidden: string[]) => Promise<void> | void;
+  onClose: () => void;
+}
+
+function NavCustomizerModal({
+  allItems,
+  hiddenHrefs,
+  onSave,
+  onClose,
+}: NavCustomizerModalProps) {
+  /* Local draft set so toggling doesn't fire a save per click; only
+     the Save button persists. The draft starts as the current hidden
+     set so unmounting without saving discards changes cleanly. */
+  const [draft, setDraft] = useState<Set<string>>(new Set(hiddenHrefs));
+  const [busy, setBusy] = useState(false);
+
+  function toggle(href: string) {
+    if (PINNED_NAV_HREFS.includes(href)) return; // can't hide pinned
+    const next = new Set(draft);
+    if (next.has(href)) next.delete(href);
+    else next.add(href);
+    setDraft(next);
+  }
+
+  async function handleSave() {
+    setBusy(true);
+    try {
+      await onSave(Array.from(draft));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.6)" }}
+      onClick={onClose}
+      data-testid="nav-customizer-overlay"
+    >
+      <div
+        className="w-full max-w-md rounded-lg border flex flex-col max-h-[80vh]"
+        style={{
+          background: "var(--wp-dark-surface)",
+          borderColor: "var(--wp-dark-border)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label="Customize nav"
+        data-testid="nav-customizer-modal"
+      >
+        <div
+          className="px-5 py-3 border-b flex items-center justify-between"
+          style={{ borderColor: "var(--wp-dark-border)" }}
+        >
+          <h2
+            className="text-sm font-semibold"
+            style={{ color: "var(--wp-gold)" }}
+          >
+            Customize left nav
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-xs"
+            style={{ color: "var(--wp-text-muted)" }}
+            aria-label="Close customize nav"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="px-5 py-3 text-xs" style={{ color: "var(--wp-text-muted)" }}>
+          Uncheck items to hide them from your sidebar. Dashboard and
+          Settings stay visible so you always have a recovery path.
+        </div>
+        <ul
+          className="flex-1 overflow-y-auto px-5 py-2 space-y-1"
+          data-testid="nav-customizer-list"
+        >
+          {allItems.map((item) => {
+            const pinned = PINNED_NAV_HREFS.includes(item.href);
+            const visible = !draft.has(item.href);
+            return (
+              <li
+                key={item.href}
+                className="flex items-center gap-2 px-2 py-1 rounded text-sm"
+                style={{
+                  color: pinned ? "var(--wp-text-muted)" : "var(--wp-text)",
+                  opacity: pinned ? 0.7 : 1,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  data-testid={`nav-customizer-item-${item.href}`}
+                  disabled={pinned || busy}
+                  checked={visible}
+                  onChange={() => toggle(item.href)}
+                  aria-label={`${visible ? "Hide" : "Show"} ${item.label}`}
+                />
+                <span className="flex-1">{item.label}</span>
+                {pinned ? (
+                  <span
+                    className="text-xs"
+                    style={{ color: "var(--wp-text-muted)" }}
+                  >
+                    pinned
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+        <div
+          className="px-5 py-3 border-t flex justify-end gap-2"
+          style={{ borderColor: "var(--wp-dark-border)" }}
+        >
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="px-3 py-1.5 rounded text-xs"
+            style={{
+              background: "var(--wp-dark-surface2)",
+              color: "var(--wp-text)",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={busy}
+            data-testid="nav-customizer-save"
+            className="px-3 py-1.5 rounded text-xs font-medium"
+            style={{
+              background: "var(--wp-gold)",
+              color: "var(--wp-dark)",
+            }}
+          >
+            {busy ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
