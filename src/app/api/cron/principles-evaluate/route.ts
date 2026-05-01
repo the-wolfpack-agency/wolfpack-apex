@@ -18,6 +18,7 @@ import {
   listActivePrinciples,
   listSignalsForPrinciple,
   insertObservations,
+  hasAnyObservationForValidator,
   type PrincipleRecord,
   type PrincipleSignalRecord,
 } from "@/lib/principles/store";
@@ -123,11 +124,32 @@ export async function GET(req: NextRequest) {
   const perValidatorCounts: Record<string, number> = {};
 
   for (const b of bindings) {
+    /* Bootstrap detection: on the very first run for a validator, the
+       DB has zero observations against it. Widen the window to 30 days
+       so leadership gets an immediate month-to-date baseline instead
+       of a blank scoreboard. Subsequent runs use the normal 7-day
+       (or query-overridden) window. */
+    let perValidatorWindow = window;
+    try {
+      const seen = await hasAnyObservationForValidator(b.validator.id);
+      if (!seen) {
+        const days = 30;
+        const end = new Date();
+        const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
+        perValidatorWindow = {
+          windowStart: start.toISOString(),
+          windowEnd: end.toISOString(),
+        };
+      }
+    } catch {
+      /* fall through to default window */
+    }
+
     const rowsForBinding: Parameters<typeof insertObservations>[0]["rows"] = [];
     for (const u of users) {
       const ctx: EvaluationContext = {
-        windowStart: window.windowStart,
-        windowEnd: window.windowEnd,
+        windowStart: perValidatorWindow.windowStart,
+        windowEnd: perValidatorWindow.windowEnd,
         subjectUserId: u.userId,
       };
       try {

@@ -1,40 +1,25 @@
 /**
  * Five starter validators wired to data Instinct already collects.
- * Each one is intentionally minimal — the goal is to prove the
- * framework, not to ship comprehensive observation. As Hoxsie + Nick
- * write more principles, more validators get added here.
+ * As Hoxsie + Nick write more principles, more validators get added
+ * here.
  *
- * Surfaces covered:
- *   - calendar (focus_block_ratio)
- *   - mail (after_hours_send)
- *   - tasks (overdue_rate)
- *   - goals (kr_measurability)
- *   - code (pr_cycle_time_under)
+ * Real (production) evaluators:
+ *   - calendar.focus_block_ratio  → calendar-focus-block.ts
+ *   - mail.after_hours_send       → mail-after-hours.ts
+ *   - tasks.overdue_rate          → tasks-overdue.ts
+ *   - goals.kr_measurability      → goals-kr-measurability.ts
+ *   - code.pr_cycle_time_under    → code-cycle-time.ts
  */
 
 import {
-  type EvaluationContext,
-  type Observation,
   registerValidator,
   keywordMatcher,
 } from "@/lib/principles/validators";
-
-/* ------------------------------------------------------------------ */
-/* calendar.focus_block_ratio                                          */
-/*   Triggers on signals containing "focus" + "block" or "deep work". */
-/*   Reads instinct_calendar_events; scores ratio of >=2h non-meeting */
-/*   windows during business hours.                                   */
-/* ------------------------------------------------------------------ */
-
-async function evaluateCalendarFocusBlock(
-  _ctx: EvaluationContext,
-): Promise<Observation[]> {
-  /* Stub at framework-prove time — the calendar query landing in a
-     follow-up PR. Returns [] so the cron pipeline runs cleanly today
-     and validation observations start firing the moment the query
-     ships, with no schema or registry change required. */
-  return [];
-}
+import { evaluateCalendarFocusBlock } from "@/lib/principles/evaluators/calendar-focus-block";
+import { evaluateMailAfterHours } from "@/lib/principles/evaluators/mail-after-hours";
+import { evaluateTasksOverdue } from "@/lib/principles/evaluators/tasks-overdue";
+import { evaluateGoalsKrMeasurability } from "@/lib/principles/evaluators/goals-kr-measurability";
+import { evaluateCodeCycleTime } from "@/lib/principles/evaluators/code-cycle-time";
 
 registerValidator({
   id: "calendar.focus_block_ratio",
@@ -44,19 +29,6 @@ registerValidator({
     keywordMatcher("focus", "block")(d) || keywordMatcher("deep", "work")(d),
   evaluate: evaluateCalendarFocusBlock,
 });
-
-/* ------------------------------------------------------------------ */
-/* mail.after_hours_send                                               */
-/*   Counter-signal: outbound mail sent 9pm–7am local.                 */
-/* ------------------------------------------------------------------ */
-
-import { evaluateMailAfterHours as evaluateMailAfterHoursReal } from "@/lib/principles/evaluators/mail-after-hours";
-
-async function evaluateMailAfterHours(
-  ctx: EvaluationContext,
-): Promise<Observation[]> {
-  return evaluateMailAfterHoursReal(ctx);
-}
 
 registerValidator({
   id: "mail.after_hours_send",
@@ -69,21 +41,10 @@ registerValidator({
   evaluate: evaluateMailAfterHours,
 });
 
-/* ------------------------------------------------------------------ */
-/* tasks.overdue_rate                                                  */
-/*   Signal: % of open tasks past their due date.                      */
-/* ------------------------------------------------------------------ */
-
-async function evaluateTasksOverdue(
-  _ctx: EvaluationContext,
-): Promise<Observation[]> {
-  return [];
-}
-
 registerValidator({
   id: "tasks.overdue_rate",
   surface: "tasks",
-  describe: "Percentage of open tasks past their due date",
+  describe: "Tasks past their due date",
   matches: (d) =>
     keywordMatcher("overdue")(d) ||
     keywordMatcher("past", "due")(d) ||
@@ -91,38 +52,16 @@ registerValidator({
   evaluate: evaluateTasksOverdue,
 });
 
-/* ------------------------------------------------------------------ */
-/* goals.kr_measurability                                              */
-/*   Signal: every active goal has at least one numeric KR.            */
-/* ------------------------------------------------------------------ */
-
-async function evaluateGoalsKrMeasurability(
-  _ctx: EvaluationContext,
-): Promise<Observation[]> {
-  return [];
-}
-
 registerValidator({
   id: "goals.kr_measurability",
   surface: "goals",
-  describe: "Every active goal carries at least one numeric KR",
+  describe: "Every active OKR carries at least one numeric KR",
   matches: (d) =>
     keywordMatcher("measurable", "kr")(d) ||
     keywordMatcher("kr", "measurability")(d) ||
     keywordMatcher("goals", "measurable")(d),
   evaluate: evaluateGoalsKrMeasurability,
 });
-
-/* ------------------------------------------------------------------ */
-/* code.pr_cycle_time_under                                            */
-/*   Signal: PR cycle time from open → merge < N hours.                */
-/* ------------------------------------------------------------------ */
-
-async function evaluateCodeCycleTime(
-  _ctx: EvaluationContext,
-): Promise<Observation[]> {
-  return [];
-}
 
 registerValidator({
   id: "code.pr_cycle_time_under",

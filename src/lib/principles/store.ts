@@ -384,6 +384,25 @@ function rowToObservation(row: ObservationRow): ObservationRecord {
   };
 }
 
+/** Returns true if any observation has been recorded for `validatorId`.
+ *  The cron uses this to detect a "first run" and widen the eval window
+ *  to 30 days so leadership gets an immediate baseline rather than a
+ *  blank scoreboard. */
+export async function hasAnyObservationForValidator(
+  validatorId: string,
+): Promise<boolean> {
+  if (!validatorId) return false;
+  const result = await safeQuery<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM instinct_principle_observations
+        WHERE validator_id = $1
+        LIMIT 1
+     ) AS exists`,
+    [validatorId],
+  );
+  return Boolean(result.rows[0]?.exists);
+}
+
 /** Bulk insert observations (one transaction, one INSERT ... VALUES). */
 export async function insertObservations(args: {
   principleId: string;

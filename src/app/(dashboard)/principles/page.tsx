@@ -44,6 +44,8 @@ interface ObservationRow {
 interface AggregateRow {
   principleId: string;
   subjectUserId: string | null;
+  subjectName?: string | null;
+  subjectEmail?: string | null;
   count: number;
   meanScore: number;
 }
@@ -489,8 +491,17 @@ function TeamView({
                         {r.subjectUserId === null
                           ? "(team-wide)"
                           : r.subjectUserId === userId
-                            ? `${r.subjectUserId} (you)`
-                            : r.subjectUserId}
+                            ? `${r.subjectName || r.subjectUserId} (you)`
+                            : r.subjectName || r.subjectUserId}
+                        {r.subjectUserId ? (
+                          <a
+                            href={`/principles/team/${encodeURIComponent(r.subjectUserId)}`}
+                            className="ml-2 text-xs"
+                            style={{ color: "var(--wp-gold)" }}
+                          >
+                            view
+                          </a>
+                        ) : null}
                       </td>
                       <td className="py-1.5 text-right" style={{ color: "var(--wp-text-dim)" }}>
                         {r.count}
