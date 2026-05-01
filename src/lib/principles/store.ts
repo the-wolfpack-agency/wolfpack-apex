@@ -442,10 +442,21 @@ export async function insertObservations(args: {
   const values: unknown[] = [];
   const placeholders: string[] = [];
   args.rows.forEach((r, i) => {
-    const base = i * 8;
+    const base = i * 9;
     placeholders.push(
-      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}::jsonb)`,
+      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}::jsonb)`,
     );
+    /* Persist the validator's observedAt (e.g. the email's
+       sentDateTime) instead of letting the DB default to NOW(). The
+       UI displays this column, so showing insert time here was
+       misleading — leadership couldn't tell if a 4 PM "drift" row was
+       a real after-hours send or just when the cron ran. Fall back to
+       NOW()-equivalent (current ISO) when the validator emits a
+       blank, so the NOT NULL constraint is satisfied. */
+    const observedAt =
+      typeof r.observedAt === "string" && r.observedAt
+        ? r.observedAt
+        : new Date().toISOString();
     values.push(
       args.principleId,
       args.signalId,
@@ -453,20 +464,17 @@ export async function insertObservations(args: {
       r.surface,
       r.surfaceSubtype ?? null,
       r.subjectUserId ?? null,
+      observedAt,
       /* score range is enforced at the DB layer (-1..1); clamp here
          so a buggy validator can't trip the constraint. */
       Math.max(-1, Math.min(1, r.score)),
       JSON.stringify(r.evidenceJsonb || {}),
     );
   });
-  /* observed_at is set per-row via a parallel INSERT extension would
-     require — keep it simple and use NOW() at the SQL layer. The
-     evidence_jsonb already carries the original observedAt for any
-     downstream consumer that wants the upstream timestamp. */
   const sql =
     `INSERT INTO instinct_principle_observations
        (principle_id, signal_id, validator_id, surface, surface_subtype,
-        subject_user_id, score, evidence_jsonb)
+        subject_user_id, observed_at, score, evidence_jsonb)
      VALUES ${placeholders.join(",")}`;
   /* writeQuery's typed surface omits rowCount; cast to read it for the
      analytics return value. The underlying pg driver always sets it. */

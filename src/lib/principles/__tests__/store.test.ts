@@ -27,6 +27,7 @@ import {
   createPrincipleNative,
   patchPrincipleNative,
   retirePrincipleNative,
+  insertObservations,
 } from "@/lib/principles/store";
 import type { ParsedPrinciple } from "@/lib/principles/parser";
 
@@ -382,6 +383,64 @@ describe("retirePrincipleNative", () => {
       /UPDATE instinct_principles[\s\S]*retired_at = NOW\(\)[\s\S]*retired_at IS NULL/,
     );
     expect(mockWriteQuery.mock.calls[0][1]).toEqual(["p1"]);
+  });
+});
+
+describe("insertObservations", () => {
+  test("persists observed_at per row from the validator's payload", async () => {
+    mockWriteQuery.mockResolvedValueOnce({ rows: [], rowCount: 2 });
+    await insertObservations({
+      principleId: "p1",
+      signalId: "s1",
+      validatorId: "mail.after_hours",
+      rows: [
+        {
+          surface: "mail",
+          subjectUserId: "u-a",
+          observedAt: "2026-04-30T23:55:00Z",
+          score: -0.6,
+          evidenceJsonb: { kind: "x" },
+        },
+        {
+          surface: "mail",
+          subjectUserId: "u-b",
+          observedAt: "2026-05-01T02:10:00Z",
+          score: -0.6,
+          evidenceJsonb: { kind: "x" },
+        },
+      ],
+    });
+    /* INSERT must list observed_at as a column AND the params must
+       carry the per-row send timestamps — not NOW() at the DB. */
+    const sql = String(mockWriteQuery.mock.calls[0][0]);
+    expect(sql).toMatch(/observed_at/);
+    const params = mockWriteQuery.mock.calls[0][1] as unknown[];
+    expect(params).toContain("2026-04-30T23:55:00Z");
+    expect(params).toContain("2026-05-01T02:10:00Z");
+  });
+
+  test("falls back to current ISO when validator omits observedAt", async () => {
+    mockWriteQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    await insertObservations({
+      principleId: "p1",
+      signalId: "s1",
+      validatorId: "v1",
+      rows: [
+        {
+          surface: "mail",
+          observedAt: "",
+          score: 0,
+          evidenceJsonb: {},
+        },
+      ],
+    });
+    const params = mockWriteQuery.mock.calls[0][1] as unknown[];
+    /* Slot index 6 in our INSERT (0=principleId,1=signalId,2=validatorId,
+       3=surface, 4=subtype, 5=subjectUserId, 6=observedAt) — exact
+       value is "now-ish" so just assert the format. */
+    const observedAt = params[6];
+    expect(typeof observedAt).toBe("string");
+    expect(observedAt as string).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 });
 
