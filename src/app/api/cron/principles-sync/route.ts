@@ -36,6 +36,7 @@ import {
   recordDocVersion,
   getLatestDocVersion,
 } from "@/lib/principles/store";
+import { resolvePrinciplesConfig } from "@/lib/principles/config";
 
 function requireCron(req: NextRequest): boolean {
   const expected = process.env.CRON_SECRET;
@@ -49,16 +50,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const sourceUrl = process.env.PRINCIPLES_DOC_URL;
-  const ownerUserId = process.env.PRINCIPLES_DOC_OWNER_USER_ID;
-  if (!sourceUrl || !ownerUserId) {
+  /* Self-service config: DB row first, env vars second. Auto-picks
+     a leadership user's M365 token when no explicit owner is set. */
+  const cfg = await resolvePrinciplesConfig();
+  if (!cfg) {
     return NextResponse.json({
       ok: false,
       code: "not_configured",
       message:
-        "Set PRINCIPLES_DOC_URL + PRINCIPLES_DOC_OWNER_USER_ID to enable principles sync",
+        "Open /principles → Connect SharePoint doc to set up. (Or set PRINCIPLES_DOC_URL env for env-driven deploys.)",
     });
   }
+  const sourceUrl = cfg.docUrl!;
+  const ownerUserId = cfg.ownerUserId!;
 
   /* Step 1 — fetch the .docx bytes. */
   const fetchResult = await fetchSharePointDocx(ownerUserId, sourceUrl);
