@@ -446,6 +446,17 @@ export type InstinctEventType =
   | "principle.created"
   | "principle.updated"
   | "principle.retired"
+  // Program cost-budget tracking (WPA template + per-client sell exports)
+  | "programBudget.created"
+  | "programBudget.updated"
+  | "programBudget.deleted"
+  | "programBudget.line_added"
+  | "programBudget.line_updated"
+  | "programBudget.line_deleted"
+  | "programBudget.actual_recorded"
+  | "programBudget.xlsx_imported"
+  | "programBudget.xlsx_exported"
+  | "programBudget.viewed"
   // Inbound-email surface awareness
   | "microsoft.email_unread_polled"
   | "microsoft.email_arrived_notified"
