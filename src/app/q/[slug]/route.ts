@@ -66,6 +66,7 @@ export async function GET(
         blocked: true,
         headers: req.headers,
         geo: extractGeo(req.headers),
+        requestUrl: req.url,
       });
     }
     /* Always fire the analytics event so dashboards count blocked
@@ -95,6 +96,7 @@ export async function GET(
     blocked: false,
     headers: req.headers,
     geo: extractGeo(req.headers),
+    requestUrl: req.url,
   });
   trackEvent(
     "assistant.qr_scan_recorded",

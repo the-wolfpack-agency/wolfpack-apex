@@ -1478,15 +1478,40 @@ export default function QrPage() {
                       ) : row.analytics ? (
                         <AnalyticsPanel a={row.analytics} />
                       ) : null}
-                      {/* "View all scans (full detail)" button + ScanDetailPanel
-                          temporarily hidden — the per-scan API endpoint
-                          (/api/qr/[id]/scans) and the matching DB columns
-                          (migration 112) were the work of an agent run that
-                          stalled. The UI was committed without its backend,
-                          so clicking the button always errored "Failed to load
-                          scan details." Aggregated analytics above still work.
-                          Re-enable when migration 112 + the scans endpoint
-                          land. */}
+                      {row.analytics ? (
+                        <div style={{ marginTop: 12 }}>
+                          <button
+                            type="button"
+                            data-testid={`qr-toggle-scan-detail-${c.slug}`}
+                            onClick={() => toggleScanDetail(c)}
+                            style={{
+                              fontSize: "0.8rem",
+                              padding: "6px 10px",
+                              background: "transparent",
+                              color: "var(--wp-gold)",
+                              border: "1px solid var(--wp-dark-border)",
+                              borderRadius: 4,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {row.detailOpen
+                              ? "Hide all scans"
+                              : "View all scans (full detail)"}
+                          </button>
+                          {row.detailOpen ? (
+                            <ScanDetailPanel
+                              codeSlug={c.slug}
+                              row={row}
+                              onSort={(k) => setScanSort(c.id, k)}
+                              onToggleGrouping={() =>
+                                patchRow(c.id, {
+                                  groupByVisitor: !row.groupByVisitor,
+                                })
+                              }
+                            />
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
