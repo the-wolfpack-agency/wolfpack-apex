@@ -339,6 +339,163 @@ export async function getLatestDocVersion(
   return result.rows[0] ? rowToDocVersion(result.rows[0]) : null;
 }
 
+/* ------------------------------------------------------------------ */
+/* Observations                                                        */
+/* ------------------------------------------------------------------ */
+
+export interface ObservationRecord {
+  id: string;
+  principleId: string;
+  signalId: string | null;
+  validatorId: string;
+  surface: string;
+  surfaceSubtype: string | null;
+  subjectUserId: string | null;
+  observedAt: string;
+  score: number;
+  evidenceJsonb: Record<string, unknown>;
+}
+
+interface ObservationRow {
+  id: string;
+  principle_id: string;
+  signal_id: string | null;
+  validator_id: string;
+  surface: string;
+  surface_subtype: string | null;
+  subject_user_id: string | null;
+  observed_at: string;
+  score: string;
+  evidence_jsonb: Record<string, unknown>;
+}
+
+function rowToObservation(row: ObservationRow): ObservationRecord {
+  return {
+    id: row.id,
+    principleId: row.principle_id,
+    signalId: row.signal_id,
+    validatorId: row.validator_id,
+    surface: row.surface,
+    surfaceSubtype: row.surface_subtype,
+    subjectUserId: row.subject_user_id,
+    observedAt: row.observed_at,
+    score: Number(row.score),
+    evidenceJsonb: row.evidence_jsonb || {},
+  };
+}
+
+/** Bulk insert observations (one transaction, one INSERT ... VALUES). */
+export async function insertObservations(args: {
+  principleId: string;
+  signalId: string | null;
+  validatorId: string;
+  rows: Array<{
+    surface: string;
+    surfaceSubtype?: string | null;
+    subjectUserId?: string | null;
+    observedAt: string;
+    score: number;
+    evidenceJsonb: Record<string, unknown>;
+  }>;
+}): Promise<number> {
+  if (args.rows.length === 0) return 0;
+  if (!process.env.DATABASE_URL) {
+    throw new WriteQueryError(
+      "insertObservations requires DATABASE_URL",
+      "no_database",
+    );
+  }
+  const values: unknown[] = [];
+  const placeholders: string[] = [];
+  args.rows.forEach((r, i) => {
+    const base = i * 8;
+    placeholders.push(
+      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}::jsonb)`,
+    );
+    values.push(
+      args.principleId,
+      args.signalId,
+      args.validatorId,
+      r.surface,
+      r.surfaceSubtype ?? null,
+      r.subjectUserId ?? null,
+      /* score range is enforced at the DB layer (-1..1); clamp here
+         so a buggy validator can't trip the constraint. */
+      Math.max(-1, Math.min(1, r.score)),
+      JSON.stringify(r.evidenceJsonb || {}),
+    );
+  });
+  /* observed_at is set per-row via a parallel INSERT extension would
+     require — keep it simple and use NOW() at the SQL layer. The
+     evidence_jsonb already carries the original observedAt for any
+     downstream consumer that wants the upstream timestamp. */
+  const sql =
+    `INSERT INTO instinct_principle_observations
+       (principle_id, signal_id, validator_id, surface, surface_subtype,
+        subject_user_id, score, evidence_jsonb)
+     VALUES ${placeholders.join(",")}`;
+  /* writeQuery's typed surface omits rowCount; cast to read it for the
+     analytics return value. The underlying pg driver always sets it. */
+  const result = (await writeQuery(sql, values)) as unknown as {
+    rowCount?: number;
+  };
+  return result.rowCount ?? args.rows.length;
+}
+
+/** Read observations scoped to a subject user. Used by /api/principles/me
+ *  for member self-views (subjectUserId === caller.id). */
+export async function listObservationsForSubject(
+  subjectUserId: string,
+  opts: { sinceISO?: string; limit?: number } = {},
+): Promise<ObservationRecord[]> {
+  if (!subjectUserId) return [];
+  const limit = Math.max(1, Math.min(opts.limit ?? 200, 500));
+  const params: unknown[] = [subjectUserId];
+  let where = "subject_user_id = $1";
+  if (opts.sinceISO) {
+    params.push(opts.sinceISO);
+    where += ` AND observed_at >= $${params.length}`;
+  }
+  params.push(limit);
+  const result = await safeQuery<ObservationRow>(
+    `SELECT id, principle_id, signal_id, validator_id, surface,
+            surface_subtype, subject_user_id, observed_at, score,
+            evidence_jsonb
+       FROM instinct_principle_observations
+      WHERE ${where}
+      ORDER BY observed_at DESC
+      LIMIT $${params.length}`,
+    params,
+  );
+  return result.rows.map(rowToObservation);
+}
+
+/** Read all observations (leadership-only — caller must enforce). */
+export async function listAllObservations(opts: {
+  sinceISO?: string;
+  limit?: number;
+} = {}): Promise<ObservationRecord[]> {
+  const limit = Math.max(1, Math.min(opts.limit ?? 500, 2000));
+  const params: unknown[] = [];
+  let where = "TRUE";
+  if (opts.sinceISO) {
+    params.push(opts.sinceISO);
+    where = `observed_at >= $1`;
+  }
+  params.push(limit);
+  const result = await safeQuery<ObservationRow>(
+    `SELECT id, principle_id, signal_id, validator_id, surface,
+            surface_subtype, subject_user_id, observed_at, score,
+            evidence_jsonb
+       FROM instinct_principle_observations
+      WHERE ${where}
+      ORDER BY observed_at DESC
+      LIMIT $${params.length}`,
+    params,
+  );
+  return result.rows.map(rowToObservation);
+}
+
 export async function recordDocVersion(args: {
   sourceUrl: string;
   docHash: string;

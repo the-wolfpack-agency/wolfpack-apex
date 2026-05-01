@@ -432,6 +432,10 @@ export type InstinctEventType =
   | "principle.sync_completed"
   | "principle.sync_unchanged"
   | "principle.sync_failed"
+  // Per-user fan-out evaluator (instinct_principle_observations writes).
+  | "principle.observations_recorded"
+  | "principle.evaluation_failed"
+  | "principle.evaluation_skipped"
   // Inbound-email surface awareness
   | "microsoft.email_unread_polled"
   | "microsoft.email_arrived_notified"

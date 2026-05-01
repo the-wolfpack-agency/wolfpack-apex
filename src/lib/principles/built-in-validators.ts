@@ -50,10 +50,12 @@ registerValidator({
 /*   Counter-signal: outbound mail sent 9pm–7am local.                 */
 /* ------------------------------------------------------------------ */
 
+import { evaluateMailAfterHours as evaluateMailAfterHoursReal } from "@/lib/principles/evaluators/mail-after-hours";
+
 async function evaluateMailAfterHours(
-  _ctx: EvaluationContext,
+  ctx: EvaluationContext,
 ): Promise<Observation[]> {
-  return [];
+  return evaluateMailAfterHoursReal(ctx);
 }
 
 registerValidator({
