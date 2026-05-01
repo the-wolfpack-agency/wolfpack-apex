@@ -273,19 +273,34 @@ export async function detectSignatureFromOutlook(
  */
 export function stripHtmlQuotedBlock(html: string): string {
   if (!html) return html;
+  /* Specific reply/forward markers only. The original list had two
+     over-eager patterns (bare <blockquote> and <div>From:) that
+     stripped entire signatures whose markup happened to contain a
+     blockquote (marketing layouts) or literal "From:" text (most
+     pro signatures have a "From: <name>" line). Production hit this
+     on a fresh sent message and reported "Stripped HTML body had no
+     visible content".
+     Use blockquote ONLY when it carries Apple Mail's type="cite"
+     attribute, which is an unambiguous quoted-original marker. */
   const markers = [
     /<div\s+id\s*=\s*["']appendonsend["'][\s\S]*$/i,
     /<div\s+class\s*=\s*["']gmail_quote[\s\S]*$/i,
-    /<blockquote[\s\S]*$/i,
     /<div[^>]*id\s*=\s*["']?divRplyFwdMsg["']?[\s\S]*$/i,
     /<hr[^>]*id\s*=\s*["']?stopSpelling["']?[\s\S]*$/i,
     /<p[^>]*>\s*On\s+[^<]{1,200}\s+wrote:\s*<\/p>[\s\S]*$/i,
-    /<div[^>]*>\s*From:\s*[\s\S]*$/i,
+    /<blockquote[^>]*type\s*=\s*["']cite["'][\s\S]*$/i,
   ];
   let cut = html.length;
   for (const m of markers) {
     const match = m.exec(html);
     if (match && match.index < cut) cut = match.index;
+  }
+  /* Preservation guardrail: if a marker matched in the first 20% of
+     a >200-char body, we'd strip the actual signature. Bail out and
+     return the original — better to leave a quoted block in than
+     throw away the user's content. */
+  if (cut < html.length * 0.2 && html.length > 200) {
+    return html;
   }
   return html.slice(0, cut);
 }
