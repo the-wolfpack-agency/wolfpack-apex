@@ -442,6 +442,10 @@ export type InstinctEventType =
   // Self-service config (instinct_principles_config) — leadership
   // edits the SharePoint doc URL via UI instead of env vars.
   | "principle.config_updated"
+  // Native principle CRUD (no SharePoint round-trip).
+  | "principle.created"
+  | "principle.updated"
+  | "principle.retired"
   // Inbound-email surface awareness
   | "microsoft.email_unread_polled"
   | "microsoft.email_arrived_notified"
