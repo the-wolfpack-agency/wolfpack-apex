@@ -634,12 +634,45 @@ function MeView({ data }: { data: MeResponse | null }) {
                         {formatDate(o.observedAt)}
                       </span>
                       {(() => {
-                        const notes = (o.evidence as { notes?: unknown }).notes;
-                        return typeof notes === "string" ? (
-                          <span className="block mt-0.5" style={{ color: "var(--wp-text-muted)" }}>
-                            {notes}
-                          </span>
-                        ) : null;
+                        const ev = o.evidence as {
+                          notes?: unknown;
+                          metric?: { name?: unknown; value?: unknown };
+                        };
+                        const notes = ev.notes;
+                        const metric =
+                          ev.metric && typeof ev.metric === "object"
+                            ? ev.metric
+                            : null;
+                        const metricName =
+                          metric && typeof metric.name === "string"
+                            ? metric.name
+                            : null;
+                        const metricValue =
+                          metric &&
+                          (typeof metric.value === "number" ||
+                            typeof metric.value === "string")
+                            ? metric.value
+                            : null;
+                        return (
+                          <>
+                            {typeof notes === "string" ? (
+                              <span
+                                className="block mt-0.5"
+                                style={{ color: "var(--wp-text-muted)" }}
+                              >
+                                {notes}
+                              </span>
+                            ) : null}
+                            {metricName && metricValue !== null ? (
+                              <span
+                                className="block mt-0.5 text-xs"
+                                style={{ color: "var(--wp-text-muted)" }}
+                              >
+                                {metricName}: {String(metricValue)}
+                              </span>
+                            ) : null}
+                          </>
+                        );
                       })()}
                     </span>
                   </li>
