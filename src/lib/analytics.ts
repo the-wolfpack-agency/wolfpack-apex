@@ -436,6 +436,9 @@ export type InstinctEventType =
   | "principle.observations_recorded"
   | "principle.evaluation_failed"
   | "principle.evaluation_skipped"
+  // Weekly auto-report cron.
+  | "principle.weekly_report_published"
+  | "principle.weekly_report_failed"
   // Inbound-email surface awareness
   | "microsoft.email_unread_polled"
   | "microsoft.email_arrived_notified"

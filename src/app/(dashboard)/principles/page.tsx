@@ -60,6 +60,16 @@ interface TeamResponse extends MeResponse {
   aggregates: AggregateRow[];
 }
 
+interface WeeklyReport {
+  id: string;
+  weekStart: string;
+  weekEnd: string;
+  markdownBody: string;
+  observationCount: number;
+  principleCount: number;
+  generatedAt: string;
+}
+
 const LEADERSHIP_ROLES = new Set(["ceo", "cto"]);
 
 function isLeadership(role: string | undefined): boolean {
@@ -92,6 +102,7 @@ export default function PrinciplesPage() {
   const [tab, setTab] = useState<"me" | "team">("me");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [team, setTeam] = useState<TeamResponse | null>(null);
+  const [report, setReport] = useState<WeeklyReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -113,6 +124,13 @@ export default function PrinciplesPage() {
         if (teamRes.ok) {
           const teamData = (await teamRes.json()) as TeamResponse;
           setTeam(teamData);
+        }
+        const reportRes = await fetchWithRefresh(
+          "/api/principles/reports/latest",
+        );
+        if (reportRes.ok) {
+          const rj = (await reportRes.json()) as { report: WeeklyReport | null };
+          setReport(rj.report);
         }
       }
     } catch (e) {
@@ -208,7 +226,37 @@ export default function PrinciplesPage() {
       ) : tab === "me" ? (
         <MeView data={me} />
       ) : (
-        <TeamView data={team} userId={user.id} />
+        <>
+          {report && (
+            <details
+              data-testid="principles-weekly-report"
+              className="rounded border p-3"
+              style={{
+                background: "var(--wp-dark-surface)",
+                borderColor: "var(--wp-dark-border)",
+              }}
+            >
+              <summary
+                className="text-sm font-medium cursor-pointer"
+                style={{ color: "var(--wp-gold)" }}
+              >
+                Weekly report — {report.weekStart} → {report.weekEnd} ·{" "}
+                {report.observationCount} observation
+                {report.observationCount === 1 ? "" : "s"}
+              </summary>
+              <pre
+                className="text-xs whitespace-pre-wrap mt-3"
+                style={{
+                  color: "var(--wp-text-dim)",
+                  fontFamily: "inherit",
+                }}
+              >
+                {report.markdownBody}
+              </pre>
+            </details>
+          )}
+          <TeamView data={team} userId={user.id} />
+        </>
       )}
     </main>
   );
