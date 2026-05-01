@@ -112,6 +112,7 @@ export default function PrinciplesPage() {
   const [savingConfig, setSavingConfig] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [editingUrl, setEditingUrl] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -296,81 +297,133 @@ export default function PrinciplesPage() {
         <MeView data={me} />
       ) : (
         <>
+          {/* SharePoint connection: collapsed-by-default once configured.
+              Set-and-forget — only leadership ever sees this section. */}
           <section
             data-testid="principles-setup"
-            className="rounded border p-4 space-y-3"
+            className="rounded border p-3 space-y-2"
             style={{
               background: "var(--wp-dark-surface)",
               borderColor: "var(--wp-dark-border)",
             }}
           >
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <h2
-                className="text-sm font-semibold"
-                style={{ color: "var(--wp-gold)" }}
-              >
-                SharePoint connection
-              </h2>
-              {config?.effective?.ownerAutoDetected && (
-                <span
+            {config?.docUrl && !editingUrl ? (
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2 text-xs flex-wrap">
+                  <span
+                    className="px-2 py-0.5 rounded font-medium"
+                    style={{
+                      background: "rgba(34,197,94,0.15)",
+                      color: "var(--wp-success)",
+                    }}
+                  >
+                    Connected
+                  </span>
+                  <span style={{ color: "var(--wp-text-muted)" }}>
+                    SharePoint doc · auto-syncs every 2h
+                  </span>
+                  {config.effective?.ownerAutoDetected && (
+                    <span style={{ color: "var(--wp-text-muted)" }}>
+                      · auto-detected leadership token
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    data-testid="principles-sync-now"
+                    disabled={syncing}
+                    onClick={() => void syncNow()}
+                    className="px-3 py-1.5 rounded text-xs font-medium"
+                    style={{
+                      background: "var(--wp-gold)",
+                      color: "var(--wp-dark)",
+                      opacity: syncing ? 0.5 : 1,
+                    }}
+                  >
+                    {syncing ? "Syncing…" : "Sync now"}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="principles-config-edit"
+                    onClick={() => setEditingUrl(true)}
+                    className="px-3 py-1.5 rounded text-xs"
+                    style={{
+                      background: "transparent",
+                      color: "var(--wp-text-dim)",
+                      border: "1px solid var(--wp-dark-border)",
+                    }}
+                  >
+                    Edit URL
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <h2
+                  className="text-sm font-semibold"
+                  style={{ color: "var(--wp-gold)" }}
+                >
+                  {config?.docUrl ? "Edit SharePoint URL" : "Connect SharePoint doc"}
+                </h2>
+                <p
                   className="text-xs"
                   style={{ color: "var(--wp-text-muted)" }}
                 >
-                  using auto-detected leadership token
-                </span>
-              )}
-            </div>
-            <p
-              className="text-xs"
-              style={{ color: "var(--wp-text-muted)" }}
-            >
-              Paste the SharePoint URL of the operating-principles doc and click
-              Save. Then click Sync now to pull principles into the dashboard.
-              Background re-sync runs every 2h after that.
-            </p>
-            <input
-              type="url"
-              data-testid="principles-config-url"
-              value={configDocUrl}
-              onChange={(e) => setConfigDocUrl(e.target.value)}
-              placeholder="https://yourtenant.sharepoint.com/..."
-              className="w-full px-3 py-2 text-sm rounded border"
-              style={{
-                background: "var(--wp-dark-surface2)",
-                borderColor: "var(--wp-dark-border)",
-                color: "var(--wp-text)",
-              }}
-            />
-            <div className="flex gap-2 flex-wrap">
-              <button
-                type="button"
-                data-testid="principles-config-save"
-                disabled={savingConfig}
-                onClick={() => void saveConfig()}
-                className="px-3 py-1.5 rounded text-xs font-medium"
-                style={{
-                  background: "var(--wp-dark-surface2)",
-                  color: "var(--wp-text)",
-                  border: "1px solid var(--wp-dark-border)",
-                }}
-              >
-                {savingConfig ? "Saving…" : "Save URL"}
-              </button>
-              <button
-                type="button"
-                data-testid="principles-sync-now"
-                disabled={syncing || !config?.docUrl}
-                onClick={() => void syncNow()}
-                className="px-3 py-1.5 rounded text-xs font-medium"
-                style={{
-                  background: "var(--wp-gold)",
-                  color: "var(--wp-dark)",
-                  opacity: syncing || !config?.docUrl ? 0.5 : 1,
-                }}
-              >
-                {syncing ? "Syncing…" : "Sync now"}
-              </button>
-            </div>
+                  One-time setup. Paste the SharePoint URL of the operating-principles
+                  doc and click Save. Background re-sync runs every 2h. Other team
+                  members never need to touch this.
+                </p>
+                <input
+                  type="url"
+                  data-testid="principles-config-url"
+                  value={configDocUrl}
+                  onChange={(e) => setConfigDocUrl(e.target.value)}
+                  placeholder="https://yourtenant.sharepoint.com/..."
+                  className="w-full px-3 py-2 text-sm rounded border"
+                  style={{
+                    background: "var(--wp-dark-surface2)",
+                    borderColor: "var(--wp-dark-border)",
+                    color: "var(--wp-text)",
+                  }}
+                />
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    data-testid="principles-config-save"
+                    disabled={savingConfig}
+                    onClick={async () => {
+                      await saveConfig();
+                      setEditingUrl(false);
+                    }}
+                    className="px-3 py-1.5 rounded text-xs font-medium"
+                    style={{
+                      background: "var(--wp-gold)",
+                      color: "var(--wp-dark)",
+                    }}
+                  >
+                    {savingConfig ? "Saving…" : "Save URL"}
+                  </button>
+                  {config?.docUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfigDocUrl(config.docUrl || "");
+                        setEditingUrl(false);
+                      }}
+                      className="px-3 py-1.5 rounded text-xs"
+                      style={{
+                        background: "transparent",
+                        color: "var(--wp-text-dim)",
+                        border: "1px solid var(--wp-dark-border)",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
             {syncResult && (
               <p
                 data-testid="principles-sync-result"
