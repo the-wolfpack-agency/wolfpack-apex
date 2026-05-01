@@ -103,6 +103,15 @@ export default function PrinciplesPage() {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [team, setTeam] = useState<TeamResponse | null>(null);
   const [report, setReport] = useState<WeeklyReport | null>(null);
+  const [config, setConfig] = useState<{
+    docUrl: string | null;
+    ownerUserId: string | null;
+    effective: { ownerUserId: string; ownerAutoDetected: boolean } | null;
+  } | null>(null);
+  const [configDocUrl, setConfigDocUrl] = useState<string>("");
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -132,6 +141,16 @@ export default function PrinciplesPage() {
           const rj = (await reportRes.json()) as { report: WeeklyReport | null };
           setReport(rj.report);
         }
+        const cfgRes = await fetchWithRefresh("/api/principles/config");
+        if (cfgRes.ok) {
+          const cfg = (await cfgRes.json()) as {
+            docUrl: string | null;
+            ownerUserId: string | null;
+            effective: { ownerUserId: string; ownerAutoDetected: boolean } | null;
+          };
+          setConfig(cfg);
+          setConfigDocUrl(cfg.docUrl || "");
+        }
       }
     } catch (e) {
       setError((e as Error).message);
@@ -142,6 +161,56 @@ export default function PrinciplesPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function saveConfig() {
+    setSavingConfig(true);
+    setSyncResult(null);
+    try {
+      const res = await fetchWithRefresh("/api/principles/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docUrl: configDocUrl }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setSyncResult(`Save failed: ${err.error || res.status}`);
+      } else {
+        setSyncResult("Saved.");
+        await load();
+      }
+    } catch (e) {
+      setSyncResult(`Save failed: ${(e as Error).message}`);
+    }
+    setSavingConfig(false);
+  }
+
+  async function syncNow() {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetchWithRefresh("/api/principles/sync-now", {
+        method: "POST",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (body?.ok) {
+        if (body.unchanged) {
+          setSyncResult("Doc unchanged since last sync.");
+        } else {
+          setSyncResult(
+            `Synced — ${body.inserted?.length ?? 0} principle(s) added/updated.`,
+          );
+        }
+        await load();
+      } else {
+        setSyncResult(
+          `Sync failed: ${body?.message || body?.code || res.status}`,
+        );
+      }
+    } catch (e) {
+      setSyncResult(`Sync failed: ${(e as Error).message}`);
+    }
+    setSyncing(false);
+  }
 
   if (!user) {
     return (
@@ -227,6 +296,91 @@ export default function PrinciplesPage() {
         <MeView data={me} />
       ) : (
         <>
+          <section
+            data-testid="principles-setup"
+            className="rounded border p-4 space-y-3"
+            style={{
+              background: "var(--wp-dark-surface)",
+              borderColor: "var(--wp-dark-border)",
+            }}
+          >
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h2
+                className="text-sm font-semibold"
+                style={{ color: "var(--wp-gold)" }}
+              >
+                SharePoint connection
+              </h2>
+              {config?.effective?.ownerAutoDetected && (
+                <span
+                  className="text-xs"
+                  style={{ color: "var(--wp-text-muted)" }}
+                >
+                  using auto-detected leadership token
+                </span>
+              )}
+            </div>
+            <p
+              className="text-xs"
+              style={{ color: "var(--wp-text-muted)" }}
+            >
+              Paste the SharePoint URL of the operating-principles doc and click
+              Save. Then click Sync now to pull principles into the dashboard.
+              Background re-sync runs every 2h after that.
+            </p>
+            <input
+              type="url"
+              data-testid="principles-config-url"
+              value={configDocUrl}
+              onChange={(e) => setConfigDocUrl(e.target.value)}
+              placeholder="https://yourtenant.sharepoint.com/..."
+              className="w-full px-3 py-2 text-sm rounded border"
+              style={{
+                background: "var(--wp-dark-surface2)",
+                borderColor: "var(--wp-dark-border)",
+                color: "var(--wp-text)",
+              }}
+            />
+            <div className="flex gap-2 flex-wrap">
+              <button
+                type="button"
+                data-testid="principles-config-save"
+                disabled={savingConfig}
+                onClick={() => void saveConfig()}
+                className="px-3 py-1.5 rounded text-xs font-medium"
+                style={{
+                  background: "var(--wp-dark-surface2)",
+                  color: "var(--wp-text)",
+                  border: "1px solid var(--wp-dark-border)",
+                }}
+              >
+                {savingConfig ? "Saving…" : "Save URL"}
+              </button>
+              <button
+                type="button"
+                data-testid="principles-sync-now"
+                disabled={syncing || !config?.docUrl}
+                onClick={() => void syncNow()}
+                className="px-3 py-1.5 rounded text-xs font-medium"
+                style={{
+                  background: "var(--wp-gold)",
+                  color: "var(--wp-dark)",
+                  opacity: syncing || !config?.docUrl ? 0.5 : 1,
+                }}
+              >
+                {syncing ? "Syncing…" : "Sync now"}
+              </button>
+            </div>
+            {syncResult && (
+              <p
+                data-testid="principles-sync-result"
+                className="text-xs"
+                style={{ color: "var(--wp-text-dim)" }}
+              >
+                {syncResult}
+              </p>
+            )}
+          </section>
           {report && (
             <details
               data-testid="principles-weekly-report"

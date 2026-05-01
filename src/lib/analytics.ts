@@ -439,6 +439,9 @@ export type InstinctEventType =
   // Weekly auto-report cron.
   | "principle.weekly_report_published"
   | "principle.weekly_report_failed"
+  // Self-service config (instinct_principles_config) — leadership
+  // edits the SharePoint doc URL via UI instead of env vars.
+  | "principle.config_updated"
   // Inbound-email surface awareness
   | "microsoft.email_unread_polled"
   | "microsoft.email_arrived_notified"
