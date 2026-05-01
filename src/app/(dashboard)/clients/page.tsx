@@ -135,7 +135,7 @@ export default function ClientsPage() {
         }),
       });
       if (res.status === 200) {
-        setSubmitMsg("Client created!"); // reuse positive banner copy
+        setSubmitMsg("Client updated.");
         cancelEdit();
         fetchClients();
       } else if (res.status === 403) {
@@ -162,7 +162,7 @@ export default function ClientsPage() {
         headers: authHeaders(),
       });
       if (res.status === 200) {
-        setSubmitMsg("Client created!"); // reuse banner
+        setSubmitMsg("Client deleted.");
       } else if (res.status === 403) {
         setSubmitMsg("You don't have permission to delete this client.");
         fetchClients();
