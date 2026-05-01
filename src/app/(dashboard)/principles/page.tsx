@@ -821,6 +821,8 @@ function NativePrincipleManager({ onChange }: { onChange: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<PrincipleFull | null>(null);
   const [creating, setCreating] = useState(false);
+  const [runningFor, setRunningFor] = useState<string | null>(null);
+  const [runMessage, setRunMessage] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -839,6 +841,44 @@ function NativePrincipleManager({ onChange }: { onChange: () => void }) {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  async function handleRunNow(p: PrincipleFull) {
+    setRunningFor(p.id);
+    setRunMessage(null);
+    try {
+      const res = await fetchWithRefresh(
+        `/api/principles/${encodeURIComponent(p.id)}/evaluate`,
+        { method: "POST" },
+      );
+      const j = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        observations?: number;
+        users?: number;
+        bindings?: number;
+        skippedReason?: string;
+        error?: string;
+      };
+      if (!res.ok || !j.ok) {
+        setRunMessage(`Failed: ${j.error || res.status}`);
+      } else if (j.skippedReason === "no_bindings") {
+        setRunMessage(
+          `No signals matched a validator. Add signals like "after-hours mail" or "PR cycle time" so the system can score this principle.`,
+        );
+      } else if (j.skippedReason === "no_connected_users") {
+        setRunMessage(
+          `No team members have connected Microsoft 365 yet. Have them connect from Settings.`,
+        );
+      } else {
+        setRunMessage(
+          `Recorded ${j.observations ?? 0} observation(s) across ${j.users ?? 0} member(s).`,
+        );
+      }
+      onChange();
+    } catch (e) {
+      setRunMessage(`Failed: ${(e as Error).message}`);
+    }
+    setRunningFor(null);
+  }
 
   async function handleRetire(p: PrincipleFull) {
     if (!confirm(`Retire "${p.title}"? Existing observations stay for history.`)) return;
@@ -921,6 +961,15 @@ function NativePrincipleManager({ onChange }: { onChange: () => void }) {
           {error}
         </div>
       )}
+      {runMessage && (
+        <div
+          data-testid="principles-run-message"
+          className="text-xs"
+          style={{ color: "var(--wp-text-muted)" }}
+        >
+          {runMessage}
+        </div>
+      )}
       {items.length === 0 ? (
         <div
           data-testid="principles-native-empty"
@@ -945,6 +994,22 @@ function NativePrincipleManager({ onChange }: { onChange: () => void }) {
                   {p.owner ? ` · ${p.owner}` : ""}
                 </span>
               </span>
+              <button
+                type="button"
+                data-testid={`principle-run-${p.slug}`}
+                onClick={() => void handleRunNow(p)}
+                disabled={runningFor === p.id}
+                title="Evaluate this principle across the org now"
+                className="px-2 py-0.5 rounded text-xs"
+                style={{
+                  background: "var(--wp-gold)",
+                  color: "var(--wp-dark)",
+                  border: "1px solid var(--wp-gold)",
+                  opacity: runningFor === p.id ? 0.6 : 1,
+                }}
+              >
+                {runningFor === p.id ? "Running…" : "Run now"}
+              </button>
               <button
                 type="button"
                 data-testid={`principle-edit-${p.slug}`}

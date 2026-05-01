@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { canReadTeamEvidence } from "@/lib/principles/authz";
 import { patchPrincipleNative } from "@/lib/principles/store";
+import { evaluatePrinciples } from "@/lib/principles/evaluate-runner";
 import { trackEvent } from "@/lib/analytics";
 
 export async function PATCH(
@@ -64,6 +65,23 @@ export async function PATCH(
       principle_id: principle.id,
       slug: principle.slug,
     });
+    /* Re-fan-out evaluation only when the signal set changed —
+       cosmetic edits (title / body / weight) don't change which
+       observations apply, so skip the cost. Fire-and-forget so a
+       transient M365 hiccup never breaks the save flow. */
+    const signalSetChanged =
+      Array.isArray(body.signals) || Array.isArray(body.counterSignals);
+    if (signalSetChanged) {
+      void evaluatePrinciples([principle], { forceBootstrap: true }).catch(
+        (err) => {
+          trackEvent("principle.evaluation_failed", user.id, user.role, {
+            stage: "post_update",
+            principle_id: principle.id,
+            error: (err as Error).message,
+          });
+        },
+      );
+    }
     return NextResponse.json({ principle });
   } catch (err) {
     return NextResponse.json(
