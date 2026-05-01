@@ -706,9 +706,13 @@ describe("EmailsPage — inline composer", () => {
     const subject = screen.getByLabelText("Subject") as HTMLInputElement;
     expect(subject.value).toBe("Intro call follow-up");
     const body = screen.getByLabelText("Email body") as HTMLDivElement;
-    expect(body.innerHTML).toContain("Send after an introductory client call.");
+    /* Template description is intentionally NOT inserted into the body
+       anymore — it's already shown in the picker UI; injecting it
+       created boilerplate the user had to delete every time. The
+       variable placeholder lines are still seeded so the user knows
+       what to fill in. */
+    expect(body.innerHTML).not.toContain("Send after an introductory client call.");
     expect(body.innerHTML).toContain("clientName");
-    expect(body.innerHTML).toContain("<br>");
   });
 
   it("loads recipient insights and renders 'Recent threads (N)' + 'Last meeting' cells", async () => {

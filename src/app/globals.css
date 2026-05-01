@@ -114,3 +114,31 @@ a:hover { color: var(--wp-gold-hover); }
 .message-flash {
   animation: wp-message-flash 2s ease-out forwards;
 }
+
+/*
+ * Email composer actions row (Discard / AI Draft / Send).
+ *
+ * Desktop: right-aligned single row with gap. Matches the previous
+ * inline-style behavior.
+ * Mobile (<560px): stack full-width, Send first (primary action), so
+ * the user's thumb hits the most important button without hunting.
+ * The previous inline `flex-wrap: wrap; justify-end` produced an
+ * unreadable two-row layout on phones (Discard + AI Draft top-right,
+ * Send alone on a second row).
+ */
+.compose-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+@media (max-width: 560px) {
+  .compose-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+  .compose-actions > button {
+    width: 100%;
+  }
+}
