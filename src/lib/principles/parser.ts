@@ -26,7 +26,9 @@
  * `feedback_zero_tokens_first`).
  */
 
-import mammoth from "mammoth";
+/* mammoth was previously used here for docx→markdown but its internal
+ * XML parser broke against the repo's @xmldom/xmldom 0.9.x override.
+ * Replaced with a direct JSZip + regex extractor below. */
 
 /** A single principle as Hoxsie writes it, normalized for storage. */
 export interface ParsedPrinciple {
@@ -65,20 +67,117 @@ export interface ParseResult {
 /* ------------------------------------------------------------------ */
 
 /**
- * Convert a .docx buffer to markdown via mammoth. Mammoth preserves
- * heading levels, bold/italic, and lists, which is exactly what our
- * marker convention needs. Images + footnotes are dropped (we never
- * read them anyway).
+ * Convert a .docx buffer to markdown directly.
+ *
+ * History: this used to delegate to mammoth.convertToMarkdown, but
+ * mammoth's internal XML parsing breaks against the @xmldom/xmldom
+ * 0.9.x version this repo overrides to (mammoth was written against
+ * 0.8.x; the 0.9 release made the mimeType arg required for
+ * DOMParser.parseFromString and mammoth never updated its call sites).
+ * Production hit this with the error
+ *   "DOMParser.parseFromString: the provided mimeType 'undefined'
+ *    is not valid"
+ * on every sync.
+ *
+ * Direct extractor: a .docx is a ZIP with `word/document.xml` as the
+ * body. Open via JSZip (already in the dep tree as a transitive),
+ * walk paragraphs, detect heading styles + bold runs, and emit the
+ * minimal markdown surface our marker parser needs:
+ *   - Heading 2 paragraphs → `## ...`
+ *   - Bold runs → wrapped in `**...**`
+ *   - Other paragraphs → plain text
+ *   - Empty paragraphs → blank line
+ *
+ * No DOMParser, no xmldom, no mammoth. Pure regex over the doc XML.
  */
 export async function docxBufferToMarkdown(buf: Buffer): Promise<string> {
-  /* mammoth's TS types are incomplete — convertToMarkdown exists at
-     runtime in v1.x but the @types/mammoth surface only covers
-     convertToHtml + extractRawText. Cast for the call only. */
-  const m = mammoth as unknown as {
-    convertToMarkdown: (opts: { buffer: Buffer }) => Promise<{ value: string }>;
-  };
-  const result = await m.convertToMarkdown({ buffer: buf });
-  return result.value;
+  /* Dynamic import — JSZip is a CommonJS module surfaced transitively;
+     a top-level import would force a build-time include. */
+  const JSZipMod = (await import("jszip")).default;
+  const zip = await JSZipMod.loadAsync(buf);
+  const docFile = zip.file("word/document.xml");
+  if (!docFile) {
+    throw new Error("not a valid .docx (missing word/document.xml)");
+  }
+  const xml = await docFile.async("string");
+  return docXmlToMarkdown(xml);
+}
+
+/**
+ * Pure-string converter: word/document.xml → markdown. Exported for
+ * unit testing without needing a real .docx fixture.
+ */
+export function docXmlToMarkdown(xml: string): string {
+  /* Walk paragraphs in order. Each `<w:p ...>...</w:p>` block is one
+     line of output. Inline runs (`<w:r>...</w:r>`) carry the actual
+     text + formatting (bold). */
+  const paraRe = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
+  const lines: string[] = [];
+  let pMatch: RegExpExecArray | null;
+  while ((pMatch = paraRe.exec(xml)) !== null) {
+    const inner = pMatch[1];
+    /* Heading style — emit ## for Heading2, # for Heading1, ### for 3.
+       Word stores it as `<w:pStyle w:val="Heading2"/>` (or just the
+       template name like "heading 2"). Tolerant. */
+    const styleMatch = /<w:pStyle\s+w:val="([^"]*)"/i.exec(inner);
+    const style = (styleMatch?.[1] ?? "").toLowerCase().replace(/\s+/g, "");
+    let prefix = "";
+    if (style === "heading1") prefix = "# ";
+    else if (style === "heading2") prefix = "## ";
+    else if (style === "heading3") prefix = "### ";
+
+    /* Walk runs to collect text, wrapping bold runs in **...**. */
+    const runRe = /<w:r\b[^>]*>([\s\S]*?)<\/w:r>/g;
+    const segments: string[] = [];
+    let rMatch: RegExpExecArray | null;
+    while ((rMatch = runRe.exec(inner)) !== null) {
+      const runInner = rMatch[1];
+      const isBold = /<w:b\b/.test(runInner);
+      /* Concatenate every <w:t>...</w:t> in this run. Multiple <w:t>
+         elements appear when Word splits a single styled run across
+         language/formatting boundaries; they belong to the same run
+         visually. */
+      const texts: string[] = [];
+      const textRe = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
+      let tMatch: RegExpExecArray | null;
+      while ((tMatch = textRe.exec(runInner)) !== null) {
+        texts.push(decodeXmlEntities(tMatch[1]));
+      }
+      const tabRe = /<w:tab\b[^>]*\/>/g;
+      const text = texts.join("");
+      if (!text) {
+        if (tabRe.test(runInner)) segments.push("\t");
+        continue;
+      }
+      /* Avoid `**...**` wrapping when the run is whitespace-only —
+         that produces `** **` artifacts that confuse our marker
+         parser. */
+      if (isBold && text.trim()) {
+        segments.push(`**${text}**`);
+      } else {
+        segments.push(text);
+      }
+    }
+    const lineText = segments.join("");
+    if (prefix) {
+      lines.push(`${prefix}${lineText.trim()}`);
+    } else {
+      lines.push(lineText);
+    }
+  }
+  /* Collapse 3+ consecutive blank lines down to a single blank line
+     — Word emits empty paragraphs liberally and the marker parser
+     prefers a clean prose body. */
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
+}
+
+function decodeXmlEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
 }
 
 /* ------------------------------------------------------------------ */

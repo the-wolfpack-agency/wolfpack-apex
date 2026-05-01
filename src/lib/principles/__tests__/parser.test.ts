@@ -4,8 +4,89 @@ import {
   parseSection,
   slugify,
   sha256Hex,
+  docXmlToMarkdown,
 } from "@/lib/principles/parser";
 import { encodeSharingUrl } from "@/lib/principles/sharepoint-fetch";
+
+describe("docXmlToMarkdown", () => {
+  test("plain paragraph → plain text line", () => {
+    const xml = `<w:document><w:body>
+      <w:p><w:r><w:t>Hello world</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    expect(docXmlToMarkdown(xml)).toBe("Hello world");
+  });
+
+  test("Heading2 paragraph → ## prefix", () => {
+    const xml = `<w:document><w:body>
+      <w:p>
+        <w:pPr><w:pStyle w:val="Heading2"/></w:pPr>
+        <w:r><w:t>Principle: Ship before perfect</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    expect(docXmlToMarkdown(xml)).toBe("## Principle: Ship before perfect");
+  });
+
+  test("bold run → wrapped in **...**", () => {
+    const xml = `<w:document><w:body>
+      <w:p>
+        <w:r><w:rPr><w:b/></w:rPr><w:t>Domain:</w:t></w:r>
+        <w:r><w:t xml:space="preserve"> code, comms</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    expect(docXmlToMarkdown(xml)).toBe("**Domain:** code, comms");
+  });
+
+  test("multiple paragraphs, mixed styles", () => {
+    const xml = `<w:document><w:body>
+      <w:p>
+        <w:pPr><w:pStyle w:val="Heading2"/></w:pPr>
+        <w:r><w:t>Principle: Respect off-hours</w:t></w:r>
+      </w:p>
+      <w:p>
+        <w:r><w:rPr><w:b/></w:rPr><w:t>Domain:</w:t></w:r>
+        <w:r><w:t xml:space="preserve"> mail</w:t></w:r>
+      </w:p>
+      <w:p><w:r><w:t>We protect each other's evenings.</w:t></w:r></w:p>
+      <w:p>
+        <w:r><w:rPr><w:b/></w:rPr><w:t>Counter-signal:</w:t></w:r>
+        <w:r><w:t xml:space="preserve"> outbound mail/Teams sent 9pm-7am local</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    const out = docXmlToMarkdown(xml);
+    expect(out).toContain("## Principle: Respect off-hours");
+    expect(out).toContain("**Domain:** mail");
+    expect(out).toContain("We protect each other");
+    expect(out).toContain("**Counter-signal:** outbound mail/Teams sent 9pm-7am local");
+  });
+
+  test("empty paragraph emits blank line; 3+ blanks collapse to 1", () => {
+    const xml = `<w:document><w:body>
+      <w:p><w:r><w:t>A</w:t></w:r></w:p>
+      <w:p></w:p>
+      <w:p></w:p>
+      <w:p></w:p>
+      <w:p><w:r><w:t>B</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    expect(docXmlToMarkdown(xml)).toBe("A\n\nB");
+  });
+
+  test("decodes basic XML entities (&amp; &lt; &gt;)", () => {
+    const xml = `<w:document><w:body>
+      <w:p><w:r><w:t>Tom &amp; Jerry &lt;3</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    expect(docXmlToMarkdown(xml)).toBe("Tom & Jerry <3");
+  });
+
+  test("whitespace-only bold run is NOT wrapped (avoids ** ** artifact)", () => {
+    const xml = `<w:document><w:body>
+      <w:p>
+        <w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">  </w:t></w:r>
+        <w:r><w:t>plain</w:t></w:r>
+      </w:p>
+    </w:body></w:document>`;
+    expect(docXmlToMarkdown(xml)).toBe("  plain");
+  });
+});
 
 describe("slugify", () => {
   test("lowercases, replaces non-alphanumeric, trims", () => {
