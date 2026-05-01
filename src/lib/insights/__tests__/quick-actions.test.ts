@@ -70,11 +70,23 @@ describe("normalizePath", () => {
     expect(normalizePath("/calendar?day=mon")).toBe("/calendar");
     expect(normalizePath("/calendar#today")).toBe("/calendar");
   });
-  test("rejects non-absolute paths", () => {
-    expect(normalizePath("calendar")).toBeNull();
+  test("rejects empty / null / undefined", () => {
     expect(normalizePath("")).toBeNull();
     expect(normalizePath(null)).toBeNull();
     expect(normalizePath(undefined)).toBeNull();
+  });
+  test("treats bare page names as paths (matches dashboard emitters)", () => {
+    /* Most page-view emitters send `metadata.page = "calendar"` (bare
+       name). Dropping those was forcing every user onto the cold-start
+       fallback regardless of actual usage. */
+    expect(normalizePath("calendar")).toBe("/calendar");
+    expect(normalizePath("knowledge")).toBe("/knowledge");
+    expect(normalizePath("meetings/upcoming")).toBe("/meetings/upcoming");
+  });
+  test("rejects garbage that isn't a route token", () => {
+    expect(normalizePath("https://evil.com")).toBeNull();
+    expect(normalizePath("hello world")).toBeNull();
+    expect(normalizePath("javascript:alert(1)")).toBeNull();
   });
 });
 

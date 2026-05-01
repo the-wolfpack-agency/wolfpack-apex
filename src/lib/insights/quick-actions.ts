@@ -146,15 +146,22 @@ export function labelForPath(path: string): string {
 
 /**
  * Strip query/hash and trailing slash so `/calendar?day=1` and
- * `/calendar/` both bucket into `/calendar`.
+ * `/calendar/` both bucket into `/calendar`. Also tolerates bare
+ * page names ("calendar", "discussions") because most of the
+ * dashboard's `system.page_viewed` emitters send the short form;
+ * dropping those silently was hiding real usage signal and forcing
+ * everyone onto the cold-start fallback.
  */
 export function normalizePath(raw: string | null | undefined): string | null {
   if (!raw || typeof raw !== "string") return null;
   const noQuery = raw.split(/[?#]/, 1)[0] ?? raw;
   const trimmed = noQuery.replace(/\/+$/, "");
   if (!trimmed) return "/";
-  if (!trimmed.startsWith("/")) return null;
-  return trimmed;
+  if (trimmed.startsWith("/")) return trimmed;
+  /* Reject anything that doesn't look like a route token — protocol
+     URLs, accidental whitespace, IDs. Letters/digits/-/_ only. */
+  if (!/^[\w-]+(?:\/[\w-]+)*$/.test(trimmed)) return null;
+  return "/" + trimmed;
 }
 
 /**
