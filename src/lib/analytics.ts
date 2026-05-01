@@ -425,6 +425,13 @@ export type InstinctEventType =
   | "user.nav_pref_updated"
   // Dashboard action-items click-through (learning-loop signal).
   | "dashboard.action_item_clicked"
+  // Operating principles platform (instinct_principles + sync cron).
+  // sync_completed fires when the SharePoint doc was re-read AND
+  // changed; sync_unchanged fires when the hash matched (cheap, no
+  // writes); sync_failed fires on fetch/parse/DB errors.
+  | "principle.sync_completed"
+  | "principle.sync_unchanged"
+  | "principle.sync_failed"
   // Inbound-email surface awareness
   | "microsoft.email_unread_polled"
   | "microsoft.email_arrived_notified"
