@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import {
   getInstinctToken,
   getInstinctUser,
+  setInstinctSession,
   clearInstinctSession,
   fetchWithRefresh,
   migrateLegacyApexKeys,
