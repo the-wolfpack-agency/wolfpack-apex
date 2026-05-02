@@ -112,6 +112,7 @@ export default function PrinciplesPage() {
   const [savingConfig, setSavingConfig] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [evaluatingAll, setEvaluatingAll] = useState(false);
   const [editingUrl, setEditingUrl] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -183,6 +184,30 @@ export default function PrinciplesPage() {
       setSyncResult(`Save failed: ${(e as Error).message}`);
     }
     setSavingConfig(false);
+  }
+
+  async function evaluateAll() {
+    setEvaluatingAll(true);
+    setSyncResult(null);
+    try {
+      const res = await fetchWithRefresh("/api/principles/evaluate-all", {
+        method: "POST",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (body?.ok) {
+        setSyncResult(
+          `Evaluated ${body.principles ?? 0} principle(s) — ${body.observations ?? 0} observation(s) recorded.`,
+        );
+        await load();
+      } else {
+        setSyncResult(
+          `Evaluate failed: ${body?.error || body?.message || res.status}`,
+        );
+      }
+    } catch (e) {
+      setSyncResult(`Evaluate failed: ${(e as Error).message}`);
+    }
+    setEvaluatingAll(false);
   }
 
   async function syncNow() {
@@ -359,6 +384,22 @@ export default function PrinciplesPage() {
                     }}
                   >
                     {syncing ? "Syncing…" : "Sync now"}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="principles-evaluate-all"
+                    disabled={evaluatingAll}
+                    onClick={() => void evaluateAll()}
+                    title="Backfill observations across every active principle now (no waiting on the periodic cron)"
+                    className="px-3 py-1.5 rounded text-xs font-medium"
+                    style={{
+                      background: "var(--wp-dark-surface2)",
+                      color: "var(--wp-text)",
+                      border: "1px solid var(--wp-gold)",
+                      opacity: evaluatingAll ? 0.5 : 1,
+                    }}
+                  >
+                    {evaluatingAll ? "Evaluating…" : "Evaluate all"}
                   </button>
                   <button
                     type="button"
