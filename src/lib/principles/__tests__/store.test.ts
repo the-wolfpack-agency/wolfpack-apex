@@ -422,8 +422,10 @@ describe("insertObservations", () => {
   test("collapses duplicate input rows by natural key before INSERT", async () => {
     /* Two identical rollup rows in one call (e.g. multiple signal lines
        on the same principle binding to the same validator) must
-       collapse to a single INSERT. The SQL must end with ON CONFLICT
-       DO NOTHING so cross-call dupes also no-op. */
+       collapse to a single INSERT. Determinism on observed_at comes
+       from the validator side (snapToUtcDay) — duplicates that reach
+       this layer share the same observed_at exactly. The SQL must end
+       with ON CONFLICT DO NOTHING so cross-call dupes also no-op. */
     mockWriteQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
     await insertObservations({
       principleId: "p1",
@@ -442,7 +444,7 @@ describe("insertObservations", () => {
           surface: "calendar",
           surfaceSubtype: "focus_block_ratio",
           subjectUserId: "u-a",
-          observedAt: "2026-05-01T00:00:00.500Z",
+          observedAt: "2026-05-01T00:00:00.000Z",
           score: 0.5,
           evidenceJsonb: { kind: "rollup" },
         },

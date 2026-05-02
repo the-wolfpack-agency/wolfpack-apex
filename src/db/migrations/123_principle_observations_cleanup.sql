@@ -21,13 +21,17 @@
 BEGIN;
 
 -- 1. Idempotent re-assert of the natural-key index — guards going forward.
+--    Index expressions must be IMMUTABLE; date_trunc is STABLE and was
+--    rejected with 42P17 on the first deploy. The application-side
+--    snapToUtcDay helper makes rollup observed_at deterministic, so
+--    indexing on observed_at directly is sufficient.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_principle_observations_natural_key
   ON instinct_principle_observations (
        principle_id,
        validator_id,
        COALESCE(subject_user_id, ''),
        COALESCE(surface_subtype, ''),
-       (date_trunc('minute', observed_at)),
+       observed_at,
        COALESCE(evidence_jsonb->>'sourceId', '')
   );
 

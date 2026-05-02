@@ -442,21 +442,17 @@ export async function insertObservations(args: {
   /* In-memory dedupe: when the same evaluation produces two identical
      rows (e.g. multiple signal lines on the same principle binding to
      the same validator), collapse them before the INSERT. Natural key
-     mirrors migration 122's UNIQUE index — minute granularity on
-     observed_at + the evidence sourceId — so two cron firings within
-     the same minute also collapse here. */
+     mirrors migration 122's UNIQUE index exactly — observed_at +
+     evidence sourceId. Determinism comes from the validator side via
+     `snapToUtcDay` for rollups; per-event observations have unique
+     sourceIds (message id, task id, PR id, KR id). */
   const seenKeys = new Set<string>();
   const dedupedRows: typeof args.rows = [];
   for (const r of args.rows) {
-    const observedMinute = (() => {
-      const ms = Date.parse(
-        typeof r.observedAt === "string" && r.observedAt
-          ? r.observedAt
-          : new Date().toISOString(),
-      );
-      if (!Number.isFinite(ms)) return r.observedAt ?? "";
-      return new Date(Math.floor(ms / 60000) * 60000).toISOString();
-    })();
+    const observedAt =
+      typeof r.observedAt === "string" && r.observedAt
+        ? r.observedAt
+        : "";
     const sourceId =
       (r.evidenceJsonb as Record<string, unknown> | undefined)?.["sourceId"] ??
       "";
@@ -465,7 +461,7 @@ export async function insertObservations(args: {
       args.validatorId,
       r.subjectUserId ?? "",
       r.surfaceSubtype ?? "",
-      observedMinute,
+      observedAt,
       String(sourceId),
     ].join("|");
     if (seenKeys.has(key)) continue;
