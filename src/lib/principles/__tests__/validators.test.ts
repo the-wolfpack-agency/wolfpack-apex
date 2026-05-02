@@ -5,6 +5,7 @@ import {
   findValidatorForDescription,
   keywordMatcher,
   normalizeDesc,
+  snapToUtcDay,
   _resetRegistryForTests,
   type Validator,
 } from "@/lib/principles/validators";
@@ -151,5 +152,50 @@ describe("built-in validators", () => {
     expect(
       findValidatorForDescription("PR cycle time < 48h")?.id,
     ).toBe("code.pr_cycle_time_under");
+  });
+
+  test("team-wide flag is set on the right validators", () => {
+    /* Run inside isolateModules so the validators module + the side-
+       effect importer share the same fresh registry. The previous
+       test left the cached validators module's registry already
+       populated; without isolation both _resetRegistryForTests +
+       require would target different module instances. */
+    jest.isolateModules(() => {
+      const validatorsModule: typeof import("@/lib/principles/validators") = require("@/lib/principles/validators");
+      validatorsModule._resetRegistryForTests();
+      require("@/lib/principles/built-in-validators");
+      const ids = validatorsModule
+        .listValidators()
+        .filter((v) => v.teamWide)
+        .map((v) => v.id)
+        .sort();
+      expect(ids).toEqual([
+        "code.pr_cycle_time_under",
+        "goals.kr_friday_status",
+        "goals.kr_measurability",
+      ]);
+    });
+  });
+});
+
+describe("snapToUtcDay", () => {
+  test("snaps mid-day timestamps to 00:00:00.000Z of the same UTC date", () => {
+    expect(snapToUtcDay("2026-05-02T08:43:25.123Z")).toBe(
+      "2026-05-02T00:00:00.000Z",
+    );
+    expect(snapToUtcDay("2026-05-02T08:43:10Z")).toBe(
+      "2026-05-02T00:00:00.000Z",
+    );
+  });
+  test("two timestamps within the same UTC day collapse to identical key", () => {
+    /* The whole point of the helper: a 15-second drift between cron
+       runs (the bug we shipped migration 122 to fix) must produce the
+       same observed_at — otherwise the unique index can't dedupe. */
+    expect(snapToUtcDay("2026-04-30T06:43:25Z")).toBe(
+      snapToUtcDay("2026-04-30T06:43:10Z"),
+    );
+  });
+  test("unparseable input is returned unchanged (defensive — never crashes)", () => {
+    expect(snapToUtcDay("not-a-timestamp")).toBe("not-a-timestamp");
   });
 });

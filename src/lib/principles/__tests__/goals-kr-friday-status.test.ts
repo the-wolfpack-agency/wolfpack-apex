@@ -15,16 +15,7 @@ const ctx = {
   subjectUserId: "u1",
 };
 
-describe("evaluateGoalsKrFridayStatus", () => {
-  test("no subjectUserId → []", async () => {
-    expect(
-      await evaluateGoalsKrFridayStatus({
-        windowStart: ctx.windowStart,
-        windowEnd: ctx.windowEnd,
-      }),
-    ).toEqual([]);
-  });
-
+describe("evaluateGoalsKrFridayStatus (team-wide)", () => {
   test("no active KRs → []", async () => {
     mockSafeQuery.mockResolvedValueOnce({ rows: [] });
     expect(await evaluateGoalsKrFridayStatus(ctx)).toEqual([]);

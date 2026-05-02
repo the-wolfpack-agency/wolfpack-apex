@@ -22,9 +22,10 @@
  */
 
 import { getValidToken } from "@/lib/microsoft-graph";
-import type {
-  EvaluationContext,
-  Observation,
+import {
+  snapToUtcDay,
+  type EvaluationContext,
+  type Observation,
 } from "@/lib/principles/validators";
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
@@ -141,7 +142,10 @@ export async function evaluateTasksWeeklyPriorities(
       surface: "tasks",
       surfaceSubtype: "weekly_priority_count",
       subjectUserId: userId,
-      observedAt: new Date().toISOString(),
+      /* Snap to UTC midnight of the window-end day so re-running the
+         evaluator within the same window produces the same observed_at
+         and the migration-122 unique index dedupes. */
+      observedAt: snapToUtcDay(ctx.windowEnd),
       score,
       evidence: {
         kind: "tasks_priority_rollup",

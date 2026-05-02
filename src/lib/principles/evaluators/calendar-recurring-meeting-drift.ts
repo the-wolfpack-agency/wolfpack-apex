@@ -20,9 +20,10 @@ import {
   extractMeaningfulBody,
   hasOutcomeMarkers,
 } from "@/lib/principles/evaluators/calendar-meeting-outcome-logged";
-import type {
-  EvaluationContext,
-  Observation,
+import {
+  snapToUtcDay,
+  type EvaluationContext,
+  type Observation,
 } from "@/lib/principles/validators";
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
@@ -148,7 +149,9 @@ export async function evaluateCalendarRecurringMeetingDrift(
       surface: "calendar",
       surfaceSubtype: "recurring_meeting_drift",
       subjectUserId: userId,
-      observedAt: r.firstStart ?? new Date().toISOString(),
+      /* Snap to UTC midnight of the series' first instance day so a
+         second cron run within the same day produces the same key. */
+      observedAt: snapToUtcDay(r.firstStart ?? ctx.windowEnd),
       score,
       evidence: {
         kind: "recurring_meeting_drift",

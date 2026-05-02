@@ -265,4 +265,45 @@ describe("evaluatePrinciples", () => {
     expect(mockListUsers).not.toHaveBeenCalled();
     expect(out.observationCount).toBe(1);
   });
+
+  test("teamWide validator runs ONCE (no per-user fan-out) and rows have subjectUserId=null", async () => {
+    /* Build a teamWide validator that records how many times it runs +
+       what ctx.subjectUserId looks like — both must be "once" + "no
+       subject id passed". */
+    const seenContexts: Array<string | undefined> = [];
+    const teamValidator: Validator = {
+      id: "goals.kr_test",
+      surface: "goals",
+      describe: "kr test",
+      matches: (d) => d.toLowerCase().includes("kr"),
+      teamWide: true,
+      evaluate: async (ctx) => {
+        seenContexts.push(ctx.subjectUserId);
+        return [
+          { surface: "goals", observedAt: ctx.windowEnd, score: 0.5, evidence: { kind: "x" } },
+          { surface: "goals", observedAt: ctx.windowEnd, score: -0.5, evidence: { kind: "y" } },
+        ];
+      },
+    };
+    registerValidator(teamValidator);
+    mockListSignals.mockResolvedValueOnce([
+      { id: "s1", principleId: "p1", kind: "signal", description: "kr drift" },
+    ]);
+    mockListUsers.mockResolvedValueOnce([
+      { userId: "u-a", email: "a@x", displayName: "A", connectedAt: "" },
+      { userId: "u-b", email: "b@x", displayName: "B", connectedAt: "" },
+    ]);
+    mockHasAny.mockResolvedValueOnce(true);
+    mockInsertObs.mockResolvedValueOnce(2);
+
+    const out = await evaluatePrinciples([principle()]);
+    expect(out.bindingCount).toBe(1);
+    /* Critical: validator runs ONCE despite 2 connected users. */
+    expect(seenContexts).toHaveLength(1);
+    expect(seenContexts[0]).toBeUndefined();
+
+    const rows = mockInsertObs.mock.calls[0][0].rows;
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r: any) => r.subjectUserId === null)).toBe(true);
+  });
 });

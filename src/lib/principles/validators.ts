@@ -70,6 +70,36 @@ export interface Validator {
    *  observations. Must NOT throw on data-source errors — return [] +
    *  log instead. The cron job catches anything that escapes. */
   evaluate: (ctx: EvaluationContext) => Promise<Observation[]>;
+  /** When true, the validator runs ONCE per cron firing (not per user)
+   *  and emits observations with `subject_user_id = null`. Used for
+   *  signals where the underlying data is org-wide (every active KR,
+   *  every team PR) and per-member fan-out would inflate counts +
+   *  flatten the per-member mean by attributing the same row to
+   *  everyone. The /principles team scoreboard renders these as a
+   *  "team" lane separate from per-member rows. */
+  teamWide?: boolean;
+}
+
+/* ------------------------------------------------------------------ */
+/* Time helpers used by rollup evaluators                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Snap an ISO timestamp to UTC midnight of the same date. Rollup
+ * evaluators (one observation per day, per week, per series) call this
+ * so two cron firings 15 seconds apart produce the SAME observed_at —
+ * which combined with the migration-122 UNIQUE index makes the insert
+ * naturally idempotent via ON CONFLICT DO NOTHING.
+ *
+ * Pure for unit testing. Returns the input unchanged on parse failure
+ * so a malformed string never crashes the cron.
+ */
+export function snapToUtcDay(iso: string): string {
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return iso;
+  const d = new Date(ms);
+  d.setUTCHours(0, 0, 0, 0);
+  return d.toISOString();
 }
 
 /* ------------------------------------------------------------------ */

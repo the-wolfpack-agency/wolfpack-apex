@@ -14,9 +14,10 @@
  */
 
 import { safeQuery } from "@/lib/db";
-import type {
-  EvaluationContext,
-  Observation,
+import {
+  snapToUtcDay,
+  type EvaluationContext,
+  type Observation,
 } from "@/lib/principles/validators";
 
 interface OkrRow {
@@ -33,8 +34,8 @@ interface KrRow {
 export async function evaluateGoalsKrMeasurability(
   ctx: EvaluationContext,
 ): Promise<Observation[]> {
-  const userId = ctx.subjectUserId;
-  if (!userId) return [];
+  /* Team-wide signal — KRs aren't per-member-scoped. evaluate-runner
+     sets subject_user_id=null on the row; we omit it here. */
   let okrs: { rows: OkrRow[] };
   try {
     okrs = await safeQuery<OkrRow>(
@@ -58,7 +59,7 @@ export async function evaluateGoalsKrMeasurability(
     krsByOkr.set(k.okr_id, list);
   }
 
-  const observedAt = new Date().toISOString();
+  const observedAt = snapToUtcDay(ctx.windowEnd);
   return okrs.rows.map((okr) => {
     const krs = krsByOkr.get(okr.id) ?? [];
     const hasMeasurable = krs.some((k) => {
@@ -70,7 +71,6 @@ export async function evaluateGoalsKrMeasurability(
     return {
       surface: "goals",
       surfaceSubtype: "okr_measurable",
-      subjectUserId: userId,
       observedAt,
       score: hasMeasurable ? 0.5 : -0.5,
       evidence: {

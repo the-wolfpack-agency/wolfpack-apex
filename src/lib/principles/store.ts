@@ -471,13 +471,16 @@ export async function insertObservations(args: {
       JSON.stringify(r.evidenceJsonb || {}),
     );
   });
+  /* ON CONFLICT DO NOTHING against migration-122's unique natural-key
+     index. Two cron firings (periodic + on-edit re-eval) producing the
+     same rollup observation now silently no-op the duplicate — the
+     rowCount returned is the count of rows that *actually* inserted. */
   const sql =
     `INSERT INTO instinct_principle_observations
        (principle_id, signal_id, validator_id, surface, surface_subtype,
         subject_user_id, observed_at, score, evidence_jsonb)
-     VALUES ${placeholders.join(",")}`;
-  /* writeQuery's typed surface omits rowCount; cast to read it for the
-     analytics return value. The underlying pg driver always sets it. */
+     VALUES ${placeholders.join(",")}
+     ON CONFLICT DO NOTHING`;
   const result = (await writeQuery(sql, values)) as unknown as {
     rowCount?: number;
   };

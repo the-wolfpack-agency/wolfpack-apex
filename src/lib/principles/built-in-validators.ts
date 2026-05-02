@@ -130,6 +130,7 @@ registerValidator({
     keywordMatcher("kr", "measurability")(d) ||
     keywordMatcher("goals", "measurable")(d),
   evaluate: evaluateGoalsKrMeasurability,
+  teamWide: true,
 });
 
 registerValidator({
@@ -145,6 +146,7 @@ registerValidator({
     keywordMatcher("krs", "closed")(d) ||
     keywordMatcher("kr", "weekly", "update")(d),
   evaluate: evaluateGoalsKrFridayStatus,
+  teamWide: true,
 });
 
 registerValidator({
@@ -158,4 +160,5 @@ registerValidator({
     keywordMatcher("prs", "open")(d) ||
     keywordMatcher("prs", "sitting")(d),
   evaluate: evaluateCodeCycleTime,
+  teamWide: true,
 });

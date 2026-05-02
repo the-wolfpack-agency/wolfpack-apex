@@ -182,11 +182,16 @@ export async function evaluateCalendarFocusBlock(
        Magnitude is moderate so a single soggy day doesn't tank the
        weekly mean. */
     const score = ratio >= ADHERENCE_RATIO ? 0.5 : -0.5;
+    /* Snap observed_at to UTC midnight so two cron firings 15s apart
+       produce the SAME observed_at — combined with the migration-122
+       unique index this makes the daily observation idempotent. */
+    const dayKey = new Date(d);
+    dayKey.setUTCHours(0, 0, 0, 0);
     observations.push({
       surface: "calendar",
       surfaceSubtype: "focus_block_ratio",
       subjectUserId: userId,
-      observedAt: d.toISOString(),
+      observedAt: dayKey.toISOString(),
       score,
       evidence: {
         kind: "calendar_focus_day",

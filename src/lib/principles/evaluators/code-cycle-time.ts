@@ -45,8 +45,8 @@ function envRepoSlug(): string | null {
 export async function evaluateCodeCycleTime(
   ctx: EvaluationContext,
 ): Promise<Observation[]> {
-  const userId = ctx.subjectUserId;
-  if (!userId) return [];
+  /* Team-wide signal — PRs aren't per-member-scoped. evaluate-runner
+     sets subject_user_id=null on the row; we omit it here. */
   const repoSlug = envRepoSlug();
   if (!repoSlug) return [];
   const token = process.env.GH_PAT;
@@ -89,7 +89,6 @@ export async function evaluateCodeCycleTime(
     observations.push({
       surface: "code",
       surfaceSubtype: "pr_cycle_time",
-      subjectUserId: userId,
       observedAt: pr.merged_at,
       score,
       evidence: {

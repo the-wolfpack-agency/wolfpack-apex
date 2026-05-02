@@ -18,9 +18,10 @@
  */
 
 import { safeQuery } from "@/lib/db";
-import type {
-  EvaluationContext,
-  Observation,
+import {
+  snapToUtcDay,
+  type EvaluationContext,
+  type Observation,
 } from "@/lib/principles/validators";
 
 interface ActiveKr {
@@ -39,8 +40,10 @@ interface ContribCount {
 export async function evaluateGoalsKrFridayStatus(
   ctx: EvaluationContext,
 ): Promise<Observation[]> {
-  const userId = ctx.subjectUserId;
-  if (!userId) return [];
+  /* Team-wide signal: every active KR is org-wide data. evaluate-runner
+     dispatches teamWide validators with no subject_user_id; we omit it
+     from the row so the scoreboard renders these in the team lane
+     instead of duplicating per member. */
 
   let krs: { rows: ActiveKr[] };
   try {
@@ -74,7 +77,7 @@ export async function evaluateGoalsKrFridayStatus(
   const byKr = new Map<string, ContribCount>();
   for (const r of contribs.rows) byKr.set(r.kr_id, r);
 
-  const observedAt = new Date().toISOString();
+  const observedAt = snapToUtcDay(ctx.windowEnd);
   return krs.rows.map((kr) => {
     const c = byKr.get(kr.kr_id);
     const count = c ? Number(c.contrib_count) : 0;
@@ -82,7 +85,6 @@ export async function evaluateGoalsKrFridayStatus(
     return {
       surface: "goals",
       surfaceSubtype: "kr_friday_status",
-      subjectUserId: userId,
       observedAt,
       score: updated ? 0.4 : -0.4,
       evidence: {

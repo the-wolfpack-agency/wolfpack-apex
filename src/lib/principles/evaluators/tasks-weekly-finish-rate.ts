@@ -29,9 +29,10 @@
  */
 
 import { getValidToken } from "@/lib/microsoft-graph";
-import type {
-  EvaluationContext,
-  Observation,
+import {
+  snapToUtcDay,
+  type EvaluationContext,
+  type Observation,
 } from "@/lib/principles/validators";
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
@@ -158,7 +159,7 @@ export async function evaluateTasksWeeklyFinishRate(
       surface: "tasks",
       surfaceSubtype: "weekly_finish_rate",
       subjectUserId: userId,
-      observedAt: new Date().toISOString(),
+      observedAt: snapToUtcDay(ctx.windowEnd),
       score,
       evidence: {
         kind: "tasks_finish_rollup",

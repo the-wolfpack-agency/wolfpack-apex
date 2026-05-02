@@ -155,11 +155,17 @@ export async function evaluatePrinciples(
     }
 
     const rows: Parameters<typeof insertObservations>[0]["rows"] = [];
-    for (const u of users) {
+
+    if (b.validator.teamWide) {
+      /* Team-wide validators (goals.kr_*, code.pr_cycle_time_under)
+         read org-wide data — every active KR, every team PR. Running
+         them per-user duplicates the same evidence under each member,
+         inflating counts and flattening the per-member mean. Run once;
+         every row lands with subject_user_id=null and surfaces as a
+         "team" lane on the scoreboard. */
       const ctx: EvaluationContext = {
         windowStart: perValidatorWindow.windowStart,
         windowEnd: perValidatorWindow.windowEnd,
-        subjectUserId: u.userId,
       };
       try {
         const observations = await b.validator.evaluate(ctx);
@@ -167,7 +173,7 @@ export async function evaluatePrinciples(
           rows.push({
             surface: o.surface,
             surfaceSubtype: o.surfaceSubtype ?? null,
-            subjectUserId: o.subjectUserId ?? u.userId,
+            subjectUserId: null,
             observedAt: o.observedAt,
             score: o.score,
             evidenceJsonb: o.evidence as unknown as Record<string, unknown>,
@@ -175,11 +181,40 @@ export async function evaluatePrinciples(
         }
       } catch (err) {
         failureCount++;
-        trackEvent("principle.evaluation_failed", u.userId, "system", {
+        trackEvent("principle.evaluation_failed", "system", "system", {
           validator_id: b.validator.id,
           principle_slug: b.principle.slug,
+          team_wide: true,
           error: (err as Error).message,
         });
+      }
+    } else {
+      for (const u of users) {
+        const ctx: EvaluationContext = {
+          windowStart: perValidatorWindow.windowStart,
+          windowEnd: perValidatorWindow.windowEnd,
+          subjectUserId: u.userId,
+        };
+        try {
+          const observations = await b.validator.evaluate(ctx);
+          for (const o of observations) {
+            rows.push({
+              surface: o.surface,
+              surfaceSubtype: o.surfaceSubtype ?? null,
+              subjectUserId: o.subjectUserId ?? u.userId,
+              observedAt: o.observedAt,
+              score: o.score,
+              evidenceJsonb: o.evidence as unknown as Record<string, unknown>,
+            });
+          }
+        } catch (err) {
+          failureCount++;
+          trackEvent("principle.evaluation_failed", u.userId, "system", {
+            validator_id: b.validator.id,
+            principle_slug: b.principle.slug,
+            error: (err as Error).message,
+          });
+        }
       }
     }
 

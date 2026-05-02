@@ -12,14 +12,7 @@ import { evaluateGoalsKrMeasurability } from "@/lib/principles/evaluators/goals-
 
 beforeEach(() => mockSafeQuery.mockReset());
 
-describe("evaluateGoalsKrMeasurability", () => {
-  test("returns [] without subjectUserId", async () => {
-    const out = await evaluateGoalsKrMeasurability({
-      windowStart: "x",
-      windowEnd: "y",
-    });
-    expect(out).toEqual([]);
-  });
+describe("evaluateGoalsKrMeasurability (team-wide)", () => {
   test("OKR with at least one numeric KR scores +0.5; without → -0.5", async () => {
     /* First query: OKRs. Second query: KRs. */
     mockSafeQuery
@@ -33,9 +26,8 @@ describe("evaluateGoalsKrMeasurability", () => {
         rows: [{ okr_id: "o1", target_value: "100" }],
       });
     const out = await evaluateGoalsKrMeasurability({
-      windowStart: "x",
-      windowEnd: "y",
-      subjectUserId: "u1",
+      windowStart: "2026-04-25T00:00:00Z",
+      windowEnd: "2026-05-02T08:43:25Z",
     });
     expect(out).toHaveLength(2);
     const o1 = out.find(
@@ -46,14 +38,16 @@ describe("evaluateGoalsKrMeasurability", () => {
     );
     expect(o1?.score).toBe(0.5);
     expect(o2?.score).toBe(-0.5);
-    expect(out.every((o) => o.subjectUserId === "u1")).toBe(true);
+    /* Team-wide: no subjectUserId on the row + observed_at snapped to
+       UTC midnight so two cron firings dedupe. */
+    expect(out.every((o) => o.subjectUserId === undefined)).toBe(true);
+    expect(out[0].observedAt).toBe("2026-05-02T00:00:00.000Z");
   });
   test("zero active OKRs returns []", async () => {
     mockSafeQuery.mockResolvedValueOnce({ rows: [] });
     const out = await evaluateGoalsKrMeasurability({
       windowStart: "x",
       windowEnd: "y",
-      subjectUserId: "u1",
     });
     expect(out).toEqual([]);
   });
