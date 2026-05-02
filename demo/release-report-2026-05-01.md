@@ -1,6 +1,6 @@
 # Wolfpack Instinct — Release Report
 **Date:** 2026-05-01
-**HEAD commit:** `00a7461`
+**HEAD commit:** `58a039d`
 **Deployed:** https://wolfpack-instinct.vercel.app
 **Repo:** the-wolfpack-agency/wolfpack-apex
 
@@ -9,6 +9,12 @@
 ## Headline
 
 Shipped the **Operating Principles platform** end-to-end (13 PRs from spike → real validators → leadership scoreboard → weekly auto-report → native in-app CRUD), plus the **Cost Budget platform** with WPA xlsx round-trip, customizable per-user left nav, and three closes-the-loop fixes that finished yesterday's open threads (QR per-scan attribution detail view, Outlook animated signature import, signature-detect graph 400). 20 PRs merged, 8 new migrations (112, 114, 115, 116, 117, 118, 119, 120), 17,864 LOC added, 37 test files touched, 220+ new test cases.
+
+After the initial conversation crash + handoff reconstruction, the session continued and delivered three additional follow-ups (post-merge, direct-to-main on a recovery branch):
+
+- **Repo hygiene** (commit `96877c2` on AgenticQA parent) — untracked the 1,194-file embedded copy of `wolfpack-auto/` from AgenticQA's git index. Phantom uncommitted-changes noise eliminated. The standalone `nhomyk/wolfpack-auto` repo remains the deploy source.
+- **Apex → Instinct rename plan + audit tool** (commit `4a6ed2e`) — `scripts/audit-apex-refs.sh` codifies the inventory (130 immutable / 14 active-schema / 6 active-type / 120 cosmetic). Plan + per-bucket rollback at `docs/apex-to-instinct-rename-plan.md`. Phase A is one PR away.
+- **Badge polling efficiency pass** (commit `58a039d`) — idle dashboard traffic dropped from ~52 reqs/min to ~8 reqs/min (~85% reduction) via concurrent-fetch coalescing + raised adaptive-poll defaults. Microsoft Graph endpoints unchanged. Full design + rollback at `docs/badge-poll-optimization.md`.
 
 Side stream: **wolfpack-aidan-mulready v2** copy refresh + 5 follow-up fixes (6 PRs).
 
@@ -128,6 +134,56 @@ All have matching `.down.sql`. `npm run vercel-build` runs `migrate.mjs` so they
 - Plus E2E + API tests on dashboard nav prefs, QR scans detail, signature detect.
 
 Total ~224 new test cases on top of yesterday's baseline.
+
+---
+
+## Post-handoff follow-ups (same day, after the crash recovery)
+
+### Repo hygiene — AgenticQA stops tracking nested independent repos
+
+Background: the AgenticQA parent repo at `/Users/nicholashomyk/mono/AgenticQA/` was tracking an embedded 1,194-file copy of `wolfpack-auto/`. Whenever the canonical `nhomyk/wolfpack-auto` repo moved forward, the AgenticQA root showed phantom uncommitted-changes drift. A prior single sync commit (`9ec64b5`, Apr 29, 35 files) had tried to fix this manually; we ended that workflow in favor of the cleaner approach.
+
+Commit `96877c2` on the AgenticQA `fix/principles-lenient-markers` branch:
+- `git rm -r --cached wolfpack-auto/` (1,194 files / ~329K LOC out of the parent's index)
+- Added `wolfpack-auto/`, `wolfpack-apex/`, `.vercel/` to AgenticQA's `.gitignore`
+- All files still on disk; deploy source remains the standalone `nhomyk/wolfpack-auto`
+
+Branch not pushed yet — left for user review.
+
+The standalone `wolfpack-auto` repo itself was also tidied: an accidental `public/sw.js` eslint-disable removal was reverted, and `.claude/` was added to `.gitignore` (commit `9e38b50`, pushed).
+
+### Apex → Instinct rename plan
+
+The platform rename's hard work was already done on 2026-04-20 (Tier 4 DB rename: 36 `apex_*` tables → `instinct_*`, with backward-compat views still in place). What remains is mostly cosmetic. We codified the inventory rather than re-grepping with AI:
+
+- `scripts/audit-apex-refs.sh` — bash 3.2-compatible audit; outputs per-bucket file lists.
+- Buckets: 130 immutable (SQL migrations + dated handoffs) / 14 active-schema (TS source with `apex_*` table refs hitting compat views) / 6 active-type (top-level configs) / 120 cosmetic.
+- Plan + per-phase rollback at `docs/apex-to-instinct-rename-plan.md`.
+- Phase A (~30 min): GitHub repo rename (auto-redirects), local `mv`, remote URL, `package.json` `"name"`, 6 config files, 14 memory files. Reversible in <5 min.
+- Phase B (~1 hr): codemod the 14 active-schema source files. Compat views absorb misses.
+- Phase C (1 week later): drop compat views via migration 121.
+
+Commit `4a6ed2e` (pushed). Not yet executed.
+
+### Badge polling efficiency pass
+
+Investigation: the user noticed thousands of requests every few minutes from an idle dashboard. Static analysis of `setInterval` + `useAdaptivePoll` callers showed:
+
+- Four sidebar/topbar badges (`EmailNavBadge`, `MessagesNavBadge`, `TeamsUnreadBadge`, `NewMessageToast`) all polling at **5s visible** cadence.
+- **Three of four** hit the same endpoint (`/api/ms/chats/unread-count`) independently — paying for the same Microsoft Graph round-trip three times.
+- Total idle traffic: **~52 reqs/min per open tab** (≈3,120/hr).
+
+Commit `58a039d` (pushed):
+- New `src/lib/coalesced-fetch.ts` — concurrent identical GETs within a 1.5s window collapse to one HTTP call. Cloned `Response` per caller. Non-GETs bypass the cache. Auto-disabled in jest (env opt-in).
+- `useAdaptivePoll` defaults raised: 5s visible → **30s**; 45s hidden → **120s**. New `idleMs: 180s` engages once `isStable()` returns true for 5 polls. Components opt in by passing an `isStable` callback.
+- All four badges now go through `coalescedFetchWithRefresh`. Three of four pass `isStable`. Source endpoints / scopes / Graph queries unchanged — Outlook integration is preserved.
+- New `system.badge_poll_optimized` analytics event feeds the learning loop with `requests_served / network_calls / requests_saved`.
+- Tests: 7 new coalesce cases, 4 new adaptive-poll cases, 3 badge component tests updated for new 30s cadence. All 64 target tests green; zero regressions in the 4,093-test baseline.
+- Rollback: `NEXT_PUBLIC_INSTINCT_BADGE_OPTIMIZE=false` (Vercel env, instant) or `git revert`. No DB changes.
+
+Resulting profile: **~8 reqs/min idle** on a visible tab; **~5 reqs/min** once idle-backoff engages. **~85% reduction**.
+
+Full design + rollback notes at `docs/badge-poll-optimization.md`.
 
 ---
 
