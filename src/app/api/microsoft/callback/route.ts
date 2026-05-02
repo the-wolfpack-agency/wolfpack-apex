@@ -213,12 +213,22 @@ export async function GET(req: NextRequest) {
       created_at: "",
     };
     const accessToken = createToken(member);
-    const refreshToken = await issueRefreshToken({
-      userId: provisioned.id,
-      ipAddress:
-        req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
-      userAgent: req.headers.get("user-agent"),
-    });
+    /* issueRefreshToken returns { tokenId, familyId }; the cookie value
+       is the token id (mirrors /api/auth/login). DB write is skipped
+       silently in shadow mode (no DATABASE_URL) so the sign-in still
+       completes locally. */
+    let refreshTokenId: string | undefined;
+    if (process.env.DATABASE_URL) {
+      try {
+        const rt = await issueRefreshToken(provisioned.id);
+        refreshTokenId = rt.tokenId;
+      } catch (err) {
+        console.warn(
+          "[microsoft-signin] could not issue refresh token:",
+          (err as Error).message,
+        );
+      }
+    }
     trackEvent("system.login", provisioned.id, provisioned.role, {
       method: "microsoft_signin",
     });
@@ -226,18 +236,18 @@ export async function GET(req: NextRequest) {
     redirectUrl.searchParams.set("ms", "connected");
     if (displayName) redirectUrl.searchParams.set("account", displayName);
     const res = NextResponse.redirect(redirectUrl);
-    setAuthCookie(
-      res,
-      ACCESS_TOKEN_COOKIE,
-      accessToken,
-      ACCESS_TOKEN_TTL,
-    );
-    setAuthCookie(
-      res,
-      REFRESH_TOKEN_COOKIE,
-      refreshToken,
-      REFRESH_TOKEN_TTL_SECONDS,
-    );
+    setAuthCookie(res, ACCESS_TOKEN_COOKIE, accessToken, ACCESS_TOKEN_TTL, {
+      sameSite: "Lax",
+    });
+    if (refreshTokenId) {
+      setAuthCookie(
+        res,
+        REFRESH_TOKEN_COOKIE,
+        refreshTokenId,
+        REFRESH_TOKEN_TTL_SECONDS,
+        { sameSite: "Strict" },
+      );
+    }
     return res;
   }
 
