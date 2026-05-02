@@ -11,10 +11,10 @@ import { getUserFromRequest } from "@/lib/auth";
 import { canReadTeamEvidence } from "@/lib/principles/authz";
 import {
   listActivePrinciples,
-  listObservationsForSubject,
   listAllObservations,
   listSignalsForPrinciple,
 } from "@/lib/principles/store";
+import { resolveUserNames } from "@/lib/principles/user-names";
 
 export async function GET(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
@@ -28,21 +28,39 @@ export async function GET(req: NextRequest) {
   const sinceISO =
     url.searchParams.get("since") ||
     new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const [principles, observations, allObs] = await Promise.all([
+  /* Pull EVERY observation in the window, then filter in-app to those
+     whose subject_user_id resolves (via resolveUserNames + email +
+     name match) to the requesting user. Email-only matching missed
+     observations whose ms_tokens row has user_email NULL/'pending'
+     but display_name is correct. Symmetric with the team aggregate's
+     name-based grouping — what the scoreboard shows under "Nick
+     Hoxsie" is what My principles shows for the Hoxsie session. */
+  const [principles, allObs] = await Promise.all([
     listActivePrinciples(),
-    listObservationsForSubject(user.id, {
-      sinceISO,
-      limit: 200,
-      /* Pass email so the helper unions all sibling ids (e.g. observations
-         written under a historical id during the dedup window — common
-         for sessions whose JWT predates a team-member dedup migration). */
-      email: user.email,
-    }),
-    /* Pull team-wide rows (subject_user_id IS NULL) so the My-principles
-       view can tell apart "nothing happened on me" from "all activity
-       this week is team-wide — see the team scoreboard". */
-    listAllObservations({ sinceISO, limit: 500 }),
+    listAllObservations({ sinceISO, limit: 1000 }),
   ]);
+  const subjectIds = Array.from(
+    new Set(
+      (allObs ?? [])
+        .map((o) => o.subjectUserId)
+        .filter((s): s is string => Boolean(s)),
+    ),
+  );
+  const nameMap = await resolveUserNames(subjectIds);
+  const myEmail = (user.email || "").toLowerCase();
+  const myName = (user.name || "").trim().toLowerCase();
+  const matchesMe = (subjectId: string | null): boolean => {
+    if (!subjectId) return false;
+    if (subjectId === user.id) return true;
+    const r = nameMap.get(subjectId);
+    if (!r) return false;
+    if (r.email && r.email.toLowerCase() === myEmail) return true;
+    if (r.displayName && r.displayName.trim().toLowerCase() === myName) {
+      return true;
+    }
+    return false;
+  };
+  const observations = (allObs ?? []).filter((o) => matchesMe(o.subjectUserId));
   const teamWideCountByPrinciple = new Map<string, number>();
   for (const o of allObs ?? []) {
     if (o.subjectUserId !== null) continue;
