@@ -10,20 +10,23 @@ let authUser: { id: string; role: string; name: string; email: string } | null =
   email: "a@x",
 };
 
+const mockSafeQuery = jest.fn();
 jest.mock("@/lib/principles/store", () => ({
   listActivePrinciples: (...a: any[]) => mockListPrinciples(...a),
   listObservationsForSubject: (...a: any[]) => mockListForSubject(...a),
   listAllObservations: (...a: any[]) => mockListAll(...a),
   listSignalsForPrinciple: jest.fn(async () => []),
 }));
-/* Per-test resolver. Default returns "Alicia / a@x" for every id so
-   the My-principles "own observations only" case passes. Tests that
-   need a different shape reassign mockResolveNamesImpl directly. */
-/* Default: each id resolves to a distinct display name keyed off the
-   id itself, so the team aggregate's name-based grouping treats every
-   id as a different person — preserving the original 1-row-per-id
-   assumption of pre-existing tests. The "owns its observations" test
-   sets a different override that maps every id to authUser. */
+jest.mock("@/lib/db", () => {
+  const actual = jest.requireActual("@/lib/db");
+  return {
+    ...actual,
+    safeQuery: (...a: any[]) => mockSafeQuery(...a),
+  };
+});
+/* The team route still uses resolveUserNames; My-principles no
+   longer does. Default mock: each id resolves to itself so existing
+   team tests preserve their 1-row-per-id assumption. */
 let mockResolveNamesImpl: (
   ids: string[],
 ) => Promise<Map<string, { userId: string; displayName: string; email: string | null }>> = async (
@@ -58,6 +61,15 @@ beforeEach(() => {
   mockListForSubject.mockReset();
   mockListAll.mockReset();
   mockRecordView.mockReset();
+  mockSafeQuery.mockReset();
+  /* Default canonical resolver: identity map — every id resolves to
+     itself. Tests that need cross-id canonicalization override per-call. */
+  mockSafeQuery.mockImplementation(async (_sql: string, params: unknown[]) => {
+    const ids = (params[0] as string[]) ?? [];
+    return {
+      rows: ids.map((id) => ({ subject_id: id, canonical_id: id })),
+    };
+  });
   authUser = { id: "u1", role: "sales", name: "Alicia", email: "a@x" };
 });
 
@@ -74,20 +86,6 @@ describe("GET /api/principles/me", () => {
     expect(res.status).toBe(401);
   });
   test("returns own observations only", async () => {
-    /* My-principles filters obs by name/email match against the
-       resolved user. Override the default resolver for this test so
-       u1 resolves to authUser's name+email. */
-    const prev = mockResolveNamesImpl;
-    mockResolveNamesImpl = async (ids: string[]) => {
-      const m = new Map<
-        string,
-        { userId: string; displayName: string; email: string | null }
-      >();
-      for (const id of ids) {
-        m.set(id, { userId: id, displayName: "Alicia", email: "a@x" });
-      }
-      return m;
-    };
     mockListPrinciples.mockResolvedValueOnce([
       { id: "p1", slug: "x", title: "X", domains: ["mail"], bodyMd: "" },
     ]);
@@ -103,20 +101,18 @@ describe("GET /api/principles/me", () => {
         evidenceJsonb: { kind: "x" },
       },
     ]);
-    try {
-      const res = await getMe(req("/api/principles/me"));
-      const body = await res.json();
-      expect(body.observations).toHaveLength(1);
-    } finally {
-      mockResolveNamesImpl = prev;
-    }
+    /* identity canonicalize (default mock): u1 → u1 → matches authUser. */
+    const res = await getMe(req("/api/principles/me"));
+    const body = await res.json();
+    expect(body.observations).toHaveLength(1);
   });
 
-  test("includes observations under sibling user-ids that resolve to caller's email/name", async () => {
-    /* Hoxsie scenario: JWT has id u1 but observations were written
-       under id u-old (e.g. dedup-survivor that's not the JWT-canonical
-       row). resolveUserNames must say u-old → same email/name as
-       authUser, and the route must include the observation. */
+  test("includes observations under sibling user-ids that canonicalize to caller", async () => {
+    /* Hoxsie scenario: JWT user.id = "u1" but observations were
+       written under "u-old" (dedup-survivor). The DB canonicalize CTE
+       maps both u1 AND u-old → same canonical id "u-canon". The route
+       includes u-old's observations. u-someone-else canonicalizes
+       to itself and stays excluded. */
     mockListPrinciples.mockResolvedValueOnce([
       { id: "p1", slug: "x", title: "X", domains: ["mail"], bodyMd: "" },
     ]);
@@ -142,30 +138,21 @@ describe("GET /api/principles/me", () => {
         evidenceJsonb: { kind: "x" },
       },
     ]);
-    /* Override per-test: u-someone-else resolves to a different person. */
-    const prev = mockResolveNamesImpl;
-    mockResolveNamesImpl = async (ids: string[]) => {
-      const m = new Map<
-        string,
-        { userId: string; displayName: string; email: string | null }
-      >();
-      for (const id of ids) {
-        if (id === "u-someone-else") {
-          m.set(id, { userId: id, displayName: "Bob", email: "b@x" });
-        } else {
-          m.set(id, { userId: id, displayName: "Alicia", email: "a@x" });
-        }
-      }
-      return m;
-    };
-    try {
-      const res = await getMe(req("/api/principles/me"));
-      const body = await res.json();
-      expect(body.observations).toHaveLength(1);
-      expect(body.observations[0].id).toBe("o-mine");
-    } finally {
-      mockResolveNamesImpl = prev;
-    }
+    /* Canonicalize: u1 → u-canon, u-old → u-canon, u-someone-else → self. */
+    mockSafeQuery.mockImplementationOnce(async (_sql: string, params: unknown[]) => {
+      const ids = (params[0] as string[]) ?? [];
+      return {
+        rows: ids.map((id) => ({
+          subject_id: id,
+          canonical_id:
+            id === "u1" || id === "u-old" ? "u-canon" : id,
+        })),
+      };
+    });
+    const res = await getMe(req("/api/principles/me"));
+    const body = await res.json();
+    expect(body.observations).toHaveLength(1);
+    expect(body.observations[0].id).toBe("o-mine");
   });
 });
 

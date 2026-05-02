@@ -14,7 +14,7 @@ import {
   listAllObservations,
   listSignalsForPrinciple,
 } from "@/lib/principles/store";
-import { resolveUserNames } from "@/lib/principles/user-names";
+import { safeQuery } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
@@ -28,13 +28,6 @@ export async function GET(req: NextRequest) {
   const sinceISO =
     url.searchParams.get("since") ||
     new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  /* Pull EVERY observation in the window, then filter in-app to those
-     whose subject_user_id resolves (via resolveUserNames + email +
-     name match) to the requesting user. Email-only matching missed
-     observations whose ms_tokens row has user_email NULL/'pending'
-     but display_name is correct. Symmetric with the team aggregate's
-     name-based grouping — what the scoreboard shows under "Nick
-     Hoxsie" is what My principles shows for the Hoxsie session. */
   const [principles, allObs] = await Promise.all([
     listActivePrinciples(),
     listAllObservations({ sinceISO, limit: 1000 }),
@@ -46,21 +39,53 @@ export async function GET(req: NextRequest) {
         .filter((s): s is string => Boolean(s)),
     ),
   );
-  const nameMap = await resolveUserNames(subjectIds);
-  const myEmail = (user.email || "").toLowerCase();
-  const myName = (user.name || "").trim().toLowerCase();
-  const matchesMe = (subjectId: string | null): boolean => {
-    if (!subjectId) return false;
-    if (subjectId === user.id) return true;
-    const r = nameMap.get(subjectId);
-    if (!r) return false;
-    if (r.email && r.email.toLowerCase() === myEmail) return true;
-    if (r.displayName && r.displayName.trim().toLowerCase() === myName) {
-      return true;
+
+  /* Canonicalize EVERY id (the JWT user.id + every observation's
+     subject_user_id) through the same DB-side CTE the team aggregate
+     uses. Two ids are "the same person" if they map to the same
+     canonical team-member row by email — looking up the email via
+     team_members.id OR ms_tokens.connected_by, then re-resolving
+     to the active team_members row by LOWER(email).
+     Match observations to user iff canonicalize(obs) === canonicalize(jwt).
+     This is JWT-content-agnostic: doesn't matter what email/name the
+     JWT carries; we use the DB to figure out who's who. */
+  const idsToResolve = Array.from(new Set([...subjectIds, user.id]));
+  const canonicalById = new Map<string, string>();
+  if (idsToResolve.length > 0) {
+    try {
+      const r = await safeQuery<{ subject_id: string; canonical_id: string }>(
+        `WITH ids AS (SELECT UNNEST($1::text[]) AS subject_id),
+              email_for_id AS (
+                SELECT i.subject_id,
+                       LOWER(COALESCE(
+                         (SELECT m.email FROM instinct_team_members m
+                           WHERE m.id::text = i.subject_id LIMIT 1),
+                         (SELECT t.user_email FROM instinct_ms_tokens t
+                           WHERE t.connected_by = i.subject_id
+                           ORDER BY t.connected_at DESC LIMIT 1)
+                       )) AS lower_email
+                  FROM ids i
+              )
+         SELECT e.subject_id,
+                COALESCE(c.id::text, e.subject_id) AS canonical_id
+           FROM email_for_id e
+           LEFT JOIN instinct_team_members c
+             ON LOWER(c.email) = e.lower_email AND c.is_active = TRUE`,
+        [idsToResolve],
+      );
+      for (const row of r.rows) {
+        canonicalById.set(row.subject_id, row.canonical_id);
+      }
+    } catch {
+      /* DB unreachable → identity map. */
     }
-    return false;
-  };
-  const observations = (allObs ?? []).filter((o) => matchesMe(o.subjectUserId));
+  }
+  const myCanonical = canonicalById.get(user.id) ?? user.id;
+  const observations = (allObs ?? []).filter((o) => {
+    if (!o.subjectUserId) return false;
+    const c = canonicalById.get(o.subjectUserId) ?? o.subjectUserId;
+    return c === myCanonical;
+  });
   const teamWideCountByPrinciple = new Map<string, number>();
   for (const o of allObs ?? []) {
     if (o.subjectUserId !== null) continue;
