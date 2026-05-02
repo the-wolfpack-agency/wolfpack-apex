@@ -34,7 +34,27 @@ SELECT DISTINCT ON (LOWER(email))
   FROM instinct_team_members
  ORDER BY LOWER(email), created_at ASC, id ASC;
 
--- 2. Repoint instinct_ms_tokens to the canonical user id by email.
+-- 2a. Dedupe instinct_ms_tokens BEFORE repointing. The table has a
+--     UNIQUE index on connected_by, so two existing rows with the
+--     same email but different connected_by user-ids would collide
+--     on the UPDATE in step 2b. For each canonical email, keep the
+--     row with the MOST RECENT connected_at (freshest token + tz +
+--     refresh secret) and delete the rest.
+WITH rank_by_email AS (
+  SELECT t.id,
+         ROW_NUMBER() OVER (
+           PARTITION BY LOWER(t.user_email)
+           ORDER BY t.connected_at DESC, t.id ASC
+         ) AS rn
+    FROM instinct_ms_tokens t
+   WHERE LOWER(t.user_email) IN (SELECT lower_email FROM _canonical_team_ids)
+)
+DELETE FROM instinct_ms_tokens t
+ USING rank_by_email r
+ WHERE t.id = r.id
+   AND r.rn > 1;
+
+-- 2b. Repoint the SURVIVING ms_tokens row to the canonical user id.
 UPDATE instinct_ms_tokens t
    SET connected_by = c.canonical_id
   FROM _canonical_team_ids c
