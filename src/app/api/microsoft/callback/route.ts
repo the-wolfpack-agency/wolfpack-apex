@@ -52,10 +52,43 @@ async function provisionOrLoadByEmail(
   if (domain !== ALLOWED_SIGNIN_DOMAIN) {
     return { denied: "domain_not_allowed" };
   }
-  /* Idempotent upsert — match on email; create with role=ops + null
-     password_hash if missing. Existing seeded rows (CEO, etc.) keep
-     their roles + names because we don't OVERWRITE on conflict. */
-  const upsert = await query<{
+  /* SELECT-then-update-or-insert. Robust against the UNIQUE index
+     shape: migration 128 created the constraint on LOWER(email)
+     (expression index), but ON CONFLICT (email) only matches a
+     constraint on the bare column. Going through SELECT first
+     avoids the mismatch entirely + preserves seeded roles
+     (we don't OVERWRITE role on update). */
+  const existing = await query<{
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+  }>(
+    `SELECT id, email, name, role
+       FROM instinct_team_members
+      WHERE LOWER(email) = $1 AND is_active = TRUE
+      LIMIT 1`,
+    [lowered],
+  );
+  if (existing.rows.length > 0) {
+    const row = existing.rows[0];
+    /* Refresh name if the OAuth profile gives us a non-empty value
+       and the stored name is empty. Don't overwrite a curated name
+       (e.g. seeded leadership). */
+    if (
+      displayName &&
+      displayName.trim() &&
+      (!row.name || row.name.trim() === row.email)
+    ) {
+      await query(
+        `UPDATE instinct_team_members SET name = $2 WHERE id = $1`,
+        [row.id, displayName],
+      );
+      row.name = displayName;
+    }
+    return row;
+  }
+  const inserted = await query<{
     id: string;
     email: string;
     name: string;
@@ -63,13 +96,10 @@ async function provisionOrLoadByEmail(
   }>(
     `INSERT INTO instinct_team_members (id, email, name, role, password_hash, is_active, created_at)
      VALUES (gen_random_uuid(), $1, COALESCE(NULLIF($2, ''), $1), 'ops', NULL, TRUE, NOW())
-     ON CONFLICT (email) DO UPDATE
-       SET name = COALESCE(NULLIF(EXCLUDED.name, ''), instinct_team_members.name),
-           is_active = TRUE
      RETURNING id, email, name, role`,
     [lowered, displayName ?? ""],
   );
-  return upsert.rows[0];
+  return inserted.rows[0];
 }
 
 /**
