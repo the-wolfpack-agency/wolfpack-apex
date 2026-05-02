@@ -764,6 +764,59 @@ function MeView({ data }: { data: MeResponse | null }) {
 /* Team view (leadership only)                                         */
 /* ------------------------------------------------------------------ */
 
+interface TeamCoverageResponse {
+  connected: number;
+  total: number;
+  unconnected: Array<{ id: string; email: string; name: string }>;
+}
+
+function TeamCoverageBanner() {
+  const [coverage, setCoverage] = useState<TeamCoverageResponse | null>(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetchWithRefresh("/api/principles/team-coverage");
+        if (!res.ok) return;
+        setCoverage((await res.json()) as TeamCoverageResponse);
+      } catch {
+        /* silent — banner is optional context */
+      }
+    })();
+  }, []);
+  if (!coverage || coverage.total === 0) return null;
+  const allConnected = coverage.unconnected.length === 0;
+  const names = coverage.unconnected.map((u) => u.name).slice(0, 5).join(", ");
+  return (
+    <div
+      data-testid="principles-team-coverage"
+      className="rounded p-3 text-xs"
+      style={{
+        background: allConnected
+          ? "rgba(34, 197, 94, 0.10)"
+          : "rgba(234, 179, 8, 0.10)",
+        color: allConnected ? "var(--wp-success)" : "var(--wp-warning)",
+        border: `1px solid ${allConnected ? "var(--wp-success)" : "var(--wp-warning)"}`,
+      }}
+    >
+      <strong>
+        {coverage.connected} of {coverage.total} team members connected
+      </strong>
+      {!allConnected && (
+        <span style={{ color: "var(--wp-text-muted)", marginLeft: 8 }}>
+          — not yet: {names}
+          {coverage.unconnected.length > 5 ? "…" : ""}
+        </span>
+      )}
+      {!allConnected && (
+        <div className="mt-1" style={{ color: "var(--wp-text-muted)" }}>
+          Per-member rows below only cover connected members. Team-wide rows
+          (KRs, PRs) cover everyone regardless.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TeamView({
   data,
   userId,
@@ -774,6 +827,7 @@ function TeamView({
   if (!data) {
     return (
       <div data-testid="principles-team-empty" style={{ color: "var(--wp-text-muted)" }}>
+        <TeamCoverageBanner />
         Team data unavailable.
       </div>
     );
@@ -802,6 +856,7 @@ function TeamView({
 
   return (
     <div data-testid="principles-team-view" className="space-y-4">
+      <TeamCoverageBanner />
       <div
         className="rounded p-3 text-xs"
         style={{

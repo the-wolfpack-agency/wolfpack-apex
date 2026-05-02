@@ -1,7 +1,21 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const mockGetValidToken = jest.fn();
+/* The evaluator now goes through getReadTokenForUser (which falls
+   back to delegated when app-only is off — today's behaviour). The
+   mock returns a delegated-shaped ReadToken so existing tests stay
+   valid. We re-export graphPathForReadToken from the real module since
+   it's pure and doesn't hit the network. */
+const { graphPathForReadToken: realGraphPath } = jest.requireActual(
+  "@/lib/microsoft-graph",
+);
 jest.mock("@/lib/microsoft-graph", () => ({
   getValidToken: (...a: any[]) => mockGetValidToken(...a),
+  getReadTokenForUser: async (userId: string) => {
+    const t = await mockGetValidToken(userId);
+    if (!t) return null;
+    return { accessToken: t.accessToken, isAppOnly: false, userPath: null };
+  },
+  graphPathForReadToken: (...a: any[]) => realGraphPath(...a),
 }));
 
 import {

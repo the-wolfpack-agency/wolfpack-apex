@@ -297,6 +297,187 @@ export function verifyState(state: string | null): string | null {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* App-only (client-credentials) auth — read-side signal mining       */
+/*                                                                     */
+/* Delegated tokens (per-user OAuth) are required for "act as user"   */
+/* writes (sending mail, drafting replies). For READ-ONLY signal      */
+/* mining (the principles validators that count meetings, after-hours */
+/* sends, overdue tasks) we can use the app-only / client-credentials */
+/* flow instead — admin consents once, app reads any user's data via  */
+/* /users/{id}/{path} endpoints.                                       */
+/*                                                                     */
+/* Behaviour is feature-flagged via INSTINCT_GRAPH_APP_ONLY:           */
+/*   - "true"  → validators try app-only first, fall back to delegated*/
+/*   - unset/false → delegated only (today's behaviour)                */
+/*                                                                     */
+/* This keeps the door open: the helpers ship now, validators opt in  */
+/* once tenant admin consent for application permissions is granted   */
+/* in Azure (Mail.Read, Calendars.Read, Tasks.Read.All,                */
+/* MailboxSettings.Read, User.Read.All).                               */
+/* ------------------------------------------------------------------ */
+
+interface AppToken {
+  accessToken: string;
+  expiresAt: number;
+}
+let cachedAppToken: AppToken | null = null;
+
+export function _resetAppTokenCacheForTests(): void {
+  cachedAppToken = null;
+}
+
+/**
+ * Acquire (or return cached) an app-only Graph access token via the
+ * client-credentials flow. Returns null when MS env vars are missing
+ * or the tenant admin hasn't granted application-permission consent
+ * yet — callers must treat null as "fall back to delegated".
+ */
+export async function getAppOnlyToken(): Promise<string | null> {
+  if (cachedAppToken && cachedAppToken.expiresAt > Date.now() + 60_000) {
+    return cachedAppToken.accessToken;
+  }
+  const creds = await getMsClientCreds();
+  if (!creds) return null;
+  /* Tenant must be a real GUID — "common" doesn't accept client-
+     credentials. Bail gracefully if it's missing. */
+  const tenantId = process.env.MS_TENANT_ID;
+  if (!tenantId || tenantId === "common") return null;
+  try {
+    const res = await fetch(
+      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: creds.clientId,
+          client_secret: creds.clientSecret,
+          /* App-only tokens always request /.default — Azure issues
+             a token containing every APPLICATION permission already
+             granted via admin consent. We can't request individual
+             scopes here. */
+          scope: "https://graph.microsoft.com/.default",
+          grant_type: "client_credentials",
+        }).toString(),
+      },
+    );
+    if (!res.ok) {
+      /* 401 / 403 typically means application-permission consent
+         hasn't been granted in Azure yet. Don't spam logs — return
+         null so the caller's delegated fallback runs. */
+      return null;
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      access_token?: string;
+      expires_in?: number;
+    };
+    if (!data.access_token) return null;
+    const ttlSec = typeof data.expires_in === "number" ? data.expires_in : 3000;
+    cachedAppToken = {
+      accessToken: data.access_token,
+      expiresAt: Date.now() + ttlSec * 1000,
+    };
+    return cachedAppToken.accessToken;
+  } catch {
+    return null;
+  }
+}
+
+export interface ReadToken {
+  accessToken: string;
+  /* When the token came from app-only, callers should request
+     /users/{userPath}/... instead of /me/... (`me` doesn't resolve
+     under client-credentials). userPath is the email address —
+     Graph accepts emails as user-id segments for tenant accounts. */
+  isAppOnly: boolean;
+  userPath: string | null;
+}
+
+function isAppOnlyEnabled(): boolean {
+  const v = (process.env.INSTINCT_GRAPH_APP_ONLY || "").toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+/**
+ * Get the right Graph token for reading data ABOUT `userId`. When the
+ * app-only flag is on AND we can mint an app-only token AND we know
+ * the user's email, we return the app-only token + user path. Otherwise
+ * we fall back to the user's delegated token (existing behaviour).
+ *
+ * Returns null when neither path is viable (no delegated token AND
+ * app-only unavailable) — caller should treat as "skip this user".
+ */
+export async function getReadTokenForUser(
+  userId: string,
+): Promise<ReadToken | null> {
+  if (isAppOnlyEnabled()) {
+    const appToken = await getAppOnlyToken();
+    if (appToken) {
+      const email = await lookupUserEmail(userId);
+      if (email) {
+        return {
+          accessToken: appToken,
+          isAppOnly: true,
+          userPath: email,
+        };
+      }
+    }
+  }
+  /* Delegated fallback (today's path). */
+  const delegated = await getValidToken(userId);
+  if (!delegated) return null;
+  return {
+    accessToken: delegated.accessToken,
+    isAppOnly: false,
+    userPath: null,
+  };
+}
+
+/**
+ * Resolve a userId to its canonical @thewolfpack.agency email so the
+ * app-only Graph caller can address `/users/{email}/...`. Tries the
+ * authoritative team-member table first, falls back to the existing
+ * MS-token cache for users not yet seeded. Returns null when neither
+ * has a row (shouldn't happen post-migration-125 for any signed-in
+ * user).
+ */
+async function lookupUserEmail(userId: string): Promise<string | null> {
+  try {
+    const r = await safeQuery<{ email: string | null }>(
+      `SELECT email FROM instinct_team_members WHERE id = $1 LIMIT 1`,
+      [userId],
+    );
+    if (r.rows[0]?.email) return r.rows[0].email;
+  } catch {
+    /* fall through */
+  }
+  try {
+    const r = await safeQuery<{ user_email: string | null }>(
+      `SELECT user_email FROM instinct_ms_tokens
+        WHERE connected_by = $1
+        ORDER BY connected_at DESC LIMIT 1`,
+      [userId],
+    );
+    if (r.rows[0]?.user_email) return r.rows[0].user_email;
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
+
+/**
+ * Build the Graph path prefix for the resolved read token. When
+ * app-only, every path is rooted at /users/{email}/... When delegated,
+ * /me/... continues to work.
+ */
+export function graphPathForReadToken(token: ReadToken, suffix: string): string {
+  const trimmed = suffix.replace(/^\/+/, "");
+  if (token.isAppOnly && token.userPath) {
+    return `/users/${encodeURIComponent(token.userPath)}/${trimmed}`;
+  }
+  return `/me/${trimmed}`;
+}
+
 /**
  * Generate the Microsoft OAuth2 authorization URL for the SIGN-IN flow
  * (no existing Instinct session). The state encodes a `signin:` prefix

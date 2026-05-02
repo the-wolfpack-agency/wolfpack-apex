@@ -11,7 +11,7 @@
  * so the cron iteration stays healthy.
  */
 
-import { getValidToken } from "@/lib/microsoft-graph";
+import { getReadTokenForUser, graphPathForReadToken } from "@/lib/microsoft-graph";
 import {
   localHourInTz as sharedLocalHourInTz,
   ORG_TZ,
@@ -61,18 +61,18 @@ export function isAfterHours(
 }
 
 async function fetchMailboxTimeZone(
-  userId: string,
-  accessToken: string,
+  token: { accessToken: string; isAppOnly: boolean; userPath: string | null },
 ): Promise<string> {
   try {
-    const res = await fetch(`${GRAPH_BASE}/me/mailboxSettings`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+    const path = graphPathForReadToken(
+      { accessToken: token.accessToken, isAppOnly: token.isAppOnly, userPath: token.userPath },
+      "mailboxSettings",
+    );
+    const res = await fetch(`${GRAPH_BASE}${path}`, {
+      headers: { Authorization: `Bearer ${token.accessToken}` },
     });
     if (!res.ok) return ORG_TZ;
     const data = (await res.json().catch(() => ({}))) as MailboxSettings;
-    /* Prefer Graph's explicit working-hours tz, then mailbox tz, then
-       the org default (Dallas). Falling back to UTC was misclassifying
-       Dallas-evening sends as in-window. */
     return (
       data.workingHours?.timeZone?.name ||
       data.timeZone ||
@@ -84,20 +84,22 @@ async function fetchMailboxTimeZone(
 }
 
 async function fetchSentSince(
-  accessToken: string,
+  token: { accessToken: string; isAppOnly: boolean; userPath: string | null },
   windowStartISO: string,
 ): Promise<{ rows: RawSentMessage[]; status: number }> {
-  /* `$filter sentDateTime ge ...` is the Graph idiom for "since X". */
   const filter = `sentDateTime ge ${windowStartISO}`;
   const select = "id,sentDateTime,subject,webLink";
+  const basePath = graphPathForReadToken(
+    { accessToken: token.accessToken, isAppOnly: token.isAppOnly, userPath: token.userPath },
+    "mailFolders/sentitems/messages",
+  );
   const path =
-    `me/mailFolders/sentitems/messages` +
-    `?$top=200` +
+    `${basePath}?$top=200` +
     `&$select=${encodeURIComponent(select)}` +
     `&$filter=${encodeURIComponent(filter)}` +
     `&$orderby=sentDateTime desc`;
-  const res = await fetch(`${GRAPH_BASE}/${path}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+  const res = await fetch(`${GRAPH_BASE}${path}`, {
+    headers: { Authorization: `Bearer ${token.accessToken}` },
   });
   if (!res.ok) return { rows: [], status: res.status };
   const data = (await res.json().catch(() => ({}))) as {
@@ -118,19 +120,23 @@ export async function evaluateMailAfterHours(
 ): Promise<Observation[]> {
   const userId = ctx.subjectUserId;
   if (!userId) return [];
-  const token = await getValidToken(userId);
+  /* getReadTokenForUser tries app-only first when
+     INSTINCT_GRAPH_APP_ONLY=true (and admin consent has been granted),
+     falls back to per-user delegated tokens. Either way the returned
+     ReadToken carries everything fetchSentSince needs. */
+  const token = await getReadTokenForUser(userId);
   if (!token) return [];
 
   let tz: string;
   try {
-    tz = await fetchMailboxTimeZone(userId, token.accessToken);
+    tz = await fetchMailboxTimeZone(token);
   } catch {
     tz = ORG_TZ;
   }
 
   let result: { rows: RawSentMessage[]; status: number };
   try {
-    result = await fetchSentSince(token.accessToken, ctx.windowStart);
+    result = await fetchSentSince(token, ctx.windowStart);
   } catch {
     return [];
   }
