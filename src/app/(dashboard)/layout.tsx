@@ -101,26 +101,35 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     (async () => {
       let token = getInstinctToken();
       let parsed = getInstinctUser<User>();
-      /* Microsoft sign-in path: the callback set the access-token
-         HttpOnly cookie but didn't write to localStorage. Hydrate from
-         the cookie via /api/auth/whoami so client-side fetchWithRefresh
-         calls carry the Bearer header. The check is cookie-aware (the
-         browser sends instinct_auth automatically) so this only fires
-         when there's a valid session AND localStorage is empty. */
-      if (!token || !parsed) {
-        try {
-          const res = await fetch("/api/auth/whoami", { credentials: "include" });
-          if (res.ok) {
-            const data = (await res.json()) as { token: string; user: unknown };
-            if (data?.token && data?.user) {
+      /* Always call /api/auth/whoami on mount. Two responsibilities:
+         - Microsoft sign-in flow: when localStorage is empty but the
+           HttpOnly cookie is set, hydrate the client-side session.
+         - Stale-id self-heal: if a prior migration deduplicated team
+           members and reissued ids, /whoami re-mints the JWT under
+           the canonical id and we replace the localStorage entries.
+           Otherwise observations queries return empty (subject_user_id
+           mismatch) until manual sign-out + sign-in. */
+      try {
+        const res = await fetch("/api/auth/whoami", {
+          credentials: "include",
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { token: string; user: User };
+          if (data?.token && data?.user) {
+            const stale =
+              !parsed ||
+              !token ||
+              parsed.id !== data.user.id ||
+              token !== data.token;
+            if (stale) {
               setInstinctSession(data.token, data.user);
               token = data.token;
-              parsed = data.user as User;
+              parsed = data.user;
             }
           }
-        } catch {
-          /* fall through to login redirect */
         }
+      } catch {
+        /* Network blip — fall through to whatever localStorage has. */
       }
       if (cancelled) return;
       if (!token || !parsed) {
