@@ -199,6 +199,22 @@ export async function syncPrinciplesFromParsed(args: {
     );
   }
   const { parsed, sourceUrl, sourceDocHash } = args;
+  /* Data-integrity guard. The sync algorithm retires every active
+     principle whose slug isn't in the parsed set. An empty parsed set
+     (caused by a stale/missing/inaccessible SharePoint URL, a parser
+     failure that returned [], or any other "couldn't read input"
+     condition) used to silently retire EVERY active principle. That
+     was the cause of the 2026-05-02 mass-retirement incident.
+     Refuse mass-retirement when the parsed set is empty — caller
+     should treat this as a parse failure, not a "retire everything"
+     signal. The error type lets the cron route distinguish this from
+     a write/DB error and surface a clear analytics event. */
+  if (parsed.length === 0) {
+    throw new WriteQueryError(
+      "syncPrinciplesFromParsed refused empty parsed set — would mass-retire every active principle. Check the SharePoint URL / parser before retrying.",
+      "empty_parsed_set",
+    );
+  }
   const inserted: PrincipleRecord[] = [];
   const unchanged: PrincipleRecord[] = [];
   const retired: PrincipleRecord[] = [];

@@ -112,6 +112,19 @@ describe("syncPrinciplesFromParsed", () => {
     ).rejects.toThrow(/DATABASE_URL/);
   });
 
+  test("REFUSES empty parsed set — would mass-retire every active principle (2026-05-02 incident guard)", async () => {
+    process.env.DATABASE_URL = "postgresql://x";
+    /* The check fires BEFORE any DB call, so no client mock setup is
+       needed; the function must throw with code 'empty_parsed_set'. */
+    await expect(
+      syncPrinciplesFromParsed({
+        parsed: [],
+        sourceUrl: "sp://doc",
+        sourceDocHash: "h1",
+      }),
+    ).rejects.toThrow(/refused empty parsed set/i);
+  });
+
   test("inserts new principle when slug doesn't exist; signals fan out", async () => {
     /* Step 1: BEGIN. Step 2: load active. Step 3: insert principle. Step 4: insert signal. Step 5: COMMIT. */
     mockClientQuery
@@ -169,21 +182,26 @@ describe("syncPrinciplesFromParsed", () => {
     expect(out.inserted.map((p) => p.id)).toEqual(["p2"]);
   });
 
-  test("retires principles whose slug disappeared from the doc", async () => {
+  test("retires principles whose slug disappeared from the doc (when other principles still parsed)", async () => {
+    /* The mass-retirement guard refuses parsed=[]; legitimate
+       per-slug retirements still work when at least one principle
+       remains in the parsed input. */
     mockClientQuery
       .mockResolvedValueOnce(undefined as any) // BEGIN
       .mockResolvedValueOnce({ rows: [principleRow({ slug: "abandoned" })] }) // active
-      .mockResolvedValueOnce(undefined as any) // UPDATE retired_at
+      .mockResolvedValueOnce({ rows: [principleRow({ id: "p-new", slug: "kept" })] }) // INSERT new principle "kept"
+      .mockResolvedValueOnce(undefined as any) // INSERT signal for "kept"
+      .mockResolvedValueOnce(undefined as any) // UPDATE retired_at on "abandoned"
       .mockResolvedValueOnce(undefined as any); // COMMIT
 
     const out = await syncPrinciplesFromParsed({
-      parsed: [],
+      parsed: [parsedPrinciple({ slug: "kept", title: "Kept" })],
       sourceUrl: "sp://doc",
-      sourceDocHash: "anything",
+      sourceDocHash: "h-new",
     });
     expect(out.retired).toHaveLength(1);
     expect(out.retired[0].slug).toBe("abandoned");
-    expect(out.inserted).toEqual([]);
+    expect(out.inserted).toHaveLength(1);
   });
 
   test("rolls back transaction when an INSERT fails", async () => {
