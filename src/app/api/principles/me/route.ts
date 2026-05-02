@@ -30,7 +30,14 @@ export async function GET(req: NextRequest) {
     new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const [principles, observations, allObs] = await Promise.all([
     listActivePrinciples(),
-    listObservationsForSubject(user.id, { sinceISO, limit: 200 }),
+    listObservationsForSubject(user.id, {
+      sinceISO,
+      limit: 200,
+      /* Pass email so the helper unions all sibling ids (e.g. observations
+         written under a historical id during the dedup window — common
+         for sessions whose JWT predates a team-member dedup migration). */
+      email: user.email,
+    }),
     /* Pull team-wide rows (subject_user_id IS NULL) so the My-principles
        view can tell apart "nothing happened on me" from "all activity
        this week is team-wide — see the team scoreboard". */

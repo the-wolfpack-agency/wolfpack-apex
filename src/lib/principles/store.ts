@@ -538,12 +538,41 @@ export async function insertObservations(args: {
  *  for member self-views (subjectUserId === caller.id). */
 export async function listObservationsForSubject(
   subjectUserId: string,
-  opts: { sinceISO?: string; limit?: number } = {},
+  opts: { sinceISO?: string; limit?: number; email?: string } = {},
 ): Promise<ObservationRecord[]> {
   if (!subjectUserId) return [];
   const limit = Math.max(1, Math.min(opts.limit ?? 200, 500));
-  const params: unknown[] = [subjectUserId];
-  let where = "subject_user_id = $1";
+
+  /* Build the set of "ids that mean me." Includes the requesting
+     user's JWT id PLUS any other team-member rows or ms_tokens rows
+     that share the same email. Captures observations written under a
+     historical id (e.g. survivor of a dedup migration that's not the
+     same as the JWT-minted canonical id). When opts.email is omitted
+     the function falls back to the single-id query — preserving
+     today's behaviour for callers that don't pass email. */
+  const ids: string[] = [subjectUserId];
+  if (opts.email) {
+    try {
+      const sib = await safeQuery<{ id: string }>(
+        `SELECT id::text AS id FROM (
+           SELECT id FROM instinct_team_members
+            WHERE LOWER(email) = LOWER($1)
+           UNION
+           SELECT connected_by AS id FROM instinct_ms_tokens
+            WHERE LOWER(user_email) = LOWER($1) AND connected_by IS NOT NULL
+         ) AS sibling_ids`,
+        [opts.email],
+      );
+      for (const row of sib.rows) {
+        if (row.id && !ids.includes(row.id)) ids.push(row.id);
+      }
+    } catch {
+      /* schema/db hiccup — fall through to single-id mode */
+    }
+  }
+
+  const params: unknown[] = [ids];
+  let where = "subject_user_id = ANY($1::text[])";
   if (opts.sinceISO) {
     params.push(opts.sinceISO);
     where += ` AND observed_at >= $${params.length}`;
