@@ -97,7 +97,15 @@ export async function safeQuery<T = Record<string, unknown>>(
  * Distinct from pg errors so API routes can catch and surface cleanly.
  */
 export class WriteQueryError extends Error {
-  readonly code: "no_database" | "db_error" | "unexpected_row_count";
+  readonly code:
+    | "no_database"
+    | "db_error"
+    | "unexpected_row_count"
+    /* Used by syncPrinciplesFromParsed to refuse mass-retirement when
+       the parsed input is empty. Distinct from db_error so callers can
+       surface the right "parser failure" diagnostic instead of a
+       generic write error. */
+    | "empty_parsed_set";
   readonly expected?: number;
   readonly actual?: number;
   constructor(
