@@ -28,6 +28,15 @@ BEGIN
   END IF;
 END $$;
 
+-- Relax password_hash to nullable so MS-sign-in primary accounts
+-- (no password set) can land in the table. Pre-existing rows are
+-- unaffected — relaxing NOT NULL is a metadata-only change with no
+-- data movement. Migration 001 set this NOT NULL when password was
+-- the only auth method; the unified Microsoft sign-in flow shipped
+-- in this release makes that assumption obsolete.
+ALTER TABLE instinct_team_members
+  ALTER COLUMN password_hash DROP NOT NULL;
+
 INSERT INTO instinct_team_members (id, email, name, role, password_hash, is_active, created_at)
 VALUES
   (gen_random_uuid(), 'nick@thewolfpack.agency',     'Nick Hoxsie',    'ceo',   NULL, TRUE, NOW()),
