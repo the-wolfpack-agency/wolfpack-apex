@@ -297,7 +297,8 @@ export default function PrinciplesPage() {
             style={{ color: "var(--wp-text-muted)" }}
           >
             Wolfpack operating principles. Suggestions and patterns to help you do
-            your best work — synced from the canonical SharePoint doc.
+            your best work. Edited directly in Instinct; every change is versioned
+            in the audit log.
           </p>
         </div>
         <button
