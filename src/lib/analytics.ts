@@ -439,6 +439,14 @@ export type InstinctEventType =
   // Weekly auto-report cron.
   | "principle.weekly_report_published"
   | "principle.weekly_report_failed"
+  // SharePoint write-back leg of the weekly cron — generates the .docx
+  // and PUTs it into the same folder as the source principles doc.
+  // _uploaded fires on a successful Graph 200/201; _upload_failed on
+  // any error surface; _upload_skipped when config/connection/scope
+  // make the write impossible (no nag, just visibility for learning).
+  | "principle.weekly_report_uploaded"
+  | "principle.weekly_report_upload_failed"
+  | "principle.weekly_report_upload_skipped"
   // Self-service config (instinct_principles_config) — leadership
   // edits the SharePoint doc URL via UI instead of env vars.
   | "principle.config_updated"

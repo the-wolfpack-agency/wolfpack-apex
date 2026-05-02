@@ -19,6 +19,8 @@ import {
   buildWeeklyReportMarkdown,
   upsertWeeklyReport,
 } from "@/lib/principles/weekly-report";
+import { resolvePrinciplesConfig } from "@/lib/principles/config";
+import { writeWeeklyReportToSharePoint } from "@/lib/principles/sharepoint-write";
 
 function requireCron(req: NextRequest): boolean {
   const expected = process.env.CRON_SECRET;
@@ -79,11 +81,58 @@ export async function GET(req: NextRequest) {
     principle_count: saved.principleCount,
   });
 
+  /* SharePoint write-back leg. Best-effort: persisted markdown row is
+     the canonical artifact (the in-app /principles banner reads from
+     it). The .docx in SharePoint is the leadership-facing convenience
+     copy — failure here MUST NOT roll back the markdown publish, so
+     the response below still reports the upsert outcome verbatim and
+     the Graph result rides alongside.
+
+     Skipped vs failed analytics events let the learning loop tell the
+     two cases apart:
+       - skipped: config gap or scope gap (no nag, recoverable in UI)
+       - failed:  Graph 5xx / network / docx build error (retry next run) */
+  const config = await resolvePrinciplesConfig();
+  const sharepoint = await writeWeeklyReportToSharePoint({
+    report: saved,
+    config: {
+      docUrl: config?.docUrl ?? null,
+      ownerUserId: config?.ownerUserId ?? null,
+    },
+  });
+
+  if (sharepoint.ok) {
+    trackEvent("principle.weekly_report_uploaded", "system", "system", {
+      week_start: saved.weekStart,
+      byte_count: sharepoint.byteCount,
+      web_url: sharepoint.webUrl ?? "",
+      item_id: sharepoint.itemId,
+    });
+  } else if (sharepoint.status === "skipped") {
+    trackEvent("principle.weekly_report_upload_skipped", "system", "system", {
+      week_start: saved.weekStart,
+      reason: sharepoint.reasonCode,
+    });
+  } else {
+    trackEvent("principle.weekly_report_upload_failed", "system", "system", {
+      week_start: saved.weekStart,
+      reason: sharepoint.reasonCode,
+      error: sharepoint.message,
+    });
+  }
+
   return NextResponse.json({
     ok: true,
     weekStart: saved.weekStart,
     weekEnd: saved.weekEnd,
     observationCount: saved.observationCount,
     principleCount: saved.principleCount,
+    sharepoint: sharepoint.ok
+      ? {
+          status: "uploaded",
+          webUrl: sharepoint.webUrl,
+          byteCount: sharepoint.byteCount,
+        }
+      : { status: sharepoint.status, reason: sharepoint.reasonCode },
   });
 }
