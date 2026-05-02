@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
     listAllObservations({ sinceISO, limit: 500 }),
   ]);
   const teamWideCountByPrinciple = new Map<string, number>();
-  for (const o of allObs) {
+  for (const o of allObs ?? []) {
     if (o.subjectUserId !== null) continue;
     teamWideCountByPrinciple.set(
       o.principleId,

@@ -1,15 +1,60 @@
 "use client";
 
-import { useState, FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useState, FormEvent, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { setInstinctSession, authHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [msLoading, setMsLoading] = useState(false);
+
+  /* Surface a banner when the MS sign-in callback redirected back here
+     with a denial / error (domain not allowed, profile fetch failed,
+     etc.). The query param is cleared so a refresh doesn't re-show. */
+  useEffect(() => {
+    const ms = searchParams?.get("ms_signin");
+    if (!ms) return;
+    const detail = searchParams?.get("detail") ?? "";
+    if (ms === "denied" && detail === "domain_not_allowed") {
+      setError(
+        "That Microsoft account isn't on the @thewolfpack.agency domain. Use your work email.",
+      );
+    } else if (ms === "error") {
+      setError(
+        `Microsoft sign-in failed${detail ? `: ${detail}` : ""}. Try again or use the password form.`,
+      );
+    }
+  }, [searchParams]);
+
+  async function handleMicrosoftSignIn() {
+    setError("");
+    setMsLoading(true);
+    try {
+      const res = await fetch("/api/auth/microsoft-start");
+      if (!res.ok) {
+        setError(
+          "Microsoft sign-in is unavailable right now. Use the password form.",
+        );
+        setMsLoading(false);
+        return;
+      }
+      const { authUrl } = (await res.json()) as { authUrl?: string };
+      if (!authUrl) {
+        setError("Microsoft sign-in is misconfigured. Use the password form.");
+        setMsLoading(false);
+        return;
+      }
+      window.location.assign(authUrl);
+    } catch {
+      setError("Network error. Try the password form.");
+      setMsLoading(false);
+    }
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -74,6 +119,34 @@ export default function LoginPage() {
           <p className="text-sm mt-1" style={{ color: "var(--wp-text-dim)" }}>
             Team Intelligence Platform
           </p>
+        </div>
+
+        <button
+          type="button"
+          data-testid="microsoft-signin-button"
+          onClick={() => void handleMicrosoftSignIn()}
+          disabled={msLoading || loading}
+          className="w-full rounded-lg py-2.5 text-sm font-semibold transition-colors disabled:opacity-50 mb-4 flex items-center justify-center gap-2"
+          style={{
+            background: "var(--wp-dark-surface2)",
+            color: "var(--wp-text)",
+            border: "1px solid var(--wp-gold)",
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 23 23" aria-hidden>
+            <rect x="0" y="0" width="11" height="11" fill="#f25022" />
+            <rect x="12" y="0" width="11" height="11" fill="#7fba00" />
+            <rect x="0" y="12" width="11" height="11" fill="#00a4ef" />
+            <rect x="12" y="12" width="11" height="11" fill="#ffb900" />
+          </svg>
+          {msLoading ? "Redirecting…" : "Sign in with Microsoft"}
+        </button>
+
+        <div
+          className="text-xs text-center mb-4"
+          style={{ color: "var(--wp-text-muted)" }}
+        >
+          or use email + password
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">

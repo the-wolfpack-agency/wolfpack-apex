@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromRequest } from "@/lib/auth";
+import { getUserFromRequest, createToken } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
+import { query } from "@/lib/db";
+import { issueRefreshToken } from "@/lib/crypto/refresh-tokens";
+import {
+  setAuthCookie,
+  ACCESS_TOKEN_COOKIE,
+  REFRESH_TOKEN_COOKIE,
+  ACCESS_TOKEN_TTL,
+  REFRESH_TOKEN_TTL_SECONDS,
+} from "@/lib/crypto/cookies";
 import {
   exchangeCode,
   storeTokens,
@@ -8,6 +17,60 @@ import {
   clearCache,
   verifyState,
 } from "@/lib/microsoft-graph";
+
+const ALLOWED_SIGNIN_DOMAIN = (
+  process.env.INSTINCT_SIGNIN_DOMAIN || "thewolfpack.agency"
+).toLowerCase();
+
+interface ProvisionedUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+}
+
+/**
+ * Provision-or-load an Instinct team member by email. Used by the
+ * Microsoft sign-in flow — first-time MS sign-in for a member with no
+ * existing row creates the row; existing rows are matched by email.
+ *
+ * Domain-gated: only INSTINCT_SIGNIN_DOMAIN (default thewolfpack.agency)
+ * addresses can sign in this way. Anyone else sees a generic "domain
+ * not allowed" error.
+ *
+ * Default role is "ops" — the catch-all for non-leadership team
+ * members. Leadership rows seeded via migration 125 with their actual
+ * roles ("ceo" for Hoxsie) are preserved by the email-keyed match.
+ */
+async function provisionOrLoadByEmail(
+  email: string,
+  displayName: string | null,
+): Promise<ProvisionedUser | { denied: "domain_not_allowed" }> {
+  const lowered = email.toLowerCase();
+  const at = lowered.lastIndexOf("@");
+  const domain = at < 0 ? "" : lowered.slice(at + 1);
+  if (domain !== ALLOWED_SIGNIN_DOMAIN) {
+    return { denied: "domain_not_allowed" };
+  }
+  /* Idempotent upsert — match on email; create with role=ops + null
+     password_hash if missing. Existing seeded rows (CEO, etc.) keep
+     their roles + names because we don't OVERWRITE on conflict. */
+  const upsert = await query<{
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+  }>(
+    `INSERT INTO instinct_team_members (id, email, name, role, password_hash, is_active, created_at)
+     VALUES (gen_random_uuid(), $1, COALESCE(NULLIF($2, ''), $1), 'ops', NULL, TRUE, NOW())
+     ON CONFLICT (email) DO UPDATE
+       SET name = COALESCE(NULLIF(EXCLUDED.name, ''), instinct_team_members.name),
+           is_active = TRUE
+     RETURNING id, email, name, role`,
+    [lowered, displayName ?? ""],
+  );
+  return upsert.rows[0];
+}
 
 /**
  * GET /api/microsoft/callback?code=...&state=...
@@ -50,26 +113,30 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // Recover the instinct user from the signed state parameter. We do NOT
-  // trust the session cookie alone — cross-site OAuth redirects often
-  // drop SameSite cookies. The signed state is the authoritative source.
-  // If state is missing, forged, or doesn't match the (optional) session
-  // user, refuse to write anything.
-  const stateUserId = verifyState(state);
-  if (!stateUserId) {
+  // Recover the state. Two flows share this callback:
+  //   1) `signin:<nonce>` — public sign-in flow, no existing session.
+  //      We will provision/load the user by email AFTER token exchange.
+  //   2) `<userId>`        — existing-session connect flow.
+  // Both share the same HMAC-signed envelope.
+  const verified = verifyState(state);
+  if (!verified) {
     const redirectUrl = new URL("/", req.url);
     redirectUrl.searchParams.set("ms", "error");
     redirectUrl.searchParams.set("detail", "Invalid OAuth state");
     return NextResponse.redirect(redirectUrl);
   }
-  if (user && user.id !== stateUserId) {
+  const isSigninFlow = verified.startsWith("signin:");
+  if (!isSigninFlow && user && user.id !== verified) {
     // Session user disagrees with state — possible CSRF / link sharing.
     const redirectUrl = new URL("/", req.url);
     redirectUrl.searchParams.set("ms", "error");
     redirectUrl.searchParams.set("detail", "OAuth state mismatch");
     return NextResponse.redirect(redirectUrl);
   }
-  const userId = stateUserId;
+  // For the connect flow this is the Instinct user id directly.
+  // For the signin flow we resolve the user AFTER fetching the OAuth
+  // profile, using a temporary "pending" id for the initial token store.
+  const userId = isSigninFlow ? `pending:${verified}` : verified;
 
   // Exchange code for tokens
   const tokens = await exchangeCode(code);
@@ -106,9 +173,76 @@ export async function GET(req: NextRequest) {
     user_email: userEmail || "unknown",
     display_name: displayName || "unknown",
     module: "microsoft-graph",
+    flow: isSigninFlow ? "signin" : "connect",
   });
 
-  // Honor returnTo if it's a safe same-origin path
+  // SIGN-IN FLOW: now that we have the verified email, provision/load
+  // the team member, RE-STORE the tokens under the real user id, mint
+  // an Instinct JWT, set the auth cookies, and redirect to /.
+  if (isSigninFlow) {
+    if (!userEmail) {
+      const redirectUrl = new URL("/login", req.url);
+      redirectUrl.searchParams.set("ms_signin", "error");
+      redirectUrl.searchParams.set("detail", "no_profile_email");
+      return NextResponse.redirect(redirectUrl);
+    }
+    const provisioned = await provisionOrLoadByEmail(
+      userEmail,
+      displayName ?? null,
+    );
+    if ("denied" in provisioned) {
+      trackEvent("system.microsoft_signin_denied", "anonymous", "anonymous", {
+        reason: provisioned.denied,
+        email_domain: userEmail.split("@")[1] ?? "unknown",
+      });
+      const redirectUrl = new URL("/login", req.url);
+      redirectUrl.searchParams.set("ms_signin", "denied");
+      redirectUrl.searchParams.set("detail", "domain_not_allowed");
+      return NextResponse.redirect(redirectUrl);
+    }
+    /* Re-store tokens under the resolved user id so getValidToken
+       lookups by canonical user id work going forward. */
+    await storeTokens(tokens, provisioned.id, userEmail, displayName);
+    clearCache(provisioned.id);
+    /* Mint Instinct JWT + refresh token, mirroring /api/auth/login. */
+    const member = {
+      id: provisioned.id,
+      email: provisioned.email,
+      name: provisioned.name,
+      role: provisioned.role as Parameters<typeof createToken>[0]["role"],
+      created_at: "",
+    };
+    const accessToken = createToken(member);
+    const refreshToken = await issueRefreshToken({
+      userId: provisioned.id,
+      ipAddress:
+        req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
+      userAgent: req.headers.get("user-agent"),
+    });
+    trackEvent("system.login", provisioned.id, provisioned.role, {
+      method: "microsoft_signin",
+    });
+    const redirectUrl = new URL("/", req.url);
+    redirectUrl.searchParams.set("ms", "connected");
+    if (displayName) redirectUrl.searchParams.set("account", displayName);
+    const res = NextResponse.redirect(redirectUrl);
+    setAuthCookie(
+      res,
+      ACCESS_TOKEN_COOKIE,
+      accessToken,
+      ACCESS_TOKEN_TTL,
+    );
+    setAuthCookie(
+      res,
+      REFRESH_TOKEN_COOKIE,
+      refreshToken,
+      REFRESH_TOKEN_TTL_SECONDS,
+    );
+    return res;
+  }
+
+  // CONNECT FLOW (existing behaviour): just redirect back to the page
+  // they came from with the ms=connected banner.
   const rawReturnTo = url.searchParams.get("returnTo");
   const safePath =
     rawReturnTo &&

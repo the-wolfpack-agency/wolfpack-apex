@@ -298,6 +298,34 @@ export function verifyState(state: string | null): string | null {
 }
 
 /**
+ * Generate the Microsoft OAuth2 authorization URL for the SIGN-IN flow
+ * (no existing Instinct session). The state encodes a `signin:` prefix
+ * + a random nonce; the callback recognises this and provisions or
+ * upserts the user record from the OAuth profile + mints an Instinct
+ * JWT — single click for both Instinct auth + Graph token grant.
+ *
+ * Domain-gating happens in the callback (only @thewolfpack.agency
+ * addresses are allowed), so this URL is safe to expose on the public
+ * /login page.
+ */
+export function getSigninAuthUrl(): string {
+  const clientId = process.env.MS_CLIENT_ID;
+  const redirectUri = process.env.MS_REDIRECT_URI;
+  if (!clientId || !redirectUri) return "";
+  const nonce = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  const params = new URLSearchParams({
+    client_id: clientId,
+    response_type: "code",
+    redirect_uri: redirectUri,
+    scope: MS_SCOPES_STRING,
+    response_mode: "query",
+    state: signState(`signin:${nonce}`),
+    prompt: "consent",
+  });
+  return `${getAuthBaseUrl()}/authorize?${params.toString()}`;
+}
+
+/**
  * Generate the Microsoft OAuth2 authorization URL for a specific user.
  * The userId is signed into the state parameter so the callback can
  * recover identity even when the session cookie is dropped on cross-site

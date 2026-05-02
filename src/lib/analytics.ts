@@ -329,6 +329,12 @@ export type InstinctEventType =
   | "clients.deleted"
   // System
   | "system.login"
+  /* Unified Microsoft sign-in flow — _started fires when the user
+     clicks "Sign in with Microsoft" on /login; _denied when the OAuth
+     profile resolves to an email outside the org domain. */
+  | "system.microsoft_signin_started"
+  | "system.microsoft_signin_denied"
+  | "system.login_rate_limited"
   | "system.page_viewed"
   | "system.ai_call_made"
   | "system.ai_call_skipped"
