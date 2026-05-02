@@ -98,8 +98,10 @@ describe("<EmailNavBadge />", () => {
     mockFetchWithRefresh.mockResolvedValue(mkRes({ count: 1 }));
     render(<EmailNavBadge />);
     await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalledTimes(1));
+    // Visible cadence is 30s after the May 2026 polling-efficiency
+    // pass (was 5s — see useAdaptivePoll defaults).
     await act(async () => {
-      jest.advanceTimersByTime(5_000);
+      jest.advanceTimersByTime(30_000);
       await Promise.resolve();
     });
     expect(mockFetchWithRefresh).toHaveBeenCalledTimes(2);

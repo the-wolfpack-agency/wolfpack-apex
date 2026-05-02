@@ -28,6 +28,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { fetchWithRefresh, getInstinctToken } from "@/lib/client-auth";
+import { coalescedFetchWithRefresh } from "@/lib/coalesced-fetch";
 import { useAdaptivePoll } from "@/lib/hooks/useAdaptivePoll";
 
 const LAST_SEEN_KEY = "instinct.messages.last_seen";
@@ -94,7 +95,9 @@ export default function TeamsUnreadBadge() {
     const qs = since ? `?since=${encodeURIComponent(since)}` : "";
 
     try {
-      const res = await fetchWithRefresh(`/api/ms/chats/unread-count${qs}`);
+      const res = await coalescedFetchWithRefresh(
+        `/api/ms/chats/unread-count${qs}`,
+      );
       if (!res.ok) {
         // 401 will already have triggered the refresh/redirect flow
         // inside fetchWithRefresh. Any other non-200 hides the badge
@@ -178,7 +181,11 @@ export default function TeamsUnreadBadge() {
 
   // Adaptive polling: 5s when tab is visible, 45s when hidden.
   // Hook owns the visibility + focus listeners.
-  useAdaptivePoll(fetchCount);
+  // 30s visible / 120s hidden / 180s idle. Idle backoff engages once
+  // the count has been stable for 5 polls; any change resets it.
+  useAdaptivePoll(fetchCount, {
+    isStable: () => lastCountRef.current === count,
+  });
 
   function handleClick(ev: React.MouseEvent<HTMLAnchorElement>) {
     ev.preventDefault();

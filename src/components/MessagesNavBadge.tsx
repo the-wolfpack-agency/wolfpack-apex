@@ -12,8 +12,9 @@
  * graceful-degradation contract as TeamsUnreadBadge.
  */
 
-import { useCallback, useRef, useState } from "react";
-import { fetchWithRefresh, getInstinctToken } from "@/lib/client-auth";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getInstinctToken } from "@/lib/client-auth";
+import { coalescedFetchWithRefresh } from "@/lib/coalesced-fetch";
 import { useAdaptivePoll } from "@/lib/hooks/useAdaptivePoll";
 
 const LAST_SEEN_KEY = "instinct.messages.last_seen";
@@ -43,7 +44,9 @@ export default function MessagesNavBadge() {
     const since = readLastSeen();
     const qs = since ? `?since=${encodeURIComponent(since)}` : "";
     try {
-      const res = await fetchWithRefresh(`/api/ms/chats/unread-count${qs}`);
+      const res = await coalescedFetchWithRefresh(
+        `/api/ms/chats/unread-count${qs}`,
+      );
       if (!res.ok) {
         setCount(0);
         return;
@@ -61,10 +64,15 @@ export default function MessagesNavBadge() {
     }
   }, []);
 
-  // Adaptive polling: 5s when tab is visible, 45s when hidden. Same
-  // battery profile as the old 45s baseline when the user is away,
-  // ~9× faster perceived latency when they're at the screen.
-  useAdaptivePoll(fetchCount);
+  // Adaptive polling: 30s visible, 120s hidden, idle backoff to 180s
+  // once the count has been stable for 5 polls.
+  const lastCountRef = useRef(0);
+  useAdaptivePoll(fetchCount, {
+    isStable: () => lastCountRef.current === count,
+  });
+  useEffect(() => {
+    lastCountRef.current = count;
+  }, [count]);
 
   if (count <= 0 || silencedRef.current) return null;
 

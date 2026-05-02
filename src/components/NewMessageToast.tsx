@@ -32,7 +32,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { fetchWithRefresh, getInstinctToken } from "@/lib/client-auth";
+import { getInstinctToken } from "@/lib/client-auth";
+import { coalescedFetchWithRefresh } from "@/lib/coalesced-fetch";
 import { useAdaptivePoll } from "@/lib/hooks/useAdaptivePoll";
 
 const LAST_SEEN_KEY = "instinct.messages.last_seen";
@@ -80,7 +81,9 @@ export default function NewMessageToast() {
     const since = readLastSeen();
     const qs = since ? `?since=${encodeURIComponent(since)}` : "";
     try {
-      const res = await fetchWithRefresh(`/api/ms/chats/unread-count${qs}`);
+      const res = await coalescedFetchWithRefresh(
+        `/api/ms/chats/unread-count${qs}`,
+      );
       if (!res.ok) return;
       const data = (await res.json()) as UnreadCountResponse;
       if (data.scope_missing || data.connected === false) {
@@ -109,6 +112,10 @@ export default function NewMessageToast() {
     }
   }, []);
 
+  // Polls the same /api/ms/chats/unread-count endpoint as
+  // MessagesNavBadge / TeamsUnreadBadge — but the network round-trip
+  // is collapsed by `coalescedFetchWithRefresh` so all three components
+  // share a single HTTP fetch per coalesce window.
   useAdaptivePoll(fetchCount);
 
   /* Reset when navigating to /messages so the next visit starts

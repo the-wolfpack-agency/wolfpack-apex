@@ -87,12 +87,14 @@ describe("<MessagesNavBadge />", () => {
     expect(container.querySelector('[data-testid="messages-nav-badge"]')).toBeNull();
   });
 
-  it("re-polls on the 45s interval", async () => {
+  it("re-polls on the visible interval (30s)", async () => {
     mockFetchWithRefresh.mockResolvedValue(mkRes({ count: 1 }));
     render(<MessagesNavBadge />);
     await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalledTimes(1));
+    // Visible cadence is 30s after the May 2026 polling-efficiency
+    // pass (was 5s — see useAdaptivePoll defaults).
     await act(async () => {
-      jest.advanceTimersByTime(5_000);
+      jest.advanceTimersByTime(30_000);
       await Promise.resolve();
     });
     expect(mockFetchWithRefresh).toHaveBeenCalledTimes(2);

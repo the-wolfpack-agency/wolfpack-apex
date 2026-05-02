@@ -460,6 +460,10 @@ export type InstinctEventType =
   // Inbound-email surface awareness
   | "microsoft.email_unread_polled"
   | "microsoft.email_arrived_notified"
+  // Client-side polling efficiency (badge coalesce + adaptive cadence).
+  // Emitted periodically so the learning loop can track real-world idle
+  // request volume + the wins from the May 2026 optimization pass.
+  | "system.badge_poll_optimized"
   // Microsoft 365 Tasks (To Do)
   | "system.ms_tasks_synced"
   | "system.ms_tasks_sync_failed"

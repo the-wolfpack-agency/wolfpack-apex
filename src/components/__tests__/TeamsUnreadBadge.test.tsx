@@ -156,9 +156,9 @@ describe("<TeamsUnreadBadge />", () => {
     expect(container.querySelector("[data-testid='teams-unread-badge']")).toBeNull();
   });
 
-  test("polling interval re-fires the fetch every 5s when tab is visible", async () => {
-    // Adaptive polling: 5s while visible (jsdom default), 45s when
-    // hidden. Old static-45s assertion is now too coarse.
+  test("polling interval re-fires the fetch every 30s when tab is visible", async () => {
+    // Adaptive polling: 30s while visible, 120s when hidden. Was 5s
+    // visible before the May 2026 polling-efficiency pass.
     mockFetchWithRefresh.mockResolvedValue(
       mkJsonResponse({ count: 0, total_chats: 0, since: null }),
     );
@@ -167,12 +167,12 @@ describe("<TeamsUnreadBadge />", () => {
     await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalledTimes(1));
 
     await act(async () => {
-      jest.advanceTimersByTime(5_000);
+      jest.advanceTimersByTime(30_000);
     });
     await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalledTimes(2));
 
     await act(async () => {
-      jest.advanceTimersByTime(5_000);
+      jest.advanceTimersByTime(30_000);
     });
     await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalledTimes(3));
   });
@@ -231,7 +231,7 @@ describe("<TeamsUnreadBadge />", () => {
     // Drop the count to zero on next poll → title restores.
     response = mkJsonResponse({ count: 0, total_chats: 5 });
     await act(async () => {
-      jest.advanceTimersByTime(5_000);
+      jest.advanceTimersByTime(30_000);
       await Promise.resolve();
     });
     await waitFor(() => expect(document.title).toBe("Instinct"));
@@ -261,7 +261,7 @@ describe("<TeamsUnreadBadge />", () => {
 
     // Same count on next poll: NO new notification (no increase).
     await act(async () => {
-      jest.advanceTimersByTime(5_000);
+      jest.advanceTimersByTime(30_000);
       await Promise.resolve();
     });
     expect(notificationCtor).toHaveBeenCalledTimes(1);
@@ -269,7 +269,7 @@ describe("<TeamsUnreadBadge />", () => {
     // Bump to 4: delta is 3, plural copy fires.
     response = mkJsonResponse({ count: 4, total_chats: 5 });
     await act(async () => {
-      jest.advanceTimersByTime(5_000);
+      jest.advanceTimersByTime(30_000);
       await Promise.resolve();
     });
     await waitFor(() => expect(notificationCtor).toHaveBeenCalledTimes(2));

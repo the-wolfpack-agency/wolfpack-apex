@@ -18,7 +18,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchWithRefresh, getInstinctToken } from "@/lib/client-auth";
+import { getInstinctToken } from "@/lib/client-auth";
+import { coalescedFetchWithRefresh } from "@/lib/coalesced-fetch";
 import { useAdaptivePoll } from "@/lib/hooks/useAdaptivePoll";
 
 const LAST_SEEN_KEY = "instinct.emails.last_seen";
@@ -48,7 +49,7 @@ export default function EmailNavBadge() {
     const since = readLastSeen();
     const qs = since ? `?since=${encodeURIComponent(since)}` : "";
     try {
-      const res = await fetchWithRefresh(
+      const res = await coalescedFetchWithRefresh(
         `/api/microsoft/messages/unread-count${qs}`,
       );
       if (!res.ok) {
@@ -69,13 +70,17 @@ export default function EmailNavBadge() {
     }
   }, []);
 
-  // Adaptive polling: 5s when tab is visible, 45s when hidden — same
-  // hook MessagesNavBadge uses. Per the spec the cadence should land
-  // ~60s but the existing useAdaptivePoll defaults give us identical
-  // perceived latency to the Teams badge, which is the user mental
-  // model we want to match (both badges feel "same speed"). The hook
-  // also re-fires on focus + visibilitychange.
-  useAdaptivePoll(fetchCount);
+  // Adaptive polling: 30s visible, 120s hidden, 180s after the count
+  // has been stable for 5 polls. Idle backoff downshifts to ~2 reqs/min
+  // when no new mail arrives. Refocus / visibility change resets the
+  // cadence and fires fresh.
+  const lastCountRef = useRef(0);
+  useAdaptivePoll(fetchCount, {
+    isStable: () => lastCountRef.current === count,
+  });
+  useEffect(() => {
+    lastCountRef.current = count;
+  }, [count]);
 
   // Listen for an explicit "user just visited /emails" event so the
   // badge clears the moment the inbox is opened, even before the

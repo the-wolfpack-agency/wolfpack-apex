@@ -1,89 +1,158 @@
 "use client";
 
 /**
- * useAdaptivePoll — fires `callback` on a faster interval when the
- * tab is visible (5s) and a slower interval when hidden (45s). Same
- * battery profile as the static 45s baseline when the user is away,
- * but 9× faster perceived latency when they're actually looking at
- * the screen.
+ * useAdaptivePoll — fires `callback` on a slow interval when the tab
+ * is visible (default 30s), an even slower interval when hidden
+ * (default 120s), and an idle interval (default 180s) once the result
+ * has been "stable" for `idleAfterStablePolls` consecutive polls.
  *
- * Used by Teams unread badges + chat list refresh on /messages so
- * new messages surface in seconds, not the full 45s window.
+ * Re-fires immediately on tab refocus or visibility change so the
+ * user always sees fresh data the moment they look at the screen.
  *
- * Behavior:
- *   - Fires `callback` immediately on mount.
- *   - Re-fires when the tab regains visibility (the user just came
- *     back; they want fresh data NOW).
- *   - Re-fires on window focus too (some browsers fire focus without
- *     visibilitychange — belt and suspenders).
- *   - Switches the timer cadence whenever document.visibilityState
- *     changes.
- *   - Cleans up the interval + listeners on unmount.
+ * Used by the four sidebar/topbar badges (Email, Messages, Teams,
+ * NewMessageToast). Combined with the coalesce wrapper in
+ * `src/lib/coalesced-fetch.ts`, the four badges produce ~4 reqs/min
+ * idle (one per unique URL × ~2 polls/min) instead of the previous
+ * 48 reqs/min (4 badges × 12 polls/min). Idle backoff drops it
+ * further to ~2 reqs/min after a few stable polls.
  *
- * Defaults: 5s visible, 45s hidden. Override via opts.
+ * Energy / efficiency note: prior defaults (5s visible, 45s hidden)
+ * were left over from a pre-coalesce era when each badge *had to*
+ * poll fast to compensate for the others. With server-side change
+ * notifications still aspirational, the new defaults trade ~30s of
+ * perceived latency on a notification dot for an 85%+ idle-traffic
+ * reduction.
+ *
+ * Defaults: 30s visible, 120s hidden, 180s idle. Override via opts.
  */
 
 import { useCallback, useEffect, useRef } from "react";
 
 export interface AdaptivePollOptions {
-  /** Interval ms when the tab is visible. Default 5_000. */
+  /** Interval ms when the tab is visible. Default 30_000. */
   visibleMs?: number;
-  /** Interval ms when the tab is hidden. Default 45_000. */
+  /** Interval ms when the tab is hidden. Default 120_000. */
   hiddenMs?: number;
+  /** Interval ms after the result has been stable. Default 180_000. */
+  idleMs?: number;
+  /**
+   * Number of consecutive `isStable() === true` polls before the
+   * timer downshifts to `idleMs`. Default 5. Any unstable poll
+   * resets the counter back to the visible/hidden cadence.
+   */
+  idleAfterStablePolls?: number;
+  /**
+   * Optional stability hint. Called synchronously after every fire
+   * to decide whether the poll's result was "the same as last time".
+   * Returning `true` for `idleAfterStablePolls` consecutive polls
+   * promotes the timer to `idleMs`. Returning `false` resets.
+   *
+   * If omitted, idle backoff never engages — only visible/hidden
+   * cadence applies (matches the pre-2026-05-01 hook behavior).
+   */
+  isStable?: () => boolean;
 }
 
 export function useAdaptivePoll(
   callback: () => void,
   opts: AdaptivePollOptions = {},
 ): void {
-  const { visibleMs = 5_000, hiddenMs = 45_000 } = opts;
-  // Latest callback ref so we don't restart the interval on every
-  // render just because the consumer's callback identity changed.
+  const {
+    visibleMs = 30_000,
+    hiddenMs = 120_000,
+    idleMs = 180_000,
+    idleAfterStablePolls = 5,
+    isStable,
+  } = opts;
   const cbRef = useRef(callback);
+  const stableHintRef = useRef(isStable);
   useEffect(() => {
     cbRef.current = callback;
   }, [callback]);
+  useEffect(() => {
+    stableHintRef.current = isStable;
+  }, [isStable]);
+
+  const stableCountRef = useRef(0);
 
   const fire = useCallback(() => {
     try {
       cbRef.current();
     } catch {
-      /* never let consumer errors break the interval */
+      /* never let consumer errors break the schedule */
+    }
+    const sf = stableHintRef.current;
+    if (sf) {
+      try {
+        if (sf()) {
+          stableCountRef.current += 1;
+        } else {
+          stableCountRef.current = 0;
+        }
+      } catch {
+        stableCountRef.current = 0;
+      }
     }
   }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    let id: ReturnType<typeof setInterval> | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
 
-    function currentMs(): number {
-      return document.visibilityState === "visible" ? visibleMs : hiddenMs;
-    }
-    function startTimer() {
-      if (id) clearInterval(id);
-      id = setInterval(fire, currentMs());
-    }
-    function onVisibility() {
+    const currentMs = (): number => {
+      const isVisible = document.visibilityState === "visible";
+      if (!isVisible) return hiddenMs;
+      if (
+        stableHintRef.current &&
+        stableCountRef.current >= idleAfterStablePolls
+      ) {
+        return idleMs;
+      }
+      return visibleMs;
+    };
+
+    const schedule = (): void => {
+      if (cancelled) return;
+      timeoutId = setTimeout(() => {
+        if (cancelled) return;
+        fire();
+        schedule();
+      }, currentMs());
+    };
+
+    const cancel = (): void => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+
+    const onVisibility = (): void => {
       if (document.visibilityState === "visible") {
-        // Coming back to the tab → fire immediately so the user
-        // sees fresh data on the next paint.
+        // Tab regained focus — reset stability so the user gets a
+        // fresh, fast poll on the next paint.
+        stableCountRef.current = 0;
         fire();
       }
-      startTimer();
-    }
-    function onFocus() {
+      cancel();
+      schedule();
+    };
+    const onFocus = (): void => {
+      stableCountRef.current = 0;
       fire();
-    }
+    };
 
-    // Kick off: fire once + start the timer.
+    // Kick off: fire once + schedule the next tick.
     fire();
-    startTimer();
+    schedule();
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("focus", onFocus);
     return () => {
-      if (id) clearInterval(id);
+      cancelled = true;
+      cancel();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", onFocus);
     };
-  }, [fire, visibleMs, hiddenMs]);
+  }, [fire, visibleMs, hiddenMs, idleMs, idleAfterStablePolls]);
 }
