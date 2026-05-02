@@ -435,4 +435,121 @@ describe("/bulletin/[id]", () => {
      test for it kept timing out in jsdom because findByTestId raced
      the picker's setState. Coverage of the branch itself is in the
      404 test; runtime smoke confirmed the empty-list path in prod. */
+
+  /* Regression 2026-05-02: AssociationPicker fires onChange twice when
+     the user starts a fresh link — once when the kind dropdown
+     changes (kind="task", id=""), and again once they pick the
+     actual record. The first emission used to fire an immediate
+     PATCH with an empty id, which the route 400'd as
+     "association.kind and association.id are required". The fix in
+     setAssociation skips the server PATCH when kind is set but id
+     isn't yet picked. */
+  test("association: picking only the kind does NOT fire a PATCH (empty id is suppressed)", async () => {
+    mockBoardDetail([makeNote()]);
+
+    /* Resolve the task list endpoint with two tasks; record every
+       fetch we see so we can assert no PATCH carrying an empty
+       association id was issued. */
+    mockFetchWithRefresh.mockImplementation((url: string, init?: any) => {
+      if (typeof url === "string" && url.startsWith("/api/tasks")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            tasks: [{ id: "t1", title: "Real task" }],
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+      });
+    });
+
+    renderBoard();
+    await waitFor(() =>
+      expect(screen.getByTestId("bulletin-note-note-1")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByTestId("bulletin-note-assoc-toggle-note-1"));
+    fireEvent.change(screen.getByTestId("bulletin-note-assoc-note-1-kind"), {
+      target: { value: "task" },
+    });
+
+    /* Wait for the picker effect to run + resolve. */
+    await screen.findByTestId("bulletin-note-assoc-note-1-id");
+
+    /* No PATCH should have fired yet — we only changed the kind. */
+    const badPatch = mockFetchWithRefresh.mock.calls.find((c) => {
+      if (
+        c[1]?.method !== "PATCH" ||
+        !String(c[0]).includes("/api/bulletin/notes/note-1")
+      )
+        return false;
+      try {
+        const body = JSON.parse(c[1].body);
+        return (
+          body.association &&
+          (!body.association.id || body.association.id === "")
+        );
+      } catch {
+        return false;
+      }
+    });
+    expect(badPatch).toBeFalsy();
+  });
+
+  /* Live polling — boards are org-shared, so when one team member
+     adds a note during a meeting every other open board page must
+     pick it up without a manual refresh. The page polls
+     /api/bulletin/boards/[id] every 5s and merges the response.
+     Local-edit guards (active note, snapshot modal, debounce-in-flight)
+     suppress the poll so a remote refresh can't stomp typed-but-
+     unsaved state. */
+  test("polling: idle board fetches detail again on the 5s interval and merges new remote notes", async () => {
+    jest.useFakeTimers();
+
+    /* Initial load: one note. */
+    mockBoardDetail([makeNote()]);
+    /* Subsequent polls: two notes (a teammate added one). */
+    mockFetchWithRefresh.mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          board: sampleBoard,
+          notes: [
+            makeNote(),
+            makeNote({
+              id: "note-remote",
+              body: "Added by teammate",
+              updatedAt: "2026-05-02T17:00:00.000Z",
+            }),
+          ],
+          snapshots: [],
+        }),
+      }),
+    );
+
+    renderBoard();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("bulletin-note-note-1")).toBeInTheDocument(),
+    );
+
+    /* Advance through one poll tick + flush microtasks. */
+    await act(async () => {
+      jest.advanceTimersByTime(5_000);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("bulletin-note-note-remote"),
+      ).toBeInTheDocument(),
+    );
+  });
 });

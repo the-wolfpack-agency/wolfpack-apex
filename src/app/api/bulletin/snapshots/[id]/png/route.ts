@@ -6,18 +6,49 @@
  * analytics event on every successful fetch (the learning loop uses
  * this to surface "most-viewed snapshot" / "stale snapshots no one
  * looks at" insights).
+ *
+ * Auth accepts either form:
+ *   1. `Authorization: Bearer <token>` — in-app `<img>` calls go through
+ *      `fetchWithRefresh` and carry the access token in the header.
+ *   2. The `instinct_access_token` HttpOnly cookie — top-level browser
+ *      navigations (the snapshot's "Download" / "View" anchors) don't
+ *      attach custom headers; they only carry cookies. The download
+ *      surface was 401-ing before this fallback was added.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromRequest } from "@/lib/auth";
+import { cookies } from "next/headers";
+import { getUserFromRequest, verifyToken, type TeamMember } from "@/lib/auth";
+import { ACCESS_TOKEN_COOKIE } from "@/lib/crypto/cookies";
 import { trackEvent } from "@/lib/analytics";
 import { getSnapshotPng } from "@/lib/bulletin/snapshots";
+
+async function resolveUserFromCookie(): Promise<TeamMember | null> {
+  try {
+    const jar = await cookies();
+    const token = jar.get(ACCESS_TOKEN_COOKIE)?.value;
+    if (!token) return null;
+    const payload = verifyToken(token);
+    return {
+      id: payload.userId,
+      email: payload.email,
+      name: payload.name,
+      role: payload.role,
+      created_at: "",
+    };
+  } catch {
+    return null;
+  }
+}
 
 export async function GET(
   req: NextRequest,
   context: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
-  const user = getUserFromRequest(req.headers.get("authorization"));
+  let user = getUserFromRequest(req.headers.get("authorization"));
+  if (!user) {
+    user = await resolveUserFromCookie();
+  }
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

@@ -389,6 +389,99 @@ export default function BulletinBoardPage({
     void loadBoard();
   }, [authChecked, loadBoard]);
 
+  /* ── live polling: shared bulletin board use during meetings ──────
+     Boards are org-shared by data-model design (migration 113), but
+     without polling each team member would see a stale snapshot until
+     they refreshed. We poll the board detail every 5s and merge
+     remote notes into local state, with these guardrails:
+       1. Skip the poll entirely when the local user is mid-edit
+          (a note is active, the snapshot modal is open, board meta
+          is saving, or any per-note debounce timer is queued) so a
+          remote refresh can't stomp typed-but-unsaved state.
+       2. Skip the poll while the document is hidden — background
+          tabs shouldn't fan out work to Postgres on a 5s cadence
+          across the whole agency.
+       3. Quiet refresh — `setLoading(false)` immediately, no flicker;
+          on network error we just wait for the next interval.
+     The /api/bulletin/boards/[id] GET is org-shared and emits no
+     analytics on the read path, so polling is safe to run cheaply. */
+  useEffect(() => {
+    if (!authChecked) return;
+    if (typeof window === "undefined") return;
+
+    const POLL_MS = 5_000;
+
+    async function pollOnce() {
+      if (typeof document !== "undefined" && document.hidden) return;
+      /* Local-edit guards — skip if anything could clobber. */
+      if (activeNoteId !== null) return;
+      if (snapshotModalOpen) return;
+      if (savingMeta) return;
+      if (debounceTimers.current.size > 0) return;
+
+      try {
+        const res = await fetchWithRefresh(
+          `/api/bulletin/boards/${encodeURIComponent(boardId)}`,
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          board: Board;
+          notes: Note[];
+          snapshots: Snapshot[];
+        };
+        /* Replace state only when we have a successful payload. The
+           note list, board meta, and snapshot index can all change
+           between users — replace each. The shape comes from the
+           same endpoint as the initial load so the ordering and
+           filtering rules already match the canvas. */
+        setBoard((prev) => {
+          if (
+            prev &&
+            prev.title === data.board.title &&
+            prev.description === data.board.description &&
+            prev.archivedAt === data.board.archivedAt &&
+            prev.updatedAt === data.board.updatedAt
+          ) {
+            return prev;
+          }
+          return data.board;
+        });
+        setNotes((prev) => {
+          /* Cheap fingerprint — if the count and per-id updatedAt
+             stamps match, skip the setState to avoid re-renders. */
+          if (prev.length === data.notes.length) {
+            const prevById = new Map(prev.map((n) => [n.id, n.updatedAt]));
+            const same = data.notes.every(
+              (n) => prevById.get(n.id) === n.updatedAt,
+            );
+            if (same) return prev;
+          }
+          return data.notes;
+        });
+        setSnapshots((prev) => {
+          if (prev.length === data.snapshots.length) {
+            const prevIds = new Set(prev.map((s) => s.id));
+            if (data.snapshots.every((s) => prevIds.has(s.id))) return prev;
+          }
+          return data.snapshots;
+        });
+      } catch {
+        /* Network blip — wait for next tick. */
+      }
+    }
+
+    const interval = window.setInterval(() => {
+      void pollOnce();
+    }, POLL_MS);
+    return () => window.clearInterval(interval);
+  }, [
+    authChecked,
+    boardId,
+    activeNoteId,
+    snapshotModalOpen,
+    savingMeta,
+  ]);
+
   /* ── meta save ────────────────────────────────────────────────── */
   async function saveMeta(patch: { title?: string; description?: string }) {
     setSavingMeta(true);
@@ -1243,11 +1336,15 @@ function NoteView({
       associationId: p.kind ? p.id : null,
       associationLabel: p.kind ? p.label : null,
     });
+    /* AssociationPicker fires onChange twice when the user starts a
+       fresh link: once when the kind dropdown changes (kind="task",
+       id=""), and again once they pick the actual record. Skip the
+       server PATCH on the kind-only step — the route requires a
+       non-empty id and would 400. The follow-up call with the picked
+       id persists the association. */
+    if (p.kind && !p.id) return;
     /* Server PATCH — endpoint expects `association: {kind,id,label} | null`
-       (verified in src/app/api/bulletin/notes/[id]/route.ts). The
-       previous payload sent `association_kind` etc as top-level keys
-       which the route silently dropped, so note associations never
-       persisted. */
+       (verified in src/app/api/bulletin/notes/[id]/route.ts). */
     void onPatchImmediate(note.id, {
       association: p.kind
         ? { kind: p.kind, id: p.id, label: p.label }
