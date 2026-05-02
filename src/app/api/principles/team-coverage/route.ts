@@ -33,6 +33,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
+  /* Filter out demo accounts (@wolfpack.dev seed users from
+     migration 001) — they're not real team members and shouldn't
+     count toward coverage. Real team rows live under
+     @thewolfpack.agency per migration 125. */
   const result = await safeQuery<{
     id: string;
     email: string;
@@ -47,6 +51,7 @@ export async function GET(req: NextRequest) {
             ) AS has_token
        FROM instinct_team_members m
       WHERE m.is_active = TRUE
+        AND LOWER(m.email) NOT LIKE '%@wolfpack.dev'
       ORDER BY m.name`,
     [],
   );
