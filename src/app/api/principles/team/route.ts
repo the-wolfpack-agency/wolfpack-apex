@@ -36,13 +36,17 @@ export async function GET(req: NextRequest) {
     listAllObservations({ sinceISO, limit: 1000 }),
   ]);
 
-  /* Build a "subject_user_id → canonical_id" map so observations
-     written under stale ids (e.g. before migration 128 deduped team
-     members) aggregate to ONE row per real person. We resolve the
-     stale id → email via instinct_ms_tokens (which migration 128
-     left intact under the canonical id), then email → canonical
-     team-member id. Any subject id that already matches the
-     canonical row passes through unchanged. */
+  /* Resolve every subject_user_id → canonical key (active team-member
+     id when we can find one by email, otherwise fall back to the
+     subject id itself). Group by canonical key so duplicate ids that
+     map to the same real person collapse into one row.
+
+     We look up email TWO ways and pick whichever finds it first:
+     1. instinct_team_members.id = subject (id matches a canonical row)
+     2. instinct_ms_tokens.connected_by = subject (id is from a stale
+        token row that was never cleaned up)
+     Then for any email found, we re-resolve to the active
+     team_members row by LOWER(email) — that's the canonical id. */
   const allSubjectIds = new Set<string>();
   for (const o of observations) {
     if (o.subjectUserId) allSubjectIds.add(o.subjectUserId);
@@ -50,20 +54,17 @@ export async function GET(req: NextRequest) {
   const subjectIds = Array.from(allSubjectIds);
   const canonicalById = new Map<string, string>();
   if (subjectIds.length > 0) {
-    /* Two-step lookup. (1) For each subject id, find its email via
-       team_members directly (covers canonical ids) OR ms_tokens (covers
-       legacy ids). (2) For each email, find the canonical
-       team_members.id. The CTE below does both in one round trip. */
     const r = await safeQuery<{ subject_id: string; canonical_id: string }>(
       `WITH ids AS (SELECT UNNEST($1::text[]) AS subject_id),
             email_for_id AS (
               SELECT i.subject_id,
-                     COALESCE(
-                       (SELECT LOWER(m.email) FROM instinct_team_members m
+                     LOWER(COALESCE(
+                       (SELECT m.email FROM instinct_team_members m
                          WHERE m.id = i.subject_id LIMIT 1),
-                       (SELECT LOWER(t.user_email) FROM instinct_ms_tokens t
-                         WHERE t.connected_by = i.subject_id LIMIT 1)
-                     ) AS lower_email
+                       (SELECT t.user_email FROM instinct_ms_tokens t
+                         WHERE t.connected_by = i.subject_id
+                         ORDER BY t.connected_at DESC LIMIT 1)
+                     )) AS lower_email
                 FROM ids i
             )
        SELECT e.subject_id,
@@ -81,39 +82,59 @@ export async function GET(req: NextRequest) {
   const canonicalize = (id: string | null): string | null =>
     id ? canonicalById.get(id) ?? id : null;
 
-  /* Aggregate per (principle, CANONICAL subject) so duplicate-id
-     observations roll up cleanly. */
-  const aggKey = (principleId: string, subjectId: string | null) =>
-    `${principleId}::${subjectId ?? "team"}`;
+  /* Resolve names FIRST — for every subject id (canonical or stale).
+     Then aggregate by (principle, displayName) so duplicate-id rows
+     for the same person collapse, even when the duplicate id has
+     been orphaned by a prior dedup migration (no email lookup
+     possible). Display name is the only key that's truly stable
+     across id drift in this codebase. */
+  const nameMap = await resolveUserNames(subjectIds);
+
+  const subjectKeyFor = (subjectId: string | null): string => {
+    if (!subjectId) return "(team-wide)";
+    const n = nameMap.get(subjectId);
+    return n?.displayName ?? subjectId;
+  };
+
+  const aggKey = (principleId: string, subjectKey: string) =>
+    `${principleId}::${subjectKey}`;
   const aggregates = new Map<
     string,
     {
       principleId: string;
       subjectUserId: string | null;
+      subjectKey: string;
       count: number;
       sumScore: number;
     }
   >();
   for (const o of observations) {
     const canonical = canonicalize(o.subjectUserId);
-    const key = aggKey(o.principleId, canonical);
-    const cur = aggregates.get(key) ?? {
+    const key = subjectKeyFor(canonical);
+    const aggregateKey = aggKey(o.principleId, key);
+    const cur = aggregates.get(aggregateKey) ?? {
       principleId: o.principleId,
+      /* Keep the canonical id for the "(you)" comparison + drill-down
+         link. When two distinct ids share a name (post-dedup orphan),
+         we pick the canonical one (the one in team_members today). */
       subjectUserId: canonical,
+      subjectKey: key,
       count: 0,
       sumScore: 0,
     };
+    /* Prefer a canonical-id row over an orphan-id row when both exist
+       under the same name. */
+    if (
+      canonical &&
+      canonicalById.has(canonical) &&
+      cur.subjectUserId !== canonical
+    ) {
+      cur.subjectUserId = canonical;
+    }
     cur.count += 1;
     cur.sumScore += o.score;
-    aggregates.set(key, cur);
+    aggregates.set(aggregateKey, cur);
   }
-
-  /* Resolve canonical ids → display names. */
-  const canonicalIds = new Set<string>();
-  for (const a of aggregates.values()) {
-    if (a.subjectUserId) canonicalIds.add(a.subjectUserId);
-  }
-  const nameMap = await resolveUserNames(Array.from(canonicalIds));
 
   const aggregateRows = Array.from(aggregates.values()).map((a) => {
     const name = a.subjectUserId ? nameMap.get(a.subjectUserId) : null;
