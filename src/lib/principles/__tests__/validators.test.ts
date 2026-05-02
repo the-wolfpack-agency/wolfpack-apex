@@ -95,6 +95,9 @@ describe("built-in validators", () => {
     expect(ids).toEqual([
       "calendar.focus_block_ratio",
       "calendar.meeting_outcome_logged",
+      "calendar.meeting_density",
+      "calendar.meeting_agenda_present",
+      "calendar.declined_attendance_rate",
       "calendar.recurring_meeting_drift",
       "mail.after_hours_send",
       "tasks.overdue_rate",
@@ -135,6 +138,16 @@ describe("built-in validators", () => {
       findValidatorForDescription("PRs sitting open more than 5 days without merge")
         ?.id,
     ).toBe("code.pr_cycle_time_under");
+    expect(
+      findValidatorForDescription("ten or fewer meetings per week")?.id,
+    ).toBe("calendar.meeting_density");
+    expect(
+      findValidatorForDescription("every meeting has a written agenda")?.id,
+    ).toBe("calendar.meeting_agenda_present");
+    expect(
+      findValidatorForDescription("calendar reflects reality — no ghost meetings")
+        ?.id,
+    ).toBe("calendar.declined_attendance_rate");
 
     expect(
       findValidatorForDescription("Focus block ratio ≥ 0.4")?.id,

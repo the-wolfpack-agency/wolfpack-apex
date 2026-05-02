@@ -23,6 +23,9 @@ import {
 import { evaluateCalendarFocusBlock } from "@/lib/principles/evaluators/calendar-focus-block";
 import { evaluateCalendarMeetingOutcomeLogged } from "@/lib/principles/evaluators/calendar-meeting-outcome-logged";
 import { evaluateCalendarRecurringMeetingDrift } from "@/lib/principles/evaluators/calendar-recurring-meeting-drift";
+import { evaluateCalendarMeetingDensity } from "@/lib/principles/evaluators/calendar-meeting-density";
+import { evaluateCalendarMeetingAgendaPresent } from "@/lib/principles/evaluators/calendar-meeting-agenda-present";
+import { evaluateCalendarDeclinedAttendance } from "@/lib/principles/evaluators/calendar-declined-attendance";
 import { evaluateMailAfterHours } from "@/lib/principles/evaluators/mail-after-hours";
 import { evaluateTasksOverdue } from "@/lib/principles/evaluators/tasks-overdue";
 import { evaluateTasksWeeklyPriorities } from "@/lib/principles/evaluators/tasks-weekly-priorities";
@@ -53,6 +56,55 @@ registerValidator({
     keywordMatcher("meeting", "decisions")(d) ||
     keywordMatcher("closed", "out", "decisions")(d),
   evaluate: evaluateCalendarMeetingOutcomeLogged,
+});
+
+registerValidator({
+  id: "calendar.meeting_density",
+  surface: "calendar",
+  describe: "Business-hours meeting count per user per window (lean → saturated)",
+  matches: (d) =>
+    keywordMatcher("meeting", "density")(d) ||
+    keywordMatcher("too", "many", "meetings")(d) ||
+    keywordMatcher("meeting", "saturated")(d) ||
+    keywordMatcher("meeting", "load")(d) ||
+    keywordMatcher("meetings", "per", "week")(d) ||
+    keywordMatcher("lean", "meeting")(d) ||
+    keywordMatcher("under", "10", "meetings")(d),
+  evaluate: evaluateCalendarMeetingDensity,
+});
+
+registerValidator({
+  id: "calendar.meeting_agenda_present",
+  surface: "calendar",
+  describe: "Upcoming meetings have a written agenda in the body",
+  /* DO NOT match the bare pair "meeting + agenda" — that's too broad
+     and collides with the recurring_meeting_drift signal line
+     "recurring meetings carrying the same agenda items into a third
+     week". Tighten to phrases that uniquely describe pre-meeting
+     agendas. */
+  matches: (d) =>
+    keywordMatcher("agenda", "before")(d) ||
+    keywordMatcher("written", "agenda")(d) ||
+    keywordMatcher("agenda", "every")(d) ||
+    keywordMatcher("no", "agenda", "no", "meeting")(d) ||
+    keywordMatcher("upcoming", "agenda")(d) ||
+    keywordMatcher("meetings", "with", "agenda")(d),
+  evaluate: evaluateCalendarMeetingAgendaPresent,
+});
+
+registerValidator({
+  id: "calendar.declined_attendance_rate",
+  surface: "calendar",
+  describe: "Past events the user declined or left tentative (ghost meetings)",
+  matches: (d) =>
+    keywordMatcher("declined", "attended")(d) ||
+    keywordMatcher("ghost", "meeting")(d) ||
+    keywordMatcher("ghost", "meetings")(d) ||
+    keywordMatcher("tentative", "events")(d) ||
+    keywordMatcher("calendar", "reflects", "reality")(d) ||
+    keywordMatcher("declined", "but", "attended")(d) ||
+    keywordMatcher("calendar", "hygiene")(d),
+  evaluate: evaluateCalendarDeclinedAttendance,
 });
 
 registerValidator({
