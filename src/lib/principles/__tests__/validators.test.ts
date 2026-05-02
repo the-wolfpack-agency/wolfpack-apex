@@ -93,11 +93,47 @@ describe("built-in validators", () => {
     const ids = listValidators().map((v) => v.id);
     expect(ids).toEqual([
       "calendar.focus_block_ratio",
+      "calendar.meeting_outcome_logged",
+      "calendar.recurring_meeting_drift",
       "mail.after_hours_send",
       "tasks.overdue_rate",
+      "tasks.weekly_priority_count",
+      "tasks.weekly_finish_rate",
       "goals.kr_measurability",
+      "goals.kr_friday_status",
       "code.pr_cycle_time_under",
     ]);
+
+    /* Each new validator binds the wording in the SharePoint principles
+       doc — these assertions are the safety net for the keyword
+       matchers, so a typo in the doc never silently de-registers a
+       signal again. */
+    expect(
+      findValidatorForDescription(
+        "more than 3 high-importance active tasks in the same week",
+      )?.id,
+    ).toBe("tasks.weekly_priority_count");
+    expect(
+      findValidatorForDescription("weekly task finish rate above 70 percent")
+        ?.id,
+    ).toBe("tasks.weekly_finish_rate");
+    expect(
+      findValidatorForDescription("KRs without status update by Friday")?.id,
+    ).toBe("goals.kr_friday_status");
+    expect(
+      findValidatorForDescription(
+        "meetings closed out with documented decisions and next steps",
+      )?.id,
+    ).toBe("calendar.meeting_outcome_logged");
+    expect(
+      findValidatorForDescription(
+        "recurring meetings carrying the same agenda items into a third week",
+      )?.id,
+    ).toBe("calendar.recurring_meeting_drift");
+    expect(
+      findValidatorForDescription("PRs sitting open more than 5 days without merge")
+        ?.id,
+    ).toBe("code.pr_cycle_time_under");
 
     expect(
       findValidatorForDescription("Focus block ratio ≥ 0.4")?.id,
