@@ -1,10 +1,22 @@
 "use client";
 
-import { useState, FormEvent, useEffect } from "react";
+import { useState, FormEvent, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { setInstinctSession, authHeaders, fetchWithRefresh } from "@/lib/client-auth";
 
+/* useSearchParams must live inside a <Suspense> boundary so Next.js
+   can prerender /login at build time without bailing out to client-
+   side rendering. We split the inner form into LoginContent + wrap
+   it in Suspense at the page-level export. */
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginContent />
+    </Suspense>
+  );
+}
+
+function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
