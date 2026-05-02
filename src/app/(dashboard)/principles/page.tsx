@@ -616,8 +616,8 @@ function MeView({ data }: { data: MeResponse | null }) {
   if (data.principles.length === 0) {
     return (
       <div data-testid="principles-me-no-principles" style={{ color: "var(--wp-text-muted)" }}>
-        No principles loaded yet. Once they sync from SharePoint, your observations
-        will appear here.
+        No principles defined yet. Use Manage principles below to add the first
+        one — observations will start flowing the next time the cron evaluates.
       </div>
     );
   }

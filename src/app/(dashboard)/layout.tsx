@@ -94,20 +94,43 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   useAmbientRefresh();
 
   useEffect(() => {
-    // One-shot migration: before reading auth state, promote any legacy
-    // `apex_*` localStorage keys to their canonical `instinct_*` names
-    // so users logged in before the 2026-04-19 rename keep their session
-    // and preferences without re-authenticating. Idempotent and safe to
-    // call on every mount — a no-op after the first run.
     migrateLegacyApexKeys();
 
-    const token = getInstinctToken();
-    const parsed = getInstinctUser<User>();
-    if (!token || !parsed) {
-      router.push("/login");
-      return;
-    }
-    setUser(parsed);
+    let cancelled = false;
+    (async () => {
+      let token = getInstinctToken();
+      let parsed = getInstinctUser<User>();
+      /* Microsoft sign-in path: the callback set the access-token
+         HttpOnly cookie but didn't write to localStorage. Hydrate from
+         the cookie via /api/auth/whoami so client-side fetchWithRefresh
+         calls carry the Bearer header. The check is cookie-aware (the
+         browser sends instinct_auth automatically) so this only fires
+         when there's a valid session AND localStorage is empty. */
+      if (!token || !parsed) {
+        try {
+          const res = await fetch("/api/auth/whoami", { credentials: "include" });
+          if (res.ok) {
+            const data = (await res.json()) as { token: string; user: unknown };
+            if (data?.token && data?.user) {
+              setInstinctSession(data.token, data.user);
+              token = data.token;
+              parsed = data.user as User;
+            }
+          }
+        } catch {
+          /* fall through to login redirect */
+        }
+      }
+      if (cancelled) return;
+      if (!token || !parsed) {
+        router.push("/login");
+        return;
+      }
+      setUser(parsed);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   // Load per-user nav prefs once we have a token. Fire-and-forget; on
