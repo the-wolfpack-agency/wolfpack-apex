@@ -311,7 +311,7 @@ describe("evaluatePrinciples", () => {
     expect(r2).toBe(r3);
   });
 
-  test("on-edit re-eval throttle: cool-down skips a follow-up call within 60s of completion", async () => {
+  test("on-edit re-eval throttle: cool-down skips a follow-up call within 5s of completion", async () => {
     registerValidator(
       validator("calendar.test", "test", async (ctx) => [
         {

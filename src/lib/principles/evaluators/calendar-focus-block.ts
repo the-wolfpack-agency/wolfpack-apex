@@ -169,31 +169,47 @@ export async function evaluateCalendarFocusBlock(
   const buckets = bucketEventsByDate(result.rows);
   const observations: Observation[] = [];
 
-  /* Iterate every business day in the window — including days with
-     no events. A day with no meetings is a maximum-focus day; it
-     still gets an observation so the scoreboard sees the win. */
-  const start = new Date(ctx.windowStart);
-  const end = new Date(ctx.windowEnd);
-  const dayMs = 24 * 60 * 60 * 1000;
-  for (let t = start.getTime(); t <= end.getTime(); t += dayMs) {
-    const d = new Date(t);
-    /* Skip weekends — focus-block expectations are business-day only.
-       Use UTC day-of-week as a coarse proxy (close enough; we just
-       want to skip Sat/Sun in Dallas for any reasonable window). */
+  /* Walk DALLAS calendar dates directly. The previous impl iterated
+     UTC instants by +24h from windowStart, which crossed the same
+     Dallas day twice when windowStart was offset from UTC midnight —
+     producing two observations per day with different observed_at
+     (slipping past the unique index). We now build a Set of distinct
+     Dallas dates between the window endpoints + visit each exactly
+     once. Days with no events still emit an observation (maximum-
+     focus day → scoreboard win). */
+  const startMs = Date.parse(ctx.windowStart);
+  const endMs = Date.parse(ctx.windowEnd);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return [];
+  const visitedDates = new Set<string>();
+  /* Step in ~12h increments so we capture both Dallas-day boundaries
+     even at DST transitions; the Set dedupes the keys. */
+  const stepMs = 12 * 60 * 60 * 1000;
+  for (let t = startMs; t <= endMs; t += stepMs) {
+    visitedDates.add(dayDateInTz(new Date(t).toISOString()));
+  }
+  /* Always include the endpoints' dates (covers the case when
+     end - start is < stepMs). */
+  visitedDates.add(dayDateInTz(new Date(startMs).toISOString()));
+  visitedDates.add(dayDateInTz(new Date(endMs).toISOString()));
+
+  for (const dateKey of visitedDates) {
+    /* Build a Date pointing at noon UTC of the Dallas calendar day
+       so .getUTCDay() lines up with the Dallas weekday. */
+    const noonUtcMs = Date.parse(`${dateKey}T12:00:00Z`);
+    if (!Number.isFinite(noonUtcMs)) continue;
+    const d = new Date(noonUtcMs);
     const dow = d.getUTCDay();
+    /* Skip weekends — focus-block expectations are business-day only. */
     if (dow === 0 || dow === 6) continue;
-    const key = dayDateInTz(d.toISOString());
-    const events = buckets.get(key) ?? [];
+    const events = buckets.get(dateKey) ?? [];
     const { focusHours, ratio } = computeFocusHoursForDate(d, events);
     /* Score: +0.5 when ratio ≥ 0.4 (adherence), -0.5 below.
        Magnitude is moderate so a single soggy day doesn't tank the
        weekly mean. */
     const score = ratio >= ADHERENCE_RATIO ? 0.5 : -0.5;
-    /* Snap observed_at to Dallas midnight (the calendar day this
-       focus block belongs to) so two cron firings within the same
-       Dallas day produce identical observed_at — combined with the
-       migration-122 unique index this makes the daily observation
-       idempotent. */
+    /* observed_at = Dallas midnight on this calendar day. Two cron
+       runs evaluating the same week produce identical observed_at +
+       identical natural key → ON CONFLICT DO NOTHING dedupes. */
     observations.push({
       surface: "calendar",
       surfaceSubtype: "focus_block_ratio",

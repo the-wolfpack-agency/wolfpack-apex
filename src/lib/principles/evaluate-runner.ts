@@ -42,7 +42,14 @@ import "@/lib/principles/built-in-validators";
    is the cheap front-line guard that keeps Graph quota under control
    when a save burst happens. */
 const inFlightByPrinciple = new Map<string, Promise<EvaluateResult>>();
-const COMPLETED_THROTTLE_MS = 60_000; // 1 min cool-down after completion
+/* Cool-down after a successful run. Originally 60s as defense against
+   button-mash spam, but the unique natural-key index + ON CONFLICT
+   DO NOTHING already make repeated runs cheap and idempotent. The
+   60s window made it impossible for leadership to re-run after a
+   deploy went out — even with a code change pending — because the
+   first click within the window short-circuited. 5s is enough to
+   absorb double-clicks without blocking deploy-driven rebuilds. */
+const COMPLETED_THROTTLE_MS = 5_000;
 const recentlyCompleted = new Map<string, number>();
 
 export function _resetEvaluationGuardForTests(): void {

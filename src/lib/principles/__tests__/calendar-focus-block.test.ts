@@ -114,7 +114,11 @@ describe("evaluateCalendarFocusBlock", () => {
     expect(out.every((o) => o.surface === "calendar")).toBe(true);
     expect(out.every((o) => o.subjectUserId === "u1")).toBe(true);
   });
-  test("Saturday + Sunday are skipped", async () => {
+  test("emits exactly ONE observation per Dallas day even when windowStart is a non-midnight UTC instant", async () => {
+    /* Regression for the bug that produced 2 focus_block_ratio rows
+       per Dallas day on /principles. The previous loop walked UTC
+       instants by +24h from windowStart, which crossed the same
+       Dallas day twice when windowStart was offset from UTC midnight. */
     mockGetValidToken.mockResolvedValueOnce({ accessToken: "tk" });
     global.fetch = jest.fn(async () => ({
       ok: true,
@@ -122,8 +126,33 @@ describe("evaluateCalendarFocusBlock", () => {
       json: async () => ({ value: [] }),
     })) as any;
     const out = await evaluateCalendarFocusBlock({
-      windowStart: "2026-05-02T00:00:00", // Saturday
-      windowEnd: "2026-05-03T23:59:59", // Sunday
+      /* windowStart at 8:43 UTC mid-week — exactly the shape of a
+         real cron firing. Spans Mon 4/27 → Fri 5/1 in Dallas =
+         5 business days. */
+      windowStart: "2026-04-27T08:43:25Z",
+      windowEnd: "2026-05-02T08:43:25Z",
+      subjectUserId: "u1",
+    });
+    /* 5 business days, 1 observation each — no doubles. */
+    expect(out).toHaveLength(5);
+    /* Every observed_at is unique. */
+    const observedAts = out.map((o) => o.observedAt);
+    expect(new Set(observedAts).size).toBe(5);
+  });
+
+  test("Saturday + Sunday are skipped", async () => {
+    mockGetValidToken.mockResolvedValueOnce({ accessToken: "tk" });
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ value: [] }),
+    })) as any;
+    /* Window endpoints chosen to land entirely on Sat 5/2 + Sun 5/3
+       in DALLAS (CDT, UTC-5): Sat midnight Dallas = 5/2 05:00 UTC;
+       Sun-end-of-day Dallas = 5/4 04:59 UTC. */
+    const out = await evaluateCalendarFocusBlock({
+      windowStart: "2026-05-02T05:00:00Z", // Sat 00:00 Dallas
+      windowEnd: "2026-05-04T04:59:59Z", // Sun 23:59 Dallas
       subjectUserId: "u1",
     });
     expect(out).toHaveLength(0);
