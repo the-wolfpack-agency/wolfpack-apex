@@ -26,7 +26,10 @@ import {
   _resetRegistryForTests,
   type Validator,
 } from "@/lib/principles/validators";
-import { evaluatePrinciples } from "@/lib/principles/evaluate-runner";
+import {
+  evaluatePrinciples,
+  _resetEvaluationGuardForTests,
+} from "@/lib/principles/evaluate-runner";
 import type { PrincipleRecord } from "@/lib/principles/store";
 
 const principle = (override: Partial<PrincipleRecord> = {}): PrincipleRecord => ({
@@ -69,6 +72,7 @@ beforeEach(() => {
   mockListUsers.mockReset();
   mockEvaluate.mockReset();
   _resetRegistryForTests();
+  _resetEvaluationGuardForTests();
 });
 
 describe("evaluatePrinciples", () => {
@@ -264,6 +268,79 @@ describe("evaluatePrinciples", () => {
     expect(inj).toHaveBeenCalled();
     expect(mockListUsers).not.toHaveBeenCalled();
     expect(out.observationCount).toBe(1);
+  });
+
+  test("on-edit re-eval throttle: concurrent forceBootstrap calls for same principle share one run", async () => {
+    /* The on-edit re-evaluator hits evaluatePrinciples([principle], {forceBootstrap:true})
+       every time leadership saves the form. Without throttling, 6 saves in
+       90s = 6 fan-outs = 6× duplicate observation sets. */
+    let evalRunCount = 0;
+    registerValidator(
+      validator("calendar.test", "test", async (ctx) => {
+        evalRunCount++;
+        await new Promise((r) => setTimeout(r, 30));
+        return [
+          {
+            surface: "calendar",
+            subjectUserId: ctx.subjectUserId,
+            observedAt: "2026-05-01",
+            score: 0.5,
+            evidence: { kind: "x" },
+          },
+        ];
+      }),
+    );
+    /* Same listSignals + listUsers responses for both racing calls. */
+    mockListSignals.mockResolvedValue([
+      { id: "s1", principleId: "p1", kind: "signal", description: "test signal" },
+    ]);
+    mockListUsers.mockResolvedValue([
+      { userId: "u-a", email: "a@x", displayName: "A", connectedAt: "" },
+    ]);
+    mockInsertObs.mockResolvedValue(1);
+
+    const [r1, r2, r3] = await Promise.all([
+      evaluatePrinciples([principle()], { forceBootstrap: true }),
+      evaluatePrinciples([principle()], { forceBootstrap: true }),
+      evaluatePrinciples([principle()], { forceBootstrap: true }),
+    ]);
+    /* Validator ran ONCE across the 3 concurrent calls. */
+    expect(evalRunCount).toBe(1);
+    /* All three callers got the same result object. */
+    expect(r1).toBe(r2);
+    expect(r2).toBe(r3);
+  });
+
+  test("on-edit re-eval throttle: cool-down skips a follow-up call within 60s of completion", async () => {
+    registerValidator(
+      validator("calendar.test", "test", async (ctx) => [
+        {
+          surface: "calendar",
+          subjectUserId: ctx.subjectUserId,
+          observedAt: "2026-05-01",
+          score: 0.5,
+          evidence: { kind: "x" },
+        },
+      ]),
+    );
+    mockListSignals.mockResolvedValue([
+      { id: "s1", principleId: "p1", kind: "signal", description: "test signal" },
+    ]);
+    mockListUsers.mockResolvedValue([
+      { userId: "u-a", email: "a@x", displayName: "A", connectedAt: "" },
+    ]);
+    mockInsertObs.mockResolvedValue(1);
+
+    /* First run lands. Second run within cool-down should short-circuit. */
+    await evaluatePrinciples([principle()], { forceBootstrap: true });
+    const followUp = await evaluatePrinciples([principle()], { forceBootstrap: true });
+    expect(followUp.observationCount).toBe(0);
+    expect(mockTrack).toHaveBeenCalledWith(
+      "principle.evaluation_skipped",
+      "system",
+      "system",
+      expect.objectContaining({ reason: "throttled" }),
+    );
   });
 
   test("teamWide validator runs ONCE (no per-user fan-out) and rows have subjectUserId=null", async () => {

@@ -419,6 +419,69 @@ describe("insertObservations", () => {
     expect(params).toContain("2026-05-01T02:10:00Z");
   });
 
+  test("collapses duplicate input rows by natural key before INSERT", async () => {
+    /* Two identical rollup rows in one call (e.g. multiple signal lines
+       on the same principle binding to the same validator) must
+       collapse to a single INSERT. The SQL must end with ON CONFLICT
+       DO NOTHING so cross-call dupes also no-op. */
+    mockWriteQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    await insertObservations({
+      principleId: "p1",
+      signalId: "s1",
+      validatorId: "calendar.focus_block_ratio",
+      rows: [
+        {
+          surface: "calendar",
+          surfaceSubtype: "focus_block_ratio",
+          subjectUserId: "u-a",
+          observedAt: "2026-05-01T00:00:00.000Z",
+          score: 0.5,
+          evidenceJsonb: { kind: "rollup" },
+        },
+        {
+          surface: "calendar",
+          surfaceSubtype: "focus_block_ratio",
+          subjectUserId: "u-a",
+          observedAt: "2026-05-01T00:00:00.500Z",
+          score: 0.5,
+          evidenceJsonb: { kind: "rollup" },
+        },
+      ],
+    });
+    const sql = String(mockWriteQuery.mock.calls[0][0]);
+    expect(sql).toMatch(/ON CONFLICT DO NOTHING/);
+    /* Only ONE placeholder row in VALUES (9 params). */
+    const params = mockWriteQuery.mock.calls[0][1] as unknown[];
+    expect(params.length).toBe(9);
+  });
+
+  test("rows with distinct sourceIds are NOT collapsed (per-event observations stay distinct)", async () => {
+    mockWriteQuery.mockResolvedValueOnce({ rows: [], rowCount: 2 });
+    await insertObservations({
+      principleId: "p1",
+      signalId: "s1",
+      validatorId: "mail.after_hours_send",
+      rows: [
+        {
+          surface: "mail",
+          subjectUserId: "u-a",
+          observedAt: "2026-05-01T22:00:00Z",
+          score: -0.6,
+          evidenceJsonb: { sourceId: "msg-1" },
+        },
+        {
+          surface: "mail",
+          subjectUserId: "u-a",
+          observedAt: "2026-05-01T22:00:30Z",
+          score: -0.6,
+          evidenceJsonb: { sourceId: "msg-2" },
+        },
+      ],
+    });
+    const params = mockWriteQuery.mock.calls[0][1] as unknown[];
+    expect(params.length).toBe(18); // 2 rows × 9 params each
+  });
+
   test("falls back to current ISO when validator omits observedAt", async () => {
     mockWriteQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
     await insertObservations({

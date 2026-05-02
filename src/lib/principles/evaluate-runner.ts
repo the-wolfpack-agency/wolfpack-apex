@@ -34,6 +34,22 @@ import {
    mail.after_hours_send) into the global registry. */
 import "@/lib/principles/built-in-validators";
 
+/* In-flight registry — prevents the on-edit re-evaluator from firing
+   the same principle's evaluatePrinciples N times when a leader saves
+   the form repeatedly within the eval window. The serverless instance
+   may live across requests; even if it doesn't, the migration-122
+   UNIQUE index + ON CONFLICT DO NOTHING is the safety net. This map
+   is the cheap front-line guard that keeps Graph quota under control
+   when a save burst happens. */
+const inFlightByPrinciple = new Map<string, Promise<EvaluateResult>>();
+const COMPLETED_THROTTLE_MS = 60_000; // 1 min cool-down after completion
+const recentlyCompleted = new Map<string, number>();
+
+export function _resetEvaluationGuardForTests(): void {
+  inFlightByPrinciple.clear();
+  recentlyCompleted.clear();
+}
+
 export interface EvaluateOptions {
   /** Default eval window in days. Overridable per-validator below
    *  when bootstrapping (no prior observations → widen to 30d). */
@@ -91,6 +107,45 @@ function defaultWindow(windowDays: number) {
  *  user. Used by both the cron (passing every active principle) and
  *  the on-create/edit/manual hooks (passing a single principle). */
 export async function evaluatePrinciples(
+  principles: readonly PrincipleRecord[],
+  opts: EvaluateOptions = {},
+): Promise<EvaluateResult> {
+  /* On-edit throttle: when a single principle is being re-evaluated
+     (the on-create / on-update path passes [singlePrinciple] +
+     forceBootstrap:true), short-circuit if either an in-flight run is
+     already happening OR a previous run completed within the cool-
+     down. The periodic cron passes the full active set and bypasses
+     this guard. */
+  if (principles.length === 1 && opts.forceBootstrap) {
+    const id = principles[0].id;
+    const inFlight = inFlightByPrinciple.get(id);
+    if (inFlight) return inFlight;
+    const completedAt = recentlyCompleted.get(id);
+    if (completedAt && Date.now() - completedAt < COMPLETED_THROTTLE_MS) {
+      trackEvent("principle.evaluation_skipped", "system", "system", {
+        reason: "throttled",
+        principle_id: id,
+        ms_since_last: Date.now() - completedAt,
+      });
+      return {
+        bindingCount: 0,
+        userCount: 0,
+        observationCount: 0,
+        failureCount: 0,
+        perValidator: {},
+      };
+    }
+    const promise = evaluatePrinciplesInner(principles, opts).finally(() => {
+      inFlightByPrinciple.delete(id);
+      recentlyCompleted.set(id, Date.now());
+    });
+    inFlightByPrinciple.set(id, promise);
+    return promise;
+  }
+  return evaluatePrinciplesInner(principles, opts);
+}
+
+async function evaluatePrinciplesInner(
   principles: readonly PrincipleRecord[],
   opts: EvaluateOptions = {},
 ): Promise<EvaluateResult> {

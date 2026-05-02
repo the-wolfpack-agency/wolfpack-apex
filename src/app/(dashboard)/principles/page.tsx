@@ -85,14 +85,14 @@ function formatDate(iso: string): string {
 }
 
 function scoreColor(score: number): string {
-  if (score < -0.3) return "var(--wp-error)";
-  if (score > 0.3) return "var(--wp-success)";
+  if (score <= -0.3) return "var(--wp-error)";
+  if (score >= 0.3) return "var(--wp-success)";
   return "var(--wp-warning)";
 }
 
 function scoreLabel(score: number): string {
-  if (score < -0.3) return "drift";
-  if (score > 0.3) return "adherence";
+  if (score <= -0.3) return "drift";
+  if (score >= 0.3) return "adherence";
   return "neutral";
 }
 

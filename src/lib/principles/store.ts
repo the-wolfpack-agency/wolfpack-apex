@@ -439,6 +439,41 @@ export async function insertObservations(args: {
       "no_database",
     );
   }
+  /* In-memory dedupe: when the same evaluation produces two identical
+     rows (e.g. multiple signal lines on the same principle binding to
+     the same validator), collapse them before the INSERT. Natural key
+     mirrors migration 122's UNIQUE index — minute granularity on
+     observed_at + the evidence sourceId — so two cron firings within
+     the same minute also collapse here. */
+  const seenKeys = new Set<string>();
+  const dedupedRows: typeof args.rows = [];
+  for (const r of args.rows) {
+    const observedMinute = (() => {
+      const ms = Date.parse(
+        typeof r.observedAt === "string" && r.observedAt
+          ? r.observedAt
+          : new Date().toISOString(),
+      );
+      if (!Number.isFinite(ms)) return r.observedAt ?? "";
+      return new Date(Math.floor(ms / 60000) * 60000).toISOString();
+    })();
+    const sourceId =
+      (r.evidenceJsonb as Record<string, unknown> | undefined)?.["sourceId"] ??
+      "";
+    const key = [
+      args.principleId,
+      args.validatorId,
+      r.subjectUserId ?? "",
+      r.surfaceSubtype ?? "",
+      observedMinute,
+      String(sourceId),
+    ].join("|");
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    dedupedRows.push(r);
+  }
+  args = { ...args, rows: dedupedRows };
+  if (args.rows.length === 0) return 0;
   const values: unknown[] = [];
   const placeholders: string[] = [];
   args.rows.forEach((r, i) => {
