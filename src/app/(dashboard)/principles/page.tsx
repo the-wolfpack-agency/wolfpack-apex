@@ -929,6 +929,35 @@ function NativePrincipleManager({ onChange }: { onChange: () => void }) {
   const [creating, setCreating] = useState(false);
   const [runningFor, setRunningFor] = useState<string | null>(null);
   const [runMessage, setRunMessage] = useState<string | null>(null);
+  const [runningAll, setRunningAll] = useState(false);
+
+  async function handleRunAll() {
+    setRunningAll(true);
+    setRunMessage(null);
+    try {
+      const res = await fetchWithRefresh("/api/principles/evaluate-all", {
+        method: "POST",
+      });
+      const j = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        principles?: number;
+        observations?: number;
+        error?: string;
+      };
+      if (!res.ok || !j.ok) {
+        setRunMessage(`Failed: ${j.error || res.status}`);
+      } else {
+        setRunMessage(
+          `Evaluated ${j.principles ?? 0} principle(s) — ${j.observations ?? 0} observation(s) recorded.`,
+        );
+        onChange();
+        await reload();
+      }
+    } catch (e) {
+      setRunMessage(`Failed: ${(e as Error).message}`);
+    }
+    setRunningAll(false);
+  }
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -1045,18 +1074,36 @@ function NativePrincipleManager({ onChange }: { onChange: () => void }) {
             Edit principles directly. Changes are versioned in the audit log.
           </p>
         </div>
-        <button
-          type="button"
-          data-testid="principle-new"
-          onClick={() => setCreating(true)}
-          className="px-3 py-1.5 rounded text-xs font-medium"
-          style={{
-            background: "var(--wp-gold)",
-            color: "var(--wp-dark)",
-          }}
-        >
-          + New principle
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            data-testid="principle-run-all"
+            disabled={runningAll}
+            onClick={() => void handleRunAll()}
+            title="Evaluate every active principle now (no per-principle clicking)"
+            className="px-3 py-1.5 rounded text-xs font-medium"
+            style={{
+              background: "var(--wp-dark-surface2)",
+              color: "var(--wp-text)",
+              border: "1px solid var(--wp-gold)",
+              opacity: runningAll ? 0.5 : 1,
+            }}
+          >
+            {runningAll ? "Running all…" : "Run all"}
+          </button>
+          <button
+            type="button"
+            data-testid="principle-new"
+            onClick={() => setCreating(true)}
+            className="px-3 py-1.5 rounded text-xs font-medium"
+            style={{
+              background: "var(--wp-gold)",
+              color: "var(--wp-dark)",
+            }}
+          >
+            + New principle
+          </button>
+        </div>
       </div>
       {error && (
         <div
