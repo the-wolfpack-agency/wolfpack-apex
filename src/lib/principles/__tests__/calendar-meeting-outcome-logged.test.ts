@@ -7,6 +7,7 @@ import {
   evaluateCalendarMeetingOutcomeLogged,
   extractMeaningfulBody,
   hasOutcomeMarkers,
+  scoreOutcome,
 } from "@/lib/principles/evaluators/calendar-meeting-outcome-logged";
 
 const ORIGINAL_FETCH = global.fetch;
@@ -37,6 +38,28 @@ describe("extractMeaningfulBody", () => {
   });
   test("undefined → empty", () => {
     expect(extractMeaningfulBody(undefined)).toBe("");
+  });
+});
+
+describe("scoreOutcome (tiering)", () => {
+  test("body with outcome markers → +0.3 logged", () => {
+    expect(scoreOutcome("Decisions: ship Friday. Action: deploy.")).toEqual({
+      score: 0.3,
+      tier: "logged",
+    });
+  });
+  test("substantial body (≥150 chars) without markers → 0 neutral (rich agenda, no recap)", () => {
+    const body = "x".repeat(200);
+    expect(scoreOutcome(body)).toEqual({ score: 0, tier: "neutral" });
+  });
+  test("short body without markers → -0.3 missed", () => {
+    expect(scoreOutcome("Standing weekly sync.")).toEqual({
+      score: -0.3,
+      tier: "missed",
+    });
+  });
+  test("empty body → -0.3 missed", () => {
+    expect(scoreOutcome("")).toEqual({ score: -0.3, tier: "missed" });
   });
 });
 

@@ -31,7 +31,10 @@ describe("scoreForMeetingCount", () => {
 });
 
 describe("countBusinessMeetings", () => {
-  test("counts busy 9-17 UTC events; skips cancelled/free/off-hours", () => {
+  test("counts 9-17 wall-clock events at the given tz; skips cancelled/free/off-hours", () => {
+    /* Pass tz='UTC' so the test's UTC ISO strings map 1:1 to the
+       business-hours window. The Dallas integration is exercised in
+       the evaluator-level test below. */
     const events = [
       { showAs: "busy", start: { dateTime: "2026-04-29T10:00:00Z" } },
       { showAs: "busy", start: { dateTime: "2026-04-29T17:00:00Z" } }, // boundary, exclusive at 18
@@ -41,7 +44,17 @@ describe("countBusinessMeetings", () => {
       { showAs: "free", start: { dateTime: "2026-04-29T14:00:00Z" } },
       { showAs: "busy" }, // no start
     ];
-    expect(countBusinessMeetings(events)).toBe(2);
+    expect(countBusinessMeetings(events, "UTC")).toBe(2);
+  });
+
+  test("default tz is Dallas (America/Chicago) — UTC-time inputs that map to Dallas business hours pass", () => {
+    /* In May 2026 (CDT, UTC-5), Dallas 11am = 16:00 UTC. */
+    const events = [
+      { showAs: "busy", start: { dateTime: "2026-05-04T16:00:00Z" } }, // 11am Dallas
+      { showAs: "busy", start: { dateTime: "2026-05-04T13:00:00Z" } }, // 8am Dallas → skip
+      { showAs: "busy", start: { dateTime: "2026-05-04T23:00:00Z" } }, // 6pm Dallas → skip
+    ];
+    expect(countBusinessMeetings(events)).toBe(1);
   });
 });
 
@@ -59,10 +72,19 @@ describe("evaluateCalendarMeetingDensity", () => {
 
   test("emits one rollup observation with snapped observedAt", async () => {
     mockGetValidToken.mockResolvedValueOnce({ accessToken: "t", userEmail: "x" });
-    const rows = Array.from({ length: 12 }, (_, i) => ({
-      showAs: "busy",
-      start: { dateTime: `2026-04-29T1${i % 8}:00:00Z` },
-    }));
+    /* 12 events at distinct UTC times that all fall in Dallas business
+       hours (14:00–22:59 UTC = 9am–5:59pm CDT). 6 hours × 2 per hour
+       fills 12 slots without spilling out of the 9-hour window. */
+    const rows = Array.from({ length: 12 }, (_, i) => {
+      const hour = 14 + Math.floor(i / 2);
+      const minute = (i % 2) * 30;
+      return {
+        showAs: "busy",
+        start: {
+          dateTime: `2026-04-29T${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}:00Z`,
+        },
+      };
+    });
     global.fetch = jest.fn().mockResolvedValueOnce({
       ok: true,
       status: 200,

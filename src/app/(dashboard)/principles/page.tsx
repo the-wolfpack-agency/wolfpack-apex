@@ -27,6 +27,11 @@ interface PrincipleSummary {
   bodyMd?: string;
   scoreboardWeight?: number;
   owner?: string | null;
+  /** Count of team-wide rows for this principle (subject_user_id IS
+   *  NULL). Used to swap the My-principles empty-state copy from
+   *  "nothing happened" to "all activity is team-wide — see Team
+   *  scoreboard" when relevant. */
+  teamWideObservationCount?: number;
 }
 
 interface ObservationRow {
@@ -78,6 +83,31 @@ function isLeadership(role: string | undefined): boolean {
 
 function formatDate(iso: string): string {
   try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+/* Subtypes that emit ONE observation per Dallas day / window (rollups
+   with snapToOrgDay observed_at). For these, only the calendar date
+   carries meaning — showing "8:00 PM" in the UI mis-suggests an event
+   happened at 8 PM when really the row covers the whole day. */
+const ROLLUP_SUBTYPES = new Set<string>([
+  "focus_block_ratio",
+  "weekly_priority_count",
+  "weekly_finish_rate",
+  "meeting_density",
+  "declined_attendance_rate",
+  "kr_friday_status",
+  "okr_measurable",
+]);
+
+function formatObservedAt(iso: string, subtype?: string | null): string {
+  try {
+    if (subtype && ROLLUP_SUBTYPES.has(subtype)) {
+      return new Date(iso).toLocaleDateString();
+    }
     return new Date(iso).toLocaleString();
   } catch {
     return iso;
@@ -643,7 +673,9 @@ function MeView({ data }: { data: MeResponse | null }) {
               style={{ color: "var(--wp-text-muted)" }}
             >
               {obs.length === 0
-                ? "No observations in the last week — keep it up."
+                ? (p.teamWideObservationCount ?? 0) > 0
+                  ? `No personal observations — ${p.teamWideObservationCount} team-wide observation${p.teamWideObservationCount === 1 ? "" : "s"} this week (see Team scoreboard).`
+                  : "No observations in the last week — keep it up."
                 : `${obs.length} observation${obs.length === 1 ? "" : "s"} in the last week:`}
             </div>
             {obs.length > 0 && (
@@ -672,7 +704,7 @@ function MeView({ data }: { data: MeResponse | null }) {
                         {o.surfaceSubtype || o.surface}
                       </strong>
                       <span style={{ color: "var(--wp-text-muted)", marginLeft: 8 }}>
-                        {formatDate(o.observedAt)}
+                        {formatObservedAt(o.observedAt, o.surfaceSubtype)}
                       </span>
                       {(() => {
                         const ev = o.evidence as {

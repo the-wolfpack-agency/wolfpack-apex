@@ -12,9 +12,11 @@
  */
 
 import { getValidToken } from "@/lib/microsoft-graph";
-import type {
-  EvaluationContext,
-  Observation,
+import {
+  localHourInTz as sharedLocalHourInTz,
+  ORG_TZ,
+  type EvaluationContext,
+  type Observation,
 } from "@/lib/principles/validators";
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
@@ -40,24 +42,9 @@ interface MailboxSettings {
 
 /**
  * Convert a UTC ISO timestamp to the local hour at the user's tz.
- * Tries Intl.DateTimeFormat; falls back to UTC if the tz is invalid.
+ * Re-exported from validators.ts so existing callers keep working.
  */
-export function localHourInTz(iso: string, tz: string): number {
-  try {
-    const fmt = new Intl.DateTimeFormat("en-US", {
-      hour: "numeric",
-      hour12: false,
-      timeZone: tz || "UTC",
-    });
-    const parts = fmt.formatToParts(new Date(iso));
-    const hourPart = parts.find((p) => p.type === "hour");
-    const n = hourPart ? Number(hourPart.value) : Number.NaN;
-    if (Number.isFinite(n)) return n === 24 ? 0 : n;
-  } catch {
-    /* fall through */
-  }
-  return new Date(iso).getUTCHours();
-}
+export const localHourInTz = sharedLocalHourInTz;
 
 /** Return true when localHour falls in the night window
  *  (start..23, then 0..end). 21..7 is the default. */
@@ -81,15 +68,18 @@ async function fetchMailboxTimeZone(
     const res = await fetch(`${GRAPH_BASE}/me/mailboxSettings`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!res.ok) return "UTC";
+    if (!res.ok) return ORG_TZ;
     const data = (await res.json().catch(() => ({}))) as MailboxSettings;
+    /* Prefer Graph's explicit working-hours tz, then mailbox tz, then
+       the org default (Dallas). Falling back to UTC was misclassifying
+       Dallas-evening sends as in-window. */
     return (
       data.workingHours?.timeZone?.name ||
       data.timeZone ||
-      "UTC"
+      ORG_TZ
     );
   } catch {
-    return "UTC";
+    return ORG_TZ;
   }
 }
 
@@ -135,7 +125,7 @@ export async function evaluateMailAfterHours(
   try {
     tz = await fetchMailboxTimeZone(userId, token.accessToken);
   } catch {
-    tz = "UTC";
+    tz = ORG_TZ;
   }
 
   let result: { rows: RawSentMessage[]; status: number };

@@ -191,6 +191,31 @@ describe("built-in validators", () => {
   });
 });
 
+describe("Dallas timezone helpers", () => {
+  /* Use require so resetting modules earlier in the file doesn't bind
+     us to a stale ORG_TZ derivation. */
+  const v = require("@/lib/principles/validators") as typeof import("@/lib/principles/validators");
+
+  test("ORG_TZ defaults to America/Chicago (Dallas)", () => {
+    expect(v.ORG_TZ).toBe("America/Chicago");
+  });
+  test("localHourInTz returns Dallas wall-clock hour for a UTC instant", () => {
+    /* CDT (May 2026, UTC-5): UTC 22:30 = Dallas 17:30 → hour 17. */
+    expect(v.localHourInTz("2026-05-01T22:30:00Z")).toBe(17);
+    /* CST (Jan 2026, UTC-6): UTC 14:00 = Dallas 08:00 → hour 8. */
+    expect(v.localHourInTz("2026-01-15T14:00:00Z")).toBe(8);
+  });
+  test("dayDateInTz buckets a late-evening UTC instant to the Dallas calendar day", () => {
+    /* UTC midnight is still 7pm previous-day in Dallas (CDT). */
+    expect(v.dayDateInTz("2026-05-02T00:00:00Z")).toBe("2026-05-01");
+  });
+  test("snapToOrgDay collapses two same-day Dallas instants to identical key", () => {
+    const morning = v.snapToOrgDay("2026-05-01T15:00:00Z"); // 10am Dallas
+    const afternoon = v.snapToOrgDay("2026-05-01T22:00:00Z"); // 5pm Dallas
+    expect(morning).toBe(afternoon);
+  });
+});
+
 describe("snapToUtcDay", () => {
   test("snaps mid-day timestamps to 00:00:00.000Z of the same UTC date", () => {
     expect(snapToUtcDay("2026-05-02T08:43:25.123Z")).toBe(

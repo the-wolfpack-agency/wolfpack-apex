@@ -19,13 +19,19 @@
 
 import { getValidToken } from "@/lib/microsoft-graph";
 import {
+  localHourInTz,
   snapToUtcDay,
+  ORG_TZ,
   type EvaluationContext,
   type Observation,
 } from "@/lib/principles/validators";
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
+/* Wolfpack is HQ'd in Dallas — business hours evaluated at America/Chicago
+   (CST/CDT). Vercel runtime is UTC; reading getUTCHours misclassified a
+   Dallas-9am meeting (UTC 14/15) as an after-hours block and a Dallas-
+   evening meeting as in-window. */
 const BUSINESS_START_HOUR = 9;
 const BUSINESS_END_HOUR = 18;
 
@@ -58,17 +64,20 @@ async function fetchEvents(
   return { rows: Array.isArray(data.value) ? data.value : [], status: 200 };
 }
 
-/** Count business-hours busy events. Pure for unit testing. */
-export function countBusinessMeetings(events: RawEvent[]): number {
+/** Count business-hours busy events. Pure for unit testing. The hour
+ *  comparison is done at ORG_TZ (Dallas) — server-local UTC was
+ *  classifying real Dallas-9am meetings as off-hours. */
+export function countBusinessMeetings(
+  events: RawEvent[],
+  tz: string = ORG_TZ,
+): number {
   let n = 0;
   for (const ev of events) {
     if (ev.isCancelled) continue;
     if (ev.showAs && ev.showAs !== "busy") continue;
     const startISO = ev.start?.dateTime;
     if (!startISO) continue;
-    const ms = Date.parse(startISO);
-    if (!Number.isFinite(ms)) continue;
-    const hour = new Date(ms).getUTCHours();
+    const hour = localHourInTz(startISO, tz);
     if (hour < BUSINESS_START_HOUR || hour >= BUSINESS_END_HOUR) continue;
     n++;
   }

@@ -14,9 +14,12 @@
  */
 
 import { getValidToken } from "@/lib/microsoft-graph";
-import type {
-  EvaluationContext,
-  Observation,
+import {
+  dayDateInTz,
+  ORG_TZ,
+  snapToOrgDay,
+  type EvaluationContext,
+  type Observation,
 } from "@/lib/principles/validators";
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
@@ -35,10 +38,6 @@ const BUSINESS_START_HOUR = 9;
 const BUSINESS_END_HOUR = 17;
 const FOCUS_BLOCK_MIN_HOURS = 2;
 const ADHERENCE_RATIO = 0.4;
-
-function fmtDate(iso: string): string {
-  return iso.slice(0, 10);
-}
 
 /** Pull events in the window via /me/calendarview. */
 async function fetchEvents(
@@ -65,22 +64,27 @@ async function fetchEvents(
 
 /**
  * Compute total focus-hours within business hours for a single date.
- * Algorithm: build a 9–17 window, subtract every busy-event interval
- * (capped at the window), then merge contiguous gaps and sum gaps
- * ≥ FOCUS_BLOCK_MIN_HOURS.
+ * Algorithm: build a 9–17 ORG_TZ window, subtract every busy-event
+ * interval (capped at the window), then merge contiguous gaps and sum
+ * gaps ≥ FOCUS_BLOCK_MIN_HOURS.
  *
- * Pure function, exported for unit testing.
+ * Pure function, exported for unit testing. The `date` argument is a
+ * UTC instant ANYWHERE in the target Dallas calendar day; this fn
+ * derives the Dallas wall-clock 9–17 window and converts back to
+ * UTC ms for event-overlap math.
  */
 export function computeFocusHoursForDate(
   date: Date,
   events: Array<{ startMs: number; endMs: number }>,
+  tz: string = ORG_TZ,
 ): { focusHours: number; ratio: number } {
-  const dayStart = new Date(date);
-  dayStart.setHours(BUSINESS_START_HOUR, 0, 0, 0);
-  const dayEnd = new Date(date);
-  dayEnd.setHours(BUSINESS_END_HOUR, 0, 0, 0);
-  const dayStartMs = dayStart.getTime();
-  const dayEndMs = dayEnd.getTime();
+  /* Resolve the Dallas-local 9am and 5pm for this calendar date as
+     UTC instants. snapToOrgDay gives us Dallas-midnight as a UTC ISO;
+     adding HOUR offsets yields Dallas-9am / 5pm in UTC ms. */
+  const dayMidnightISO = snapToOrgDay(date.toISOString(), tz);
+  const dayMidnightMs = Date.parse(dayMidnightISO);
+  const dayStartMs = dayMidnightMs + BUSINESS_START_HOUR * 60 * 60 * 1000;
+  const dayEndMs = dayMidnightMs + BUSINESS_END_HOUR * 60 * 60 * 1000;
   const totalWindowHours = (dayEndMs - dayStartMs) / (60 * 60 * 1000);
 
   /* Sort + clip events to the business window. */
@@ -132,9 +136,10 @@ export function bucketEventsByDate(
     const startMs = new Date(startISO).getTime();
     const endMs = new Date(endISO).getTime();
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;
-    /* Bucket by the day the event STARTS. Multi-day events are clipped
-       to the day's window inside computeFocusHoursForDate. */
-    const dateKey = fmtDate(startISO);
+    /* Bucket by the day the event STARTS in ORG_TZ (Dallas). Multi-day
+       events are clipped to the day's window inside
+       computeFocusHoursForDate. */
+    const dateKey = dayDateInTz(startISO);
     const list = out.get(dateKey) ?? [];
     list.push({ startMs, endMs });
     out.set(dateKey, list);
@@ -172,26 +177,28 @@ export async function evaluateCalendarFocusBlock(
   const dayMs = 24 * 60 * 60 * 1000;
   for (let t = start.getTime(); t <= end.getTime(); t += dayMs) {
     const d = new Date(t);
-    /* Skip weekends — focus-block expectations are business-day only. */
-    const dow = d.getDay();
+    /* Skip weekends — focus-block expectations are business-day only.
+       Use UTC day-of-week as a coarse proxy (close enough; we just
+       want to skip Sat/Sun in Dallas for any reasonable window). */
+    const dow = d.getUTCDay();
     if (dow === 0 || dow === 6) continue;
-    const key = fmtDate(d.toISOString());
+    const key = dayDateInTz(d.toISOString());
     const events = buckets.get(key) ?? [];
     const { focusHours, ratio } = computeFocusHoursForDate(d, events);
     /* Score: +0.5 when ratio ≥ 0.4 (adherence), -0.5 below.
        Magnitude is moderate so a single soggy day doesn't tank the
        weekly mean. */
     const score = ratio >= ADHERENCE_RATIO ? 0.5 : -0.5;
-    /* Snap observed_at to UTC midnight so two cron firings 15s apart
-       produce the SAME observed_at — combined with the migration-122
-       unique index this makes the daily observation idempotent. */
-    const dayKey = new Date(d);
-    dayKey.setUTCHours(0, 0, 0, 0);
+    /* Snap observed_at to Dallas midnight (the calendar day this
+       focus block belongs to) so two cron firings within the same
+       Dallas day produce identical observed_at — combined with the
+       migration-122 unique index this makes the daily observation
+       idempotent. */
     observations.push({
       surface: "calendar",
       surfaceSubtype: "focus_block_ratio",
       subjectUserId: userId,
-      observedAt: dayKey.toISOString(),
+      observedAt: snapToOrgDay(d.toISOString()),
       score,
       evidence: {
         kind: "calendar_focus_day",

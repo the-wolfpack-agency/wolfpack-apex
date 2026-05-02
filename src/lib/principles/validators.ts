@@ -103,6 +103,79 @@ export function snapToUtcDay(iso: string): string {
 }
 
 /* ------------------------------------------------------------------ */
+/* Org timezone — Wolfpack is based in Dallas, TX. Calendar / mail    */
+/* evaluators anchor business-hours + after-hours windows to this     */
+/* zone instead of UTC (Vercel server time). Override via env for     */
+/* tests or future relocation.                                         */
+/* ------------------------------------------------------------------ */
+
+export const ORG_TZ = process.env.INSTINCT_ORG_TZ || "America/Chicago";
+
+/**
+ * Wall-clock hour (0-23) at the given timezone for a UTC ISO string.
+ * Falls back to UTC hour on parse / tz failure.
+ */
+export function localHourInTz(iso: string, tz: string = ORG_TZ): number {
+  try {
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      hour12: false,
+      timeZone: tz || "UTC",
+    });
+    const parts = fmt.formatToParts(new Date(iso));
+    const hourPart = parts.find((p) => p.type === "hour");
+    const n = hourPart ? Number(hourPart.value) : Number.NaN;
+    if (Number.isFinite(n)) return n === 24 ? 0 : n;
+  } catch {
+    /* fall through */
+  }
+  return new Date(iso).getUTCHours();
+}
+
+/**
+ * Return the calendar date (YYYY-MM-DD) at the given timezone for a
+ * UTC ISO string. Used by daily-rollup evaluators that bucket events
+ * by Dallas calendar day, not UTC day.
+ */
+export function dayDateInTz(iso: string, tz: string = ORG_TZ): string {
+  try {
+    const fmt = new Intl.DateTimeFormat("en-CA", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      timeZone: tz || "UTC",
+    });
+    return fmt.format(new Date(iso));
+  } catch {
+    return iso.slice(0, 10);
+  }
+}
+
+/**
+ * Return the UTC ISO string for midnight on the given calendar date in
+ * the given timezone. The result is a stable "day key" — repeated
+ * cron firings on the same Dallas day produce identical observed_at.
+ */
+export function snapToOrgDay(iso: string, tz: string = ORG_TZ): string {
+  const dayDate = dayDateInTz(iso, tz);
+  /* Construct a Date at midnight in the target tz: parse YYYY-MM-DD as
+     UTC, then offset by the tz offset for that date. We compute the
+     offset by formatting the same instant in both UTC and the target
+     tz and diffing. Robust across DST transitions. */
+  const utcMidnightMs = Date.parse(`${dayDate}T00:00:00Z`);
+  if (!Number.isFinite(utcMidnightMs)) return iso;
+  /* Find the offset (minutes) at this date by formatting noon UTC in
+     the target tz and reading back the wall-clock hour. */
+  const probeMs = utcMidnightMs + 12 * 60 * 60 * 1000; // noon UTC
+  const wallHour = localHourInTz(new Date(probeMs).toISOString(), tz);
+  /* If wallHour < 12, the tz is west of UTC; offset = -(12 - wallHour).
+     If >= 12, east; offset = wallHour - 12. */
+  const offsetHours = wallHour < 12 ? -(12 - wallHour) : wallHour - 12;
+  const orgMidnightMs = utcMidnightMs - offsetHours * 60 * 60 * 1000;
+  return new Date(orgMidnightMs).toISOString();
+}
+
+/* ------------------------------------------------------------------ */
 /* Registry                                                            */
 /* ------------------------------------------------------------------ */
 

@@ -12,6 +12,7 @@ import { canReadTeamEvidence } from "@/lib/principles/authz";
 import {
   listActivePrinciples,
   listObservationsForSubject,
+  listAllObservations,
   listSignalsForPrinciple,
 } from "@/lib/principles/store";
 
@@ -27,10 +28,22 @@ export async function GET(req: NextRequest) {
   const sinceISO =
     url.searchParams.get("since") ||
     new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const [principles, observations] = await Promise.all([
+  const [principles, observations, allObs] = await Promise.all([
     listActivePrinciples(),
     listObservationsForSubject(user.id, { sinceISO, limit: 200 }),
+    /* Pull team-wide rows (subject_user_id IS NULL) so the My-principles
+       view can tell apart "nothing happened on me" from "all activity
+       this week is team-wide — see the team scoreboard". */
+    listAllObservations({ sinceISO, limit: 500 }),
   ]);
+  const teamWideCountByPrinciple = new Map<string, number>();
+  for (const o of allObs) {
+    if (o.subjectUserId !== null) continue;
+    teamWideCountByPrinciple.set(
+      o.principleId,
+      (teamWideCountByPrinciple.get(o.principleId) ?? 0) + 1,
+    );
+  }
 
   if (wantFull) {
     /* Leadership-only — return the editable shape (signals, weight,
@@ -76,6 +89,7 @@ export async function GET(req: NextRequest) {
       title: p.title,
       domains: p.domains,
       bodyMd: p.bodyMd,
+      teamWideObservationCount: teamWideCountByPrinciple.get(p.id) ?? 0,
     })),
     observations: observations.map((o) => ({
       id: o.id,

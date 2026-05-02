@@ -82,6 +82,30 @@ export function hasOutcomeMarkers(meaningfulBody: string): boolean {
   return OUTCOME_PATTERNS.some((re) => re.test(meaningfulBody));
 }
 
+/* Tiering thresholds. A meeting whose body is empty/short AND has no
+   outcome markers is a clear miss (-0.3). A body that's substantial
+   (≥150 chars of cleaned text) but lacks explicit outcome markers is
+   ambiguous — usually a rich agenda invite that wasn't updated post-
+   meeting; we score 0 (neutral) instead of penalizing the meeting. */
+const SUBSTANTIAL_BODY_CHARS = 150;
+
+/** Pure scorer — meaningful_body_chars + marker presence → score. */
+export function scoreOutcome(meaningfulBody: string): {
+  score: number;
+  tier: "logged" | "neutral" | "missed";
+} {
+  if (hasOutcomeMarkers(meaningfulBody)) {
+    return { score: 0.3, tier: "logged" };
+  }
+  if (meaningfulBody.length >= SUBSTANTIAL_BODY_CHARS) {
+    /* Long body without explicit outcome markers — likely a rich
+       agenda doc that wasn't appended to post-meeting. Don't punish
+       the meeting; surface neutral so leadership can drill in. */
+    return { score: 0, tier: "neutral" };
+  }
+  return { score: -0.3, tier: "missed" };
+}
+
 async function fetchPastEvents(
   accessToken: string,
   startISO: string,
@@ -141,19 +165,19 @@ export async function evaluateCalendarMeetingOutcomeLogged(
       if (minutes < 5) continue;
     }
     const meaningful = extractMeaningfulBody(ev.body?.content);
-    const logged = hasOutcomeMarkers(meaningful);
+    const { score, tier } = scoreOutcome(meaningful);
     observations.push({
       surface: "calendar",
       surfaceSubtype: "meeting_outcome_logged",
       subjectUserId: userId,
       observedAt: endISO,
-      score: logged ? 0.3 : -0.3,
+      score,
       evidence: {
         kind: "meeting_outcome_logged",
         sourceId: ev.id,
         sourceUrl: ev.webLink,
         metric: { name: "meaningful_body_chars", value: meaningful.length },
-        notes: ev.subject?.slice(0, 200),
+        notes: `${ev.subject?.slice(0, 200) ?? ""} [${tier}]`,
       },
     });
   }

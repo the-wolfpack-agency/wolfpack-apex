@@ -134,7 +134,7 @@ describe("evaluateMailAfterHours", () => {
     });
     expect(out).toEqual([]);
   });
-  test("missing tz settings falls back to UTC and still detects after-hours", async () => {
+  test("missing mailbox tz falls back to ORG_TZ (Dallas) and still detects after-hours", async () => {
     mockGetValidToken.mockResolvedValueOnce({ accessToken: "tk" });
     let call = 0;
     global.fetch = jest.fn(async () => {
@@ -149,7 +149,11 @@ describe("evaluateMailAfterHours", () => {
           value: [
             {
               id: "m1",
-              sentDateTime: "2026-05-01T22:30:00Z", // UTC 22:30 — after-hours
+              /* In CDT (May 2026, UTC-5): UTC 03:30 = Dallas 22:30
+                 (10:30pm) — solidly inside the 21:00-07:00 after-hours
+                 window. Confirms the org-tz fallback works without
+                 mailbox settings. */
+              sentDateTime: "2026-05-01T03:30:00Z",
             },
           ],
         }),
@@ -157,7 +161,7 @@ describe("evaluateMailAfterHours", () => {
     }) as any;
     const out = await evaluateMailAfterHours({
       windowStart: "2026-04-24T00:00:00Z",
-      windowEnd: "2026-05-01T00:00:00Z",
+      windowEnd: "2026-05-02T00:00:00Z",
       subjectUserId: "u1",
     });
     expect(out).toHaveLength(1);

@@ -20,30 +20,39 @@ afterEach(() => {
 const hourMs = (h: number) => h * 60 * 60 * 1000;
 
 describe("computeFocusHoursForDate", () => {
+  /* Tests use tz="UTC" so the wall-clock hours in the test inputs are
+     unambiguous. The Dallas-tz code path is exercised end-to-end in
+     the evaluateCalendarFocusBlock integration tests below. */
   test("an empty calendar = full 8h focus, ratio 1.0", () => {
-    const day = new Date("2026-05-04T00:00:00"); // Monday
-    const out = computeFocusHoursForDate(day, []);
+    const day = new Date("2026-05-04T00:00:00Z"); // Monday
+    const out = computeFocusHoursForDate(day, [], "UTC");
     expect(out.focusHours).toBe(8);
     expect(out.ratio).toBe(1);
   });
   test("one 1h meeting at 11am leaves a 2h pre-block + 5h post-block", () => {
-    const day = new Date("2026-05-04T00:00:00");
+    const day = new Date("2026-05-04T00:00:00Z");
     const start = day.getTime() + hourMs(11);
     const end = start + hourMs(1);
-    const out = computeFocusHoursForDate(day, [
-      { startMs: start, endMs: end },
-    ]);
+    const out = computeFocusHoursForDate(
+      day,
+      [{ startMs: start, endMs: end }],
+      "UTC",
+    );
     /* 9–11 (2h focus) + 12–17 (5h focus) = 7h */
     expect(out.focusHours).toBe(7);
   });
   test("a meeting that consumes most of the day leaves 0 ≥2h blocks", () => {
-    const day = new Date("2026-05-04T00:00:00");
-    const out = computeFocusHoursForDate(day, [
-      {
-        startMs: day.getTime() + hourMs(10),
-        endMs: day.getTime() + hourMs(15),
-      },
-    ]);
+    const day = new Date("2026-05-04T00:00:00Z");
+    const out = computeFocusHoursForDate(
+      day,
+      [
+        {
+          startMs: day.getTime() + hourMs(10),
+          endMs: day.getTime() + hourMs(15),
+        },
+      ],
+      "UTC",
+    );
     /* 9–10 (1h) + 15–17 (2h) — only the 2h block counts */
     expect(out.focusHours).toBe(2);
   });
