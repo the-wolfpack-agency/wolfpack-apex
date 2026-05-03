@@ -435,3 +435,95 @@ describe("assemblePorscheClassSummary · class_match merge", () => {
     expect(result!.survey?.response_count).toBe(16);
   });
 });
+
+describe("assemblePorscheClassSummary — instructor note Y/N + follow-up labeling", () => {
+  /* Regression 2026-05-03: Cognito's instructor form uses the SAME
+     "Please provide details:" follow-up label after every Y/N parent
+     question. The renderer dropped the parent question and emitted
+     three identical "Please provide details: …" lines, losing all
+     context. The fix splices the immediately-preceding Y/N parent
+     question's label in. */
+  it("renders the parent question with the follow-up answer instead of bare 'Please provide details'", async () => {
+    const result = await assemblePorscheClassSummary(
+      "BA102|2026-05-01|Westlake",
+      {
+        query: fakeQuery({
+          snapshots: [
+            {
+              id: "1",
+              source_type: "cognito_instructor",
+              source_message_id: "msg-inst-juliann",
+              source_artifact_id: "artifact-inst-1",
+              captured_at: "2026-05-03T07:00:00.000Z",
+              class_key: "BA102|2026-05-01|Westlake",
+              course_type: "BA102",
+              class_date: "2026-05-01",
+              location: "Westlake",
+              participants: [],
+              source_payload: {
+                instructor_name: "Juliann McDaniel",
+                instructor_email: "juliann@porscheacademy.us",
+                fields: {},
+                sections: [
+                  {
+                    heading: "Entry Details",
+                    fields: [
+                      { label: "Name", value: "Juliann McDaniel" },
+                      { label: "Email", value: "juliann@porscheacademy.us" },
+                      {
+                        label: "Are there any issues or changes in the content that we need to make/be aware of?",
+                        value: "Yes",
+                      },
+                      {
+                        label: "Please provide details:",
+                        value: "Add a slide for participants to visually see coaching call reminders",
+                      },
+                      {
+                        label: "Were there any successes (wow moments) that stood out?",
+                        value: "Yes",
+                      },
+                      {
+                        label: "Please provide details:",
+                        value: "GM input",
+                      },
+                      {
+                        label: "Were there any pax details that stood out for future surprise and delight moments?",
+                        value: "Yes",
+                      },
+                      {
+                        label: "Please provide details:",
+                        value: "In crm.",
+                      },
+                    ],
+                  },
+                ],
+              },
+              participant_hash: "hash-inst",
+              created_at: "2026-05-03T07:00:00.000Z",
+            },
+          ],
+          exceptions: [],
+        }),
+        now: () => NOW,
+      },
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.instructor_notes).toHaveLength(1);
+    const note = result!.instructor_notes[0].note;
+    /* Each follow-up answer must be prefixed with the parent
+       question, not the generic "Please provide details:" label. */
+    expect(note).toContain(
+      "Are there any issues or changes in the content that we need to make/be aware of?: Add a slide for participants to visually see coaching call reminders",
+    );
+    expect(note).toContain(
+      "Were there any successes (wow moments) that stood out?: GM input",
+    );
+    expect(note).toContain(
+      "Were there any pax details that stood out for future surprise and delight moments?: In crm.",
+    );
+    /* And the bare "Please provide details:" prefix must be gone. */
+    expect(note).not.toContain("Please provide details: GM input");
+    expect(note).not.toContain("Please provide details: In crm.");
+  });
+});

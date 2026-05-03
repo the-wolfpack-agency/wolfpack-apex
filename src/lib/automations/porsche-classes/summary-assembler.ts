@@ -198,19 +198,48 @@ function noteOf(payload: Record<string, unknown> | null): string {
     "Class Location",
     "Total number of participants",
   ]);
+  /* "Please provide details" + close variants are GENERIC follow-up
+     prompts that come right after a Y/N parent question. Cognito
+     reuses the same label for every Yes branch, so emitting them
+     verbatim renders three identical "Please provide details:"
+     lines with no context (regression report 2026-05-03). When we
+     see one of these, we splice the IMMEDIATELY preceding parent
+     question's label in so the line reads
+       "Are there any issues...: Add a slide for participants..."
+     instead of
+       "Please provide details: Add a slide for participants..."  */
+  const FOLLOWUP_LABELS = new Set([
+    "Please provide details",
+    "Please provide details:",
+    "Provide details",
+    "Provide details:",
+    "Details",
+    "Details:",
+  ]);
   const out: string[] = [];
   for (const section of sections as Array<{
     heading: string;
     fields: Array<{ label: string; value: string }>;
   }>) {
+    let lastParent: string | null = null;
     for (const field of section.fields) {
       if (SKIP_LABELS.has(field.label)) continue;
       const v = (field.value ?? "").trim();
       if (!v) continue;
-      // Collapse "Yes/No" answers to just the label question — they're
-      // implicit from the follow-up "Please provide details:" answer.
-      if (v === "Yes" || v === "No") continue;
-      out.push(`${field.label}: ${v}`);
+      // Y/N parent questions hold context for the next follow-up but
+      // aren't worth showing on their own — record the label, skip the
+      // value.
+      if (v === "Yes" || v === "No") {
+        lastParent = field.label;
+        continue;
+      }
+      const isFollowup = FOLLOWUP_LABELS.has(field.label.replace(/:$/, ""));
+      const labelToUse = isFollowup && lastParent ? lastParent : field.label;
+      out.push(`${labelToUse}: ${v}`);
+      // After consuming a follow-up, clear so a subsequent free-text
+      // field with its own label doesn't accidentally inherit the
+      // parent question.
+      if (isFollowup) lastParent = null;
     }
   }
   return out.join("\n");
