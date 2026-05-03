@@ -200,7 +200,7 @@ export async function GET(req: NextRequest) {
       await storeTokens(tokens, userId, userEmail, displayName);
     }
   } catch (err) {
-    console.warn("[microsoft-graph] Failed to fetch user profile:", (err as Error).message);
+    console.warn("[microsoft-graph] Failed to fetch user profile:", sanitizeForLog((err as Error).message));
     await storeTokens(tokens, userId, user?.email || "unknown");
   }
 
@@ -260,7 +260,7 @@ export async function GET(req: NextRequest) {
       } catch (err) {
         console.warn(
           "[microsoft-signin] could not issue refresh token:",
-          (err as Error).message,
+          sanitizeForLog((err as Error).message),
         );
       }
     }

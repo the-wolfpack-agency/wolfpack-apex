@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
       await storeTokens(tokens, userId, companyName);
     }
   } catch (err) {
-    console.warn("[quickbooks] Failed to fetch company info:", (err as Error).message);
+    console.warn("[quickbooks] Failed to fetch company info:", sanitizeForLog((err as Error).message));
     await storeTokens(tokens, userId);
   }
 

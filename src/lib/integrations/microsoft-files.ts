@@ -112,6 +112,50 @@ interface GraphCallOpts {
   binaryContentType?: string;
 }
 
+/**
+ * Strict allow-list for Microsoft Graph + SharePoint/CDN download hosts.
+ * Reconstructs a fresh URL from the validated hostname + path so taint on
+ * the original endpoint string does not flow to fetch() (CodeQL:
+ * js/request-forgery).
+ */
+function assertAllowedGraphUrl(rawUrl: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new GraphFilesError(400, `invalid graph endpoint`);
+  }
+  if (parsed.protocol !== "https:") {
+    throw new GraphFilesError(400, `non-https graph endpoint`);
+  }
+  const host = parsed.hostname.toLowerCase();
+  const exactHosts = new Set<string>([
+    "graph.microsoft.com",
+  ]);
+  const allowedSuffixes = [
+    ".graph.microsoft.com",
+    ".sharepoint.com",
+    ".azureedge.net",
+    ".officeapps.live.com",
+  ];
+  const suffixOk =
+    allowedSuffixes.some(
+      (suf) => host.length > suf.length && host.endsWith(suf),
+    );
+  if (!exactHosts.has(host) && !suffixOk) {
+    throw new GraphFilesError(400, `disallowed graph host`);
+  }
+  // Reconstruct from validated components — taint laundered through an
+  // explicit allow-list check so the resulting URL string is no longer a
+  // tainted-flow source for fetch().
+  const safe = new URL("https://placeholder.invalid");
+  safe.protocol = "https:";
+  safe.hostname = host;
+  safe.pathname = parsed.pathname;
+  safe.search = parsed.search;
+  return safe.toString();
+}
+
 async function graphCall<T = unknown>(endpoint: string, opts: GraphCallOpts): Promise<T> {
   // Build the request URL, then validate that the host is on the
   // Microsoft Graph allow-list before any fetch(). `endpoint` may be
@@ -120,26 +164,7 @@ async function graphCall<T = unknown>(endpoint: string, opts: GraphCallOpts): Pr
   // graph.microsoft.com or *.sharepoint.com / *.azureedge.net (Graph's
   // download CDNs) may be reached. (CodeQL: js/request-forgery.)
   const rawUrl = endpoint.startsWith("http") ? endpoint : `${GRAPH_BASE_URL}/${endpoint}`;
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    throw new GraphFilesError(400, `invalid graph endpoint: ${endpoint}`);
-  }
-  if (parsed.protocol !== "https:") {
-    throw new GraphFilesError(400, `non-https graph endpoint: ${endpoint}`);
-  }
-  const host = parsed.hostname.toLowerCase();
-  const hostAllowed =
-    host === "graph.microsoft.com" ||
-    host.endsWith(".graph.microsoft.com") ||
-    host.endsWith(".sharepoint.com") ||
-    host.endsWith(".azureedge.net") ||
-    host.endsWith(".officeapps.live.com");
-  if (!hostAllowed) {
-    throw new GraphFilesError(400, `disallowed graph host: ${host}`);
-  }
-  const url = parsed.toString();
+  const url = assertAllowedGraphUrl(rawUrl);
   const method = opts.method ?? "GET";
   const headers: Record<string, string> = {
     Authorization: `Bearer ${opts.accessToken}`,

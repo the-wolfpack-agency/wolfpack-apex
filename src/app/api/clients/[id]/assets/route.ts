@@ -174,7 +174,7 @@ export async function POST(
     try {
       await saveAssetBlob(asset.id, buf.toString("base64"));
     } catch (err) {
-      console.error("[clients/assets POST blob]", (err as Error).message);
+      console.error("[clients/assets POST blob]", sanitizeForLog((err as Error).message));
       // Non-fatal — metadata row is committed; blob can be re-uploaded.
     }
   }
@@ -201,7 +201,7 @@ export async function POST(
   } catch (err) {
     // Audit write failure should not break the API response — the
     // observation trail is already in analytics via trackEvent.
-    console.error("[clients/assets POST audit]", (err as Error).message);
+    console.error("[clients/assets POST audit]", sanitizeForLog((err as Error).message));
   }
 
   return NextResponse.json({ asset }, { status: 201 });

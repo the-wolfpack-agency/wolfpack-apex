@@ -582,7 +582,7 @@ export async function exchangeCode(code: string): Promise<MsTokens | null> {
     handle.setAttribute("status_code", res.status);
 
     if (!res.ok) {
-      console.error("[microsoft-graph] Token exchange failed:", res.status, await res.text());
+      console.error("[microsoft-graph] Token exchange failed:", res.status, sanitizeForLog(await res.text()));
       handle.end("error");
       return null;
     }
@@ -598,7 +598,7 @@ export async function exchangeCode(code: string): Promise<MsTokens | null> {
       expires_at: expiresAt,
     };
   } catch (err) {
-    console.error("[microsoft-graph] Token exchange error:", (err as Error).message);
+    console.error("[microsoft-graph] Token exchange error:", sanitizeForLog((err as Error).message));
     handle.setAttribute("error_message", (err as Error).message);
     handle.end("error");
     obs.recordError(err as Error, { route: "ms_graph.auth.exchange_code" });
@@ -638,7 +638,7 @@ export async function refreshAccessToken(currentRefreshToken: string): Promise<M
     handle.setAttribute("status_code", res.status);
 
     if (!res.ok) {
-      console.error("[microsoft-graph] Token refresh failed:", res.status, await res.text());
+      console.error("[microsoft-graph] Token refresh failed:", res.status, sanitizeForLog(await res.text()));
       handle.end("error");
       return null;
     }
@@ -654,7 +654,7 @@ export async function refreshAccessToken(currentRefreshToken: string): Promise<M
       expires_at: expiresAt,
     };
   } catch (err) {
-    console.error("[microsoft-graph] Token refresh error:", (err as Error).message);
+    console.error("[microsoft-graph] Token refresh error:", sanitizeForLog((err as Error).message));
     handle.setAttribute("error_message", (err as Error).message);
     handle.end("error");
     obs.recordError(err as Error, { route: "ms_graph.auth.refresh_token" });
@@ -691,7 +691,7 @@ export async function storeTokens(
       [userEmail || tokens.user_email, displayName || tokens.display_name || null, tokens.access_token, tokens.refresh_token, tokens.expires_at, userId],
     );
   } catch (err) {
-    console.error("[microsoft-graph] Failed to store tokens:", (err as Error).message);
+    console.error("[microsoft-graph] Failed to store tokens:", sanitizeForLog((err as Error).message));
   }
 }
 
@@ -768,7 +768,7 @@ export async function deleteTokens(userId: string): Promise<void> {
     await query(`DELETE FROM instinct_ms_tokens WHERE connected_by = $1`, [userId]);
     clearCache(userId);
   } catch (err) {
-    console.error("[microsoft-graph] Failed to delete tokens:", (err as Error).message);
+    console.error("[microsoft-graph] Failed to delete tokens:", sanitizeForLog((err as Error).message));
   }
 }
 

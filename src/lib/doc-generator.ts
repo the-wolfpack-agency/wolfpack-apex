@@ -7,7 +7,7 @@
  */
 
 import { readFileSync } from "fs";
-import { resolve, sep } from "path";
+import { resolve, relative, isAbsolute, sep } from "path";
 import { execFileSync } from "child_process";
 import { query, safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
@@ -64,7 +64,14 @@ export function generateApiDoc(repoPath: string, filePath: string): GeneratedDoc
   // concat allowed (CodeQL: js/path-injection).
   const baseAbs = resolve(repoPath);
   const fullPath = resolve(baseAbs, filePath);
-  if (!fullPath.startsWith(baseAbs + sep) && fullPath !== baseAbs) {
+  // Use path.relative as the canonical containment check — CodeQL's
+  // js/path-injection sanitizer recognises this exact pattern.
+  const rel = relative(baseAbs, fullPath);
+  const escapesBase =
+    rel.startsWith("..") ||
+    isAbsolute(rel) ||
+    rel.split(sep).includes("..");
+  if (escapesBase) {
     return makeDoc({
       title: `API Documentation - ${filePath}`,
       doc_type: "api_doc",

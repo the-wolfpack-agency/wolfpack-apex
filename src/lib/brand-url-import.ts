@@ -560,8 +560,22 @@ async function tryImagePalette(
   deps: BrandImportDeps,
 ): Promise<string[]> {
   const fetchImpl = deps.fetchImpl ?? fetch;
+  // SSRF guard: og:image URLs come from scraped HTML — attacker-controllable.
+  // Run them through the same parseBrandUrl gate as the page fetch so they
+  // can never reach internal hosts (CodeQL: js/request-forgery).
+  const parsed = parseBrandUrl(imageUrl);
+  if (!parsed.ok) return [];
+  if (
+    parsed.url.protocol !== "https:" &&
+    !(
+      parsed.url.hostname === "localhost" ||
+      parsed.url.hostname.endsWith(".localhost")
+    )
+  ) {
+    return [];
+  }
   try {
-    const res = await fetchImpl(imageUrl, {
+    const res = await fetchImpl(parsed.url.toString(), {
       method: "GET",
       headers: { "User-Agent": BRAND_SCRAPE_USER_AGENT },
     });

@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ templates, history });
   } catch (err) {
-    console.error("[reports]", (err as Error).message);
+    console.error("[reports]", sanitizeForLog((err as Error).message));
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },
@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
         });
       } catch (err) {
         // AI failed — fall through to template-only generation
-        console.warn("[reports] Claude generation failed, using template-only:", (err as Error).message);
+        console.warn("[reports] Claude generation failed, using template-only:", sanitizeForLog((err as Error).message));
       }
     }
 
