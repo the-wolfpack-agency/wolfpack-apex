@@ -45,8 +45,15 @@ function graphReplyUrl(messageId: string): string {
   return `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/reply`;
 }
 
+/* RFC 5321 caps a full email address at 254 chars; capping before the
+   regex defeats ReDoS amplification on adversarial input where the
+   `[^\s@]+` … `[^\s@]+\.[^\s@]+` alternation chain could backtrack. */
+const MAX_EMAIL_LEN = 254;
+
 function isValidEmail(s: unknown): s is string {
-  return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+  if (typeof s !== "string") return false;
+  if (s.length === 0 || s.length > MAX_EMAIL_LEN) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
 
 export async function POST(

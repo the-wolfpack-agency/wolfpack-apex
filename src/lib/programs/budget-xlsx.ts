@@ -71,7 +71,25 @@ interface XlsxRow {
 }
 
 function cleanXmlText(s: string): string {
-  return s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+  /* Single-pass entity decode — chained sequential replacements (which
+     started with `&amp;` → `&`) double-decode strings like `&amp;lt;`
+     into `<` and trip CodeQL js/double-escaping. */
+  return s.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => {
+    switch (name) {
+      case "amp":
+        return "&";
+      case "lt":
+        return "<";
+      case "gt":
+        return ">";
+      case "quot":
+        return '"';
+      case "apos":
+        return "'";
+      default:
+        return _;
+    }
+  });
 }
 
 function parseSharedStrings(xml: string): string[] {

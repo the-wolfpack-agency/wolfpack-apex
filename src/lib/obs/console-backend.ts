@@ -14,6 +14,8 @@
  * Anything outside these values falls back to 'default'.
  */
 
+import { createHash } from "node:crypto";
+
 import type {
   ObservabilityBackend,
   Span,
@@ -24,6 +26,34 @@ import type {
 type ObsLevel = "verbose" | "default" | "errors-only";
 
 const SLOW_SPAN_THRESHOLD_MS = 250;
+
+/* Defense-in-depth: callers SHOULD NOT pass secrets through span
+   attributes, but in practice tokens, refresh_tokens, and passwords
+   leak in via metadata copies. This redactor swaps any attribute whose
+   key looks secret-shaped for a short sha256 fingerprint, which is
+   enough to correlate two log lines without ever printing the secret
+   in cleartext. */
+const SECRET_KEY_RE =
+  /(token|secret|password|passwd|api[_-]?key|authorization|cookie|session|refresh)/i;
+
+function fingerprint(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  const s = typeof value === "string" ? value : JSON.stringify(value);
+  return "sha256:" + createHash("sha256").update(s).digest("hex").slice(0, 8);
+}
+
+function redactAttributes(attrs: SpanAttributes | undefined): SpanAttributes {
+  if (!attrs) return {};
+  const out: SpanAttributes = {};
+  for (const [k, v] of Object.entries(attrs)) {
+    if (SECRET_KEY_RE.test(k) && v !== null && v !== undefined && v !== "") {
+      out[k] = fingerprint(v);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
 
 function readLevel(): ObsLevel {
   const raw = (process.env.OBS_LEVEL ?? "").toLowerCase();
@@ -56,7 +86,7 @@ export class ConsoleBackend implements ObservabilityBackend {
         duration_ms: span.endTime - span.startTime,
         start_time: span.startTime,
         end_time: span.endTime,
-        attributes: span.attributes,
+        attributes: redactAttributes(span.attributes),
         error: span.error,
       };
       const line = JSON.stringify(payload);
@@ -79,7 +109,7 @@ export class ConsoleBackend implements ObservabilityBackend {
       const payload = {
         kind: "error",
         error,
-        attributes: attrs ?? {},
+        attributes: redactAttributes(attrs),
       };
       console.error(JSON.stringify(payload));
     } catch {

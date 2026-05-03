@@ -70,11 +70,19 @@ const ATTRIBUTE_KEYWORDS: Record<string, RegExp> = {
  *   "correction: Porsche"
  *   "the client is actually Porsche"
  */
+/* ReDoS guard: cap the input the regex engine sees. The patterns below
+   contain alternations + bounded quantifiers ({1,120}) that, while
+   bounded, are still expensive on adversarial input. A correction is a
+   short phrase by definition; anything past 4 KiB is not a correction
+   the assistant should learn from. */
+const MAX_DETECT_INPUT_LEN = 4096;
+
 export function detectCorrection(
   userText: string,
   priorAssistantText: string | undefined,
 ): CorrectionExtraction | null {
   if (!userText) return null;
+  if (userText.length > MAX_DETECT_INPUT_LEN) return null;
 
   /* Pattern 1: "no, it is/its X" / "actually it is X" / "correction: X" */
   const m1 = /\b(?:no[,\s]+|actually[,\s]+)(?:it'?s|it\s+is|that'?s|that\s+is)\s+([^.!?\n]{1,120})/i.exec(
@@ -140,6 +148,10 @@ export function detectCorrection(
  */
 export function extractSubject(text: string | undefined): string | null {
   if (!text) return null;
+  /* ReDoS guard — cap the input to a reasonable length before running
+     character-class alternations that would otherwise be exponential
+     on pathological input. */
+  if (text.length > MAX_DETECT_INPUT_LEN) return null;
   const t = text.replace(/\n+/g, " ");
 
   /* 1. Double-quoted phrase. */

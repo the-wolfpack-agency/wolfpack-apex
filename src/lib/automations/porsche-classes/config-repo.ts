@@ -26,6 +26,19 @@
 
 import { query, writeQuery } from "@/lib/db";
 
+/* Strip leading + trailing slashes without a regex. The previous
+   `/^\/+|\/+$/g` form has overlapping `+` quantifiers across an
+   alternation that can backtrack on adversarial input (long runs of
+   slashes in the middle of the string). Plain string scanning is
+   linear and obviously bounded. */
+function stripSlashes(input: string): string {
+  let start = 0;
+  let end = input.length;
+  while (start < end && input.charCodeAt(start) === 47 /* '/' */) start++;
+  while (end > start && input.charCodeAt(end - 1) === 47) end--;
+  return start === 0 && end === input.length ? input : input.slice(start, end);
+}
+
 /* ------------------------------------------------------------------ */
 /* Typed payloads                                                      */
 /* ------------------------------------------------------------------ */
@@ -207,7 +220,7 @@ export async function getSharepointConfig(): Promise<SharepointConfig | null> {
   return {
     site_id: stored.site_id.trim(),
     drive_id: stored.drive_id.trim(),
-    path: stored.path.trim().replace(/^\/+|\/+$/g, ""),
+    path: stripSlashes(stored.path.trim()),
   };
 }
 
@@ -227,7 +240,7 @@ export async function setSharepointConfig(
   const trimmed: SharepointConfig = {
     site_id: value.site_id.trim(),
     drive_id: value.drive_id.trim(),
-    path: value.path.trim().replace(/^\/+|\/+$/g, ""),
+    path: stripSlashes(value.path.trim()),
   };
   if (!trimmed.site_id || !trimmed.drive_id || !trimmed.path) {
     throw new Error(

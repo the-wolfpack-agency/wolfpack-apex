@@ -35,6 +35,7 @@ import { trackEvent } from "@/lib/analytics";
 import type { AutomationDefinition } from "@/lib/automations/types";
 import { listFeeds } from "./feeds-repo";
 import { routeMessageToFeed } from "./router";
+import { htmlToText } from "@/lib/html-sanitize";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -352,11 +353,11 @@ async function safeExtractBodyText(input: {
        loses the message. */
   }
   if (input.body_html) {
-    return input.body_html
-      .replace(/<\s*(script|style)[\s\S]*?<\/\s*\1\s*>/gi, "")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+    /* Parser-driven fallback (cheerio under the hood). The earlier
+       regex pipeline was defeated by mutation inputs like
+       `<scr<script>ipt>` — flagged by CodeQL
+       js/incomplete-multi-character-sanitization. */
+    return htmlToText(input.body_html).replace(/\s+/g, " ").trim();
   }
   return input.body_preview ?? "";
 }

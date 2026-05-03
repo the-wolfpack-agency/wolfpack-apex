@@ -31,6 +31,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { emitInsight } from "@/lib/insights/emit";
+import { htmlToText } from "@/lib/html-sanitize";
 
 interface RecipientSummary {
   name: string;
@@ -160,30 +161,20 @@ function formatRelative(iso: string, nowMs: number = Date.now()): string {
 }
 
 /**
- * Strip the body HTML to a safe subset. Outlook bodies arrive as
- * full HTML documents (style tags, scripts, conditional comments).
- * We render the plain-text projection inside a styled container
- * rather than dropping raw HTML into the page — same trade-off the
- * messages page makes for chat HTML, which already shipped.
+ * Strip the body HTML to a safe plain-text projection. Outlook bodies
+ * arrive as full HTML documents (style tags, scripts, conditional
+ * comments). We render the plain-text projection inside a styled
+ * container rather than dropping raw HTML into the page.
+ *
+ * Implementation: parser-driven via `htmlToText` in `lib/html-sanitize`.
+ * The earlier regex pipeline was defeated by mutation-XSS inputs like
+ * `<scr<script>ipt>` (CodeQL js/incomplete-multi-character-sanitization
+ * + js/bad-tag-filter + js/double-escaping). The parser-driven path
+ * sees a real DOM tree, so concatenated tag fragments can't escape the
+ * sanitizer.
  */
 function htmlToSafeText(html: string): string {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n\n")
-    .replace(/<\/div>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return htmlToText(html);
 }
 
 export default function EmailReader({ id, onClose, onMutated, _now }: EmailReaderProps) {

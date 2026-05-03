@@ -80,10 +80,16 @@ function safeDecode(s: string): string {
  * Returns null on anything that fails the host check or doesn't yield a
  * usable folder path.
  */
+/* RFC 3986 caps a sane URL well under 8 KiB; SharePoint copy/paste
+   links are ~500 chars at the high end. Cap input before any regex
+   touches it to defeat ReDoS amplification on adversarial input. */
+const MAX_URL_LEN = 8192;
+
 export function parseSharepointFolderUrl(
   raw: string,
 ): ParsedSharepointFolderUrl | null {
   if (typeof raw !== "string") return null;
+  if (raw.length > MAX_URL_LEN) return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;
 

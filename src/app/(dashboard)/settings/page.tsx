@@ -7,6 +7,7 @@ import {
   startQuickbooksConnect,
   connectPlaud as connectPlaudHelper,
 } from "@/lib/integrations/connect";
+import { sanitizeHtml } from "@/lib/html-sanitize";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -115,12 +116,13 @@ function SignatureHtmlPreview({
 
   /* Wrap the user's HTML in a minimal document with a sane base font
      and word-wrap so long URLs don't push out the iframe horizontally.
-     `script` is stripped before render for defense in depth — even
-     though `sandbox=""` already disables scripts, it's cheap insurance. */
-  const safeHtml = html.replace(
-    /<\s*script\b[^<]*(?:(?!<\s*\/\s*script\s*>)<[^<]*)*<\s*\/\s*script\s*>/gi,
-    "",
-  );
+     The signature HTML is fully parser-sanitized via DOMPurify before
+     it reaches the iframe. The `sandbox=""` attribute is still set as
+     defense in depth, but parser-based sanitization is what blocks the
+     mutation-XSS attack class (e.g. `<scr<script>ipt>`) that CodeQL
+     flagged js/incomplete-multi-character-sanitization on the prior
+     regex strip. */
+  const safeHtml = sanitizeHtml(html);
   const srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:8px;font-family:Arial,sans-serif;font-size:14px;color:#222;background:#fff;word-wrap:break-word}img{max-width:100%}a{color:#0a66c2}</style></head><body>${safeHtml}<script>parent.postMessage({type:'instinct-sig-preview-h',h:document.body.scrollHeight+16},'*')<\/script></body></html>`;
 
   useEffect(() => {

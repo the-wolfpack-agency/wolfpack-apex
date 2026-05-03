@@ -101,9 +101,16 @@ export const AUTO_FLAG_NOT_HELPFUL = 5;
  *   - collapses whitespace (multiple spaces, tabs, newlines → single space)
  *   - strips trailing punctuation runs (?, ., !, …, etc.)
  */
+/** Hard cap on free-text question length before any regex runs. Any
+ *  reasonable Q&A is well under 4 KiB; capping here defeats ReDoS
+ *  amplification on adversarial input. */
+const MAX_QUESTION_LEN = 4096;
+
 export function normalizeQuestion(raw: string): string {
   if (!raw) return "";
-  return raw
+  /* ReDoS guard — truncate before the regex engine sees it. */
+  const bounded = raw.length > MAX_QUESTION_LEN ? raw.slice(0, MAX_QUESTION_LEN) : raw;
+  return bounded
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim()

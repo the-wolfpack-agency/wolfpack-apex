@@ -33,6 +33,7 @@ import {
   jsonHeaders,
   getInstinctUser,
 } from "@/lib/client-auth";
+import { htmlToText } from "@/lib/html-sanitize";
 import { emitInsight } from "@/lib/insights/emit";
 import EmailReader from "./EmailReader";
 import InboxPanel from "./InboxPanel";
@@ -116,15 +117,11 @@ function plainTextToHtml(s: string): string {
 }
 
 function htmlToPlainText(html: string): string {
-  if (!html) return "";
-  if (typeof document === "undefined") {
-    return html.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "");
-  }
-  const tmp = document.createElement("div");
-  tmp.innerHTML = html;
-  const text = (tmp as HTMLDivElement).innerText;
-  if (typeof text === "string") return text;
-  return html.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "");
+  /* Always parser-driven via lib/html-sanitize.htmlToText (cheerio on
+     server, DOMParser in browser/jsdom). The previous regex fallback
+     was defeated by mutation inputs like `<scr<script>ipt>` — flagged
+     by CodeQL js/incomplete-multi-character-sanitization. */
+  return htmlToText(html);
 }
 
 // ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import { getNavPrefs, setNavPrefs } from "@/lib/user-nav-prefs";
 import { WriteQueryError } from "@/lib/db";
+import { sanitizeForLog } from "@/lib/log-sanitize";
 
 export async function GET(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
@@ -59,7 +60,7 @@ export async function PUT(req: NextRequest) {
     });
   } catch (err) {
     if (err instanceof WriteQueryError) {
-      console.error("[api/user-nav-prefs]", err.message);
+      console.error("[api/user-nav-prefs]", sanitizeForLog(err.message));
       return NextResponse.json(
         { error: "Failed to save preferences" },
         { status: 500 },

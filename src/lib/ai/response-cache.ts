@@ -117,12 +117,14 @@ const UUID_RE =
   /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const ISO_TIMESTAMP_RE =
   /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/gi;
-/* Phone numbers cover the common North American and E.164 shapes. The
-   ten-digit body is anchored on word boundaries so we don't snip out
-   pieces of UUIDs or sign-in error codes (those are stripped earlier in
-   the pipeline anyway). */
+/* Phone numbers cover the common North American and E.164 shapes.
+   Anchored on a leading word boundary so we don't snip out pieces of
+   UUIDs or sign-in error codes (those are stripped earlier in the
+   pipeline anyway). The single allowed separator class `[\s.()-]` is
+   non-overlapping with the digit class, keeping the matcher linear and
+   defeating polynomial backtracking on adversarial digit-heavy input. */
 const PHONE_RE =
-  /\+?\d{0,3}[\s.-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b/g;
+  /\b\+?\d{1,3}?[\s.()-]{0,2}\d{3}[\s.()-]{0,2}\d{3}[\s.()-]{0,2}\d{4}\b/g;
 /* Person-name heuristic: strip standalone capitalized tokens (Title-
    case, not all-caps acronyms like CEO/MFA/AADSTS). This must run
    before lowercasing. Imperfect by design — false positives just
@@ -163,10 +165,21 @@ const WHITESPACE_RE = /\s+/g;
  * the same string as "Sarah got an MFA prompt at 3:14 PM today": same
  * conceptual ticket → same hash → cache hit.
  */
+/* ReDoS guard: support tickets are bounded in length by the inbound
+   email size limits already enforced upstream, but the regex engine
+   should not burn time on adversarial input. PHONE_RE in particular
+   has overlapping `[\s.-]?` separators that can backtrack on long
+   digit-heavy strings. Cap to 16 KiB before any pattern runs. */
+const MAX_SIGNATURE_INPUT_LEN = 16 * 1024;
+
 export function normalizeForSignature(text: string): string {
   if (!text) return "";
+  const bounded =
+    text.length > MAX_SIGNATURE_INPUT_LEN
+      ? text.slice(0, MAX_SIGNATURE_INPUT_LEN)
+      : text;
   /* Pre-lowercase pass: case-sensitive patterns. */
-  const preLower = text
+  const preLower = bounded
     .replace(EMAIL_RE, " ")
     .replace(UUID_RE, " ")
     .replace(ISO_TIMESTAMP_RE, " ")

@@ -171,13 +171,34 @@ export function docXmlToMarkdown(xml: string): string {
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
 }
 
+/**
+ * Decode the five predefined XML entities in a single pass.
+ *
+ * The earlier implementation chained five sequential `.replace()` calls
+ * starting with `&amp;` → `&`. That order means `&amp;lt;` decodes to
+ * `&lt;` and then `<` — a textbook js/double-escaping path that CodeQL
+ * flagged. A single-pass match-then-substitute closes the bug: each
+ * entity in the input is replaced exactly once, and pre-decoded
+ * substrings that look like entities (e.g. an ampersand followed by
+ * `lt;` in source text) survive intact.
+ */
 function decodeXmlEntities(s: string): string {
-  return s
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'");
+  return s.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => {
+    switch (name) {
+      case "amp":
+        return "&";
+      case "lt":
+        return "<";
+      case "gt":
+        return ">";
+      case "quot":
+        return '"';
+      case "apos":
+        return "'";
+      default:
+        return _;
+    }
+  });
 }
 
 /* ------------------------------------------------------------------ */

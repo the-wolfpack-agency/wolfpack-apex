@@ -12,6 +12,7 @@
  * Zero LLM tokens — pure string algorithm.
  */
 import { getValidToken } from "@/lib/microsoft-graph";
+import { htmlToText, sanitizeHtml } from "@/lib/html-sanitize";
 
 interface RawAttachment {
   "@odata.type"?: string;
@@ -72,24 +73,16 @@ export type DetectResult = DetectOk | DetectError;
 export type DetectHtmlResult = DetectHtmlOk | DetectError;
 
 /**
- * Strip HTML tags + collapse whitespace to plain text. Very narrow —
- * preserves line breaks via <br> and </p> conversion so the signature's
- * shape (multi-line) survives.
+ * Strip HTML tags + collapse whitespace to plain text. Parser-driven —
+ * uses cheerio (server) / DOMParser (jsdom) under the hood. Preserves
+ * line breaks for `<br>` and the standard block-level closers so the
+ * signature's multi-line shape survives.
+ *
+ * Replaces an earlier regex pipeline that was defeated by mutation-XSS
+ * inputs like `<scr<script>ipt>`; see `src/lib/html-sanitize.ts`.
  */
 export function htmlToPlainText(html: string): string {
-  return html
-    .replace(/<\s*br\s*\/?\s*>/gi, "\n")
-    .replace(/<\/\s*(p|div|li|tr|h[1-6])\s*>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return htmlToText(html);
 }
 
 /**
@@ -486,7 +479,10 @@ export async function detectSignatureHtmlFromOutlook(
     }
   }
   const resolved = resolveCidImages(stripped, attachments);
-  if (resolved.replace(/<[^>]+>/g, "").trim().length < 6) {
+  /* Visibility check: parser-driven plain-text length, never regex. The
+     prior `.replace(/<[^>]+>/g, "")` was defeated by `<scr<script>ipt>`-
+     style mutation inputs (CodeQL js/incomplete-multi-character-sanitization). */
+  if (htmlToText(resolved).trim().length < 6) {
     return {
       ok: false,
       code: "no_signature_detected",
@@ -494,10 +490,17 @@ export async function detectSignatureHtmlFromOutlook(
     };
   }
 
+  /* Defense-in-depth: run the resolved HTML through DOMPurify before we
+     hand it back. Outlook/Gmail bodies might carry script blocks, MS-only
+     conditional comments, etc.; the email reader sandboxes the iframe
+     but server-side sanitization keeps malicious content from ever
+     entering Postgres in the first place. */
+  const sanitizedHtml = sanitizeHtml(resolved);
+
   return {
     ok: true,
     signature: {
-      html: resolved,
+      html: sanitizedHtml,
       text: plainSuffix,
       sampledCount: result.rows.length,
       matchedCount,

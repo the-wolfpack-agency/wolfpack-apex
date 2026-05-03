@@ -21,6 +21,7 @@
  */
 
 import { getValidToken } from "@/lib/microsoft-graph";
+import { htmlToText } from "@/lib/html-sanitize";
 import type {
   EvaluationContext,
   Observation,
@@ -51,18 +52,16 @@ const OUTCOME_PATTERNS: RegExp[] = [
 ];
 
 /** Strip HTML and Outlook invite boilerplate so we can decide if there
- *  is any real outcome content. Pure for unit testing. */
+ *  is any real outcome content. Pure for unit testing.
+ *
+ *  HTML→text uses the shared parser-driven helper (`lib/html-sanitize`).
+ *  An earlier regex pipeline here was defeated by mutation-XSS inputs
+ *  like `<scr<script>ipt>` and triggered CodeQL findings
+ *  (js/incomplete-multi-character-sanitization, js/bad-tag-filter,
+ *  js/double-escaping). */
 export function extractMeaningfulBody(content: string | undefined): string {
   if (!content) return "";
-  /* HTML → text. Defensive: don't pull in a parser, just regex strip. */
-  const text = content
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
+  const text = htmlToText(content);
   /* Strip Teams join boilerplate so a meeting whose body is only the
      join URL doesn't look like it has notes. */
   const stripped = text

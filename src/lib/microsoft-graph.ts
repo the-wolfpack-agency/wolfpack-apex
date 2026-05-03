@@ -8,7 +8,7 @@
  * All API calls are tracked via analytics and cached with 5-minute TTL.
  */
 
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 import { safeQuery, query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { getSecretOrThrow } from "@/lib/secrets";
@@ -493,7 +493,10 @@ export function getSigninAuthUrl(): string {
   const clientId = process.env.MS_CLIENT_ID;
   const redirectUri = process.env.MS_REDIRECT_URI;
   if (!clientId || !redirectUri) return "";
-  const nonce = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  /* Cryptographic nonce — Math.random() is predictable and would let
+     an attacker forge a state value for the SIGN-IN flow. randomBytes
+     gives 128 bits of entropy from the OS CSPRNG. */
+  const nonce = Date.now().toString(36) + randomBytes(16).toString("hex");
   const params = new URLSearchParams({
     client_id: clientId,
     response_type: "code",

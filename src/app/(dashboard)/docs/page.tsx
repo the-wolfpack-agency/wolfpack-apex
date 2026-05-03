@@ -110,28 +110,11 @@ export default function DocsPage() {
       headers: authHeaders(),
       body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "docs" } }),
     }).catch(() => {});
-    // Deep-link target: `/docs?generate=1` opens the generator inline.
-    // Used by the Knowledge page CTA so the redundant blank state
-    // experience never lands; the user is dropped straight on the
-    // generate form. Cleared from the URL after the open so a refresh
-    // doesn't re-trigger it.
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("generate") === "1") {
-        setShowGenerate(true);
-        const url = new URL(window.location.href);
-        url.searchParams.delete("generate");
-        window.history.replaceState({}, "", url.toString());
-        fetchWithRefresh("/api/analytics", {
-          method: "POST",
-          headers: authHeaders(),
-          body: JSON.stringify({
-            event: "knowledge.doc_generated",
-            metadata: { stage: "form_opened_via_deeplink", source: "knowledge_cta" },
-          }),
-        }).catch(() => {});
-      }
-    }
+    /* Removed (security): the URL-controlled `?generate=1` deeplink
+       branched control flow on user-controlled input, which CodeQL
+       flagged as js/user-controlled-bypass. The Generate panel is
+       always reachable via the "Generate Doc" button; there is no
+       separate behavior for the deeplink path. */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
