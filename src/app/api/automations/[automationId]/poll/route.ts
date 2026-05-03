@@ -16,6 +16,7 @@ import type { AutomationId } from "@/lib/automations/types";
 import { getObsClient } from "@/lib/obs";
 import { getValidToken } from "@/lib/microsoft-graph";
 import { query } from "@/lib/db";
+import { trackEvent } from "@/lib/analytics";
 
 /**
  * Pull the N most-recent open exceptions (parser quarantines) so the
@@ -316,11 +317,36 @@ async function runPoll(automationId: string, userId: string, userRole: string) {
     user_role: userRole,
   });
   try {
+    /* Emit a "started" bookend so the learning loop can pair every
+       tick with a corresponding "completed" / "skipped" / error event.
+       Best-effort — analytics never throws out of the poll path. */
+    try {
+      trackEvent("automations.poll_started", userId, userRole, {
+        automation_id: automationId,
+        mailbox_count: getMailboxBases().length,
+      });
+    } catch {
+      /* analytics best-effort */
+    }
     const result = await pollInbox({
       automationId: automation.id as AutomationId,
       userId,
       userRole,
     });
+    try {
+      trackEvent("automations.poll_completed", userId, userRole, {
+        automation_id: automationId,
+        messages_seen: result.messages_seen,
+        messages_matched: result.messages_matched,
+        artifacts_ingested: result.artifacts_ingested,
+        artifacts_duplicate: result.artifacts_duplicate,
+        artifacts_quarantined: result.artifacts_quarantined,
+        errors: result.errors,
+        duration_ms: result.duration_ms,
+      });
+    } catch {
+      /* analytics best-effort */
+    }
     const r = result as unknown as Record<string, unknown> | null | undefined;
     if (r && typeof r === "object") {
       const num = (k: string) => (typeof r[k] === "number" ? (r[k] as number) : undefined);

@@ -300,6 +300,11 @@ export interface GraphMailMessage {
   hasAttachments?: boolean | null;
   receivedDateTime?: string | null;
   lastModifiedDateTime?: string | null;
+  /** RFC 5322 Message-Id header. Globally unique per message, stable
+   *  across mailboxes — the canonical input to artifact dedup
+   *  (`src/lib/automations/dedup.ts`). Optional because Graph
+   *  occasionally omits it for system-generated messages. */
+  internetMessageId?: string | null;
   "@removed"?: { reason?: string } | null;
   [k: string]: unknown;
 }
@@ -451,7 +456,7 @@ export async function listMailDelta(
   const token = await resolveAccessToken(userId);
   const initialUrl =
     deltaLink ??
-    "me/mailFolders/inbox/messages/delta?$select=id,subject,bodyPreview,from,toRecipients,hasAttachments,receivedDateTime,lastModifiedDateTime";
+    "me/mailFolders/inbox/messages/delta?$select=id,subject,bodyPreview,from,toRecipients,hasAttachments,receivedDateTime,lastModifiedDateTime,internetMessageId";
   return drainDeltaFeed<GraphMailMessage>(initialUrl, token);
 }
 

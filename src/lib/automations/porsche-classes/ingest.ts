@@ -31,6 +31,7 @@ import type {
   ParseInput,
   SnapshotInput,
 } from "@/lib/automations/types";
+import { computeDedupKey } from "@/lib/automations/dedup";
 import {
   buildClassKey,
   canonicalParticipants,
@@ -68,6 +69,17 @@ export interface IngestRequest {
    * assigned to THAT class instead of routed by filename regex.
    */
   class_override?: ParseInput["class_override"];
+  /** RFC 5322 Message-Id header from Graph (when available). PRIMARY
+   *  half of the dedup key — see src/lib/automations/dedup.ts. Pollers
+   *  pass this through; manual uploads leave it null and the dedup
+   *  helper falls back to a content-derived hash. */
+  internet_message_id?: string | null;
+  /** Subject line (used by the dedup fallback hash when
+   *  internet_message_id is missing). */
+  subject?: string | null;
+  /** From address (used by the dedup fallback hash when
+   *  internet_message_id is missing). */
+  from_address?: string | null;
 }
 
 export interface IngestResult {
@@ -89,11 +101,32 @@ export async function ingestArtifact(
 ): Promise<IngestResult> {
   const automationId = req.automation.id;
 
-  // 1. Compute content sha256 — half of the idempotency key.
+  // 1. Compute content sha256 — kept around for forensics + the legacy
+  //    UNIQUE index on (source_message_id, content_sha256) which the
+  //    table still carries during the migration window. The NEW
+  //    idempotency key is artifacts.dedup_key (migration 130).
+  //    TODO(2026-Q3): drop legacy dedup index in migration 131+ after
+  //    2026-06-01 once the new key has been live for >1 week.
   const sha = createHash("sha256").update(req.bytes).digest("hex");
 
-  // 2. Upsert the artifact row. ON CONFLICT we keep the existing row
-  //    and return its id + parse_status so we can short-circuit duplicates.
+  // 2. Compute the canonical dedup key. PRIMARY: RFC 5322
+  //    internet_message_id (globally unique, stable across mailboxes).
+  //    FALLBACK: SHA-256 over (subject, from, received, body-first-512)
+  //    when no internet_message_id is available (direct uploads + rare
+  //    Graph corner cases). See src/lib/automations/dedup.ts.
+  const dedup = computeDedupKey({
+    internet_message_id: req.internet_message_id ?? null,
+    subject: req.subject ?? null,
+    from: req.from_address ?? null,
+    received_iso: req.received_at,
+    bytes: req.bytes,
+  });
+
+  // 3. Upsert the artifact row. ON CONFLICT on the new (automation_id,
+  //    dedup_key) UNIQUE index — this is the contract that prevents
+  //    re-ingesting the same RFC-5322 message even when Graph hands us
+  //    a different mailbox-scoped id (the false-positive duplicate bug
+  //    fixed by migration 130).
   const upsert = await writeQuery<{
     id: string;
     parse_status: string;
@@ -101,9 +134,9 @@ export async function ingestArtifact(
   }>(
     `INSERT INTO instinct_automation_porsche_artifacts
        (automation_id, source_message_id, received_at, bytes,
-        content_sha256, mime, parse_status)
-     VALUES ($1, $2, $3, $4, $5, $6, 'pending')
-     ON CONFLICT (source_message_id, content_sha256) DO UPDATE SET
+        content_sha256, mime, parse_status, internet_message_id, dedup_key)
+     VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
+     ON CONFLICT (automation_id, dedup_key) DO UPDATE SET
        -- Touch a benign column so RETURNING gives us the existing row.
        mime = EXCLUDED.mime
      RETURNING id, parse_status, (xmax = 0) AS inserted`,
@@ -114,6 +147,8 @@ export async function ingestArtifact(
       req.bytes,
       sha,
       req.mime,
+      dedup.internet_message_id,
+      dedup.dedup_key,
     ],
     { expectRows: 1 },
   );
@@ -122,7 +157,16 @@ export async function ingestArtifact(
   const artifactId = artifactRow.id;
 
   // Duplicate-and-already-processed: no-op at every downstream layer.
+  // Emit a typed dedup event so the learning loop can see how often
+  // each automation runs into idempotent re-polls (high rates indicate
+  // either an over-eager cron schedule or a cursor that isn't advancing).
   if (!artifactRow.inserted && artifactRow.parse_status === "processed") {
+    trackEvent("automations.artifact_deduplicated", req.user_id, req.user_role, {
+      automation_id: automationId,
+      source_type: req.source_type,
+      source_message_id: req.source_message_id ?? "",
+      dedup_strategy: dedup.strategy,
+    });
     return {
       artifact_id: artifactId,
       was_duplicate: true,
@@ -653,6 +697,19 @@ async function quarantine(args: QuarantineArgs): Promise<IngestResult> {
     reason: args.reason,
     exception_kind: args.exceptionKind,
   });
+
+  /* parse_failure deserves a dedicated event so the learning loop can
+     surface "this CWE-style column-rename keeps biting us" without
+     digging through the generic quarantined stream. The reason string
+     is the same one persisted on the exception row — operators see
+     identical text in both views. */
+  if (args.exceptionKind === "parse_failure") {
+    trackEvent("automations.parse_failure", args.user_id, args.user_role, {
+      automation_id: args.automationId,
+      source_message_id: args.source_message_id ?? "",
+      reason: args.reason,
+    });
+  }
 
   return {
     artifact_id: args.artifactId,

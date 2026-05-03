@@ -405,3 +405,81 @@ describe("ingestArtifact — success path", () => {
     expect(result.parse_status).toBe("processed");
   });
 });
+
+describe("ingestArtifact — dedup key threading", () => {
+  it("passes internet_message_id + dedup_key into the artifact upsert (canonical IMID path)", async () => {
+    mockWriteQuery.mockResolvedValueOnce({
+      rows: [{ id: "art_imid", parse_status: "processed", inserted: false }],
+    });
+    const parser = jest
+      .fn()
+      .mockResolvedValue({ ok: true, source_type: "porsche_xlsx", snapshots: [] });
+    const result = await ingestArtifact(
+      baseRequest({
+        automation: fakeAutomation(parser as never),
+        internet_message_id: "<canonical@host>",
+        subject: "Daily roster",
+        from_address: "noreply@porsche.example",
+      }),
+    );
+    expect(result.was_duplicate).toBe(true);
+    /* The args passed to the artifact INSERT include the canonical
+       imid alongside the dedup_key. We assert the SQL invocation by
+       reading the parameters of the FIRST writeQuery call (the
+       artifact upsert). Order matches the SQL: $1 automationId,
+       $2 source_message_id, $3 received_at, $4 bytes, $5 sha,
+       $6 mime, $7 internet_message_id, $8 dedup_key. JS array is
+       0-indexed: positions 6 and 7 in the params array. */
+    const upsertCall = mockWriteQuery.mock.calls[0];
+    expect(upsertCall).toBeDefined();
+    const params = upsertCall[1] as unknown[];
+    expect(params[6]).toBe("canonical@host");
+    expect(typeof params[7]).toBe("string");
+    expect((params[7] as string).startsWith("imid:")).toBe(true);
+  });
+
+  it("emits automations.artifact_deduplicated with the dedup strategy when re-ingesting a processed artifact", async () => {
+    mockWriteQuery.mockResolvedValueOnce({
+      rows: [{ id: "art_dup", parse_status: "processed", inserted: false }],
+    });
+    const parser = jest
+      .fn()
+      .mockResolvedValue({ ok: true, source_type: "porsche_xlsx", snapshots: [] });
+    await ingestArtifact(
+      baseRequest({
+        automation: fakeAutomation(parser as never),
+        internet_message_id: "<dup@host>",
+      }),
+    );
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "automations.artifact_deduplicated",
+      "u_1",
+      "ops",
+      expect.objectContaining({
+        automation_id: "porsche-classes",
+        dedup_strategy: "internet_message_id",
+      }),
+    );
+  });
+
+  it("falls back to content-derived dedup_key when no internet_message_id is provided", async () => {
+    mockWriteQuery.mockResolvedValueOnce({
+      rows: [{ id: "art_fb", parse_status: "processed", inserted: false }],
+    });
+    const parser = jest
+      .fn()
+      .mockResolvedValue({ ok: true, source_type: "porsche_xlsx", snapshots: [] });
+    await ingestArtifact(
+      baseRequest({
+        automation: fakeAutomation(parser as never),
+        // omit internet_message_id entirely
+        subject: "no imid",
+        from_address: "x@y",
+      }),
+    );
+    const upsertCall = mockWriteQuery.mock.calls[0];
+    const params = upsertCall[1] as unknown[];
+    expect(params[6]).toBeNull(); // internet_message_id should be null
+    expect((params[7] as string).startsWith("fb:")).toBe(true); // fallback hash
+  });
+});

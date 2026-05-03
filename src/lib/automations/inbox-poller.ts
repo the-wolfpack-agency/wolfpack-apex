@@ -154,7 +154,7 @@ async function listInboxSince(
      space in `$orderby` and the encodeURIComponent'd `$filter` into
      `%20`. */
   const select =
-    "id,subject,bodyPreview,from,toRecipients,hasAttachments,receivedDateTime,lastModifiedDateTime";
+    "id,subject,bodyPreview,from,toRecipients,hasAttachments,receivedDateTime,lastModifiedDateTime,internetMessageId";
   const filter = `receivedDateTime ge ${sinceIso}`;
   const url =
     `https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages` +
@@ -820,6 +820,9 @@ async function processMatchedMessage(
         mime: att.contentType || "application/octet-stream",
         user_id: args.userId,
         user_role: args.userRole,
+        internet_message_id: msg.internetMessageId ?? null,
+        subject: msg.subject ?? null,
+        from_address: msg.from?.emailAddress?.address ?? null,
       });
       if (result.was_duplicate) duplicate += 1;
       else if (result.parse_status === "processed") ingested += 1;
@@ -849,6 +852,9 @@ async function processMatchedMessage(
         mime: "message/rfc822",
         user_id: args.userId,
         user_role: args.userRole,
+        internet_message_id: msg.internetMessageId ?? null,
+        subject: msg.subject ?? null,
+        from_address: msg.from?.emailAddress?.address ?? null,
       });
       if (result.was_duplicate) duplicate += 1;
       else if (result.parse_status === "processed") ingested += 1;
@@ -991,7 +997,7 @@ async function pollInboxBySearch(
      0 across 10+ manual runs; manual encodeURIComponent path returns
      the expected hits.) */
   const select =
-    "id,subject,bodyPreview,from,toRecipients,ccRecipients,body,receivedDateTime,hasAttachments";
+    "id,subject,bodyPreview,from,toRecipients,ccRecipients,body,receivedDateTime,hasAttachments,internetMessageId";
   const urlString =
     `https://graph.microsoft.com/v1.0${base}/mailFolders/inbox/messages` +
     `?$top=50` +
@@ -1089,7 +1095,7 @@ async function pollInboxBySearch(
     try {
       const sinceIso = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
       const fbSelect =
-        "id,subject,bodyPreview,from,toRecipients,ccRecipients,body,receivedDateTime,hasAttachments";
+        "id,subject,bodyPreview,from,toRecipients,ccRecipients,body,receivedDateTime,hasAttachments,internetMessageId";
       const fbFilter = `receivedDateTime ge ${sinceIso}`;
       const fbUrl =
         `https://graph.microsoft.com/v1.0${base}/mailFolders/inbox/messages` +
@@ -1326,7 +1332,7 @@ export async function pollInboxHistorical(args: HistoricalScanArgs): Promise<Pol
      KQL rejects silently. */
   const searchClause = buildSearchClause(args.filters);
   const histSelect =
-    "id,subject,bodyPreview,from,toRecipients,ccRecipients,body,receivedDateTime,hasAttachments";
+    "id,subject,bodyPreview,from,toRecipients,ccRecipients,body,receivedDateTime,hasAttachments,internetMessageId";
   let urlStr =
     `https://graph.microsoft.com/v1.0${getMailboxBase()}/mailFolders/inbox/messages` +
     `?$top=${limit}` +
@@ -1543,6 +1549,9 @@ export async function pollInboxHistorical(args: HistoricalScanArgs): Promise<Pol
           mime: att.contentType || "application/octet-stream",
           user_id: args.userId,
           user_role: args.userRole,
+          internet_message_id: msg.internetMessageId ?? null,
+          subject: msg.subject ?? null,
+          from_address: msg.from?.emailAddress?.address ?? null,
         });
         if (result.was_duplicate) artifactsDuplicate += 1;
         else if (result.parse_status === "processed") artifactsIngested += 1;

@@ -1438,6 +1438,32 @@ export type InstinctEventType =
   | "automations.poll_run"
   | "automations.poll_historical"
   | "automations.poll_skipped"
+  //   automations.poll_started        { automation_id, mode, mailbox_count }
+  //   automations.poll_completed      { automation_id, messages_seen,
+  //                                       messages_matched, artifacts_ingested,
+  //                                       artifacts_duplicate, artifacts_quarantined,
+  //                                       errors, duration_ms }
+  //     — bookend events to poll_run; lets the learning loop see how
+  //       long a tick took and what the inbound mix looks like.
+  //   automations.artifact_deduplicated { automation_id, source_type,
+  //                                         source_message_id, dedup_strategy }
+  //     — fires when ingestArtifact short-circuits an already-processed
+  //       artifact. dedup_strategy ∈ "internet_message_id" | "fallback_hash".
+  //   automations.parse_failure       { automation_id, source_type,
+  //                                       missing_columns, exception_kind, hint }
+  //     — emitted by parsers when a known-shape input rejects. The
+  //       missing_columns list names the SPECIFIC canonical column(s)
+  //       that were absent so the operator + learning loop know whether
+  //       the parser needs a new synonym or the source is malformed.
+  //   automations.quarantine_reprocessed { automation_id, exception_id,
+  //                                          artifact_id, outcome }
+  //     — fires when an operator clicks "Reprocess" on a quarantined
+  //       artifact. outcome ∈ "processed" | "still_quarantined" | "duplicate".
+  | "automations.poll_started"
+  | "automations.poll_completed"
+  | "automations.artifact_deduplicated"
+  | "automations.parse_failure"
+  | "automations.quarantine_reprocessed"
   //
   //   automations.cursor_advanced     { automation_id, mailbox_base,
   //                                      cursor_kind, ms_since_last_poll }

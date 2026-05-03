@@ -2,7 +2,7 @@
  * porsche-classes / parser-xlsx — Porsche daily training-report parser.
  *
  * Source: a daily PCNA Training Report attachment exported from
- * Cornerstone. Sheet 1, header row at index 6, then one row per
+ * Cornerstone. Sheet 1, header row near index 6, then one row per
  * (class, participant) pair. We filter to BA101 / BA102 (Brand
  * Ambassador 101 Skills / 102 Management) — those are the only
  * classes the program team tracks.
@@ -10,6 +10,22 @@
  * Output: one `SnapshotInput` per distinct (course, date, location)
  * tuple. Participants per snapshot are deduped + canonicalized via
  * `normalize.ts`, so the delta engine sees a stable shape.
+ *
+ * Header tolerance — the parser used to assert exact column-by-index
+ * header text and crashed with an unhelpful "expected X got Y" when
+ * Cornerstone shipped a column-rename or a column-shuffle (which they
+ * did on 2026-05-01). We now:
+ *   * Search for the header row anywhere in the first 12 sheet rows
+ *     (the historical layout has it at index 6; new exports occasionally
+ *     prepend a logo/date row).
+ *   * Match each canonical column by NAME using a synonyms map
+ *     (case-insensitive, whitespace-tolerant), not by absolute column
+ *     index. Empty cells in a header row are tolerated.
+ *   * When a required column is missing, name the SPECIFIC missing
+ *     canonical column(s) instead of "expected X got Y".
+ *   * When a known-optional column (e.g. PPN ID, Facilities-fallback
+ *     location) is missing, ingest with that field null instead of
+ *     quarantining — only required columns are hard failures.
  *
  * On parse failure we DO NOT throw — we return `ParseFailure` with a
  * structured `exception_kind`, and the orchestrator persists an
@@ -27,42 +43,216 @@ import type {
 import { normalizeClass } from "./normalize";
 
 /* ------------------------------------------------------------------ */
-/* Column layout — derived from porsche-daily-2026-04-20.xlsx fixture  */
+/* Header column synonyms                                              */
+/*                                                                     */
+/* Each canonical column lists the header strings that have appeared    */
+/* in real prod exports. Match is case-insensitive + whitespace-        */
+/* normalized (collapsing multiple spaces, ignoring trim) so the        */
+/* parser tolerates tiny formatting drift without an entry update.      */
 /* ------------------------------------------------------------------ */
 
-// Header row index (0-based) — row 6 is "Module Properties-Learning Type
-// | Module Properties-Module ID | …". Verified against the real fixture.
-const HEADER_ROW_INDEX = 6;
+/** Canonical column names used internally — these are the keys downstream
+ *  code (per-row reads, error reporting) refers to. */
+type CanonicalColumn =
+  | "module_title"
+  | "last_name"
+  | "first_name"
+  | "email"
+  | "user_id"
+  | "training_center"
+  | "facilities"
+  | "start_date";
 
-// Column indices (header verified against fixture). Future-proofed by
-// also matching by header text if the layout changes.
-const COL = {
-  MODULE_TITLE: 2, // "Brand Ambassador 101 Skills (Classroom)"
-  LAST_NAME: 4,
-  FIRST_NAME: 5,
-  EMAIL: 7,
-  // PPN ID — Cornerstone calls this "User Properties-User ID". This is
-  // the same identifier that appears as "PPN ID" in the survey export,
-  // and we use it as the join key when auto-splitting a survey export
-  // that mixes responses from multiple classes (see parser-survey
-  // `splitMixedSurvey`). Names alone aren't safe as a join key —
-  // diacritics, spelling, and "Bob/Robert" variants all break a name
-  // match — so we capture the PPN ID alongside the name in the snapshot
-  // payload without changing the existing `participants: string[]` shape.
-  USER_ID: 8,
-  TRAINING_CENTER: 18, // primary location; fallback to FACILITIES (19)
-  FACILITIES: 19,
-  START_DATE: 21, // "Apr 13, 2026 6:00 PM"
-} as const;
-
-const EXPECTED_HEADERS: Record<number, string> = {
-  [COL.MODULE_TITLE]: "Module Properties-Module Title",
-  [COL.LAST_NAME]: "User Properties-Last Name",
-  [COL.FIRST_NAME]: "User Properties-First Name",
-  [COL.USER_ID]: "User Properties-User ID",
-  [COL.TRAINING_CENTER]: "Training Center-Training Center Name",
-  [COL.START_DATE]: "Session Properties-Start Date",
+/**
+ * Synonyms map. Order matters ONLY for documentation — the matcher is
+ * order-independent. New synonyms should be added at the END of each
+ * list. Top entries are the historically-most-common shape.
+ *
+ * Top 3 entries per column (the user-facing examples in the report):
+ *   module_title : "Module Properties-Module Title", "Module Title",
+ *                  "Module Properties - Module Title"
+ *   last_name    : "User Properties-Last Name", "Last Name",
+ *                  "User Properties - Last Name"
+ *   start_date   : "Session Properties-Start Date", "Start Date",
+ *                  "Session Properties - Start Date"
+ */
+const SYNONYMS: Record<CanonicalColumn, string[]> = {
+  module_title: [
+    "Module Properties-Module Title",
+    "Module Title",
+    "Module Properties - Module Title",
+    "Module Properties Module Title",
+  ],
+  last_name: [
+    "User Properties-Last Name",
+    "Last Name",
+    "User Properties - Last Name",
+    "Surname",
+  ],
+  first_name: [
+    "User Properties-First Name",
+    "First Name",
+    "User Properties - First Name",
+    "Given Name",
+  ],
+  email: [
+    "User Properties-Email Address",
+    "Email Address",
+    "Email",
+    "User Properties - Email Address",
+    "Primary Email",
+  ],
+  user_id: [
+    "User Properties-User ID",
+    "User ID",
+    "User Properties - User ID",
+    "PPN ID",
+    "PPN",
+  ],
+  training_center: [
+    "Training Center-Training Center Name",
+    "Training Center Name",
+    "Training Center - Training Center Name",
+    "Training Center",
+  ],
+  facilities: [
+    "Session Properties-Facilities",
+    "Facilities",
+    "Session Properties - Facilities",
+    "Facility",
+    "Location",
+  ],
+  start_date: [
+    "Session Properties-Start Date",
+    "Start Date",
+    "Session Properties - Start Date",
+    "Class Start Date",
+    "Session Start",
+  ],
 };
+
+/** Required columns — header detection MUST find each of these or the
+ *  parser quarantines with a clear "missing canonical column N" error.
+ *  Every CanonicalColumn NOT in this list is OPTIONAL — when missing,
+ *  per-row reads return null and the row continues to ingest with the
+ *  affected field unset (instead of failing the whole artifact). */
+const REQUIRED_COLUMNS: CanonicalColumn[] = [
+  "module_title",
+  "last_name",
+  "first_name",
+  "user_id",
+  "start_date",
+];
+
+/** Normalize a header cell for matching: trim, lowercase, collapse runs
+ *  of whitespace to a single space, strip the dash-vs-en-dash variants. */
+function normalizeHeaderCell(raw: unknown): string {
+  if (raw === null || raw === undefined) return "";
+  return String(raw)
+    .replace(/[–—]/g, "-") // en/em dash → hyphen
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/** Build a map from normalized synonym → canonical column. */
+function buildSynonymIndex(): Map<string, CanonicalColumn> {
+  const out = new Map<string, CanonicalColumn>();
+  for (const [canonical, synonyms] of Object.entries(SYNONYMS)) {
+    for (const s of synonyms) {
+      out.set(normalizeHeaderCell(s), canonical as CanonicalColumn);
+    }
+  }
+  return out;
+}
+
+const SYNONYM_INDEX = buildSynonymIndex();
+
+/* ------------------------------------------------------------------ */
+/* Header detection — find the row + map columns by name               */
+/* ------------------------------------------------------------------ */
+
+interface HeaderResolution {
+  row_index: number;
+  /** Map from canonical column name → 0-based column index in the sheet. */
+  columns: Partial<Record<CanonicalColumn, number>>;
+}
+
+/** Search the first N rows for the one that matches the most canonical
+ *  columns. Returns the best-scoring row whose REQUIRED columns are all
+ *  present, or null when no row qualifies. Captures empty cells without
+ *  failing the whole row — only required-column absence is fatal. */
+export function resolveHeaders(rows: unknown[][]): HeaderResolution | null {
+  const SCAN_LIMIT = Math.min(rows.length, 12);
+  let best: HeaderResolution | null = null;
+  let bestScore = -1;
+  for (let r = 0; r < SCAN_LIMIT; r++) {
+    const row = rows[r];
+    if (!Array.isArray(row) || row.length === 0) continue;
+    const columns: Partial<Record<CanonicalColumn, number>> = {};
+    for (let c = 0; c < row.length; c++) {
+      const norm = normalizeHeaderCell(row[c]);
+      if (!norm) continue; // empty cells are tolerated
+      const canonical = SYNONYM_INDEX.get(norm);
+      if (!canonical) continue;
+      // First-wins per canonical column — duplicates in the same row
+      // (rare but possible if Cornerstone repeats a column) shouldn't
+      // overwrite the earlier index.
+      if (columns[canonical] === undefined) columns[canonical] = c;
+    }
+    const score = Object.keys(columns).length;
+    // A row qualifies only if EVERY required column was found.
+    const hasAllRequired = REQUIRED_COLUMNS.every(
+      (col) => columns[col] !== undefined,
+    );
+    if (hasAllRequired && score > bestScore) {
+      bestScore = score;
+      best = { row_index: r, columns };
+    }
+  }
+  return best;
+}
+
+/** Diagnostic: which required columns are missing from the best row we
+ *  could find? When the parser can't resolve headers at all, we want to
+ *  tell the operator the SPECIFIC columns to look for. */
+function diagnoseMissingColumns(rows: unknown[][]): {
+  missing_required: CanonicalColumn[];
+  best_row_index: number | null;
+  /** First 30 normalized header values across the candidate row, for
+   *  the operator's eyes. */
+  observed_headers: string[];
+} {
+  const SCAN_LIMIT = Math.min(rows.length, 12);
+  let bestIdx: number | null = null;
+  let bestScore = -1;
+  let observed: string[] = [];
+  let missing: CanonicalColumn[] = [...REQUIRED_COLUMNS];
+  for (let r = 0; r < SCAN_LIMIT; r++) {
+    const row = rows[r];
+    if (!Array.isArray(row) || row.length === 0) continue;
+    const found = new Set<CanonicalColumn>();
+    const headers: string[] = [];
+    for (let c = 0; c < row.length; c++) {
+      const norm = normalizeHeaderCell(row[c]);
+      if (norm) headers.push(norm);
+      const canonical = SYNONYM_INDEX.get(norm);
+      if (canonical) found.add(canonical);
+    }
+    const score = found.size;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = r;
+      observed = headers.slice(0, 30);
+      missing = REQUIRED_COLUMNS.filter((c) => !found.has(c));
+    }
+  }
+  return {
+    missing_required: missing,
+    best_row_index: bestIdx,
+    observed_headers: observed,
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /* Course-type detection                                               */
@@ -124,21 +314,6 @@ export function parseReportDate(raw: unknown): string | null {
 }
 
 /* ------------------------------------------------------------------ */
-/* Header validation                                                   */
-/* ------------------------------------------------------------------ */
-
-function validateHeaders(row: unknown[]): string | null {
-  for (const [idxStr, expected] of Object.entries(EXPECTED_HEADERS)) {
-    const idx = Number(idxStr);
-    const actual = String(row[idx] ?? "").trim();
-    if (actual !== expected) {
-      return `header column ${idx} expected "${expected}", got "${actual}"`;
-    }
-  }
-  return null;
-}
-
-/* ------------------------------------------------------------------ */
 /* Public parser                                                       */
 /* ------------------------------------------------------------------ */
 
@@ -172,25 +347,39 @@ export async function parseXlsx(input: ParseInput): Promise<ParseResult> {
     raw: false,
   });
 
-  if (rows.length <= HEADER_ROW_INDEX) {
+  if (rows.length === 0) {
     return {
       ok: false,
       source_type: "porsche_xlsx",
-      error: `sheet has ${rows.length} rows, expected at least ${HEADER_ROW_INDEX + 1}`,
+      error: "xlsx sheet is empty",
       exception_kind: "parse_failure",
     };
   }
 
-  const headerErr = validateHeaders(rows[HEADER_ROW_INDEX]);
-  if (headerErr) {
+  const headers = resolveHeaders(rows);
+  if (!headers) {
+    const diag = diagnoseMissingColumns(rows);
+    const missingList = diag.missing_required
+      .map((c) => SYNONYMS[c][0])
+      .join(", ");
     return {
       ok: false,
       source_type: "porsche_xlsx",
-      error: `xlsx header layout drift: ${headerErr}`,
+      error:
+        `xlsx header layout drift: missing required column(s) [${missingList}]; ` +
+        `parser scanned the first ${Math.min(rows.length, 12)} rows and could not find a header row containing every required column. ` +
+        `Add the missing column name(s) to the SYNONYMS map in parser-xlsx.ts if Cornerstone renamed them.`,
       exception_kind: "parse_failure",
-      detail: { header_row: rows[HEADER_ROW_INDEX] },
+      detail: {
+        missing_required_columns: diag.missing_required,
+        best_candidate_row_index: diag.best_row_index,
+        observed_headers: diag.observed_headers,
+      },
     };
   }
+
+  const headerRowIndex = headers.row_index;
+  const COL = headers.columns;
 
   // Group by class_key components; each entry collects participant
   // strings (we let normalizeClass handle dedup + sort at the end).
@@ -223,33 +412,50 @@ export async function parseXlsx(input: ParseInput): Promise<ParseResult> {
   let skippedNoDate = 0;
   let skippedNoLocation = 0;
 
-  for (let r = HEADER_ROW_INDEX + 1; r < rows.length; r++) {
+  /** Read a cell by canonical column name. Returns null when the column
+   *  wasn't present in the resolved header (i.e. an OPTIONAL_COLUMN that
+   *  the source file omitted) — caller must guard. */
+  const readCell = (row: unknown[], col: CanonicalColumn): unknown => {
+    const idx = COL[col];
+    if (idx === undefined) return null;
+    return row[idx];
+  };
+
+  for (let r = headerRowIndex + 1; r < rows.length; r++) {
     const row = rows[r];
     if (!row || row.length === 0) continue;
 
-    const courseType = detectCourseType(row[COL.MODULE_TITLE] as string | null);
+    const courseType = detectCourseType(
+      readCell(row, "module_title") as string | null,
+    );
     if (!courseType) {
       // Not BA101 / BA102 — silently filter (this report has thousands of
       // unrelated rows). Not a skip we count — it's expected.
       continue;
     }
 
-    const classDate = parseReportDate(row[COL.START_DATE]);
+    const classDate = parseReportDate(readCell(row, "start_date"));
     if (!classDate) {
       skippedNoDate += 1;
       continue;
     }
 
-    const trainingCenter = row[COL.TRAINING_CENTER] as string | null;
-    const facilities = row[COL.FACILITIES] as string | null;
-    const location = (trainingCenter ?? facilities ?? "").toString().trim();
+    // Location resolution: prefer the canonical Training Center column;
+    // fall back to Facilities; finally null. When BOTH optional columns
+    // were absent at the header layer, we still try by-name reads (read-
+    // Cell returns null for an absent column, which falls through here).
+    const trainingCenter = readCell(row, "training_center") as string | null;
+    const facilities = readCell(row, "facilities") as string | null;
+    const location = (trainingCenter ?? facilities ?? "")
+      .toString()
+      .trim();
     if (!location) {
       skippedNoLocation += 1;
       continue;
     }
 
-    const lastName = (row[COL.LAST_NAME] ?? "").toString().trim();
-    const firstName = (row[COL.FIRST_NAME] ?? "").toString().trim();
+    const lastName = (readCell(row, "last_name") ?? "").toString().trim();
+    const firstName = (readCell(row, "first_name") ?? "").toString().trim();
     if (!lastName && !firstName) {
       skippedNoCourse += 1;
       continue;
@@ -259,7 +465,7 @@ export async function parseXlsx(input: ParseInput): Promise<ParseResult> {
     // etc.) — we keep them in the roster anyway, but with a null PPN
     // ID so the survey-splitter's name-vs-PPN coverage report can flag
     // them. The xlsx column is empty/whitespace in those cases.
-    const rawPpn = (row[COL.USER_ID] ?? "").toString().trim();
+    const rawPpn = (readCell(row, "user_id") ?? "").toString().trim();
     const ppn_id = rawPpn ? rawPpn.toLowerCase() : null;
 
     const key = `${courseType}|${classDate}|${location}`;
@@ -289,7 +495,7 @@ export async function parseXlsx(input: ParseInput): Promise<ParseResult> {
       error: "no BA101 / BA102 rows found in xlsx",
       exception_kind: "missing_field",
       detail: {
-        total_rows: rows.length - (HEADER_ROW_INDEX + 1),
+        total_rows: rows.length - (headerRowIndex + 1),
         skipped_no_date: skippedNoDate,
         skipped_no_location: skippedNoLocation,
         skipped_no_name: skippedNoCourse,
