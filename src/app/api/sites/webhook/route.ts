@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recordDeployResult } from "@/lib/sites";
 import { trackEvent } from "@/lib/analytics";
+import { sanitizeForLog } from "@/lib/log-sanitize";
 
 export async function POST(req: NextRequest) {
   const expected = process.env.WOLFPACK_SITES_WEBHOOK_SECRET;

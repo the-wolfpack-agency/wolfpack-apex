@@ -17,6 +17,7 @@
 
 import { trackEvent } from "@/lib/analytics";
 import { validateBrief, BriefValidationError, type SiteBrief } from "@/lib/sites";
+import { htmlToText } from "@/lib/html-sanitize";
 
 export interface ParseResult {
   brief: SiteBrief;
@@ -28,18 +29,13 @@ export interface ParseResult {
 /* --------------------------- HTML stripping --------------------------- */
 
 export function stripHtml(input: string): string {
-  return input
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
+  // Parser-based HTML→text via @/lib/html-sanitize. Defeats the
+  // mutation-style attack (e.g. `<scr<script>ipt>`) that regex-based
+  // strippers reconstruct after removing the substring CodeQL flagged
+  // (js/incomplete-multi-character-sanitization, js/bad-tag-filter,
+  // js/double-escaping, js/polynomial-redos).
+  if (!input) return "";
+  return htmlToText(input).replace(/\s+/g, " ").trim();
 }
 
 /* --------------------------- Heuristic pass --------------------------- */
@@ -96,13 +92,23 @@ function extractImages(html: string): Array<{ src: string; alt: string }> {
   return out;
 }
 
+/** Hard input cap before any regex work. The heuristic only inspects
+ *  headings + the first stats/images, so 256 KB of designer-pasted prose
+ *  is plenty. Capping bounds worst-case time on every regex below
+ *  (CodeQL: js/polynomial-redos on the tag/img/HTML-detect patterns). */
+const HEURISTIC_INPUT_MAX = 256 * 1024;
+
 export function heuristicParse(
   rawInput: string,
   clientSlug: string,
 ): { brief: SiteBrief; confidence: "low" | "medium" | "high" } {
-  const looksHtml = /<[a-z][\s\S]*?>/i.test(rawInput);
-  const html = looksHtml ? rawInput : "";
-  const text = stripHtml(rawInput);
+  const capped =
+    rawInput.length > HEURISTIC_INPUT_MAX
+      ? rawInput.slice(0, HEURISTIC_INPUT_MAX)
+      : rawInput;
+  const looksHtml = /<[a-z][\s\S]*?>/i.test(capped);
+  const html = looksHtml ? capped : "";
+  const text = stripHtml(capped);
 
   const headings = looksHtml ? extractHeadings(html) : [];
   const stats = extractStats(text);

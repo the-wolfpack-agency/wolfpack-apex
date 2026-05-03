@@ -21,6 +21,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { getValidToken } from "@/lib/microsoft-graph";
+import { htmlToText } from "@/lib/html-sanitize";
 import { query, safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { recordAudit } from "@/lib/audit-log";
@@ -172,25 +173,14 @@ async function graphCall<T = unknown>(
 
 function htmlToPlain(html: string | null | undefined): string {
   if (!html) return "";
-  let s = String(html);
-  s = s.replace(/<script[\s\S]*?<\/script>/gi, "");
-  s = s.replace(/<style[\s\S]*?<\/style>/gi, "");
-  s = s.replace(/<\/(p|div|li|tr|h[1-6]|blockquote)\s*>/gi, "\n");
-  s = s.replace(/<br\s*\/?>/gi, "\n");
-  s = s.replace(/<[^>]+>/g, "");
-  s = s
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_m, c) => {
-      const n = parseInt(c, 10);
-      return Number.isFinite(n) ? String.fromCharCode(n) : "";
-    });
-  return s.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  // Parser-based HTML→text via @/lib/html-sanitize. Replaces a regex
+  // strip flagged by CodeQL for double-escaping,
+  // incomplete-multi-character-sanitization, polynomial-redos, and
+  // bad-tag-filter.
+  return htmlToText(String(html))
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function previewFrom(html: string, title: string, max = 240): string {

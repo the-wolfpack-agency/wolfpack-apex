@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import { exchangeCode, storeTokens, fetchCompanyInfo, clearCache } from "@/lib/quickbooks";
+import { sanitizeForLog } from "@/lib/log-sanitize";
 
 /**
  * GET /api/quickbooks/callback?code=...&realmId=...&state=...
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
 
   // Intuit sends error param if user denies access
   if (error) {
-    console.warn("[quickbooks] OAuth denied:", error);
+    console.warn("[quickbooks] OAuth denied:", sanitizeForLog(error));
     const redirectUrl = new URL("/", req.url);
     redirectUrl.searchParams.set("qbo", "denied");
     return NextResponse.redirect(redirectUrl);

@@ -262,7 +262,10 @@ export function truncateBodyPreview(
   max = BODY_PREVIEW_MAX,
 ): string {
   const raw = input.bodyText ?? input.bodyHtml ?? "";
-  const stripped = raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  // Cap input length before any regex passes to bound worst-case time
+  // (CodeQL: js/polynomial-redos on the `<[^>]*>` + `\s+` chain).
+  const capped = raw.length > 16384 ? raw.slice(0, 16384) : raw;
+  const stripped = capped.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
   return stripped.length > max ? stripped.slice(0, max) : stripped;
 }
 

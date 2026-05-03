@@ -15,6 +15,7 @@
  */
 
 import { classifyKind, type BrainKind } from "./types";
+import { htmlToText } from "@/lib/html-sanitize";
 
 export type ExtractSuccess = {
   ok: true;
@@ -137,17 +138,12 @@ function extractCsv(buffer: Buffer): ExtractResult {
 // ── HTML ─────────────────────────────────────────────────────────
 
 function extractHtml(buffer: Buffer): ExtractResult {
-  // Very simple HTML → text. Strip <script> and <style> blocks, then all
-  // other tags. Keeps line breaks on block-level tags so paragraphs
-  // survive. Not a full parser; a full parser (cheerio) is too much
-  // weight for v0.1 and the retrieval layer tolerates noise fine.
+  // Parser-based HTML→text via @/lib/html-sanitize. The previous
+  // regex-based strip was flagged by CodeQL for js/bad-tag-filter; a
+  // single-pass parser blocks the `<scr<script>ipt>` mutation class.
   const raw = buffer.toString("utf-8");
   if (!raw.trim()) return { ok: false, reason: "empty", detail: "empty HTML" };
-  const stripped = raw
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<\/?(p|div|br|h[1-6]|li|tr|section|article)[^>]*>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
+  const stripped = htmlToText(raw)
     .replace(/\s+\n/g, "\n")
     .replace(/[ \t]+/g, " ")
     .trim();

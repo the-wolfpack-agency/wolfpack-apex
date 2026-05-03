@@ -19,6 +19,7 @@
  */
 
 import { trackEvent } from "@/lib/analytics";
+import { htmlToText, sanitizeHtml } from "@/lib/html-sanitize";
 
 const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
 
@@ -188,21 +189,11 @@ interface RawChatMessage {
  */
 export function stripHtml(input: string | undefined | null): string {
   if (!input) return "";
-  const withoutTags = String(input)
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<br\s*\/?\s*>/gi, " ")
-    .replace(/<\/p\s*>/gi, " ")
-    .replace(/<[^>]+>/g, "");
-  const decoded = withoutTags
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/&apos;/gi, "'");
-  return decoded.replace(/\s+/g, " ").trim();
+  // Parser-based HTML→text via @/lib/html-sanitize so the
+  // `<scr<script>ipt>` mutation class can't reconstruct the tag after
+  // a regex pass. CodeQL: js/incomplete-multi-character-sanitization,
+  // js/bad-tag-filter, js/double-escaping.
+  return htmlToText(String(input)).replace(/\s+/g, " ").trim();
 }
 
 function normalizeBody(raw: RawBody | undefined): {
@@ -591,26 +582,10 @@ export async function getChatMessagesResult(
  */
 export function sanitizeComposeHtml(input: string): string {
   if (!input) return "";
-  let out = String(input);
-  // Remove dangerous blocks entirely, including their contents.
-  out = out
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
-    .replace(/<iframe\b[^>]*\/?\s*>/gi, "")
-    .replace(/<object[\s\S]*?<\/object>/gi, "")
-    .replace(/<embed\b[^>]*\/?\s*>/gi, "")
-    .replace(/<link\b[^>]*\/?\s*>/gi, "")
-    .replace(/<meta\b[^>]*\/?\s*>/gi, "");
-  // Strip event handlers: on<word>=... (quoted or unquoted value).
-  out = out.replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, "");
-  out = out.replace(/\son[a-z]+\s*=\s*'[^']*'/gi, "");
-  out = out.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, "");
-  // Neutralize javascript: / data:text/html URLs inside attributes.
-  out = out.replace(/(href|src)\s*=\s*"(\s*javascript:[^"]*)"/gi, '$1="#"');
-  out = out.replace(/(href|src)\s*=\s*'(\s*javascript:[^']*)'/gi, "$1='#'");
-  out = out.replace(/(href|src)\s*=\s*(javascript:[^\s>]+)/gi, '$1="#"');
-  return out;
+  // DOMPurify-backed parser sanitization via @/lib/html-sanitize. Replaces
+  // a regex-based strip that CodeQL flagged for double-escaping and
+  // incomplete multi-character sanitization on tag/attribute removal.
+  return sanitizeHtml(String(input));
 }
 
 /**

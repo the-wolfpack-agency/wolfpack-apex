@@ -41,6 +41,7 @@ import {
   ChangeEvent,
 } from "react";
 import Link from "next/link";
+import { htmlToText } from "@/lib/html-sanitize";
 import { fetchWithRefresh, getInstinctUser } from "@/lib/client-auth";
 import { emitInsight } from "@/lib/insights/emit";
 import { useAdaptivePoll } from "@/lib/hooks/useAdaptivePoll";
@@ -304,21 +305,11 @@ export const BASIC_EMOJIS: ReadonlyArray<{ char: string; name: string }> = [
  */
 export function stripHtmlToText(html: string | undefined | null): string {
   if (!html) return "";
-  // Remove script/style blocks including content.
-  let s = html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, "");
-  // Convert <br> and </p> to newlines for readability.
-  s = s.replace(/<br\s*\/?\s*>/gi, "\n").replace(/<\/p\s*>/gi, "\n\n");
-  // Strip every remaining tag.
-  s = s.replace(/<[^>]+>/g, "");
-  // Decode a few common entities.
-  s = s
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-  return s.trim();
+  // Parser-based HTML→text via @/lib/html-sanitize. CodeQL flagged the
+  // earlier regex-based strip for double-escaping +
+  // incomplete-multi-character-sanitization (the `<scr<script>ipt>`
+  // mutation class).
+  return htmlToText(html);
 }
 
 export function formatRelativeTime(iso: string, now: number = Date.now()): string {

@@ -332,6 +332,18 @@ const MOTION_KEYS = ["fast", "normal", "slow"] as const;
 const CSS_DIMENSION_RE = /^(0|-?\d*\.?\d+(px|rem|em|%|ch|vw|vh|vmin|vmax|pt|pc|in|cm|mm))$/i;
 // line-height can be unitless ("1.4") OR dimensioned.
 const LINE_HEIGHT_RE = /^(0|-?\d*\.?\d+(px|rem|em|%|ch|vw|vh|vmin|vmax|pt|pc|in|cm|mm)?|normal)$/i;
+/**
+ * Hard cap input lengths before .test() so any regex with overlapping
+ * quantifier alternatives can't be driven to polynomial time by a long
+ * adversarial string (CodeQL: js/polynomial-redos). 64 chars is far
+ * larger than any legal CSS dimension / time / easing / hex value.
+ */
+const SHORT_INPUT_MAX = 64;
+function shortStr(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  if (v.length > SHORT_INPUT_MAX) return null;
+  return v;
+}
 // CSS times: "150ms" or "0.25s". No bare numbers — CSS requires a unit on
 // non-zero values. "fast" is deliberately rejected so a word never slips
 // into a CSS animation-duration.
@@ -354,7 +366,8 @@ function validateSpacing(
   for (const k of SPACING_KEYS) {
     const v = r[k];
     if (v === undefined) continue;
-    if (typeof v !== "string" || !CSS_DIMENSION_RE.test(v.trim())) {
+    const s = shortStr(v);
+    if (s === null || !CSS_DIMENSION_RE.test(s.trim())) {
       errors.push(`theme.spacing.${k} must be a CSS dimension string (e.g. "16px")`);
     }
   }
@@ -373,7 +386,8 @@ function validateRadius(
   for (const k of RADIUS_KEYS) {
     const v = r[k];
     if (v === undefined) continue;
-    if (typeof v !== "string" || !CSS_DIMENSION_RE.test(v.trim())) {
+    const s = shortStr(v);
+    if (s === null || !CSS_DIMENSION_RE.test(s.trim())) {
       errors.push(`theme.radius.${k} must be a CSS dimension string (e.g. "8px", "9999px")`);
     }
   }
@@ -397,10 +411,12 @@ function validateTypeScale(
       continue;
     }
     const e = entry as Record<string, unknown>;
-    if (typeof e.fontSize !== "string" || !CSS_DIMENSION_RE.test(String(e.fontSize).trim())) {
+    const fs = shortStr(e.fontSize);
+    if (fs === null || !CSS_DIMENSION_RE.test(fs.trim())) {
       errors.push(`theme.typeScale.${k}.fontSize must be a CSS dimension string`);
     }
-    if (typeof e.lineHeight !== "string" || !LINE_HEIGHT_RE.test(String(e.lineHeight).trim())) {
+    const lh = shortStr(e.lineHeight);
+    if (lh === null || !LINE_HEIGHT_RE.test(lh.trim())) {
       errors.push(
         `theme.typeScale.${k}.lineHeight must be a CSS dimension, unitless ratio, or "normal"`,
       );
@@ -421,12 +437,14 @@ function validateMotion(
   for (const k of MOTION_KEYS) {
     const v = r[k];
     if (v === undefined) continue;
-    if (typeof v !== "string" || !CSS_TIME_RE.test(v.trim())) {
+    const s = shortStr(v);
+    if (s === null || !CSS_TIME_RE.test(s.trim())) {
       errors.push(`theme.motion.${k} must be a CSS time string (e.g. "150ms", "0.25s")`);
     }
   }
   if (r.ease !== undefined) {
-    if (typeof r.ease !== "string" || !CSS_EASING_RE.test(r.ease.trim())) {
+    const ease = shortStr(r.ease);
+    if (ease === null || !CSS_EASING_RE.test(ease.trim())) {
       errors.push(
         'theme.motion.ease must be a CSS easing (e.g. "ease-in-out" or "cubic-bezier(...)")',
       );
@@ -584,7 +602,11 @@ export function validateBrief(brief: unknown): asserts brief is SiteBrief {
   if (!b.product?.name || typeof b.product.name !== "string") {
     errors.push("product.name required");
   }
-  if (b.product?.supportEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(b.product.supportEmail)) {
+  if (
+    b.product?.supportEmail &&
+    (b.product.supportEmail.length > 254 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(b.product.supportEmail))
+  ) {
     errors.push("product.supportEmail must be a valid email");
   }
   if (!Array.isArray(b.pages) || b.pages.length === 0) {
@@ -655,6 +677,7 @@ export function validateBrief(brief: unknown): asserts brief is SiteBrief {
       if (cf.recipientEmail !== undefined) {
         if (
           typeof cf.recipientEmail !== "string" ||
+          cf.recipientEmail.length > 254 ||
           !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cf.recipientEmail)
         ) {
           errors.push("contactForm.recipientEmail must be a valid email");

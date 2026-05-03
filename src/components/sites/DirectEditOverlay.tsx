@@ -56,6 +56,7 @@ import {
   type TextField,
 } from "@/lib/preview-postmessage";
 import { authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import { htmlToText } from "@/lib/html-sanitize";
 
 /** Event types we track from this overlay. Kept here as constants so a
  *  test importing the component can assert the string literals. */
@@ -126,23 +127,11 @@ function emitAnalytics(
  * Exported for unit tests that need to pin the sanitization contract.
  */
 export function sanitizeEditableText(raw: string): string {
-  // Drop script/style content wholesale BEFORE we route through a div —
-  // `textContent` on a parsed DOM would otherwise surface the script
-  // body as visible text ("alert(1)"), which is still hostile copy for
-  // a brief. We also keep a regex-only path for SSR / no-jsdom.
-  const stripped = raw
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[\s\S]*?<\/style>/gi, "");
-  if (typeof document !== "undefined") {
-    const tmp = document.createElement("div");
-    tmp.innerHTML = stripped;
-    const text = tmp.textContent ?? "";
-    return text.replace(/\s+/g, " ").trim();
-  }
-  return stripped
-    .replace(/<[^>]*>/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  // Parser-based HTML→text via @/lib/html-sanitize. The previous regex
+  // strip + `textContent` chain was flagged by CodeQL for
+  // js/incomplete-multi-character-sanitization, js/bad-tag-filter, and
+  // js/xss-through-dom on the temporary `innerHTML` assignment.
+  return htmlToText(raw).replace(/\s+/g, " ").trim();
 }
 
 /* --------------------------- Editable selectors -------------------------- */

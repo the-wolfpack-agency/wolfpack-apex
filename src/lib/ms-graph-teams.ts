@@ -18,6 +18,7 @@
  */
 
 import { trackEvent } from "@/lib/analytics";
+import { htmlToText } from "@/lib/html-sanitize";
 
 const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
 
@@ -158,20 +159,11 @@ async function graphGet<T>(
 }
 
 function stripHtmlServer(html: string): string {
-  // Mirror of the page's strip — Graph channel messages can come back
-  // as HTML; we surface a plain-text projection for UI previews + RAG.
-  return html
-    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")
-    .replace(/<br\s*\/?\s*>/gi, "\n")
-    .replace(/<\/p\s*>/gi, "\n\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim();
+  // Parser-based HTML→text via @/lib/html-sanitize. Replaces the
+  // regex-based strip that CodeQL flagged for double-escaping +
+  // incomplete multi-character sanitization (the `<scr<script>ipt>`
+  // mutation class).
+  return htmlToText(html);
 }
 
 function normalizeTeam(raw: RawTeam): JoinedTeam | null {

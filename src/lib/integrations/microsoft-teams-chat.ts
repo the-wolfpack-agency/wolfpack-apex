@@ -22,6 +22,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { getValidToken } from "@/lib/microsoft-graph";
+import { htmlToText } from "@/lib/html-sanitize";
 import { query, safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { indexTeamsMessage } from "@/lib/learning/ms-content-ingest";
@@ -180,28 +181,11 @@ async function graphGet<T = unknown>(endpoint: string, accessToken: string): Pro
  */
 export function htmlToPlaintext(html: string | null | undefined): string {
   if (!html) return "";
-  let s = String(html);
-  // Drop script/style blocks entirely.
-  s = s.replace(/<script[\s\S]*?<\/script>/gi, "");
-  s = s.replace(/<style[\s\S]*?<\/style>/gi, "");
-  // Block-level elements → newlines so message paragraphs read naturally.
-  s = s.replace(/<\/(p|div|li|tr|h[1-6]|blockquote)\s*>/gi, "\n");
-  s = s.replace(/<br\s*\/?>/gi, "\n");
-  // Strip remaining tags.
-  s = s.replace(/<[^>]+>/g, "");
-  // Decode common entities.
-  s = s
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_m, code) => {
-      const n = parseInt(code, 10);
-      return Number.isFinite(n) ? String.fromCharCode(n) : "";
-    });
+  // Parser-based HTML→text via @/lib/html-sanitize. Replaces a regex
+  // strip flagged by CodeQL for double-escaping +
+  // incomplete-multi-character-sanitization +
+  // js/polynomial-redos / js/bad-tag-filter on the entity decoder.
+  let s = htmlToText(String(html));
   // Collapse whitespace.
   s = s.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
   return s;

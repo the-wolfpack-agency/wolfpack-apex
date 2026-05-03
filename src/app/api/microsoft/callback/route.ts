@@ -3,6 +3,7 @@ import { getUserFromRequest, createToken } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import { query } from "@/lib/db";
 import { issueRefreshToken } from "@/lib/crypto/refresh-tokens";
+import { sanitizeForLog } from "@/lib/log-sanitize";
 import {
   setAuthCookie,
   ACCESS_TOKEN_COOKIE,
@@ -123,7 +124,11 @@ export async function GET(req: NextRequest) {
   // dashboard so the user can see WHY (e.g. AADSTS65001 = admin consent
   // required for .All scopes, AADSTS50011 = redirect_uri mismatch).
   if (error) {
-    console.warn("[microsoft-graph] OAuth denied:", error, errorDescription);
+    console.warn(
+      "[microsoft-graph] OAuth denied:",
+      sanitizeForLog(error),
+      sanitizeForLog(errorDescription),
+    );
     const redirectUrl = new URL("/", req.url);
     redirectUrl.searchParams.set("ms", "denied");
     redirectUrl.searchParams.set("error_code", error);

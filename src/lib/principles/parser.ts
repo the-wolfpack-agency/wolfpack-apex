@@ -218,7 +218,11 @@ export function sha256Hex(buf: Buffer | string): string {
 /* ------------------------------------------------------------------ */
 
 export function slugify(title: string): string {
-  return title
+  // Cap input first — `[^a-z0-9]+` plus `^-+|-+$` over an unbounded
+  // string is the polynomial pattern CodeQL flagged. 1024 chars is far
+  // larger than any real principle title.
+  const capped = title.length > 1024 ? title.slice(0, 1024) : title;
+  return capped
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
