@@ -45,7 +45,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "admin only" }, { status: 403 });
   }
 
-  const repo = req.nextUrl.searchParams.get("repo") ?? undefined;
+  const repoRaw = req.nextUrl.searchParams.get("repo") ?? undefined;
+  // Validate `repo` shape strictly so the URL we hand to fetch() can
+  // only ever target api.github.com and only ever in the
+  // `<owner>/<name>` slot. Refuses anything containing `/` outside that
+  // single slash, schemes, query strings, or `..`. (CodeQL:
+  // js/request-forgery — we hardcode the host + path prefix and let
+  // only an allow-listed pattern fill in the trailing segment.)
+  const repo =
+    repoRaw && /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/.test(repoRaw)
+      ? repoRaw
+      : undefined;
+  if (repoRaw && !repo) {
+    return NextResponse.json(
+      { error: "repo must match owner/name (alphanumerics, dot, dash, underscore)" },
+      { status: 400 },
+    );
+  }
 
   const result: ProbeResult = {
     env: {

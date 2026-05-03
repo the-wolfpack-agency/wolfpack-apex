@@ -476,6 +476,8 @@ async function upsertTask(
 // ---------------------------------------------------------------------------
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Microsoft Graph user-id allow-list for object-key injection guards. */
+const PLANNER_USER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function resolvePlanIds(
   userId: string,
@@ -777,8 +779,12 @@ export async function createTask(
   if (typeof input.priority === "number") body.priority = input.priority;
   if (input.dueAt !== undefined && input.dueAt !== null) body.dueDateTime = input.dueAt;
   if (input.assignees && input.assignees.length > 0) {
-    const assignments: Record<string, unknown> = {};
+    // CodeQL: js/remote-property-injection — only Graph user-ids
+    // (UUIDs) may become object keys here so an attacker can't inject
+    // `__proto__` or pollute the assignments map.
+    const assignments: Record<string, unknown> = Object.create(null);
     for (const uid of input.assignees) {
+      if (typeof uid !== "string" || !PLANNER_USER_ID_RE.test(uid)) continue;
       assignments[uid] = { "@odata.type": "#microsoft.graph.plannerAssignment", orderHint: " !" };
     }
     body.assignments = assignments;
@@ -877,8 +883,10 @@ export async function updateTask(
     }
   }
   if (patch.assignees !== undefined) {
-    const assignments: Record<string, unknown> = {};
+    // CodeQL: js/remote-property-injection — strict UUID allow-list.
+    const assignments: Record<string, unknown> = Object.create(null);
     for (const uid of patch.assignees) {
+      if (typeof uid !== "string" || !PLANNER_USER_ID_RE.test(uid)) continue;
       assignments[uid] = { "@odata.type": "#microsoft.graph.plannerAssignment", orderHint: " !" };
     }
     body.assignments = assignments;

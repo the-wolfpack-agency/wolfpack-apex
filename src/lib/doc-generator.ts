@@ -7,6 +7,7 @@
  */
 
 import { readFileSync } from "fs";
+import { resolve, sep } from "path";
 import { execFileSync } from "child_process";
 import { query, safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
@@ -58,7 +59,19 @@ const DEMO_DOCS: GeneratedDocument[] = [
 // generateApiDoc — Parse TS/Python and generate markdown docs (zero tokens)
 // ---------------------------------------------------------------------------
 export function generateApiDoc(repoPath: string, filePath: string): GeneratedDocument {
-  const fullPath = `${repoPath}/${filePath}`;
+  // Resolve once, then enforce the resolved path is still inside the
+  // base repo directory. Defeats `..` traversal that the previous string
+  // concat allowed (CodeQL: js/path-injection).
+  const baseAbs = resolve(repoPath);
+  const fullPath = resolve(baseAbs, filePath);
+  if (!fullPath.startsWith(baseAbs + sep) && fullPath !== baseAbs) {
+    return makeDoc({
+      title: `API Documentation - ${filePath}`,
+      doc_type: "api_doc",
+      content: `# ${filePath}\n\nPath traversal rejected.`,
+      generated_from: filePath,
+    });
+  }
   let fileContent: string;
 
   try {

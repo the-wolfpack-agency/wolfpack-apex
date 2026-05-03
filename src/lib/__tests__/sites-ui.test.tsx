@@ -85,7 +85,7 @@ describe("SitesPage — list & form", () => {
     expect(html).not.toMatch(/mulready/i);
     // And the new generic placeholders ARE present:
     expect(html).toMatch(/acme/i);
-    expect(html).toMatch(/example\.com/i);
+    expect(html).toMatch(/(^|[^a-z])example\.com($|[^a-z])/i);
   });
 
   it("slug input sanitizes as the user types (lowercase, strips slashes/spaces)", async () => {

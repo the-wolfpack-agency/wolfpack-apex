@@ -257,7 +257,7 @@ describe("POST /api/sites/[id]/generate-image", () => {
     );
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.url).toMatch(/raw\.githubusercontent\.com/);
+    expect(data.url).toMatch(/^https:\/\/raw\.githubusercontent\.com\//);
     expect(data.generationId).toBe("img_gen_1");
     expect(data.cost_cents).toBe(1);
     expect(data.seed).toBe(42);

@@ -141,7 +141,10 @@ self.addEventListener("fetch", (event) => {
 });
 
 // Message channel — allow the page to force a cache purge (on logout).
+// Only same-origin pages may instruct us; reject everything else.
+// (CodeQL: js/missing-origin-check.)
 self.addEventListener("message", (event) => {
+  if (event.origin && event.origin !== self.location.origin) return;
   if (event.data && event.data.type === "CLEAR_CACHES") {
     event.waitUntil(
       caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))),

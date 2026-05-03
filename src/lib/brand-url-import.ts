@@ -249,7 +249,23 @@ async function safeFetchHtml(
   const timer = setTimeout(() => controller.abort(), BRAND_SCRAPE_TIMEOUT_MS);
   try {
     while (true) {
-      const res = await fetchImpl(current.toString(), {
+      // Belt-and-braces SSRF gate at every hop. parseBrandUrl validated
+      // the entry URL and every redirect target; we additionally insist on
+      // https:// here so any future caller that constructs a URL outside
+      // parseBrandUrl can never reach `fetch()` over a non-TLS scheme
+      // (CodeQL: js/request-forgery).
+      const safeUrl = parseBrandUrl(current.toString());
+      if (!safeUrl.ok) return { ok: false, reason: "invalid_url" };
+      if (
+        safeUrl.url.protocol !== "https:" &&
+        !(
+          safeUrl.url.hostname === "localhost" ||
+          safeUrl.url.hostname.endsWith(".localhost")
+        )
+      ) {
+        return { ok: false, reason: "invalid_url" };
+      }
+      const res = await fetchImpl(safeUrl.url.toString(), {
         method: "GET",
         redirect: "manual",
         signal: controller.signal,

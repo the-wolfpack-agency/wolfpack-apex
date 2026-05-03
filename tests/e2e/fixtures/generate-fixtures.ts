@@ -225,10 +225,16 @@ function crc32(buf: Buffer): number {
  */
 export function ensureFixture(name: string, text: string): string {
   const fixturesDir = path.resolve(__dirname);
-  if (!fs.existsSync(fixturesDir)) fs.mkdirSync(fixturesDir, { recursive: true });
+  fs.mkdirSync(fixturesDir, { recursive: true });
   const full = path.join(fixturesDir, name);
-  if (!fs.existsSync(full)) {
-    fs.writeFileSync(full, renderTextPng(text));
+  // Atomic exists-then-write via the `wx` flag — fs.existsSync followed
+  // by fs.writeFileSync was a TOCTOU race CodeQL flagged
+  // (js/file-system-race). `wx` causes writeFileSync to throw EEXIST
+  // when the file is already present, which is exactly the no-op path.
+  try {
+    fs.writeFileSync(full, renderTextPng(text), { flag: "wx" });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
   }
   return full;
 }

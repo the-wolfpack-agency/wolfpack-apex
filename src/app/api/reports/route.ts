@@ -10,6 +10,7 @@ import {
   cleanAiArtifacts,
 } from "@/lib/report-templates";
 import { generateCustomReport } from "@/lib/claude-report-generator";
+import { sanitizeForLog } from "@/lib/log-sanitize";
 
 /**
  * GET /api/reports — List templates and past reports.
@@ -151,7 +152,7 @@ export async function POST(req: NextRequest) {
       sectionsIncluded: report.sectionsIncluded,
     });
   } catch (err) {
-    console.error("[reports/generate]", (err as Error).message);
+    console.error("[reports/generate]", sanitizeForLog((err as Error).message));
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },

@@ -9,11 +9,18 @@
  * Locally, skips gracefully.
  */
 
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { join } from "path";
 
 const isCI = process.env.CI === "true";
 const prodDomain = process.env.PROD_DOMAIN ?? "";
+
+/**
+ * Strict domain shape so the env-supplied `PROD_DOMAIN` can never be
+ * re-interpreted as shell metacharacters by the child process.
+ * (CodeQL: js/indirect-command-line-injection.)
+ */
+const DOMAIN_RE = /^[A-Za-z0-9.-]{1,253}$/;
 
 describe("TLS Hybrid Posture", () => {
   const skip = !isCI || !prodDomain;
@@ -24,8 +31,11 @@ describe("TLS Hybrid Posture", () => {
       const scriptPath = join(process.cwd(), "scripts", "verify-tls-hybrid.sh");
       let result: "pass" | "fail" = "fail";
       let output = "";
+      if (!DOMAIN_RE.test(prodDomain)) {
+        throw new Error(`PROD_DOMAIN must match ${DOMAIN_RE}`);
+      }
       try {
-        output = execSync(`sh "${scriptPath}" "${prodDomain}"`, {
+        output = execFileSync("sh", [scriptPath, prodDomain], {
           timeout: 15000,
           encoding: "utf-8",
         });

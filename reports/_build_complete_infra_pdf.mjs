@@ -5,7 +5,7 @@
 //
 // Usage: node reports/_build_complete_infra_pdf.mjs
 import { readFileSync, writeFileSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -221,7 +221,19 @@ const html = `<!doctype html>
 
 writeFileSync(HTML_PATH, html, "utf-8");
 
-// Render with headless Chrome
-const cmd = `"${CHROME}" --headless --disable-gpu --no-pdf-header-footer --print-to-pdf="${PDF_PATH}" "file://${HTML_PATH}"`;
-execSync(cmd, { stdio: "inherit" });
+// Render with headless Chrome via execFileSync — pass argv as an array
+// so paths derived from process.env (e.g. HOME via __dirname) can never
+// be re-interpreted as shell metacharacters. (CodeQL:
+// js/shell-command-injection-from-environment.)
+execFileSync(
+  CHROME,
+  [
+    "--headless",
+    "--disable-gpu",
+    "--no-pdf-header-footer",
+    `--print-to-pdf=${PDF_PATH}`,
+    `file://${HTML_PATH}`,
+  ],
+  { stdio: "inherit" },
+);
 console.log(`PDF written to ${PDF_PATH}`);

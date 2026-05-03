@@ -62,9 +62,12 @@ const AI_WORD_MAP: Record<string, string> = {
 export function cleanAiArtifacts(text: string): string {
   let cleaned = text;
 
-  // Replace em dashes with commas or hyphens
-  cleaned = cleaned.replace(/, /g, ", ");
+  // Replace em dashes with " - " and en dashes with a single hyphen.
+  // The previous `cleaned.replace(/, /g, ", ")` was a no-op
+  // (CodeQL: js/identity-replacement). Em-dash conversion is what we
+  // actually want for Wolfpack copy hygiene.
   cleaned = cleaned.replace(/—/g, " - ");
+  cleaned = cleaned.replace(/–/g, "-");
 
   // Replace AI-tell words (case-insensitive, preserve case of first letter)
   for (const [aiWord, replacement] of Object.entries(AI_WORD_MAP)) {

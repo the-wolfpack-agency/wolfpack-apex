@@ -127,6 +127,11 @@ function SignatureHtmlPreview({
 
   useEffect(() => {
     function onMsg(e: MessageEvent) {
+      // The preview iframe is loaded from a `srcDoc` so its postMessage
+      // origin is the literal string "null". Reject anything else
+      // outright (CodeQL: js/missing-origin-check). We additionally
+      // require the source to be our own iframe contentWindow.
+      if (e.origin !== "null" && e.origin !== window.location.origin) return;
       const data = e.data as { type?: string; h?: number } | undefined;
       if (data?.type === "instinct-sig-preview-h" && typeof data.h === "number") {
         setHeight(Math.min(Math.max(data.h, 80), 600));

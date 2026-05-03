@@ -30,6 +30,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash, randomUUID } from "node:crypto";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
+import { sanitizeForLog } from "@/lib/log-sanitize";
 import {
   listAssetsForClient,
   recordAssetUpload,
@@ -161,7 +162,7 @@ export async function POST(
     });
   } catch (err) {
     const msg = (err as Error).message ?? "upload failed";
-    console.error("[clients/assets POST]", msg);
+    console.error("[clients/assets POST]", sanitizeForLog(msg));
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 

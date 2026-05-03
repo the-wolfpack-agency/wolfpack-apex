@@ -13,6 +13,7 @@ import { safeQuery, query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { getSecretOrThrow } from "@/lib/secrets";
 import { getObsClient } from "@/lib/obs";
+import { sanitizeForLog } from "@/lib/log-sanitize";
 
 // TODO: when Azure Key Vault is provisioned, more secrets will move
 // behind getSecretOrThrow (MS_TENANT_ID, MS_REDIRECT_URI, INSTINCT_JWT_SECRET).
@@ -800,7 +801,14 @@ export async function graphFetch<T = unknown>(
     });
 
     if (!res.ok) {
-      console.error(`[microsoft-graph] API error ${res.status} for ${endpoint}:`, await res.text());
+      // Pass user-controlled values as ARGS, never as the format string
+      // (CodeQL: js/tainted-format-string + js/log-injection on `endpoint`).
+      console.error(
+        "[microsoft-graph] API error %s for %s: %s",
+        res.status,
+        sanitizeForLog(endpoint),
+        sanitizeForLog(await res.text()),
+      );
       trackEvent("microsoft.fetch_failed", userId, "system", {
         endpoint,
         status: res.status,
@@ -810,7 +818,11 @@ export async function graphFetch<T = unknown>(
 
     return (await res.json()) as T;
   } catch (err) {
-    console.error(`[microsoft-graph] API fetch error for ${endpoint}:`, (err as Error).message);
+    console.error(
+      "[microsoft-graph] API fetch error for %s: %s",
+      sanitizeForLog(endpoint),
+      sanitizeForLog((err as Error).message),
+    );
     trackEvent("microsoft.fetch_failed", userId, "system", {
       endpoint,
       status: 0,

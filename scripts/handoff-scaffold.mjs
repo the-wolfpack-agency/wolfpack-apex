@@ -19,7 +19,7 @@
  *         npm run handoff   (if package.json script is wired up)
  */
 import { readdirSync, existsSync, writeFileSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -48,12 +48,23 @@ function findLatestHandoff() {
 }
 
 function gitLogSince(sinceDate) {
+  // Use execFileSync with an argv array so `sinceDate` (parsed from a
+  // filename earlier in this module) can never be interpreted as shell
+  // metacharacters. CodeQL flagged the original
+  // js/shell-command-injection-from-environment + indirect injection.
+  // `sinceDate` is also re-validated to YYYY-MM-DD before use.
   try {
-    const arg = sinceDate ? `--since=${sinceDate}` : `--since="24 hours ago"`;
-    const out = execSync(
-      `git -C "${REPO_ROOT}" log ${arg} --pretty=format:"%h|%s" --no-merges`,
-      { encoding: "utf-8" },
-    );
+    const args = [
+      "-C",
+      REPO_ROOT,
+      "log",
+      sinceDate && /^\d{4}-\d{2}-\d{2}$/.test(sinceDate)
+        ? `--since=${sinceDate}`
+        : `--since=24 hours ago`,
+      "--pretty=format:%h|%s",
+      "--no-merges",
+    ];
+    const out = execFileSync("git", args, { encoding: "utf-8" });
     return out
       .split("\n")
       .filter((line) => line.trim().length > 0)
@@ -68,7 +79,9 @@ function gitLogSince(sinceDate) {
 
 function gitHead() {
   try {
-    return execSync(`git -C "${REPO_ROOT}" rev-parse --short HEAD`, { encoding: "utf-8" }).trim();
+    return execFileSync("git", ["-C", REPO_ROOT, "rev-parse", "--short", "HEAD"], {
+      encoding: "utf-8",
+    }).trim();
   } catch {
     return "(unknown)";
   }
@@ -185,18 +198,25 @@ function main() {
   const date = todayIso();
   const targetPath = resolve(DEMO_DIR, `handoff-${date}.md`);
 
-  if (existsSync(targetPath)) {
-    console.log(`Handoff already exists: ${targetPath}`);
-    console.log("Refusing to overwrite. Edit it directly or delete + re-run.");
-    process.exit(0);
-  }
-
   const latest = findLatestHandoff();
   // git log --since accepts a YYYY-MM-DD
   const commits = gitLogSince(latest?.date || null);
   const body = buildHandoff(date, latest, commits);
 
-  writeFileSync(targetPath, body, "utf-8");
+  // Atomic exists-then-write via the `wx` flag (CodeQL:
+  // js/file-system-race). Replaces the existsSync + writeFileSync
+  // TOCTOU sequence — `wx` makes writeFileSync throw EEXIST when the
+  // file is already present, which is the "do not clobber" path.
+  try {
+    writeFileSync(targetPath, body, { encoding: "utf-8", flag: "wx" });
+  } catch (err) {
+    if (err && err.code === "EEXIST") {
+      console.log(`Handoff already exists: ${targetPath}`);
+      console.log("Refusing to overwrite. Edit it directly or delete + re-run.");
+      process.exit(0);
+    }
+    throw err;
+  }
   console.log(`Handoff scaffold written: ${targetPath}`);
   console.log(`  ${commits.length} commit(s) captured`);
   if (latest) console.log(`  Previous handoff: ${latest.name}`);
