@@ -14,7 +14,19 @@
  * Anything outside these values falls back to 'default'.
  */
 
-import { createHash } from "node:crypto";
+/* Edge-runtime compatible hash: this file is reached transitively
+   from middleware via obs/router → automations poll route, so
+   `node:crypto` would break the Edge build. The hash is only a
+   log-correlation fingerprint, NOT a security primitive — a 32-bit
+   FNV-1a is plenty. */
+function fnv1a32(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
 
 import type {
   ObservabilityBackend,
@@ -39,7 +51,7 @@ const SECRET_KEY_RE =
 function fingerprint(value: unknown): string {
   if (value === null || value === undefined) return "";
   const s = typeof value === "string" ? value : JSON.stringify(value);
-  return "sha256:" + createHash("sha256").update(s).digest("hex").slice(0, 8);
+  return "fp:" + fnv1a32(s);
 }
 
 function redactAttributes(attrs: SpanAttributes | undefined): SpanAttributes {
