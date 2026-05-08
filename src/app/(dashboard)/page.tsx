@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import IntegrationStatusBanner from "@/components/IntegrationStatusBanner";
 import MorningBriefing from "@/components/MorningBriefing";
 import MsInsightsPanel from "@/components/MsInsightsPanel";
+import Skeleton from "@/components/ui/Skeleton";
+import Tooltip from "@/components/ui/Tooltip";
 import { getInstinctToken, authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 import {
   FALLBACK_ACTIONS,
@@ -292,17 +294,71 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>Loading dashboard...</p>
+      <div className="max-w-7xl mx-auto space-y-6 wp-fade-in" data-testid="dashboard-skeleton">
+        <Skeleton width={180} height={28} />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Skeleton.Card />
+          <Skeleton.Card />
+          <Skeleton.Card />
+          <Skeleton.Card />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div
+            className="rounded-lg p-5 border"
+            style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+          >
+            <Skeleton width={140} height={20} />
+            <div style={{ height: 16 }} />
+            <Skeleton.Lines lines={4} />
+          </div>
+          <div
+            className="rounded-lg p-5 border"
+            style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+          >
+            <Skeleton width={140} height={20} />
+            <div style={{ height: 16 }} />
+            <Skeleton.Lines lines={4} />
+          </div>
+        </div>
       </div>
     );
   }
 
-  const statCards = [
-    { label: "Knowledge Entries", value: stats?.knowledge_count ?? 0, color: "var(--wp-gold)" },
-    { label: "Active Discussions", value: stats?.discussion_count ?? 0, color: "var(--wp-info)" },
-    { label: "Feature Requests", value: stats?.feature_count ?? 0, color: "var(--wp-success)" },
-    { label: "Team Members", value: stats?.team_count ?? 0, color: "var(--wp-warning)" },
+  const statCards: Array<{
+    label: string;
+    value: number;
+    color: string;
+    href: string;
+    hint: string;
+  }> = [
+    {
+      label: "Knowledge Entries",
+      value: stats?.knowledge_count ?? 0,
+      color: "var(--wp-gold)",
+      href: "/knowledge",
+      hint: "Click to search the knowledge base",
+    },
+    {
+      label: "Active Discussions",
+      value: stats?.discussion_count ?? 0,
+      color: "var(--wp-info)",
+      href: "/discussions",
+      hint: "Open the discussion threads",
+    },
+    {
+      label: "Feature Requests",
+      value: stats?.feature_count ?? 0,
+      color: "var(--wp-success)",
+      href: "/features",
+      hint: "Open the feature request board",
+    },
+    {
+      label: "Team Members",
+      value: stats?.team_count ?? 0,
+      color: "var(--wp-warning)",
+      href: "/hr",
+      hint: "Open the team directory",
+    },
   ];
 
   return (
@@ -419,21 +475,31 @@ export default function DashboardPage() {
       {/* MS 365 Insights — patterns from calendar/email/tasks */}
       <MsInsightsPanel />
 
-      {/* Stats */}
+      {/* Stats — each card is a tooltip-wrapped link with hover-lift.
+          Tooltip surfaces the click target so the user knows the card
+          is interactive without having to discover it. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((card) => (
-          <div
-            key={card.label}
-            className="rounded-lg p-5 border"
-            style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
-          >
-            <p className="text-3xl font-bold" style={{ color: card.color }}>
-              {card.value}
-            </p>
-            <p className="text-sm mt-1" style={{ color: "var(--wp-text-dim)" }}>
-              {card.label}
-            </p>
-          </div>
+          <Tooltip key={card.label} label={card.label} hint={card.hint}>
+            <a
+              href={card.href}
+              data-testid={`stat-card-${card.href.replace(/\//g, "")}`}
+              className="rounded-lg p-5 border block wp-hover-lift outline-none"
+              style={{
+                background: "var(--wp-dark-surface)",
+                borderColor: "var(--wp-dark-border)",
+                width: "100%",
+                textDecoration: "none",
+              }}
+            >
+              <p className="text-3xl font-bold" style={{ color: card.color }}>
+                {card.value}
+              </p>
+              <p className="text-sm mt-1" style={{ color: "var(--wp-text-dim)" }}>
+                {card.label}
+              </p>
+            </a>
+          </Tooltip>
         ))}
       </div>
 

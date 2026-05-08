@@ -142,3 +142,114 @@ a:hover { color: var(--wp-gold-hover); }
     width: 100%;
   }
 }
+
+
+/* ──────────────────────────────────────────────────────────────────────
+ * UX primitives — animations + interaction polish.
+ * Owned by the `Skeleton`, `Tooltip`, `CommandPalette` components in
+ * src/components/ui/. Tokens reuse --wp-* only — no new colors.
+ * ──────────────────────────────────────────────────────────────────── */
+
+@keyframes wp-skeleton-shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+@keyframes wp-fade-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes wp-pop-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.wp-fade-in    { animation: wp-fade-in 140ms ease-out both; }
+.wp-pop-in     { animation: wp-pop-in 180ms cubic-bezier(.2,.8,.2,1) both; }
+
+/* Hover-lift utility — apply to interactive cards */
+.wp-hover-lift {
+  transition: transform 150ms ease-out, border-color 150ms ease-out, box-shadow 150ms ease-out;
+}
+.wp-hover-lift:hover {
+  transform: translateY(-1px);
+  border-color: var(--wp-gold) !important;
+  box-shadow: 0 4px 12px -4px rgba(0,0,0,0.4);
+}
+
+/* Keyboard-shortcut chip — used in CommandPalette + tooltips */
+.wp-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--wp-text-dim);
+  background: var(--wp-dark);
+  border: 1px solid var(--wp-dark-border);
+  border-radius: 4px;
+  box-shadow: 0 1px 0 var(--wp-dark-border);
+}
+
+/* Reduced-motion users get nothing flashy */
+@media (prefers-reduced-motion: reduce) {
+  .wp-fade-in, .wp-pop-in,
+  .wp-hover-lift,
+  [data-skeleton="true"] {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Sidebar nav item — interactive hover. The active state retains its
+ * own visual (gold text + surface2 bg). Hover layers a subtle
+ * highlight + a sliding gold accent bar so the user feels the button
+ * respond before clicking. Active state has the bar fully visible. */
+.wp-nav-item {
+  position: relative;
+  transition:
+    background 150ms ease-out,
+    color 150ms ease-out,
+    transform 150ms ease-out;
+}
+.wp-nav-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--wp-gold);
+  border-radius: 0 2px 2px 0;
+  transform: scaleY(0);
+  transform-origin: center;
+  transition: transform 180ms ease-out, opacity 180ms ease-out;
+  opacity: 0;
+}
+.wp-nav-item:hover:not(.wp-nav-item--active) {
+  background: var(--wp-dark-surface) !important;
+  color: var(--wp-text) !important;
+  transform: translateX(2px);
+}
+.wp-nav-item:hover:not(.wp-nav-item--active)::before {
+  transform: scaleY(0.6);
+  opacity: 0.6;
+}
+.wp-nav-item--active::before {
+  transform: scaleY(1);
+  opacity: 1;
+}
+.wp-nav-item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--wp-gold) inset;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wp-nav-item, .wp-nav-item::before { transition: none !important; transform: none !important; }
+  .wp-nav-item:hover:not(.wp-nav-item--active) { transform: none !important; }
+}
