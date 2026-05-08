@@ -9,14 +9,26 @@
  *
  * No session needed — identity is proven by the single-use signed
  * token on the URL.
+ *
+ * The inner form component is rendered inside a <Suspense> boundary so
+ * `useSearchParams()` doesn't fail Next.js's static-prerender check at
+ * build time. The export-default page is a tiny shell.
  */
 
-import { useEffect, useState, FormEvent } from "react";
+import { Suspense, useEffect, useState, FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 export default function AcceptInvitePage() {
+  return (
+    <Suspense fallback={null}>
+      <AcceptInviteForm />
+    </Suspense>
+  );
+}
+
+function AcceptInviteForm() {
   const router = useRouter();
   const params = useSearchParams();
   const token = params?.get("token") ?? "";
