@@ -844,7 +844,7 @@ export default function DiscussionsPage() {
       <div
         key={t.id}
         onClick={() => openThread(t.id)}
-        className="rounded-lg border p-4 cursor-pointer transition-colors hover:border-[var(--wp-gold)]"
+        className="rounded-lg border p-4 cursor-pointer wp-hover-lift outline-none"
         style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
       >
         <div className="flex items-start justify-between gap-4">

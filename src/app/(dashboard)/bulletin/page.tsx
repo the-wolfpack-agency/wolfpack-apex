@@ -340,6 +340,7 @@ export default function BulletinIndexPage() {
                 data-testid={`bulletin-row-${b.id}`}
                 type="button"
                 onClick={() => navigateToBoard(b.id)}
+                className="wp-hover-lift outline-none"
                 style={{
                   display: "grid",
                   gridTemplateColumns: "1fr auto",

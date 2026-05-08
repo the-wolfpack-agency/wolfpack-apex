@@ -85,11 +85,12 @@ export default function AutomationsIndexPage() {
               key={a.id}
               href={`/automations/${a.id}`}
               data-testid={`automation-row-${a.id}`}
+              className="wp-hover-lift outline-none"
               style={{
                 display: "block",
                 padding: "1rem 1.25rem",
-                background: "var(--wp-card)",
-                border: "1px solid var(--wp-border)",
+                background: "var(--wp-dark-surface)",
+                border: "1px solid var(--wp-dark-border)",
                 borderRadius: "8px",
                 textDecoration: "none",
                 color: "var(--wp-text)",

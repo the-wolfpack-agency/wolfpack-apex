@@ -450,7 +450,7 @@ export default function FeaturesPage() {
           {features.map((f) => (
             <div
               key={f.id}
-              className="rounded-lg border p-4 cursor-pointer transition-colors hover:border-[var(--wp-gold)]"
+              className="rounded-lg border p-4 cursor-pointer wp-hover-lift outline-none"
               style={{
                 background: selected?.id === f.id ? "var(--wp-dark-surface2)" : "var(--wp-dark-surface)",
                 borderColor: selected?.id === f.id ? "var(--wp-gold)" : "var(--wp-dark-border)",

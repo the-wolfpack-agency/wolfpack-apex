@@ -314,7 +314,7 @@ export default function ClientsPage() {
             <div
               key={client.id}
               onClick={() => setSelected(selected?.id === client.id ? null : client)}
-              className="rounded-lg border p-4 cursor-pointer transition-colors hover:border-[var(--wp-gold)]"
+              className="rounded-lg border p-4 cursor-pointer wp-hover-lift outline-none"
               style={{
                 background: selected?.id === client.id ? "var(--wp-dark-surface2)" : "var(--wp-dark-surface)",
                 borderColor: selected?.id === client.id ? "var(--wp-gold)" : "var(--wp-dark-border)",

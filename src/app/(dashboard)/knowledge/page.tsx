@@ -1082,7 +1082,7 @@ export default function KnowledgePage() {
               key={entry.id}
               data-knowledge-entry={entry.id}
               onClick={() => setSelected(selected?.id === entry.id ? null : entry)}
-              className="rounded-lg border p-4 cursor-pointer transition-colors hover:border-[var(--wp-gold)]"
+              className="rounded-lg border p-4 cursor-pointer wp-hover-lift outline-none"
               style={{
                 background: selected?.id === entry.id ? "var(--wp-dark-surface2)" : "var(--wp-dark-surface)",
                 borderColor: selected?.id === entry.id ? "var(--wp-gold)" : "var(--wp-dark-border)",

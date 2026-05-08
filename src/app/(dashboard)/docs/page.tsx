@@ -532,7 +532,7 @@ export default function DocsPage() {
                   setGenType(card.type);
                   setShowGenerate(true);
                 }}
-                className="text-left rounded-lg border p-4 transition-colors hover:border-[var(--wp-gold)]"
+                className="text-left rounded-lg border p-4 wp-hover-lift outline-none"
                 style={{
                   background: "var(--wp-dark-surface2)",
                   borderColor: "var(--wp-dark-border)",
@@ -565,7 +565,7 @@ export default function DocsPage() {
             <div
               key={doc.id}
               onClick={() => setSelected(doc)}
-              className="rounded-lg border p-4 cursor-pointer transition-colors hover:border-[var(--wp-gold)]"
+              className="rounded-lg border p-4 cursor-pointer wp-hover-lift outline-none"
               style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
             >
               <div className="flex items-start justify-between gap-4">
