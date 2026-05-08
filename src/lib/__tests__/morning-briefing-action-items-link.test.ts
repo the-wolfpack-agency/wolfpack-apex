@@ -1,9 +1,11 @@
 /**
  * Locks in the action-item link contract: emails surfaced as action
- * items must carry a click-through URL (preferring in-app
- * /emails?messageId=... over Outlook webLink). Re-runs the suffix
- * detection at the action-items level to catch silent regressions
- * if the lib drops the id/webLink fields again.
+ * items must carry a click-through URL.
+ *
+ * Preference order (2026-05-08): Outlook webLink first, in-app
+ * /emails?messageId=... only as a fallback. The /emails reader is
+ * hidden from the sidebar; users reply / archive / file in their real
+ * Outlook mailbox.
  */
 
 import type { ImportantEmail, ActionItem } from "@/lib/morning-briefing";
@@ -35,10 +37,21 @@ describe("ActionItem + ImportantEmail link contract", () => {
       text: "Respond to Sara",
       context: "Q3 plan",
       source: "email",
+      link: "https://outlook.office365.com/owa/?ItemID=AAMk%2BId&exvsurl=1&viewmodel=ReadMessageItem",
+    };
+    expect(a.link).toMatch(/^https:\/\/outlook\./);
+    expect(a.source).toBe("email");
+  });
+
+  test("legacy in-app /emails link form is still accepted (fallback when webLink is missing)", () => {
+    const a: ActionItem = {
+      priority: "medium",
+      text: "Respond to Sara",
+      context: "Q3 plan",
+      source: "email",
       link: "/emails?messageId=AAMkAGZ-msg-id",
     };
     expect(a.link).toMatch(/^\/emails\?messageId=/);
-    expect(a.source).toBe("email");
   });
 
   test("absent link signals display-only — dashboard renders as div", () => {

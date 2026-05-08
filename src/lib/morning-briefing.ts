@@ -371,12 +371,16 @@ function generateActionItems(
 
   // Medium priority: important unread emails
   for (const email of emails.slice(0, 2)) {
-    /* Prefer in-app /emails deep-link by message id; fall back to the
-       Outlook webLink (opens in a new tab) when we don't have an id.
-       The dashboard renderer treats absolute URLs as target=_blank. */
-    const link = email.id
-      ? `/emails?messageId=${encodeURIComponent(email.id)}`
-      : email.webLink || undefined;
+    /* Prefer the Outlook webLink so the user lands in their real
+       mailbox (where they reply, archive, file, etc.). The /emails
+       in-app reader is currently hidden from the sidebar and not the
+       primary mail surface, so falling back to it only when MS Graph
+       doesn't return a webLink for some reason. */
+    const link = email.webLink
+      ? email.webLink
+      : email.id
+        ? `/emails?messageId=${encodeURIComponent(email.id)}`
+        : undefined;
     items.push({
       priority: "medium",
       text: `Respond to ${email.from}`,
