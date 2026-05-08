@@ -368,41 +368,40 @@ function SearchContents() {
             >
               {TYPE_LABELS[t]} · {group.length}
             </h2>
-            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
               {group.map((r, i) => (
-                <li
-                  key={r.id}
-                  style={{
-                    background: "var(--wp-surface)",
-                    border: "1px solid var(--wp-border)",
-                    borderRadius: "8px",
-                    marginBottom: "8px",
-                    padding: "12px 14px",
-                  }}
-                >
+                <li key={r.id} style={{ listStyle: "none" }}>
                   <a
                     href={r.url || "#"}
                     onClick={() => handleResultClick(r, i)}
                     data-testid={`result-${r.id}`}
+                    className="wp-hover-lift outline-none"
                     style={{
-                      color: "var(--wp-text-primary)",
-                      textDecoration: "none",
                       display: "block",
+                      background: "var(--wp-dark-surface)",
+                      border: "1px solid var(--wp-dark-border)",
+                      borderRadius: 8,
+                      padding: "12px 14px",
+                      textDecoration: "none",
+                      color: "var(--wp-text)",
                     }}
                   >
                     <div
                       style={{
                         display: "flex",
                         justifyContent: "space-between",
-                        gap: "12px",
+                        gap: 12,
                       }}
                     >
-                      <strong style={{ fontSize: "14px" }}>{r.title}</strong>
+                      <strong style={{ fontSize: 14, color: "var(--wp-text)" }}>
+                        {r.title}
+                      </strong>
                       <span
                         style={{
-                          color: "var(--wp-text-secondary)",
-                          fontSize: "12px",
+                          color: "var(--wp-text-dim)",
+                          fontSize: 12,
                           whiteSpace: "nowrap",
+                          flexShrink: 0,
                         }}
                       >
                         {formatRelative(r.timestamp)}
@@ -411,10 +410,15 @@ function SearchContents() {
                     {r.snippet && (
                       <p
                         style={{
-                          color: "var(--wp-text-secondary)",
-                          fontSize: "13px",
-                          marginTop: "4px",
+                          color: "var(--wp-text-muted)",
+                          fontSize: 13,
+                          marginTop: 4,
                           marginBottom: 0,
+                          lineHeight: 1.45,
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
                         }}
                       >
                         {r.snippet}
