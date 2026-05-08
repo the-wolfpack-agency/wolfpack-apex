@@ -474,6 +474,10 @@ export type InstinctEventType =
   // Inbound-email surface awareness
   | "microsoft.email_unread_polled"
   | "microsoft.email_arrived_notified"
+  // Self-service password reset flow
+  | "auth.forgot_password_requested"
+  | "auth.forgot_password_rate_limited"
+  | "auth.reset_password_completed"
   // Client-side polling efficiency (badge coalesce + adaptive cadence).
   // Emitted periodically so the learning loop can track real-world idle
   // request volume + the wins from the May 2026 optimization pass.

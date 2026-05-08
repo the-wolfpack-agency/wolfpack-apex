@@ -230,6 +230,17 @@ function LoginContent() {
           >
             {loading ? "Signing in..." : "Sign In"}
           </button>
+
+          <div className="text-center">
+            <a
+              href="/forgot-password"
+              data-testid="forgot-password-link"
+              className="text-xs"
+              style={{ color: "var(--wp-text-dim)" }}
+            >
+              Forgot password?
+            </a>
+          </div>
         </form>
 
         <div
