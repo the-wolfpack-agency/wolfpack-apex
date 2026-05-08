@@ -65,7 +65,7 @@ import {
 } from "@/lib/client-auth";
 
 // Roles that can hard-delete (matches server gate hasRole(role, "hr")).
-const HARD_DELETE_ROLES = new Set(["ceo", "cto", "hr"]);
+const HARD_DELETE_ROLES = new Set(["ceo", "cto", "evp", "hr"]);
 
 interface SiteProject {
   id: string;

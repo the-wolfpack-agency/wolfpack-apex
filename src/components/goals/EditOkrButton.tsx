@@ -25,7 +25,7 @@ export default function EditOkrButton({
   userRole,
   onSaved,
 }: Props) {
-  const isAdmin = userRole === "ceo" || userRole === "cto";
+  const isAdmin = userRole === "ceo" || userRole === "cto" || userRole === "evp";
   const [open, setOpen] = useState(false);
   const [objective, setObjective] = useState(currentObjective);
   const [quarter, setQuarter] = useState(currentQuarter);

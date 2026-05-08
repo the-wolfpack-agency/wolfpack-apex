@@ -13,7 +13,7 @@ import { updateKRCurrent, updateKR, deleteKR } from "@/lib/goals";
 import { fanoutToTeam, actorLabel } from "@/lib/notifications/team-fanout";
 
 function isAdmin(role: string): boolean {
-  return role === "ceo" || role === "cto";
+  return role === "ceo" || role === "cto" || role === "evp";
 }
 
 export async function PATCH(

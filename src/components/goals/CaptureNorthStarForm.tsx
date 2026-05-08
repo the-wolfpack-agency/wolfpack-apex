@@ -24,7 +24,7 @@ export default function CaptureNorthStarForm({
   onCaptured,
   triggerLabel = "Update North Star",
 }: Props) {
-  const isAdmin = userRole === "ceo" || userRole === "cto";
+  const isAdmin = userRole === "ceo" || userRole === "cto" || userRole === "evp";
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState("");
   const [value, setValue] = useState("");

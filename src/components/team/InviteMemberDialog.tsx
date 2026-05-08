@@ -19,6 +19,7 @@ const ROLES: Array<{ value: string; label: string }> = [
   { value: "dev", label: "Developer" },
   { value: "sales", label: "Sales" },
   { value: "hr", label: "HR" },
+  { value: "evp", label: "EVP" },
   { value: "cto", label: "CTO" },
   { value: "ceo", label: "CEO" },
 ];

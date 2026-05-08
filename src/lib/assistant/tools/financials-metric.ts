@@ -55,7 +55,7 @@ export async function runFinancialsMetric(params: {
    *  the generic RAG path, so they see no numbers. */
   userRole: string;
 }): Promise<FinancialsMetricResult | null> {
-  if (params.userRole !== "ceo" && params.userRole !== "cto") return null;
+  if (params.userRole !== "ceo" && params.userRole !== "cto" && params.userRole !== "evp") return null;
   const status = await getConnectionStatus().catch(() => null);
   if (!status || !status.connected) return null;
 

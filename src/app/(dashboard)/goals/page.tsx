@@ -271,7 +271,7 @@ export default function GoalsPage() {
               }}
             >
               <p style={{ color: "var(--wp-text-muted)" }}>
-                {userRole === "ceo" || userRole === "cto"
+                {userRole === "ceo" || userRole === "cto" || userRole === "evp"
                   ? "No active OKRs yet. Click “+ New OKR” above to create one."
                   : "No active OKRs yet. An admin needs to create them."}
               </p>

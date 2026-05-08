@@ -29,7 +29,7 @@ export interface AuthorizedUser {
   role: string;
 }
 
-const LEADERSHIP_ROLES = new Set(["ceo", "cto"]);
+const LEADERSHIP_ROLES = new Set(["ceo", "cto", "evp"]);
 
 export function canReadTeamEvidence(user: AuthorizedUser): boolean {
   return LEADERSHIP_ROLES.has((user.role || "").toLowerCase());

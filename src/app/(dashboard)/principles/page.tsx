@@ -75,7 +75,7 @@ interface WeeklyReport {
   generatedAt: string;
 }
 
-const LEADERSHIP_ROLES = new Set(["ceo", "cto"]);
+const LEADERSHIP_ROLES = new Set(["ceo", "cto", "evp"]);
 
 function isLeadership(role: string | undefined): boolean {
   return LEADERSHIP_ROLES.has((role || "").toLowerCase());

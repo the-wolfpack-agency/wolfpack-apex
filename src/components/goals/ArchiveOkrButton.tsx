@@ -16,7 +16,7 @@ interface Props {
 }
 
 export default function ArchiveOkrButton({ okrId, userRole, onArchived }: Props) {
-  const isAdmin = userRole === "ceo" || userRole === "cto";
+  const isAdmin = userRole === "ceo" || userRole === "cto" || userRole === "evp";
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);

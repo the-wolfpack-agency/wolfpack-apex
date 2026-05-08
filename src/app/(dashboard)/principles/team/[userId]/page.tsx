@@ -38,7 +38,7 @@ interface TeamMemberResp {
   observations: Observation[];
 }
 
-const LEADERSHIP_ROLES = new Set(["ceo", "cto"]);
+const LEADERSHIP_ROLES = new Set(["ceo", "cto", "evp"]);
 
 function fmtDate(iso: string) {
   try {

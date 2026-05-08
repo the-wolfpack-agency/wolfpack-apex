@@ -25,7 +25,7 @@ export default function ManageNorthStarButton({
   userRole,
   onChanged,
 }: Props) {
-  const isAdmin = userRole === "ceo" || userRole === "cto";
+  const isAdmin = userRole === "ceo" || userRole === "cto" || userRole === "evp";
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(String(currentValue));
   const [label, setLabel] = useState(currentLabel);

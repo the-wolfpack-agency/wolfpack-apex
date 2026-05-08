@@ -17,7 +17,7 @@ const AUDIT_CAPABILITY = "admin.audit_log.view" as Capability;
 async function checkAuth(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return { ok: false as const, response: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
-  if (user.role === "ceo" || user.role === "cto") return { ok: true as const, user };
+  if (user.role === "ceo" || user.role === "cto" || user.role === "evp") return { ok: true as const, user };
   try {
     const { capabilities } = await effectiveCapabilitiesFor(user);
     if (capabilities.has(AUDIT_CAPABILITY)) return { ok: true as const, user };

@@ -18,7 +18,7 @@ export async function DELETE(
 ) {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (user.role !== "ceo" && user.role !== "cto") {
+  if (user.role !== "ceo" && user.role !== "cto" && user.role !== "evp") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -45,7 +45,7 @@ export async function PATCH(
 ) {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (user.role !== "ceo" && user.role !== "cto") {
+  if (user.role !== "ceo" && user.role !== "cto" && user.role !== "evp") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const { id } = await ctx.params;

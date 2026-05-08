@@ -87,6 +87,19 @@ describe("POST /api/team/invite (inviteFlow)", () => {
     expect(res.status).toBe(400);
   });
 
+  it("201 accepts evp as a valid role (org-chart contract)", async () => {
+    mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
+    const mailer = jest.fn().mockResolvedValue({ delivered: false, reason: "no_api_key" });
+    const { inviteFlow } = await import("@/app/api/team/invite/route");
+    const res = await inviteFlow(
+      mkReq({ invites: [{ email: "max@thewolfpack.agency", role: "evp" }] }),
+      mailer,
+    );
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.invites[0].role).toBe("evp");
+  });
+
   it("201 happy path: persists, calls mailer, returns acceptUrl", async () => {
     mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
     const mailer = jest.fn().mockResolvedValue({ delivered: true, reason: "ok" });

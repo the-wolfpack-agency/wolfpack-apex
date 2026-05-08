@@ -37,7 +37,7 @@ interface UserInfo {
 }
 
 function isAdmin(user: UserInfo | null): boolean {
-  return !!user && (user.role === "ceo" || user.role === "cto");
+  return !!user && (user.role === "ceo" || user.role === "cto" || user.role === "evp");
 }
 
 function ValueBlock({ value }: { value: unknown }) {

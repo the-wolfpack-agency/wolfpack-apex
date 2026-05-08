@@ -12,7 +12,7 @@ import {
   type TeamRole,
 } from "@/lib/auth/role-capabilities";
 
-const ALL_ROLES: TeamRole[] = ["ceo", "cto", "dev", "sales", "ops", "hr", "designer"];
+const ALL_ROLES: TeamRole[] = ["ceo", "cto", "evp", "dev", "sales", "ops", "hr", "designer"];
 
 describe("role-capabilities — universal read-only grants", () => {
   test("every team role carries automations.view (the dashboard is in the global nav)", () => {
@@ -43,5 +43,18 @@ describe("role-capabilities — universal read-only grants", () => {
     // surprised by a 403 on their own platform.
     expect(cto.has("finance.reports.view")).toBe(true);
     expect(cto.has("automations.view")).toBe(true);
+  });
+
+  test("EVP capability set mirrors CEO exactly (org-chart contract)", () => {
+    // EVP sits "directly below the President" — capabilities-wise
+    // they get whatever CEO gets so executive parity holds across
+    // every capability-gated surface. CTO retains the deploy delta;
+    // EVP follows CEO, not CTO.
+    const ceo = capabilitiesForRole("ceo");
+    const evp = capabilitiesForRole("evp");
+    expect(evp.size).toBe(ceo.size);
+    for (const cap of ceo) {
+      expect(evp.has(cap)).toBe(true);
+    }
   });
 });

@@ -33,7 +33,7 @@ function currentQuarter(nowMs = Date.now()): string {
 const QUARTER_RE = /^\d{4}-Q[1-4]$/;
 
 export default function CreateOkrForm({ userRole, onCreated }: Props) {
-  const isAdmin = userRole === "ceo" || userRole === "cto";
+  const isAdmin = userRole === "ceo" || userRole === "cto" || userRole === "evp";
   const [open, setOpen] = useState(false);
   const [quarter, setQuarter] = useState(currentQuarter());
   const [objective, setObjective] = useState("");

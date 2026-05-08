@@ -12,7 +12,7 @@ import {
 import { trackEvent } from "@/lib/analytics";
 
 function isAdmin(role: string): boolean {
-  return role === "ceo" || role === "cto";
+  return role === "ceo" || role === "cto" || role === "evp";
 }
 
 export async function DELETE(

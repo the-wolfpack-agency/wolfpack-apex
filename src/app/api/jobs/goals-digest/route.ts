@@ -57,7 +57,7 @@ function isAuthorized(req: NextRequest): boolean {
   const secret = process.env.INSTINCT_CRON_SECRET;
   if (secret && auth === `Bearer ${secret}`) return true;
   const user = getUserFromRequest(auth);
-  return Boolean(user && (user.role === "ceo" || user.role === "cto"));
+  return Boolean(user && (user.role === "ceo" || user.role === "cto" || user.role === "evp"));
 }
 
 export async function GET(req: NextRequest) {

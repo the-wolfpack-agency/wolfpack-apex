@@ -1018,7 +1018,7 @@ export default function SettingsPage() {
     }
   }
 
-  const isCeo = user?.role === "ceo";
+  const isCeo = user?.role === "ceo" || user?.role === "evp";
 
   if (!user) {
     return (

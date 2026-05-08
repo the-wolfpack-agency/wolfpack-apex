@@ -22,7 +22,7 @@ import { tripleWriteEvent } from "@/lib/triple-write";
  * a grief vector.
  */
 function isAdminRole(role: string): boolean {
-  return role === "cto" || role === "ceo";
+  return role === "cto" || role === "ceo" || role === "evp";
 }
 
 export async function GET(

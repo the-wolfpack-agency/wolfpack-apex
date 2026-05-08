@@ -10,6 +10,8 @@
  *   - `ceo` gets everything EXCEPT developer-only actions (site deploy,
  *     discussion pinning is left to devs/leadership) and admin role
  *     assignment is CEO-allowed too — CEO must be able to promote a CTO.
+ *   - `evp` is "directly below President (CEO)" — mirrors CEO baseline
+ *     so executive parity is preserved across capability-gated surfaces.
  *   - Non-privileged roles default CLOSED for finance + HR sensitive data.
  *   - `hr` is the only non-cto/ceo role that sees payroll/benefits/employees
  *     by default — their whole job.
@@ -24,7 +26,7 @@
 import type { Capability } from "./capabilities";
 import { CAPABILITIES } from "./capabilities";
 
-export type TeamRole = "ceo" | "cto" | "dev" | "sales" | "ops" | "hr" | "designer";
+export type TeamRole = "ceo" | "cto" | "evp" | "dev" | "sales" | "ops" | "hr" | "designer";
 
 const ALL_CAPS: readonly Capability[] = Object.keys(CAPABILITIES) as Capability[];
 
@@ -39,6 +41,14 @@ const CTO: readonly Capability[] = ALL_CAPS;
 const CEO: readonly Capability[] = ALL_CAPS.filter(
   (c) => c !== "sites.deploy",
 );
+
+/**
+ * EVP: "directly below the President" — mirrors CEO baseline so executive
+ * parity is preserved across capability-gated surfaces. See `LEADERSHIP_ROLES`
+ * sites + hardcoded `role === "ceo" || "cto"` checks for the surfaces that
+ * also include EVP.
+ */
+const EVP: readonly Capability[] = CEO;
 
 /** HR: owns people + benefits + payroll. Sees meetings + docs + journal. */
 const HR: readonly Capability[] = [
@@ -227,6 +237,7 @@ const DESIGNER: readonly Capability[] = [
 const ROLE_MAP: Record<TeamRole, readonly Capability[]> = {
   cto: CTO,
   ceo: CEO,
+  evp: EVP,
   hr: HR,
   sales: SALES,
   ops: OPS,

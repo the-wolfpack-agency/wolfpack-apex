@@ -30,7 +30,7 @@ interface KrPayload {
 export async function POST(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (user.role !== "ceo" && user.role !== "cto") {
+  if (user.role !== "ceo" && user.role !== "cto" && user.role !== "evp") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

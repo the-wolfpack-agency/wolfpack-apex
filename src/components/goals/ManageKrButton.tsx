@@ -30,7 +30,7 @@ export default function ManageKrButton({
   userRole,
   onChanged,
 }: Props) {
-  const isAdmin = userRole === "ceo" || userRole === "cto";
+  const isAdmin = userRole === "ceo" || userRole === "cto" || userRole === "evp";
   const [open, setOpen] = useState(false);
   const [metric, setMetric] = useState(currentMetric);
   const [target, setTarget] = useState(String(currentTarget));
