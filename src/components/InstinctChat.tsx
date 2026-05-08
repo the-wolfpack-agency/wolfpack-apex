@@ -814,7 +814,7 @@ export default function InstinctChat({
                     <button
                       key={c.id}
                       onClick={() => loadConversation(c.id)}
-                      className="w-full text-left px-4 py-3 border-b text-sm transition-colors hover:opacity-80"
+                      className={`wp-conv-item w-full text-left px-4 py-3 border-b text-sm ${c.id === conversationId ? "wp-conv-item--active" : ""}`}
                       style={{
                         borderColor: "var(--wp-dark-border, #333)",
                         background:
@@ -881,14 +881,16 @@ export default function InstinctChat({
               </button>
             )}
 
-            {/* Brain icon */}
+            {/* Brain icon — pulse-glow gives the AI surface a subtle
+                "alive" feel; honors prefers-reduced-motion via globals. */}
             <svg
-              className="w-6 h-6 shrink-0"
+              className="w-6 h-6 shrink-0 wp-pulse-glow"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
               strokeWidth={1.5}
               style={{ color: "var(--wp-gold, #eab308)" }}
+              aria-hidden
             >
               <path
                 strokeLinecap="round"
@@ -1355,7 +1357,7 @@ export default function InstinctChat({
                 }}
                 placeholder="Ask anything..."
                 rows={1}
-                className="flex-1 min-w-0 resize-none rounded-xl px-3 py-3 text-sm outline-none"
+                className="wp-input-focus flex-1 min-w-0 resize-none rounded-xl px-3 py-3 text-sm outline-none"
                 style={{
                   background: "var(--wp-dark-surface2, #222)",
                   color: "var(--wp-text, #eee)",
@@ -1368,7 +1370,7 @@ export default function InstinctChat({
               <button
                 onClick={handleSend}
                 disabled={!input.trim() || loading}
-                className="shrink-0 rounded-xl px-4 py-3 text-sm font-medium transition-opacity disabled:opacity-40"
+                className="wp-send-btn shrink-0 rounded-xl px-4 py-3 text-sm font-medium disabled:opacity-40"
                 style={{
                   background: "var(--wp-gold, #eab308)",
                   color: "var(--wp-dark, #111)",

@@ -253,3 +253,92 @@ a:hover { color: var(--wp-gold-hover); }
   .wp-nav-item, .wp-nav-item::before { transition: none !important; transform: none !important; }
   .wp-nav-item:hover:not(.wp-nav-item--active) { transform: none !important; }
 }
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Assistant polish — futuristic AI surface motion + glows.
+ * Owned by InstinctChat. All within wp-* tokens; no new colors.
+ * ──────────────────────────────────────────────────────────────────── */
+
+/* Continuous gentle "breathing" glow on the assistant sparkle icon.
+   Subtle enough to feel alive without being distracting. */
+@keyframes wp-pulse-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 0 rgba(241,194,51,0));
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 6px rgba(241,194,51,0.55));
+    transform: scale(1.04);
+  }
+}
+
+.wp-pulse-glow {
+  animation: wp-pulse-glow 3.4s ease-in-out infinite;
+  transform-origin: center;
+}
+
+/* Conversation list item — dense rows in a narrow sidebar.
+   Subtle bg shift + sliding gold left bar. No translate (rows touch). */
+.wp-conv-item {
+  position: relative;
+  transition: background 150ms ease-out, color 150ms ease-out;
+}
+.wp-conv-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--wp-gold);
+  transform: scaleY(0);
+  transform-origin: center;
+  transition: transform 180ms ease-out, opacity 180ms ease-out;
+  opacity: 0;
+}
+.wp-conv-item:hover:not(.wp-conv-item--active) {
+  background: var(--wp-dark-surface) !important;
+  color: var(--wp-text) !important;
+}
+.wp-conv-item:hover:not(.wp-conv-item--active)::before {
+  transform: scaleY(0.5);
+  opacity: 0.45;
+}
+.wp-conv-item--active::before {
+  transform: scaleY(1);
+  opacity: 1;
+}
+
+/* Composer focus ring — soft gold halo on focus instead of the
+   default browser focus outline. */
+.wp-input-focus {
+  transition: border-color 160ms ease-out, box-shadow 160ms ease-out;
+}
+.wp-input-focus:focus {
+  border-color: var(--wp-gold) !important;
+  box-shadow: 0 0 0 3px rgba(241,194,51,0.18);
+  outline: none;
+}
+
+/* Send button — gentle gold glow on hover, scale-down on active for
+   tactile feedback. */
+.wp-send-btn {
+  transition: transform 120ms ease-out, box-shadow 160ms ease-out, filter 160ms ease-out;
+}
+.wp-send-btn:hover:not(:disabled) {
+  box-shadow: 0 0 16px -2px rgba(241,194,51,0.45);
+  filter: brightness(1.05);
+}
+.wp-send-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wp-pulse-glow,
+  .wp-conv-item, .wp-conv-item::before,
+  .wp-input-focus, .wp-send-btn {
+    animation: none !important;
+    transition: none !important;
+  }
+  .wp-pulse-glow { transform: none !important; filter: none !important; }
+}
