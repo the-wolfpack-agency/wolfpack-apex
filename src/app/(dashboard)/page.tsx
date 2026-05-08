@@ -362,7 +362,7 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="max-w-7xl mx-auto space-y-6 wp-fade-in" data-testid="dashboard-ready">
       <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>
         Dashboard
       </h1>
@@ -566,10 +566,30 @@ export default function DashboardPage() {
                 data-source={action.source}
                 data-href={action.href}
                 onClick={() => handleQuickActionClick(action, idx)}
-                className="flex items-center gap-2 rounded-lg p-3 border transition-colors hover:border-[var(--wp-gold)]"
-                style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
+                className="flex items-center justify-between gap-2 rounded-lg p-3 border wp-hover-lift outline-none"
+                style={{
+                  background: "var(--wp-dark-surface2)",
+                  borderColor: "var(--wp-dark-border)",
+                  textDecoration: "none",
+                }}
               >
-                <span className="text-sm font-medium">{action.label}</span>
+                <span className="text-sm font-medium" style={{ color: "var(--wp-text)" }}>
+                  {action.label}
+                </span>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                  style={{ color: "var(--wp-text-muted)", flexShrink: 0 }}
+                >
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
               </a>
             ))}
           </div>
@@ -583,27 +603,62 @@ export default function DashboardPage() {
           <h2 className="text-lg font-semibold mb-4" style={{ color: "var(--wp-gold)" }}>
             Recent Activity
           </h2>
-          <div className="space-y-3">
+          <div className="space-y-1">
             {events.length === 0 ? (
-              <p className="text-sm" style={{ color: "var(--wp-text-muted)" }}>
-                No activity yet. Start by asking a question or creating a discussion.
-              </p>
+              <div
+                className="flex flex-col items-center justify-center py-8 text-center gap-3"
+                data-testid="recent-activity-empty"
+              >
+                <svg
+                  width="32"
+                  height="32"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                  style={{ color: "var(--wp-text-muted)" }}
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>
+                  No activity yet
+                </p>
+                <p className="text-xs max-w-[260px]" style={{ color: "var(--wp-text-muted)" }}>
+                  Ask a question or start a discussion. Anything you do shows up here so the team has context.
+                </p>
+              </div>
             ) : (
               events.slice(0, 8).map((event) => (
                 <div
                   key={event.id}
-                  className="flex items-center justify-between py-2 border-b last:border-b-0 gap-3"
-                  style={{ borderColor: "var(--wp-dark-border)" }}
+                  className="flex items-center justify-between gap-3 px-2 py-2 -mx-2 rounded-md transition-colors"
+                  style={{
+                    borderBottom: "1px solid var(--wp-dark-border)",
+                    cursor: "default",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "var(--wp-dark-surface2)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                  }}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium truncate">
+                    <p className="text-sm font-medium truncate" style={{ color: "var(--wp-text)" }}>
                       {EVENT_LABELS[event.event_type] || event.event_type.replace(/[._]/g, " ")}
                     </p>
-                    <p className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
+                    <p className="text-xs truncate" style={{ color: "var(--wp-text-muted)" }}>
                       {event.user_id}
                     </p>
                   </div>
-                  <span className="text-xs whitespace-nowrap" style={{ color: "var(--wp-text-dim)" }}>
+                  <span
+                    className="text-xs whitespace-nowrap"
+                    style={{ color: "var(--wp-text-dim)" }}
+                  >
                     {formatTimeAgo(event.timestamp)}
                   </span>
                 </div>
