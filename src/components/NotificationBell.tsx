@@ -136,7 +136,16 @@ export default function NotificationBell() {
       setCount((c) => Math.max(0, c - 1));
       setItems((list) => list.filter((x) => x.id !== n.id));
       setOpen(false);
-      if (dest) router.push(dest);
+      if (dest) {
+        // Absolute URLs (e.g. Outlook webLink) open in a new tab so
+        // the user keeps their Instinct session. router.push is
+        // in-app only — feeding it an https:// URL silently fails.
+        if (/^https?:\/\//i.test(dest)) {
+          window.open(dest, "_blank", "noopener,noreferrer");
+        } else {
+          router.push(dest);
+        }
+      }
     } catch {
       /* leave bell state alone */
     }

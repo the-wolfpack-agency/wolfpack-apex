@@ -21,6 +21,7 @@ import InstinctChat from "@/components/InstinctChat";
 import WelcomeTooltip from "@/components/WelcomeTooltip";
 import CommandPalette from "@/components/ui/CommandPalette";
 import { useAmbientRefresh } from "@/lib/hooks/useAmbientRefresh";
+import { useEmailArrivalPoll } from "@/lib/hooks/useEmailArrivalPoll";
 import { NAV_ITEMS, PINNED_NAV_HREFS } from "@/lib/dashboard-nav";
 
 interface User {
@@ -57,6 +58,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   // and an idle-driven stale refresh loop. No UI, no prompts. Mounts
   // once here so every dashboard route benefits.
   useAmbientRefresh();
+
+  // Silent email-arrival poll. Fires `email_arrived` notifications
+  // to the top-right bell whenever new mail comes in (with a webLink
+  // to the user's Outlook mailbox). Replaces what EmailNavBadge used
+  // to drive before the badge was hidden from the sidebar.
+  useEmailArrivalPoll();
 
   useEffect(() => {
     migrateLegacyApexKeys();

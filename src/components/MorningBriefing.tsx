@@ -21,6 +21,11 @@ interface ImportantEmail {
   subject: string;
   receivedAt: string;
   preview: string;
+  /** Microsoft Graph message id, surfaced for in-app /emails fallback. */
+  id?: string;
+  /** Outlook webLink — when set, the inbox card links the user out
+   *  to their real mailbox instead of the in-app reader. */
+  webLink?: string;
 }
 
 interface ActionItem {
@@ -409,7 +414,7 @@ export default function MorningBriefing() {
                 );
                 const cardClass =
                   "flex items-start gap-3 rounded-lg p-3 border" +
-                  (item.link ? " hover:opacity-90 cursor-pointer transition-opacity" : "");
+                  (item.link ? " wp-hover-lift cursor-pointer outline-none" : "");
                 const cardStyle = {
                   background: "var(--wp-dark-surface)",
                   borderColor: "var(--wp-dark-border)",
@@ -466,28 +471,64 @@ export default function MorningBriefing() {
           </p>
         ) : (
           <div className="space-y-2">
-            {briefing.email.importantEmails.map((email, i) => (
-              <div
-                key={i}
-                className="rounded-lg p-3 border"
-                style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium truncate" style={{ color: "var(--wp-text)" }}>
-                    {email.from}
+            {briefing.email.importantEmails.map((email, i) => {
+              /* Prefer the Outlook webLink so users land in their real
+                 mailbox (where they reply, archive, file). Fallback to
+                 the in-app /emails reader (currently hidden from nav)
+                 when the upstream MS Graph response lacks webLink. */
+              const href = email.webLink
+                ? email.webLink
+                : email.id
+                  ? `/emails?messageId=${encodeURIComponent(email.id)}`
+                  : null;
+              const isExternal = !!href && /^https?:\/\//i.test(href);
+              const inner = (
+                <>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium truncate" style={{ color: "var(--wp-text)" }}>
+                      {email.from}
+                    </p>
+                    <span className="text-xs shrink-0" style={{ color: "var(--wp-text-muted)" }}>
+                      {formatTime(email.receivedAt)}
+                    </span>
+                  </div>
+                  <p className="text-xs font-medium mt-1" style={{ color: "var(--wp-text-dim)" }}>
+                    {email.subject}
                   </p>
-                  <span className="text-xs shrink-0" style={{ color: "var(--wp-text-muted)" }}>
-                    {formatTime(email.receivedAt)}
-                  </span>
-                </div>
-                <p className="text-xs font-medium mt-1" style={{ color: "var(--wp-text-dim)" }}>
-                  {email.subject}
-                </p>
-                <p className="text-xs mt-0.5 line-clamp-2" style={{ color: "var(--wp-text-muted)" }}>
-                  {email.preview}
-                </p>
-              </div>
-            ))}
+                  <p className="text-xs mt-0.5 line-clamp-2" style={{ color: "var(--wp-text-muted)" }}>
+                    {email.preview}
+                  </p>
+                </>
+              );
+              if (!href) {
+                return (
+                  <div
+                    key={i}
+                    className="rounded-lg p-3 border"
+                    style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
+                  >
+                    {inner}
+                  </div>
+                );
+              }
+              return (
+                <a
+                  key={i}
+                  href={href}
+                  target={isExternal ? "_blank" : undefined}
+                  rel={isExternal ? "noopener noreferrer" : undefined}
+                  data-testid={`briefing-email-link-${i}`}
+                  className="block rounded-lg p-3 border wp-hover-lift outline-none"
+                  style={{
+                    background: "var(--wp-dark-surface)",
+                    borderColor: "var(--wp-dark-border)",
+                    textDecoration: "none",
+                  }}
+                >
+                  {inner}
+                </a>
+              );
+            })}
           </div>
         )}
       </Section>

@@ -50,6 +50,7 @@ interface GraphMessage {
   bodyPreview: string | null;
   receivedDateTime: string | null;
   isRead: boolean;
+  webLink?: string | null;
   from?: {
     emailAddress?: {
       name?: string | null;
@@ -101,7 +102,7 @@ export async function GET(req: NextRequest) {
     // the ConsistencyLevel: eventual header; without it Graph returns
     // 400 "InvalidRequest" for `$count` on a filtered set.
     const top = NOTIFY_CAP;
-    const select = "id,subject,bodyPreview,receivedDateTime,isRead,from";
+    const select = "id,subject,bodyPreview,receivedDateTime,isRead,from,webLink";
     const endpoint =
       `${GRAPH_BASE}/me/mailFolders/inbox/messages` +
       `?$count=true` +
@@ -169,14 +170,21 @@ export async function GET(req: NextRequest) {
         const subject = msg.subject?.trim() || "(no subject)";
         const sender = senderLabel(msg);
         try {
+          /* Prefer Outlook webLink so users land in their real
+             mailbox (where they reply, archive, file). Fallback to
+             the in-app reader path when MS Graph somehow doesn't
+             return a webLink for the message. */
+          const actionUrl = msg.webLink
+            ? msg.webLink
+            : `/emails/${encodeURIComponent(msg.id)}`;
           await notify({
             userId: user.id,
             category: "email_arrived",
             priority: "normal",
             title: `New email from ${sender}`,
             body: subject,
-            actionUrl: `/emails/${encodeURIComponent(msg.id)}`,
-            actionLabel: "Open email",
+            actionUrl,
+            actionLabel: "Open in Outlook",
             source: "microsoft.email",
             sourceId: msg.id,
             metadata: {
