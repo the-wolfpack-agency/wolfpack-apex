@@ -11,15 +11,40 @@ import { safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { randomUUID } from "crypto";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
+import {
+  buildAcceptUrl,
+  sendInviteEmail,
+  type InviteEmailArgs,
+  type InviteEmailResult,
+} from "@/lib/mail/send-invite";
 
 interface InvitePayload {
   email: string;
   role: string;
 }
 
+interface InviteResult {
+  id: string;
+  email: string;
+  role: string;
+  token: string;
+  acceptUrl: string;
+  emailDelivered: boolean;
+  emailReason?: string;
+}
+
 const VALID_ROLES = ["ceo", "cto", "dev", "sales", "ops", "hr"];
 
-export async function POST(req: NextRequest) {
+/**
+ * Optional `mailer` injection seam — tests can pass a stub via the
+ * second argument to POST, which Next.js does NOT call with extra
+ * arguments. To avoid breaking the route signature, the contract test
+ * imports `inviteFlow` directly.
+ */
+export async function inviteFlow(
+  req: NextRequest,
+  mailer?: (a: InviteEmailArgs) => Promise<InviteEmailResult>,
+): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
   const user = auth.user;
@@ -31,7 +56,6 @@ export async function POST(req: NextRequest) {
 
   const invites: InvitePayload[] = body.invites;
 
-  // Validate
   for (const inv of invites) {
     if (!inv.email || typeof inv.email !== "string" || !inv.email.includes("@")) {
       return NextResponse.json({ error: `Invalid email: ${inv.email}` }, { status: 400 });
@@ -41,7 +65,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const results: { id: string; email: string; role: string; token: string }[] = [];
+  const inviterName =
+    typeof user.email === "string" ? user.email.split("@")[0] : user.role;
+
+  const results: InviteResult[] = [];
 
   for (const inv of invites) {
     const id = `inv_${randomUUID().slice(0, 12)}`;
@@ -60,7 +87,27 @@ export async function POST(req: NextRequest) {
       invited_role: inv.role,
     });
 
-    results.push({ id, email: inv.email, role: inv.role, token });
+    const acceptUrl = buildAcceptUrl(token);
+    const emailResult = await sendInviteEmail(
+      {
+        to: inv.email,
+        inviterName,
+        inviterEmail: typeof user.email === "string" ? user.email : "",
+        role: inv.role,
+        acceptUrl,
+      },
+      mailer,
+    );
+
+    results.push({
+      id,
+      email: inv.email,
+      role: inv.role,
+      token,
+      acceptUrl,
+      emailDelivered: emailResult.delivered,
+      emailReason: emailResult.reason,
+    });
   }
 
   const meta = extractRequestMetadata(req);
@@ -70,7 +117,11 @@ export async function POST(req: NextRequest) {
       action: "team.invite.sent",
       resourceType: "team_invite",
       resourceId: inv.id,
-      afterState: { email: inv.email, role: inv.role },
+      afterState: {
+        email: inv.email,
+        role: inv.role,
+        email_delivered: inv.emailDelivered,
+      },
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
       requestId: meta.requestId,
@@ -78,4 +129,8 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ invites: results }, { status: 201 });
+}
+
+export async function POST(req: NextRequest) {
+  return inviteFlow(req);
 }

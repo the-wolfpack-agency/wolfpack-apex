@@ -4,6 +4,7 @@ import { fetchWithRefresh } from "@/lib/client-auth";
 
 import { useEffect, useState } from "react";
 import { authHeaders, jsonHeaders } from "./auth";
+import InviteMemberDialog from "@/components/team/InviteMemberDialog";
 
 interface Employee {
   id: string;
@@ -18,6 +19,7 @@ interface Employee {
 export function EmployeesTab() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [showInviteDialog, setShowInviteDialog] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [title, setTitle] = useState("");
@@ -57,14 +59,30 @@ export function EmployeesTab() {
 
   return (
     <div data-tab="employees">
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1rem" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1rem", gap: "0.5rem", flexWrap: "wrap" }}>
         <h3 style={{ margin: 0, fontSize: "1.05rem" }}>Employees ({employees.length})</h3>
         {!showForm && (
-          <button onClick={() => setShowForm(true)} style={btn("var(--wp-gold)")}>
-            + Add employee
-          </button>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              type="button"
+              onClick={() => setShowInviteDialog(true)}
+              data-testid="open-invite-dialog"
+              style={btn()}
+              title="Invite a teammate to log into Instinct"
+            >
+              + Invite to Instinct
+            </button>
+            <button onClick={() => setShowForm(true)} style={btn("var(--wp-gold)")}>
+              + Add employee
+            </button>
+          </div>
         )}
       </div>
+
+      <InviteMemberDialog
+        open={showInviteDialog}
+        onClose={() => setShowInviteDialog(false)}
+      />
 
       {showForm && (
         <form

@@ -20,8 +20,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "token and password required" }, { status: 400 });
   }
 
-  if (typeof body.password !== "string" || body.password.length < 4) {
-    return NextResponse.json({ error: "Password must be at least 4 characters" }, { status: 400 });
+  if (typeof body.password !== "string" || body.password.length < 8) {
+    return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
   }
 
   // Look up the invite
