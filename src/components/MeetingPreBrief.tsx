@@ -198,31 +198,47 @@ export default function MeetingPreBrief({ meetingId }: Props) {
           {recentThreads.length === 0 ? (
             <div style={emptyStyle}>No recent email with attendees</div>
           ) : (
-            <ul style={listStyle}>
+            <ul style={threadListStyle}>
               {recentThreads.map((t) => {
                 const inner = (
                   <>
-                    <div style={{ fontWeight: 600 }}>{t.subject}</div>
-                    <div style={{ fontSize: 12, color: "var(--wp-text-dim)" }}>
+                    <div style={{ fontWeight: 600, color: "var(--wp-text)", fontSize: 13 }}>
+                      {t.subject}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--wp-text-dim)", marginTop: 2 }}>
                       {t.from} · {new Date(t.receivedDateTime).toLocaleDateString()}
                     </div>
-                    <div style={{ fontSize: 12, marginTop: 2 }}>{t.bodyPreview}</div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "var(--wp-text-muted)",
+                        marginTop: 6,
+                        lineHeight: 1.45,
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {t.bodyPreview}
+                    </div>
                   </>
                 );
                 return (
-                  <li key={t.id} style={itemStyle}>
+                  <li key={t.id} style={{ listStyle: "none" }}>
                     {t.webLink ? (
                       <a
                         href={t.webLink}
                         target="_blank"
                         rel="noopener noreferrer"
                         data-testid={`prebrief-thread-link-${t.id}`}
-                        style={{ color: "inherit", textDecoration: "none", display: "block" }}
+                        className="wp-hover-lift outline-none"
+                        style={threadCardStyle}
                       >
                         {inner}
                       </a>
                     ) : (
-                      inner
+                      <div style={threadCardStyle}>{inner}</div>
                     )}
                   </li>
                 );
@@ -401,4 +417,28 @@ const itemStyle: React.CSSProperties = {
 const emptyStyle: React.CSSProperties = {
   fontSize: 12,
   color: "var(--wp-text-dim)",
+};
+
+/* Recent email threads — cards. Tighter visual separation than the
+ * shared listStyle (which is for plain text rows like attendees and
+ * tasks). Each card gets its own bg + border + padding so the user
+ * can see they're discrete clickable items. The link variant adds
+ * wp-hover-lift via className. */
+const threadListStyle: React.CSSProperties = {
+  listStyle: "none",
+  padding: 0,
+  margin: 0,
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+};
+
+const threadCardStyle: React.CSSProperties = {
+  display: "block",
+  background: "var(--wp-dark-surface2)",
+  border: "1px solid var(--wp-dark-border)",
+  borderRadius: 8,
+  padding: "10px 12px",
+  color: "inherit",
+  textDecoration: "none",
 };
