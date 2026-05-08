@@ -175,13 +175,21 @@ async function searchEmails(userId: string, q: string, perTypeLimit: number): Pr
   const out: SearchResult[] = [];
   for (const m of emails) {
     if (matches(m.subject, q) || matches(m.bodyPreview, q) || matches(m.from, q)) {
+      /* Prefer the Outlook webLink so search hits open the user's
+         real mailbox (where they reply, archive, file). Fallback to
+         the in-app /emails reader for the rare case MS Graph
+         returns no webLink. Mirrors the pattern the dashboard
+         Inbox + Action Items + Pre-Brief sections use. */
+      const url = m.webLink
+        ? m.webLink
+        : `/emails?id=${encodeURIComponent(m.id)}`;
       out.push({
         type: "email",
         id: m.id,
         title: m.subject || "(no subject)",
         snippet: `From ${m.from}: ${buildSnippet(m.bodyPreview, q)}`,
         timestamp: m.receivedDateTime,
-        url: `/emails?id=${encodeURIComponent(m.id)}`,
+        url,
       });
       if (out.length >= perTypeLimit) break;
     }

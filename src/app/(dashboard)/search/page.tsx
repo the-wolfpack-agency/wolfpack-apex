@@ -369,10 +369,14 @@ function SearchContents() {
               {TYPE_LABELS[t]} · {group.length}
             </h2>
             <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-              {group.map((r, i) => (
+              {group.map((r, i) => {
+                const isExternal = !!r.url && /^https?:\/\//i.test(r.url);
+                return (
                 <li key={r.id} style={{ listStyle: "none" }}>
                   <a
                     href={r.url || "#"}
+                    target={isExternal ? "_blank" : undefined}
+                    rel={isExternal ? "noopener noreferrer" : undefined}
                     onClick={() => handleResultClick(r, i)}
                     data-testid={`result-${r.id}`}
                     className="wp-hover-lift outline-none"
@@ -426,7 +430,8 @@ function SearchContents() {
                     )}
                   </a>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </section>
         );

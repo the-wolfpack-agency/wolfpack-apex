@@ -230,7 +230,7 @@ export default function TasksPage() {
           return (
             <li
               key={task.id}
-              className="flex items-center gap-3 p-3 rounded-lg border"
+              className="flex items-center gap-3 p-3 rounded-lg border wp-hover-lift outline-none"
               style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
             >
               <input
