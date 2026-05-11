@@ -332,6 +332,28 @@ export default function BulletinBoardPage({
   const [snapshotBusy, setSnapshotBusy] = useState(false);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
 
+  // Snapshots sidebar collapsed state — persisted in localStorage so the
+  // user's "more board, less sidebar" preference survives page reloads.
+  const [snapshotsCollapsed, setSnapshotsCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem("instinct.bulletin.snapshots_collapsed") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        "instinct.bulletin.snapshots_collapsed",
+        snapshotsCollapsed ? "1" : "0",
+      );
+    } catch {
+      /* localStorage unavailable */
+    }
+  }, [snapshotsCollapsed]);
+
   const canvasRef = useRef<HTMLDivElement | null>(null);
   /* Per-note PATCH debounce timers. */
   const debounceTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
@@ -710,11 +732,12 @@ export default function BulletinBoardPage({
       data-testid="bulletin-board-page"
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr 280px",
+        gridTemplateColumns: snapshotsCollapsed ? "1fr 40px" : "1fr 280px",
         gap: "1rem",
         maxWidth: "100%",
         minWidth: 0,
         padding: "0 1rem",
+        transition: "grid-template-columns 180ms ease-out",
       }}
     >
       <style jsx global>{`
@@ -922,28 +945,86 @@ export default function BulletinBoardPage({
         </div>
       </div>
 
-      {/* Snapshots sidebar */}
+      {/* Snapshots sidebar — collapsible. When collapsed, renders a thin
+          40px strip with just the toggle button so the board canvas
+          reclaims ~240px of horizontal space. */}
       <aside
         data-testid="bulletin-snapshot-sidebar"
+        data-collapsed={snapshotsCollapsed ? "true" : "false"}
         style={{
           background: "var(--wp-dark-surface)",
           borderRadius: 8,
           border: "1px solid var(--wp-dark-border)",
-          padding: "0.75rem",
+          padding: snapshotsCollapsed ? "0.5rem 0.25rem" : "0.75rem",
           height: "fit-content",
+          overflow: "hidden",
+          minWidth: 0,
         }}
       >
-        <h3
+        {snapshotsCollapsed ? (
+          <button
+            type="button"
+            data-testid="bulletin-snapshot-sidebar-expand"
+            aria-label="Expand saved snapshots"
+            title="Expand saved snapshots"
+            onClick={() => setSnapshotsCollapsed(false)}
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              color: "var(--wp-gold)",
+              fontSize: "1rem",
+              padding: "0.25rem 0",
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              writingMode: "vertical-rl",
+            }}
+          >
+            « Snapshots ({snapshots.length})
+          </button>
+        ) : (
+        <>
+        <div
           style={{
-            color: "var(--wp-gold)",
-            fontSize: "0.85rem",
-            margin: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
             marginBottom: "0.5rem",
-            fontWeight: 600,
+            gap: "0.5rem",
           }}
         >
-          Saved snapshots
-        </h3>
+          <h3
+            style={{
+              color: "var(--wp-gold)",
+              fontSize: "0.85rem",
+              margin: 0,
+              fontWeight: 600,
+            }}
+          >
+            Saved snapshots
+          </h3>
+          <button
+            type="button"
+            data-testid="bulletin-snapshot-sidebar-collapse"
+            aria-label="Minimize saved snapshots"
+            title="Minimize saved snapshots (more board space)"
+            onClick={() => setSnapshotsCollapsed(true)}
+            style={{
+              background: "transparent",
+              border: "1px solid var(--wp-dark-border)",
+              borderRadius: 4,
+              color: "var(--wp-text-dim)",
+              cursor: "pointer",
+              fontSize: "0.8rem",
+              padding: "0 0.4rem",
+              lineHeight: "1.3rem",
+            }}
+          >
+            »
+          </button>
+        </div>
         {snapshots.length === 0 ? (
           <div
             data-testid="bulletin-snapshot-empty"
@@ -1012,6 +1093,8 @@ export default function BulletinBoardPage({
               </li>
             ))}
           </ul>
+        )}
+        </>
         )}
       </aside>
 
