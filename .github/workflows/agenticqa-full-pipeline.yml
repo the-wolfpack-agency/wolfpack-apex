@@ -32,7 +32,7 @@ jobs:
     timeout-minutes: 5
     name: "Pipeline Health Check"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Validate workflow YAML
         run: |
           pip install pyyaml -q
@@ -46,8 +46,8 @@ jobs:
     timeout-minutes: 10
     name: "Code Linting"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -65,11 +65,11 @@ jobs:
     timeout-minutes: 15
     name: "SRE Auto-Fix Linting"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -101,8 +101,8 @@ jobs:
       DATABASE_URL: ''
       APEX_JWT_SECRET: 'ci-test-secret-not-real'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -113,7 +113,7 @@ jobs:
         run: npx tsc --noEmit
       - name: Upload test output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jest-results
           path: jest-output.log
@@ -154,7 +154,7 @@ jobs:
     env:
       AGENTICQA_API: http://127.0.0.1:8765
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Check if PAT is configured
         id: pat-check
@@ -170,7 +170,7 @@ jobs:
 
       - name: Clone AgenticQA source
         if: steps.pat-check.outputs.configured == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: nhomyk/AgenticQA
           token: ${{ secrets.AGENTICQA_REPO_PAT }}
@@ -180,7 +180,7 @@ jobs:
 
       - name: Set up Python
         if: steps.pat-check.outputs.configured == 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -389,14 +389,14 @@ jobs:
       DATABASE_URL: ''
       APEX_JWT_SECRET: 'ci-test-secret-not-real'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
       - run: npm ci
       - name: Cache Next.js build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .next/cache
           key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**/*') }}
@@ -460,8 +460,8 @@ jobs:
     timeout-minutes: 10
     name: "Phase 1: SDET Analysis"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
         with:
           name: jest-results
           path: ./jest-data
@@ -500,7 +500,7 @@ jobs:
     timeout-minutes: 10
     name: "Phase 1: Compliance Analysis"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Compliance + privacy posture
         run: |
           echo "## Compliance Analysis" >> $GITHUB_STEP_SUMMARY
@@ -548,8 +548,8 @@ jobs:
     timeout-minutes: 15
     name: "Phase 2: Fullstack Build Verification"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -576,8 +576,8 @@ jobs:
     timeout-minutes: 10
     name: "Phase 3: SRE Production Readiness"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
