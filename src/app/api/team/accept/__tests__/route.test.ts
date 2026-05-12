@@ -9,7 +9,7 @@
  *   - 200 happy path: writes member with bcrypt hash, marks invite accepted,
  *     fires analytics + audit
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 export {};
 
 const mockSafeQuery = jest.fn();

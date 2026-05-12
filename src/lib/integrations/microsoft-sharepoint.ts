@@ -22,7 +22,7 @@
  *   POST /search/query     — query across driveItems / listItems / sites
  *   GET  /drives/{id}/items/{id}/content — first 8KB of a file's content
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { trackEvent } from "@/lib/analytics";
 import { buildSearchQueryString } from "@/lib/integrations/microsoft-search-keywords";

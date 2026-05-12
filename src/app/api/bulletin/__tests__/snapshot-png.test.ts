@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockGetSnapshotPng = jest.fn();
 const mockTrackEvent = jest.fn();
 const mockGetUserFromRequest = jest.fn();

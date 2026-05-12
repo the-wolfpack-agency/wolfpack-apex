@@ -2,7 +2,7 @@ export {};
 /**
  * Mailbox API routes — auth, rate limit, audit on refresh.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockGetUser = jest.fn();
 jest.mock("@/lib/auth", () => ({

@@ -19,7 +19,7 @@
  * index via `@/lib/learning/ms-content-ingest`. Indexing failures are
  * caught + analytics-emitted; they never block the sync.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { getValidToken } from "@/lib/microsoft-graph";
 import { htmlToText } from "@/lib/html-sanitize";

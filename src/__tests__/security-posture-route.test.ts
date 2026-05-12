@@ -7,7 +7,7 @@
  *   - Emits system.security_posture_viewed analytics event
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrackEvent = jest.fn();
 jest.mock("@/lib/analytics", () => ({

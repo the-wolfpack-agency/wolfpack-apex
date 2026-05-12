@@ -15,7 +15,7 @@
  * but the plumbing lives here so Stream C can enable it without touching
  * this file again.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { getValidToken, type CalendarEvent } from "@/lib/microsoft-graph";
 import { query } from "@/lib/db";

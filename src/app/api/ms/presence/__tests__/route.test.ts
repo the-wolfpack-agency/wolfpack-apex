@@ -1,7 +1,7 @@
 /**
  * API: GET + POST /api/ms/presence.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

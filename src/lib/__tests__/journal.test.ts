@@ -4,7 +4,7 @@
  * Tests create, update, auto-context, history, team view, and analytics.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { trackEvent } from "@/lib/analytics";
 

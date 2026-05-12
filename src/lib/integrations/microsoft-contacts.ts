@@ -13,7 +13,7 @@
  * On 403 helpers return { ok:false, code:"scope_missing", scope:"Contacts.ReadWrite" }.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { getValidToken } from "@/lib/microsoft-graph";
 import { query, safeQuery } from "@/lib/db";

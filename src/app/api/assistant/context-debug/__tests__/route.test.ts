@@ -13,7 +13,7 @@
  *     openai are imported by the route, and no fetch with an llm-style
  *     URL is issued at runtime.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 
@@ -284,10 +284,10 @@ describe("GET /api/assistant/context-debug — never calls an LLM", () => {
    *     helpers we wired up — no Anthropic, no OpenAI, no `chat()`.
    */
   it("route source does not import any LLM SDK", () => {
-    /* eslint-disable @typescript-eslint/no-require-imports */
+     
     const fs = require("fs");
     const path = require("path");
-    /* eslint-enable @typescript-eslint/no-require-imports */
+     
     const src = fs.readFileSync(
       path.join(__dirname, "..", "route.ts"),
       "utf8",

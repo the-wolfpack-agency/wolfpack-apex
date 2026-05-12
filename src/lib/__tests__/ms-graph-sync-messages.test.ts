@@ -1,7 +1,7 @@
 /**
  * MS Graph sync — messages (Outlook mail) worker.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

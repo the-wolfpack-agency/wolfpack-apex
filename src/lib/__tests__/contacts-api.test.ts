@@ -1,7 +1,7 @@
 /**
  * /api/contacts + /api/contacts/[id] + /api/contacts/sync route tests.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockGetUserContacts = jest.fn();
 jest.mock("@/lib/auth", () => ({

@@ -7,7 +7,7 @@
  *   - Non-JSON body returns 400
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrackEvent = jest.fn();
 jest.mock("@/lib/analytics", () => ({

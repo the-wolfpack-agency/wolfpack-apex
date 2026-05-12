@@ -2,7 +2,7 @@
  * JWT TTL tests — access token 15-min boundary, expired token reason, refresh 7-day TTL.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrackEvent = jest.fn();
 jest.mock("@/lib/analytics", () => ({

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 /**
  * /api/integrations/status — aggregate integration-connection endpoint.
  *

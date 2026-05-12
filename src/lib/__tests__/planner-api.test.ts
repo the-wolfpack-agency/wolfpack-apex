@@ -1,7 +1,7 @@
 /**
  * /api/planner/* route tests — plans, buckets, tasks (list/create/update/complete), sync.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockGetUser = jest.fn();
 jest.mock("@/lib/auth", () => ({

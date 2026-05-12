@@ -2,7 +2,7 @@
  * /api/onenote route tests — auth, rate limit, audit on mutation,
  * scope_missing, analytics.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockGetUser = jest.fn();
 jest.mock("@/lib/auth", () => ({

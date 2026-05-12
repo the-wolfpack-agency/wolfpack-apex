@@ -6,7 +6,7 @@
  *   - Shadow mode: returns empty array when DATABASE_URL is not set
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockSafeQuery = jest.fn();
 

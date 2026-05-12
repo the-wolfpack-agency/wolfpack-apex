@@ -23,7 +23,7 @@
  * `system.ms_teams_channel_sync_indexing_failed` and the sync continues —
  * never blocks.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { getValidToken } from "@/lib/microsoft-graph";
 import { query, safeQuery } from "@/lib/db";

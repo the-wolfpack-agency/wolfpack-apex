@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockCreateCode = jest.fn();
 const mockListCodes = jest.fn();
 const mockTrackEvent = jest.fn();

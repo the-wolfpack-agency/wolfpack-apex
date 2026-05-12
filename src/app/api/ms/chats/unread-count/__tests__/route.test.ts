@@ -12,7 +12,7 @@
  *   - analytics event `messages.unread_count_polled` fires on every
  *     resolved path (happy, connected:false, scope_missing)
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

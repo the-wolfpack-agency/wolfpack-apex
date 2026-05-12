@@ -137,7 +137,7 @@ export async function setPrinciplesConfig(args: {
  */
 export async function resolvePrinciplesConfig(): Promise<PrinciplesConfigRecord | null> {
   const stored = await getPrinciplesConfig();
-  let docUrl = stored.docUrl ?? process.env.PRINCIPLES_DOC_URL ?? null;
+  const docUrl = stored.docUrl ?? process.env.PRINCIPLES_DOC_URL ?? null;
   let ownerUserId =
     stored.ownerUserId ?? process.env.PRINCIPLES_DOC_OWNER_USER_ID ?? null;
   let autoDetected = false;

@@ -1,7 +1,7 @@
 /**
  * Microsoft Presence integration tests — fetch, 403 → null, no cache.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrackPresence = jest.fn();
 const mockGetValidTokenPresence = jest.fn();

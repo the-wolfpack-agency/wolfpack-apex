@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 /**
  * /api/calendar/range — verifies that `webLink` and `onlineMeeting.joinUrl`
  * from Microsoft Graph pass through verbatim so the /calendar UI can

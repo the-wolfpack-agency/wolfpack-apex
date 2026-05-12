@@ -4,7 +4,7 @@
 /**
  * TeamsMeetingToggle UI tests — capability probe gating.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

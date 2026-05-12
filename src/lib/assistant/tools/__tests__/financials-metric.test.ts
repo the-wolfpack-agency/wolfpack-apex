@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockGetConnectionStatus = jest.fn();
 const mockFetchPnL = jest.fn();
 const mockFetchBalance = jest.fn();

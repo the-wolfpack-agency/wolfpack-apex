@@ -5,7 +5,7 @@
  * per chat, 429 Retry-After, HTML→text, cache upsert), 403 scope_missing,
  * analytics events.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 // Make this file a module (not a script) so top-level `const` declarations
 // stay file-scoped and don't collide with sibling test files.

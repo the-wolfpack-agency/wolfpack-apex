@@ -1,7 +1,7 @@
 /**
  * /api/online-meetings + /api/online-meetings/[id] route tests.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

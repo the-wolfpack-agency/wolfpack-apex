@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import "@testing-library/jest-dom";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 

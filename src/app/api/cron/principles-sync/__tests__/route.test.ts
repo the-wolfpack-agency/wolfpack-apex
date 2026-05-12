@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockFetchSp = jest.fn();
 const mockParseDocx = jest.fn();
 const mockGetLatest = jest.fn();

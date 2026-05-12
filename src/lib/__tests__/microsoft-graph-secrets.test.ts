@@ -5,7 +5,7 @@
  * on real env state.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockGetSecretOrThrow = jest.fn();
 

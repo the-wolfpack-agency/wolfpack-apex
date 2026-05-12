@@ -5,7 +5,7 @@
  * from git log, feature docs from DB data, save/get/download, analytics.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { trackEvent } from "@/lib/analytics";
 

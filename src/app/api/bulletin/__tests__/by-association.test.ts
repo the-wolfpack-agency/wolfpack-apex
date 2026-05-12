@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockFindNotes = jest.fn();
 const mockFindSnaps = jest.fn();
 let authUser: { id: string; role: string; name: string; email: string } | null = {

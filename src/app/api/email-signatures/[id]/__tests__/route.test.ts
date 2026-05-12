@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockUpdateSignature = jest.fn();
 const mockDeleteSignature = jest.fn();
 let authUser: { id: string; role: string; name: string; email: string } | null = {

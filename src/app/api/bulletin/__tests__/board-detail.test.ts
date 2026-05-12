@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockGetBoard = jest.fn();
 const mockUpdateBoard = jest.fn();
 const mockArchiveBoard = jest.fn();

@@ -36,7 +36,7 @@ export async function getRecentTasksForContext(
   const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
   const statuses = opts.statuses ?? ["notStarted", "inProgress", "waitingOnOthers"];
 
-  const { rows } = await safeQuery<any>( // eslint-disable-line @typescript-eslint/no-explicit-any
+  const { rows } = await safeQuery<any>(  
     `SELECT t.*, l.ms_list_id AS list_ms_id
      FROM instinct_tasks t
      JOIN instinct_task_lists l ON l.id = t.list_id

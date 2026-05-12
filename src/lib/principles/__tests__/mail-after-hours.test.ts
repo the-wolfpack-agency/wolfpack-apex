@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockGetValidToken = jest.fn();
 /* The evaluator now goes through getReadTokenForUser (which falls
    back to delegated when app-only is off — today's behaviour). The

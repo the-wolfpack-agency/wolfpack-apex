@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockArchive = jest.fn();
 const mockGetUser = jest.fn();
 const mockTrackEvent = jest.fn();

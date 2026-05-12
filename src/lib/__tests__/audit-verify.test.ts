@@ -6,7 +6,7 @@
  * a tampered row.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockQuery = jest.fn();
 jest.mock("@/lib/db", () => ({

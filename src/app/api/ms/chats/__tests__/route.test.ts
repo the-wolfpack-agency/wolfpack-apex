@@ -3,7 +3,7 @@
  * Covers 401 (no JWT), 200 (happy path), 403 (non-member), scope_missing,
  * and 500 paths.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

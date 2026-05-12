@@ -8,7 +8,7 @@
  *   - Malformed setup event (missing step) is handled gracefully
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { resolve } from "path";
 import fs from "fs";

@@ -28,7 +28,7 @@
  * here — only the public-directory fields. Mailbox OOO lives in
  * src/lib/integrations/microsoft-mailbox.ts and targets /me only.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { getValidToken } from "@/lib/microsoft-graph";
 import { query, safeQuery } from "@/lib/db";

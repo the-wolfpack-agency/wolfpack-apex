@@ -2,7 +2,7 @@
  * Unit tests for src/lib/ms-graph-presence.ts — batching, POST shape,
  * availability normalization, 401 → scope_missing analytics.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

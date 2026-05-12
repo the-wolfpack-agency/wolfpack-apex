@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockGetById = jest.fn();
 const mockEvaluate = jest.fn();
 const mockTrack = jest.fn();

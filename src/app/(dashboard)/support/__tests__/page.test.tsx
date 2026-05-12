@@ -14,7 +14,7 @@ jest.mock("@/lib/client-auth", () => ({
 }));
 
 jest.mock("next/link", () => {
-  /* eslint-disable @typescript-eslint/no-explicit-any */
+   
   return ({ href, children, ...rest }: any) => (
     <a href={typeof href === "string" ? href : "#"} {...rest}>
       {children}

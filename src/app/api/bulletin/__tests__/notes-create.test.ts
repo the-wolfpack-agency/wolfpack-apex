@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockCreateNote = jest.fn();
 const mockTrackEvent = jest.fn();
 let authUser: { id: string; role: string; name: string; email: string } | null = {

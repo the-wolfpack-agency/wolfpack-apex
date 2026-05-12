@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockGetUser = jest.fn();
 const mockCanRead = jest.fn();
 const mockListActive = jest.fn();

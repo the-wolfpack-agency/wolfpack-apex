@@ -4,7 +4,7 @@
  * Covers: auth gate, rate limiting (30/hr), validation, analytics,
  * scope_missing passthrough.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockGetUser = jest.fn();
 jest.mock("@/lib/auth", () => ({

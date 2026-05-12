@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockGetLatest = jest.fn();
 let authUser: { id: string; role: string; name: string; email: string } | null = {
   id: "u-cto",

@@ -12,7 +12,7 @@
  *   - updatePreferences emits changes list
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockQuery = jest.fn();
 const mockSafeQuery = jest.fn();

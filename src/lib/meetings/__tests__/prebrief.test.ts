@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 /**
  * computePrebrief — pure composition layer over MS Graph + tasks cache.
  *

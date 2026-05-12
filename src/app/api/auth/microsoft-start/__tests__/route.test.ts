@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockGetSigninAuthUrl = jest.fn();
 const mockTrack = jest.fn();
 

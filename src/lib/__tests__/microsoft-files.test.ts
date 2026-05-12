@@ -2,7 +2,7 @@
  * Microsoft Files integration tests — list/get/upload small/upload session/
  * download-url/share/delete, 403 → scope_missing, audit written.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrackFiles = jest.fn();
 const mockQueryFiles = jest.fn();

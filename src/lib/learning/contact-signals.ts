@@ -12,7 +12,7 @@
  * the function returns a partial score flagged in `components`.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { safeQuery } from "@/lib/db";
 

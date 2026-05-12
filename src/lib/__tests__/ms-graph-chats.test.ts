@@ -2,7 +2,7 @@
  * Unit tests for src/lib/ms-graph-chats.ts — Graph response parsing,
  * HTML→text normalization, scope_missing handling, analytics wiring.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

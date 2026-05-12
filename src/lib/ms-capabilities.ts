@@ -41,7 +41,7 @@ const ZERO: MsCapabilities = {
 
 function readRequestedScopes(): Set<string> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     const { getAuthUrl } = require("@/lib/microsoft-graph");
     const url = getAuthUrl("probe");
     if (!url) return new Set();

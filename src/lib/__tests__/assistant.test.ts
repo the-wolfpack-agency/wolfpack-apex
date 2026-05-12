@@ -11,7 +11,7 @@
  *   - Analytics events
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 // ---------------------------------------------------------------------------
 // Mocks -- must be defined before imports

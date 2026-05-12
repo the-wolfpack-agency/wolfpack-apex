@@ -5,7 +5,7 @@
  * substring filter (only matching tasks return), topN cap, To Do fallback
  * after Planner 403, and total 403 -> typed scope_missing (never throws).
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

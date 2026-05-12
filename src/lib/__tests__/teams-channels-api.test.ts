@@ -1,7 +1,7 @@
 /**
  * /api/teams/teams + nested routes + channels-sync route tests.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

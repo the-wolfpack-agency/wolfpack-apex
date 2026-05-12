@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 /**
  * POST /api/emails/[id]/reply — reply / replyAll / forward contract test.
  */

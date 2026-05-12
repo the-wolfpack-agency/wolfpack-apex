@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockCreateBudget = jest.fn();
 const mockListBudgets = jest.fn();
 const mockGetBudget = jest.fn();

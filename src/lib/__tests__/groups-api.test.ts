@@ -4,7 +4,7 @@
  * Covers auth, rate limit, analytics + audit on mutation, scope_missing
  * translation, 429 passthrough.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockGetUser = jest.fn();
 jest.mock("@/lib/auth", () => ({

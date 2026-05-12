@@ -23,7 +23,7 @@
  *
  * Never throws on expected Graph errors — returns Result<T>.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { getValidToken } from "@/lib/microsoft-graph";
 import { query, safeQuery } from "@/lib/db";

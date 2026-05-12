@@ -13,7 +13,7 @@
  *   6. Data Pipeline Integrity (5 tests)
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before imports

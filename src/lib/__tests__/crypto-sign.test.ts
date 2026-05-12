@@ -10,7 +10,7 @@
  *   - analytics events emitted on each path
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrackEvent = jest.fn();
 jest.mock("@/lib/analytics", () => ({

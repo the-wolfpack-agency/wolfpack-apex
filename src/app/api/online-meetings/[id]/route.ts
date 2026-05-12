@@ -9,7 +9,7 @@
  * matches the calendar event lifecycle Tier 1 owns. Meetings are cleaned
  * up when their linked event is deleted.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";

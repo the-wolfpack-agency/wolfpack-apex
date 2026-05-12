@@ -7,7 +7,7 @@
  * 403 surfaces typed error on bundle.errors (never throws). Property test
  * asserts rendered_prompt_block.length <= maxChars.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

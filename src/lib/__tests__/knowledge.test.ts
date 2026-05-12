@@ -5,7 +5,7 @@
  * DB is mocked; shadow mode (no DATABASE_URL) returns demo data.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { trackEvent } from "@/lib/analytics";
 

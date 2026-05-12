@@ -6,7 +6,7 @@
  * Pattern mirrors src/__tests__/brain-routes.test.ts.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockRequireCapability = jest.fn();
 const mockSafeQuery = jest.fn();

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockResolve = jest.fn();
 const mockFetch = jest.fn();
 const mockParse = jest.fn();

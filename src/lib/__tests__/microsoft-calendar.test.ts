@@ -4,7 +4,7 @@
  * Covers: create/update/delete round-trip (Graph + cache + audit +
  * analytics), attendees JSON, list read path, 403 → scope_missing.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrackCal = jest.fn();
 const mockQueryCal = jest.fn();

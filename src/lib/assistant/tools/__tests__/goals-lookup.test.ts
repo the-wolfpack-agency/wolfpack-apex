@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockGetActiveOKRs = jest.fn();
 const mockGetNorthStarTrend = jest.fn();
 

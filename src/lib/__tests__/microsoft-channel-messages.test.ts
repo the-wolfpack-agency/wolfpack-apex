@@ -5,7 +5,7 @@
  * syncAllChannels (pagination, 429 Retry-After, HTML→text, RAG index,
  * indexing failure path), 403 scope_missing, analytics events.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 // Isolate top-level const declarations from sibling test files.
 export {};

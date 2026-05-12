@@ -19,7 +19,7 @@ export function sanitizeForLog(value: unknown, maxLen = 200): string {
   if (value === null || value === undefined) return "";
   const s = typeof value === "string" ? value : String(value);
   /* Strip CR/LF/TAB and all C0 control chars (0x00-0x1f) plus DEL. */
-  // eslint-disable-next-line no-control-regex
+   
   const stripped = s.replace(/[\x00-\x1f\x7f]/g, "");
   return stripped.length > maxLen ? stripped.slice(0, maxLen) : stripped;
 }

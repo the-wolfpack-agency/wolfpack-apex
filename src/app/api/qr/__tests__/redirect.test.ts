@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockGetCodeBySlug = jest.fn();
 const mockRecordScan = jest.fn();
 const mockTrackEvent = jest.fn();

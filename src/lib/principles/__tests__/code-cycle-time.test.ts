@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import { evaluateCodeCycleTime } from "@/lib/principles/evaluators/code-cycle-time";
 
 const ORIG_FETCH = global.fetch;

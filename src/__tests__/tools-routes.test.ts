@@ -12,7 +12,7 @@
  * 16 tests across all 4 tool routes + the status endpoint.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrackEvent = jest.fn();
 const mockTriggerToolRun = jest.fn();

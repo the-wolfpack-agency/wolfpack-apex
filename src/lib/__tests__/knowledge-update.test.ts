@@ -5,7 +5,7 @@
  * are mocked; DATABASE_URL toggles between real-DB and shadow-mode paths.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { trackEvent } from "@/lib/analytics";
 

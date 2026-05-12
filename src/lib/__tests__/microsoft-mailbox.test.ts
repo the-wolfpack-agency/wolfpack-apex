@@ -2,7 +2,7 @@ export {};
 /**
  * microsoft-mailbox.ts — mailbox settings, auto-reply, OOO refresh/persist.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrack = jest.fn();
 const mockQuery = jest.fn();

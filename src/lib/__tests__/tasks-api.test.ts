@@ -2,7 +2,7 @@
  * /api/tasks route tests — auth gate, validation, rate limit, analytics,
  * webhook signature validation.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockGetUser = jest.fn();
 jest.mock("@/lib/auth", () => ({

@@ -25,9 +25,9 @@ import MultiFrameUploader from "@/components/sites/MultiFrameUploader";
 // jsdom has a stub for URL.createObjectURL/revokeObjectURL but it is
 // undefined by default — wire simple tokens so thumbs can mint + revoke.
 beforeAll(() => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   (URL as any).createObjectURL = jest.fn((f: File) => `blob:mock/${f.name}`);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   (URL as any).revokeObjectURL = jest.fn();
 });
 

@@ -2,7 +2,7 @@
  * /api/files + /api/files/[id] + /api/files/upload + /api/files/upload-session
  * + /api/files/[id]/download-url + /api/files/[id]/share route tests.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockGetUserFiles = jest.fn();
 jest.mock("@/lib/auth", () => ({

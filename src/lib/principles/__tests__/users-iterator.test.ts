@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockSafeQuery = jest.fn();
 jest.mock("@/lib/db", () => {
   const actual = jest.requireActual("@/lib/db");

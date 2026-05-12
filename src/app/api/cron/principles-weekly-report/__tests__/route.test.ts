@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockListPrinciples = jest.fn();
 const mockListAll = jest.fn();
 const mockResolveNames = jest.fn();

@@ -4,7 +4,7 @@
  * Exercises: cache reads, scope_missing (403), rate-limit backoff (429),
  * cache upsert on successful sync.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 // Make this file a module (not a script) so top-level `const` declarations
 // stay file-scoped under tsconfig's `isolatedModules`.

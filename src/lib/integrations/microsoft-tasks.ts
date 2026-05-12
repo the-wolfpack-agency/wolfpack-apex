@@ -15,7 +15,7 @@
  * Rate limits: Graph returns 429 with Retry-After — honor it exactly once,
  * then surface. 5xx does not invalidate cached reads.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { getValidToken } from "@/lib/microsoft-graph";
 import { query, safeQuery } from "@/lib/db";

@@ -7,7 +7,7 @@
  * returned `reliable` flag surfaces that distinction so the Assistant can
  * phrase answers honestly.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { safeQuery } from "@/lib/db";
 

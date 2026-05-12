@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockUpdateCurrent = jest.fn();
 const mockUpdateKR = jest.fn();
 const mockDeleteKR = jest.fn();

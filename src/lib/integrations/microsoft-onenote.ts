@@ -18,7 +18,7 @@
  *
  * 403 → asScopeMissing() for typed `scope_missing` results.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { getValidToken } from "@/lib/microsoft-graph";
 import { htmlToText } from "@/lib/html-sanitize";

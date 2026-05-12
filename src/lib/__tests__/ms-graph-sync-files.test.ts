@@ -1,7 +1,7 @@
 /**
  * MS Graph sync — files (OneDrive) worker.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

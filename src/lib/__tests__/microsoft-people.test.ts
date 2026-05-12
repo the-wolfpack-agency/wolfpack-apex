@@ -2,7 +2,7 @@
  * Microsoft People integration tests — suggest with/without query, cache
  * hit, 403 handling.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrackPeople = jest.fn();
 const mockQueryPeople = jest.fn();

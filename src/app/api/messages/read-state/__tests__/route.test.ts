@@ -12,7 +12,7 @@
  *   POST  200 happy path → fires lib + returns persisted ts
  *   POST  500 propagates lib write error
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

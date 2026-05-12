@@ -10,7 +10,7 @@
  *   - clearAuthCookie sets Max-Age 0
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import {
   setAuthCookie,

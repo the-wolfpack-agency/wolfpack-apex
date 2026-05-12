@@ -1,7 +1,7 @@
 /**
  * /api/calendar/events routes — GET/POST + [id]/PATCH + [id]/DELETE.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockGetUser = jest.fn();
 jest.mock("@/lib/auth", () => ({

@@ -5,7 +5,7 @@
  * found during the security audit.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 // Capture real fs before any mocks
 const realFs = jest.requireActual("fs") as typeof import("fs");

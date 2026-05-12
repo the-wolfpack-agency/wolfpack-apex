@@ -6,7 +6,7 @@
  * entity-tags itself has its own round-trip tests.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockApplyTag = jest.fn();
 const mockGetTags = jest.fn();

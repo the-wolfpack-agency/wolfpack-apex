@@ -14,7 +14,7 @@
  * Graph surface:
  *   GET /me/memberOf/microsoft.graph.group
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { getValidToken } from "@/lib/microsoft-graph";
 import { query, safeQuery } from "@/lib/db";

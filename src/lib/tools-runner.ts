@@ -519,7 +519,7 @@ function extractJsonFromZip(zipBytes: Uint8Array, targetFilename: string): strin
   // Use Node.js zlib for deflate decompression (works in Vercel Functions)
   let inflateRawSync: ((buf: Uint8Array) => Buffer) | null = null;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     inflateRawSync = require("zlib").inflateRawSync;
   } catch {
     // zlib not available

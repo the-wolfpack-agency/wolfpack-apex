@@ -11,7 +11,7 @@
  * These are read-only.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { safeQuery } from "@/lib/db";
 

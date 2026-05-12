@@ -5,7 +5,7 @@
  * createPage (audit + analytics + RAG ingest), syncRecentPages, 403
  * scope_missing, cache upsert, 429 retry.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 // Make this file a module (not a script) so top-level `const` declarations
 // stay file-scoped and don't collide with sibling test files.

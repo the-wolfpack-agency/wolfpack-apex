@@ -216,7 +216,7 @@ async function buildPdf(jpeg: Blob, slug: string): Promise<Blob> {
     out.set(b, off);
     off += b.length;
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   return new Blob([out as any], { type: "application/pdf" });
 }
 

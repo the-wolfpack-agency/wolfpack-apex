@@ -9,7 +9,7 @@
  * route testing stays uniform across the repo.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockRequireCapability = jest.fn();
 const mockIngest = jest.fn();

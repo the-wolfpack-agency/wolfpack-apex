@@ -5,7 +5,7 @@
  * replyToMessage (in_reply_to propagates), 403 → scope_missing return,
  * 429 with Retry-After honored, body_preview truncation to 512 chars.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrackMail = jest.fn();
 const mockQueryMail = jest.fn();

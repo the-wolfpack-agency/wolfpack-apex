@@ -15,7 +15,7 @@
  *   - last-resort try/catch returns 200 + count:0 even if a downstream
  *     dep throws unexpectedly
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

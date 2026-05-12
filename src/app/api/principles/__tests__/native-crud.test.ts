@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockCreate = jest.fn();
 const mockPatch = jest.fn();
 const mockRetire = jest.fn();

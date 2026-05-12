@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import "@testing-library/jest-dom";
 
 // jsdom doesn't implement scrollIntoView; the thread auto-scroll on

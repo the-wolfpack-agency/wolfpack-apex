@@ -5,7 +5,7 @@
  *   - HTML body strip + bodyText projection on channel messages
  *   - Graph URL composition (top, encoding)
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 export {};
 
 const mockTrack = jest.fn();

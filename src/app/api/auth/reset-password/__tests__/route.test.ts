@@ -8,7 +8,7 @@
  *     updates instinct_team_members, marks token used, fires audit
  *   - 200 shadow mode (no DB) — pretends success
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 export {};
 
 import { createHash } from "crypto";

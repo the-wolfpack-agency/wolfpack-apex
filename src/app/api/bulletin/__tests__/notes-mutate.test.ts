@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockUpdateNote = jest.fn();
 const mockDeleteNote = jest.fn();
 const mockTrackEvent = jest.fn();

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockListPrinciples = jest.fn();
 const mockListForSubject = jest.fn();
 const mockListAll = jest.fn();
@@ -27,7 +27,7 @@ jest.mock("@/lib/db", () => {
 /* The team route still uses resolveUserNames; My-principles no
    longer does. Default mock: each id resolves to itself so existing
    team tests preserve their 1-row-per-id assumption. */
-let mockResolveNamesImpl: (
+const mockResolveNamesImpl: (
   ids: string[],
 ) => Promise<Map<string, { userId: string; displayName: string; email: string | null }>> = async (
   ids,

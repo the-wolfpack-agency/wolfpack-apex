@@ -2,7 +2,7 @@ export {};
 /**
  * Directory API routes — auth, rate limit, audit on sync, analytics.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockGetUser = jest.fn();
 jest.mock("@/lib/auth", () => ({

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockCreateBoard = jest.fn();
 const mockListBoards = jest.fn();
 const mockTrackEvent = jest.fn();

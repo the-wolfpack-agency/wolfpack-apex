@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockGetValidToken = jest.fn();
 jest.mock("@/lib/microsoft-graph", () => ({
   getValidToken: (...a: any[]) => mockGetValidToken(...a),

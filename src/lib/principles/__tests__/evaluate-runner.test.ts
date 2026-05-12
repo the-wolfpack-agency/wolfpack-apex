@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockListSignals = jest.fn();
 const mockInsertObs = jest.fn();
 const mockHasAny = jest.fn();

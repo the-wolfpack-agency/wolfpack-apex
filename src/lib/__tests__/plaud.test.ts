@@ -11,7 +11,7 @@
  *   - Analytics event types: registered in analytics.ts
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const plaudMockTrackEvent = jest.fn();
 const plaudMockSafeQuery = jest.fn();

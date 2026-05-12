@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockSaveSnapshot = jest.fn();
 const mockGetBoard = jest.fn();
 const mockTrackEvent = jest.fn();

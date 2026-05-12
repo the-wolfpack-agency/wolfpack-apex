@@ -12,7 +12,7 @@
  *      assistant.page_facts_hit analytics event.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 // ---------------------------------------------------------------------------
 // Mocks — must be defined before importing modules that pull them in.

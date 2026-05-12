@@ -1,7 +1,7 @@
 /**
  * API: GET /api/ms/deep-links.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

@@ -3,7 +3,7 @@
  * proxy contract of /api/ms/chats. Covers 401, 200 happy, scope_missing,
  * not connected, and 500.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

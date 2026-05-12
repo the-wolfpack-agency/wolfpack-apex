@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 /**
  * Email matcher — the robust fallback path that finally fixes the
  * "No recent email with attendees" bug. Filter lives in JavaScript,

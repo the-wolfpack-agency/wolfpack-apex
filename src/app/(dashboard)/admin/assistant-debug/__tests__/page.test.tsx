@@ -11,7 +11,7 @@
  *   - Surfaces probe failures in the table.
  *   - Surfaces the diagnosis paragraph verbatim.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import "@testing-library/jest-dom";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";

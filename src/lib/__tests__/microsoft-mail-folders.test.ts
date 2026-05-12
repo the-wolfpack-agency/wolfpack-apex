@@ -9,7 +9,7 @@
  *   - 403 → scope_missing, 429 → rate_limited propagate intact.
  *   - normalizeInboxRow now carries `isDraft` through.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrack = jest.fn();
 const mockQuery = jest.fn();

@@ -16,7 +16,7 @@
  * On 403 / 429 / 5xx we return discriminated results — never throw on
  * expected Graph failures.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { getValidToken } from "@/lib/microsoft-graph";
 import { query, safeQuery } from "@/lib/db";

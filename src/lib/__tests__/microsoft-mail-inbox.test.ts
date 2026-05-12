@@ -5,7 +5,7 @@
  * archiveMessage move-to-Archive, deleteMessage soft-delete, replyAll +
  * forward Graph endpoints.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrackInbox = jest.fn();
 const mockQueryInbox = jest.fn();

@@ -1,7 +1,7 @@
 /**
  * API: GET /api/ms/teams/[teamId]/channels/[channelId]/messages
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 export {};
 
 const mockGetUser = jest.fn();

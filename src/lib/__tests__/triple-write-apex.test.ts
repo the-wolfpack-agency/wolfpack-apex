@@ -5,7 +5,7 @@
  * All external calls are mocked — tests run without infrastructure.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 // ---------------------------------------------------------------------------
 // Global fetch mock

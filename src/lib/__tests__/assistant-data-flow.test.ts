@@ -9,7 +9,7 @@
  * Pattern: prompt in -> data written to PG + Qdrant + Neo4j -> data readable back.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 // ---------------------------------------------------------------------------
 // In-memory mock DB -- stores rows per table, returns on SELECT

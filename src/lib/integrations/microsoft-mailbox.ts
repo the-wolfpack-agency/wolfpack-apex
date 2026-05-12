@@ -21,7 +21,7 @@
  * Inbox rules: NOT stored. They are noisy, not load-bearing for our
  * learning loop, and flagged as a privacy concern in the deliverable.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { getValidToken } from "@/lib/microsoft-graph";
 import { query, safeQuery } from "@/lib/db";

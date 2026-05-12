@@ -377,7 +377,7 @@ export default function InboxPanel({
     // EmailReader. The alternative (suspending render on a promise)
     // would force the whole /emails page into a Suspense boundary that
     // breaks the existing composer-first tests.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+     
     void load({ unread: unreadOnly, folder });
   }, [load, unreadOnly, reloadKey, folder]);
 

@@ -96,7 +96,7 @@ function makeMultipartReq(parts: {
       fd.append(p.name, p.value);
       continue;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const FileCtor: any = (globalThis as any).File;
     if (typeof FileCtor === "function") {
       const file = new FileCtor([p.value], p.filename ?? "unnamed.bin", {
@@ -104,7 +104,7 @@ function makeMultipartReq(parts: {
       });
       fd.append(p.name, file);
     } else {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const blob = new Blob([p.value as any], {
         type: p.type ?? "application/octet-stream",
       });

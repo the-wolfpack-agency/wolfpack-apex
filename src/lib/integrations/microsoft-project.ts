@@ -25,7 +25,7 @@
  * deliberate v2 follow-up — flagged in the PR body. Documented here so the
  * next contributor knows the tradeoff was intentional.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { trackEvent } from "@/lib/analytics";
 

@@ -1,7 +1,7 @@
 /**
  * /api/presence/me route tests.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockGetUserPres = jest.fn();
 jest.mock("@/lib/auth", () => ({

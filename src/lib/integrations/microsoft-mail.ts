@@ -19,7 +19,7 @@
  * Rate limits: Graph returns 429 with Retry-After — honor it exactly once
  * (same pattern as microsoft-tasks), then surface as rate_limited.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import { getValidToken } from "@/lib/microsoft-graph";
 import { query } from "@/lib/db";

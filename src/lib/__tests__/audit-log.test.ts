@@ -2,7 +2,7 @@
  * audit-log.test.ts — core recordAudit + hash-chain + PII redaction.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockConnect = jest.fn();
 const mockQuery = jest.fn();

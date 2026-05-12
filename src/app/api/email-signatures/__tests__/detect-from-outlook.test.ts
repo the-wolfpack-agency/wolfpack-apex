@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockDetectText = jest.fn();
 const mockDetectHtml = jest.fn();
 const mockTrackEvent = jest.fn();

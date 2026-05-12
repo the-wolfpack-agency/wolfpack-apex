@@ -13,7 +13,7 @@
  *   - 401 handling with attachments
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 // ---------------------------------------------------------------------------
 // Mocks

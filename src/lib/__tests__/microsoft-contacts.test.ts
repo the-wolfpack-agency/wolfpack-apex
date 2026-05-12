@@ -1,7 +1,7 @@
 /**
  * Microsoft Contacts integration tests — CRUD, sync, mirror correctness, 403.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrackContacts = jest.fn();
 const mockQueryContacts = jest.fn();

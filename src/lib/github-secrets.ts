@@ -67,7 +67,7 @@ async function getSodium(): Promise<SodiumLike> {
     await sodiumImpl.ready;
     return sodiumImpl;
   }
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const mod = require("libsodium-wrappers") as SodiumLike;
   sodiumImpl = mod;
   await sodiumImpl.ready;

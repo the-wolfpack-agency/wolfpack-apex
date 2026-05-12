@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 /**
  * Resize handle behaviour:
  *   - Default inbox width is INBOX_WIDTH_DEFAULT (340).

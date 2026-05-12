@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import "@testing-library/jest-dom";
 /**
  * IntegrationStatusBanner — surfaces ?ms / ?qbo OAuth callback outcomes

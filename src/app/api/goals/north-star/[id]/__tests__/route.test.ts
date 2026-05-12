@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockDelete = jest.fn();
 const mockUpdate = jest.fn();
 const mockGetUser = jest.fn();

@@ -7,7 +7,7 @@
  * working.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockSafeQuery = jest.fn();
 const mockGetSecret = jest.fn();
 

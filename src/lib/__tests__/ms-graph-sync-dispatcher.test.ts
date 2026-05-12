@@ -5,7 +5,7 @@
  * workers still run, the aggregate `failedEntityTypes` surfaces the
  * failure, and counters from successful workers propagate correctly.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 /**
  * /api/assistant — response shape contract.
  *
@@ -189,7 +189,7 @@ describe("POST /api/assistant — sources + relatedPages", () => {
       trackGateResult: mockTrackGateResult,
     }));
     jest.doMock("@/lib/analytics", () => ({ trackEvent: mockTrackEvent }));
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     const { POST: anonPost } = require("../route");
     const res = await anonPost(postMessage("hi"));
     expect(res.status).toBe(401);

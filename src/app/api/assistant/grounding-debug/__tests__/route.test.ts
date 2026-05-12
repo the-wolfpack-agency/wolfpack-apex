@@ -11,7 +11,7 @@
  *     table-tested.
  *   - Endpoint never invokes an LLM (no openai / anthropic imports).
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 
@@ -416,7 +416,7 @@ describe("GET /api/assistant/grounding-debug", () => {
 
 describe("LLM safety", () => {
   it("route module does not import any LLM SDK", () => {
-    /* eslint-disable @typescript-eslint/no-require-imports */
+     
     const fs = require("fs");
     const path = require("path");
     const src = fs.readFileSync(
@@ -425,6 +425,6 @@ describe("LLM safety", () => {
     );
     expect(src).not.toMatch(/@anthropic-ai\/sdk/);
     expect(src).not.toMatch(/from ['"]openai['"]/);
-    /* eslint-enable @typescript-eslint/no-require-imports */
+     
   });
 });

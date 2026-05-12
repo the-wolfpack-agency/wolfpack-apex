@@ -10,7 +10,7 @@
  *   - per-helper endpoint correctness (calendar, tasks, mail, contacts, files)
  *   - token resolution failure throws GraphClientError{code:"no_token"}
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

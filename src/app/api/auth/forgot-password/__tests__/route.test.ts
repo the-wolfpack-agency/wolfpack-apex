@@ -8,7 +8,7 @@
  *   - 429 after 5 attempts in the rolling window from the same IP
  *   - dev_link surfaced ONLY when delivery failed (no_api_key path)
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 export {};
 
 const mockSafeQuery = jest.fn();

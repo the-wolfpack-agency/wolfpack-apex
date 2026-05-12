@@ -22,9 +22,9 @@ import "@testing-library/jest-dom";
 // jsdom polyfills for the thumbnail URLs (imported transitively — not
 // used here but cheap to stub so any test helper change doesn't crash).
 beforeAll(() => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   (URL as any).createObjectURL = (f: File) => `blob:mock/${f.name}`;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   (URL as any).revokeObjectURL = jest.fn();
 });
 

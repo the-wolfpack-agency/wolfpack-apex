@@ -43,7 +43,7 @@ let cachedDomPurify: DOMPurifyLike | null = null;
 
 function loadDomPurify(): DOMPurifyLike {
   if (cachedDomPurify) return cachedDomPurify;
-  /* eslint-disable @typescript-eslint/no-require-imports */
+   
   const mod = require("isomorphic-dompurify") as
     | { default?: DOMPurifyLike }
     | DOMPurifyLike;
@@ -243,7 +243,7 @@ export function htmlToText(html: string): string {
      stays out of client bundles when this helper is reached only from
      server code. */
   try {
-    /* eslint-disable @typescript-eslint/no-require-imports */
+     
     const cheerio = require("cheerio") as typeof import("cheerio");
     const $ = cheerio.load(html);
     $("script, style, noscript").remove();

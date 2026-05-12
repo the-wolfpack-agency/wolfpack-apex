@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import "@testing-library/jest-dom";
 /**
  * MeetingPreBriefPanel — dashboard wrapper with meeting picker.

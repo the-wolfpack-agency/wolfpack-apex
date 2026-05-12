@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 /**
  * Compose-pane signature behaviour:
  *   1) The "Signature" toolbar dropdown lists the user's saved signatures

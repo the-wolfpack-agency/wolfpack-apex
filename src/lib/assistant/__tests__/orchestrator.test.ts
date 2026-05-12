@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockCalendar = jest.fn();
 const mockBrain = jest.fn();
 const mockMail = jest.fn();

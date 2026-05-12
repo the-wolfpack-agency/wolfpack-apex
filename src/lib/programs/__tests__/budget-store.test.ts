@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockSafeQuery = jest.fn();
 const mockWriteQuery = jest.fn();
 const mockClientQuery = jest.fn();

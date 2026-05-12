@@ -1,7 +1,7 @@
 /**
  * /api/teams route tests — auth, rate limit, 403 scope_missing, analytics.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockGetUser = jest.fn();
 jest.mock("@/lib/auth", () => ({

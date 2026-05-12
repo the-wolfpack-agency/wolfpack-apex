@@ -8,7 +8,7 @@
  * `createTeamsMeeting: true` flag. That wiring is NOT in this stream.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { createMeeting } from "@/lib/integrations/microsoft-online-meetings";

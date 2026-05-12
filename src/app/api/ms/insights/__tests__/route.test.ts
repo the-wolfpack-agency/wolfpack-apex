@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockRequireCapability = jest.fn();
 const mockTrackEvent = jest.fn();
 const mockFetchCalendarEvents = jest.fn();

@@ -1,7 +1,7 @@
 /**
  * MS Graph sync — contacts worker.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

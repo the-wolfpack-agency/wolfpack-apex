@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockFetchCalendarEvents = jest.fn();
 const mockSafeQuery = jest.fn();
 

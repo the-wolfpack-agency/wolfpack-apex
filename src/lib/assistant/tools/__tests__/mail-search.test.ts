@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockFindThreads = jest.fn();
 jest.mock("@/lib/meetings/email-matcher", () => ({
   findThreadsInvolvingAttendees: (...a: any[]) => mockFindThreads(...a),

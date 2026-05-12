@@ -10,7 +10,7 @@
  *   - mailer-failure does NOT 500 the route — invite still persists, just
  *     reports `emailDelivered: false` so the UI can surface a copyable URL
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 export {};
 
 const mockRequireCap = jest.fn();

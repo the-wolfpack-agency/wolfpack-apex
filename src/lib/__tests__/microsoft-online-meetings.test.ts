@@ -5,7 +5,7 @@
  * attachTeamsMeetingToEventInput, input validation, 403 scope_missing,
  * 429 retry, audit + analytics emission, cache upsert.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 

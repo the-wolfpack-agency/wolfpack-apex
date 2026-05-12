@@ -85,7 +85,7 @@ function makeReq(
       fd.append(p.name, p.value);
       continue;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const FileCtor: any = (globalThis as any).File;
     if (typeof FileCtor === "function") {
       const file = new FileCtor([p.value], p.filename ?? "unnamed.bin", {

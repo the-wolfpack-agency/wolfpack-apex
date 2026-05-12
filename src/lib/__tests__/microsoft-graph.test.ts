@@ -13,7 +13,7 @@
  *   - Analytics event types
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrackEvent = jest.fn();
 const mockSafeQuery = jest.fn();

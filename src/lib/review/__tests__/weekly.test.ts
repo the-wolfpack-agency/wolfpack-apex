@@ -3,7 +3,7 @@
  * mocked. Covers counts, slip integration, week boundary, and
  * prior-week tasks being excluded from the current week's "opened".
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockFetchCalendar = jest.fn();
 const mockFetchEmails = jest.fn();

@@ -1,7 +1,7 @@
 /**
  * GET /api/review/weekly — auth gate, happy path, slip-analytics fanout.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockGetUser = jest.fn();
 const mockCompute = jest.fn();

@@ -5,7 +5,7 @@
  * updateTask (etag happy path + 412 etag_conflict), completeTask (notify
  * fan-out), syncAllForUser (pagination + 429 backoff), 403 scope_missing.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 // Make this file a module (not a script) so top-level `const` declarations
 // stay file-scoped under tsconfig's `isolatedModules`.

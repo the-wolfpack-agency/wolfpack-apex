@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockSearchBrain = jest.fn();
 jest.mock("@/lib/brain/repo", () => ({
   keywordSearch: (...a: any[]) => mockSearchBrain(...a),

@@ -3,7 +3,7 @@ export {};
  * microsoft-directory.ts — listUsers, getUser, getManager, getDirectReports,
  * syncDirectory (delta token roundtrip + 403 scope_missing).
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 const mockTrack = jest.fn();
 const mockQuery = jest.fn();

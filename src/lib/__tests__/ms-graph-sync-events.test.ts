@@ -4,7 +4,7 @@
  * Exercises empty-delta, create, update, delete, writeQuery bubble, and
  * scope_missing graceful surface.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 export {};
 
