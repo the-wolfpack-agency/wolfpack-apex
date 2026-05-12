@@ -357,6 +357,8 @@ describe("searchMessages", () => {
     const init = fetchMockMail.mock.calls[0][1];
     const body = JSON.parse(init.body as string);
     expect(body.requests[0].entityTypes).toEqual(["message"]);
+    /* The keyword extractor lowercases plain nouns and drops nothing in a
+       short noun-only query, so "porsche dealer" passes through unchanged. */
     expect(body.requests[0].query.queryString).toBe("porsche dealer");
   });
 

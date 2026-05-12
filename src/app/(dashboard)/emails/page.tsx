@@ -202,6 +202,18 @@ export default function EmailsPage() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  // Tell the sidebar EmailNavBadge that the user has now seen the
+  // inbox. The badge persists `instinct.emails.last_seen` in
+  // localStorage and clears its count immediately. The server-side
+  // unread-count route uses the same timestamp to decide which
+  // newly-arrived emails should fan out as bell notifications, so
+  // surfacing it from /emails on mount keeps the bell quiet about
+  // mail the user has already seen.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new Event("instinct:emails-seen"));
+  }, []);
+
   // Nav rail. Default expanded on desktop, collapsed on narrow.
   const [navExpanded, setNavExpanded] = useState<boolean>(() =>
     typeof window !== "undefined" ? window.innerWidth >= 1100 : true,

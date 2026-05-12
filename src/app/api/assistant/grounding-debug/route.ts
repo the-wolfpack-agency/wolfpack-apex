@@ -44,6 +44,7 @@ import {
   type ContextBundle,
   type ContextSurface,
 } from "@/lib/assistant/context-resolver";
+import { buildSearchQueryString } from "@/lib/integrations/microsoft-search-keywords";
 
 /**
  * Default question — matches the user's recurring failing test case so
@@ -175,6 +176,13 @@ export interface ProbeResult {
   scope_missing: boolean;
   /** Wall time in ms. */
   took_ms: number;
+  /**
+   * For probes that POST a `query.queryString` to Graph (`/search/query`),
+   * the EXACT string we sent. Surfacing this closes the diagnostic gap that
+   * hid the SharePoint/Mail "200 OK / 0 hits" bug: the user can now see what
+   * Graph was actually searching for vs the question they asked.
+   */
+  query_string_sent?: string;
 }
 
 interface DoProbeArgs {
@@ -185,6 +193,12 @@ interface DoProbeArgs {
   body?: unknown;
   /** Function that, given a 200 response payload, returns a count for the UI. */
   countOf?: (payload: unknown) => number;
+  /**
+   * For /search/query probes: the EXACT keyword string we sent to Graph.
+   * Surfaced verbatim on the response so the diagnostic page renders it
+   * next to the row.
+   */
+  queryStringSent?: string;
 }
 
 async function doProbe(
@@ -239,6 +253,7 @@ async function doProbe(
       ...(typeof count === "number" ? { count } : {}),
       scope_missing: false,
       took_ms,
+      ...(args.queryStringSent !== undefined ? { query_string_sent: args.queryStringSent } : {}),
     };
   }
 
@@ -276,6 +291,7 @@ async function doProbe(
     error_message: message?.slice(0, 200),
     scope_missing: Boolean(scopeMissing),
     took_ms,
+    ...(args.queryStringSent !== undefined ? { query_string_sent: args.queryStringSent } : {}),
   };
 }
 
@@ -291,6 +307,13 @@ export async function runProbes(
 ): Promise<ProbeResult[]> {
   const startISO = new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString();
   const endISO = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
+
+  /* Both /search/query probes (SharePoint + Mail) hit Graph's keyword
+     search. Apply the SAME extractor that searchSharePoint / searchMessages
+     use, so the diagnostic page reflects what the resolver actually sends.
+     Without this, the probe would 0-hit on a verbatim natural-language
+     question even after the resolver was fixed, hiding the fix. */
+  const searchKeywordQuery = buildSearchQueryString(question);
 
   const probes: DoProbeArgs[] = [
     {
@@ -322,12 +345,13 @@ export async function runProbes(
         requests: [
           {
             entityTypes: ["driveItem", "listItem", "site"],
-            query: { queryString: question },
+            query: { queryString: searchKeywordQuery },
             from: 0,
             size: 1,
           },
         ],
       },
+      queryStringSent: searchKeywordQuery,
       countOf: (p) => {
         const containers =
           (p as { value?: Array<{ hitsContainers?: Array<{ total?: number; hits?: unknown[] }> }> })
@@ -359,12 +383,13 @@ export async function runProbes(
         requests: [
           {
             entityTypes: ["message"],
-            query: { queryString: question },
+            query: { queryString: searchKeywordQuery },
             from: 0,
             size: 1,
           },
         ],
       },
+      queryStringSent: searchKeywordQuery,
       countOf: (p) => {
         const containers =
           (p as { value?: Array<{ hitsContainers?: Array<{ total?: number; hits?: unknown[] }> }> })

@@ -25,6 +25,7 @@ import { getValidToken } from "@/lib/microsoft-graph";
 import { query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { recordAudit } from "@/lib/audit-log";
+import { buildSearchQueryString } from "@/lib/integrations/microsoft-search-keywords";
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -1340,6 +1341,13 @@ export interface SearchMessagesValue {
   hits: EmailThreadHit[];
   total: number;
   took_ms: number;
+  /**
+   * Final keyword string sent to Graph as `query.queryString`. Surfaced so
+   * the diagnostic page (and integration tests) can assert exactly what
+   * was searched. Often differs from the user's verbatim question because
+   * `buildSearchQueryString` strips natural-language filler.
+   */
+  query_string_sent: string;
 }
 
 const EMAIL_SNIPPET_MAX = 300;
@@ -1432,11 +1440,17 @@ export async function searchMessages(
   const requested = Number.isFinite(opts.topN) ? Number(opts.topN) : EMAIL_DEFAULT_TOP_N;
   const topN = Math.min(Math.max(requested, 1), EMAIL_TOP_N_CAP);
 
+  /* Microsoft's /search/query is keyword/phrase based; passing a verbatim
+     user question drops too many noise words and Graph returns 0 hits even
+     when the message exists. Extract the load-bearing tokens first so
+     Graph can match. See microsoft-search-keywords.ts. */
+  const queryString = buildSearchQueryString(q);
+
   const body = {
     requests: [
       {
         entityTypes: ["message"],
-        query: { queryString: q },
+        query: { queryString },
         from: 0,
         size: topN,
       },
@@ -1476,7 +1490,7 @@ export async function searchMessages(
 
   return {
     ok: true,
-    value: { hits, total, took_ms: Date.now() - t0 },
+    value: { hits, total, took_ms: Date.now() - t0, query_string_sent: queryString },
   };
 }
 

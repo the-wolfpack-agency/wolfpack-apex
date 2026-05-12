@@ -49,6 +49,14 @@ interface ProbeResult {
   error_message?: string;
   scope_missing: boolean;
   took_ms: number;
+  /**
+   * For /search/query probes: the EXACT keyword string we sent to Graph
+   * (after `buildSearchQueryString` extraction). Rendered under the row so
+   * the user can see exactly what Graph was searching for vs the question
+   * they asked. Closes the diagnostic gap that hid the SharePoint/Mail
+   * "200 OK / 0 hits" bug.
+   */
+  query_string_sent?: string;
 }
 
 interface GroundingDebugResponse {
@@ -309,6 +317,17 @@ export default function AssistantDebugPage() {
                       <div style={{ color: "var(--wp-text-dim)" }}>
                         {p.method} {p.endpoint}
                       </div>
+                      {p.query_string_sent !== undefined && (
+                        <div
+                          data-testid={`probe-querystring-${p.name}`}
+                          style={{ color: "var(--wp-text-dim)" }}
+                        >
+                          queryString:{" "}
+                          <span style={{ color: "var(--wp-warning)" }}>
+                            {p.query_string_sent || "(empty)"}
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td className="py-2">
                       <StatusPill ok={p.ok} label={String(p.status || "ERR")} />
