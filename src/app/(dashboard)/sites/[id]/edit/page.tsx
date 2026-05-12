@@ -788,6 +788,23 @@ export default function SiteEditPage({
     }
   }
 
+  // Parity diagnostic — fires once per load when the editor is displaying
+  // a draft divergent from the live site. Lets the learning loop grade
+  // how often designers see content drift between the two surfaces.
+  // Hook lives ABOVE the early return below so it runs unconditionally
+  // every render (react-hooks/rules-of-hooks).
+  useEffect(() => {
+    if (!project) return;
+    const hasPreview = !!project.preview_url;
+    const source = !dirty && hasPreview ? "deployed" : "draft";
+    trackClient("sites.editor_preview_parity_check", {
+      site_id: id,
+      source,
+      has_preview_url: hasPreview,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.id, project?.preview_url, dirty]);
+
   if (!project || !draft) {
     return (
       <main style={{ padding: 40, color: "var(--wp-fg, #e6e6e6)" }}>
@@ -816,21 +833,6 @@ export default function SiteEditPage({
     draft,
     iframeNonce,
   });
-
-  // Parity diagnostic — fires once per load when the editor is displaying
-  // a draft divergent from the live site. Lets the learning loop grade
-  // how often designers see content drift between the two surfaces.
-  useEffect(() => {
-    if (!project) return;
-    const hasPreview = !!project.preview_url;
-    const source = !dirty && hasPreview ? "deployed" : "draft";
-    trackClient("sites.editor_preview_parity_check", {
-      site_id: id,
-      source,
-      has_preview_url: hasPreview,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project?.id, project?.preview_url, dirty]);
 
   return (
     <main

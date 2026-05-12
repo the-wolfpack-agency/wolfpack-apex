@@ -240,8 +240,8 @@ describe("POST /api/assistant — page-facts contracts (PENDING Agent A)", () =>
   });
 
   // Placeholder so the test runner records the pending contract even
-  // when `.skip` collapses the block above.
-  // eslint-disable-next-line jest/no-disabled-tests,jest/expect-expect
+  // when `.skip` collapses the block above. jest/* rules aren't loaded
+  // in this repo's ESLint config, so no disable comment is needed.
   it.todo("Agent A page-facts required: see skipped cases (a)-(d), (f)");
 });
 
@@ -311,7 +311,8 @@ describe("POST /api/assistant — auth gates", () => {
 });
 
 describe("POST /api/assistant — bad input", () => {
-  // eslint-disable-next-line jest/no-disabled-tests
+  // jest/* rules aren't loaded in this repo's ESLint config — leaving
+  // the .skip as documentation of the gap (see comment below).
   test.skip("(h) bad JSON body returns 400", async () => {
     // Current route.ts: any throw inside the try block (including
     // req.json() failing on malformed JSON) returns 500. The

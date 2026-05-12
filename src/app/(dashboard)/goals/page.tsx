@@ -64,7 +64,7 @@ export default function GoalsPage() {
   const [streamsByKr, setStreamsByKr] = useState<Record<string, ContributionView[]>>({});
   const [userNames, setUserNames] = useState<Record<string, string>>({});
 
-  const week_of = useMemo(todayWeekOfMonday, []);
+  const week_of = useMemo(() => todayWeekOfMonday(), []);
 
   useEffect(() => {
     const token = getInstinctToken();

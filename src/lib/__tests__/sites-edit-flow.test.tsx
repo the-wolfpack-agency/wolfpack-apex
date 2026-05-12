@@ -45,6 +45,7 @@
 
 import "@testing-library/jest-dom";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 interface Brief {
@@ -242,7 +243,7 @@ function EditHarness() {
     <div>
       <section data-testid="edit-chat-pane">
         <nav aria-label="Breadcrumb" data-testid="edit-breadcrumbs">
-          <a href="/sites" data-testid="edit-breadcrumb-sites">← Sites</a>
+          <Link href="/sites" data-testid="edit-breadcrumb-sites">← Sites</Link>
           {" / "}
           <a href={`/sites/${id}`} data-testid="edit-breadcrumb-detail">
             test

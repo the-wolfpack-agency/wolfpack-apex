@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { fetchWithRefresh, getInstinctUser } from "@/lib/client-auth";
 
@@ -262,9 +263,9 @@ export default function BudgetDetailPage() {
     >
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <a href="/programs/budgets" className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
+          <Link href="/programs/budgets" className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
             ← All budgets
-          </a>
+          </Link>
           <h1 className="text-2xl font-bold mt-1" style={{ color: "var(--wp-gold)" }}>
             {data.budget.name}
           </h1>

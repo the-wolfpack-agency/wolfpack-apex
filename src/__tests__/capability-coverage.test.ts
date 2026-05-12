@@ -49,9 +49,9 @@ function posixRelative(absPath: string): string {
 }
 
 describe("capability coverage", () => {
-  for (const module of PROTECTED_MODULES) {
-    it(`every route.ts under src/app/api/${module}/ calls requireCapability or is allowlisted`, () => {
-      const dir = join(API_ROOT, module);
+  for (const mod of PROTECTED_MODULES) {
+    it(`every route.ts under src/app/api/${mod}/ calls requireCapability or is allowlisted`, () => {
+      const dir = join(API_ROOT, mod);
       if (!existsSync(dir)) {
         // Nothing to check yet — forward-looking module not built.
         return;

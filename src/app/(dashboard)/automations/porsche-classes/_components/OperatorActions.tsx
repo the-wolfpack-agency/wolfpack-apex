@@ -25,6 +25,7 @@
  * detector → summary) runs end-to-end on real data.
  */
 
+import Link from "next/link";
 import { useState } from "react";
 import { fetchWithRefresh } from "@/lib/client-auth";
 
@@ -486,9 +487,9 @@ function PollExceptionsBlock({
       </ul>
       <div style={{ marginTop: 4, color: "var(--wp-text-muted)" }}>
         Resolve from{" "}
-        <a href="/automations/porsche-classes/exceptions">
+        <Link href="/automations/porsche-classes/exceptions">
           /automations/porsche-classes/exceptions
-        </a>
+        </Link>
       </div>
     </div>
   );

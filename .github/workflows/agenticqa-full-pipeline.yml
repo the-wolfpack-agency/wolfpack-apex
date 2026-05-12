@@ -49,8 +49,10 @@ jobs:
       - name: TypeScript type-check
         run: npx tsc --noEmit
       - name: ESLint
-        run: npx eslint .
-        continue-on-error: true
+        # Fails the job on lint errors (warnings still pass through).
+        # Replaces prior continue-on-error:true that made lint
+        # false-green: 15 errors + 146 warnings were not blocking CI.
+        run: npm run lint
 
   linting-fix:
     needs: [lint]

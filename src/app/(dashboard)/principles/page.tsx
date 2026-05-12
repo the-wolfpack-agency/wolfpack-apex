@@ -595,6 +595,19 @@ function TabButton({
 /* ------------------------------------------------------------------ */
 
 function MeView({ data }: { data: MeResponse | null }) {
+  // Hooks must run unconditionally before any early return — moved
+  // above the `if (!data)` guard to satisfy react-hooks/rules-of-hooks.
+  const obsByPrinciple = useMemo(() => {
+    const map = new Map<string, ObservationRow[]>();
+    if (!data) return map;
+    for (const o of data.observations) {
+      const list = map.get(o.principleId) ?? [];
+      list.push(o);
+      map.set(o.principleId, list);
+    }
+    return map;
+  }, [data]);
+
   if (!data) {
     return (
       <div data-testid="principles-me-empty" style={{ color: "var(--wp-text-muted)" }}>
@@ -602,16 +615,6 @@ function MeView({ data }: { data: MeResponse | null }) {
       </div>
     );
   }
-
-  const obsByPrinciple = useMemo(() => {
-    const map = new Map<string, ObservationRow[]>();
-    for (const o of data.observations) {
-      const list = map.get(o.principleId) ?? [];
-      list.push(o);
-      map.set(o.principleId, list);
-    }
-    return map;
-  }, [data.observations]);
 
   if (data.principles.length === 0) {
     return (
@@ -824,16 +827,11 @@ function TeamView({
   data: TeamResponse | null;
   userId: string;
 }) {
-  if (!data) {
-    return (
-      <div data-testid="principles-team-empty" style={{ color: "var(--wp-text-muted)" }}>
-        <TeamCoverageBanner />
-        Team data unavailable.
-      </div>
-    );
-  }
+  // Hooks must run unconditionally before any early return — moved
+  // above the `if (!data)` guard to satisfy react-hooks/rules-of-hooks.
   const aggByPrinciple = useMemo(() => {
     const map = new Map<string, AggregateRow[]>();
+    if (!data) return map;
     for (const a of data.aggregates) {
       const list = map.get(a.principleId) ?? [];
       list.push(a);
@@ -844,7 +842,16 @@ function TeamView({
       list.sort((a, b) => a.meanScore - b.meanScore);
     }
     return map;
-  }, [data.aggregates]);
+  }, [data]);
+
+  if (!data) {
+    return (
+      <div data-testid="principles-team-empty" style={{ color: "var(--wp-text-muted)" }}>
+        <TeamCoverageBanner />
+        Team data unavailable.
+      </div>
+    );
+  }
 
   if (data.principles.length === 0) {
     return (

@@ -12,6 +12,7 @@
  */
 
 import type { Metadata } from "next";
+import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "QR not active — Wolfpack Instinct",
@@ -92,7 +93,7 @@ export default function QrMissingPage() {
           believe this is a mistake, please contact the team and let them
           know where you scanned it.
         </p>
-        <a
+        <Link
           data-testid="qr-missing-support-link"
           href="/support"
           style={{
@@ -106,7 +107,7 @@ export default function QrMissingPage() {
           }}
         >
           Contact support
-        </a>
+        </Link>
         <div
           style={{
             marginTop: "1.5rem",

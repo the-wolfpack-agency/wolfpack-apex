@@ -10,6 +10,7 @@
  * Assistant uses behind the scenes.
  */
 
+import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 import { authHeaders as canonicalAuthHeaders, fetchWithRefresh } from "@/lib/client-auth";
 import { saveMeetingDraftOffline } from "@/lib/meetings-offline";
@@ -155,7 +156,7 @@ export default function MeetingsPage() {
           style={{ borderColor: "var(--wp-dark-border)" }}
           data-testid="meetings-tab-strip"
         >
-          <a
+          <Link
             href="/meetings/feeds"
             className="px-4 py-2 text-sm font-medium border-b-2 hover:opacity-80"
             style={{
@@ -166,7 +167,7 @@ export default function MeetingsPage() {
             data-testid="meetings-tab-feeds"
           >
             Email feeds
-          </a>
+          </Link>
           <span
             className="px-4 py-2 text-sm font-medium border-b-2"
             style={{
