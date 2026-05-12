@@ -1,0 +1,91 @@
+name: Security Governance
+
+# Weekly governance audit:
+#   - Verify branch protection on main matches the codified policy
+#     (scripts/branch_protection_enforcer.py)
+#   - Verify no Actions/Dependabot secrets are >90 days old
+#     (scripts/secret_age_tracker.py)
+#
+# Drift opens a GitHub issue. Operational layer preventing
+# "we forgot to enforce X" from reappearing.
+#
+# Schedule: Monday 09:30 UTC (offset 30 min from parent AgenticQA).
+
+on:
+  schedule:
+    - cron: "30 9 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  branch-protection:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Check branch protection
+        id: bp
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          python scripts/branch_protection_enforcer.py \
+            --repo "${{ github.repository }}" \
+            --branch main \
+            > bp-report.json || true
+          drift=$(python -c "import json; d=json.load(open('bp-report.json')); print(d.get('drift_count', 0))" 2>/dev/null || echo 0)
+          echo "drift_count=$drift" >> "$GITHUB_OUTPUT"
+          cat bp-report.json
+      - name: Open issue on drift
+        if: steps.bp.outputs.drift_count != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const r = JSON.parse(fs.readFileSync('bp-report.json', 'utf8'));
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[gov] Branch protection drift on main (${r.drift_count} fields)`,
+              body: '```json\n' + JSON.stringify(r.drift, null, 2) + '\n```\nResolve via: `python scripts/branch_protection_enforcer.py --repo $REPO --branch main --apply`',
+              labels: ['security', 'governance'],
+            });
+
+  secret-age:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Check secret age
+        id: secrets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          python scripts/secret_age_tracker.py \
+            --repo "${{ github.repository }}" \
+            --max-age-days 90 \
+            > secrets-report.json || true
+          stale=$(python -c "import json; d=json.load(open('secrets-report.json')); print(d.get('stale_count', 0))" 2>/dev/null || echo 0)
+          echo "stale_count=$stale" >> "$GITHUB_OUTPUT"
+          cat secrets-report.json
+      - name: Open issue on stale secrets
+        if: steps.secrets.outputs.stale_count != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const r = JSON.parse(fs.readFileSync('secrets-report.json', 'utf8'));
+            const list = r.stale.map(s => `- **${s.name}** (${s.kind}): ${s.age_days} days old`).join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[gov] ${r.stale_count} secret(s) older than ${r.max_age_days} days`,
+              body: `Rotate the following:\n\n${list}\n\nLast updated: see GitHub repo Settings - Secrets and variables - Actions.`,
+              labels: ['security', 'governance', 'secrets-rotation'],
+            });

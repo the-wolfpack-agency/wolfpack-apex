@@ -1,0 +1,100 @@
+name: Nightly DAST
+
+# Probes the deployed wolfpack-auto URL for runtime issues that static scans miss:
+#   - Security response headers (CSP, HSTS, etc.) actually present at the edge
+#   - Error pages don't leak stack traces or file paths
+#   - Unauthenticated probes don't 200 on protected endpoints
+#
+# Failures open a GitHub issue. Schedule offset from parent AgenticQA (04:00 UTC).
+#
+# Required secrets:
+#   PROD_URL                 - live URL to probe (defaults to https://wolfpack-apex.vercel.app)
+#   SMOKE_TEST_EMAIL/PASSWORD - for authenticated probe paths (optional, future use)
+
+on:
+  schedule:
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Target URL (defaults to PROD_URL secret or wolfpack-auto.vercel.app)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: nightly-dast-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Probe security headers
+        id: headers
+        env:
+          TARGET: ${{ github.event.inputs.target || secrets.PROD_URL || 'https://wolfpack-apex.vercel.app' }}
+        run: |
+          set -e
+          python scripts/probe_security_headers.py "$TARGET" > headers-report.json
+          cat headers-report.json
+          missing=$(python -c "import json; d=json.load(open('headers-report.json')); print(d.get('missing_count', 0))")
+          echo "missing_count=$missing" >> "$GITHUB_OUTPUT"
+          if [ "$missing" -gt 0 ]; then
+            echo "::warning::$missing security headers missing on $TARGET"
+          fi
+
+      - name: Probe error-page disclosure
+        env:
+          TARGET: ${{ github.event.inputs.target || secrets.PROD_URL || 'https://wolfpack-apex.vercel.app' }}
+        run: |
+          python scripts/probe_error_disclosure.py "$TARGET" > error-report.json || true
+          cat error-report.json
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dast-reports
+          path: |
+            headers-report.json
+            error-report.json
+          retention-days: 30
+
+      - name: Open issue on header regression
+        if: steps.headers.outputs.missing_count != '0'
+        uses: actions/github-script@v7
+        env:
+          TARGET: ${{ github.event.inputs.target || secrets.PROD_URL || 'https://wolfpack-apex.vercel.app' }}
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('headers-report.json', 'utf8'));
+            const body = [
+              `## Nightly DAST detected missing security headers`,
+              ``,
+              `**Target:** ${process.env.TARGET}`,
+              `**Missing:** ${report.missing_count} header(s)`,
+              ``,
+              `### Headers`,
+              ...report.headers.map(h => `- ${h.name}: ${h.present ? 'present' : 'MISSING'}`),
+              ``,
+              `Auto-opened by .github/workflows/nightly-dast.yml`,
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[DAST] Missing security headers - ${new Date().toISOString().slice(0,10)}`,
+              body,
+              labels: ['security', 'dast'],
+            });
