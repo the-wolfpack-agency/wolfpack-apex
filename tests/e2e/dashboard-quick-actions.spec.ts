@@ -1,5 +1,6 @@
 /**
- * /dashboard — personalized Quick Actions tile.
+ * Dashboard root (/) — personalized Quick Actions tile.
+ * Dashboard lives at "/" via the (dashboard) route group, not "/dashboard".
  *
  * Locks in PR #28:
  *   1. Card renders with EXACTLY 4 tiles (top-N from
@@ -37,7 +38,7 @@ test.describe("dashboard quick actions (real browser)", () => {
   });
 
   test("renders 4 tiles with labels, hrefs, and per-position testids", async ({ page }) => {
-    const response = await page.goto(`${target.baseUrl}/dashboard`, {
+    const response = await page.goto(`${target.baseUrl}/`, {
       waitUntil: "domcontentloaded",
     });
     expect(response?.status()).toBe(200);
@@ -77,7 +78,7 @@ test.describe("dashboard quick actions (real browser)", () => {
       }
     });
 
-    await page.goto(`${target.baseUrl}/dashboard`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${target.baseUrl}/`, { waitUntil: "domcontentloaded" });
     await settle(page);
 
     // Pick tile #2 to vary the position from the trivial #0.
