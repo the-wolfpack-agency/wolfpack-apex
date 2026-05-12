@@ -1,8 +1,10 @@
 name: AgenticQA Full Pipeline
 
-# Runs the AgenticQA security scanner + standard quality gates against
-# the Instinct codebase. Manual trigger only until the GitHub Actions
-# minutes budget resets May 1.
+# Composition of thin callers against reusable workflows in
+# the-wolfpack-agency/AgenticQA-core.  Caller-specific jobs (the
+# AgenticQA-orchestrator sidecar, shadow-mode route sweep, SRE production
+# readiness, SRE auto-fix self-commit) stay inline; everything generic
+# delegates upstream.
 
 on:
   workflow_dispatch:
@@ -28,23 +30,15 @@ jobs:
   # ──────────────────────────────────────────────────
 
   pipeline-rescue:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
     name: "Pipeline Health Check"
-    steps:
-      - uses: actions/checkout@v4
-      - name: Validate workflow YAML
-        run: |
-          pip install pyyaml -q
-          for file in .github/workflows/*.yml; do
-            python3 -c "import yaml; yaml.safe_load(open('$file'))" && echo "ok: $file"
-          done
+    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/pipeline-health-check.yml@main
 
   lint:
     needs: [pipeline-rescue]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     name: "Code Linting"
+    # Stays inline: generic tsc + eslint, no value in wrapping.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -64,6 +58,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     name: "SRE Auto-Fix Linting"
+    # Stays inline: needs caller GITHUB_TOKEN to commit + push fixes back
+    # to main.  Reusable workflows can't easily propagate that without
+    # granting wider secrets:inherit which we don't want.
     steps:
       - uses: actions/checkout@v4
         with:
@@ -87,7 +84,7 @@ jobs:
           fi
 
   # ──────────────────────────────────────────────────
-  # Phase 1: Tests + Security Scan (parallel)
+  # Phase 1: Tests + Orchestrator + Shadow (parallel)
   # ──────────────────────────────────────────────────
 
   phase-1-testing:
@@ -384,6 +381,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     name: "Phase 1: Shadow Mode Verification"
+    # Stays inline: routes swept here are wolfpack-apex-specific
+    # (/api/dashboard, /api/journal, /api/microsoft, …) and the build
+    # uses APEX_JWT_SECRET rather than NEXTAUTH_SECRET.
     env:
       CI: true
       DATABASE_URL: ''
@@ -448,94 +448,27 @@ jobs:
           fi
 
   # ──────────────────────────────────────────────────
-  # Phase 1b: Lightweight agent analysis (no AgenticQA
-  # node-script dependency — pure shell so it runs
-  # against any project without modification)
+  # Phase 1b: Agent analysis (thin callers — generic
+  # noun-level signals against the wolfpack-apex tree)
   # ──────────────────────────────────────────────────
 
   sdet-analysis:
     needs: [phase-1-testing, agenticqa-orchestrator]
     if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
     name: "Phase 1: SDET Analysis"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: jest-results
-          path: ./jest-data
-        continue-on-error: true
-      - name: Test inventory & coverage gaps
-        run: |
-          echo "## SDET Analysis" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -f jest-data/jest-output.log ]; then
-            SUITES=$(grep -oP "Test Suites:.*?(\d+) total" jest-data/jest-output.log | grep -oP "\d+ total" | grep -oP "\d+" || echo "0")
-            TOTAL=$(grep -oP "Tests:.*?(\d+) total" jest-data/jest-output.log | grep -oP "\d+ total" | grep -oP "\d+" || echo "0")
-            PASSED=$(grep -oP "Tests:.*?(\d+) passed" jest-data/jest-output.log | grep -oP "\d+ passed" | grep -oP "\d+" || echo "0")
-            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-            echo "| Test suites | ${SUITES} |" >> $GITHUB_STEP_SUMMARY
-            echo "| Tests total | ${TOTAL} |" >> $GITHUB_STEP_SUMMARY
-            echo "| Tests passed | ${PASSED} |" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Surface inventory" >> $GITHUB_STEP_SUMMARY
-          API_ROUTES=$(find src/app/api -name "route.ts" 2>/dev/null | wc -l || echo "0")
-          PAGES=$(find "src/app/(dashboard)" -name "page.tsx" 2>/dev/null | wc -l || echo "0")
-          LIB_FILES=$(find src/lib -name "*.ts" -not -path "*/__tests__/*" 2>/dev/null | wc -l || echo "0")
-          TEST_FILES=$(find src/lib/__tests__ -name "*.test.ts" 2>/dev/null | wc -l || echo "0")
-          echo "| Asset | Count |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| API routes | ${API_ROUTES} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Dashboard pages | ${PAGES} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Lib modules | ${LIB_FILES} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Test files | ${TEST_FILES} |" >> $GITHUB_STEP_SUMMARY
+    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/agent-sdet.yml@main
+    with:
+      artifact_pattern: 'jest-results'
+      node_version: '22'
+      run_npm_ci: false
 
   compliance-analysis:
     needs: [phase-1-testing, agenticqa-orchestrator]
     if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
     name: "Phase 1: Compliance Analysis"
-    steps:
-      - uses: actions/checkout@v4
-      - name: Compliance + privacy posture
-        run: |
-          echo "## Compliance Analysis" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Security headers" >> $GITHUB_STEP_SUMMARY
-          for header in "X-Frame-Options" "X-Content-Type-Options" "Strict-Transport-Security" "Content-Security-Policy"; do
-            if grep -rq "$header" src/ next.config.* 2>/dev/null; then
-              echo "- ${header}: configured" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "- ${header}: **missing**" >> $GITHUB_STEP_SUMMARY
-            fi
-          done
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### PII protection" >> $GITHUB_STEP_SUMMARY
-          if find src/lib -name "doc-quality-gate.ts" 2>/dev/null | grep -q .; then
-            echo "- Doc quality gate: present" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- Doc quality gate: **missing**" >> $GITHUB_STEP_SUMMARY
-          fi
-          ENCRYPT_REFS=$(grep -rln "createHmac\|timingSafeEqual\|encrypt\|cipher" src/ --include="*.ts" 2>/dev/null | wc -l || echo "0")
-          echo "- Files using crypto/HMAC: ${ENCRYPT_REFS}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Secret exposure" >> $GITHUB_STEP_SUMMARY
-          NEXT_PUBLIC_SECRETS=$(grep -rn "NEXT_PUBLIC.*SECRET\|NEXT_PUBLIC.*KEY\|NEXT_PUBLIC.*PASSWORD" src/ .env* 2>/dev/null | wc -l || echo "0")
-          echo "- NEXT_PUBLIC_ secret leaks: ${NEXT_PUBLIC_SECRETS}" >> $GITHUB_STEP_SUMMARY
-          [ "$NEXT_PUBLIC_SECRETS" -gt 0 ] && echo "::warning::Potential secret exposure via NEXT_PUBLIC_"
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Per-user token isolation" >> $GITHUB_STEP_SUMMARY
-          NO_USER_SCOPE=$(grep -rln "FROM apex_ms_tokens" src/lib --include="*.ts" 2>/dev/null | xargs grep -L "WHERE connected_by" 2>/dev/null | wc -l || echo "0")
-          if [ "$NO_USER_SCOPE" -gt 0 ]; then
-            echo "::warning::${NO_USER_SCOPE} apex_ms_tokens query without user scoping (regression of c96129d)"
-            echo "- **${NO_USER_SCOPE}** unscoped queries — possible regression" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- All apex_ms_tokens queries scoped by connected_by" >> $GITHUB_STEP_SUMMARY
-          fi
+    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/agent-compliance.yml@main
+    with:
+      src_path: 'src/'
 
   # ──────────────────────────────────────────────────
   # Phase 2: Fullstack verification (build still works)
@@ -544,26 +477,12 @@ jobs:
   fullstack-verification:
     needs: [sdet-analysis, compliance-analysis, shadow-verification]
     if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
     name: "Phase 2: Fullstack Build Verification"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-      - run: npm ci
-      - name: Production build still works after Phase 1 fixes
-        run: |
-          echo "## Fullstack Build Verification" >> $GITHUB_STEP_SUMMARY
-          if DATABASE_URL= npm run build 2>&1; then
-            echo "- Production build: PASS" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- Production build: **FAIL**" >> $GITHUB_STEP_SUMMARY
-            echo "::error::Production build failed"
-            exit 1
-          fi
+    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/agent-fullstack.yml@main
+    with:
+      artifact_pattern: 'jest-results'
+      verify_build: true
+      node_version: '22'
 
   # ──────────────────────────────────────────────────
   # Phase 3: SRE production readiness
@@ -575,6 +494,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     name: "Phase 3: SRE Production Readiness"
+    # Stays inline: Next.js/npm-specific production-readiness checks
+    # (.next bundle size, npm audit, src/ console.log hygiene, env-var
+    # cataloging, migration count).  Generic version would lose those
+    # signals.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -616,34 +539,17 @@ jobs:
       - fullstack-verification
       - sre-readiness
     if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
     name: "Pipeline Summary"
-    steps:
-      - name: Generate summary
-        run: |
-          echo "## AgenticQA Full Pipeline — Wolfpack Instinct" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Phase | Job | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 0 | Pipeline Health | ${{ needs.pipeline-rescue.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 0 | Code Linting | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 0 | SRE Auto-Fix | ${{ needs.linting-fix.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 1 | Jest Test Suite | ${{ needs.phase-1-testing.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 1 | AgenticQA Orchestrator | ${{ needs.agenticqa-orchestrator.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 1 | Shadow Mode Verification | ${{ needs.shadow-verification.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 1 | SDET Analysis | ${{ needs.sdet-analysis.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 1 | Compliance Analysis | ${{ needs.compliance-analysis.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 2 | Fullstack Build Verification | ${{ needs.fullstack-verification.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 3 | SRE Readiness | ${{ needs.sre-readiness.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          FAILED=false
-          for r in "${{ needs.lint.result }}" "${{ needs.phase-1-testing.result }}" "${{ needs.shadow-verification.result }}" "${{ needs.fullstack-verification.result }}"; do
-            [ "$r" = "failure" ] && FAILED=true
-          done
-          if [ "$FAILED" = "true" ]; then
-            echo "::error::Pipeline failed — do not deploy"
-            echo "**RESULT: FAILED**" >> $GITHUB_STEP_SUMMARY
-            exit 1
-          fi
-          echo "**RESULT: ALL GATES PASSED**" >> $GITHUB_STEP_SUMMARY
+    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/pipeline-summary.yml@main
+    with:
+      pipeline_rescue_result: ${{ needs.pipeline-rescue.result }}
+      lint_result: ${{ needs.lint.result }}
+      linting_fix_result: ${{ needs.linting-fix.result }}
+      phase_1_testing_result: ${{ needs.phase-1-testing.result }}
+      phase_1_compliance_result: ${{ needs.agenticqa-orchestrator.result }}
+      shadow_verification_result: ${{ needs.shadow-verification.result }}
+      sdet_agent_result: ${{ needs.sdet-analysis.result }}
+      compliance_agent_result: ${{ needs.compliance-analysis.result }}
+      fullstack_agent_result: ${{ needs.fullstack-verification.result }}
+      sre_agent_result: ${{ needs.sre-readiness.result }}
+      gating_jobs: 'lint,phase_1_testing,shadow_verification,fullstack_agent'
