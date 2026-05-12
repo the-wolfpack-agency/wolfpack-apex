@@ -1,84 +1,16 @@
 name: SDET Trend Benchmark
 
-# Tracks Jest test count + pass rate over time so we can spot
-# coverage regressions or flake-rate creep. Stores a JSONL history
-# as a GitHub Actions artifact (workflow-scoped retention).
-#
-# Schedule: 03:30 UTC daily (offset 30 min from parent AgenticQA).
-#
-# TODO: Full SDET-cohort benchmark (auto-fix uplift) requires the
-# agenticqa Python package (PromptWorkflowStore / WorkflowExecutionWorker).
-# This is a scoped-down version that just counts unit-test pass/fail.
-
 on:
   schedule:
-    - cron: "30 3 * * *"
+    - cron: '30 3 * * *'
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
-  sdet-trend:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    name: Track Jest test counts + pass rate
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-
-      - name: Install
-        run: npm ci --no-audit --no-fund
-
-      - name: Run jest with JSON reporter
-        id: jest
-        run: |
-          set +e
-          npx jest --json --outputFile=jest-results.json --passWithNoTests
-          echo "exit=$?" >> "$GITHUB_OUTPUT"
-          set -e
-
-      - name: Compute trend record
-        run: |
-          python3 scripts/sdet_trend_record.py jest-results.json > trend-record.json
-          cat trend-record.json
-
-      - name: Download history artifact
-        id: dl
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: sdet-trend-history
-          path: ./trend-history/
-
-      - name: Append + commit history JSONL
-        run: |
-          mkdir -p trend-history
-          touch trend-history/sdet_trend_history.jsonl
-          cat trend-record.json >> trend-history/sdet_trend_history.jsonl
-          echo "" >> trend-history/sdet_trend_history.jsonl
-          echo "--- last 10 entries ---"
-          tail -n 10 trend-history/sdet_trend_history.jsonl
-
-      - name: Upload updated history
-        uses: actions/upload-artifact@v4
-        with:
-          name: sdet-trend-history
-          path: trend-history/sdet_trend_history.jsonl
-          retention-days: 90
-
-      - name: Upload latest record
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: sdet-trend-latest
-          path: |
-            trend-record.json
-            jest-results.json
-          retention-days: 30
+  benchmark:
+    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/sdet-trend-benchmark.yml@main
+    with:
+      jest_command: 'npx jest --json --silent'
+      node_version: '22'
+      working_directory: '.'
+      install_command: 'npm ci'
+    secrets: inherit

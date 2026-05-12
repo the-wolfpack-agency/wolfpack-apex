@@ -1,112 +1,24 @@
 name: Red Team Governance Scan
 
-# Weekly red-team probe against wolfpack-auto's auth/guard surfaces.
-# Detects regressions in authentication, tenant isolation, and rate limiting
-# by issuing adversarial probes against the deployed product.
-#
-# Schedule: Sunday 3:30 AM UTC (offset from parent AgenticQA at 03:00).
-#
-# NOTE: Full RedTeamAgent (parent AgenticQA) requires the agenticqa Python
-# package + constitutional gate scaffolding which is not vendored into
-# wolfpack-auto. This is a scoped-down version that runs HTTP-level probes
-# against the deployed URL. To enable the full agent, install AgenticQA via:
-#   pip install -e /path/to/AgenticQA
-# and uncomment the full-agent block below.
-
 on:
   schedule:
     - cron: '30 3 * * 0'
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'src/lib/auth-guard.ts'
-      - 'src/lib/operator-auth.ts'
       - 'src/lib/auth.ts'
       - 'src/middleware.ts'
       - 'src/lib/rate-limit.ts'
       - 'src/lib/tenant-context.ts'
       - 'src/lib/tenant-resolver.ts'
   workflow_dispatch:
-    inputs:
-      target:
-        description: 'Target URL (defaults to PROD_URL or wolfpack-auto.vercel.app)'
-        required: false
-        default: ''
-
-permissions:
-  contents: read
-  issues: write
-
-concurrency:
-  group: red-team-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
-  red-team-probe:
-    name: Red Team HTTP probes
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Run adversarial probes
-        id: probe
-        env:
-          TARGET: ${{ github.event.inputs.target || secrets.PROD_URL || 'https://wolfpack-auto.vercel.app' }}
-        run: |
-          set -e
-          # Use probe_error_disclosure as a quick adversarial probe — it
-          # hits bogus endpoints and asserts no info leak. Counts as a
-          # baseline red-team check for wolfpack-auto.
-          python scripts/probe_error_disclosure.py "$TARGET" > redteam-report.json || true
-          cat redteam-report.json
-          leaks=$(python -c "import json; d=json.load(open('redteam-report.json')); print(d.get('leak_count', 0))")
-          echo "leak_count=$leaks" >> "$GITHUB_OUTPUT"
-
-      # TODO: Full RedTeamAgent integration requires agenticqa Python package.
-      # When AgenticQA is installable into wolfpack-auto, uncomment:
-      # - name: Install AgenticQA
-      #   run: pip install -e /path/to/AgenticQA
-      # - name: Run RedTeamAgent
-      #   run: python -c "from agents import RedTeamAgent; print(RedTeamAgent().execute({'mode':'fast','target':'both','auto_patch':False}))"
-
-      - name: Upload report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: redteam-report
-          path: redteam-report.json
-          retention-days: 30
-
-      - name: Open issue on adversarial leak
-        if: steps.probe.outputs.leak_count != '0'
-        uses: actions/github-script@v7
-        env:
-          TARGET: ${{ github.event.inputs.target || secrets.PROD_URL || 'https://wolfpack-auto.vercel.app' }}
-        with:
-          script: |
-            const fs = require('fs');
-            const r = JSON.parse(fs.readFileSync('redteam-report.json', 'utf8'));
-            const body = [
-              `## Red Team probes detected information disclosure`,
-              ``,
-              `**Target:** ${process.env.TARGET}`,
-              `**Leaks:** ${r.leak_count}`,
-              ``,
-              `\`\`\`json`,
-              JSON.stringify(r.leaks, null, 2),
-              `\`\`\``,
-              ``,
-              `Auto-opened by .github/workflows/red-team-governance.yml`,
-            ].join('\n');
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `[Red Team] Information disclosure detected - ${new Date().toISOString().slice(0,10)}`,
-              body,
-              labels: ['security', 'red-team'],
-            });
+  red-team:
+    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/red-team-governance.yml@main
+    with:
+      repo: ${{ github.repository }}
+      branch: ${{ github.ref_name }}
+      apply: 'false'
+    secrets: inherit
