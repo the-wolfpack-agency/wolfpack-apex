@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'Target URL (overrides PROD_URL secret)'
+        description: 'Target URL (defaults to hardcoded prod)'
         required: false
         default: ''
 
@@ -14,5 +14,5 @@ jobs:
   dast:
     uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/nightly-dast.yml@main
     with:
-      prod_url: ${{ github.event.inputs.target || secrets.PROD_URL || 'https://wolfpack-apex.vercel.app' }}
+      prod_url: ${{ github.event.inputs.target != '' && github.event.inputs.target || 'https://wolfpack-apex.vercel.app' }}
     secrets: inherit
