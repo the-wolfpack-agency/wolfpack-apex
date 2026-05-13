@@ -172,6 +172,11 @@ export function collectConsoleAndNetworkFailures(page: Page) {
       // /login. The probe still wants to flag 401s elsewhere as broken
       // auth wiring, so allowlist only this single endpoint.
       if (status === 401 && /\/api\/auth\/whoami(\?|$)/.test(url)) return;
+      // /api/analytics is fire-and-forget telemetry. A 401 there doesn't
+      // affect user-visible behavior (analytics calls return 401 cleanly
+      // and the page keeps working), and we don't want a noisy network
+      // collector to fail the journey for a benign telemetry rejection.
+      if (status === 401 && /\/api\/analytics(\?|$|\/)/.test(url)) return;
       failures.push({
         kind: "network",
         detail: `${status} ${req.method()} ${url}`,
