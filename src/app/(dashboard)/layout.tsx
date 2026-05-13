@@ -203,7 +203,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--wp-dark)" }}>
-        <div className="text-sm" style={{ color: "var(--wp-text-dim)" }}>Loading...</div>
+        <div className="text-sm" style={{ color: "var(--wp-text-dim)" }}>Loading Instinct…</div>
       </div>
     );
   }

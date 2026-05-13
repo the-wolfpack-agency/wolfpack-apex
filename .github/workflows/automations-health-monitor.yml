@@ -59,8 +59,11 @@ jobs:
           fi
           # Surface the skipped reason as a notice (not error) so the
           # operator knows a connect-mailbox step is still pending.
-          if grep -q '"skipped"' "$response"; then
-            reason=$(grep -oE '"skipped":"[^"]*"' "$response" | head -1)
+          # Note: under `set -euo pipefail`, an empty grep match in a pipe
+          # propagates a non-zero exit and kills the step. Match only when
+          # `skipped` carries a quoted string value, and tolerate "no match".
+          if grep -q '"skipped":"' "$response"; then
+            reason=$(grep -oE '"skipped":"[^"]*"' "$response" | head -1 || true)
             echo "::notice::poll skipped — $reason. Connect a mailbox to begin ingest."
           fi
 
