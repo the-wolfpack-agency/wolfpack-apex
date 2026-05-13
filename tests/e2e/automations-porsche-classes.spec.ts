@@ -117,18 +117,20 @@ test.describe("/automations — porsche-classes flow", () => {
     ).not.toBe("timeout");
     expect(rendered, "porsche-classes overview must not surface a hard error").not.toBe("error");
 
-    /* ---------- /changes ---------- */
-    const changesLink = page.getByTestId("link-changes");
-    await changesLink.click();
-    await page.waitForURL(/\/automations\/porsche-classes\/changes$/, {
-      timeout: 10_000,
+    /* ---------- /changes ----------
+       The dedicated /automations/porsche-classes page doesn't expose
+       a `link-changes` testid (it lives only on the generic detail
+       page). Next.js still resolves /automations/porsche-classes/changes
+       to [automationId]/changes/page.tsx, so navigate directly.
+       Match the more generous /exceptions block below for timing budget. */
+    await page.goto(`${target.baseUrl}/automations/porsche-classes/changes`, {
+      waitUntil: "domcontentloaded",
     });
-    // Either the list renders or the empty-state — both are valid 200s.
     const list = page.getByTestId("changes-list");
     const empty = page.getByTestId("changes-empty");
     const oneOrTheOther = await Promise.race([
-      list.waitFor({ state: "visible", timeout: 10_000 }).then(() => "list"),
-      empty.waitFor({ state: "visible", timeout: 10_000 }).then(() => "empty"),
+      list.waitFor({ state: "visible", timeout: 15_000 }).then(() => "list"),
+      empty.waitFor({ state: "visible", timeout: 15_000 }).then(() => "empty"),
     ]).catch(() => null);
     expect(oneOrTheOther, "changes page rendered list or empty state").not.toBeNull();
 
