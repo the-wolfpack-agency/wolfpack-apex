@@ -84,6 +84,32 @@ export async function hasInstinctToken(page: Page): Promise<boolean> {
   return Boolean(token);
 }
 
+/**
+ * Install a stub token into localStorage on EVERY page mount in this
+ * context — must be called BEFORE any navigation so the dashboard
+ * layout's auth-guard sees a token on first render and doesn't
+ * router.push("/login") (which races test navigations and produces
+ * net::ERR_ABORTED). Tests that intercept the data API never
+ * validate the token, so the stub is safe.
+ */
+export async function stubInstinctSession(
+  page: Page,
+  overrides: { id?: string; role?: string; name?: string; email?: string } = {},
+): Promise<void> {
+  const user = {
+    id: overrides.id ?? "u-test",
+    role: overrides.role ?? "ops",
+    name: overrides.name ?? "Test",
+    email: overrides.email ?? "test@instinct.local",
+  };
+  await page.addInitScript((u) => {
+    if (!localStorage.getItem("instinct_token")) {
+      localStorage.setItem("instinct_token", "test-token-not-validated");
+      localStorage.setItem("instinct_user", JSON.stringify(u));
+    }
+  }, user);
+}
+
 export interface ConsoleFailure {
   kind: "console" | "network";
   detail: string;
@@ -112,9 +138,15 @@ export function collectConsoleAndNetworkFailures(page: Page) {
     const status = resp.status();
     // 401/403/5xx on XHR/fetch indicates a broken call from the page.
     if (status === 401 || status === 403 || status >= 500) {
+      const url = resp.url();
+      // /api/auth/whoami legitimately returns 401 on the public (unauthed)
+      // landing — that's how the (dashboard) layout decides to redirect to
+      // /login. The probe still wants to flag 401s elsewhere as broken
+      // auth wiring, so allowlist only this single endpoint.
+      if (status === 401 && /\/api\/auth\/whoami(\?|$)/.test(url)) return;
       failures.push({
         kind: "network",
-        detail: `${status} ${req.method()} ${resp.url()}`,
+        detail: `${status} ${req.method()} ${url}`,
       });
     }
   });

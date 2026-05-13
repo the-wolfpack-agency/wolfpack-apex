@@ -17,9 +17,9 @@
 import { test, expect } from "@playwright/test";
 import {
   collectConsoleAndNetworkFailures,
-  hasInstinctToken,
   resolveSmokeTarget,
   signInIfPossible,
+  stubInstinctSession,
 } from "./helpers/smoke-helpers";
 
 const target = resolveSmokeTarget();
@@ -83,24 +83,13 @@ test.describe("Porsche class summary E2E", () => {
     // Auth: prefer real sign-in; else stub a token so the page stops
     // bouncing to /login. The intercepted API response means the route
     // never actually validates the token, so this is safe in test.
+    // Install the stub token BEFORE any navigation — addInitScript runs
+    // on every page mount, so the dashboard layout sees a token on first
+    // render and doesn't router.push("/login") (which races our next
+    // navigation and produces net::ERR_ABORTED). Real sign-in (if creds
+    // resolve) will overwrite via setInstinctSession.
+    await stubInstinctSession(page);
     await signInIfPossible(page, target);
-    // Trust the WRITTEN token, not the return value — signInIfPossible
-    // returns true even when the login API fails (shadow build / no DB).
-    if (!(await hasInstinctToken(page))) {
-      await page.goto(`${target.baseUrl}/`, { waitUntil: "domcontentloaded" });
-      await page.evaluate(() => {
-        localStorage.setItem("instinct_token", "test-token-not-validated");
-        localStorage.setItem(
-          "instinct_user",
-          JSON.stringify({
-            id: "u-test",
-            role: "ops",
-            name: "Test",
-            email: "test@instinct.local",
-          }),
-        );
-      });
-    }
 
     // Intercept the assembler API.
     await page.route(API_URL, async (route) => {
@@ -193,24 +182,13 @@ test.describe("Porsche class summary E2E", () => {
   test("manual survey upload that lands on a DIFFERENT class shows wrong-class alert", async ({
     page,
   }) => {
+    // Install the stub token BEFORE any navigation — addInitScript runs
+    // on every page mount, so the dashboard layout sees a token on first
+    // render and doesn't router.push("/login") (which races our next
+    // navigation and produces net::ERR_ABORTED). Real sign-in (if creds
+    // resolve) will overwrite via setInstinctSession.
+    await stubInstinctSession(page);
     await signInIfPossible(page, target);
-    // Trust the WRITTEN token, not the return value — signInIfPossible
-    // returns true even when the login API fails (shadow build / no DB).
-    if (!(await hasInstinctToken(page))) {
-      await page.goto(`${target.baseUrl}/`, { waitUntil: "domcontentloaded" });
-      await page.evaluate(() => {
-        localStorage.setItem("instinct_token", "test-token-not-validated");
-        localStorage.setItem(
-          "instinct_user",
-          JSON.stringify({
-            id: "u-test",
-            role: "ops",
-            name: "Test",
-            email: "test@instinct.local",
-          }),
-        );
-      });
-    }
 
     /* Both initial-load and post-upload refetch return the same
        summary with survey=null. The route counts how many times we
@@ -295,24 +273,13 @@ test.describe("Porsche class summary E2E", () => {
   test("manual survey upload that quarantines surfaces a visible alert + does not reload", async ({
     page,
   }) => {
+    // Install the stub token BEFORE any navigation — addInitScript runs
+    // on every page mount, so the dashboard layout sees a token on first
+    // render and doesn't router.push("/login") (which races our next
+    // navigation and produces net::ERR_ABORTED). Real sign-in (if creds
+    // resolve) will overwrite via setInstinctSession.
+    await stubInstinctSession(page);
     await signInIfPossible(page, target);
-    // Trust the WRITTEN token, not the return value — signInIfPossible
-    // returns true even when the login API fails (shadow build / no DB).
-    if (!(await hasInstinctToken(page))) {
-      await page.goto(`${target.baseUrl}/`, { waitUntil: "domcontentloaded" });
-      await page.evaluate(() => {
-        localStorage.setItem("instinct_token", "test-token-not-validated");
-        localStorage.setItem(
-          "instinct_user",
-          JSON.stringify({
-            id: "u-test",
-            role: "ops",
-            name: "Test",
-            email: "test@instinct.local",
-          }),
-        );
-      });
-    }
 
     await page.route(API_URL, async (route) => {
       await route.fulfill({
@@ -389,24 +356,13 @@ test.describe("Porsche class summary E2E", () => {
   test("manual survey upload that surfaces an HTTP error shows a visible alert", async ({
     page,
   }) => {
+    // Install the stub token BEFORE any navigation — addInitScript runs
+    // on every page mount, so the dashboard layout sees a token on first
+    // render and doesn't router.push("/login") (which races our next
+    // navigation and produces net::ERR_ABORTED). Real sign-in (if creds
+    // resolve) will overwrite via setInstinctSession.
+    await stubInstinctSession(page);
     await signInIfPossible(page, target);
-    // Trust the WRITTEN token, not the return value — signInIfPossible
-    // returns true even when the login API fails (shadow build / no DB).
-    if (!(await hasInstinctToken(page))) {
-      await page.goto(`${target.baseUrl}/`, { waitUntil: "domcontentloaded" });
-      await page.evaluate(() => {
-        localStorage.setItem("instinct_token", "test-token-not-validated");
-        localStorage.setItem(
-          "instinct_user",
-          JSON.stringify({
-            id: "u-test",
-            role: "ops",
-            name: "Test",
-            email: "test@instinct.local",
-          }),
-        );
-      });
-    }
 
     await page.route(API_URL, async (route) => {
       await route.fulfill({
@@ -455,24 +411,13 @@ test.describe("Porsche class summary E2E", () => {
   test("renders a clean error state when the API returns 404", async ({
     page,
   }) => {
+    // Install the stub token BEFORE any navigation — addInitScript runs
+    // on every page mount, so the dashboard layout sees a token on first
+    // render and doesn't router.push("/login") (which races our next
+    // navigation and produces net::ERR_ABORTED). Real sign-in (if creds
+    // resolve) will overwrite via setInstinctSession.
+    await stubInstinctSession(page);
     await signInIfPossible(page, target);
-    // Trust the WRITTEN token, not the return value — signInIfPossible
-    // returns true even when the login API fails (shadow build / no DB).
-    if (!(await hasInstinctToken(page))) {
-      await page.goto(`${target.baseUrl}/`, { waitUntil: "domcontentloaded" });
-      await page.evaluate(() => {
-        localStorage.setItem("instinct_token", "test-token-not-validated");
-        localStorage.setItem(
-          "instinct_user",
-          JSON.stringify({
-            id: "u-test",
-            role: "ops",
-            name: "Test",
-            email: "test@instinct.local",
-          }),
-        );
-      });
-    }
 
     await page.route(API_URL, async (route) => {
       await route.fulfill({
