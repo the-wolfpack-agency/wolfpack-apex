@@ -73,7 +73,10 @@ jobs:
     # SMOKE_TEST_PASSWORD. If this job alarms, first verify those secrets
     # match the row in instinct_team_members.
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 20m budget: ~8m for npm ci + playwright install + Next.js compile
+    # warmup, ~3-4m per Playwright attempt, plus one retry on flake.
+    # The previous 10m cap killed retries mid-flight.
+    timeout-minutes: 20
     needs: poll-probe
     steps:
       - uses: actions/checkout@v4

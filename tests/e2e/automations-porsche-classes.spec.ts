@@ -90,25 +90,30 @@ test.describe("/automations — porsche-classes flow", () => {
     await porscheRow.click();
 
     /* ---------- /automations/porsche-classes overview ----------
-       Next.js routes this URL to the DEDICATED porsche-classes page
-       (src/app/(dashboard)/automations/porsche-classes/page.tsx), not
-       the generic [automationId] page. The dedicated page exposes the
-       weekly-class list under different testids — assert the page
-       rendered successfully by waiting for EITHER the populated list
-       OR the empty-state surface (both are valid 200 outcomes).
-       Cold-start budget on prod can spike past 10s, so use 30s. */
+       Next.js routes this URL to the DEDICATED porsche-classes page,
+       not the generic [automationId] page. Check the page mounted
+       first (cheap, fast — `this-week-back` link is unconditional),
+       THEN check the data section under a longer budget. A page that's
+       still in its "Loading classes…" state is a valid render — the
+       data section just needs more time on cold-start Vercel + Postgres
+       + Microsoft-Graph counts. */
     await page.waitForURL(/\/automations\/porsche-classes$/, { timeout: 10_000 });
+    await expect(
+      page.getByTestId("this-week-back"),
+      "porsche-classes page must mount within 15s",
+    ).toBeVisible({ timeout: 15_000 });
+
     const weekList = page.getByTestId("this-week-list");
     const weekEmpty = page.getByTestId("this-week-empty");
     const weekErr = page.getByTestId("this-week-error");
     const rendered = await Promise.race([
-      weekList.first().waitFor({ state: "visible", timeout: 30_000 }).then(() => "list" as const),
-      weekEmpty.first().waitFor({ state: "visible", timeout: 30_000 }).then(() => "empty" as const),
-      weekErr.first().waitFor({ state: "visible", timeout: 30_000 }).then(() => "error" as const),
+      weekList.first().waitFor({ state: "visible", timeout: 45_000 }).then(() => "list" as const),
+      weekEmpty.first().waitFor({ state: "visible", timeout: 45_000 }).then(() => "empty" as const),
+      weekErr.first().waitFor({ state: "visible", timeout: 45_000 }).then(() => "error" as const),
     ]).catch(() => "timeout" as const);
     expect(
       rendered,
-      "porsche-classes overview must render the list, empty state, or an explicit error within 30s",
+      "porsche-classes data section must render list/empty/error within 45s",
     ).not.toBe("timeout");
     expect(rendered, "porsche-classes overview must not surface a hard error").not.toBe("error");
 
