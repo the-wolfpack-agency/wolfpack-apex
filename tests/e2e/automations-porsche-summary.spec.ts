@@ -17,6 +17,7 @@
 import { test, expect } from "@playwright/test";
 import {
   collectConsoleAndNetworkFailures,
+  hasInstinctToken,
   resolveSmokeTarget,
   signInIfPossible,
 } from "./helpers/smoke-helpers";
@@ -82,8 +83,10 @@ test.describe("Porsche class summary E2E", () => {
     // Auth: prefer real sign-in; else stub a token so the page stops
     // bouncing to /login. The intercepted API response means the route
     // never actually validates the token, so this is safe in test.
-    const signedIn = await signInIfPossible(page, target);
-    if (!signedIn) {
+    await signInIfPossible(page, target);
+    // Trust the WRITTEN token, not the return value — signInIfPossible
+    // returns true even when the login API fails (shadow build / no DB).
+    if (!(await hasInstinctToken(page))) {
       await page.goto(`${target.baseUrl}/`, { waitUntil: "domcontentloaded" });
       await page.evaluate(() => {
         localStorage.setItem("instinct_token", "test-token-not-validated");
@@ -190,8 +193,10 @@ test.describe("Porsche class summary E2E", () => {
   test("manual survey upload that lands on a DIFFERENT class shows wrong-class alert", async ({
     page,
   }) => {
-    const signedIn = await signInIfPossible(page, target);
-    if (!signedIn) {
+    await signInIfPossible(page, target);
+    // Trust the WRITTEN token, not the return value — signInIfPossible
+    // returns true even when the login API fails (shadow build / no DB).
+    if (!(await hasInstinctToken(page))) {
       await page.goto(`${target.baseUrl}/`, { waitUntil: "domcontentloaded" });
       await page.evaluate(() => {
         localStorage.setItem("instinct_token", "test-token-not-validated");
@@ -290,8 +295,10 @@ test.describe("Porsche class summary E2E", () => {
   test("manual survey upload that quarantines surfaces a visible alert + does not reload", async ({
     page,
   }) => {
-    const signedIn = await signInIfPossible(page, target);
-    if (!signedIn) {
+    await signInIfPossible(page, target);
+    // Trust the WRITTEN token, not the return value — signInIfPossible
+    // returns true even when the login API fails (shadow build / no DB).
+    if (!(await hasInstinctToken(page))) {
       await page.goto(`${target.baseUrl}/`, { waitUntil: "domcontentloaded" });
       await page.evaluate(() => {
         localStorage.setItem("instinct_token", "test-token-not-validated");
@@ -382,8 +389,10 @@ test.describe("Porsche class summary E2E", () => {
   test("manual survey upload that surfaces an HTTP error shows a visible alert", async ({
     page,
   }) => {
-    const signedIn = await signInIfPossible(page, target);
-    if (!signedIn) {
+    await signInIfPossible(page, target);
+    // Trust the WRITTEN token, not the return value — signInIfPossible
+    // returns true even when the login API fails (shadow build / no DB).
+    if (!(await hasInstinctToken(page))) {
       await page.goto(`${target.baseUrl}/`, { waitUntil: "domcontentloaded" });
       await page.evaluate(() => {
         localStorage.setItem("instinct_token", "test-token-not-validated");
@@ -446,8 +455,10 @@ test.describe("Porsche class summary E2E", () => {
   test("renders a clean error state when the API returns 404", async ({
     page,
   }) => {
-    const signedIn = await signInIfPossible(page, target);
-    if (!signedIn) {
+    await signInIfPossible(page, target);
+    // Trust the WRITTEN token, not the return value — signInIfPossible
+    // returns true even when the login API fails (shadow build / no DB).
+    if (!(await hasInstinctToken(page))) {
       await page.goto(`${target.baseUrl}/`, { waitUntil: "domcontentloaded" });
       await page.evaluate(() => {
         localStorage.setItem("instinct_token", "test-token-not-validated");

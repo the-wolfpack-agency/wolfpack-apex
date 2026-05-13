@@ -70,6 +70,20 @@ export async function signInIfPossible(
   return true;
 }
 
+/**
+ * Returns true iff the real-login flow actually wrote a token into
+ * localStorage. Use this when a spec needs to know whether to fall
+ * back to a stubbed test token. `signInIfPossible` historically
+ * returns `true` just for "attempt was made", so don't read it as
+ * "session is real."
+ */
+export async function hasInstinctToken(page: Page): Promise<boolean> {
+  const token = await page
+    .evaluate(() => localStorage.getItem("instinct_token") ?? "")
+    .catch(() => "");
+  return Boolean(token);
+}
+
 export interface ConsoleFailure {
   kind: "console" | "network";
   detail: string;
