@@ -117,7 +117,13 @@ test.describe("Porsche class summary E2E", () => {
     // Header — class meta.
     const header = page.getByTestId("summary-header");
     await expect(header).toContainText("BA101");
-    await expect(header).toContainText("2026-04-13");
+    // The page renders class_date via formatClassDate() → human-readable
+    // form (e.g. "Mon, Apr 13, 2026"), NOT the raw ISO. Assert on the
+    // pieces that survive that transformation: month abbreviation +
+    // day number + year. The format is locale-sensitive ("Apr"/"April"),
+    // so use a regex over a single literal.
+    await expect(header).toContainText(/Apr(?:il)? 13/);
+    await expect(header).toContainText("2026");
     await expect(header).toContainText("Westlake");
 
     // Action buttons present.
