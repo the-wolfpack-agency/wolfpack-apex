@@ -192,6 +192,10 @@ export function collectConsoleAndNetworkFailures(page: Page) {
         /\/api\/assistant(\?|$|\/)/,
         /\/api\/me\/welcome-tooltip(\?|$)/,
         /\/api\/user-nav-prefs(\?|$)/,
+        // /merge-suggestions is a fire-and-forget enrichment fetch on the
+        // summary detail page — if it 401s the main summary content still
+        // renders, so don't sink summary specs on it.
+        /\/api\/automations\/[^/]+\/summaries\/[^/]+\/merge-suggestions(\?|$)/,
       ];
       if (status === 401 && BENIGN_401_PATHS.some((rx) => rx.test(url))) return;
       failures.push({
