@@ -58,8 +58,16 @@ export async function signInIfPossible(
   const submit = opts.submitSelector ?? 'button[type="submit"]';
 
   await page.goto(`${target.baseUrl}/login`, { waitUntil: "domcontentloaded" });
+  // /login is "use client" and wraps the form in <Suspense> — under
+  // `domcontentloaded`, the form may not be hydrated yet. Wait for the
+  // input to actually appear before giving up (was: instant isVisible
+  // check that returned false on a slow CI cold-start).
   const emailInput = page.locator(emailField).first();
-  if (!(await emailInput.isVisible().catch(() => false))) return false;
+  const formReady = await emailInput
+    .waitFor({ state: "visible", timeout: 15_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!formReady) return false;
   await emailInput.fill(target.email);
   await page.locator(passwordField).first().fill(target.password);
   await page.locator(submit).first().click();
