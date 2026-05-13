@@ -89,19 +89,28 @@ test.describe("/automations — porsche-classes flow", () => {
     await expect(porscheRow).toBeVisible({ timeout: 20_000 });
     await porscheRow.click();
 
-    /* ---------- /automations/porsche-classes overview ---------- */
+    /* ---------- /automations/porsche-classes overview ----------
+       Next.js routes this URL to the DEDICATED porsche-classes page
+       (src/app/(dashboard)/automations/porsche-classes/page.tsx), not
+       the generic [automationId] page. The dedicated page exposes the
+       weekly-class list under different testids — assert the page
+       rendered successfully by waiting for EITHER the populated list
+       OR the empty-state surface (both are valid 200 outcomes).
+       Cold-start budget on prod can spike past 10s, so use 30s. */
     await page.waitForURL(/\/automations\/porsche-classes$/, { timeout: 10_000 });
-    await expect(page.getByTestId("automation-tiles")).toBeVisible({
-      timeout: 10_000,
-    });
-    // Tiles render numeric content (or "0") — never blank.
-    for (const id of ["tile-classes", "tile-artifacts", "tile-exceptions"]) {
-      const tile = page.getByTestId(id);
-      await expect(tile).toBeVisible();
-      const text = (await tile.innerText()).trim();
-      expect(text.length).toBeGreaterThan(0);
-      expect(/\d+/.test(text), `tile ${id} contains a number`).toBe(true);
-    }
+    const weekList = page.getByTestId("this-week-list");
+    const weekEmpty = page.getByTestId("this-week-empty");
+    const weekErr = page.getByTestId("this-week-error");
+    const rendered = await Promise.race([
+      weekList.first().waitFor({ state: "visible", timeout: 30_000 }).then(() => "list" as const),
+      weekEmpty.first().waitFor({ state: "visible", timeout: 30_000 }).then(() => "empty" as const),
+      weekErr.first().waitFor({ state: "visible", timeout: 30_000 }).then(() => "error" as const),
+    ]).catch(() => "timeout" as const);
+    expect(
+      rendered,
+      "porsche-classes overview must render the list, empty state, or an explicit error within 30s",
+    ).not.toBe("timeout");
+    expect(rendered, "porsche-classes overview must not surface a hard error").not.toBe("error");
 
     /* ---------- /changes ---------- */
     const changesLink = page.getByTestId("link-changes");
