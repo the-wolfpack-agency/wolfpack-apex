@@ -86,11 +86,14 @@ export async function hasInstinctToken(page: Page): Promise<boolean> {
 
 /**
  * Install a stub token into localStorage on EVERY page mount in this
- * context — must be called BEFORE any navigation so the dashboard
- * layout's auth-guard sees a token on first render and doesn't
- * router.push("/login") (which races test navigations and produces
- * net::ERR_ABORTED). Tests that intercept the data API never
- * validate the token, so the stub is safe.
+ * context AND route the auth endpoints to success responses so the
+ * (dashboard) layout's fetchWithRefresh chain doesn't see an expired
+ * stub token, call refresh, get 401, clearInstinctSession() (which
+ * wipes our stub), and redirect to /login.
+ *
+ * Must be called BEFORE any navigation. Tests that intercept the data
+ * API never actually validate the token server-side, so the stub is
+ * safe.
  */
 export async function stubInstinctSession(
   page: Page,
@@ -102,12 +105,29 @@ export async function stubInstinctSession(
     name: overrides.name ?? "Test",
     email: overrides.email ?? "test@instinct.local",
   };
+  // 1. Seed localStorage on every page mount.
   await page.addInitScript((u) => {
     if (!localStorage.getItem("instinct_token")) {
       localStorage.setItem("instinct_token", "test-token-not-validated");
       localStorage.setItem("instinct_user", JSON.stringify(u));
     }
   }, user);
+  // 2. Keep the auth-refresh chain happy so client-auth.ts doesn't
+  //    clearInstinctSession() and redirect to /login.
+  await page.route("**/api/auth/whoami", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ token: "test-token-not-validated", user }),
+    });
+  });
+  await page.route("**/api/auth/refresh", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ token: "test-token-not-validated", user }),
+    });
+  });
 }
 
 export interface ConsoleFailure {
