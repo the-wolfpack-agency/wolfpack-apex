@@ -68,15 +68,10 @@ jobs:
           fi
 
   user-e2e:
-    # Disabled 2026-05-13 — the SMOKE_TEST_EMAIL/PASSWORD secrets point at
-    # a user whose row in instinct_team_members is unknown (the secret
-    # value can't be read back). Rather than dance with a dedicated
-    # smoke account today, suspend this job. poll-probe above is the
-    # load-bearing signal; user-flow regressions still surface via the
-    # AgenticQA Full Pipeline on every push.
-    # Re-enable: remove this `if: false` line and rotate the secrets to
-    # a dedicated smoke-e2e@thewolfpack.agency account with role=dev.
-    if: false
+    # Auth: smoke-e2e@thewolfpack.agency, role=dev (created 2026-05-13).
+    # Credentials live in GitHub Secrets SMOKE_TEST_EMAIL +
+    # SMOKE_TEST_PASSWORD. If this job alarms, first verify those secrets
+    # match the row in instinct_team_members.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: poll-probe
