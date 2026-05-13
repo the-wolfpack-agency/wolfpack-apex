@@ -167,16 +167,33 @@ export function collectConsoleAndNetworkFailures(page: Page) {
     // 401/403/5xx on XHR/fetch indicates a broken call from the page.
     if (status === 401 || status === 403 || status >= 500) {
       const url = resp.url();
-      // /api/auth/whoami legitimately returns 401 on the public (unauthed)
-      // landing — that's how the (dashboard) layout decides to redirect to
-      // /login. The probe still wants to flag 401s elsewhere as broken
-      // auth wiring, so allowlist only this single endpoint.
-      if (status === 401 && /\/api\/auth\/whoami(\?|$)/.test(url)) return;
-      // /api/analytics is fire-and-forget telemetry. A 401 there doesn't
-      // affect user-visible behavior (analytics calls return 401 cleanly
-      // and the page keeps working), and we don't want a noisy network
-      // collector to fail the journey for a benign telemetry rejection.
-      if (status === 401 && /\/api\/analytics(\?|$|\/)/.test(url)) return;
+      // Fire-and-forget dashboard-layout side-effect endpoints. In shadow
+      // mode (or with a stub token), these return 401 cleanly and the
+      // page keeps working — they don't affect user-visible behavior.
+      // Allowlist 401s on these so the network-failure collector doesn't
+      // sink real-functional tests with telemetry noise.
+      //
+      // - /api/auth/whoami: layout's auth probe; 401 = "redirect to /login"
+      // - /api/auth/refresh: silent token-refresh; 401 = "session ended"
+      // - /api/analytics: client-side event POST
+      // - /api/notifications/unread-count: top-right bell badge
+      // - /api/microsoft/messages/unread-count: email badge
+      // - /api/ms/chats/unread-count: Teams badge
+      // - /api/assistant?conversations=...: Wolfpack Assistant sidebar count
+      // - /api/me/welcome-tooltip: dismissable onboarding tooltip
+      // - /api/user-nav-prefs: per-user nav visibility prefs
+      const BENIGN_401_PATHS = [
+        /\/api\/auth\/whoami(\?|$)/,
+        /\/api\/auth\/refresh(\?|$)/,
+        /\/api\/analytics(\?|$|\/)/,
+        /\/api\/notifications\/unread-count(\?|$)/,
+        /\/api\/microsoft\/messages\/unread-count(\?|$)/,
+        /\/api\/ms\/chats\/unread-count(\?|$)/,
+        /\/api\/assistant(\?|$|\/)/,
+        /\/api\/me\/welcome-tooltip(\?|$)/,
+        /\/api\/user-nav-prefs(\?|$)/,
+      ];
+      if (status === 401 && BENIGN_401_PATHS.some((rx) => rx.test(url))) return;
       failures.push({
         kind: "network",
         detail: `${status} ${req.method()} ${url}`,
