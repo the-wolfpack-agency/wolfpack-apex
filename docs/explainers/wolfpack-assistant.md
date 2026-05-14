@@ -108,9 +108,9 @@ The tool-first pipeline is the cost moat. Every competitor that calls the LLM on
 
 ### How a non-technical reader can verify
 
-- "Tool-first routing": [`src/lib/assistant/orchestrator.ts`](../../src/lib/assistant/orchestrator.ts), line comment "Everything the orchestrator does is zero-token, the LLM is only invoked downstream of `tryToolAnswer() === null`."
-- "Six deterministic tools": [`src/lib/assistant/tools/`](../../src/lib/assistant/tools/) directory, count the files (calendar-availability, brain-history, mail-search, goals-lookup, financials-metric, meetings-on-date).
-- "Org-wide correction capture": [`src/lib/assistant/learning.ts`](../../src/lib/assistant/learning.ts), see `detectCorrection()` and the `instinct_org_facts` table.
+- "Tool-first routing": [`src/lib/assistant/orchestrator.ts`](src/lib/assistant/orchestrator.ts), line comment "Everything the orchestrator does is zero-token, the LLM is only invoked downstream of `tryToolAnswer() === null`."
+- "Six deterministic tools": [`src/lib/assistant/tools/`](src/lib/assistant/tools/) directory, count the files (calendar-availability, brain-history, mail-search, goals-lookup, financials-metric, meetings-on-date).
+- "Org-wide correction capture": [`src/lib/assistant/learning.ts`](src/lib/assistant/learning.ts), see `detectCorrection()` and the `instinct_org_facts` table.
 - "Sources in every answer": every tool result includes a `source` field that the UI renders as a clickable link.
 
 ---
@@ -119,17 +119,17 @@ The tool-first pipeline is the cost moat. Every competitor that calls the LLM on
 
 Read in order:
 
-1. The orchestrator: [`src/lib/assistant/orchestrator.ts`](../../src/lib/assistant/orchestrator.ts). The flow is: `classifyIntent()`, dispatch to matching tool, return result. Falls back to RAG only when no tool matches.
-2. Intent routing: [`src/lib/assistant/intent-router.ts`](../../src/lib/assistant/intent-router.ts). Deterministic regex and keyword matching. Returns `IntentMatch` with confidence. No LLM.
-3. The six tools: [`src/lib/assistant/tools/`](../../src/lib/assistant/tools/).
+1. The orchestrator: [`src/lib/assistant/orchestrator.ts`](src/lib/assistant/orchestrator.ts). The flow is: `classifyIntent()`, dispatch to matching tool, return result. Falls back to RAG only when no tool matches.
+2. Intent routing: [`src/lib/assistant/intent-router.ts`](src/lib/assistant/intent-router.ts). Deterministic regex and keyword matching. Returns `IntentMatch` with confidence. No LLM.
+3. The six tools: [`src/lib/assistant/tools/`](src/lib/assistant/tools/).
    - `calendar-availability.ts`, `meetings-on-date.ts`: Microsoft Graph calendar API.
    - `mail-search.ts`: Microsoft Graph mail search with relevance ranking.
    - `goals-lookup.ts`: queries the goals table.
    - `financials-metric.ts`: queries pre-aggregated financial views.
    - `brain-history.ts`: queries the knowledge / brain store for prior conversations.
-4. Learning loop: [`src/lib/assistant/learning.ts`](../../src/lib/assistant/learning.ts). When a user follows up with a correction ("no, it is Porsche"), `detectCorrection()` (regex-based, no LLM) parses the structured fact and writes it to `instinct_org_facts`. Every future Assistant prompt is grounded with these facts.
-5. RAG fallback: [`src/lib/knowledge/`](../../src/lib/knowledge/). Semantic search over the org's knowledge base (Qdrant vectors), feeds the top-K results into the LLM context. The LLM is only invoked here, and only when the retrieval confidence justifies the cost.
-6. UI: [`src/app/(dashboard)/assistant/page.tsx`](../../src/app/(dashboard)/assistant/page.tsx). Sidebar chat surface. Renders markdown with source links.
+4. Learning loop: [`src/lib/assistant/learning.ts`](src/lib/assistant/learning.ts). When a user follows up with a correction ("no, it is Porsche"), `detectCorrection()` (regex-based, no LLM) parses the structured fact and writes it to `instinct_org_facts`. Every future Assistant prompt is grounded with these facts.
+5. RAG fallback: [`src/lib/knowledge/`](src/lib/knowledge/). Semantic search over the org's knowledge base (Qdrant vectors), feeds the top-K results into the LLM context. The LLM is only invoked here, and only when the retrieval confidence justifies the cost.
+6. UI: [`src/app/(dashboard)/assistant/page.tsx`](src/app/(dashboard)/assistant/page.tsx). Sidebar chat surface. Renders markdown with source links.
 
 ### How to add a new tool
 
