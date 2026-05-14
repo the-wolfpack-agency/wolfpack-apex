@@ -40,6 +40,95 @@ export interface CorrectionExtraction {
 }
 
 /* ------------------------------------------------------------------ */
+/* Safety: role allowlist, value sanitization, rate limit              */
+/* ------------------------------------------------------------------ */
+
+/* Roles permitted to write into the org-wide fact store. Membership in
+   this set is enforced before any INSERT — even an authenticated user
+   without an allowed role cannot poison the learning loop. */
+const ALLOWED_FACT_ROLES = new Set<string>([
+  "admin",
+  "owner",
+  "cto",
+  "ceo",
+  "lead",
+  "manager",
+  "member",
+]);
+
+/* Per-user write budget. Above this rate, captures are silently dropped
+   for the rest of the hour. Prevents rapid-fire poisoning. */
+const FACT_RATE_LIMIT_PER_HOUR = 20;
+
+const FACT_VALUE_MAX_LEN = 500;
+const FACT_ATTRIBUTE_MAX_LEN = 80;
+
+/**
+ * Neutralize a value before it is stored or rendered into an LLM
+ * grounding block. Strips line breaks, control characters, and caps
+ * length. The combination defeats the canonical persistent-prompt-
+ * injection payload (a multi-line value that closes the grounding
+ * fence and starts a new "system:" instruction).
+ */
+export function sanitizeFactValue(s: string): string {
+  if (!s) return "";
+  return s
+    .replace(/[\r\n\t\v\f]+/g, " ")
+    .replace(/[\x00-\x1F\x7F]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, FACT_VALUE_MAX_LEN);
+}
+
+function sanitizeFactAttribute(s: string): string {
+  if (!s) return "fact";
+  const clean = s
+    .replace(/[^\w\s-]/g, "")
+    .replace(/\s+/g, "_")
+    .toLowerCase()
+    .slice(0, FACT_ATTRIBUTE_MAX_LEN);
+  return clean || "fact";
+}
+
+/**
+ * Reject patterns that look like attempts to override the LLM's
+ * system prompt at render time. Defense-in-depth alongside
+ * sanitization — if a payload survives the strip, an obvious
+ * prompt-injection cue still fails the allowlist.
+ */
+export function isAllowedFactValue(s: string): boolean {
+  if (!s || s.length === 0) return false;
+  if (s.length > FACT_VALUE_MAX_LEN) return false;
+  if (/\bignore (?:prior|previous|above|the\s+above)\b/i.test(s)) return false;
+  if (/\b(?:system|assistant)\s*:\s*you are\b/i.test(s)) return false;
+  if (/<\|im_(?:start|end)\|>/i.test(s)) return false;
+  return true;
+}
+
+/**
+ * Per-user-per-hour rate limit on fact writes. SQL window query, no
+ * external state. Returns true when the user is under their budget.
+ */
+async function isUnderRateLimit(userId: string): Promise<boolean> {
+  if (!process.env.DATABASE_URL) return true;
+  try {
+    const r = await safeQuery<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM instinct_org_facts
+        WHERE source_user_id = $1
+          AND created_at > now() - interval '1 hour'`,
+      [userId],
+    );
+    const n = parseInt(r.rows[0]?.count ?? "0", 10);
+    return n < FACT_RATE_LIMIT_PER_HOUR;
+  } catch {
+    /* On DB error, fail closed — refuse the write rather than allow
+       unbounded captures. */
+    return false;
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Detection                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -190,16 +279,34 @@ export async function captureFactFromCorrection(args: {
   userRole: string;
 }): Promise<OrgFact | null> {
   if (!process.env.DATABASE_URL) return null;
+
+  /* Role allowlist — only members in the allowed set may write to the
+     org-wide store. A future invite-only role would be rejected here
+     until added to the allowlist deliberately. */
+  if (!ALLOWED_FACT_ROLES.has(args.userRole)) return null;
+
+  /* Per-user-per-hour rate limit. Above the budget, drop silently. */
+  if (!(await isUnderRateLimit(args.userId))) return null;
+
   const correction = detectCorrection(
     args.userMessage,
     args.priorAssistantContent,
   );
   if (!correction) return null;
-  const subject = extractSubject(args.priorAssistantContent);
-  if (!subject) return null;
+
+  /* Sanitize at the boundary: strip control characters and cap length,
+     then reject obvious prompt-injection cues. */
+  const cleanValue = sanitizeFactValue(correction.value);
+  if (!isAllowedFactValue(cleanValue)) return null;
+  const cleanAttribute = sanitizeFactAttribute(correction.attribute);
+
+  const subjectRaw = extractSubject(args.priorAssistantContent);
+  if (!subjectRaw) return null;
+  const cleanSubject = sanitizeFactValue(subjectRaw);
+  if (!cleanSubject) return null;
 
   try {
-    const subjectNormalized = normalizeSubject(subject);
+    const subjectNormalized = normalizeSubject(cleanSubject);
 
     /* Supersede any existing active fact for the same (subject, attribute)
        — newer corrections always win. The old row stays for history. */
@@ -210,7 +317,7 @@ export async function captureFactFromCorrection(args: {
           AND attribute = $2
           AND superseded_by IS NULL
           AND value = $3`,
-      [subjectNormalized, correction.attribute, correction.value],
+      [subjectNormalized, cleanAttribute, cleanValue],
     );
 
     const r = await safeQuery<{
@@ -225,10 +332,10 @@ export async function captureFactFromCorrection(args: {
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id, subject, attribute, value`,
       [
-        subject,
+        cleanSubject,
         subjectNormalized,
-        correction.attribute,
-        correction.value,
+        cleanAttribute,
+        cleanValue,
         args.priorAssistantMessageId,
         args.userId,
         args.userRole,
@@ -244,7 +351,7 @@ export async function captureFactFromCorrection(args: {
             AND attribute = $3
             AND id <> $1
             AND superseded_by IS NULL`,
-        [r.rows[0].id, subjectNormalized, correction.attribute],
+        [r.rows[0].id, subjectNormalized, cleanAttribute],
       );
     }
 
@@ -292,12 +399,18 @@ export async function findRelevantFacts(
   }
 }
 
-/** Build a small grounding block to inject into the system prompt. */
+/** Build a small grounding block to inject into the system prompt.
+ *  Every field is sanitized at render time as defense-in-depth — even
+ *  if a poisoned value bypassed write-side validation, control chars
+ *  and newlines cannot escape the grounding fence here. */
 export function renderFactsBlock(facts: OrgFact[]): string {
   if (facts.length === 0) return "";
-  const lines = facts.map(
-    (f) => `- ${f.subject} → ${f.attribute}: ${f.value}`,
-  );
+  const lines = facts.map((f) => {
+    const subject = sanitizeFactValue(f.subject);
+    const attribute = sanitizeFactAttribute(f.attribute);
+    const value = sanitizeFactValue(f.value);
+    return `- ${subject} → ${attribute}: ${value}`;
+  });
   return [
     "Verified facts the team has provided about subjects in this question:",
     ...lines,
