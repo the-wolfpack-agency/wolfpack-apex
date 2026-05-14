@@ -23,5 +23,7 @@ jobs:
     with:
       repo: ${{ github.repository }}
       branch: ${{ github.ref_name }}
-      apply: 'false'
+      # Boolean per the reusable workflow's input type; the prior 'false'
+      # string caused startup_failure on push (run 25887380989).
+      apply: false
     secrets: inherit
