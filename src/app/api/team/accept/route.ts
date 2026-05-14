@@ -24,15 +24,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
   }
 
-  // Look up the invite
+  // Look up the invite (migration 134 added expires_at — read it so we
+  // can return a clear 410 Gone instead of a generic 404 when the
+  // window has lapsed; the UI hints at "ask your admin to resend.")
   const invite = await safeQuery<{
     id: string;
     email: string;
     role: string;
     status: string;
     invited_by: string;
+    expires_at: string | Date | null;
   }>(
-    "SELECT id, email, role, status, invited_by FROM instinct_invites WHERE token = $1 LIMIT 1",
+    "SELECT id, email, role, status, invited_by, expires_at FROM instinct_invites WHERE token = $1 LIMIT 1",
     [body.token],
   );
 
@@ -44,12 +47,31 @@ export async function POST(req: NextRequest) {
   }
 
   if (invite.rows.length === 0) {
-    return NextResponse.json({ error: "Invalid or expired invite token" }, { status: 404 });
+    return NextResponse.json({ error: "Invalid invite token" }, { status: 404 });
   }
 
   const inv = invite.rows[0];
   if (inv.status !== "pending") {
     return NextResponse.json({ error: "Invite already accepted" }, { status: 409 });
+  }
+  if (inv.expires_at) {
+    const expMs =
+      inv.expires_at instanceof Date
+        ? inv.expires_at.getTime()
+        : Date.parse(String(inv.expires_at));
+    if (!Number.isNaN(expMs) && expMs < Date.now()) {
+      trackEvent("system.team_invite_expired", inv.id, inv.role, {
+        invite_id: inv.id,
+        invited_email: inv.email,
+      });
+      return NextResponse.json(
+        {
+          error: "Invite has expired",
+          hint: "Ask your admin to resend the invite.",
+        },
+        { status: 410 },
+      );
+    }
   }
 
   // Create the team member

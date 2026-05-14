@@ -387,6 +387,14 @@ export type InstinctEventType =
   // loop's threshold tuning + lets us measure which filter saves the
   // most client-facing hallucinations over time.
   | "assistant.quality_flag_raised"
+  // Invite was looked up but the expires_at column says it lapsed.
+  // Drives the "ask your admin to resend" UX hint + a tenant-side
+  // dashboard counter so admins see expirations before users complain.
+  | "system.team_invite_expired"
+  // Admin re-sent an existing pending invite, bumping its expiry.
+  // Metadata: { invite_id, invited_email, invited_role, extension_days,
+  // email_delivered }.
+  | "system.team_invite_resent"
   // Zero-token page-facts priority hit. Fires when the assistant answers
   // a "what is / how do I use <page>" question directly from the static
   // page-facts registry, before the knowledge base or RAG priorities
