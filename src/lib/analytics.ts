@@ -373,6 +373,19 @@ export type InstinctEventType =
   // Tool failed (validation, capability, no_match, needs_confirmation, internal).
   // Metadata: { tool, code, message }.
   | "assistant.tool_failed"
+  // Action tool dispatch persisted a pending confirmation (waiting on
+  // the user's next-turn "confirm" / "cancel"). Metadata: { tool,
+  // pending_id, description, expires_at }.
+  | "assistant.action_pending"
+  // The user explicitly confirmed a pending action; the dispatcher
+  // executed the underlying handler. Metadata: { tool, pending_id }.
+  | "assistant.action_confirmed"
+  // The user explicitly cancelled a pending action. Metadata: { tool,
+  // pending_id }.
+  | "assistant.action_cancelled"
+  // A pending action lapsed without confirmation. Fired by the cleanup
+  // path. Metadata: { count }.
+  | "assistant.action_expired"
   | "assistant.fallback_to_rag"
   | "assistant.fallback_to_ai"
   // Related-pages chip + source chip click-through. Every response now

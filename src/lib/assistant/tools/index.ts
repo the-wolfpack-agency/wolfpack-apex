@@ -19,6 +19,12 @@ import "./search-mail-tool";
 import "./get-calendar-availability-tool";
 import "./get-goals-tool";
 
+// Phase 3 — action tools (mutate state, behind the requiresConfirmation
+// gate). Dispatcher returns needs_confirmation on first dispatch; the
+// chat handler persists a pending action; the user's next turn confirms
+// or cancels.
+import "./save-team-fact-tool";
+
 export { tryDispatchTool } from "./dispatcher";
 export { getTools, getToolByName, registerTool, __resetRegistryForTests } from "./registry";
 export type {
@@ -29,3 +35,13 @@ export type {
   ToolResult,
   ToolSuccess,
 } from "./types";
+
+// Phase-3 confirmation flow surfaces
+export {
+  savePendingAction,
+  consumeMostRecentPendingAction,
+  detectConfirmationIntent,
+  cleanupExpiredPendingActions,
+} from "./pending-actions";
+export type { PendingActionRow, ConfirmIntent } from "./pending-actions";
+export { persistTeamFact } from "./save-team-fact-tool";

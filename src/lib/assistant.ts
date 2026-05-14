@@ -32,7 +32,14 @@ import {
   runAnswerQualityChecks,
   validateCitations,
 } from "@/lib/assistant/answer-quality";
-import { tryDispatchTool } from "@/lib/assistant/tools";
+import {
+  tryDispatchTool,
+  savePendingAction,
+  consumeMostRecentPendingAction,
+  detectConfirmationIntent,
+  persistTeamFact,
+  getToolByName,
+} from "@/lib/assistant/tools";
 import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
 
 // ---------------------------------------------------------------------------
@@ -575,6 +582,52 @@ export async function chat(
     topics: topics.join(","),
   });
 
+  // --- Priority -3: Confirm / cancel a pending action ---
+  // The user's previous turn dispatched an action tool, the dispatcher
+  // returned needs_confirmation, and we persisted a pending row. If
+  // this turn is a confirmation phrase (yes / confirm / proceed / etc.)
+  // we execute. If it's a cancellation phrase, we drop it. Anything
+  // else falls through to the rest of the priority chain.
+  const confirmIntent = detectConfirmationIntent(message);
+  if (confirmIntent !== "none") {
+    const row = await consumeMostRecentPendingAction(userId, confirmIntent);
+    if (row) {
+      if (confirmIntent === "cancel") {
+        trackEvent("assistant.action_cancelled", userId, userRole, {
+          tool: row.tool_name,
+          pending_id: row.id,
+        });
+        const cancelMsg = `Cancelled. Nothing was saved.`;
+        const msgId = await dbSaveMessage(convId, "assistant", cancelMsg, "tool", 0);
+        await dbUpdateConversationStats(convId, 0);
+        return {
+          response: cancelMsg,
+          source: "tool",
+          tokensUsed: 0,
+          conversationId: convId,
+          messageId: msgId,
+        };
+      }
+      /* confirmIntent === "confirm" → execute the pending action. */
+      const exec = await executePendingAction(row, userId, userRole);
+      trackEvent("assistant.action_confirmed", userId, userRole, {
+        tool: row.tool_name,
+        pending_id: row.id,
+      });
+      const msgId = await dbSaveMessage(convId, "assistant", exec.answer, "tool", 0);
+      await dbUpdateConversationStats(convId, 0);
+      return {
+        response: exec.answer,
+        source: "tool",
+        tokensUsed: 0,
+        conversationId: convId,
+        messageId: msgId,
+      };
+    }
+    /* Confirmation phrase but no pending row — treat as ordinary text
+       and fall through. */
+  }
+
   // --- Priority -2: Deterministic tool dispatch ---
   // Phase 1 of the agentic-executor work. Before any cache / RAG / LLM,
   // try to match the question to a deterministic tool (see
@@ -606,11 +659,44 @@ export async function chat(
   // silently falling through. The user got matched to a tool; they
   // deserve to know why it didn't run.
   if (toolResult && !toolResult.result.ok && toolResult.result.code !== "no_match") {
+    /* Action-tool needs_confirmation: persist the pending action and
+       return the confirm prompt. The user's next "yes" / "confirm"
+       triggers Priority -3 above on the following turn. */
+    if (toolResult.result.code === "needs_confirmation") {
+      const tool = getToolByName(toolResult.tool);
+      /* Re-run matchIntent so we have the structured params to persist.
+         (The dispatcher consumed them but only used them for validation;
+         we need them again for the pending row.) */
+      const params = (tool?.matchIntent(message) ?? {}) as Record<string, unknown>;
+      const description = toolResult.result.message.replace(/^tool \S+ /, "");
+      const saved = await savePendingAction({
+        userId,
+        toolName: toolResult.tool,
+        params: params as Record<string, unknown>,
+        description,
+      });
+      trackEvent("assistant.action_pending", userId, userRole, {
+        tool: toolResult.tool,
+        pending_id: saved.id,
+        description: saved.description.slice(0, 200),
+      });
+      const promptMsg =
+        `I'll ${describePendingAction(toolResult.tool, params)}.\n\n` +
+        `Say **"confirm"** to proceed, or **"cancel"** to drop it. ` +
+        `(This auto-cancels in 5 minutes.)`;
+      const msgId = await dbSaveMessage(convId, "assistant", promptMsg, "tool", 0);
+      await dbUpdateConversationStats(convId, 0);
+      return {
+        response: promptMsg,
+        source: "tool",
+        tokensUsed: 0,
+        conversationId: convId,
+        messageId: msgId,
+      };
+    }
     const failureMsg =
       toolResult.result.code === "capability"
         ? `That tool (${toolResult.tool}) needs a higher-privilege role than yours.`
-        : toolResult.result.code === "needs_confirmation"
-        ? `That looks like an action that needs confirmation. (Action-tools land in a later phase — for now I only run read-only tools.)`
         : `I couldn't run ${toolResult.tool}: ${toolResult.result.message.slice(0, 200)}`;
     const msgId = await dbSaveMessage(convId, "assistant", failureMsg, "tool", 0);
     await dbUpdateConversationStats(convId, 0);
@@ -1349,6 +1435,56 @@ interface BrainContext {
  * The returned string is already formatted with markdown citations so
  * the chat UI can render source links without extra wiring.
  */
+/* ------------------------------------------------------------------ */
+/* Phase-3 action-tool execution                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Execute a confirmed pending action. Dispatches on tool_name to the
+ * matching action handler. Each new action tool needs a case here.
+ *
+ * Read-only tools never land here (they don't go through the
+ * needs_confirmation flow). Only action tools that requiresConfirmation
+ * = true.
+ */
+async function executePendingAction(
+  row: import("@/lib/assistant/tools/pending-actions").PendingActionRow,
+  userId: string,
+  userRole: string,
+): Promise<{ answer: string }> {
+  if (row.tool_name === "save_team_fact") {
+    const p = row.params as { subject?: string; attribute?: string; value?: string };
+    if (!p.subject || !p.attribute || !p.value) {
+      return { answer: "The pending action's parameters were incomplete; nothing saved." };
+    }
+    const result = await persistTeamFact({
+      userId,
+      userRole,
+      subject: p.subject,
+      attribute: p.attribute,
+      value: p.value,
+    });
+    if (result.ok) {
+      return {
+        answer: `✓ Saved: **${p.subject}** → **${p.attribute}**: ${p.value}`,
+      };
+    }
+    return {
+      answer: `I tried to save it, but the write was refused (${result.reason}). Nothing was stored.`,
+    };
+  }
+  return { answer: `Unknown pending action tool (${row.tool_name}); nothing executed.` };
+}
+
+/** Human-readable preview of a pending action for the confirm prompt. */
+function describePendingAction(toolName: string, params: Record<string, unknown>): string {
+  if (toolName === "save_team_fact") {
+    const p = params as { subject?: string; attribute?: string; value?: string };
+    return `save: **${p.subject ?? "?"}** → **${p.attribute ?? "?"}**: ${p.value ?? "?"}`;
+  }
+  return `run ${toolName}`;
+}
+
 async function tryBrain(
   message: string,
   userId: string,
