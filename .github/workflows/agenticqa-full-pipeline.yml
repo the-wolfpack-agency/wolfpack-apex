@@ -15,10 +15,7 @@ on:
         default: 'Manual pipeline trigger'
 
 permissions:
-  contents: write
-  pull-requests: write
-  security-events: write
-  actions: read
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,7 +28,7 @@ jobs:
 
   pipeline-rescue:
     name: "Pipeline Health Check"
-    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/pipeline-health-check.yml@main
+    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/pipeline-health-check.yml@664a57b1089a6d83061f01198dc7cd2d5fb7fbca # main
 
   lint:
     needs: [pipeline-rescue]
@@ -40,8 +37,8 @@ jobs:
     name: "Code Linting"
     # Stays inline: generic tsc + eslint, no value in wrapping.
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.4
         with:
           node-version: "22"
           cache: npm
@@ -60,15 +57,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     name: "SRE Auto-Fix Linting"
+    permissions:
+      contents: write
     # Stays inline: needs caller GITHUB_TOKEN to commit + push fixes back
     # to main.  Reusable workflows can't easily propagate that without
     # granting wider secrets:inherit which we don't want.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.4
         with:
           node-version: "22"
           cache: npm
@@ -104,8 +103,8 @@ jobs:
       DATABASE_URL: ''
       APEX_JWT_SECRET: 'ci-test-secret-not-real'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.4
         with:
           node-version: "22"
           cache: npm
@@ -117,7 +116,7 @@ jobs:
         run: npx tsc --noEmit
       - name: Upload test output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: jest-results-shard-${{ matrix.shard }}
           path: jest-output.log
@@ -250,7 +249,7 @@ jobs:
     env:
       AGENTICQA_API: http://127.0.0.1:8765
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
       - name: Check if PAT is configured
         id: pat-check
@@ -266,7 +265,7 @@ jobs:
 
       - name: Clone AgenticQA source
         if: steps.pat-check.outputs.configured == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
           repository: nhomyk/AgenticQA
           token: ${{ secrets.AGENTICQA_REPO_PAT }}
@@ -276,7 +275,7 @@ jobs:
 
       - name: Set up Python
         if: steps.pat-check.outputs.configured == 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
         with:
           python-version: '3.11'
 
@@ -488,14 +487,14 @@ jobs:
       DATABASE_URL: ''
       APEX_JWT_SECRET: 'ci-test-secret-not-real'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.4
         with:
           node-version: "22"
           cache: npm
       - run: npm ci
       - name: Cache Next.js build
-        uses: actions/cache@v4
+        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
         with:
           path: .next/cache
           key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**/*') }}
@@ -555,7 +554,7 @@ jobs:
     needs: [phase-1-testing, agenticqa-orchestrator]
     if: always()
     name: "Phase 1: SDET Analysis"
-    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/agent-sdet.yml@main
+    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/agent-sdet.yml@664a57b1089a6d83061f01198dc7cd2d5fb7fbca # main
     with:
       artifact_pattern: 'jest-results-shard-*'
       node_version: '22'
@@ -565,7 +564,7 @@ jobs:
     needs: [phase-1-testing, agenticqa-orchestrator]
     if: always()
     name: "Phase 1: Compliance Analysis"
-    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/agent-compliance.yml@main
+    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/agent-compliance.yml@664a57b1089a6d83061f01198dc7cd2d5fb7fbca # main
     with:
       src_path: 'src/'
 
@@ -577,7 +576,7 @@ jobs:
     needs: [sdet-analysis, compliance-analysis, shadow-verification, phase-1-playwright]
     if: always()
     name: "Phase 2: Fullstack Build Verification"
-    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/agent-fullstack.yml@main
+    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/agent-fullstack.yml@664a57b1089a6d83061f01198dc7cd2d5fb7fbca # main
     with:
       artifact_pattern: 'jest-results-shard-*'
       verify_build: true
@@ -598,8 +597,8 @@ jobs:
     # cataloging, migration count).  Generic version would lose those
     # signals.
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.4
         with:
           node-version: "22"
           cache: npm
@@ -640,7 +639,7 @@ jobs:
       - sre-readiness
     if: always()
     name: "Pipeline Summary"
-    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/pipeline-summary.yml@main
+    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/pipeline-summary.yml@664a57b1089a6d83061f01198dc7cd2d5fb7fbca # main
     with:
       pipeline_rescue_result: ${{ needs.pipeline-rescue.result }}
       lint_result: ${{ needs.lint.result }}

@@ -20,6 +20,9 @@ on:
     - cron: "*/30 12-22 * * 1-5"
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 concurrency:
   group: automations-porsche-poll
   cancel-in-progress: false
