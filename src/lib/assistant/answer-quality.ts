@@ -174,10 +174,22 @@ export function gateConfidence(
   hitCount: number | undefined,
 ): QualityFlag | null {
   if (typeof topScore !== "number") return null;
-  if (topScore >= MIN_CONFIDENCE_SCORE && (hitCount ?? 0) > 0) return null;
+  /* Only fire when grounding was retrieved but is too weak. With zero
+     hits the answer is free-floating general-knowledge from the LLM
+     (e.g. "what is Nurburgring?") — there's nothing to gate against
+     because we never claimed to ground it. Citation gate (A3) handles
+     the "claims to cite a source but didn't" case separately.
+
+     Prior behavior: tryBrain returned emptyContext with topScore: 0
+     when no hits existed, which made this gate fire `block` and the
+     answer was swapped for the canned reject message, killing every
+     general-knowledge response (regression reported 2026-05-14). */
+  const hits = hitCount ?? 0;
+  if (hits === 0) return null;
+  if (topScore >= MIN_CONFIDENCE_SCORE) return null;
   return {
     filter: "confidence",
-    reason: `top retrieval score ${topScore.toFixed(2)} < ${MIN_CONFIDENCE_SCORE} (hits=${hitCount ?? 0})`,
+    reason: `top retrieval score ${topScore.toFixed(2)} < ${MIN_CONFIDENCE_SCORE} (hits=${hits})`,
     severity: "block",
   };
 }

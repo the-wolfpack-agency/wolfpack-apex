@@ -1103,6 +1103,8 @@ describe("knowledge cache bypass for meeting / date queries", () => {
         view_count: 1,
         tokens_used: 0,
         tags: [],
+        /* High similarity: same topic, slight rephrase. */
+        sim: 0.78,
       },
     ]);
     const result = await chat("How does auth work?", "u-1", "cto");
@@ -1113,6 +1115,91 @@ describe("knowledge cache bypass for meeting / date queries", () => {
       (c: any[]) => c[0] === "assistant.knowledge_cache_bypassed",
     );
     expect(bypassed).toHaveLength(0);
+  });
+});
+
+/* ---------------------------------------------------------------------
+ * Regression 2026-05-14 — KB similarity quality gate.
+ *
+ * The bug: searchKnowledge uses Postgres trigram similarity > 0.1 as
+ * the SQL retrieval floor (so a slightly-rephrased question still
+ * finds the right entry). tryKnowledgeBase was returning the top hit
+ * with no further quality gate, so "what is Nurburgring?" loose-
+ * matched "what is Morning Briefing?" on the shared "what is "
+ * trigrams (~0.25 sim) and served the unrelated Morning Briefing
+ * answer — never falling through to the LLM.
+ *
+ * These tests pin the contract: a loose-similarity hit must NOT
+ * short-circuit the LLM. The threshold lives in assistant.ts as
+ * KB_MIN_SIMILARITY (currently 0.45).
+ * --------------------------------------------------------------- */
+describe("regression 2026-05-14 — KB similarity quality gate", () => {
+  test("low-similarity hit (cross-topic) does NOT short-circuit as KB answer", async () => {
+    /* Loose trigram match — different topic, just "what is " overlap.
+       This is the EXACT shape of the prod regression: a "what is X"
+       question hit the trigram floor against a "what is Y" KB entry
+       and served Y's answer with a "From knowledge base" badge. */
+    mockSearchKnowledge.mockResolvedValue([
+      {
+        id: "k-briefing",
+        question: "what is Morning Briefing?",
+        answer: "The Morning Briefing appears at the top of the dashboard…",
+        source: "docs",
+        rating: 5,
+        view_count: 1,
+        tokens_used: 0,
+        tags: [],
+        sim: 0.25,
+      },
+    ]);
+
+    const result = await chat("what is Nurburgring?", "u-1", "cto");
+    /* The whole point of the gate: do NOT serve the unrelated entry.
+       Whatever the downstream source ends up being (ai / cannot_answer /
+       grounding-derived), it must NOT be knowledge_cache, and the
+       Morning-Briefing text must NOT appear in the response. */
+    expect(result.source).not.toBe("knowledge_cache");
+    expect(result.response).not.toContain("Morning Briefing");
+  });
+
+  test("high-similarity hit (same topic, slight rephrase) still serves from KB", async () => {
+    mockSearchKnowledge.mockResolvedValue([
+      {
+        id: "k-auth",
+        question: "How does the auth system work?",
+        answer: "JWT-based auth with 15-minute access tokens.",
+        source: "docs",
+        rating: 5,
+        view_count: 1,
+        tokens_used: 0,
+        tags: [],
+        /* Same topic, different wording — trigram sim ≈ 0.55. */
+        sim: 0.55,
+      },
+    ]);
+    const result = await chat("how does auth work", "u-1", "cto");
+    expect(result.source).toBe("knowledge_cache");
+    expect(result.response).toContain("JWT");
+  });
+
+  test("missing sim (e.g. demo entry) bypasses the gate (back-compat)", async () => {
+    /* DEMO_ENTRIES in shadow mode don't carry sim; preserving the old
+       permissive behavior for that small curated set is intentional. */
+    mockSearchKnowledge.mockResolvedValue([
+      {
+        id: "k-demo",
+        question: "How does auth work?",
+        answer: "JWT.",
+        source: "docs",
+        rating: 5,
+        view_count: 1,
+        tokens_used: 0,
+        tags: [],
+        /* sim is undefined */
+      },
+    ]);
+    const result = await chat("how does auth work", "u-1", "cto");
+    expect(result.source).toBe("knowledge_cache");
   });
 });
 

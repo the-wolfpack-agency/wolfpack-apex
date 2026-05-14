@@ -47,9 +47,14 @@ describe("gateConfidence", () => {
     expect(flag?.filter).toBe("confidence");
   });
 
-  test("blocks when zero hits even at high score", () => {
-    const flag = gateConfidence(0.9, 0);
-    expect(flag?.severity).toBe("block");
+  test("no-ops when zero hits (general-knowledge answer, nothing to gate)", () => {
+    /* Prior behavior was `block` here — that killed every general-
+       knowledge answer because tryBrain returned topScore: 0 with no
+       hits when DB was empty. The correct semantic: if no grounding
+       was retrieved, the answer isn't claiming brain-backing, so
+       there's nothing to confidence-gate. (Regression 2026-05-14.) */
+    expect(gateConfidence(0.9, 0)).toBeNull();
+    expect(gateConfidence(0, 0)).toBeNull();
   });
 
   test("no-ops when score undefined (no retrieval was attempted)", () => {

@@ -1291,6 +1291,20 @@ interface KnowledgeMatch {
   sources: AssistantSourceRef[];
 }
 
+/* Trigram similarity floor for "this KB entry actually answers the
+   question." searchKnowledge SQL retrieves anything > 0.1, but that
+   floor exists so a slightly-rephrased question still finds the
+   right entry — NOT to decide whether the entry is relevant. Without
+   a real quality gate here, "what is Nurburgring?" matched
+   "what is Morning Briefing?" on the shared "what is" trigrams and
+   served the Dashboard answer (regression reported 2026-05-14).
+
+   0.45 is empirically the boundary where same-topic questions still
+   land (e.g. "how does auth work" vs "how does the auth system work"
+   sits around 0.55) but cross-topic "what is X" vs "what is Y" falls
+   below (typically 0.2–0.35). */
+const KB_MIN_SIMILARITY = 0.45;
+
 async function tryKnowledgeBase(message: string): Promise<KnowledgeMatch | null> {
   try {
     const results = await searchKnowledge(message, 5);
@@ -1301,6 +1315,12 @@ async function tryKnowledgeBase(message: string): Promise<KnowledgeMatch | null>
     const usable = results.filter((r) => r.rating === null || r.rating > 2);
     if (usable.length === 0) return null;
     const top = usable[0];
+    /* Quality gate: only serve from KB when the top match is actually
+       similar enough to be plausibly the right answer. Rows from
+       shadow-mode demo data don't carry sim (KnowledgeEntry.sim is
+       undefined) and bypass the gate — the demo fixture's small,
+       curated set is implicitly relevant. */
+    if (top.sim !== undefined && top.sim < KB_MIN_SIMILARITY) return null;
     // Surface up to 3 sources so the user can click through to the
     // underlying KB entries. Each source carries a stable id + a
     // deep link into /knowledge so the UI chip is clickable.

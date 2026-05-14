@@ -26,6 +26,12 @@ export interface KnowledgeEntry {
   tags: string[];
   created_at: string;
   updated_at: string;
+  /** Postgres trigram similarity (0..1) between the search query and
+   *  this entry's question, populated by `searchKnowledge`. Surfaced so
+   *  callers can apply a quality threshold — the SQL floor of 0.1 is a
+   *  "show me anything" floor, not an "answer this" floor. Absent for
+   *  rows not retrieved via similarity search (e.g. demo entries). */
+  sim?: number;
 }
 
 export interface KnowledgeGap {
@@ -473,5 +479,6 @@ function rowToKnowledge(row: Record<string, unknown>): KnowledgeEntry {
     tags: (row.tags as string[]) ?? [],
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
+    sim: row.sim != null ? Number(row.sim) : undefined,
   };
 }
