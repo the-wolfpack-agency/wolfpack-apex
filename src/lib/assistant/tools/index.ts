@@ -25,6 +25,12 @@ import "./get-goals-tool";
 // or cancels.
 import "./save-team-fact-tool";
 
+// Phase 4 — connector-backed tools (external CRMs / systems via
+// generic REST adapter). Register AFTER connectors so the registry
+// has them at tool-handler invocation time.
+import "@/lib/assistant/connectors";
+import "./get-external-record-tool";
+
 export { tryDispatchTool } from "./dispatcher";
 export { getTools, getToolByName, registerTool, __resetRegistryForTests } from "./registry";
 export type {

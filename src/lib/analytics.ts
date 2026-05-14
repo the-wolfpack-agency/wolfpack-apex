@@ -386,6 +386,14 @@ export type InstinctEventType =
   // A pending action lapsed without confirmation. Fired by the cleanup
   // path. Metadata: { count }.
   | "assistant.action_expired"
+  // Phase-4 connector telemetry. Fires from every external-system
+  // request the connector framework dispatches.
+  //   assistant.connector_succeeded { connector, duration_ms, code:"ok" }
+  //   assistant.connector_failed    { connector, duration_ms, code:
+  //     "not_configured" | "auth_failed" | "rate_limited" | "not_found"
+  //     | "remote_error" | "network" | "validation" }
+  | "assistant.connector_succeeded"
+  | "assistant.connector_failed"
   | "assistant.fallback_to_rag"
   | "assistant.fallback_to_ai"
   // Related-pages chip + source chip click-through. Every response now
