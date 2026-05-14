@@ -422,6 +422,20 @@ describe("Meeting transcript read API", () => {
       expect(typeof results[0].snippet).toBe("string");
     }
   });
+
+  test("searchMeetingTranscripts SQL excludes future-dated recordings", async () => {
+    /* Regression for 2026-05-14: Assistant answered "Your first recorded
+       meeting with Max Fuerst was on June 4, 2026" (a future date). The
+       transcript table had a future-recorded_at row from a scheduled
+       meeting placeholder. The query must filter those out so the
+       assistant never describes a future date as a past meeting. */
+    plaudMockSafeQuery.mockResolvedValueOnce({ rows: [], fromCache: false });
+    await plaud.searchMeetingTranscripts("meeting with max", 3);
+    const calls = plaudMockSafeQuery.mock.calls;
+    expect(calls.length).toBe(1);
+    const sql = String(calls[0][0]);
+    expect(sql).toMatch(/recorded_at\s+IS\s+NULL\s+OR\s+t?\.?recorded_at\s*<=\s*now\(\)/i);
+  });
 });
 
 // ---------------------------------------------------------------------------

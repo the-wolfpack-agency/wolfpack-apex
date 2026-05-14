@@ -523,13 +523,21 @@ export async function searchMeetingTranscripts(
     quality_status: "pass" | "warn" | "reject";
     ingested_at: string;
   }>(
+    /* Future-recorded-at exclusion: a "recorded" meeting cannot be in
+       the future. Scheduled-meeting placeholders synced from Microsoft
+       Graph can land here with a future timestamp; without this guard
+       the assistant would describe a future date as a "first meeting"
+       (2026-05-14 bug, screenshot in handoff). NULL recorded_at is
+       accepted — those rows fall back to ingested_at for ordering. */
     `SELECT t.id, t.file_id, t.owner_user_id,
             m.name AS owner_name,
             t.title, t.summary, t.transcript_text,
             t.recorded_at, t.duration_seconds, t.quality_status, t.ingested_at
      FROM instinct_meeting_transcripts t
      LEFT JOIN instinct_team_members m ON m.id = t.owner_user_id
-     WHERE t.quality_status <> 'reject' AND (${conditions.join(" OR ")})
+     WHERE t.quality_status <> 'reject'
+       AND (t.recorded_at IS NULL OR t.recorded_at <= now())
+       AND (${conditions.join(" OR ")})
      ORDER BY COALESCE(t.recorded_at, t.ingested_at) DESC
      LIMIT 50`,
     params,

@@ -190,6 +190,53 @@ describe("saveAnswer", () => {
     expect(result!.id).toMatch(/^demo-/);
     expect(result!.question).toBe("Q?");
   });
+
+  test("refuses to cache an answer that describes a past event with a future date", async () => {
+    /* Regression for 2026-05-14: the Assistant cached
+       "Your first recorded meeting with Max Fuerst was on June 4, 2026"
+       (today is 2026-05-14). Caching a hallucinated future-date past
+       event poisons every subsequent ask. saveAnswer must veto. The date
+       below (2099) is chosen to stay in the future regardless of when
+       this suite runs — avoids fake-timer setup. */
+    setDatabaseUrl("postgres://localhost/test");
+
+    const poisoned =
+      "Your first recorded meeting with Max Fuerst was on June 4, 2099, during the Wolfpack Weekly Tech Team Call.";
+    const result = await saveAnswer(poisoned, poisoned, "llm", "u1");
+
+    expect(result).toBeNull();
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(trackEvent).toHaveBeenCalledWith(
+      "knowledge.answer_rejected",
+      "u1",
+      "dev",
+      expect.objectContaining({ reason: "past_event_future_date" }),
+    );
+  });
+
+  test("still caches forward-looking copy ('scheduled for', 'will be') when no past-tense verb is present", async () => {
+    setDatabaseUrl("postgres://localhost/test");
+    mockQuery.mockResolvedValueOnce({ rows: [FAKE_ROW] });
+
+    const future =
+      "The next sync is scheduled for June 4, 2099 at 2 pm. We will discuss the launch.";
+    const result = await saveAnswer(future, future, "llm", "u1");
+
+    expect(result).not.toBeNull();
+    expect(mockQuery).toHaveBeenCalled();
+  });
+
+  test("caches past-event answers with valid past dates", async () => {
+    setDatabaseUrl("postgres://localhost/test");
+    mockQuery.mockResolvedValueOnce({ rows: [FAKE_ROW] });
+
+    const past =
+      "Your first recorded meeting with Max was on April 12, 2020 during the kickoff.";
+    const result = await saveAnswer(past, past, "llm", "u1");
+
+    expect(result).not.toBeNull();
+    expect(mockQuery).toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

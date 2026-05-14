@@ -147,6 +147,39 @@ export async function askQuestion(
 }
 
 // ---------------------------------------------------------------------------
+// Don't cache obviously-wrong answers.
+//
+// An answer that describes a past event with a future date (e.g. "Your
+// first recorded meeting was on June 4, 2026" said today, 2026-05-14)
+// is a hallucination. If the cache stores it, every subsequent ask will
+// reinforce the wrong answer. Defense-in-depth: refuse to cache.
+//
+// The check is narrow: we only veto when the answer matches a "past
+// event" verb + a date string we can parse + that date is strictly
+// later than today. Forward-looking copy ("scheduled for...") still
+// caches fine.
+// ---------------------------------------------------------------------------
+const PAST_EVENT_VERB_RE =
+  /\b(was|were|happened|occurred|took place|met|recorded|signed|closed|attended|joined|completed|finished|spoke|talked|discussed|reviewed|launched|shipped|published|fired|hired|left|departed)\b/i;
+const DATE_IN_ANSWER_RE =
+  /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:,\s*\d{4})?\b/g;
+
+function answerImpliesFuturePastEvent(answer: string, now = new Date()): boolean {
+  if (!answer || !PAST_EVENT_VERB_RE.test(answer)) return false;
+  const tomorrow = new Date(now);
+  tomorrow.setUTCHours(0, 0, 0, 0);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  let m: RegExpExecArray | null;
+  DATE_IN_ANSWER_RE.lastIndex = 0;
+  while ((m = DATE_IN_ANSWER_RE.exec(answer))) {
+    const parsed = Date.parse(m[0]);
+    if (Number.isNaN(parsed)) continue;
+    if (parsed >= tomorrow.getTime()) return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // saveAnswer
 // ---------------------------------------------------------------------------
 export async function saveAnswer(
@@ -158,6 +191,16 @@ export async function saveAnswer(
   filePath?: string,
   tokensUsed?: number,
 ): Promise<KnowledgeEntry | null> {
+  // Reject answers that describe a past event with a future date — they're
+  // hallucinations and caching them poisons every subsequent ask.
+  if (answerImpliesFuturePastEvent(answer)) {
+    trackEvent("knowledge.answer_rejected", userId, "dev", {
+      reason: "past_event_future_date",
+      source,
+      tokens_used: tokensUsed ?? 0,
+    });
+    return null;
+  }
   if (!process.env.DATABASE_URL) {
     const entry: KnowledgeEntry = {
       id: `demo-${Date.now()}`,
