@@ -10,6 +10,10 @@ import { sendAssistantMessageOffline } from "@/lib/assistant-drafts-offline";
 import { RagSnapshotBadge } from "@/components/RagSnapshotBadge";
 
 import { renderMessageContent } from "@/lib/assistant/render-markdown";
+import {
+  ingestFileFromChat,
+  formatIngestSystemMessage,
+} from "@/lib/assistant/chat-ingest";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -243,6 +247,12 @@ export default function InstinctChat({
 
     const newFiles: AttachedFile[] = [];
     const errors: string[] = [];
+    /* Files we'll also ingest into the Central Brain so they become
+       permanently searchable across the org. We pair (file, blob)
+       because handleFiles is invoked from drag/drop AND from the
+       <input> picker — both supply File blobs, but readFile() only
+       returns text/base64 content. */
+    const toIngest: File[] = [];
 
     for (const file of incoming) {
       const err = isAllowedFile(file);
@@ -257,6 +267,7 @@ export default function InstinctChat({
       }
       try {
         newFiles.push(await readFile(file));
+        toIngest.push(file);
       } catch {
         errors.push(`Could not read "${file.name}"`);
       }
@@ -267,6 +278,32 @@ export default function InstinctChat({
     }
     if (newFiles.length > 0) {
       setAttachedFiles((prev) => [...prev, ...newFiles]);
+    }
+
+    /* Fire-and-forget Brain ingest, in parallel, AFTER attachment state
+       is updated so the UI stays responsive. Each ingest result pushes
+       a system message into the chat thread so the user sees what
+       landed permanently versus what stayed transient. */
+    for (const file of toIngest) {
+      ingestFileFromChat(file)
+        .then((result) => {
+          const sysMsg = formatIngestSystemMessage(file.name, result);
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: sysMsg,
+              source: "system" as Message["source"],
+              tokensUsed: 0,
+              timestamp: new Date().toISOString(),
+            },
+          ]);
+        })
+        .catch(() => {
+          /* Never block the chat. The helper already returns structured
+             failures; an actual throw here would only come from a
+             pre-fetch error which is rare enough to swallow. */
+        });
     }
   }
 
