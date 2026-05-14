@@ -12,6 +12,13 @@
 // Phase 1 — read-only tools
 import "./get-org-facts";
 
+// Phase 2 — additional read-only tools (more-specific first so they win
+// the intent cascade before a general tool catches them).
+import "./get-financials-metric-tool"; // CTO/CEO only — most-specific
+import "./search-mail-tool";
+import "./get-calendar-availability-tool";
+import "./get-goals-tool";
+
 export { tryDispatchTool } from "./dispatcher";
 export { getTools, getToolByName, registerTool, __resetRegistryForTests } from "./registry";
 export type {
