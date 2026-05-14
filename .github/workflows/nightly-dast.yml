@@ -10,9 +10,12 @@ on:
         required: false
         default: ''
 
+permissions:
+  contents: read
+
 jobs:
   dast:
-    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/nightly-dast.yml@main
+    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/nightly-dast.yml@664a57b1089a6d83061f01198dc7cd2d5fb7fbca # main
     with:
       prod_url: ${{ github.event.inputs.target != '' && github.event.inputs.target || 'https://wolfpack-apex.vercel.app' }}
     secrets: inherit

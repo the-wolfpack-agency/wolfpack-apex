@@ -14,9 +14,12 @@ on:
       - 'src/lib/tenant-resolver.ts'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   red-team:
-    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/red-team-governance.yml@main
+    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/red-team-governance.yml@664a57b1089a6d83061f01198dc7cd2d5fb7fbca # main
     with:
       repo: ${{ github.repository }}
       branch: ${{ github.ref_name }}

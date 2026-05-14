@@ -7,11 +7,13 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   validate:
-    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/pipeline-validation.yml@main
+    permissions:
+      contents: read
+      issues: write
+    uses: the-wolfpack-agency/AgenticQA-core/.github/workflows/pipeline-validation.yml@664a57b1089a6d83061f01198dc7cd2d5fb7fbca # main
     with:
       severity: 'medium'
       fail_on_findings: 'false'
