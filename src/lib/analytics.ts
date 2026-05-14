@@ -18,6 +18,10 @@ export type InstinctEventType =
   | "knowledge.answer_found"
   | "knowledge.answer_not_found"
   | "knowledge.answer_rated"
+  // Cache-write veto from saveAnswer when the candidate answer looks
+  // wrong (e.g. past-tense verb + future date — hallucinated). Metadata:
+  // { reason, source, tokens_used }.
+  | "knowledge.answer_rejected"
   | "knowledge.doc_generated"
   | "knowledge.doc_downloaded"
   | "knowledge.doc_revised"
@@ -378,6 +382,11 @@ export type InstinctEventType =
   //       {"knowledge","brain","tool","meeting","analytics"}.
   | "assistant.link_clicked"
   | "assistant.source_viewed"
+  // Answer-quality filter fired (see src/lib/assistant/answer-quality.ts).
+  // Metadata: { filter, severity, reason, verdict }. Drives the learning
+  // loop's threshold tuning + lets us measure which filter saves the
+  // most client-facing hallucinations over time.
+  | "assistant.quality_flag_raised"
   // Zero-token page-facts priority hit. Fires when the assistant answers
   // a "what is / how do I use <page>" question directly from the static
   // page-facts registry, before the knowledge base or RAG priorities

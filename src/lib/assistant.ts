@@ -25,6 +25,11 @@ import {
   findRelevantFacts,
   renderFactsBlock,
 } from "@/lib/assistant/learning";
+import {
+  getKnownTeamNames,
+  lowConfidenceMessage,
+  runAnswerQualityChecks,
+} from "@/lib/assistant/answer-quality";
 import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
 
 // ---------------------------------------------------------------------------
@@ -816,11 +821,38 @@ export async function chat(
       aiResult.tokensUsed,
     ).catch(() => {});
 
-    const msgId = await dbSaveMessage(convId, "assistant", aiResult.content, "ai", aiResult.tokensUsed);
+    /* Answer-quality gate: validate entities + stale-doc cues on the LLM
+       output before it reaches the user. Reject-severity flags swap in
+       the deterministic low-confidence message; warn-severity flags
+       prepend an in-band notice so the user knows the answer may need a
+       second look. Every flag fires `assistant.quality_flag_raised` so
+       the learning loop can tune thresholds over time. */
+    const knownNames = await getKnownTeamNames();
+    const quality = runAnswerQualityChecks(
+      {
+        answer: aiResult.content,
+        knownNames,
+        /* The LLM path doesn't yet thread retrieval scores / source IDs
+           — those gates fire only when we have them. Entities + stale
+           still apply at this layer. */
+      },
+      { userId, userRole },
+    );
+    let safeContent = aiResult.content;
+    if (quality.verdict === "reject") {
+      safeContent = lowConfidenceMessage();
+    } else if (quality.verdict === "low_confidence") {
+      const flagReasons = quality.flags.map((f) => f.reason).join("; ");
+      safeContent =
+        `_Note: this answer may need a second look — ${flagReasons}._\n\n` +
+        aiResult.content;
+    }
+
+    const msgId = await dbSaveMessage(convId, "assistant", safeContent, "ai", aiResult.tokensUsed);
     await dbUpdateConversationStats(convId, aiResult.tokensUsed);
 
     return {
-      response: aiResult.content,
+      response: safeContent,
       source: "ai",
       tokensUsed: aiResult.tokensUsed,
       conversationId: convId,
