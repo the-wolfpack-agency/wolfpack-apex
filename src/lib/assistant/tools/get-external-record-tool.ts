@@ -16,7 +16,8 @@
  */
 
 import { z } from "zod";
-import { getConnector } from "@/lib/assistant/connectors";
+import { getConnector, buildRestConnectorForWorkspace } from "@/lib/assistant/connectors";
+import type { Connector } from "@/lib/assistant/connectors";
 import { registerTool } from "./registry";
 import type { ToolDef, ToolResult } from "./types";
 
@@ -84,8 +85,21 @@ export const getExternalRecordTool: ToolDef<Params, ExternalRecordData> = {
   paramSchema: ParamSchema,
   capability: "*",
   matchIntent: matchExternalRecordIntent,
-  async handler(params, _ctx): Promise<ToolResult<ExternalRecordData>> {
-    const connector = getConnector(params.connector);
+  async handler(params, ctx): Promise<ToolResult<ExternalRecordData>> {
+    /* Prefer per-tenant credentials from instinct_connector_credentials
+       (migration 136). Falls back to the env-registered "rest-default"
+       singleton when no row exists — preserves single-workspace deploys
+       without any DB rows. */
+    let connector: Connector | null = null;
+    if (params.connector === "rest-default") {
+      const workspaceId = ctx.workspaceId || "default";
+      connector = await buildRestConnectorForWorkspace(
+        workspaceId,
+        params.connector,
+      );
+    } else {
+      connector = getConnector(params.connector);
+    }
     if (!connector) {
       return {
         ok: false,

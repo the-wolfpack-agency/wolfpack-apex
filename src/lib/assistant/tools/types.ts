@@ -37,6 +37,13 @@ export interface ToolContext {
   userRole: string;
   /** User's email (optional — present when the auth layer surfaced it). */
   userEmail?: string;
+  /**
+   * Workspace the user is acting on behalf of. Drives per-tenant
+   * connector credential lookup. Defaults to "default" when the
+   * deployment is single-workspace. Multi-tenant deployments
+   * resolve this from the session.
+   */
+  workspaceId?: string;
 }
 
 /** Successful tool dispatch — the handler ran and produced data. */

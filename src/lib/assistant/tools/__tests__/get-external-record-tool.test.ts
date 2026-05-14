@@ -3,8 +3,10 @@
  */
 
 const mockGetConnector = jest.fn();
+const mockBuildRest = jest.fn();
 jest.mock("@/lib/assistant/connectors", () => ({
   getConnector: (...a: any[]) => mockGetConnector(...a),
+  buildRestConnectorForWorkspace: (...a: any[]) => mockBuildRest(...a),
 }));
 
 import { getExternalRecordTool } from "@/lib/assistant/tools/get-external-record-tool";
@@ -13,7 +15,16 @@ const ctx = { userId: "u1", userRole: "cto" };
 
 beforeEach(() => {
   mockGetConnector.mockReset();
+  mockBuildRest.mockReset();
 });
+
+/* The rest-default connector path runs through buildRestConnectorForWorkspace.
+   Helper that points BOTH mocks at the same stub object so tests can
+   ignore the routing detail. */
+function stubBoth(stub: any): void {
+  mockGetConnector.mockReturnValue(stub);
+  mockBuildRest.mockResolvedValue(stub);
+}
 
 describe("get_external_record — intent matching", () => {
   test.each([
@@ -49,7 +60,7 @@ describe("get_external_record — intent matching", () => {
 
 describe("get_external_record — handler", () => {
   test("returns graceful 'not configured' answer when connector exists but isn't set up", async () => {
-    mockGetConnector.mockReturnValueOnce({
+    stubBoth({
       isConfigured: () => false,
       getRecord: async () => ({ ok: false }),
     });
@@ -72,7 +83,7 @@ describe("get_external_record — handler", () => {
   });
 
   test("returns Markdown summary on a real fetched record", async () => {
-    mockGetConnector.mockReturnValueOnce({
+    stubBoth({
       isConfigured: () => true,
       getRecord: async () => ({
         ok: true,
@@ -93,7 +104,7 @@ describe("get_external_record — handler", () => {
   });
 
   test("returns 'no record found' when connector says not_found", async () => {
-    mockGetConnector.mockReturnValueOnce({
+    stubBoth({
       isConfigured: () => true,
       getRecord: async () => ({ ok: false, code: "not_found", message: "no" }),
     });
@@ -106,7 +117,7 @@ describe("get_external_record — handler", () => {
   });
 
   test("maps connector auth_failed → tool capability failure", async () => {
-    mockGetConnector.mockReturnValueOnce({
+    stubBoth({
       isConfigured: () => true,
       getRecord: async () => ({ ok: false, code: "auth_failed", message: "HTTP 401" }),
     });
@@ -119,7 +130,7 @@ describe("get_external_record — handler", () => {
   });
 
   test("maps other connector errors → tool internal failure", async () => {
-    mockGetConnector.mockReturnValueOnce({
+    stubBoth({
       isConfigured: () => true,
       getRecord: async () => ({ ok: false, code: "remote_error", message: "HTTP 500" }),
     });

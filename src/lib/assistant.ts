@@ -635,7 +635,14 @@ export async function chat(
   // ("what do we know about X", "did <client> pay this month") by
   // reading from a typed data source, zero LLM tokens. If no tool's
   // intent matches, fall through to the existing priority chain.
-  const toolResult = await tryDispatchTool(message, { userId, userRole });
+  const toolResult = await tryDispatchTool(message, {
+    userId,
+    userRole,
+    /* Single-workspace deploys default to "default". When multi-
+       workspace lands, resolve from the session (see migration 136
+       — instinct_connector_credentials is already workspace-keyed). */
+    workspaceId: "default",
+  });
   if (toolResult && toolResult.result.ok) {
     const msgId = await dbSaveMessage(
       convId,
