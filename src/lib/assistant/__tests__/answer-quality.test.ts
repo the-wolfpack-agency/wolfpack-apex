@@ -10,6 +10,11 @@ jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: any[]) => mockTrack(...a),
 }));
 
+const mockSafeQuery = jest.fn();
+jest.mock("@/lib/db", () => ({
+  safeQuery: (...a: any[]) => mockSafeQuery(...a),
+}));
+
 import {
   MIN_CONFIDENCE_SCORE,
   STALE_DOC_AGE_MS,
@@ -19,6 +24,9 @@ import {
   detectStaleClaim,
   runAnswerQualityChecks,
   lowConfidenceMessage,
+  validateCitations,
+  getAssistantStrictness,
+  __resetStrictnessCacheForTests,
 } from "@/lib/assistant/answer-quality";
 
 beforeEach(() => mockTrack.mockClear());
@@ -237,5 +245,165 @@ describe("lowConfidenceMessage", () => {
     const m = lowConfidenceMessage();
     expect(typeof m).toBe("string");
     expect(m.length).toBeGreaterThan(20);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Per-workspace strictness                                            */
+/* ------------------------------------------------------------------ */
+
+describe("strictness + runAnswerQualityChecks", () => {
+  test("permissive: warn-only flags → verdict low_confidence", () => {
+    const r = runAnswerQualityChecks(
+      {
+        answer: "Max Fuerst joined the call.",
+        topScore: 0.9,
+        hitCount: 1,
+        knownNames: ["nick"],
+        retrievedIds: [],
+      },
+      { userId: "u1", userRole: "cto", strictness: "permissive" },
+    );
+    expect(r.verdict).toBe("low_confidence");
+  });
+
+  test("strict: warn-only flags → verdict reject (no LLM voice under doubt)", () => {
+    const r = runAnswerQualityChecks(
+      {
+        answer: "Max Fuerst joined the call.",
+        topScore: 0.9,
+        hitCount: 1,
+        knownNames: ["nick"],
+        retrievedIds: [],
+      },
+      { userId: "u1", userRole: "cto", strictness: "strict" },
+    );
+    expect(r.verdict).toBe("reject");
+    expect(mockTrack).toHaveBeenCalledWith(
+      "assistant.quality_flag_raised",
+      "u1",
+      "cto",
+      expect.objectContaining({ verdict: "reject", strictness: "strict" }),
+    );
+  });
+
+  test("strict + zero flags → verdict still ok (no false positives)", () => {
+    const r = runAnswerQualityChecks(
+      {
+        answer: "Nick reviewed the doc [ref:doc-1].",
+        topScore: 0.9,
+        hitCount: 1,
+        knownNames: ["nick"],
+        retrievedIds: ["doc-1"],
+      },
+      { userId: "u1", userRole: "cto", strictness: "strict" },
+    );
+    expect(r.verdict).toBe("ok");
+    expect(r.flags).toEqual([]);
+  });
+});
+
+describe("getAssistantStrictness", () => {
+  const ORIGINAL_DB_URL = process.env.DATABASE_URL;
+  beforeEach(() => {
+    __resetStrictnessCacheForTests();
+    mockSafeQuery.mockReset();
+    process.env.DATABASE_URL = "postgres://test";
+  });
+  afterAll(() => {
+    if (ORIGINAL_DB_URL === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = ORIGINAL_DB_URL;
+  });
+
+  test("returns 'permissive' when shadow mode (no DATABASE_URL)", async () => {
+    delete process.env.DATABASE_URL;
+    expect(await getAssistantStrictness()).toBe("permissive");
+    expect(mockSafeQuery).not.toHaveBeenCalled();
+  });
+
+  test("returns 'strict' when workspace row says strict", async () => {
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [{ assistant_strictness: "strict" }],
+    });
+    expect(await getAssistantStrictness()).toBe("strict");
+  });
+
+  test("returns 'permissive' when workspace row says permissive", async () => {
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [{ assistant_strictness: "permissive" }],
+    });
+    expect(await getAssistantStrictness()).toBe("permissive");
+  });
+
+  test("returns 'permissive' when row missing or column null (pre-migration)", async () => {
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] });
+    expect(await getAssistantStrictness()).toBe("permissive");
+  });
+
+  test("caches in-process — second call within 60s does not re-query", async () => {
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [{ assistant_strictness: "strict" }],
+    });
+    await getAssistantStrictness();
+    await getAssistantStrictness();
+    expect(mockSafeQuery).toHaveBeenCalledTimes(1);
+  });
+
+  test("returns 'permissive' on DB error (fail-open — assistant remains usable)", async () => {
+    mockSafeQuery.mockRejectedValueOnce(new Error("DB down"));
+    expect(await getAssistantStrictness()).toBe("permissive");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Citation validation (tenant-scoped)                                 */
+/* ------------------------------------------------------------------ */
+
+describe("validateCitations", () => {
+  test("keeps valid [ref:X] tokens, returns kept ID set", () => {
+    const r = validateCitations(
+      "The launch is set for August [ref:doc-1]. Pricing finalized [ref:doc-2].",
+      ["doc-1", "doc-2"],
+    );
+    expect(r.cleanAnswer).toContain("[ref:doc-1]");
+    expect(r.cleanAnswer).toContain("[ref:doc-2]");
+    expect(r.keptRefs.sort()).toEqual(["doc-1", "doc-2"]);
+    expect(r.droppedRefs).toEqual([]);
+  });
+
+  test("strips [ref:X] tokens not in validSourceIds (invented citations)", () => {
+    const r = validateCitations(
+      "The launch is in August [ref:doc-1]. Margin is 40% [ref:doc-42].",
+      ["doc-1"],
+    );
+    expect(r.cleanAnswer).toContain("[ref:doc-1]");
+    expect(r.cleanAnswer).not.toContain("[ref:doc-42]");
+    expect(r.cleanAnswer).toContain("Margin is 40%.");
+    expect(r.droppedRefs).toEqual(["doc-42"]);
+    expect(r.keptRefs).toEqual(["doc-1"]);
+  });
+
+  test("empty validSourceIds strips every citation", () => {
+    const r = validateCitations(
+      "First [ref:a] second [ref:b].",
+      [],
+    );
+    expect(r.cleanAnswer).not.toMatch(/\[ref:/);
+    expect(r.droppedRefs.sort()).toEqual(["a", "b"]);
+  });
+
+  test("handles empty answer gracefully", () => {
+    const r = validateCitations("", ["doc-1"]);
+    expect(r.cleanAnswer).toBe("");
+    expect(r.droppedRefs).toEqual([]);
+    expect(r.keptRefs).toEqual([]);
+  });
+
+  test("collapses double-spaces left by stripped tokens", () => {
+    const r = validateCitations(
+      "Note  [ref:fake]  here.",
+      [],
+    );
+    expect(r.cleanAnswer).toBe("Note here.");
   });
 });

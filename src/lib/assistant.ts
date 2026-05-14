@@ -26,9 +26,11 @@ import {
   renderFactsBlock,
 } from "@/lib/assistant/learning";
 import {
+  getAssistantStrictness,
   getKnownTeamNames,
   lowConfidenceMessage,
   runAnswerQualityChecks,
+  validateCitations,
 } from "@/lib/assistant/answer-quality";
 import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
 
@@ -821,31 +823,53 @@ export async function chat(
       aiResult.tokensUsed,
     ).catch(() => {});
 
-    /* Answer-quality gate: validate entities + stale-doc cues on the LLM
-       output before it reaches the user. Reject-severity flags swap in
-       the deterministic low-confidence message; warn-severity flags
-       prepend an in-band notice so the user knows the answer may need a
-       second look. Every flag fires `assistant.quality_flag_raised` so
-       the learning loop can tune thresholds over time. */
-    const knownNames = await getKnownTeamNames();
+    /* Answer-quality gate: validate entities + stale-doc cues + citations
+       on the LLM output before it reaches the user. Reject-severity flags
+       swap in the deterministic low-confidence message; warn-severity
+       flags either pre-pend an in-band notice (permissive) or also
+       upgrade to reject (strict, for enterprise tenants). Every flag
+       fires `assistant.quality_flag_raised` so the learning loop can
+       tune thresholds over time. */
+    const [knownNames, strictness] = await Promise.all([
+      getKnownTeamNames(),
+      getAssistantStrictness(),
+    ]);
+
+    /* Citation validation: strip any [ref:X] token whose <X> isn't in the
+       set of sources we actually retrieved this turn. Prevents the LLM
+       from inventing tenant-cross-contaminated citations. The valid set
+       is empty today on the AI-fallback path (no source IDs threaded
+       through); the LLM has nothing legitimate to cite, so any [ref:X]
+       it emitted is fabricated and gets stripped. */
+    const citationCheck = validateCitations(aiResult.content, /* validSourceIds */ []);
+    if (citationCheck.droppedRefs.length > 0) {
+      trackEvent("assistant.quality_flag_raised", userId, userRole, {
+        filter: "citations",
+        severity: "block",
+        reason: `dropped ${citationCheck.droppedRefs.length} invented citation(s): ${citationCheck.droppedRefs.slice(0, 3).join(", ")}`,
+        verdict: "reject",
+        strictness,
+      });
+    }
+
     const quality = runAnswerQualityChecks(
       {
-        answer: aiResult.content,
+        answer: citationCheck.cleanAnswer,
         knownNames,
         /* The LLM path doesn't yet thread retrieval scores / source IDs
            — those gates fire only when we have them. Entities + stale
            still apply at this layer. */
       },
-      { userId, userRole },
+      { userId, userRole, strictness },
     );
-    let safeContent = aiResult.content;
+    let safeContent = citationCheck.cleanAnswer;
     if (quality.verdict === "reject") {
       safeContent = lowConfidenceMessage();
     } else if (quality.verdict === "low_confidence") {
       const flagReasons = quality.flags.map((f) => f.reason).join("; ");
       safeContent =
         `_Note: this answer may need a second look — ${flagReasons}._\n\n` +
-        aiResult.content;
+        citationCheck.cleanAnswer;
     }
 
     const msgId = await dbSaveMessage(convId, "assistant", safeContent, "ai", aiResult.tokensUsed);

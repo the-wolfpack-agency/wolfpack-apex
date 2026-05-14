@@ -73,6 +73,47 @@ export function __resetRosterCacheForTests(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* Per-workspace strictness                                            */
+/* ------------------------------------------------------------------ */
+
+export type AssistantStrictness = "permissive" | "strict";
+
+let _strictnessCache: { value: AssistantStrictness; ts: number } | null = null;
+const STRICTNESS_CACHE_MS = 60 * 1000;
+
+/**
+ * Read the workspace's assistant_strictness setting (migration 133).
+ * Cached in-process for 60s — strictness rarely changes. Defaults to
+ * "permissive" if the workspace row is missing, the column is absent
+ * (pre-migration), or we're in shadow mode.
+ */
+export async function getAssistantStrictness(): Promise<AssistantStrictness> {
+  if (!process.env.DATABASE_URL) return "permissive";
+  if (
+    _strictnessCache &&
+    Date.now() - _strictnessCache.ts < STRICTNESS_CACHE_MS
+  ) {
+    return _strictnessCache.value;
+  }
+  try {
+    const r = await safeQuery<{ assistant_strictness: string | null }>(
+      `SELECT assistant_strictness FROM instinct_workspace WHERE id = 'default' LIMIT 1`,
+    );
+    const raw = r.rows[0]?.assistant_strictness;
+    const value: AssistantStrictness = raw === "strict" ? "strict" : "permissive";
+    _strictnessCache = { value, ts: Date.now() };
+    return value;
+  } catch {
+    return "permissive";
+  }
+}
+
+/** Test seam — clear the in-process strictness cache. */
+export function __resetStrictnessCacheForTests(): void {
+  _strictnessCache = null;
+}
+
+/* ------------------------------------------------------------------ */
 /* Types                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -281,6 +322,15 @@ export interface RunQualityChecksOpts {
   /** User firing the question — for analytics attribution. */
   userId: string;
   userRole: string;
+  /**
+   * Per-workspace strictness mode. In "strict" mode every warn-level
+   * flag is upgraded to block — the verdict becomes "reject" and the
+   * caller swaps in the deterministic low-confidence message. Enterprise
+   * tenants run strict; self-serve / dev run permissive.
+   *
+   * Defaults to "permissive" if omitted.
+   */
+  strictness?: AssistantStrictness;
 }
 
 export function runAnswerQualityChecks(
@@ -309,10 +359,15 @@ export function runAnswerQualityChecks(
   );
   if (fStale) flags.push(fStale);
 
-  /* Verdict: any "block" → reject; only "warn"s → low_confidence; none → ok. */
+  /* Verdict: any "block" → reject; only "warn"s → low_confidence; none → ok.
+     In strict mode, any flag (warn OR block) becomes reject so enterprise
+     tenants never see the LLM speak under doubt. */
+  const strictness: AssistantStrictness = opts.strictness ?? "permissive";
   let verdict: QualityVerdict = "ok";
   if (flags.some((f) => f.severity === "block")) verdict = "reject";
-  else if (flags.length > 0) verdict = "low_confidence";
+  else if (flags.length > 0) {
+    verdict = strictness === "strict" ? "reject" : "low_confidence";
+  }
 
   for (const flag of flags) {
     trackEvent(
@@ -324,11 +379,72 @@ export function runAnswerQualityChecks(
         severity: flag.severity,
         reason: flag.reason,
         verdict,
+        strictness,
       },
     );
   }
 
   return { verdict, flags };
+}
+
+/* ------------------------------------------------------------------ */
+/* Citation validation                                                 */
+/* ------------------------------------------------------------------ */
+
+export interface CitationValidationResult {
+  /** Answer with invalid [ref:X] tokens removed. */
+  cleanAnswer: string;
+  /** IDs the LLM cited but that weren't in the retrieved set. */
+  droppedRefs: string[];
+  /** Distinct valid IDs that survived. */
+  keptRefs: string[];
+}
+
+/**
+ * Strip [ref:<id>] tokens from the answer when <id> is not in the
+ * actual retrieved-source set for this turn. Without this check the
+ * LLM could invent citations ("[ref:doc-42]") that look authoritative
+ * but point at nothing — exactly the kind of confidently-wrong output
+ * that breaks an enterprise demo.
+ *
+ * Cleanup is conservative: we remove the token + the leading space when
+ * present, leaving the surrounding prose intact.
+ *
+ * Per-tenant: the `validSourceIds` set is constructed by the caller
+ * from sources the user can actually see (RLS-scoped at the query
+ * layer), so a citation that survives this filter is guaranteed to
+ * resolve to a doc in the user's tenant — never to a global or
+ * cross-tenant id.
+ */
+export function validateCitations(
+  answer: string,
+  validSourceIds: string[],
+): CitationValidationResult {
+  if (!answer) {
+    return { cleanAnswer: "", droppedRefs: [], keptRefs: [] };
+  }
+  const valid = new Set(validSourceIds.map((id) => id.trim()).filter(Boolean));
+  const droppedRefs = new Set<string>();
+  const keptRefs = new Set<string>();
+
+  const cleanAnswer = answer.replace(
+    /\s?\[ref:([A-Za-z0-9_-]+)\]/g,
+    (_match, id) => {
+      const trimmed = String(id).trim();
+      if (valid.has(trimmed)) {
+        keptRefs.add(trimmed);
+        return ` [ref:${trimmed}]`;
+      }
+      droppedRefs.add(trimmed);
+      return "";
+    },
+  );
+
+  return {
+    cleanAnswer: cleanAnswer.replace(/\s{2,}/g, " ").trim(),
+    droppedRefs: [...droppedRefs],
+    keptRefs: [...keptRefs],
+  };
 }
 
 /** Build the deterministic low-confidence reply the assistant returns
