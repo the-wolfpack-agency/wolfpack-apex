@@ -106,9 +106,14 @@ export async function runCalendarAvailability(params: {
   const subject = isSelf ? "You" : resolved.displayName;
   const haveVerb = isSelf ? "have" : "has";
   const freeVerb = isSelf ? "look" : "looks";
-  const answer = busy
+  const core = busy
     ? `${subject} ${haveVerb} ${overlapping.length} meeting${overlapping.length === 1 ? "" : "s"} ${range.label}: ${summary}${overlapping.length > 3 ? ", …" : "."}`
     : `${subject} ${freeVerb} free ${range.label}.`;
+  const clarifier =
+    range.resolved === false && params.timeframeToken
+      ? `\n\nI wasn't sure what timeframe "${params.timeframeToken}" meant, so I checked today. Try a specific day ("Monday", "May 18"), week ("this week", "next week"), or range ("Monday of next week").`
+      : "";
+  const answer = core + clarifier;
 
   return {
     person: resolved.displayName,
