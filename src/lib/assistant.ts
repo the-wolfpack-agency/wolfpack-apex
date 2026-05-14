@@ -32,6 +32,7 @@ import {
   runAnswerQualityChecks,
   validateCitations,
 } from "@/lib/assistant/answer-quality";
+import { tryDispatchTool } from "@/lib/assistant/tools";
 import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
 
 // ---------------------------------------------------------------------------
@@ -45,6 +46,7 @@ export type AssistantSource =
   | "analytics"
   | "meeting_transcripts"
   | "brain"
+  | "tool"
   | "ai"
   | "fallback";
 
@@ -572,6 +574,54 @@ export async function chat(
     module: "assistant",
     topics: topics.join(","),
   });
+
+  // --- Priority -2: Deterministic tool dispatch ---
+  // Phase 1 of the agentic-executor work. Before any cache / RAG / LLM,
+  // try to match the question to a deterministic tool (see
+  // src/lib/assistant/tools/). Tools answer parameterized questions
+  // ("what do we know about X", "did <client> pay this month") by
+  // reading from a typed data source, zero LLM tokens. If no tool's
+  // intent matches, fall through to the existing priority chain.
+  const toolResult = await tryDispatchTool(message, { userId, userRole });
+  if (toolResult && toolResult.result.ok) {
+    const msgId = await dbSaveMessage(
+      convId,
+      "assistant",
+      toolResult.result.answer,
+      "tool",
+      0,
+    );
+    await dbUpdateConversationStats(convId, 0);
+    return {
+      response: toolResult.result.answer,
+      source: "tool",
+      tokensUsed: 0,
+      conversationId: convId,
+      messageId: msgId,
+      sources: toolResult.result.sources,
+    };
+  }
+  // Tool intent matched but execution failed (validation / capability /
+  // internal) — surface a deterministic failure message rather than
+  // silently falling through. The user got matched to a tool; they
+  // deserve to know why it didn't run.
+  if (toolResult && !toolResult.result.ok && toolResult.result.code !== "no_match") {
+    const failureMsg =
+      toolResult.result.code === "capability"
+        ? `That tool (${toolResult.tool}) needs a higher-privilege role than yours.`
+        : toolResult.result.code === "needs_confirmation"
+        ? `That looks like an action that needs confirmation. (Action-tools land in a later phase — for now I only run read-only tools.)`
+        : `I couldn't run ${toolResult.tool}: ${toolResult.result.message.slice(0, 200)}`;
+    const msgId = await dbSaveMessage(convId, "assistant", failureMsg, "tool", 0);
+    await dbUpdateConversationStats(convId, 0);
+    return {
+      response: failureMsg,
+      source: "tool",
+      tokensUsed: 0,
+      conversationId: convId,
+      messageId: msgId,
+    };
+  }
 
   // --- Priority -1: Org-wide exact-match Q/A cache ---
   // The assistant is the organization's shared knowledge base. ANY

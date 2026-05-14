@@ -368,6 +368,11 @@ export type InstinctEventType =
   // Token-free intent router + tool-use pipeline.
   | "assistant.intent_classified"
   | "assistant.tool_invoked"
+  // Tool succeeded (handler returned ok:true). Metadata: { tool, duration_ms }.
+  | "assistant.tool_succeeded"
+  // Tool failed (validation, capability, no_match, needs_confirmation, internal).
+  // Metadata: { tool, code, message }.
+  | "assistant.tool_failed"
   | "assistant.fallback_to_rag"
   | "assistant.fallback_to_ai"
   // Related-pages chip + source chip click-through. Every response now
