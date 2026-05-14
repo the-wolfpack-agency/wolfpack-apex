@@ -80,13 +80,25 @@ export async function GET(req: NextRequest) {
     // First poll (no `since`) → 0 so we never show a flash badge the
     // moment a user logs in. The client will set `last_seen` to now()
     // on first click and subsequent polls will be accurate.
+    //
+    // We also skip chats whose lastMessagePreview has no displayable
+    // text body. Graph reports lastUpdatedDateTime for system events
+    // (call started/ended, member added, meeting recording posted) even
+    // when there's no human message — those previously caused the badge
+    // to flash on an empty chat (see the screenshot: Messages(1) with
+    // an open chat showing only timestamp pills, no message body).
+    // Filtering by `bodyText.length > 0` lines the badge up with the
+    // user's intuition: "I have a new message I haven't read."
     let count = 0;
     if (since !== null) {
       for (const chat of result.chats) {
         const ts = chat.lastUpdatedDateTime
           ? Date.parse(chat.lastUpdatedDateTime)
           : NaN;
-        if (!Number.isNaN(ts) && ts > since) count += 1;
+        if (Number.isNaN(ts) || ts <= since) continue;
+        const bodyText = chat.lastMessagePreview?.bodyText?.trim() ?? "";
+        if (bodyText.length === 0) continue;
+        count += 1;
       }
     }
 

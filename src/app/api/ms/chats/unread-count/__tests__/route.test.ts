@@ -117,16 +117,22 @@ describe("GET /api/ms/chats/unread-count", () => {
     expect(body.since).toBeNull();
   });
 
-  it("counts only chats whose lastUpdatedDateTime > since", async () => {
+  it("counts only chats whose lastUpdatedDateTime > since AND have a non-empty message body", async () => {
     mockGetUser.mockReturnValue(USER);
     mockGetValidToken.mockResolvedValue({ accessToken: "T", userEmail: "a@x.com" });
+    const withBody = (text: string) => ({
+      body: { content: text, contentType: "text" as const },
+      bodyText: text,
+      from: { displayName: "x", email: "x@x" },
+      createdDateTime: "2026-04-23T12:00:00Z",
+    });
     mockListChatsResult.mockResolvedValue({
       ok: true,
       chats: [
-        { id: "stale", topic: "", chatType: "group", lastUpdatedDateTime: "2026-04-20T00:00:00Z", members: [] },
-        { id: "fresh1", topic: "", chatType: "group", lastUpdatedDateTime: "2026-04-23T10:00:00Z", members: [] },
-        { id: "fresh2", topic: "", chatType: "group", lastUpdatedDateTime: "2026-04-23T12:00:00Z", members: [] },
-        { id: "invalid", topic: "", chatType: "group", lastUpdatedDateTime: "not-a-date", members: [] },
+        { id: "stale", topic: "", chatType: "group", lastUpdatedDateTime: "2026-04-20T00:00:00Z", members: [], lastMessagePreview: withBody("old message") },
+        { id: "fresh1", topic: "", chatType: "group", lastUpdatedDateTime: "2026-04-23T10:00:00Z", members: [], lastMessagePreview: withBody("hello") },
+        { id: "fresh2", topic: "", chatType: "group", lastUpdatedDateTime: "2026-04-23T12:00:00Z", members: [], lastMessagePreview: withBody("ping") },
+        { id: "invalid", topic: "", chatType: "group", lastUpdatedDateTime: "not-a-date", members: [], lastMessagePreview: withBody("never") },
       ],
     });
 
@@ -147,6 +153,42 @@ describe("GET /api/ms/chats/unread-count", () => {
       "dev",
       expect.objectContaining({ count: 2, total_chats: 4, has_since: true }),
     );
+  });
+
+  it("does NOT count chats whose lastMessagePreview has no body text (system / meeting events)", async () => {
+    /* Regression for the 2026-05-14 screenshot: Messages(1) badge fired on
+       a chat whose timeline rendered only empty bubbles because Graph
+       returned lastUpdatedDateTime for meeting/system events with no
+       displayable body. The badge should silence those. */
+    mockGetUser.mockReturnValue(USER);
+    mockGetValidToken.mockResolvedValue({ accessToken: "T", userEmail: "a@x.com" });
+    const empty = {
+      body: { content: "", contentType: "text" as const },
+      bodyText: "",
+      from: { displayName: "system", email: "system@teams" },
+      createdDateTime: "2026-04-23T11:00:00Z",
+    };
+    mockListChatsResult.mockResolvedValue({
+      ok: true,
+      chats: [
+        // Chat A: fresh timestamp, empty body → must NOT count
+        { id: "meeting-only", topic: "Automating Coaching Calls", chatType: "meeting", lastUpdatedDateTime: "2026-04-23T11:00:00Z", members: [], lastMessagePreview: empty },
+        // Chat B: fresh timestamp, missing preview entirely → must NOT count
+        { id: "no-preview", topic: "Bot updates", chatType: "group", lastUpdatedDateTime: "2026-04-23T11:30:00Z", members: [] },
+        // Chat C: fresh timestamp, real message text → must count
+        { id: "real-msg", topic: "team chat", chatType: "group", lastUpdatedDateTime: "2026-04-23T11:45:00Z", members: [], lastMessagePreview: { body: { content: "hey", contentType: "text" as const }, bodyText: "hey", from: { displayName: "Nick", email: "n@x" }, createdDateTime: "2026-04-23T11:45:00Z" } },
+      ],
+    });
+
+    const since = "2026-04-22T00:00:00Z";
+    const { GET } = await import("@/app/api/ms/chats/unread-count/route");
+    const res = await GET(
+      mkReq(`/api/ms/chats/unread-count?since=${encodeURIComponent(since)}`, "Bearer t"),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.count).toBe(1);
+    expect(body.total_chats).toBe(3);
   });
 
   it("malformed ?since= is treated as first poll (count 0)", async () => {
