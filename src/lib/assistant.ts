@@ -773,7 +773,12 @@ export async function chat(
   // (score >= 0.5 OR keyword+semantic match), we return a citation-
   // linked answer at zero model tokens. Otherwise we pass the hits as
   // context to the AI call below via pageContext.
-  const brainResult = await tryBrain(message, userId, userRole, convId);
+  const { strong: brainResult, context: brainContext } = await tryBrain(
+    message,
+    userId,
+    userRole,
+    convId,
+  );
   if (brainResult) {
     trackEvent("knowledge.answer_found", userId, userRole, {
       source: "brain",
@@ -805,7 +810,7 @@ export async function chat(
     module: "assistant",
   });
 
-  const aiResult = await callAI(message, history, userMemory, userId, userRole, pageContext);
+  const aiResult = await callAI(message, history, userMemory, userId, userRole, pageContext, brainContext);
   if (aiResult) {
     trackEvent("system.ai_call_made", userId, userRole, {
       module: "assistant",
@@ -836,12 +841,12 @@ export async function chat(
     ]);
 
     /* Citation validation: strip any [ref:X] token whose <X> isn't in the
-       set of sources we actually retrieved this turn. Prevents the LLM
-       from inventing tenant-cross-contaminated citations. The valid set
-       is empty today on the AI-fallback path (no source IDs threaded
-       through); the LLM has nothing legitimate to cite, so any [ref:X]
-       it emitted is fabricated and gets stripped. */
-    const citationCheck = validateCitations(aiResult.content, /* validSourceIds */ []);
+       set of sources we actually retrieved this turn. The valid set is
+       sourced from brainContext.hits (weak-but-real brain hits the LLM
+       was prompted with). Any [ref:X] outside that set is a
+       hallucination and gets dropped. */
+    const validSourceIds = (brainContext?.hits ?? []).map((h) => h.document_id);
+    const citationCheck = validateCitations(aiResult.content, validSourceIds);
     if (citationCheck.droppedRefs.length > 0) {
       trackEvent("assistant.quality_flag_raised", userId, userRole, {
         filter: "citations",
@@ -856,9 +861,13 @@ export async function chat(
       {
         answer: citationCheck.cleanAnswer,
         knownNames,
-        /* The LLM path doesn't yet thread retrieval scores / source IDs
-           — those gates fire only when we have them. Entities + stale
-           still apply at this layer. */
+        /* topScore + hitCount + retrievedIds now thread through from the
+           brain retrieval. Confidence gate (A1) fires when no real hits
+           backed the answer. Citation gate (A3) fires when factual
+           claims aren't cited. */
+        topScore: brainContext?.topScore,
+        hitCount: brainContext?.hits.length,
+        retrievedIds: validSourceIds,
       },
       { userId, userRole, strictness },
     );
@@ -1266,6 +1275,22 @@ interface BrainHitAnswer {
 }
 
 /**
+ * Brain context surfaced to the AI fallback path even when there was
+ * no STRONG hit. Carries the raw hits + top score so the LLM can be
+ * grounded in weak retrievals AND the answer-quality runner has real
+ * topScore + validSourceIds inputs (no more empty-set fallbacks).
+ */
+interface BrainContext {
+  hits: Array<{
+    document_id: string;
+    document_filename: string;
+    content: string;
+    score: number;
+  }>;
+  topScore: number;
+}
+
+/**
  * Query the Brain's keyword+semantic retrieval. Returns a formatted
  * answer ONLY when at least one hit crosses the confidence threshold
  * (semantic or keyword+semantic hit, OR pure keyword with score >= 0.05).
@@ -1279,7 +1304,8 @@ async function tryBrain(
   userId: string,
   userRole: string,
   conversationId: string,
-): Promise<BrainHitAnswer | null> {
+): Promise<{ strong: BrainHitAnswer | null; context: BrainContext }> {
+  const emptyContext: BrainContext = { hits: [], topScore: 0 };
   try {
     const result = await queryBrain({
       userId,
@@ -1288,7 +1314,28 @@ async function tryBrain(
       limit: 5,
       conversationId,
     });
-    if (result.hits.length === 0) return null;
+    if (result.hits.length === 0) return { strong: null, context: emptyContext };
+
+    /* Compute context regardless of strong-hit verdict — even weak hits
+       give the LLM real grounding + give the quality runner real
+       topScore + validSourceIds. Dedupe by document_id so the LLM
+       isn't told the same doc 3x. */
+    const seen = new Set<string>();
+    const ctxHits: BrainContext["hits"] = [];
+    let topScore = 0;
+    for (const h of result.hits) {
+      if (h.score > topScore) topScore = h.score;
+      const id = String(h.document_id);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      ctxHits.push({
+        document_id: id,
+        document_filename: h.document_filename,
+        content: h.content,
+        score: h.score,
+      });
+    }
+    const context: BrainContext = { hits: ctxHits, topScore };
 
     // Gate: require either a semantic-blended hit OR a keyword hit with
     // reasonable tsrank score. ts_rank_cd returns values typically in
@@ -1298,7 +1345,7 @@ async function tryBrain(
       if (h.source.includes("semantic")) return true;
       return h.score >= 0.05;
     });
-    if (strong.length === 0) return null;
+    if (strong.length === 0) return { strong: null, context };
 
     // Format zero-LLM-token response. Each chunk is passed through
     // neutralizeInjection() so a hostile document containing
@@ -1344,13 +1391,16 @@ async function tryBrain(
       });
     }
     return {
-      answer: lines.join("\n"),
-      tokensUsed: result.tokens_used,
-      queryLogId: result.query_log_id,
-      sources,
+      strong: {
+        answer: lines.join("\n"),
+        tokensUsed: result.tokens_used,
+        queryLogId: result.query_log_id,
+        sources,
+      },
+      context,
     };
   } catch {
-    return null;
+    return { strong: null, context: emptyContext };
   }
 }
 
@@ -1395,6 +1445,7 @@ async function callAI(
   userId: string,
   userRole: string,
   pageContext?: string,
+  brainContext?: BrainContext,
 ): Promise<{ content: string; tokensUsed: number } | null> {
   /* Use the AI router (src/lib/ai/router.ts) so this works whether prod
      is configured for Anthropic OR Azure OpenAI. The previous direct-
@@ -1434,7 +1485,28 @@ async function callAI(
     const facts = await findRelevantFacts(message);
     const factsBlock = renderFactsBlock(facts);
 
-    const systemPrompt = [factsBlock, contextBlock, baseSystemPrompt]
+    /* Brain-hit grounding: thread weak-but-real hits into the prompt
+       with stable [ref:<id>] citation markers. The LLM is instructed to
+       cite via these markers when it draws on the retrieved content;
+       validateCitations() in the caller strips any [ref:<id>] the LLM
+       invented. The result: every surviving citation in the final
+       answer points at a real, tenant-scoped doc. */
+    let brainBlock = "";
+    if (brainContext && brainContext.hits.length > 0) {
+      const lines = ["Retrieved company-knowledge passages (cite via [ref:<id>]):"];
+      for (const h of brainContext.hits.slice(0, 5)) {
+        const safe = h.content.slice(0, 400).replace(/\s+/g, " ").trim();
+        lines.push(
+          `- [ref:${h.document_id}] "${h.document_filename}" (score ${h.score.toFixed(2)}): ${safe}`,
+        );
+      }
+      lines.push(
+        "When you draw on any of the passages above, cite the matching [ref:<id>] inline. Never invent a [ref:] you have not been given.",
+      );
+      brainBlock = lines.join("\n");
+    }
+
+    const systemPrompt = [factsBlock, brainBlock, contextBlock, baseSystemPrompt]
       .filter((s) => s && s.trim().length > 0)
       .join("\n");
 
