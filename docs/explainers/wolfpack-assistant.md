@@ -17,7 +17,7 @@ last_translated: 2026-05-14
 
 ## 1-minute version (for an exec)
 
-Most office teams answer the same five questions every week. "When did we agree to ship that?" "What was Jorge's update on the Porsche launch?" "What's on the calendar next Thursday?" "How much did we bring in last month?" "Did anyone email back yet?" The answers exist somewhere across email, calendar, meeting notes, financial reports, and team chat. People spend hours hunting.
+Most office teams answer the same five questions every week. "When did we agree to ship that?" "What was the latest update on the Q3 launch?" "What's on the calendar next Thursday?" "How much did we bring in last month?" "Did anyone email back yet?" The answers exist somewhere across email, calendar, meeting notes, financial reports, and team chat. People spend hours hunting.
 
 The Wolfpack Assistant is one place to ask any of those questions in plain English and get the right answer. It checks calendar, email, meeting transcripts, financial data, and team knowledge, then replies with the specific fact you asked for and a link to the source. It works across the whole team's data, not just yours. When someone corrects it ("no, that decision was Tuesday, not Wednesday"), the correction sticks, and every future answer for the entire team uses the corrected fact.
 
@@ -43,7 +43,7 @@ A new hire takes 3 to 6 months to figure out where to look for what. Even tenure
 
 The naive way: a chatbot that calls GPT on every question. Expensive (10 cents to a dollar per real question), slow (5+ seconds), and frequently wrong because the model has no access to your team's actual data.
 
-The Wolfpack way: route the question to the right tool first. If the question is "when is my next meeting with Jane," that is a calendar lookup. Zero AI tokens. If it is "find the email where we decided on the Porsche launch date," that is a mail search. Zero AI tokens. Only when the question is genuinely open-ended ("what did we talk about with Jorge last week") does the system fall back to RAG over the team's knowledge base, and even then the LLM call is bounded.
+The Wolfpack way: route the question to the right tool first. If the question is "when is my next meeting with the design team," that is a calendar lookup. Zero AI tokens. If it is "find the email where we decided on the Q3 launch date," that is a mail search. Zero AI tokens. Only when the question is genuinely open-ended ("what did we talk about with the program lead last week") does the system fall back to RAG over the team's knowledge base, and even then the LLM call is bounded.
 
 ### Analogy: the executive assistant who has been there forever
 
@@ -60,18 +60,18 @@ Unlike a human EA, the Assistant also learns from corrections across the whole t
 The user types a question in plain English. The Assistant responds with a specific answer plus the source link:
 
 ```
-You: when's my next call with the Porsche launch team?
+You: when's my next call with the launch team?
 Wolfpack Assistant: Thursday at 2 pm.
-  Source: calendar event "Porsche launch sync" with Alicia, Jorge.
+  Source: calendar event "Q3 launch sync" with the program team.
   [Open in calendar →]
 
-You: did we ever follow up with Aidan about the contract?
-Wolfpack Assistant: Yes. Last reply was March 14 from Jorge.
-  "Sending the updated draft EOD." No reply from Aidan since.
+You: did we ever follow up with the vendor about the contract?
+Wolfpack Assistant: Yes. Last reply was March 14 from the program lead.
+  "Sending the updated draft EOD." No reply from the vendor since.
   [Open thread →]
 
-You: who owns the goal "ship Porsche launch by Q3"?
-Wolfpack Assistant: Alicia is the lead. Status as of last week: on track.
+You: who owns the goal "ship Q3 launch"?
+Wolfpack Assistant: The program manager is the lead. Status as of last week: on track.
   Last update: April 28.
   [Open goal →]
 ```
@@ -127,7 +127,7 @@ Read in order:
    - `goals-lookup.ts`: queries the goals table.
    - `financials-metric.ts`: queries pre-aggregated financial views.
    - `brain-history.ts`: queries the knowledge / brain store for prior conversations.
-4. Learning loop: [`src/lib/assistant/learning.ts`](src/lib/assistant/learning.ts). When a user follows up with a correction ("no, it is Porsche"), `detectCorrection()` (regex-based, no LLM) parses the structured fact and writes it to `instinct_org_facts`. Every future Assistant prompt is grounded with these facts.
+4. Learning loop: [`src/lib/assistant/learning.ts`](src/lib/assistant/learning.ts). When a user follows up with a correction ("no, the project name is Q3 Launch"), `detectCorrection()` (regex-based, no LLM) parses the structured fact and writes it to `instinct_org_facts`. Every future Assistant prompt is grounded with these facts.
 5. RAG fallback: [`src/lib/knowledge/`](src/lib/knowledge/). Semantic search over the org's knowledge base (Qdrant vectors), feeds the top-K results into the LLM context. The LLM is only invoked here, and only when the retrieval confidence justifies the cost.
 6. UI: [`src/app/(dashboard)/assistant/page.tsx`](src/app/(dashboard)/assistant/page.tsx). Sidebar chat surface. Renders markdown with source links.
 
@@ -147,11 +147,11 @@ Read in order:
 
 ---
 
-## Future potential (clearly aspirational)
+## Future potential
 
 The same tool-first pattern extends to:
 - Voice interface: same intent router, same tools, different surface. The expensive part (the tools) is already built.
-- Action tools (not just lookup): "schedule a follow-up with Aidan next Tuesday" routes to a calendar-create tool with the same zero-token path.
+- Action tools (not just lookup): "schedule a follow-up with the vendor next Tuesday" routes to a calendar-create tool with the same zero-token path.
 - Per-user calibration: the learning loop currently captures org-wide facts. A second loop could capture user-specific preferences ("I prefer 1-hour meetings, not 30-minute").
 - Cross-product Assistant: same orchestrator, different tool set, deployed inside wolfpack-auto for dealers. The architecture is product-agnostic.
 
