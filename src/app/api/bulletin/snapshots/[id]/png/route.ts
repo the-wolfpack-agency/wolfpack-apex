@@ -18,7 +18,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { getUserFromRequest, verifyToken, type TeamMember } from "@/lib/auth";
+import { DEFAULT_WORKSPACE_ID, getUserFromRequest, verifyToken, type TeamMember } from "@/lib/auth";
 import { ACCESS_TOKEN_COOKIE } from "@/lib/crypto/cookies";
 import { trackEvent } from "@/lib/analytics";
 import { getSnapshotPng } from "@/lib/bulletin/snapshots";
@@ -34,6 +34,7 @@ async function resolveUserFromCookie(): Promise<TeamMember | null> {
       email: payload.email,
       name: payload.name,
       role: payload.role,
+      workspaceId: payload.workspaceId ?? DEFAULT_WORKSPACE_ID,
       created_at: "",
     };
   } catch {

@@ -29,33 +29,38 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "name must be 120 characters or fewer" }, { status: 400 });
   }
 
+  /* Rename the caller's own workspace. workspaceId comes from the
+     session — never from the request body — so a privileged user
+     cannot rename another tenant's workspace by spoofing the id. */
+  const workspaceId = user.workspaceId;
+
   // Capture previous workspace name for audit
   const prior = await safeQuery<{ name: string }>(
-    `SELECT name FROM instinct_workspace WHERE id = 'default' LIMIT 1`,
+    `SELECT name FROM instinct_workspace WHERE id = $1 LIMIT 1`,
+    [workspaceId],
   );
   const priorName = prior.rows[0]?.name ?? null;
 
   // Upsert workspace name
   const workspaceResult = await safeQuery(
     `INSERT INTO instinct_workspace (id, name, updated_at)
-     VALUES ('default', $1, NOW())
-     ON CONFLICT (id) DO UPDATE SET name = $1, updated_at = NOW()`,
-    [name],
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (id) DO UPDATE SET name = $2, updated_at = NOW()`,
+    [workspaceId, name],
   );
 
   if (workspaceResult.fromCache) {
     return NextResponse.json({ error: "database_unavailable" }, { status: 503 });
   }
 
-  // Ensure the caller is registered as an active team member.
-  // This satisfies teamCount >= 1 in the status route (profileComplete check).
-  // Use a placeholder password_hash since this user already has a valid JWT.
+  // Ensure the caller is registered as an active team member of THIS workspace.
+  // Mirrors the profile-complete check in the status route.
   const memberId = `tm_${randomUUID().slice(0, 12)}`;
   await safeQuery(
-    `INSERT INTO instinct_team_members (id, email, name, role, password_hash, is_active)
-     VALUES ($1, $2, $3, $4, '', true)
+    `INSERT INTO instinct_team_members (id, email, name, role, password_hash, is_active, workspace_id)
+     VALUES ($1, $2, $3, $4, '', true, $5)
      ON CONFLICT (email) DO UPDATE SET is_active = true`,
-    [memberId, user.email, user.name, user.role],
+    [memberId, user.email, user.name, user.role, workspaceId],
   );
 
   const meta = extractRequestMetadata(req);
@@ -63,7 +68,7 @@ export async function PUT(req: NextRequest) {
     actor: { user_id: user.id, role: user.role },
     action: "workspace.renamed",
     resourceType: "workspace",
-    resourceId: "default",
+    resourceId: workspaceId,
     beforeState: { name: priorName },
     afterState: { name },
     ipAddress: meta.ipAddress,

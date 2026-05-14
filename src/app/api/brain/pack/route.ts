@@ -44,7 +44,6 @@ import { trackEvent } from "@/lib/analytics";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
-const DEFAULT_WORKSPACE = "default";
 
 interface PackChunkRow {
   id: string;
@@ -93,10 +92,12 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Single-tenant today: anything other than "default" is forbidden. This
-  // mirrors instinct_workspace.id = 'default' used throughout the app.
-  // When multi-tenant lands, swap this for a membership query.
-  if (workspace !== DEFAULT_WORKSPACE) {
+  /* Multi-workspace gate: the caller may only request the pack for
+     their own workspace. Single-tenant deploys have everyone in
+     "default" so existing clients see no change. Cross-tenant reads
+     are forbidden even with brain.read capability — the session,
+     not the request, decides which workspace this user belongs to. */
+  if (workspace !== user.workspaceId) {
     return NextResponse.json(
       { error: "forbidden", reason: "workspace_not_accessible" },
       { status: 403 },

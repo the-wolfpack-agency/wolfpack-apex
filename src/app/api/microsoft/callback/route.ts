@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromRequest, createToken } from "@/lib/auth";
+import { getUserFromRequest, createToken, DEFAULT_WORKSPACE_ID } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import { query } from "@/lib/db";
 import { issueRefreshToken } from "@/lib/crypto/refresh-tokens";
@@ -28,6 +28,7 @@ interface ProvisionedUser {
   email: string;
   name: string;
   role: string;
+  workspaceId: string;
 }
 
 /**
@@ -64,8 +65,9 @@ async function provisionOrLoadByEmail(
     email: string;
     name: string;
     role: string;
+    workspace_id: string | null;
   }>(
-    `SELECT id, email, name, role
+    `SELECT id, email, name, role, workspace_id
        FROM instinct_team_members
       WHERE LOWER(email) = $1 AND is_active = TRUE
       LIMIT 1`,
@@ -87,20 +89,34 @@ async function provisionOrLoadByEmail(
       );
       row.name = displayName;
     }
-    return row;
+    return {
+      id: row.id,
+      email: row.email,
+      name: row.name,
+      role: row.role,
+      workspaceId: row.workspace_id ?? DEFAULT_WORKSPACE_ID,
+    };
   }
   const inserted = await query<{
     id: string;
     email: string;
     name: string;
     role: string;
+    workspace_id: string | null;
   }>(
     `INSERT INTO instinct_team_members (id, email, name, role, password_hash, is_active, created_at)
      VALUES (gen_random_uuid(), $1, COALESCE(NULLIF($2, ''), $1), 'ops', NULL, TRUE, NOW())
-     RETURNING id, email, name, role`,
+     RETURNING id, email, name, role, workspace_id`,
     [lowered, displayName ?? ""],
   );
-  return inserted.rows[0];
+  const row = inserted.rows[0];
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    role: row.role,
+    workspaceId: row.workspace_id ?? DEFAULT_WORKSPACE_ID,
+  };
 }
 
 /**
@@ -245,6 +261,7 @@ export async function GET(req: NextRequest) {
       email: provisioned.email,
       name: provisioned.name,
       role: provisioned.role as Parameters<typeof createToken>[0]["role"],
+      workspaceId: provisioned.workspaceId,
       created_at: "",
     };
     const accessToken = createToken(member);

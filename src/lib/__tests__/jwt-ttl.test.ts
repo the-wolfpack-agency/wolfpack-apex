@@ -130,6 +130,7 @@ describe("auth.ts createToken uses 15-min TTL", () => {
       email: "test@test.com",
       name: "Test",
       role: "dev",
+      workspaceId: "default",
       created_at: new Date().toISOString(),
     });
 

@@ -30,7 +30,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const AUTHED = {
   ok: true as const,
-  user: { id: "u1", role: "cto", name: "Test", email: "t@t.co" },
+  user: { id: "u1", role: "cto", name: "Test", email: "t@t.co", workspaceId: "default" },
 };
 const UNAUTH = {
   ok: false as const,

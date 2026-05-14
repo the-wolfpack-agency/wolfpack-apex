@@ -497,6 +497,11 @@ export async function chat(
   userRole: string,
   conversationId?: string,
   pageContext?: string,
+  /* Tenant the caller belongs to. Optional for backward-compat —
+     callers that haven't been updated since migration 137 still pass
+     5 args; falls back to "default" via the literal in the dispatcher
+     call below. Once every caller is updated, this becomes required. */
+  workspaceId: string = "default",
 ): Promise<AssistantResponse> {
   // --- Resolve or create conversation ---
   let convId = conversationId || null;
@@ -638,10 +643,10 @@ export async function chat(
   const toolResult = await tryDispatchTool(message, {
     userId,
     userRole,
-    /* Single-workspace deploys default to "default". When multi-
-       workspace lands, resolve from the session (see migration 136
-       — instinct_connector_credentials is already workspace-keyed). */
-    workspaceId: "default",
+    /* Workspace flows in from the session via the chat() arg —
+       every tool that reads workspace-scoped state (connector
+       credentials, brain pack, strictness) reads it from here. */
+    workspaceId,
   });
   if (toolResult && toolResult.result.ok) {
     const msgId = await dbSaveMessage(

@@ -125,6 +125,7 @@ const USERS: Record<string, TeamMember> = {
     email: "cto@wolfpack.dev",
     name: "Alex CTO",
     role: "cto",
+    workspaceId: "default",
     created_at: "2026-01-01T00:00:00Z",
   },
   dev: {
@@ -132,6 +133,7 @@ const USERS: Record<string, TeamMember> = {
     email: "dev@wolfpack.dev",
     name: "Blake Dev",
     role: "dev",
+    workspaceId: "default",
     created_at: "2026-01-01T00:00:00Z",
   },
   sales: {
@@ -139,6 +141,7 @@ const USERS: Record<string, TeamMember> = {
     email: "sales@wolfpack.dev",
     name: "Casey Sales",
     role: "sales",
+    workspaceId: "default",
     created_at: "2026-01-01T00:00:00Z",
   },
   ops: {
@@ -146,6 +149,7 @@ const USERS: Record<string, TeamMember> = {
     email: "ops@wolfpack.dev",
     name: "Dana Ops",
     role: "ops",
+    workspaceId: "default",
     created_at: "2026-01-01T00:00:00Z",
   },
 };

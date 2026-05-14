@@ -23,7 +23,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { createToken, verifyToken, type TeamRole } from "@/lib/auth";
+import { createToken, verifyToken, DEFAULT_WORKSPACE_ID, type TeamRole } from "@/lib/auth";
 import {
   ACCESS_TOKEN_COOKIE,
   ACCESS_TOKEN_TTL,
@@ -78,8 +78,9 @@ export async function GET(_req: NextRequest) {
     email: string;
     name: string;
     role: string;
+    workspace_id: string | null;
   }>(
-    `SELECT id, email, name, role FROM instinct_team_members
+    `SELECT id, email, name, role, workspace_id FROM instinct_team_members
       WHERE LOWER(email) = LOWER($1) AND is_active = TRUE LIMIT 1`,
     [payload.email],
   );
@@ -94,6 +95,7 @@ export async function GET(_req: NextRequest) {
     email: row.email,
     name: row.name,
     role: row.role as TeamRole,
+    workspaceId: row.workspace_id ?? DEFAULT_WORKSPACE_ID,
     created_at: "",
   };
   const newToken = createToken(member);

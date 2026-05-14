@@ -27,7 +27,7 @@ jest.mock("@/lib/audit-log", () => ({
 
 import { GET, POST } from "@/app/api/admin/connectors/route";
 
-const ADMIN = { id: "u1", email: "homyk@thewolfpack.agency", role: "cto" };
+const ADMIN = { id: "u1", email: "homyk@thewolfpack.agency", role: "cto", workspaceId: "default" };
 
 function mkReq(body?: unknown): any {
   return {
@@ -214,5 +214,93 @@ describe("POST /api/admin/connectors", () => {
     expect(mockSave).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceId: "default" }),
     );
+  });
+});
+
+/* --- Multi-tenant isolation (migration 137) -------------------------
+ *
+ * With per-tenant credentials live, the route must read/write under the
+ * caller's *own* workspace_id (taken from the JWT) and NEVER under a
+ * workspace name from the request body. These tests cover both reads
+ * and writes for two distinct tenants.
+ */
+describe("multi-tenant isolation", () => {
+  const ACME_ADMIN = { id: "u-acme", email: "cto@acme", role: "cto", workspaceId: "ws_acme" };
+  const BLITZ_ADMIN = { id: "u-blitz", email: "cto@blitz", role: "cto", workspaceId: "ws_blitz" };
+
+  test("GET only returns the caller's own workspace creds", async () => {
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: ACME_ADMIN });
+    mockList.mockResolvedValueOnce([
+      { workspaceId: "ws_acme", connectorName: "hubspot", baseUrl: "https://api.hubapi.com", authHeaderHint: "Bearer ****ACME", isActive: true, createdAt: "x", updatedAt: "y" },
+    ]);
+    const res = await GET(mkReq());
+    expect(res.status).toBe(200);
+    /* listConnectorCredentials must be called with ACME's workspace,
+       never "default" or a body value. */
+    expect(mockList).toHaveBeenCalledWith("ws_acme");
+  });
+
+  test("POST writes under the caller's own workspace, ignoring body workspaceId", async () => {
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: BLITZ_ADMIN });
+    mockSave.mockResolvedValueOnce({
+      workspaceId: "ws_blitz",
+      connectorName: "rest-default",
+      baseUrl: "https://api.blitz.com",
+      authHeaderHint: "Bearer ****BLITZ",
+      isActive: true,
+      createdAt: "x",
+      updatedAt: "y",
+    });
+    await POST(
+      mkReq({
+        connectorName: "rest-default",
+        baseUrl: "https://api.blitz.com",
+        authHeader: "Bearer blitz-token-xyz",
+        /* Attacker tries to write into Acme's workspace from Blitz's session: */
+        workspaceId: "ws_acme",
+      } as any),
+    );
+    expect(mockSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "ws_blitz",
+        connectorName: "rest-default",
+        createdBy: "u-blitz",
+      }),
+    );
+    /* Audit log records the actual tenant, not the spoofed one. */
+    expect(mockAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resourceId: "ws_blitz:rest-default",
+        afterState: expect.objectContaining({ workspace_id: "ws_blitz" }),
+      }),
+    );
+  });
+
+  test("two callers in different workspaces never see each other's lists", async () => {
+    /* Acme call returns Acme's row. */
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: ACME_ADMIN });
+    mockList.mockResolvedValueOnce([
+      { workspaceId: "ws_acme", connectorName: "hubspot", baseUrl: "https://api.hubapi.com", authHeaderHint: "Bearer ****ACME", isActive: true, createdAt: "x", updatedAt: "y" },
+    ]);
+    const r1 = await GET(mkReq());
+    const b1 = await r1.json();
+
+    /* Blitz call returns Blitz's row only. */
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: BLITZ_ADMIN });
+    mockList.mockResolvedValueOnce([
+      { workspaceId: "ws_blitz", connectorName: "salesforce", baseUrl: "https://blitz.my.salesforce.com", authHeaderHint: "Bearer ****BLITZ", isActive: true, createdAt: "x", updatedAt: "y" },
+    ]);
+    const r2 = await GET(mkReq());
+    const b2 = await r2.json();
+
+    expect(b1.connectors).toHaveLength(1);
+    expect(b1.connectors[0].workspaceId).toBe("ws_acme");
+    expect(b2.connectors).toHaveLength(1);
+    expect(b2.connectors[0].workspaceId).toBe("ws_blitz");
+
+    /* The store was queried per tenant; cross-talk would mean the
+       same workspaceId appeared in both calls. */
+    expect(mockList).toHaveBeenNthCalledWith(1, "ws_acme");
+    expect(mockList).toHaveBeenNthCalledWith(2, "ws_blitz");
   });
 });

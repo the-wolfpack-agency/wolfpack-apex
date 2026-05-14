@@ -149,6 +149,7 @@ describe("Auth Library", () => {
         email: "test@test.com",
         name: "Test",
         role: "dev",
+        workspaceId: "default",
         created_at: "",
       });
       expect(token).toBeTruthy();
@@ -161,6 +162,7 @@ describe("Auth Library", () => {
         email: "test@test.com",
         name: "Test",
         role: "dev",
+        workspaceId: "default",
         created_at: "",
       });
       const payload = verifyToken(token);

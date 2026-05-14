@@ -191,7 +191,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const result = await chat(message, user.id, user.role, conversationId, pageContext);
+    const result = await chat(message, user.id, user.role, conversationId, pageContext, user.workspaceId);
 
     // Include gate results (warnings) alongside the response
     const response: Record<string, unknown> = { ...result };

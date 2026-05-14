@@ -74,11 +74,14 @@ export async function inviteFlow(
     const id = `inv_${randomUUID().slice(0, 12)}`;
     const token = randomUUID();
 
+    /* Invites grant membership to the INVITER's workspace. When the
+       new user accepts, they join this workspace and never inherit a
+       different one from cookies or query strings. */
     await safeQuery(
-      `INSERT INTO instinct_invites (id, email, role, token, status, invited_by)
-       VALUES ($1, $2, $3, $4, 'pending', $5)
+      `INSERT INTO instinct_invites (id, email, role, token, status, invited_by, workspace_id)
+       VALUES ($1, $2, $3, $4, 'pending', $5, $6)
        ON CONFLICT (token) DO NOTHING`,
-      [id, inv.email, inv.role, token, user.id],
+      [id, inv.email, inv.role, token, user.id, user.workspaceId],
     );
 
     trackEvent("system.team_member_invited", user.id, user.role, {

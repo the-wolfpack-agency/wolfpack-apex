@@ -41,7 +41,7 @@ function makeReq(auth?: string): NextRequest {
   return new NextRequest("http://localhost/api/sites/site_abc", { method: "DELETE", headers });
 }
 
-const USER = { id: "u_1", email: "a@b", name: "A", role: "cto" as const, created_at: "" };
+const USER = { id: "u_1", email: "a@b", name: "A", role: "cto" as const, workspaceId: "default", created_at: "" };
 
 beforeEach(() => {
   jest.clearAllMocks();

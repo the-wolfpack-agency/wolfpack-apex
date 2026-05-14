@@ -44,10 +44,10 @@ interface PostBody {
 export async function GET(req: NextRequest) {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
-  /* Workspace from the session, not the body. Single-workspace deploys
-     all see "default". When multi-workspace lands, replace this with
-     session.workspaceId. */
-  const workspaceId = "default";
+  /* Workspace comes from the session, never the request body — a
+     privileged user must not be able to read another tenant's
+     connector list by spoofing workspace_id in a query string. */
+  const workspaceId = auth.user.workspaceId;
   const connectors = await listConnectorCredentials(workspaceId);
   return NextResponse.json({ connectors });
 }
@@ -123,8 +123,9 @@ export async function POST(req: NextRequest) {
     objectMap = { ...preset.objectMap };
   }
 
-  /* Workspace resolved server-side, not from body. */
-  const workspaceId = "default";
+  /* Workspace resolved server-side, not from body — a privileged
+     user must not be able to write into another tenant's row. */
+  const workspaceId = auth.user.workspaceId;
 
   const saved = await saveConnectorCredentials({
     workspaceId,

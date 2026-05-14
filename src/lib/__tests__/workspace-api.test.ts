@@ -34,6 +34,7 @@ const DEMO_USER = {
   email: "cto@wolfpack.dev",
   name: "Demo CTO",
   role: "cto" as const,
+  workspaceId: "default",
   created_at: "",
 };
 

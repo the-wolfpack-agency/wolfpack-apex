@@ -24,9 +24,16 @@ export interface TeamMember {
   email: string;
   name: string;
   role: TeamRole;
+  /** Tenant the member belongs to. Defaults to "default" for the
+   *  singleton-workspace deploys that existed before migration 137. */
+  workspaceId: string;
   avatar_url?: string;
   created_at: string;
 }
+
+/** Singleton-tenant fallback for shadow mode, legacy JWTs, and any
+ *  code path that runs before the first workspace row is provisioned. */
+export const DEFAULT_WORKSPACE_ID = "default";
 
 export interface AuthResult {
   user: TeamMember;
@@ -66,13 +73,28 @@ export function verifyPassword(password: string, hash: string): boolean {
 
 export function createToken(user: TeamMember): string {
   return signToken(
-    { userId: user.id, email: user.email, role: user.role, name: user.name },
+    {
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      name: user.name,
+      workspaceId: user.workspaceId,
+    },
     { ttlSeconds: JWT_TTL_SECONDS },
   );
 }
 
-export function verifyToken(token: string): JwtPayload & { userId: string; email: string; role: TeamRole; name: string } {
-  const result = cryptoVerifyToken<JwtPayload & { userId: string; email: string; role: TeamRole; name: string }>(token);
+type JwtClaims = JwtPayload & {
+  userId: string;
+  email: string;
+  role: TeamRole;
+  name: string;
+  /** Optional — legacy JWTs minted before migration 137 don't carry it. */
+  workspaceId?: string;
+};
+
+export function verifyToken(token: string): JwtClaims {
+  const result = cryptoVerifyToken<JwtClaims>(token);
   if (!result.valid) {
     throw new Error(`[auth] Token verification failed: ${result.reason}`);
   }
@@ -86,11 +108,11 @@ export async function authenticate(email: string, password: string): Promise<Aut
   if (!process.env.DATABASE_URL) {
     // Shadow mode: demo users
     const demoUsers: Record<string, TeamMember & { password: string }> = {
-      "ceo@wolfpack.dev": { id: "demo-ceo", email: "ceo@wolfpack.dev", name: "Demo CEO", role: "ceo", password: "apex", created_at: new Date().toISOString() },
-      "cto@wolfpack.dev": { id: "demo-cto", email: "cto@wolfpack.dev", name: "Demo CTO", role: "cto", password: "apex", created_at: new Date().toISOString() },
-      "dev@wolfpack.dev": { id: "demo-dev", email: "dev@wolfpack.dev", name: "Demo Dev", role: "dev", password: "apex", created_at: new Date().toISOString() },
-      "sales@wolfpack.dev": { id: "demo-sales", email: "sales@wolfpack.dev", name: "Demo Sales", role: "sales", password: "apex", created_at: new Date().toISOString() },
-      "ops@wolfpack.dev": { id: "demo-ops", email: "ops@wolfpack.dev", name: "Demo Ops", role: "ops", password: "apex", created_at: new Date().toISOString() },
+      "ceo@wolfpack.dev": { id: "demo-ceo", email: "ceo@wolfpack.dev", name: "Demo CEO", role: "ceo", workspaceId: DEFAULT_WORKSPACE_ID, password: "apex", created_at: new Date().toISOString() },
+      "cto@wolfpack.dev": { id: "demo-cto", email: "cto@wolfpack.dev", name: "Demo CTO", role: "cto", workspaceId: DEFAULT_WORKSPACE_ID, password: "apex", created_at: new Date().toISOString() },
+      "dev@wolfpack.dev": { id: "demo-dev", email: "dev@wolfpack.dev", name: "Demo Dev", role: "dev", workspaceId: DEFAULT_WORKSPACE_ID, password: "apex", created_at: new Date().toISOString() },
+      "sales@wolfpack.dev": { id: "demo-sales", email: "sales@wolfpack.dev", name: "Demo Sales", role: "sales", workspaceId: DEFAULT_WORKSPACE_ID, password: "apex", created_at: new Date().toISOString() },
+      "ops@wolfpack.dev": { id: "demo-ops", email: "ops@wolfpack.dev", name: "Demo Ops", role: "ops", workspaceId: DEFAULT_WORKSPACE_ID, password: "apex", created_at: new Date().toISOString() },
     };
     const user = demoUsers[email];
     if (user && password === user.password) {
@@ -104,7 +126,7 @@ export async function authenticate(email: string, password: string): Promise<Aut
 
   try {
     const result = await query(
-      `SELECT id, email, name, role, password_hash, avatar_url, created_at
+      `SELECT id, email, name, role, password_hash, avatar_url, created_at, workspace_id
        FROM instinct_team_members
        WHERE email = $1 AND is_active = true`,
       [email],
@@ -120,6 +142,7 @@ export async function authenticate(email: string, password: string): Promise<Aut
       email: row.email as string,
       name: row.name as string,
       role: row.role as TeamRole,
+      workspaceId: (row.workspace_id as string | null) ?? DEFAULT_WORKSPACE_ID,
       avatar_url: row.avatar_url as string | undefined,
       created_at: row.created_at as string,
     };
@@ -145,6 +168,10 @@ export function getUserFromRequest(authHeader: string | null): TeamMember | null
       email: payload.email,
       name: payload.name,
       role: payload.role,
+      /* Legacy JWTs minted before migration 137 don't carry workspaceId.
+         Fall back to "default" so existing sessions keep working until
+         the next login mints a token with the claim. */
+      workspaceId: payload.workspaceId ?? DEFAULT_WORKSPACE_ID,
       created_at: "",
     };
   } catch {

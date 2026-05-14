@@ -23,7 +23,7 @@ import {
 } from "@/lib/crypto/cookies";
 import { trackEvent } from "@/lib/analytics";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
-import type { TeamMember, TeamRole } from "@/lib/auth";
+import { DEFAULT_WORKSPACE_ID, type TeamMember, type TeamRole } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
   // Accept refresh token from HttpOnly cookie (preferred) or JSON body (fallback for API clients)
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
 
     if (process.env.DATABASE_URL) {
       const result = await query(
-        `SELECT id, email, name, role, avatar_url, created_at
+        `SELECT id, email, name, role, avatar_url, created_at, workspace_id
          FROM instinct_team_members
          WHERE id = $1 AND is_active = true`,
         [rotated.userId],
@@ -63,6 +63,7 @@ export async function POST(req: NextRequest) {
           email: row.email as string,
           name: row.name as string,
           role: row.role as TeamRole,
+          workspaceId: (row.workspace_id as string | null) ?? DEFAULT_WORKSPACE_ID,
           avatar_url: row.avatar_url as string | undefined,
           created_at: row.created_at as string,
         };
@@ -76,6 +77,7 @@ export async function POST(req: NextRequest) {
         email: "",
         name: "",
         role: "dev",
+        workspaceId: DEFAULT_WORKSPACE_ID,
         created_at: new Date().toISOString(),
       };
     }

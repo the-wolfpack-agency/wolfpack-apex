@@ -34,8 +34,9 @@ export async function POST(req: NextRequest) {
     status: string;
     invited_by: string;
     expires_at: string | Date | null;
+    workspace_id: string | null;
   }>(
-    "SELECT id, email, role, status, invited_by, expires_at FROM instinct_invites WHERE token = $1 LIMIT 1",
+    "SELECT id, email, role, status, invited_by, expires_at, workspace_id FROM instinct_invites WHERE token = $1 LIMIT 1",
     [body.token],
   );
 
@@ -79,10 +80,14 @@ export async function POST(req: NextRequest) {
   const passwordHash = hashPassword(body.password);
   const name = body.name || inv.email.split("@")[0];
 
+  /* New member joins the invite's workspace (the inviter's tenant).
+     Pre-migration-137 invites have a NULL workspace_id — fall back
+     to "default" so legacy invite links still work. */
+  const joinWorkspace = inv.workspace_id ?? "default";
   await safeQuery(
-    `INSERT INTO instinct_team_members (id, email, name, role, password_hash, is_active)
-     VALUES ($1, $2, $3, $4, $5, true)`,
-    [memberId, inv.email, name, inv.role, passwordHash],
+    `INSERT INTO instinct_team_members (id, email, name, role, password_hash, is_active, workspace_id)
+     VALUES ($1, $2, $3, $4, $5, true, $6)`,
+    [memberId, inv.email, name, inv.role, passwordHash, joinWorkspace],
   );
 
   // Mark invite as accepted

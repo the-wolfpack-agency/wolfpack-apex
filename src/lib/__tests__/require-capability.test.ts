@@ -70,7 +70,7 @@ describe("requireCapability — anonymous", () => {
 
 describe("requireCapability — insufficient caps", () => {
   it("returns 403 and emits capability_denied with user metadata", async () => {
-    mockGetUser.mockReturnValue({ id: "u1", email: "s@x", name: "S", role: "sales", created_at: "" });
+    mockGetUser.mockReturnValue({ id: "u1", email: "s@x", name: "S", role: "sales", workspaceId: "default", created_at: "" });
     const res = await requireCapability(
       mkReq({ path: "/api/quickbooks", auth: "Bearer x" }),
       "finance.reports.view",
@@ -98,7 +98,7 @@ describe("requireCapability — insufficient caps", () => {
 
 describe("requireCapability — authorized", () => {
   it("returns ok:true with user + capability set on success", async () => {
-    mockGetUser.mockReturnValue({ id: "u2", email: "c@x", name: "C", role: "ceo", created_at: "" });
+    mockGetUser.mockReturnValue({ id: "u2", email: "c@x", name: "C", role: "ceo", workspaceId: "default", created_at: "" });
     const res = await requireCapability(
       mkReq({ path: "/api/quickbooks", auth: "Bearer x" }),
       "finance.reports.view",
@@ -113,7 +113,7 @@ describe("requireCapability — authorized", () => {
   });
 
   it("grants from overrides extend the role defaults", async () => {
-    mockGetUser.mockReturnValue({ id: "u3", email: "s@x", name: "S", role: "sales", created_at: "" });
+    mockGetUser.mockReturnValue({ id: "u3", email: "s@x", name: "S", role: "sales", workspaceId: "default", created_at: "" });
     mockLoadOverrides.mockResolvedValue({
       role: "sales",
       overrides: { grants: ["finance.reports.view"], revokes: [], expires: {} },
@@ -126,7 +126,7 @@ describe("requireCapability — authorized", () => {
   });
 
   it("revokes in overrides deny a capability the role would grant", async () => {
-    mockGetUser.mockReturnValue({ id: "u4", email: "d@x", name: "D", role: "dev", created_at: "" });
+    mockGetUser.mockReturnValue({ id: "u4", email: "d@x", name: "D", role: "dev", workspaceId: "default", created_at: "" });
     mockLoadOverrides.mockResolvedValue({
       role: "dev",
       overrides: { grants: [], revokes: ["docs.edit"], expires: {} },
@@ -177,7 +177,7 @@ describe("hasCapability (sync)", () => {
 describe("effectiveCapabilitiesFor", () => {
   it("falls back to role defaults when no overrides row", async () => {
     mockLoadOverrides.mockResolvedValue(null);
-    const user = { id: "u5", email: "x", name: "x", role: "sales" as const, created_at: "" };
+    const user = { id: "u5", email: "x", name: "x", role: "sales" as const, workspaceId: "default", created_at: "" };
     const result = await effectiveCapabilitiesFor(user);
     expect(result.capabilities.has("clients.view")).toBe(true);
     expect(result.capabilities.has("finance.reports.view")).toBe(false);

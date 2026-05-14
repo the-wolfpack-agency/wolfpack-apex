@@ -78,6 +78,7 @@ const CTO_USER = {
   email: "cto@test",
   name: "CTO",
   role: "cto" as const,
+  workspaceId: "default",
   created_at: "",
 };
 const HR_USER = { ...CTO_USER, id: "u_hr", role: "hr" as const };
