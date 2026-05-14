@@ -56,7 +56,7 @@ jobs:
       risk_level: ${{ steps.parse.outputs.risk_level }}
     steps:
       - name: Checkout Instinct
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Check if PAT is configured
         id: pat-check
@@ -72,7 +72,7 @@ jobs:
 
       - name: Checkout AgenticQA
         if: steps.pat-check.outputs.configured == 'true'
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: nhomyk/AgenticQA
           token: ${{ secrets.AGENTICQA_REPO_PAT }}
@@ -82,7 +82,7 @@ jobs:
 
       - name: Set up Python 3.13
         if: steps.pat-check.outputs.configured == 'true'
-        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: '3.13'
           cache: pip
@@ -216,7 +216,7 @@ jobs:
 
       - name: Upload scan results
         if: steps.pat-check.outputs.configured == 'true'
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: scan-results
           path: scan-results.json
@@ -226,7 +226,7 @@ jobs:
         if: >-
           steps.pat-check.outputs.configured == 'true' &&
           github.event_name == 'pull_request'
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.0.1
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v7.0.1
         with:
           script: |
             const fs = require('fs');
@@ -323,7 +323,7 @@ jobs:
     name: "Pentest Validation"
     steps:
       - name: Checkout Instinct
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Check if PAT is configured
         id: pat-check
@@ -339,7 +339,7 @@ jobs:
 
       - name: Checkout AgenticQA
         if: steps.pat-check.outputs.configured == 'true'
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: nhomyk/AgenticQA
           token: ${{ secrets.AGENTICQA_REPO_PAT }}
@@ -349,7 +349,7 @@ jobs:
 
       - name: Set up Python 3.13
         if: steps.pat-check.outputs.configured == 'true'
-        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: '3.13'
           cache: pip
@@ -363,7 +363,7 @@ jobs:
 
       - name: Download scan results
         if: steps.pat-check.outputs.configured == 'true'
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: scan-results
           path: ./scan-data
@@ -389,7 +389,7 @@ jobs:
 
       - name: Upload pentest results
         if: steps.pat-check.outputs.configured == 'true'
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pentest-results
           path: pentest-results.json
@@ -429,10 +429,10 @@ jobs:
       critical_count: ${{ steps.parse.outputs.critical_count }}
     steps:
       - name: Checkout Instinct
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set up Node.js
-        uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.4
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
         with:
           node-version: '22'
           cache: npm
@@ -478,7 +478,7 @@ jobs:
           PYEOF
 
       - name: Upload audit results
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: npm-audit
           path: npm-audit.json
@@ -507,10 +507,10 @@ jobs:
       issues: write
     steps:
       - name: Checkout (for issue creation context)
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Download all artifacts
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: ./artifacts
         continue-on-error: true
@@ -616,7 +616,7 @@ jobs:
 
       - name: Post PR comment (combined)
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.0.1
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v7.0.1
         with:
           script: |
             const fs = require('fs');
@@ -648,7 +648,7 @@ jobs:
         if: >-
           github.event_name == 'schedule' &&
           steps.report.outputs.total_critical != '0'
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.0.1
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v7.0.1
         with:
           script: |
             const fs = require('fs');
