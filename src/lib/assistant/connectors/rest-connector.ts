@@ -26,6 +26,7 @@
 import type { Connector, ConnectorResult } from "./types";
 import { trackEvent } from "@/lib/analytics";
 import { registerConnector } from "./registry";
+import { loadConnectorCredentials } from "./credentials";
 
 const DEFAULT_OBJECT_MAP: Record<string, string> = {
   contact: "contacts",
@@ -219,6 +220,33 @@ function parseEnvObjectMap(raw: string | undefined): Record<string, string> {
   return {};
 }
 
+/**
+ * Build a workspace-aware RestConnector — reads per-tenant credentials
+ * from instinct_connector_credentials first, falls back to env-var
+ * defaults when no row exists. Callers wanting tenant-isolated
+ * connector behavior use this; the env-driven default still serves
+ * single-workspace deployments via the registered "rest-default".
+ */
+export async function buildRestConnectorForWorkspace(
+  workspaceId: string,
+  connectorName = "rest-default",
+): Promise<RestConnector> {
+  const creds = await loadConnectorCredentials(workspaceId, connectorName);
+  if (creds) {
+    return new RestConnector({
+      name: connectorName,
+      baseUrl: creds.baseUrl,
+      authHeader: creds.authHeader,
+      objectMap: creds.objectMap,
+    });
+  }
+  /* No DB row → fall through to env-var defaults. */
+  return new RestConnector({ name: connectorName });
+}
+
 /* Side-effect registration so importing this file (or the connectors
- * index barrel) makes the default REST connector discoverable. */
+ * index barrel) makes the default REST connector discoverable. The
+ * env-default instance stays registered for single-workspace deploys;
+ * workspace-aware callers should invoke buildRestConnectorForWorkspace
+ * to get per-tenant credentials. */
 registerConnector(new RestConnector());

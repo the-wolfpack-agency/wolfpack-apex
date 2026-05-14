@@ -10,4 +10,10 @@ import "./rest-connector";
 
 export { registerConnector, getConnector, listConnectors, __resetConnectorRegistryForTests } from "./registry";
 export type { Connector, ConnectorResult } from "./types";
-export { RestConnector } from "./rest-connector";
+export { RestConnector, buildRestConnectorForWorkspace } from "./rest-connector";
+export {
+  loadConnectorCredentials,
+  saveConnectorCredentials,
+  listConnectorCredentials,
+} from "./credentials";
+export type { ConnectorCredentials, MaskedConnectorCredentials } from "./credentials";

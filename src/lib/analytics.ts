@@ -394,6 +394,13 @@ export type InstinctEventType =
   //     | "remote_error" | "network" | "validation" }
   | "assistant.connector_succeeded"
   | "assistant.connector_failed"
+  // Per-tenant connector credentials lifecycle (migration 136).
+  //   assistant.connector_credentials_updated  { connector, workspace_id }
+  //   assistant.connector_credentials_decrypt_failed { connector,
+  //     workspace_id } — fires when an existing row's auth_header
+  //     can't be decrypted (typically a key rotation mismatch).
+  | "assistant.connector_credentials_updated"
+  | "assistant.connector_credentials_decrypt_failed"
   | "assistant.fallback_to_rag"
   | "assistant.fallback_to_ai"
   // Related-pages chip + source chip click-through. Every response now
