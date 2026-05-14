@@ -22,6 +22,7 @@ import {
   listConnectorCredentials,
 } from "@/lib/assistant/connectors";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
+import { getVendorPreset } from "@/lib/assistant/connectors/vendor-presets";
 
 /** Connectors clients can configure. Wider than just "rest-default" so
  *  the next wave of vendor adapters drops in without an allow-list
@@ -75,10 +76,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
+  /* Vendor presets: if the caller picks a known vendor and OMITS
+     baseUrl / objectMap, fill from the preset. Caller overrides win. */
+  const preset = getVendorPreset(connectorName);
+  let baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
+  if (!baseUrl && preset && preset.baseUrl) {
+    baseUrl = preset.baseUrl;
+  }
   if (!/^https?:\/\/[a-zA-Z0-9.\-_]+(:\d+)?(\/.*)?$/.test(baseUrl)) {
     return NextResponse.json(
-      { error: "baseUrl must be http(s) URL" },
+      {
+        error:
+          "baseUrl must be http(s) URL" +
+          (preset && !preset.baseUrl ? " (this vendor preset requires per-org override)" : ""),
+      },
       { status: 400 },
     );
   }
@@ -107,6 +118,9 @@ export async function POST(req: NextRequest) {
       );
     }
     objectMap = body.objectMap as Record<string, string>;
+  }
+  if (!objectMap && preset) {
+    objectMap = { ...preset.objectMap };
   }
 
   /* Workspace resolved server-side, not from body. */
