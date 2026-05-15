@@ -7,8 +7,16 @@
  */
 
 const mockGetUser = jest.fn();
+const mockVerifyToken = jest.fn();
 jest.mock("@/lib/auth", () => ({
   getUserFromRequest: (...args: unknown[]) => mockGetUser(...args),
+  verifyToken: (...args: unknown[]) => mockVerifyToken(...args),
+  DEFAULT_WORKSPACE_ID: "default",
+}));
+
+const mockCookieGet = jest.fn();
+jest.mock("next/headers", () => ({
+  cookies: async () => ({ get: (...args: unknown[]) => mockCookieGet(...args) }),
 }));
 
 const mockLoadOverrides = jest.fn();
@@ -42,6 +50,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   // Default: no overrides row (shadow mode falls back to role defaults).
   mockLoadOverrides.mockResolvedValue(null);
+  // Default: no cookie present.
+  mockCookieGet.mockReturnValue(undefined);
 });
 
 describe("requireCapability — anonymous", () => {
@@ -181,5 +191,81 @@ describe("effectiveCapabilitiesFor", () => {
     const result = await effectiveCapabilitiesFor(user);
     expect(result.capabilities.has("clients.view")).toBe(true);
     expect(result.capabilities.has("finance.reports.view")).toBe(false);
+  });
+});
+
+/* ---------------------------------------------------------------------
+ * Regression 2026-05-15: browser-navigated admin routes (OAuth /start,
+ * snapshot download links, etc.) only carry the access-token cookie —
+ * not an Authorization header. requireCapability must resolve the user
+ * from the cookie too, or the OAuth flow returns 401 on every kick-off.
+ * --------------------------------------------------------------- */
+describe("requireCapability — cookie fallback (browser-navigated routes)", () => {
+  it("authorizes when Authorization header is missing but cookie carries a valid token", async () => {
+    mockGetUser.mockReturnValue(null);
+    mockCookieGet.mockReturnValue({ value: "VALID_JWT" });
+    mockVerifyToken.mockReturnValue({
+      userId: "u-cookie",
+      email: "cto@wolfpack.dev",
+      name: "Cookie CTO",
+      role: "cto",
+      workspaceId: "default",
+    });
+    const res = await requireCapability(
+      mkReq({ path: "/api/admin/connectors/oauth/salesforce/start" }),
+      "settings.manage_team",
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.user.id).toBe("u-cookie");
+      expect(res.user.role).toBe("cto");
+    }
+  });
+
+  it("returns 401 when neither header nor cookie identifies a user", async () => {
+    mockGetUser.mockReturnValue(null);
+    mockCookieGet.mockReturnValue(undefined);
+    const res = await requireCapability(
+      mkReq({ path: "/api/admin/connectors/oauth/salesforce/start" }),
+      "settings.manage_team",
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.response.status).toBe(401);
+  });
+
+  it("Authorization header takes precedence over cookie (header sets user, cookie unused)", async () => {
+    mockGetUser.mockReturnValue({
+      id: "u-header",
+      email: "x",
+      name: "x",
+      role: "cto",
+      workspaceId: "default",
+      created_at: "",
+    });
+    /* Cookie also carries a token but should be ignored. */
+    mockCookieGet.mockReturnValue({ value: "OTHER_JWT" });
+    mockVerifyToken.mockImplementation(() => {
+      throw new Error("verifyToken should not be reached when header is present");
+    });
+    const res = await requireCapability(
+      mkReq({ path: "/api/clients", auth: "Bearer abc" }),
+      "clients.view",
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.user.id).toBe("u-header");
+  });
+
+  it("falls back to 401 (not 500) when cookie's JWT fails verification", async () => {
+    mockGetUser.mockReturnValue(null);
+    mockCookieGet.mockReturnValue({ value: "TAMPERED_JWT" });
+    mockVerifyToken.mockImplementation(() => {
+      throw new Error("invalid signature");
+    });
+    const res = await requireCapability(
+      mkReq({ path: "/api/admin/connectors/oauth/salesforce/start" }),
+      "settings.manage_team",
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.response.status).toBe(401);
   });
 });

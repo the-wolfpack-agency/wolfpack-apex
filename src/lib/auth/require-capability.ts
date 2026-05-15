@@ -17,7 +17,14 @@
  */
 
 import { NextResponse } from "next/server";
-import { getUserFromRequest, type TeamMember } from "@/lib/auth";
+import { cookies } from "next/headers";
+import {
+  getUserFromRequest,
+  verifyToken,
+  DEFAULT_WORKSPACE_ID,
+  type TeamMember,
+} from "@/lib/auth";
+import { ACCESS_TOKEN_COOKIE } from "@/lib/crypto/cookies";
 import { trackEvent } from "@/lib/analytics";
 import type { Capability } from "./capabilities";
 import {
@@ -86,12 +93,41 @@ export function hasCapability(
  * Route enforcement. Always returns — never throws. Emits
  * `system.capability_denied` on every 401/403.
  */
+/** Resolve the caller from the HttpOnly access-token cookie. Used as
+ *  the fallback when a request arrives without an Authorization header
+ *  — i.e. a browser navigation to an admin route (OAuth start, snapshot
+ *  download links). The same JWT shape is in both, so behaviour is
+ *  identical once the user is constructed. */
+async function userFromCookie(): Promise<TeamMember | null> {
+  try {
+    const jar = await cookies();
+    const token = jar.get(ACCESS_TOKEN_COOKIE)?.value;
+    if (!token) return null;
+    const payload = verifyToken(token);
+    return {
+      id: payload.userId,
+      email: payload.email,
+      name: payload.name,
+      role: payload.role,
+      workspaceId: payload.workspaceId ?? DEFAULT_WORKSPACE_ID,
+      created_at: "",
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function requireCapability(
   request: Request,
   capability: Capability,
 ): Promise<RequireCapabilityResult> {
   const route = routeOf(request);
-  const user = getUserFromRequest(request.headers.get("authorization"));
+  /* Header first (Bearer token from JS clients), cookie fallback (browser
+     navigations like OAuth /start). Either path yields the same TeamMember
+     shape so downstream capability checks don't fork. */
+  const user =
+    getUserFromRequest(request.headers.get("authorization")) ??
+    (await userFromCookie());
 
   if (!user) {
     trackEvent("system.capability_denied", "anonymous", "anonymous", {
