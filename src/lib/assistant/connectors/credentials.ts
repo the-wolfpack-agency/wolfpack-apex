@@ -30,6 +30,11 @@ export interface ConnectorCredentials {
   /** Optional domain-object → URL-path map. */
   objectMap?: Record<string, string>;
   isActive: boolean;
+  /** "static_bearer" for legacy / single-token rows, "oauth2" when the
+   *  row is managed by the OAuth orchestrator (migration 138). */
+  authType: "static_bearer" | "oauth2";
+  /** When the cached access token expires. Null for static_bearer. */
+  accessTokenExpiresAt: string | null;
 }
 
 export interface MaskedConnectorCredentials {
@@ -63,9 +68,12 @@ export async function loadConnectorCredentials(
       auth_header_enc: string;
       object_map_json: string | null;
       is_active: boolean;
+      auth_type: string | null;
+      access_token_expires_at: string | null;
     }>(
       `SELECT workspace_id, connector_name, base_url, auth_header_enc,
-              object_map_json, is_active
+              object_map_json, is_active, auth_type,
+              access_token_expires_at::text AS access_token_expires_at
          FROM instinct_connector_credentials
         WHERE workspace_id = $1
           AND connector_name = $2
@@ -93,6 +101,8 @@ export async function loadConnectorCredentials(
       authHeader,
       objectMap: parseObjectMap(row.object_map_json),
       isActive: row.is_active,
+      authType: row.auth_type === "oauth2" ? "oauth2" : "static_bearer",
+      accessTokenExpiresAt: row.access_token_expires_at ?? null,
     };
   } catch {
     return null;

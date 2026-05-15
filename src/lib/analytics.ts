@@ -431,6 +431,30 @@ export type InstinctEventType =
   // source grounding errors are uniformly trackable.
   // Metadata: { status, code, scope_missing }.
   | "assistant.porsche_class_lookup_failed"
+  // OAuth lifecycle for connector credentials (migration 138 +
+  // src/lib/assistant/connectors/oauth/). The orchestrator fires
+  // these uniformly across providers (Salesforce, HubSpot, future
+  // QBO/Jira/GitHub) so the learning loop sees connector-auth health
+  // without per-vendor special cases.
+  //   assistant.oauth_authorization_started  { provider, workspace_id }
+  //   assistant.oauth_authorization_completed { provider, connector,
+  //       workspace_id, expires_in_sec, refresh_token_present }
+  //   assistant.oauth_authorization_failed   { provider, workspace_id,
+  //       code, status }
+  //   assistant.oauth_authorization_denied   { provider, reason }
+  //   assistant.oauth_token_refreshed        { connector, workspace_id,
+  //       expires_in_sec, refresh_token_rotated }
+  //   assistant.oauth_refresh_failed         { connector, workspace_id,
+  //       reason, status? }
+  //   assistant.oauth_persist_failed         { provider, workspace_id,
+  //       reason }
+  | "assistant.oauth_authorization_started"
+  | "assistant.oauth_authorization_completed"
+  | "assistant.oauth_authorization_failed"
+  | "assistant.oauth_authorization_denied"
+  | "assistant.oauth_token_refreshed"
+  | "assistant.oauth_refresh_failed"
+  | "assistant.oauth_persist_failed"
   // Invite was looked up but the expires_at column says it lapsed.
   // Drives the "ask your admin to resend" UX hint + a tenant-side
   // dashboard counter so admins see expirations before users complain.

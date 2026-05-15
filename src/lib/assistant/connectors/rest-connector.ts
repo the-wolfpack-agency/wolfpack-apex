@@ -27,6 +27,7 @@ import type { Connector, ConnectorResult } from "./types";
 import { trackEvent } from "@/lib/analytics";
 import { registerConnector } from "./registry";
 import { loadConnectorCredentials } from "./credentials";
+import { refreshConnectorAccessToken } from "./oauth/refresh";
 
 const DEFAULT_OBJECT_MAP: Record<string, string> = {
   contact: "contacts",
@@ -46,15 +47,26 @@ export interface RestConnectorConfig {
   fetchImpl?: typeof fetch;
   /** Override for tests + per-tenant overrides later. */
   name?: string;
+  /** When set, the connector hands off to refreshConnectorAccessToken
+   *  on a 401, retries once with the refreshed token, and returns the
+   *  retry result. Required for OAuth-backed connectors (Salesforce,
+   *  HubSpot, future Jira/QBO). Static-bearer connectors leave this
+   *  unset and a 401 returns directly. */
+  workspaceId?: string;
+  /** Test seam — when set, the refresh path uses this fetch instead of
+   *  the global one. */
+  refreshFetchImpl?: typeof fetch;
 }
 
 export class RestConnector implements Connector {
   readonly name: string;
   readonly description = "Generic REST API adapter (configurable per tenant via env).";
-  private readonly baseUrl?: string;
-  private readonly authHeader?: string;
+  private baseUrl?: string;
+  private authHeader?: string;
   private readonly objectMap: Record<string, string>;
   private readonly fetchImpl: typeof fetch;
+  private readonly workspaceId?: string;
+  private readonly refreshFetchImpl?: typeof fetch;
 
   constructor(cfg: RestConnectorConfig = {}) {
     this.name = cfg.name ?? "rest-default";
@@ -65,6 +77,8 @@ export class RestConnector implements Connector {
       ...(cfg.objectMap ?? parseEnvObjectMap(process.env.INSTINCT_REST_CRM_OBJECT_MAP)),
     };
     this.fetchImpl = cfg.fetchImpl ?? fetch;
+    this.workspaceId = cfg.workspaceId;
+    this.refreshFetchImpl = cfg.refreshFetchImpl;
   }
 
   isConfigured(): boolean {
@@ -115,6 +129,7 @@ export class RestConnector implements Connector {
 
   private async request<R>(
     path: string,
+    isRetry = false,
   ): Promise<ConnectorResult<R>> {
     const start = Date.now();
     const url = `${this.baseUrl!.replace(/\/$/, "")}${path}`;
@@ -138,6 +153,26 @@ export class RestConnector implements Connector {
       };
     }
     const durationMs = Date.now() - start;
+    /* Refresh-on-401: when the connector is OAuth-backed (workspaceId
+       set), a 401 triggers exactly one refresh + retry. If the retry
+       also 401s, fall through to the auth_failed return so the assistant
+       surfaces the "credentials expired" answer. */
+    if (res.status === 401 && this.workspaceId && !isRetry) {
+      const refreshed = await refreshConnectorAccessToken({
+        workspaceId: this.workspaceId,
+        connectorName: this.name,
+        fetchImpl: this.refreshFetchImpl,
+      });
+      if (refreshed) {
+        this.authHeader = refreshed.authHeader;
+        if (refreshed.baseUrl) this.baseUrl = refreshed.baseUrl;
+        /* The refresh orchestrator already fired assistant.oauth_token_refreshed
+           with provider-side detail. No double-emit here. */
+        return this.request<R>(path, true);
+      }
+      /* Refresh failed (no refresh token, provider rejected, persist
+         error) — fall through to the auth_failed return. */
+    }
     if (res.status === 401 || res.status === 403) {
       emit(this.name, "request_failed", durationMs, "auth_failed");
       return { ok: false, code: "auth_failed", message: `HTTP ${res.status}`, durationMs };
@@ -238,6 +273,9 @@ export async function buildRestConnectorForWorkspace(
       baseUrl: creds.baseUrl,
       authHeader: creds.authHeader,
       objectMap: creds.objectMap,
+      /* Only OAuth-backed rows can refresh. Static-bearer rows leave
+         workspaceId unset so a 401 returns directly (no refresh path). */
+      ...(creds.authType === "oauth2" ? { workspaceId } : {}),
     });
   }
   /* No DB row → fall through to env-var defaults. */
