@@ -426,6 +426,11 @@ export type InstinctEventType =
   // learning loop sees which cases regressed when, and so we can build
   // a quality-over-time dashboard without re-running cases by hand.
   | "assistant.eval_case_executed"
+  // Porsche-class grounding lookup failed (DB unreachable, query
+  // error, etc.). Mirrors assistant.meeting_lookup_failed so multi-
+  // source grounding errors are uniformly trackable.
+  // Metadata: { status, code, scope_missing }.
+  | "assistant.porsche_class_lookup_failed"
   // Invite was looked up but the expires_at column says it lapsed.
   // Drives the "ask your admin to resend" UX hint + a tenant-side
   // dashboard counter so admins see expirations before users complain.

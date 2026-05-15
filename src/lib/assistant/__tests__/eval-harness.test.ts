@@ -78,6 +78,13 @@ const cases: EvalCase[] = (corpus as EvalCorpus).cases;
 // ---------------------------------------------------------------------------
 
 function applyMocks(c: EvalCase): void {
+  /* mockResolvedValueOnce queues persist across tests because
+     jest.clearAllMocks() doesn't reset the once-queue (only mockReset
+     does). Reset the AI mock explicitly so a case that doesn't consume
+     its queued response — e.g. when chat() dispatches to a tool before
+     reaching the LLM — can't bleed that response into the next case. */
+  mockAIComplete.mockReset();
+
   /* KB mock — return the case's hits or [] for default. The shape
      mirrors what searchKnowledge returns: rating, sim, full row. */
   const kbHits = (c.mocks?.kb ?? []).map((hit: EvalKbHit, i: number) => ({
@@ -198,6 +205,7 @@ describe("eval corpus execution", () => {
         throw new Error(
           `Eval case "${c.id}" failed (${c.rationale}):\n  - ${verdict.failures.join("\n  - ")}\n` +
             `  actual source: ${verdict.sourceActual}\n` +
+            `  actual response: ${JSON.stringify(result.response).slice(0, 200)}\n` +
             `  rationale: ${c.rationale}`,
         );
       }

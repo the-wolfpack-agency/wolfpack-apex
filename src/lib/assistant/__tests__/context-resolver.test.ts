@@ -22,6 +22,8 @@ const mockSearchCalendarEvents = jest.fn();
 const mockSearchMessages = jest.fn();
 const mockTrackCalFail = jest.fn();
 const mockTrackEmailFail = jest.fn();
+const mockSearchPorsche = jest.fn();
+const mockTrackPorscheFail = jest.fn();
 
 jest.mock("@/lib/analytics", () => ({
   trackEvent: (...args: any[]) => mockTrack(...args),
@@ -55,6 +57,11 @@ jest.mock("@/lib/plaud", () => ({
   searchMeetingTranscripts: (...args: any[]) => mockSearchMeetingTranscripts(...args),
 }));
 
+jest.mock("@/lib/automations/porsche-classes/assistant-grounding", () => ({
+  searchPorscheClassNotes: (...args: any[]) => mockSearchPorsche(...args),
+  trackPorscheClassLookupFailure: (...args: any[]) => mockTrackPorscheFail(...args),
+}));
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetValidToken.mockResolvedValue({ accessToken: "tok-abc", userEmail: "u@example.com" });
@@ -71,6 +78,9 @@ beforeEach(() => {
     ok: true,
     value: { hits: [], total: 0, took_ms: 1 },
   });
+  /* Default: porsche grounding self-gates to empty on unrelated questions.
+     Tests that exercise the porsche lane override this. */
+  mockSearchPorsche.mockResolvedValue({ ok: true, hits: [], took_ms: 0 });
 });
 
 const baseHit = (i: number, snippetLen = 50) => ({
@@ -989,5 +999,110 @@ describe("getRelevantContext - calendar + email integration", () => {
         endDateTime: "2026-03-31T23:59:59.999Z",
       }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Porsche-class grounding lane
+// ---------------------------------------------------------------------------
+
+describe("getRelevantContext - porsche-class grounding", () => {
+  it("merges porsche-class hits into meeting_notes alongside plaud", async () => {
+    /* Plaud returns one hit. */
+    mockSearchMeetingTranscripts.mockResolvedValueOnce([
+      {
+        id: "plaud-1",
+        title: "Sales sync",
+        summary: "",
+        snippet: "Discussed Q2 pipeline",
+        score: 0.8,
+        recordedAt: "2026-04-20T15:00:00Z",
+        ingestedAt: "2026-04-20T15:30:00Z",
+      },
+    ]);
+    /* Porsche returns one snapshot. */
+    mockSearchPorsche.mockResolvedValueOnce({
+      ok: true,
+      hits: [
+        {
+          id: "snap-1",
+          title: "BA101 2026-04-20 Atlanta",
+          occurred_at: "2026-04-20T15:00:00Z",
+          snippet: "12 participants · +2 added (Smith, Jones)",
+          source_kind: "porsche_class",
+          url: "/automations/porsche-classes",
+        },
+      ],
+      took_ms: 2,
+    });
+    mockSearchSharePoint.mockResolvedValueOnce({
+      ok: true,
+      value: { hits: [], total: 0, took_ms: 1 },
+    });
+    mockSearchProjectTasks.mockResolvedValueOnce({
+      ok: true,
+      value: { tasks: [], took_ms: 1 },
+    });
+    mockSearchCalendarEvents.mockResolvedValueOnce({
+      ok: true,
+      value: { hits: [], total: 0, took_ms: 1 },
+    });
+    mockSearchMessages.mockResolvedValueOnce({
+      ok: true,
+      value: { hits: [], total: 0, took_ms: 1 },
+    });
+
+    const { getRelevantContext } = await import("@/lib/assistant/context-resolver");
+    const bundle = await getRelevantContext({
+      question: "what changed in BA101 on April 20",
+      userId: "u-1",
+      role: "cto",
+      surface: "assistant_support",
+    });
+
+    /* Both grounding lanes are present. */
+    expect(bundle.meeting_notes).toHaveLength(2);
+    const porscheHit = bundle.meeting_notes.find((h) => h.source_kind === "porsche_class");
+    expect(porscheHit).toBeDefined();
+    expect(porscheHit?.title).toBe("BA101 2026-04-20 Atlanta");
+    expect(porscheHit?.url).toBe("/automations/porsche-classes");
+    /* The rendered prompt block carries the porsche snippet so the LLM
+       can cite it inline. */
+    expect(bundle.rendered_prompt_block).toContain("BA101 2026-04-20 Atlanta");
+    expect(bundle.rendered_prompt_block).toContain("+2 added");
+  });
+
+  it("fires trackPorscheClassLookupFailure on grounding error and still returns the rest of the bundle", async () => {
+    mockSearchPorsche.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      code: "internal",
+      message: "db down",
+    });
+    mockSearchSharePoint.mockResolvedValueOnce({
+      ok: true,
+      value: { hits: [baseHit(1)], total: 1, took_ms: 1 },
+    });
+    mockSearchProjectTasks.mockResolvedValueOnce({
+      ok: true, value: { tasks: [], took_ms: 1 },
+    });
+    mockSearchCalendarEvents.mockResolvedValueOnce({
+      ok: true, value: { hits: [], total: 0, took_ms: 1 },
+    });
+    mockSearchMessages.mockResolvedValueOnce({
+      ok: true, value: { hits: [], total: 0, took_ms: 1 },
+    });
+
+    const { getRelevantContext } = await import("@/lib/assistant/context-resolver");
+    const bundle = await getRelevantContext({
+      question: "what classes ran last Friday",
+      userId: "u-1",
+      role: "cto",
+      surface: "assistant_support",
+    });
+
+    expect(mockTrackPorscheFail).toHaveBeenCalledTimes(1);
+    /* SharePoint hit still landed; the bundle isn't aborted. */
+    expect(bundle.sharepoint_hits).toHaveLength(1);
   });
 });

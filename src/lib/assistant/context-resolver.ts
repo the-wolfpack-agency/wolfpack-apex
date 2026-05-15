@@ -62,6 +62,10 @@ import {
   type MailErrorResult,
 } from "@/lib/integrations/microsoft-mail";
 import { searchMeetingTranscripts } from "@/lib/plaud";
+import {
+  searchPorscheClassNotes,
+  trackPorscheClassLookupFailure,
+} from "@/lib/automations/porsche-classes/assistant-grounding";
 
 // Re-export for downstream consumers + tests.
 export type { CalendarEventHit, EmailThreadHit };
@@ -683,6 +687,16 @@ export async function getRelevantContext(
     topN: MEETING_TOP_N,
   });
 
+  /* Porsche-class snapshots are another DB-local grounding lane.
+     `searchPorscheClassNotes` self-gates on a keyword regex so cost
+     is zero for questions that aren't class-related. We fan out in
+     parallel with the other lookups. */
+  const porschePromise = searchPorscheClassNotes({
+    question,
+    dateRange: extractDateRange(question) ?? undefined,
+    topN: MEETING_TOP_N,
+  });
+
   const token = await getValidToken(userId);
 
   /* Parallel surface fan-out. searchMeetingNotes already returns typed
@@ -718,7 +732,7 @@ export async function getRelevantContext(
     mailRes = mailSettled.status === "fulfilled" ? mailSettled.value : null;
   }
 
-  const meetingRes = await meetingPromise;
+  const [meetingRes, porscheRes] = await Promise.all([meetingPromise, porschePromise]);
 
   const errors: ContextBundle["errors"] = {};
   let sharepoint_hits: SharePointSearchHit[] = [];
@@ -744,6 +758,17 @@ export async function getRelevantContext(
   } else {
     errors.meeting = meetingRes;
     trackMeetingLookupFailure(userId, role, meetingRes);
+  }
+  /* Merge porsche-class snapshots into the same lane. They share the
+     MeetingNoteHit shape so renderMeetingEntry handles them uniformly
+     (the [Meeting] prefix is acceptable shorthand for any class-or-
+     transcript-style hit). When the porsche fetch errored, the typed
+     result still surfaces in `errors.meeting` so the UI can flag it. */
+  if (porscheRes.ok) {
+    meeting_notes = meeting_notes.concat(porscheRes.hits);
+  } else {
+    errors.meeting = errors.meeting ?? porscheRes;
+    trackPorscheClassLookupFailure(userId, role, porscheRes);
   }
   if (calRes && calRes.ok) {
     calendar_events = calRes.value.hits;

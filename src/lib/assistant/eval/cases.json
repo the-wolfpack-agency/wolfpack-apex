@@ -172,6 +172,21 @@
         "sourceNot": ["knowledge_cache"],
         "answerNotContains": ["JWT"]
       }
+    },
+    {
+      "id": "happy-porsche-class-grounding-reaches-llm",
+      "category": "happy_path",
+      "rationale": "Porsche-class snapshots now ground the assistant via context-resolver. The grounding-block fixture below is what searchPorscheClassNotes would render for 'what changed in BA101 on April 20'. The AI mock must cite the +2 added participants so we know the prompt block reached the LLM (not just that the SQL ran). This is the smoke test for the new grounding lane end-to-end.",
+      "question": "what changed in BA101 on April 20",
+      "mocks": {
+        "groundingBlock": "Internal context (cite if you use it):\n\n[Meeting] BA101 2026-04-20 Atlanta — 2026-04-20T15:00:00Z\n12 participants · +2 added (Smith, Jones)\n/automations/porsche-classes\n",
+        "aiResponse": "BA101 on April 20 in Atlanta had 12 participants. Two new attendees joined: Smith and Jones."
+      },
+      "expect": {
+        "source": "ai",
+        "answerContains": ["BA101", "Smith", "Jones"],
+        "answerNotContains": ["I don't have a confident answer"]
+      }
     }
   ]
 }
