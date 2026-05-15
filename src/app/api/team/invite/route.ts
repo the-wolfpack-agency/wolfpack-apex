@@ -135,5 +135,11 @@ export async function inviteFlow(
 }
 
 export async function POST(req: NextRequest) {
+  /* Explicit auth check at the POST handler so static-analysis can
+     see the gate without following the inviteFlow indirection.
+     inviteFlow itself ALSO calls requireCapability (defense in depth,
+     same workspace + capability gate). */
+  const auth = await requireCapability(req, "settings.manage_team");
+  if (!auth.ok) return auth.response;
   return inviteFlow(req);
 }
