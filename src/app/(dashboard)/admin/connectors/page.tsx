@@ -3,18 +3,27 @@
 /**
  * /admin/connectors — manage per-tenant connector credentials.
  *
- * CTO/CEO only (enforced by /api/admin/connectors). Lists active
- * credentials with masked auth-header hints, lets an admin add /
- * update an entry. Plaintext NEVER appears on screen after save —
- * the form clears the auth-header input and we re-fetch the masked
- * list.
+ * CTO/CEO only (enforced by the underlying APIs). Three layers:
  *
- * Vendor presets (HubSpot / Salesforce / QuickBooks) auto-fill
- * baseUrl + objectMap when picked from the dropdown so the operator
- * only types the auth header.
+ *   1. Quick Connect — one-click OAuth for vendors with registered
+ *      providers (Salesforce, HubSpot today; QBO/Jira/GitHub when
+ *      their providers land). Kicks off /api/admin/connectors/oauth/
+ *      <provider>/start which redirects to the vendor's authorize URL.
+ *
+ *   2. Active connectors — per-row badge ("OAuth" vs "Static bearer"),
+ *      token-expiry hint for OAuth rows, and Verify + Disconnect
+ *      actions.
+ *
+ *   3. Advanced — paste credentials manually. Still required for the
+ *      generic rest-default connector and for clients who can't allow
+ *      a 3rd-party OAuth app and must use their own static token.
+ *
+ * Auth headers are encrypted at rest (AES-256-GCM) and never re-rendered
+ * in plaintext anywhere.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { fetchWithRefresh } from "@/lib/client-auth";
 
 interface MaskedConnectorRow {
@@ -26,6 +35,8 @@ interface MaskedConnectorRow {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  authType: "static_bearer" | "oauth2";
+  accessTokenExpiresAt: string | null;
 }
 
 const VENDOR_OPTIONS = [
@@ -84,17 +95,29 @@ const VENDOR_OPTIONS = [
   },
 ];
 
+/** Vendors that support one-click OAuth. Each must have an OAuthProvider
+ *  registered in src/lib/assistant/connectors/oauth/registry.ts. */
+const OAUTH_VENDORS = [
+  { name: "salesforce", label: "Salesforce" },
+  { name: "hubspot", label: "HubSpot" },
+];
+
 export default function AdminConnectorsPage() {
   const [rows, setRows] = useState<MaskedConnectorRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [okMessage, setOkMessage] = useState<string | null>(null);
+  const [verifyState, setVerifyState] = useState<Record<string, string | null>>({});
 
   const [vendor, setVendor] = useState("rest-default");
   const [baseUrl, setBaseUrl] = useState("");
   const [authHeader, setAuthHeader] = useState("");
   const [objectMapText, setObjectMapText] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [okMessage, setOkMessage] = useState<string | null>(null);
+
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
 
   const selected = useMemo(
     () => VENDOR_OPTIONS.find((o) => o.value === vendor) ?? VENDOR_OPTIONS[0],
@@ -112,7 +135,7 @@ export default function AdminConnectorsPage() {
         return;
       }
       const data = (await res.json()) as { connectors: MaskedConnectorRow[] };
-      setRows(data.connectors ?? []);
+      setRows((data.connectors ?? []).filter((r) => r.isActive));
     } catch (e) {
       setError((e as Error).message || "Network error");
     } finally {
@@ -124,12 +147,70 @@ export default function AdminConnectorsPage() {
     loadRows();
   }, [loadRows]);
 
+  /* Surface OAuth callback redirects to the user as success/error toasts.
+     The callback route appends ?oauth_connected=<provider> on success
+     and ?oauth_error=<code>&oauth_message=<text> on failure. We read
+     them once + clear them from the URL so a reload doesn't re-toast. */
+  useEffect(() => {
+    const connected = searchParams.get("oauth_connected");
+    const oauthError = searchParams.get("oauth_error");
+    const oauthMessage = searchParams.get("oauth_message");
+    if (connected) {
+      setOkMessage(`✅ Connected ${connected}. Tokens stored encrypted; the assistant can query this CRM now.`);
+      router.replace(pathname);
+    } else if (oauthError) {
+      setError(`OAuth failed (${oauthError})${oauthMessage ? `: ${oauthMessage}` : ""}`);
+      router.replace(pathname);
+    }
+  }, [searchParams, router, pathname]);
+
   /* When the operator picks a vendor preset, prefill the URL +
      objectMap fields so they only have to type the auth header. */
   useEffect(() => {
     setBaseUrl(selected.baseUrl);
     setObjectMapText(selected.objectMap);
   }, [selected]);
+
+  function startOAuth(provider: string): void {
+    /* Full-page navigation (NOT fetch) — we need the browser to follow
+       redirects from /start → vendor authorize → /callback → here. */
+    window.location.href = `/api/admin/connectors/oauth/${encodeURIComponent(provider)}/start?return_to=${encodeURIComponent("/admin/connectors")}`;
+  }
+
+  async function disconnect(connectorName: string): Promise<void> {
+    if (!confirm(`Disconnect ${connectorName}? Stored tokens will be deactivated. You can reconnect any time.`)) return;
+    setError(null);
+    setOkMessage(null);
+    const res = await fetchWithRefresh(`/api/admin/connectors/${encodeURIComponent(connectorName)}/disconnect`, {
+      method: "POST",
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body?.error || `Disconnect failed (HTTP ${res.status})`);
+      return;
+    }
+    setOkMessage(`Disconnected ${connectorName}.`);
+    await loadRows();
+  }
+
+  async function verify(connectorName: string): Promise<void> {
+    setVerifyState((s) => ({ ...s, [connectorName]: "checking…" }));
+    const res = await fetchWithRefresh(`/api/admin/connectors/${encodeURIComponent(connectorName)}/verify`, {
+      method: "POST",
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok && body?.ok) {
+      setVerifyState((s) => ({
+        ...s,
+        [connectorName]: `✅ live (${body.duration_ms ?? "?"}ms${typeof body.matched === "number" ? `, ${body.matched} probe match` : ""})`,
+      }));
+    } else {
+      setVerifyState((s) => ({
+        ...s,
+        [connectorName]: `⚠️ ${body?.code ?? "failed"}${body?.message ? `: ${body.message}` : ""}`,
+      }));
+    }
+  }
 
   async function onSubmit(ev: React.FormEvent) {
     ev.preventDefault();
@@ -178,6 +259,17 @@ export default function AdminConnectorsPage() {
     }
   }
 
+  function renderExpiry(row: MaskedConnectorRow): string {
+    if (row.authType !== "oauth2" || !row.accessTokenExpiresAt) return "";
+    const ms = Date.parse(row.accessTokenExpiresAt);
+    if (Number.isNaN(ms)) return "";
+    const minsLeft = Math.round((ms - Date.now()) / 60000);
+    if (minsLeft < 0) return ` · access token expired ${-minsLeft}m ago (will auto-refresh on next call)`;
+    if (minsLeft < 60) return ` · access token expires in ${minsLeft}m`;
+    const hoursLeft = Math.round(minsLeft / 60);
+    return ` · access token expires in ${hoursLeft}h`;
+  }
+
   return (
     <div style={{ maxWidth: 920, margin: "0 auto", padding: 24, color: "var(--wp-text,#fff)" }}>
       <h1 style={{ fontSize: 24, marginBottom: 4 }}>Connectors</h1>
@@ -186,10 +278,43 @@ export default function AdminConnectorsPage() {
         encrypted at rest (AES-256-GCM) and never re-rendered in plaintext.
       </p>
 
-      <section style={cardStyle}>
+      {okMessage && (
+        <div role="status" style={{ ...cardStyle, marginBottom: 16, borderColor: "var(--wp-green,#22c55e)" }}>
+          <p style={{ color: "var(--wp-green,#22c55e)", margin: 0 }}>{okMessage}</p>
+        </div>
+      )}
+      {error && (
+        <div role="alert" style={{ ...cardStyle, marginBottom: 16, borderColor: "var(--wp-red,#ef4444)" }}>
+          <p style={{ color: "var(--wp-red,#ef4444)", margin: 0 }}>{error}</p>
+        </div>
+      )}
+
+      <section style={cardStyle} aria-label="quick-connect">
+        <h2 style={{ fontSize: 18, marginBottom: 4 }}>Quick Connect</h2>
+        <p style={{ fontSize: 13, color: "var(--wp-text-dim,#a0a8b4)", marginTop: 0, marginBottom: 16 }}>
+          One-click OAuth. The vendor signs the user in, asks for permission, and
+          drops back here. We never see the password.
+        </p>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          {OAUTH_VENDORS.map((v) => (
+            <button
+              key={v.name}
+              type="button"
+              onClick={() => startOAuth(v.name)}
+              style={oauthBtnStyle}
+            >
+              Connect {v.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section style={{ ...cardStyle, marginTop: 24 }} aria-label="active-connectors">
         <h2 style={{ fontSize: 18, marginBottom: 12 }}>Active connectors</h2>
         {loading && <p>Loading…</p>}
-        {!loading && rows.length === 0 && <p style={{ color: "var(--wp-text-dim,#a0a8b4)" }}>None configured yet.</p>}
+        {!loading && rows.length === 0 && (
+          <p style={{ color: "var(--wp-text-dim,#a0a8b4)" }}>None configured yet.</p>
+        )}
         {rows.map((r) => (
           <div
             key={`${r.workspaceId}:${r.connectorName}`}
@@ -198,25 +323,49 @@ export default function AdminConnectorsPage() {
               borderBottom: "1px solid var(--wp-dark-border,#2a2c30)",
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <strong>{r.connectorName}</strong>
-              <small style={{ color: "var(--wp-text-dim,#a0a8b4)" }}>
-                updated {new Date(r.updatedAt).toLocaleString()}
-              </small>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+              <strong style={{ fontSize: 15 }}>
+                {r.connectorName}{" "}
+                <span style={r.authType === "oauth2" ? badgeOauthStyle : badgeStaticStyle}>
+                  {r.authType === "oauth2" ? "OAuth" : "Static bearer"}
+                </span>
+              </strong>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" onClick={() => verify(r.connectorName)} style={smallBtnStyle}>
+                  Verify
+                </button>
+                <button
+                  type="button"
+                  onClick={() => disconnect(r.connectorName)}
+                  style={{ ...smallBtnStyle, color: "var(--wp-red,#ef4444)" }}
+                >
+                  Disconnect
+                </button>
+              </div>
             </div>
-            <div style={{ fontSize: 13, color: "var(--wp-text-dim,#a0a8b4)", marginTop: 4 }}>
-              <div>baseUrl: {r.baseUrl}</div>
-              <div>auth: <code>{r.authHeaderHint}</code></div>
-              {r.objectMap && (
-                <div>objects: {Object.keys(r.objectMap).join(", ")}</div>
+            <div style={{ fontSize: 13, color: "var(--wp-text-dim,#a0a8b4)", marginTop: 6 }}>
+              <div>baseUrl: {r.baseUrl || "(none)"}</div>
+              <div>
+                auth: <code>{r.authHeaderHint}</code>
+                {renderExpiry(r)}
+              </div>
+              {r.objectMap && <div>objects: {Object.keys(r.objectMap).join(", ")}</div>}
+              <div>updated {new Date(r.updatedAt).toLocaleString()}</div>
+              {verifyState[r.connectorName] && (
+                <div style={{ marginTop: 4 }}>verify: {verifyState[r.connectorName]}</div>
               )}
             </div>
           </div>
         ))}
       </section>
 
-      <section style={{ ...cardStyle, marginTop: 24 }}>
-        <h2 style={{ fontSize: 18, marginBottom: 12 }}>Add / update connector</h2>
+      <section style={{ ...cardStyle, marginTop: 24 }} aria-label="advanced-static-form">
+        <h2 style={{ fontSize: 18, marginBottom: 4 }}>Advanced — paste static credentials</h2>
+        <p style={{ fontSize: 13, color: "var(--wp-text-dim,#a0a8b4)", marginTop: 0, marginBottom: 12 }}>
+          For the generic <code>rest-default</code> connector and for clients who
+          can&apos;t allow a 3rd-party OAuth app. Use Quick Connect above for
+          one-click Salesforce / HubSpot whenever possible.
+        </p>
         <form onSubmit={onSubmit} aria-label="connector-form">
           <label style={labelStyle}>
             Vendor
@@ -280,8 +429,6 @@ export default function AdminConnectorsPage() {
           >
             {submitting ? "Saving…" : "Save credentials"}
           </button>
-          {error && <p style={{ color: "var(--wp-red,#ef4444)", marginTop: 12 }}>{error}</p>}
-          {okMessage && <p style={{ color: "var(--wp-green,#22c55e)", marginTop: 12 }}>{okMessage}</p>}
         </form>
       </section>
     </div>
@@ -311,4 +458,48 @@ const inputStyle: React.CSSProperties = {
   color: "var(--wp-text,#fff)",
   border: "1px solid var(--wp-dark-border,#2a2c30)",
   borderRadius: 6,
+};
+
+const oauthBtnStyle: React.CSSProperties = {
+  padding: "10px 18px",
+  background: "var(--wp-gold,#eab308)",
+  color: "#111",
+  border: "none",
+  borderRadius: 6,
+  fontWeight: 600,
+  cursor: "pointer",
+};
+
+const smallBtnStyle: React.CSSProperties = {
+  padding: "4px 10px",
+  background: "transparent",
+  color: "var(--wp-text,#fff)",
+  border: "1px solid var(--wp-dark-border,#2a2c30)",
+  borderRadius: 4,
+  fontSize: 12,
+  cursor: "pointer",
+};
+
+const badgeOauthStyle: React.CSSProperties = {
+  display: "inline-block",
+  padding: "1px 8px",
+  marginLeft: 8,
+  background: "rgba(34,197,94,0.15)",
+  color: "var(--wp-green,#22c55e)",
+  border: "1px solid rgba(34,197,94,0.4)",
+  borderRadius: 999,
+  fontSize: 11,
+  fontWeight: 600,
+};
+
+const badgeStaticStyle: React.CSSProperties = {
+  display: "inline-block",
+  padding: "1px 8px",
+  marginLeft: 8,
+  background: "rgba(160,168,180,0.15)",
+  color: "var(--wp-text-dim,#a0a8b4)",
+  border: "1px solid rgba(160,168,180,0.3)",
+  borderRadius: 999,
+  fontSize: 11,
+  fontWeight: 600,
 };

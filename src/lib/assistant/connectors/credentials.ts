@@ -47,6 +47,11 @@ export interface MaskedConnectorCredentials {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  /** "static_bearer" or "oauth2" — drives the admin UI badge that
+   *  tells the operator whether refresh applies. */
+  authType: "static_bearer" | "oauth2";
+  /** ISO timestamp when the cached access token expires (oauth2 only). */
+  accessTokenExpiresAt: string | null;
 }
 
 const DEFAULT_WORKSPACE = "default";
@@ -174,6 +179,13 @@ export async function saveConnectorCredentials(args: {
       isActive: row.is_active,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      /* The static-bearer save path doesn't touch auth_type, so the
+         row keeps whatever value it had (defaults to 'static_bearer'
+         per migration 138). The DB-returned shape doesn't surface
+         these here; the next listConnectorCredentials() call picks
+         them up fresh. */
+      authType: "static_bearer",
+      accessTokenExpiresAt: null,
     };
   } catch {
     return null;
@@ -236,9 +248,12 @@ export async function listConnectorCredentials(
       is_active: boolean;
       created_at: string;
       updated_at: string;
+      auth_type: string | null;
+      access_token_expires_at: string | null;
     }>(
       `SELECT workspace_id, connector_name, base_url, auth_header_enc,
-              object_map_json, is_active, created_at::text, updated_at::text
+              object_map_json, is_active, created_at::text, updated_at::text,
+              auth_type, access_token_expires_at::text AS access_token_expires_at
          FROM instinct_connector_credentials
         WHERE workspace_id = $1
         ORDER BY connector_name`,
@@ -255,6 +270,8 @@ export async function listConnectorCredentials(
         isActive: row.is_active,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        authType: row.auth_type === "oauth2" ? "oauth2" : "static_bearer",
+        accessTokenExpiresAt: row.access_token_expires_at ?? null,
       };
     });
   } catch {

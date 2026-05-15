@@ -461,6 +461,13 @@ export type InstinctEventType =
   // searches start returning 0 results (could be auth, could be empty
   // tenant data, could be a regex regression).
   | "assistant.connector_search_executed"
+  // Admin disconnected a connector (soft-delete is_active=false).
+  // Metadata: { connector, workspace_id }.
+  | "assistant.connector_disconnected"
+  | "assistant.connector_disconnect_failed"
+  // Admin clicked "Verify" — health-check fired against the vendor.
+  // Metadata: { connector, workspace_id, ok, duration_ms, code }.
+  | "assistant.connector_verified"
   // Invite was looked up but the expires_at column says it lapsed.
   // Drives the "ask your admin to resend" UX hint + a tenant-side
   // dashboard counter so admins see expirations before users complain.
