@@ -288,6 +288,50 @@ export class RestConnector implements Connector {
     return { ok: true, data: { id }, durationMs: r.durationMs };
   }
 
+  async searchRelated(
+    parentType: string,
+    parentName: string,
+    relatedType: string,
+    limit = 10,
+  ): Promise<ConnectorResult<Array<Record<string, unknown>>>> {
+    if (!this.isConfigured()) return notConfigured(this.name, "searchRelated");
+    if (!this.vendorPreset?.relatedSearch) {
+      return {
+        ok: false,
+        code: "validation",
+        message: `connector "${this.name}" does not support related-record search`,
+      };
+    }
+    const req = this.vendorPreset.relatedSearch.build(
+      parentType.toLowerCase(),
+      parentName,
+      relatedType.toLowerCase(),
+      limit,
+    );
+    const r = await this.request<unknown>(req.path.startsWith("/") ? req.path : `/${req.path}`);
+    if (!r.ok) return r as ConnectorResult<Array<Record<string, unknown>>>;
+    return { ok: true, data: req.extract(r.data), durationMs: r.durationMs };
+  }
+
+  async searchFiltered(
+    objectType: string,
+    filters: import("./vendor-presets").FilterSpec,
+    limit = 10,
+  ): Promise<ConnectorResult<Array<Record<string, unknown>>>> {
+    if (!this.isConfigured()) return notConfigured(this.name, "searchFiltered");
+    if (!this.vendorPreset?.filterSearch) {
+      return {
+        ok: false,
+        code: "validation",
+        message: `connector "${this.name}" does not support filter queries`,
+      };
+    }
+    const req = this.vendorPreset.filterSearch.build(objectType.toLowerCase(), filters, limit);
+    const r = await this.request<unknown>(req.path.startsWith("/") ? req.path : `/${req.path}`);
+    if (!r.ok) return r as ConnectorResult<Array<Record<string, unknown>>>;
+    return { ok: true, data: req.extract(r.data), durationMs: r.durationMs };
+  }
+
   private async requestWithBody(
     method: "POST" | "PATCH",
     path: string,

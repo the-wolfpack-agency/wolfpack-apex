@@ -41,6 +41,10 @@ import "./get-external-record-tool";
    firing a real write against the vendor. */
 import "./create-external-record-tool";
 import "./update-external-record-tool";
+/* Read-only advanced queries — related records ("Acme's opportunities")
+   and filter queries ("deals over $50k closing this month"). */
+import "./get-related-records-tool";
+import "./filter-external-records-tool";
 
 export { tryDispatchTool } from "./dispatcher";
 export { getTools, getToolByName, registerTool, __resetRegistryForTests } from "./registry";

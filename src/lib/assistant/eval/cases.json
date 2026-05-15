@@ -239,6 +239,32 @@
       }
     },
     {
+      "id": "happy-related-records-routes-to-tool",
+      "category": "happy_path",
+      "rationale": "'Acme's opportunities' / 'Jorge's deals' should route to the related-records tool, not search or page-facts. Pins the routing contract; downstream behavior depends on the live connector.",
+      "question": "Acme's opportunities",
+      "expect": {
+        "source": "tool",
+        "answerNotContains": [
+          "I don't have a confident answer",
+          "Your Microsoft 365 calendar view"
+        ]
+      }
+    },
+    {
+      "id": "happy-filter-deals-over-amount-routes-to-tool",
+      "category": "happy_path",
+      "rationale": "'deals over $50k closing this month' is the canonical sales-reporting query. It must route to the filter tool — not get_external_record (would treat '$50k' as an ID), not search (no name match).",
+      "question": "deals over $50k closing this month",
+      "expect": {
+        "source": "tool",
+        "answerNotContains": [
+          "I don't have a confident answer",
+          "No contact found"
+        ]
+      }
+    },
+    {
       "id": "happy-porsche-class-grounding-reaches-llm",
       "category": "happy_path",
       "rationale": "Porsche-class snapshots now ground the assistant via context-resolver. The grounding-block fixture below is what searchPorscheClassNotes would render for 'what changed in BA101 on April 20'. The AI mock must cite the +2 added participants so we know the prompt block reached the LLM (not just that the SQL ran). This is the smoke test for the new grounding lane end-to-end.",

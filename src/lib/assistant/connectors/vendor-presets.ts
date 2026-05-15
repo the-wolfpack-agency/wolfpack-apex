@@ -60,6 +60,54 @@ export interface VendorPreset {
     create(objectType: string, fields: Record<string, unknown>): VendorWriteRequest;
     update(objectType: string, id: string, fields: Record<string, unknown>): VendorWriteRequest;
   };
+  /** Optional related-record search ("Acme's opportunities").
+   *  Vendors that don't support relationship queries (or where we
+   *  haven't shipped them yet) leave this undefined. */
+  relatedSearch?: {
+    build(
+      parentType: string,
+      parentName: string,
+      relatedType: string,
+      limit: number,
+    ): VendorSearchRequest;
+  };
+  /** Optional filter-query support ("deals over $50k closing this month").
+   *  Takes a structured FilterSpec the tool composes from regex
+   *  parsing; the vendor preset translates it to the vendor's native
+   *  filter expression (SOQL WHERE for Salesforce, search filter
+   *  body for HubSpot). */
+  filterSearch?: {
+    build(
+      objectType: string,
+      filters: FilterSpec,
+      limit: number,
+    ): VendorSearchRequest;
+  };
+}
+
+/** Filter clauses the filter-search tool can apply. Each is optional;
+ *  the vendor preset composes the ones present into a vendor-native
+ *  expression. New clause types land here as patterns get added. */
+export interface FilterSpec {
+  /** Numeric amount comparison ("over $50k", "under 10000"). Salesforce
+   *  fields: Opportunity.Amount, Account.AnnualRevenue, etc. */
+  amount?: { op: "gt" | "lt" | "gte" | "lte" | "eq"; value: number };
+  /** Symbolic date range applied to the object's default date field
+   *  (Opportunity.CloseDate, Contact.CreatedDate, etc). The vendor
+   *  preset translates the symbol to a concrete date literal. */
+  dateRange?:
+    | "this_week"
+    | "last_week"
+    | "this_month"
+    | "last_month"
+    | "next_month"
+    | "this_quarter"
+    | "this_year";
+  /** Stage filter for Opportunity ("stuck in Proposal" / "in Closed Won"). */
+  stage?: string;
+  /** Owner-name filter ("deals Jorge owns"). The vendor preset substring-
+   *  matches against Owner.Name. */
+  ownerName?: string;
 }
 
 /** Salesforce SOQL string-literal escape. Single quotes wrap the value,
@@ -179,6 +227,117 @@ export const VENDOR_PRESETS: Record<string, VendorPreset> = {
           path: `/services/data/v59.0/sobjects/${sobject}/${encodeURIComponent(id)}`,
           body: fields,
           extractCreatedId: () => id,
+        };
+      },
+    },
+    relatedSearch: {
+      build(parentType, parentName, relatedType, limit) {
+        /* "Acme's opportunities" → SOQL:
+              SELECT … FROM Opportunity WHERE Account.Name LIKE '%Acme%'
+           "Jorge's open deals" / "Jorge's contacts" → owner-based
+              SELECT … FROM Opportunity WHERE Owner.Name LIKE '%Jorge%'
+           parentType=contact treated as owner; account/company as parent. */
+        const RelatedSObject: Record<string, string> = {
+          opportunity: "Opportunity",
+          deal: "Opportunity",
+          contact: "Contact",
+          account: "Account",
+          company: "Account",
+          task: "Task",
+        };
+        const sobject = RelatedSObject[relatedType] ?? "Opportunity";
+        const fields =
+          sobject === "Opportunity"
+            ? "Id,Name,StageName,Amount,CloseDate,AccountId,Account.Name"
+            : sobject === "Contact"
+            ? "Id,Name,Email,Phone,AccountId,Account.Name"
+            : sobject === "Account"
+            ? "Id,Name,Industry,Phone"
+            : "Id,Subject,Status,ActivityDate";
+        const escaped = sfSoqlEscape(parentName);
+        /* Build the relationship clause: account/company parents use
+           Account.Name; contact/person parents use Owner.Name (a contact
+           "owns" opps/accounts via OwnerId in our usage). */
+        let whereClause: string;
+        if (parentType === "account" || parentType === "company") {
+          whereClause =
+            sobject === "Opportunity" || sobject === "Contact"
+              ? `Account.Name LIKE '%${escaped}%'`
+              : `Name LIKE '%${escaped}%'`;
+        } else {
+          /* Owner-based relationship (Jorge's deals / Jorge's contacts). */
+          whereClause = `Owner.Name LIKE '%${escaped}%'`;
+        }
+        const soql = `SELECT ${fields} FROM ${sobject} WHERE ${whereClause} LIMIT ${limit}`;
+        const path = `/services/data/v59.0/query?${sfEncode(soql)}`;
+        return {
+          path,
+          extract: (raw) => {
+            const r = raw as { records?: Array<Record<string, unknown>> };
+            return Array.isArray(r?.records) ? r.records : [];
+          },
+        };
+      },
+    },
+    filterSearch: {
+      build(objectType, filters, limit) {
+        /* Compose a SOQL WHERE from the FilterSpec. Always SELECTs
+           the same per-sobject field set we use elsewhere so the
+           tool's renderer doesn't have to fork. */
+        const SObjectByType: Record<string, string> = {
+          contact: "Contact",
+          deal: "Opportunity",
+          opportunity: "Opportunity",
+          account: "Account",
+          company: "Account",
+        };
+        const sobject = SObjectByType[objectType] ?? "Opportunity";
+        const fields =
+          sobject === "Opportunity"
+            ? "Id,Name,StageName,Amount,CloseDate,AccountId,Account.Name,Owner.Name"
+            : sobject === "Contact"
+            ? "Id,Name,Email,Phone,AccountId,Account.Name,Owner.Name"
+            : "Id,Name,Industry,Phone,Owner.Name";
+
+        const clauses: string[] = [];
+        if (filters.amount && sobject === "Opportunity") {
+          const op = ({ gt: ">", lt: "<", gte: ">=", lte: "<=", eq: "=" } as const)[filters.amount.op];
+          clauses.push(`Amount ${op} ${filters.amount.value}`);
+        }
+        if (filters.stage && sobject === "Opportunity") {
+          clauses.push(`StageName = '${sfSoqlEscape(filters.stage)}'`);
+        }
+        if (filters.ownerName) {
+          clauses.push(`Owner.Name LIKE '%${sfSoqlEscape(filters.ownerName)}%'`);
+        }
+        if (filters.dateRange) {
+          const dateField = sobject === "Opportunity" ? "CloseDate" : "CreatedDate";
+          /* Salesforce SOQL date literals: THIS_WEEK, LAST_WEEK,
+             THIS_MONTH, LAST_MONTH, NEXT_MONTH, THIS_QUARTER, THIS_YEAR
+             are unquoted reserved tokens. */
+          const SOQL_LITERAL: Record<string, string> = {
+            this_week: "THIS_WEEK",
+            last_week: "LAST_WEEK",
+            this_month: "THIS_MONTH",
+            last_month: "LAST_MONTH",
+            next_month: "NEXT_MONTH",
+            this_quarter: "THIS_QUARTER",
+            this_year: "THIS_YEAR",
+          };
+          const lit = SOQL_LITERAL[filters.dateRange];
+          if (lit) clauses.push(`${dateField} = ${lit}`);
+        }
+
+        const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+        const orderBy = sobject === "Opportunity" ? "ORDER BY Amount DESC NULLS LAST" : "ORDER BY Name";
+        const soql = `SELECT ${fields} FROM ${sobject} ${where} ${orderBy} LIMIT ${limit}`.replace(/\s+/g, " ").trim();
+        const path = `/services/data/v59.0/query?${sfEncode(soql)}`;
+        return {
+          path,
+          extract: (raw) => {
+            const r = raw as { records?: Array<Record<string, unknown>> };
+            return Array.isArray(r?.records) ? r.records : [];
+          },
         };
       },
     },

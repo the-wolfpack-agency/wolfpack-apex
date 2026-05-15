@@ -475,6 +475,14 @@ export type InstinctEventType =
   // Drives a write-success dashboard so a sudden auth_failed spike
   // post-token-rotation surfaces immediately.
   | "assistant.connector_write_executed"
+  // Related-record search executed against a connector (Acme's
+  // opportunities / Jorge's deals).
+  // Metadata: { connector, parent_type, related_type, match_count }.
+  | "assistant.connector_related_executed"
+  // Filter-query search executed against a connector ("deals over $50k
+  // closing this month"). Metadata flags which clause types were
+  // present so we can dashboard the most-used filter shapes.
+  | "assistant.connector_filter_executed"
   // Invite was looked up but the expires_at column says it lapsed.
   // Drives the "ask your admin to resend" UX hint + a tenant-side
   // dashboard counter so admins see expirations before users complain.

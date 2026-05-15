@@ -89,4 +89,25 @@ export interface Connector {
     id: string,
     fields: Record<string, unknown>,
   ): Promise<ConnectorResult<{ id: string }>>;
+  /**
+   * Related-record search: "Acme's open opportunities" / "Jorge's
+   * tickets". Connector resolves the relationship via vendor-specific
+   * SOQL/equivalent. Adapters without relationship support omit this.
+   */
+  searchRelated?(
+    parentType: string,
+    parentName: string,
+    relatedType: string,
+    limit?: number,
+  ): Promise<ConnectorResult<Array<Record<string, unknown>>>>;
+  /**
+   * Filter-query search: structured FilterSpec composed by the tool
+   * from regex extraction. The connector calls the vendor preset's
+   * builder, then executes. Adapters without filter support omit this.
+   */
+  searchFiltered?(
+    objectType: string,
+    filters: import("./vendor-presets").FilterSpec,
+    limit?: number,
+  ): Promise<ConnectorResult<Array<Record<string, unknown>>>>;
 }
