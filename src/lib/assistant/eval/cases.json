@@ -1,0 +1,177 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "regression-2026-05-14-kb-cross-topic-loose-match",
+      "category": "regression",
+      "rationale": "Prod regression: 'what is Nurburgring?' loose-matched 'what is Morning Briefing?' on shared 'what is' trigrams (~0.25 sim) and served the unrelated Dashboard answer.",
+      "question": "what is Nurburgring?",
+      "mocks": {
+        "kb": [
+          {
+            "id": "k-briefing",
+            "question": "what is Morning Briefing?",
+            "answer": "The Morning Briefing appears at the top of the dashboard.",
+            "sim": 0.25,
+            "rating": 5
+          }
+        ]
+      },
+      "expect": {
+        "sourceNot": ["knowledge_cache"],
+        "answerNotContains": ["Morning Briefing", "dashboard"]
+      }
+    },
+    {
+      "id": "regression-2026-05-14-a1-zero-hits-rejects-llm",
+      "category": "regression",
+      "rationale": "Prod regression: A1 confidence gate fired block for zero-hit answers because tryBrain returned topScore:0, killing every general-knowledge LLM reply (swapped for canned 'I don't have a confident answer').",
+      "question": "What is quantum computing?",
+      "mocks": {
+        "aiResponse": "Quantum computing uses qubits to perform calculations in superposition."
+      },
+      "expect": {
+        "source": "ai",
+        "answerContains": ["qubits"],
+        "answerNotContains": ["I don't have a confident answer"]
+      }
+    },
+    {
+      "id": "happy-kb-same-topic-rephrase",
+      "category": "happy_path",
+      "rationale": "Same-topic rephrase must still hit the KB (gate at sim>=0.45 not so tight it kills legitimate hits).",
+      "question": "how does auth work",
+      "mocks": {
+        "kb": [
+          {
+            "id": "k-auth",
+            "question": "How does the auth system work?",
+            "answer": "JWT-based auth with 15-minute access tokens and HttpOnly refresh tokens.",
+            "sim": 0.55,
+            "rating": 5
+          }
+        ]
+      },
+      "expect": {
+        "source": "knowledge_cache",
+        "answerContains": ["JWT"]
+      }
+    },
+    {
+      "id": "edge-empty-kb-empty-brain-hits-llm",
+      "category": "edge_case",
+      "rationale": "Bare LLM-only path: no KB hit, no brain hit, AI mock configured. Verifies the pipeline reaches the AI fallback without being short-circuited.",
+      "question": "What year did the Roman Empire fall?",
+      "mocks": {
+        "aiResponse": "The Western Roman Empire fell in 476 AD."
+      },
+      "expect": {
+        "source": "ai",
+        "answerContains": ["476"]
+      }
+    },
+    {
+      "id": "edge-off-topic-short-question",
+      "category": "edge_case",
+      "rationale": "Very short / off-topic message must not over-match KB. 'hi' historically matched anything with 'hi' as a trigram fragment.",
+      "question": "hi",
+      "mocks": {
+        "kb": [
+          {
+            "id": "k-hiring",
+            "question": "What is the hiring process?",
+            "answer": "Submit your resume to careers@",
+            "sim": 0.2,
+            "rating": 5
+          }
+        ],
+        "aiResponse": "Hi! How can I help?"
+      },
+      "expect": {
+        "sourceNot": ["knowledge_cache"],
+        "answerNotContains": ["hiring process", "resume"]
+      }
+    },
+    {
+      "id": "regression-low-rating-kb-skipped",
+      "category": "regression",
+      "rationale": "Entries rated <= 2 must be skipped even when sim is high — they're explicitly graded wrong by the team. Without this, a downvoted answer would still be served.",
+      "question": "what is our refund policy",
+      "mocks": {
+        "kb": [
+          {
+            "id": "k-refund-bad",
+            "question": "what is the refund policy",
+            "answer": "We do not offer refunds under any circumstances.",
+            "sim": 0.9,
+            "rating": 1
+          }
+        ],
+        "aiResponse": "Refund policy details aren't in the knowledge base yet."
+      },
+      "expect": {
+        "sourceNot": ["knowledge_cache"],
+        "answerNotContains": ["We do not offer refunds"]
+      }
+    },
+    {
+      "id": "regression-2026-05-14-canned-reject-not-default",
+      "category": "regression",
+      "rationale": "Direct guard against the prod canned-reject regression: any question that reaches the AI mock with grounding-less context must surface the AI's actual reply, NOT the 'I don't have a confident answer' string.",
+      "question": "What is the speed of light?",
+      "mocks": {
+        "aiResponse": "Light travels at approximately 299,792,458 meters per second in a vacuum."
+      },
+      "expect": {
+        "source": "ai",
+        "answerNotContains": [
+          "I don't have a confident answer",
+          "open a support ticket"
+        ]
+      }
+    },
+    {
+      "id": "edge-kb-just-above-threshold",
+      "category": "edge_case",
+      "rationale": "Sim of 0.45 (exactly at KB_MIN_SIMILARITY) must pass — boundary check guards against threshold drift. Question avoids tool-intent regexes ('tell me about X', 'what do we know about X') so the KB path is the one being exercised.",
+      "question": "how does our authentication flow work end to end",
+      "mocks": {
+        "kb": [
+          {
+            "id": "k-auth-2",
+            "question": "How does the auth system work?",
+            "answer": "JWT-based auth, 15-minute tokens, refresh via HttpOnly cookie.",
+            "sim": 0.45,
+            "rating": 5
+          }
+        ]
+      },
+      "expect": {
+        "source": "knowledge_cache",
+        "answerContains": ["JWT"]
+      }
+    },
+    {
+      "id": "edge-kb-just-below-threshold",
+      "category": "edge_case",
+      "rationale": "Sim of 0.44 (just below KB_MIN_SIMILARITY) must NOT serve from KB. Pair with the just-above case to pin the boundary exactly.",
+      "question": "tell me about something completely different",
+      "mocks": {
+        "kb": [
+          {
+            "id": "k-unrelated",
+            "question": "How does the auth system work?",
+            "answer": "JWT-based auth.",
+            "sim": 0.44,
+            "rating": 5
+          }
+        ],
+        "aiResponse": "I'd be happy to help — what topic?"
+      },
+      "expect": {
+        "sourceNot": ["knowledge_cache"],
+        "answerNotContains": ["JWT"]
+      }
+    }
+  ]
+}

@@ -420,6 +420,12 @@ export type InstinctEventType =
   // loop's threshold tuning + lets us measure which filter saves the
   // most client-facing hallucinations over time.
   | "assistant.quality_flag_raised"
+  // Answer-relevance eval harness fired one case.
+  // Metadata: { case_id, category, passed, source_actual, source_expected?,
+  // failures }. Every PR's eval run emits one event per case so the
+  // learning loop sees which cases regressed when, and so we can build
+  // a quality-over-time dashboard without re-running cases by hand.
+  | "assistant.eval_case_executed"
   // Invite was looked up but the expires_at column says it lapsed.
   // Drives the "ask your admin to resend" UX hint + a tenant-side
   // dashboard counter so admins see expirations before users complain.
