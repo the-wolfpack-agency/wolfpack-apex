@@ -15,5 +15,6 @@ export {
   loadConnectorCredentials,
   saveConnectorCredentials,
   listConnectorCredentials,
+  pickConfiguredConnector,
 } from "./credentials";
 export type { ConnectorCredentials, MaskedConnectorCredentials } from "./credentials";

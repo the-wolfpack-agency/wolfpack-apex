@@ -4,9 +4,11 @@
 
 const mockGetConnector = jest.fn();
 const mockBuildRest = jest.fn();
+const mockPickConfigured = jest.fn();
 jest.mock("@/lib/assistant/connectors", () => ({
   getConnector: (...a: any[]) => mockGetConnector(...a),
   buildRestConnectorForWorkspace: (...a: any[]) => mockBuildRest(...a),
+  pickConfiguredConnector: (...a: any[]) => mockPickConfigured(...a),
 }));
 
 import { getExternalRecordTool } from "@/lib/assistant/tools/get-external-record-tool";
@@ -16,6 +18,11 @@ const ctx = { userId: "u1", userRole: "cto" };
 beforeEach(() => {
   mockGetConnector.mockReset();
   mockBuildRest.mockReset();
+  mockPickConfigured.mockReset();
+  /* Default: no preferred vendor row configured (legacy single-workspace
+     env-driven deploy). Tests that exercise the auto-routing path
+     override this. */
+  mockPickConfigured.mockResolvedValue(null);
 });
 
 /* The rest-default connector path runs through buildRestConnectorForWorkspace.
@@ -140,5 +147,84 @@ describe("get_external_record — handler", () => {
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe("internal");
+  });
+});
+
+/* ---------------------------------------------------------------------
+ * Regression 2026-05-15: tool defaulted to connector="rest-default"
+ * (the intent regex's only output) but the workspace had OAuth creds
+ * stored under "salesforce". User saw "rest-default isn't configured"
+ * even though Salesforce was fully wired. The tool now asks
+ * pickConfiguredConnector for the best match.
+ * --------------------------------------------------------------- */
+describe("get_external_record — auto-routing to vendor-configured connector", () => {
+  test("when workspace has a salesforce row, default rest-default routes to salesforce", async () => {
+    mockPickConfigured.mockResolvedValueOnce("salesforce");
+    const sfStub = {
+      isConfigured: () => true,
+      getRecord: async () => ({
+        ok: true,
+        data: { Id: "003abc", Name: "Grimace Fromcdonalds", Email: "g@mc.dev" },
+        durationMs: 12,
+      }),
+    };
+    mockBuildRest.mockResolvedValueOnce(sfStub);
+
+    const r = await getExternalRecordTool.handler(
+      { objectType: "contact", id: "003abc", connector: "rest-default" },
+      { ...ctx, workspaceId: "ws1" },
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      /* The data block carries the RESOLVED connector name. The user-
+         visible answer references the actual Salesforce record. */
+      expect(r.data.connector).toBe("salesforce");
+      expect(r.answer).toContain("Grimace Fromcdonalds");
+    }
+    /* buildRestConnectorForWorkspace was called with the resolved name,
+       NOT "rest-default". This is the actual contract change. */
+    expect(mockBuildRest).toHaveBeenCalledWith("ws1", "salesforce");
+  });
+
+  test("when workspace has no vendor row, falls back to rest-default", async () => {
+    mockPickConfigured.mockResolvedValueOnce(null);
+    stubBoth({
+      isConfigured: () => true,
+      getRecord: async () => ({ ok: true, data: { id: "x" }, durationMs: 1 }),
+    });
+    await getExternalRecordTool.handler(
+      { objectType: "contact", id: "x", connector: "rest-default" },
+      { ...ctx, workspaceId: "ws-no-creds" },
+    );
+    expect(mockBuildRest).toHaveBeenCalledWith("ws-no-creds", "rest-default");
+  });
+
+  test("when pickConfiguredConnector returns rest-default explicitly, no change", async () => {
+    mockPickConfigured.mockResolvedValueOnce("rest-default");
+    stubBoth({
+      isConfigured: () => true,
+      getRecord: async () => ({ ok: true, data: {}, durationMs: 1 }),
+    });
+    await getExternalRecordTool.handler(
+      { objectType: "contact", id: "x", connector: "rest-default" },
+      { ...ctx, workspaceId: "ws1" },
+    );
+    expect(mockBuildRest).toHaveBeenCalledWith("ws1", "rest-default");
+  });
+
+  test("explicit non-default connector param skips auto-routing", async () => {
+    /* When the caller (or a future tool) passes connector="hubspot"
+       directly, we honor it via getConnector and DON'T consult the
+       picker — the explicit name is the source of truth. */
+    mockGetConnector.mockReturnValue({
+      isConfigured: () => true,
+      getRecord: async () => ({ ok: true, data: { id: "x" }, durationMs: 1 }),
+    });
+    await getExternalRecordTool.handler(
+      { objectType: "contact", id: "x", connector: "hubspot" },
+      { ...ctx, workspaceId: "ws1" },
+    );
+    expect(mockPickConfigured).not.toHaveBeenCalled();
+    expect(mockGetConnector).toHaveBeenCalledWith("hubspot");
   });
 });

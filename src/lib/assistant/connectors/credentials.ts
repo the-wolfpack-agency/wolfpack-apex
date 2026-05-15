@@ -180,6 +180,47 @@ export async function saveConnectorCredentials(args: {
   }
 }
 
+/** Return the connector_name of the most useful active row for this
+ *  workspace, or null when only the env-driven fallback applies.
+ *
+ *  Preference order:
+ *    1. Vendor-specific OAuth rows (salesforce, hubspot, qbo, jira, …)
+ *       — these have real per-tenant credentials AND a vendor preset
+ *       objectMap so vendor REST paths work out of the box.
+ *    2. rest-default OAuth row (generic OAuth deployment).
+ *    3. Any other active row (legacy static_bearer).
+ *
+ *  Returns null when no row exists; callers fall back to the env-driven
+ *  rest-default singleton.
+ *
+ *  Used by tools that want to pick the right connector automatically —
+ *  e.g. when the user asks "look up contact id 003xxx" without naming
+ *  Salesforce, we route to whatever's actually configured.
+ */
+export async function pickConfiguredConnector(
+  workspaceId: string,
+): Promise<string | null> {
+  if (!process.env.DATABASE_URL) return null;
+  try {
+    const r = await safeQuery<{ connector_name: string }>(
+      `SELECT connector_name
+         FROM instinct_connector_credentials
+        WHERE workspace_id = $1
+          AND is_active = TRUE
+        ORDER BY
+          CASE
+            WHEN connector_name = 'rest-default' THEN 2
+            ELSE 1
+          END,
+          connector_name`,
+      [workspaceId || DEFAULT_WORKSPACE],
+    );
+    return r.rows[0]?.connector_name ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** List active credentials for a workspace; auth_header is masked. */
 export async function listConnectorCredentials(
   workspaceId: string = DEFAULT_WORKSPACE,

@@ -30,6 +30,7 @@ import { safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { encryptSecret, decryptSecret } from "@/lib/crypto/secret-storage";
 import { getOAuthProvider } from "./registry";
+import { getVendorPreset } from "../vendor-presets";
 import type {
   OAuthLifecycleResult,
   OAuthProvider,
@@ -81,13 +82,21 @@ export async function saveOAuthCredentials(args: {
   const accessEnc = encryptSecret(authHeader);
   const refreshEnc = token.refreshToken ? encryptSecret(token.refreshToken) : null;
 
+  /* Seed object_map_json from the vendor preset so the REST connector
+     knows the provider-specific URL paths (Salesforce: services/data/
+     vXX.X/sobjects/Contact, HubSpot: crm/v3/objects/contacts, …).
+     Without this, the connector falls back to DEFAULT_OBJECT_MAP
+     ({contact: "contacts", …}) and Salesforce 404s every request. */
+  const preset = getVendorPreset(provider.connectorName);
+  const objectMapJson = preset ? JSON.stringify(preset.objectMap) : null;
+
   try {
     await safeQuery(
       `INSERT INTO instinct_connector_credentials
          (workspace_id, connector_name, base_url, auth_header_enc,
           auth_type, refresh_token_enc, access_token_expires_at,
-          oauth_provider_metadata, is_active, created_by)
-       VALUES ($1, $2, $3, $4, 'oauth2', $5, $6, $7::jsonb, TRUE, $8)
+          oauth_provider_metadata, object_map_json, is_active, created_by)
+       VALUES ($1, $2, $3, $4, 'oauth2', $5, $6, $7::jsonb, $8, TRUE, $9)
        ON CONFLICT (workspace_id, connector_name)
        DO UPDATE SET
          base_url = EXCLUDED.base_url,
@@ -96,6 +105,7 @@ export async function saveOAuthCredentials(args: {
          refresh_token_enc = COALESCE(EXCLUDED.refresh_token_enc, instinct_connector_credentials.refresh_token_enc),
          access_token_expires_at = EXCLUDED.access_token_expires_at,
          oauth_provider_metadata = EXCLUDED.oauth_provider_metadata,
+         object_map_json = COALESCE(EXCLUDED.object_map_json, instinct_connector_credentials.object_map_json),
          is_active = TRUE,
          updated_at = now()`,
       [
@@ -106,6 +116,7 @@ export async function saveOAuthCredentials(args: {
         refreshEnc,
         expiresAtIso,
         metadata ? JSON.stringify(metadata) : null,
+        objectMapJson,
         args.createdBy ?? null,
       ],
     );
