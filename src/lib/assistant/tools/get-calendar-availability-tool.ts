@@ -31,6 +31,16 @@ const SELF_PATTERNS: RegExp[] = [
   /\b(?:am\s+i|are\s+we)\s+(?:free|busy|available)\s+(?:on\s+|at\s+)?(.{2,40}?)\??$/i,
   /\bwhat'?s\s+on\s+my\s+(?:calendar|schedule|agenda)\s*(?:for|on)?\s*(.{2,40})?\??$/i,
   /\bdo\s+i\s+have\s+(?:any\s+)?(?:meetings|events)\s+(?:on|today|tomorrow|this\s+week)?\s*(.{2,40})?\??$/i,
+  /* "what meetings do I have on Monday" / "any meetings tomorrow" /
+     "my meetings next week" — leading-noun phrasing the previous
+     three patterns missed. Captures the timeframe tail after the
+     optional preposition. */
+  /\b(?:what|any)\s+(?:meetings|events)\s+(?:do\s+i\s+have\s+)?(?:on\s+|for\s+)?(.{2,40}?)\??$/i,
+  /\bmy\s+(?:meetings|events|schedule|calendar)\s+(?:on\s+|for\s+|this\s+|next\s+|last\s+)?(.{2,40}?)\??$/i,
+  /* Bare-keyword shortcut: "Calendar Monday", "schedule Tuesday".
+     The leading word is the page name (already filtered out by
+     shouldBypassKnowledgeCache); the trailing token is the day. */
+  /^(?:calendar|schedule|agenda)\s+(.{2,40}?)\??$/i,
 ];
 
 const PERSON_PATTERNS: RegExp[] = [

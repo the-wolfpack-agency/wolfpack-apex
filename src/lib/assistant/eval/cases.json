@@ -187,6 +187,32 @@
       }
     },
     {
+      "id": "regression-2026-05-15-calendar-bare-day-shortcut",
+      "category": "regression",
+      "rationale": "'Calendar Monday' (the page name + a weekday) used to fire page-facts and return the Calendar page description. The weekday hint signals a date-bound calendar lookup; page-facts must bypass when a weekday name is in the question (shouldBypassKnowledgeCache extension), and the calendar tool's bare-keyword shortcut pattern picks it up as a self-query.",
+      "question": "Calendar Monday",
+      "expect": {
+        "sourceNot": ["page_facts", "knowledge_cache"],
+        "answerNotContains": [
+          "Your Microsoft 365 calendar view",
+          "Open it: Calendar"
+        ]
+      }
+    },
+    {
+      "id": "regression-2026-05-15-what-meetings-do-i-have-phrasing",
+      "category": "regression",
+      "rationale": "'what meetings do I have on Monday' previously fell through to a calendar lookup with empty timeframe, which resolved to today and returned 'You look free today.' The new leading-noun pattern matches '(?:what|any) meetings ... (on)? <timeframe>' so the actual day captured drives the lookup.",
+      "question": "what meetings do I have on Monday",
+      "expect": {
+        "sourceNot": ["page_facts", "knowledge_cache"],
+        "answerNotContains": [
+          "You look free today",
+          "free today"
+        ]
+      }
+    },
+    {
       "id": "happy-porsche-class-grounding-reaches-llm",
       "category": "happy_path",
       "rationale": "Porsche-class snapshots now ground the assistant via context-resolver. The grounding-block fixture below is what searchPorscheClassNotes would render for 'what changed in BA101 on April 20'. The AI mock must cite the +2 added participants so we know the prompt block reached the LLM (not just that the SQL ran). This is the smoke test for the new grounding lane end-to-end.",

@@ -144,6 +144,13 @@ export const MEETING_OR_DATE_BYPASS_PATTERNS: RegExp[] = [
   /\bcall(s)? (with|on|about)\b/i,
   /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(uary|ruary|ch|il|e|y|ust|tember|ober|ember)?\b/i,
   /\b(yesterday|today|tomorrow|this week|last week|next week)\b/i,
+  /* Weekday names — "Calendar Monday" / "schedule Tuesday" / "what
+     meetings do I have on Friday" all signal a date-bound calendar
+     query, not a page-description request. Without this row the
+     page-facts matcher fires on the page-name keyword and returns
+     "Calendar — Your Microsoft 365 calendar view…" instead of routing
+     to the calendar tool. (Regression 2026-05-15.) */
+  /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i,
   /\b\d{4}-\d{2}-\d{2}\b/,
   /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
   /* Document-name patterns: questions referencing a specific file by
