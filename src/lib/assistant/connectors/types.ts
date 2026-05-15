@@ -69,4 +69,24 @@ export interface Connector {
     query: string,
     limit?: number,
   ): Promise<ConnectorResult<Array<Record<string, unknown>>>>;
+  /**
+   * Create a record. Returns the new record's id. Adapters that
+   * don't support writes return validation failure. Action-tools
+   * dispatching to this method go through the confirmation flow —
+   * we never silently mutate a tenant's CRM.
+   */
+  createRecord?(
+    objectType: string,
+    fields: Record<string, unknown>,
+  ): Promise<ConnectorResult<{ id: string }>>;
+  /**
+   * Update fields on an existing record. Returns ok with no payload
+   * on success (Salesforce 204; HubSpot 200 with body). Same
+   * mutation contract as createRecord — gated by confirmation.
+   */
+  updateRecord?(
+    objectType: string,
+    id: string,
+    fields: Record<string, unknown>,
+  ): Promise<ConnectorResult<{ id: string }>>;
 }

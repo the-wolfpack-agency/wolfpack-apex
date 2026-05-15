@@ -621,7 +621,7 @@ export async function chat(
         };
       }
       /* confirmIntent === "confirm" → execute the pending action. */
-      const exec = await executePendingAction(row, userId, userRole);
+      const exec = await executePendingAction(row, userId, userRole, workspaceId);
       trackEvent("assistant.action_confirmed", userId, userRole, {
         tool: row.tool_name,
         pending_id: row.id,
@@ -1490,6 +1490,7 @@ async function executePendingAction(
   row: import("@/lib/assistant/tools/pending-actions").PendingActionRow,
   userId: string,
   userRole: string,
+  workspaceId?: string,
 ): Promise<{ answer: string }> {
   if (row.tool_name === "save_team_fact") {
     const p = row.params as { subject?: string; attribute?: string; value?: string };
@@ -1512,6 +1513,42 @@ async function executePendingAction(
       answer: `I tried to save it, but the write was refused (${result.reason}). Nothing was stored.`,
     };
   }
+  if (row.tool_name === "create_external_record") {
+    const mod = await import("@/lib/assistant/tools/create-external-record-tool");
+    const result = await mod.executeCreateExternalRecord(
+      row.params as unknown as Parameters<typeof mod.executeCreateExternalRecord>[0],
+      { userId, userRole, workspaceId },
+    );
+    if (result.ok) {
+      return {
+        answer: `✓ Created in ${result.connector}. New record id: \`${result.id}\`. Use \`look up contact id ${result.id}\` (or the matching object type) to drill in.`,
+      };
+    }
+    return { answer: `I tried to create the record but the write was refused (${result.reason}). Nothing was saved.` };
+  }
+  if (row.tool_name === "update_external_record") {
+    const mod = await import("@/lib/assistant/tools/update-external-record-tool");
+    const result = await mod.executeUpdateExternalRecord(
+      row.params as unknown as Parameters<typeof mod.executeUpdateExternalRecord>[0],
+      { userId, userRole, workspaceId },
+    );
+    if (result.ok) {
+      return {
+        answer: `✓ Updated record \`${result.id}\` in ${result.connector}.`,
+      };
+    }
+    if (result.reason === "ambiguous") {
+      return {
+        answer: `I found ${result.matchCount ?? "multiple"} matches for that name and refused to update — too ambiguous. Search first with \`find <name>\`, then update by id.`,
+      };
+    }
+    if (result.reason === "no_match_found") {
+      return {
+        answer: `I couldn't find that record in the CRM. The update was not applied.`,
+      };
+    }
+    return { answer: `I tried to update the record but the write was refused (${result.reason}). Nothing was changed.` };
+  }
   return { answer: `Unknown pending action tool (${row.tool_name}); nothing executed.` };
 }
 
@@ -1520,6 +1557,25 @@ function describePendingAction(toolName: string, params: Record<string, unknown>
   if (toolName === "save_team_fact") {
     const p = params as { subject?: string; attribute?: string; value?: string };
     return `save: **${p.subject ?? "?"}** → **${p.attribute ?? "?"}**: ${p.value ?? "?"}`;
+  }
+  if (toolName === "create_external_record") {
+    const p = params as { objectType?: string; fields?: Record<string, unknown> };
+    const fieldsHint = p.fields
+      ? Object.entries(p.fields)
+          .slice(0, 4)
+          .map(([k, v]) => `${k}=${String(v)}`)
+          .join(", ")
+      : "";
+    return `create **${p.objectType ?? "?"}** in your CRM: ${fieldsHint}`;
+  }
+  if (toolName === "update_external_record") {
+    const p = params as {
+      objectType?: string;
+      recordName?: string;
+      fieldName?: string;
+      fieldValue?: string | number | boolean;
+    };
+    return `update **${p.objectType ?? "?"}** "${p.recordName ?? "?"}" → ${p.fieldName ?? "?"} = ${p.fieldValue ?? "?"}`;
   }
   return `run ${toolName}`;
 }

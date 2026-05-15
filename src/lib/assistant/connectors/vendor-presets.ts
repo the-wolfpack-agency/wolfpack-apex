@@ -26,6 +26,18 @@ export interface VendorSearchRequest {
   extract: (raw: unknown) => Array<Record<string, unknown>>;
 }
 
+/** Write-request descriptor. Same shape for create + update so the
+ *  REST connector can route them through one helper. `body` is the
+ *  vendor-formatted JSON the request will send. `extractCreatedId`
+ *  pulls the new record's id out of whatever shape the vendor returns
+ *  (Salesforce: top-level `id`; HubSpot: top-level `id`; generic
+ *  REST: same). */
+export interface VendorWriteRequest {
+  path: string;
+  body: Record<string, unknown>;
+  extractCreatedId: (raw: unknown) => string | null;
+}
+
 export interface VendorPreset {
   baseUrl: string;
   objectMap: Record<string, string>;
@@ -39,6 +51,14 @@ export interface VendorPreset {
      *  support per-object-type search (or always search across all
      *  objects) can ignore objectType and return the same shape. */
     build(objectType: string, query: string, limit: number): VendorSearchRequest;
+  };
+  /** Optional write support. Vendors that don't expose REST writes
+   *  (or where we haven't shipped them yet — see QuickBooks) leave
+   *  this undefined. The action-tool framework then refuses to
+   *  dispatch to this connector with a typed error. */
+  writes?: {
+    create(objectType: string, fields: Record<string, unknown>): VendorWriteRequest;
+    update(objectType: string, id: string, fields: Record<string, unknown>): VendorWriteRequest;
   };
 }
 
@@ -84,6 +104,27 @@ export const VENDOR_PRESETS: Record<string, VendorPreset> = {
         };
       },
     },
+    writes: {
+      create(objectType, fields) {
+        /* HubSpot wraps custom + standard properties in a "properties"
+           envelope on both create and update. */
+        return {
+          path: `/crm/v3/objects/${objectType}s`,
+          body: { properties: fields },
+          extractCreatedId: (raw) => {
+            const r = raw as { id?: string };
+            return typeof r?.id === "string" ? r.id : null;
+          },
+        };
+      },
+      update(objectType, id, fields) {
+        return {
+          path: `/crm/v3/objects/${objectType}s/${encodeURIComponent(id)}`,
+          body: { properties: fields },
+          extractCreatedId: () => id,
+        };
+      },
+    },
   },
   salesforce: {
     /* baseUrl varies per org (https://<instance>.my.salesforce.com).
@@ -98,6 +139,49 @@ export const VENDOR_PRESETS: Record<string, VendorPreset> = {
     },
     description:
       "Salesforce REST API. Auth header: 'Bearer <oauth-access-token>'. baseUrl must be the org's https://<instance>.my.salesforce.com.",
+    writes: {
+      create(objectType, fields) {
+        /* Salesforce REST insert: POST to the SObject collection with
+           the fields directly as the body (no envelope). Response is
+           { id, success, errors }. */
+        const SObjectByType: Record<string, string> = {
+          contact: "Contact",
+          deal: "Opportunity",
+          opportunity: "Opportunity",
+          company: "Account",
+          account: "Account",
+          task: "Task",
+        };
+        const sobject = SObjectByType[objectType] ?? objectType;
+        return {
+          path: `/services/data/v59.0/sobjects/${sobject}`,
+          body: fields,
+          extractCreatedId: (raw) => {
+            const r = raw as { id?: string };
+            return typeof r?.id === "string" ? r.id : null;
+          },
+        };
+      },
+      update(objectType, id, fields) {
+        /* Salesforce PATCH returns 204 No Content — RestConnector
+           treats empty 2xx as success with body=null. extractCreatedId
+           falls back to the URL id since we know it. */
+        const SObjectByType: Record<string, string> = {
+          contact: "Contact",
+          deal: "Opportunity",
+          opportunity: "Opportunity",
+          company: "Account",
+          account: "Account",
+          task: "Task",
+        };
+        const sobject = SObjectByType[objectType] ?? objectType;
+        return {
+          path: `/services/data/v59.0/sobjects/${sobject}/${encodeURIComponent(id)}`,
+          body: fields,
+          extractCreatedId: () => id,
+        };
+      },
+    },
     search: {
       build(objectType, query, limit) {
         /* Salesforce SOQL for the common "look up Grimace" / "find

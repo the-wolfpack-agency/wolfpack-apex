@@ -213,6 +213,32 @@
       }
     },
     {
+      "id": "happy-create-action-requires-confirmation",
+      "category": "happy_path",
+      "rationale": "Phase-3 contract: action tools (create_external_record, update_external_record) must NEVER silently fire. The dispatcher's confirmation gate returns needs_confirmation BEFORE the connector is hit, surfacing an 'I'll create X. Say confirm to proceed' preview. This case proves the route + that the answer is a preview, not a side-effect.",
+      "question": "create a contact named Jane Doe email jane@acme.com",
+      "expect": {
+        "source": "tool",
+        "answerContains": ["create", "contact", "Jane", "confirm"],
+        "answerNotContains": [
+          "I don't have a confident answer",
+          "Created in",
+          "New record id"
+        ]
+      }
+    },
+    {
+      "id": "happy-update-stage-requires-confirmation",
+      "category": "happy_path",
+      "rationale": "Same as create: 'move the Acme Renewal to Closed Won' must surface a confirmation preview, not silently PATCH the deal.",
+      "question": "move the Acme Renewal to Closed Won",
+      "expect": {
+        "source": "tool",
+        "answerContains": ["update", "Acme Renewal", "Closed Won", "confirm"],
+        "answerNotContains": ["✓ Updated"]
+      }
+    },
+    {
       "id": "happy-porsche-class-grounding-reaches-llm",
       "category": "happy_path",
       "rationale": "Porsche-class snapshots now ground the assistant via context-resolver. The grounding-block fixture below is what searchPorscheClassNotes would render for 'what changed in BA101 on April 20'. The AI mock must cite the +2 added participants so we know the prompt block reached the LLM (not just that the SQL ran). This is the smoke test for the new grounding lane end-to-end.",

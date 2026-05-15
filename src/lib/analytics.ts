@@ -468,6 +468,13 @@ export type InstinctEventType =
   // Admin clicked "Verify" — health-check fired against the vendor.
   // Metadata: { connector, workspace_id, ok, duration_ms, code }.
   | "assistant.connector_verified"
+  // Write executed against a CRM connector (create_external_record /
+  // update_external_record after user confirmation).
+  // Metadata: { op: "create"|"update", connector, object_type,
+  //   field_name?, ok, duration_ms, code }.
+  // Drives a write-success dashboard so a sudden auth_failed spike
+  // post-token-rotation surfaces immediately.
+  | "assistant.connector_write_executed"
   // Invite was looked up but the expires_at column says it lapsed.
   // Drives the "ask your admin to resend" UX hint + a tenant-side
   // dashboard counter so admins see expirations before users complain.

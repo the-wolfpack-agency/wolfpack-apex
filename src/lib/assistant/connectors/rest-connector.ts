@@ -234,6 +234,148 @@ export class RestConnector implements Connector {
     emit(this.name, "request_succeeded", durationMs, undefined);
     return { ok: true, data: body as R, durationMs };
   }
+
+  /* ------------------------------------------------------------------
+   * Write methods — required for action-tools (create_external_record,
+   * update_external_record). Gated by the vendor preset declaring a
+   * `writes` block; connectors without one return validation failure
+   * so the action-tool surfaces "this CRM doesn't support writes yet."
+   * ----------------------------------------------------------------- */
+
+  async createRecord(
+    objectType: string,
+    fields: Record<string, unknown>,
+  ): Promise<ConnectorResult<{ id: string }>> {
+    if (!this.isConfigured()) return notConfigured(this.name, "createRecord");
+    if (!this.vendorPreset?.writes) {
+      return {
+        ok: false,
+        code: "validation",
+        message: `connector "${this.name}" does not support writes (no vendor preset)`,
+      };
+    }
+    const req = this.vendorPreset.writes.create(objectType.toLowerCase(), fields);
+    const r = await this.requestWithBody("POST", req.path.startsWith("/") ? req.path : `/${req.path}`, req.body);
+    if (!r.ok) return r as ConnectorResult<{ id: string }>;
+    const id = req.extractCreatedId(r.data);
+    if (!id) {
+      return {
+        ok: false,
+        code: "remote_error",
+        message: "create succeeded but vendor response omitted the new id",
+        durationMs: r.durationMs,
+      };
+    }
+    return { ok: true, data: { id }, durationMs: r.durationMs };
+  }
+
+  async updateRecord(
+    objectType: string,
+    id: string,
+    fields: Record<string, unknown>,
+  ): Promise<ConnectorResult<{ id: string }>> {
+    if (!this.isConfigured()) return notConfigured(this.name, "updateRecord");
+    if (!this.vendorPreset?.writes) {
+      return {
+        ok: false,
+        code: "validation",
+        message: `connector "${this.name}" does not support writes (no vendor preset)`,
+      };
+    }
+    const req = this.vendorPreset.writes.update(objectType.toLowerCase(), id, fields);
+    const r = await this.requestWithBody("PATCH", req.path.startsWith("/") ? req.path : `/${req.path}`, req.body);
+    if (!r.ok) return r as ConnectorResult<{ id: string }>;
+    return { ok: true, data: { id }, durationMs: r.durationMs };
+  }
+
+  private async requestWithBody(
+    method: "POST" | "PATCH",
+    path: string,
+    body: Record<string, unknown>,
+    isRetry = false,
+  ): Promise<ConnectorResult<unknown>> {
+    const start = Date.now();
+    const url = `${this.baseUrl!.replace(/\/$/, "")}${path}`;
+    let res: Response;
+    try {
+      res = await this.fetchImpl(url, {
+        method,
+        headers: {
+          Authorization: this.authHeader!,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      const durationMs = Date.now() - start;
+      emit(this.name, "request_failed", durationMs, "network");
+      return {
+        ok: false,
+        code: "network",
+        message: `connector ${this.name} network error: ${(err as Error)?.message ?? "unknown"}`,
+        durationMs,
+      };
+    }
+    const durationMs = Date.now() - start;
+    /* Same refresh-on-401 contract as read path. */
+    if (res.status === 401 && this.workspaceId && !isRetry) {
+      const refreshed = await refreshConnectorAccessToken({
+        workspaceId: this.workspaceId,
+        connectorName: this.name,
+        fetchImpl: this.refreshFetchImpl,
+      });
+      if (refreshed) {
+        this.authHeader = refreshed.authHeader;
+        if (refreshed.baseUrl) this.baseUrl = refreshed.baseUrl;
+        return this.requestWithBody(method, path, body, true);
+      }
+    }
+    if (res.status === 401 || res.status === 403) {
+      emit(this.name, "request_failed", durationMs, "auth_failed");
+      return { ok: false, code: "auth_failed", message: `HTTP ${res.status}`, durationMs };
+    }
+    if (res.status === 404) {
+      emit(this.name, "request_failed", durationMs, "not_found");
+      return { ok: false, code: "not_found", message: "record not found", durationMs };
+    }
+    if (res.status === 429) {
+      emit(this.name, "request_failed", durationMs, "rate_limited");
+      return { ok: false, code: "rate_limited", message: "rate-limited by remote", durationMs };
+    }
+    if (!res.ok) {
+      /* For writes, surface the vendor's error body if it's JSON — SF
+         returns informative messages like "REQUIRED_FIELD_MISSING".
+         We pass them through so the action-tool can render a helpful
+         "this is what went wrong" answer. */
+      let errText = `HTTP ${res.status}`;
+      try {
+        const errBody = await res.json();
+        const msg = Array.isArray(errBody)
+          ? (errBody[0]?.message as string | undefined)
+          : ((errBody as { message?: string })?.message);
+        if (msg) errText = `${errText}: ${msg}`;
+      } catch {
+        /* non-JSON error body — keep the HTTP status. */
+      }
+      emit(this.name, "request_failed", durationMs, "remote_error");
+      return { ok: false, code: "remote_error", message: errText, durationMs };
+    }
+    /* Salesforce PATCH returns 204 No Content; HubSpot returns the
+       full record. Tolerate both — null body is fine for write
+       success, callers extract whatever id they need from extractCreatedId. */
+    let data: unknown = null;
+    if (res.status !== 204) {
+      try {
+        data = await res.json();
+      } catch {
+        /* Empty body on a 2xx is still success (some APIs do this on
+           PATCH). Leave data as null. */
+      }
+    }
+    emit(this.name, "request_succeeded", durationMs, undefined);
+    return { ok: true, data, durationMs };
+  }
 }
 
 function notConfigured(

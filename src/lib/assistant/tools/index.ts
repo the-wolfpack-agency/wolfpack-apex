@@ -37,6 +37,10 @@ import "@/lib/assistant/connectors";
    single-word names. */
 import "./search-external-records-tool";
 import "./get-external-record-tool";
+/* Action tools — go through the Phase-3 confirmation flow before
+   firing a real write against the vendor. */
+import "./create-external-record-tool";
+import "./update-external-record-tool";
 
 export { tryDispatchTool } from "./dispatcher";
 export { getTools, getToolByName, registerTool, __resetRegistryForTests } from "./registry";
