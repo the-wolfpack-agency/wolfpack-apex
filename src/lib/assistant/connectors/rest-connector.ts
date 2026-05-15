@@ -28,6 +28,7 @@ import { trackEvent } from "@/lib/analytics";
 import { registerConnector } from "./registry";
 import { loadConnectorCredentials } from "./credentials";
 import { refreshConnectorAccessToken } from "./oauth/refresh";
+import { getVendorPreset, type VendorPreset } from "./vendor-presets";
 
 const DEFAULT_OBJECT_MAP: Record<string, string> = {
   contact: "contacts",
@@ -56,6 +57,10 @@ export interface RestConnectorConfig {
   /** Test seam — when set, the refresh path uses this fetch instead of
    *  the global one. */
   refreshFetchImpl?: typeof fetch;
+  /** Override the vendor preset lookup. Tests pass an in-memory preset
+   *  so they don't depend on the registry. Production reads the preset
+   *  via `getVendorPreset(name)`. */
+  vendorPreset?: VendorPreset | null;
 }
 
 export class RestConnector implements Connector {
@@ -67,6 +72,7 @@ export class RestConnector implements Connector {
   private readonly fetchImpl: typeof fetch;
   private readonly workspaceId?: string;
   private readonly refreshFetchImpl?: typeof fetch;
+  private readonly vendorPreset: VendorPreset | null;
 
   constructor(cfg: RestConnectorConfig = {}) {
     this.name = cfg.name ?? "rest-default";
@@ -79,6 +85,12 @@ export class RestConnector implements Connector {
     this.fetchImpl = cfg.fetchImpl ?? fetch;
     this.workspaceId = cfg.workspaceId;
     this.refreshFetchImpl = cfg.refreshFetchImpl;
+    /* Vendor preset drives provider-aware search (Salesforce SOQL,
+       HubSpot search). When the connector name matches a known preset
+       (salesforce, hubspot, …) we pick that up automatically; tests
+       can override via cfg.vendorPreset. */
+    this.vendorPreset =
+      cfg.vendorPreset !== undefined ? cfg.vendorPreset : getVendorPreset(this.name);
   }
 
   isConfigured(): boolean {
@@ -111,6 +123,19 @@ export class RestConnector implements Connector {
         message: "search query must be at least 2 characters",
       };
     }
+    /* Vendor-aware search path. When the preset has a search builder
+       (Salesforce SOQL, HubSpot contacts-search), use it AND its
+       extractor. Otherwise fall back to the generic
+       `${path}?q=${q}&limit=${limit}` shape that suits a handful of
+       small REST APIs. */
+    if (this.vendorPreset?.search) {
+      const req = this.vendorPreset.search.build(objectType.toLowerCase(), query, limit);
+      const r = await this.request<unknown>(req.path.startsWith("/") ? req.path : `/${req.path}`);
+      if (!r.ok) return r as ConnectorResult<Array<Record<string, unknown>>>;
+      const records = req.extract(r.data);
+      return { ok: true, data: records, durationMs: r.durationMs };
+    }
+
     const path = this.objectMap[objectType.toLowerCase()] ?? objectType.toLowerCase();
     const url = `/${path}?q=${encodeURIComponent(query)}&limit=${limit}`;
     const r = await this.request<unknown>(url);

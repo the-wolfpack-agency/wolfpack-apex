@@ -455,6 +455,12 @@ export type InstinctEventType =
   | "assistant.oauth_token_refreshed"
   | "assistant.oauth_refresh_failed"
   | "assistant.oauth_persist_failed"
+  // Free-text search against an external connector returned N matches.
+  // Metadata: { connector, object_type, query_length, match_count }.
+  // Drives a "search recall" dashboard so we can spot when name
+  // searches start returning 0 results (could be auth, could be empty
+  // tenant data, could be a regex regression).
+  | "assistant.connector_search_executed"
   // Invite was looked up but the expires_at column says it lapsed.
   // Drives the "ask your admin to resend" UX hint + a tenant-side
   // dashboard counter so admins see expirations before users complain.
