@@ -129,7 +129,7 @@ export function EmailThreadWidget({ spec }: EmailThreadWidgetProps) {
                   {m.preview}
                 </div>
               )}
-              <div className="mt-1 flex gap-3">
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
                 {m.webLink && (
                   <a
                     href={m.webLink}

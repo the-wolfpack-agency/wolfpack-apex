@@ -235,7 +235,9 @@ export function CalendarWidget({ spec }: CalendarWidgetProps) {
               month: "short",
               day: "numeric",
             })}
-            {selectedEvents.length === 0 ? " — no meetings" : ` — ${selectedEvents.length} meeting${selectedEvents.length === 1 ? "" : "s"}`}
+            {selectedEvents.length === 0
+              ? " · no meetings"
+              : ` · ${selectedEvents.length} meeting${selectedEvents.length === 1 ? "" : "s"}`}
           </div>
           <ul className="space-y-1">
             {selectedEvents.map((ev) => (
@@ -255,14 +257,17 @@ export function CalendarWidget({ spec }: CalendarWidgetProps) {
                   {ev.subject}
                 </div>
                 <div
-                  className="flex items-center gap-2 mt-0.5"
+                  className="flex items-center flex-wrap gap-x-2 gap-y-0.5 mt-0.5"
                   style={{ color: "var(--wp-text-muted, #6b7280)" }}
                 >
-                  <span>{formatTime(ev.start)}{ev.end ? `–${formatTime(ev.end)}` : ""}</span>
-                  {ev.location && <span>· {ev.location}</span>}
+                  <span className="whitespace-nowrap">
+                    {formatTime(ev.start)}
+                    {ev.end ? `–${formatTime(ev.end)}` : ""}
+                  </span>
+                  {ev.location && <span className="truncate max-w-full">· {ev.location}</span>}
                   {ev.isOnlineMeeting && <span>· Teams</span>}
                 </div>
-                <div className="mt-1 flex gap-3">
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
                   {ev.instinctDetailHref && (
                     <Link
                       href={ev.instinctDetailHref}

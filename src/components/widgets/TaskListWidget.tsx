@@ -176,7 +176,7 @@ export function TaskListWidget({ spec }: TaskListWidgetProps) {
                     {t.title}
                   </a>
                   <div
-                    className="flex items-center gap-2 mt-0.5"
+                    className="flex items-center flex-wrap gap-x-2 gap-y-0.5 mt-0.5"
                     style={{ color: "var(--wp-text-muted, #6b7280)" }}
                   >
                     {t.importance === "high" && (
