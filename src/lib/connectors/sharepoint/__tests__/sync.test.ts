@@ -81,7 +81,12 @@ describe("syncSource", () => {
     /* Confirms the brain-ingest tag chain includes provenance for the
        learning loop. */
     expect(ingestFn.mock.calls[0][0].tags).toEqual(
-      expect.arrayContaining(["sharepoint", "sp-source:src-1", "workspace:ws-1"]),
+      expect.arrayContaining([
+        "sharepoint",
+        "sp-source:src-1",
+        `sp-source-name:${source.name}`,
+        "workspace:ws-1",
+      ]),
     );
   });
 
@@ -203,10 +208,23 @@ describe("syncSource", () => {
     expect(ingestArgs.filename).toBe("training-master.mp4.placeholder.txt");
     expect(ingestArgs.contentType).toBe("text/plain");
     expect(ingestArgs.tags).toEqual(expect.arrayContaining(["sp-video-placeholder"]));
+    /* Source name is in the tag list so chat retrieval can filter
+     * by SharePoint site without needing to embed the name string. */
+    expect(ingestArgs.tags).toEqual(expect.arrayContaining([`sp-source-name:${source.name}`]));
     const body = ingestArgs.buffer.toString("utf-8");
     expect(body).toContain("training-master.mp4");
     expect(body).toContain("video/mp4");
     expect(body).toContain("https://x.sharepoint.com/sites/Y/Shared%20Documents/training-master.mp4");
+    /* CRITICAL for retrieval: the source site name appears as a
+     * natural-language token in the body so a chat query like
+     * "what videos do we have for {sourceName}" embeds + retrieves
+     * this doc. Without this, embeddings have nothing to match
+     * against the site name. */
+    expect(body).toContain(source.name);
+    expect(body).toContain("Video from the");
+    /* Folder breadcrumb is human-readable so each folder name
+     * becomes a searchable token ("Training", "Options Content"). */
+    expect(body).toContain("Shared Documents / Training");
 
     expect(result.successCount).toBe(1);
     expect(result.failCount).toBe(0);

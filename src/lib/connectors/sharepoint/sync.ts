@@ -56,20 +56,54 @@ function isPlaceholderable(mimeType: string | undefined): boolean {
   return PLACEHOLDER_MIME_PREFIXES.some((p) => mimeType.startsWith(p));
 }
 
-function placeholderBuffer(f: DriveItem): Buffer {
+/** Coarse media-type label for a MIME string. Drives the "Training
+ *  video", "Audio recording", etc. natural-language line in the body. */
+function mediaLabel(mimeType: string | undefined): string {
+  if (!mimeType) return "Media file";
+  if (mimeType.startsWith("video/")) return "Video";
+  if (mimeType.startsWith("audio/")) return "Audio recording";
+  return "Media file";
+}
+
+function placeholderBuffer(f: DriveItem, sourceName: string): Buffer {
+  /* Body is designed for keyword + embedding retrieval. The first
+   * paragraph reads as a natural-language description so a query like
+   * "what training videos do we have for PCNA" tokenizes against
+   * "video", "PCNA", "training", "Wolfpack" (via the source name).
+   * Subsequent lines carry the structured metadata. */
+  const label = mediaLabel(f.file?.mimeType);
   const lines: string[] = [
     `# ${f.name}`,
     "",
-    `Type: ${f.file?.mimeType ?? "unknown media"}`,
-    `Size: ${typeof f.size === "number" ? `${f.size.toLocaleString()} bytes` : "unknown"}`,
+    `${label} from the ${sourceName} SharePoint source.`,
   ];
-  if (f.parentReference?.path) lines.push(`Folder: ${f.parentReference.path}`);
-  if (f.webUrl) lines.push(`Watch: ${f.webUrl}`);
+  if (f.parentReference?.path) {
+    /* Convert "/drives/D/root:/Shared Documents/General/Ad-hoc Training Projects/Options Content"
+     * into "Shared Documents / General / Ad-hoc Training Projects / Options Content"
+     * so the folder breadcrumb words ("Training", "Options Content", etc.)
+     * are searchable as separate tokens. */
+    const breadcrumb = f.parentReference.path
+      .replace(/^\/drives\/[^/]+\/root:?\/?/, "")
+      .split("/")
+      .filter(Boolean)
+      .join(" / ");
+    if (breadcrumb) {
+      lines.push(`Located in: ${breadcrumb}.`);
+    }
+  }
   lines.push("");
   lines.push(
-    "This is a placeholder for a media file too large to ingest into the searchable index directly.",
-    "The placeholder makes the file discoverable by name in chat and provides a link to view it.",
-    "If a transcript (.vtt or .txt) exists alongside the original in the same SharePoint folder, that transcript is indexed normally.",
+    `**File:** ${f.name}`,
+    `**Type:** ${f.file?.mimeType ?? "unknown media"}`,
+    `**Size:** ${typeof f.size === "number" ? `${f.size.toLocaleString()} bytes` : "unknown"}`,
+    `**Source:** ${sourceName}`,
+  );
+  if (f.webUrl) lines.push(`**Watch:** ${f.webUrl}`);
+  lines.push("");
+  lines.push(
+    `This is a placeholder for a ${label.toLowerCase()} too large to ingest into the searchable index directly.`,
+    `The placeholder makes the file discoverable by name in chat and provides a link to view it.`,
+    `If a transcript (.vtt or .txt) exists alongside the original in the same SharePoint folder, that transcript is indexed normally.`,
   );
   return Buffer.from(lines.join("\n"), "utf-8");
 }
@@ -205,7 +239,7 @@ export async function syncSource(
            * file is at least searchable by name + clickable. Without
            * this the operator silently loses every large video. */
           if (isPlaceholderable(f.file?.mimeType)) {
-            const buf = placeholderBuffer(f);
+            const buf = placeholderBuffer(f, source.name);
             await ingestFn({
               filename: `${f.name}.placeholder.txt`,
               contentType: "text/plain",
@@ -216,6 +250,7 @@ export async function syncSource(
                 "sharepoint",
                 "sp-video-placeholder",
                 `sp-source:${source.id}`,
+                `sp-source-name:${source.name}`,
                 `workspace:${source.workspaceId}`,
               ],
             });
@@ -252,7 +287,12 @@ export async function syncSource(
           buffer: buf,
           uploadedBy: triggeredBy,
           uploaderRole: triggeredByRole,
-          tags: ["sharepoint", `sp-source:${source.id}`, `workspace:${source.workspaceId}`],
+          tags: [
+            "sharepoint",
+            `sp-source:${source.id}`,
+            `sp-source-name:${source.name}`,
+            `workspace:${source.workspaceId}`,
+          ],
         });
         successCount++;
         bytesIngested += buf.length;
