@@ -36,7 +36,7 @@ const SCHEDULE_RE = /\b(what'?s|whats|what is)\s+(on|in)\s+([a-z][\w\s.'-]{0,40}
 // substitutes the caller's userId/displayName from ToolContext.
 const SELF_BUSY_RE = /\bam\s+i\s+(busy|free|available)\b/i;
 const SELF_HAVE_RE = /\bdo\s+i\s+have\s+(?:any|anything|a\s+meeting|meetings|time|stuff|plans)\b/i;
-const SELF_SCHEDULE_RE = /\b(?:(?:what'?s|whats|what is)\s+(?:on|in)\s+my\s+(?:calendar|schedule|agenda)|what'?s\s+my\s+(?:day|schedule|agenda)|what\s+does\s+my\s+day\s+look\s+like|my\s+(?:calendar|schedule|agenda)\s+(?:today|tomorrow|this|next))\b/i;
+const SELF_SCHEDULE_RE = /\b(?:(?:what'?s|whats|what is)\s+(?:on|in)\s+my\s+(?:calendar|schedule|agenda)|what'?s\s+my\s+(?:day|schedule|agenda)|what\s+does\s+my\s+day\s+look\s+like|my\s+(?:calendar|schedule|agenda)\s+(?:today|tomorrow|this|next|monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i;
 // Meeting-centric first-person variants the SELF_SCHEDULE_RE misses.
 // "when are my meetings today", "when is my next meeting",
 // "what meetings do I have", "any meetings today", "my meetings today".
@@ -73,10 +73,34 @@ const TIME_HINTS: Record<string, string> = {
   "last year": "last_year",
 };
 
+/* Weekday names recognized by resolveTimeframe via parseWeekdayPhrase.
+ * Returned verbatim (e.g. "monday", "next tuesday") so downstream
+ * resolveTimeframe handles the qualifier semantics ("next" / "last" /
+ * "this") in one place. Order matters: longest phrases first so "next
+ * monday" beats "monday" when both could match. */
+const WEEKDAY_PHRASES: string[] = [
+  // Qualified forms FIRST so they win against the bare day match.
+  "next monday", "next tuesday", "next wednesday", "next thursday",
+  "next friday", "next saturday", "next sunday",
+  "last monday", "last tuesday", "last wednesday", "last thursday",
+  "last friday", "last saturday", "last sunday",
+  "this monday", "this tuesday", "this wednesday", "this thursday",
+  "this friday", "this saturday", "this sunday",
+  "monday", "tuesday", "wednesday", "thursday",
+  "friday", "saturday", "sunday",
+];
+
 function extractTimeframe(text: string): string | undefined {
   const lower = text.toLowerCase();
   for (const [phrase, token] of Object.entries(TIME_HINTS)) {
     if (lower.includes(phrase)) return token;
+  }
+  /* Weekday names — "what is on my calendar monday?" should resolve
+     to upcoming Monday, not default to today. Surface the matched
+     phrase to resolveTimeframe which has the canonical day-math. */
+  for (const phrase of WEEKDAY_PHRASES) {
+    const re = new RegExp(`\\b${phrase}\\b`, "i");
+    if (re.test(lower)) return phrase;
   }
   return undefined;
 }

@@ -131,4 +131,36 @@ describe("classifyIntent (token-free)", () => {
     expect(m.intent).toBe("calendar_schedule");
     expect(m.slots.person).toBeDefined();
   });
+
+  /* Regression 2026-05-16: "what is on my calendar monday?" returned
+     "You look free today" instead of Monday's schedule. The legacy
+     intent-router matched calendar_schedule but extractTimeframe
+     didn't know about weekday names, so slots.timeframe was undefined
+     and resolveTimeframe defaulted to today. Now weekday names are
+     surfaced as the literal phrase so resolveTimeframe handles the
+     day-math via parseWeekdayPhrase. */
+  test.each([
+    ["what is on my calendar monday?", "monday"],
+    ["what's on my calendar tuesday", "tuesday"],
+    ["what is on my calendar next wednesday", "next wednesday"],
+    ["what's on my schedule friday?", "friday"],
+    ["what's on my agenda this thursday", "this thursday"],
+    ["my calendar saturday", "saturday"],
+  ])("'%s' extracts timeframe '%s'", (q, expected) => {
+    const m = classifyIntent(q);
+    expect(m.intent).toBe("calendar_schedule");
+    expect(m.slots.timeframe).toBe(expected);
+  });
+
+  test("'what's on my calendar today' still uses TIME_HINTS short form (no regression)", () => {
+    /* TIME_HINTS comes first so 'today' wins over the weekday loop. */
+    const m = classifyIntent("what's on my calendar today");
+    expect(m.intent).toBe("calendar_schedule");
+    expect(m.slots.timeframe).toBe("today");
+  });
+
+  test("'what's on my calendar tomorrow' resolves to tomorrow, not a weekday", () => {
+    const m = classifyIntent("what's on my calendar tomorrow");
+    expect(m.slots.timeframe).toBe("tomorrow");
+  });
 });
