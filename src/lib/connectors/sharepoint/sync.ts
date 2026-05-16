@@ -152,12 +152,31 @@ export async function syncSource(
   let bytesIngested = 0;
   let topLevelError: string | null = null;
 
+  /* Skip files larger than the brain ingest cap BEFORE downloading.
+   * Downloading a 500MB video into a Buffer then handing it to brain
+   * ingest (which rejects it anyway) wastes the function's memory and
+   * can trigger a Vercel OOM that surfaces as an HTML 500 to the
+   * client. Brain ingest's default cap is 50MB; we honor the same
+   * env var to stay in sync. */
+  const MAX_FILE_BYTES = Number(process.env.BRAIN_MAX_SIZE_BYTES ?? 50 * 1024 * 1024);
+
   try {
     const files = await walkFn(triggeredBy, source.driveId, source.folderPath);
     fileCount = files.length;
 
     for (const f of files) {
       try {
+        if (typeof f.size === "number" && f.size > MAX_FILE_BYTES) {
+          failCount++;
+          trackEvent("connectors.sharepoint.file_ingest_failed", triggeredBy, triggeredByRole, {
+            source_id: source.id,
+            job_id: job.id,
+            file_name: f.name,
+            file_size: f.size,
+            error: "file_too_large_skipped_before_download",
+          });
+          continue;
+        }
         const buf = await downloadFn(triggeredBy, source.driveId, f.id);
         await ingestFn({
           filename: f.name,

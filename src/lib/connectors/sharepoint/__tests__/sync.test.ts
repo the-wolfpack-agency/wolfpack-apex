@@ -149,6 +149,31 @@ describe("syncSource", () => {
     expect(result.failCount).toBe(0);
   });
 
+  test("skips files larger than BRAIN_MAX_SIZE_BYTES BEFORE downloading (OOM guard)", async () => {
+    const repo = fakeRepo();
+    const walkFn = jest.fn().mockResolvedValue([
+      { id: "f1", name: "small.pdf", size: 1024, file: { mimeType: "application/pdf" } },
+      { id: "f2", name: "huge-video.mp4", size: 500 * 1024 * 1024, file: { mimeType: "video/mp4" } },
+    ]);
+    const downloadFn = jest.fn().mockResolvedValue(Buffer.from("ok"));
+    const ingestFn = jest.fn().mockResolvedValue({ document_id: "d", status: "indexed", chunk_count: 1, extracted_chars: 2 });
+
+    const result = await syncSource(source, "u1", "cto", { repo, walkFn, downloadFn, ingestFn });
+    /* Small file ingested, huge file skipped without download. */
+    expect(downloadFn).toHaveBeenCalledTimes(1);
+    expect(downloadFn).toHaveBeenCalledWith("u1", "drive-xyz", "f1");
+    expect(result.successCount).toBe(1);
+    expect(result.failCount).toBe(1);
+    expect(result.status).toBe("partial");
+    /* Analytics records the size-skip with a clear error code. */
+    const skipCall = mockTrackEvent.mock.calls.find((c) =>
+      c[0] === "connectors.sharepoint.file_ingest_failed" &&
+      c[3]?.file_name === "huge-video.mp4",
+    );
+    expect(skipCall).toBeDefined();
+    expect(skipCall?.[3]?.error).toBe("file_too_large_skipped_before_download");
+  });
+
   test("fires sync_started + sync_finished analytics", async () => {
     const repo = fakeRepo();
     const walkFn = jest.fn().mockResolvedValue([]);
