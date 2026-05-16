@@ -110,4 +110,13 @@ export interface Connector {
     filters: import("./vendor-presets").FilterSpec,
     limit?: number,
   ): Promise<ConnectorResult<Array<Record<string, unknown>>>>;
+  /**
+   * Aggregate query — count, sum, avg, win-rate, or top-N. Connector
+   * dispatches to the vendor preset's aggregateSearch.build which
+   * returns both the request path and a typed parser for the result
+   * shape (scalar / rate / list).
+   */
+  searchAggregate?(
+    spec: import("./vendor-presets").AggregateSpec,
+  ): Promise<ConnectorResult<import("./vendor-presets").AggregateResult>>;
 }

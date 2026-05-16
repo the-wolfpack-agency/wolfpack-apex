@@ -332,6 +332,23 @@ export class RestConnector implements Connector {
     return { ok: true, data: req.extract(r.data), durationMs: r.durationMs };
   }
 
+  async searchAggregate(
+    spec: import("./vendor-presets").AggregateSpec,
+  ): Promise<ConnectorResult<import("./vendor-presets").AggregateResult>> {
+    if (!this.isConfigured()) return notConfigured(this.name, "searchAggregate");
+    if (!this.vendorPreset?.aggregateSearch) {
+      return {
+        ok: false,
+        code: "validation",
+        message: `connector "${this.name}" does not support aggregate queries`,
+      };
+    }
+    const req = this.vendorPreset.aggregateSearch.build(spec);
+    const r = await this.request<unknown>(req.path.startsWith("/") ? req.path : `/${req.path}`);
+    if (!r.ok) return r as ConnectorResult<import("./vendor-presets").AggregateResult>;
+    return { ok: true, data: req.parse(r.data), durationMs: r.durationMs };
+  }
+
   private async requestWithBody(
     method: "POST" | "PATCH",
     path: string,

@@ -45,6 +45,7 @@ import "./update-external-record-tool";
    and filter queries ("deals over $50k closing this month"). */
 import "./get-related-records-tool";
 import "./filter-external-records-tool";
+import "./aggregate-external-records-tool";
 
 export { tryDispatchTool } from "./dispatcher";
 export { getTools, getToolByName, registerTool, __resetRegistryForTests } from "./registry";

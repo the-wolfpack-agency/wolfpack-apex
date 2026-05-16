@@ -265,6 +265,36 @@
       }
     },
     {
+      "id": "happy-aggregate-count-routes-to-tool",
+      "category": "happy_path",
+      "rationale": "'how many deals are in the pipeline' is the canonical CEO query. Routes to aggregate_external_records → SOQL COUNT(Id). Must not match filter_external_records, get_external_record, or LLM fallback.",
+      "question": "how many deals are in the pipeline",
+      "expect": {
+        "source": "tool",
+        "answerNotContains": ["I don't have a confident answer"]
+      }
+    },
+    {
+      "id": "happy-aggregate-win-rate-routes-to-tool",
+      "category": "happy_path",
+      "rationale": "'what's my win rate' is the canonical sales-leader query. Routes to aggregate_external_records → SOQL GROUP BY IsWon. Must not match other tools or fall to LLM.",
+      "question": "what's my win rate this quarter",
+      "expect": {
+        "source": "tool",
+        "answerNotContains": ["I don't have a confident answer"]
+      }
+    },
+    {
+      "id": "happy-aggregate-top-routes-to-tool",
+      "category": "happy_path",
+      "rationale": "'top 5 accounts by revenue' returns ordered list with the field value rendered. Pins routing + result-type contract.",
+      "question": "top 5 accounts by revenue",
+      "expect": {
+        "source": "tool",
+        "answerNotContains": ["I don't have a confident answer"]
+      }
+    },
+    {
       "id": "happy-porsche-class-grounding-reaches-llm",
       "category": "happy_path",
       "rationale": "Porsche-class snapshots now ground the assistant via context-resolver. The grounding-block fixture below is what searchPorscheClassNotes would render for 'what changed in BA101 on April 20'. The AI mock must cite the +2 added participants so we know the prompt block reached the LLM (not just that the SQL ran). This is the smoke test for the new grounding lane end-to-end.",

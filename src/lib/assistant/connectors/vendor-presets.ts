@@ -83,6 +83,45 @@ export interface VendorPreset {
       limit: number,
     ): VendorSearchRequest;
   };
+  /** Optional aggregate support ("how many deals", "total pipeline
+   *  value", "win rate this quarter", "top 5 accounts by revenue"). */
+  aggregateSearch?: {
+    /** Build the SOQL request. Win-rate returns a wider request that
+     *  needs special parsing — the extract function handles all
+     *  shapes uniformly. */
+    build(spec: AggregateSpec): { path: string; parse: (raw: unknown) => AggregateResult };
+  };
+}
+
+/** Aggregate-query spec. The aggregate tool composes one of these from
+ *  regex extraction; the vendor preset translates it into the native
+ *  expression (Salesforce: SOQL aggregate / GROUP BY; HubSpot: search
+ *  endpoint with aggregations when wired later). */
+export interface AggregateSpec {
+  objectType: string;
+  /** count | sum | avg | win_rate (special: returns won/(won+lost)) |
+   *  top (returns top-N records ordered by field). */
+  operation: "count" | "sum" | "avg" | "win_rate" | "top";
+  /** Field for SUM/AVG/TOP. For COUNT this is implicit (record id). */
+  field?: string;
+  /** Limit for TOP. Ignored for count/sum/avg/win_rate (scalar). */
+  limit?: number;
+  /** Optional WHERE clauses — reuses the FilterSpec shape so all the
+   *  same date/stage/owner clauses the filter tool understands work
+   *  for aggregates too. */
+  filters?: FilterSpec;
+}
+
+/** Result of an aggregate query. Shape varies by operation. */
+export interface AggregateResult {
+  type: "scalar" | "rate" | "list";
+  /** Set for type='scalar' (count/sum/avg). */
+  value?: number;
+  /** Set for type='rate' (win_rate). */
+  numerator?: number;
+  denominator?: number;
+  /** Set for type='list' (top N). */
+  rows?: Array<Record<string, unknown>>;
 }
 
 /** Filter clauses the filter-search tool can apply. Each is optional;
@@ -277,6 +316,112 @@ export const VENDOR_PRESETS: Record<string, VendorPreset> = {
             return Array.isArray(r?.records) ? r.records : [];
           },
         };
+      },
+    },
+    aggregateSearch: {
+      build(spec) {
+        const SObjectByType: Record<string, string> = {
+          contact: "Contact",
+          deal: "Opportunity",
+          opportunity: "Opportunity",
+          account: "Account",
+          company: "Account",
+        };
+        const sobject = SObjectByType[spec.objectType] ?? "Opportunity";
+
+        /* Compose WHERE from any FilterSpec the caller passed in
+           (same dialect as filterSearch). */
+        const whereParts: string[] = [];
+        if (spec.filters?.amount && sobject === "Opportunity") {
+          const op = ({ gt: ">", lt: "<", gte: ">=", lte: "<=", eq: "=" } as const)[spec.filters.amount.op];
+          whereParts.push(`Amount ${op} ${spec.filters.amount.value}`);
+        }
+        if (spec.filters?.stage && sobject === "Opportunity") {
+          whereParts.push(`StageName = '${sfSoqlEscape(spec.filters.stage)}'`);
+        }
+        if (spec.filters?.ownerName) {
+          whereParts.push(`Owner.Name LIKE '%${sfSoqlEscape(spec.filters.ownerName)}%'`);
+        }
+        if (spec.filters?.dateRange) {
+          const dateField = sobject === "Opportunity" ? "CloseDate" : "CreatedDate";
+          const SOQL_LITERAL: Record<string, string> = {
+            this_week: "THIS_WEEK",
+            last_week: "LAST_WEEK",
+            this_month: "THIS_MONTH",
+            last_month: "LAST_MONTH",
+            next_month: "NEXT_MONTH",
+            this_quarter: "THIS_QUARTER",
+            this_year: "THIS_YEAR",
+          };
+          const lit = SOQL_LITERAL[spec.filters.dateRange];
+          if (lit) whereParts.push(`${dateField} = ${lit}`);
+        }
+        const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
+
+        let soql: string;
+        let parse: (raw: unknown) => AggregateResult;
+
+        if (spec.operation === "count") {
+          /* SOQL: SELECT COUNT(Id) c FROM <S> WHERE …
+             Response: { records: [{ c: N }], totalSize: 1, done: true } */
+          soql = `SELECT COUNT(Id) c FROM ${sobject} ${whereClause}`.trim();
+          parse = (raw) => {
+            const r = raw as { records?: Array<{ c?: number }> };
+            const v = r?.records?.[0]?.c;
+            return { type: "scalar", value: typeof v === "number" ? v : 0 };
+          };
+        } else if (spec.operation === "sum" || spec.operation === "avg") {
+          const fn = spec.operation === "sum" ? "SUM" : "AVG";
+          const field = spec.field || (sobject === "Opportunity" ? "Amount" : "AnnualRevenue");
+          /* SOQL: SELECT SUM(Amount) v FROM Opportunity WHERE … */
+          soql = `SELECT ${fn}(${field}) v FROM ${sobject} ${whereClause}`.trim();
+          parse = (raw) => {
+            const r = raw as { records?: Array<{ v?: number }> };
+            const v = r?.records?.[0]?.v;
+            return { type: "scalar", value: typeof v === "number" ? v : 0 };
+          };
+        } else if (spec.operation === "win_rate") {
+          /* SOQL needs GROUP BY IsWon for the rate calculation:
+             SELECT IsWon, COUNT(Id) c FROM Opportunity WHERE IsClosed=true …
+             Force-add IsClosed=true to the WHERE (a deal not yet
+             closed is neither won nor lost — including it would skew
+             the rate). */
+          const closedFilter = "IsClosed = true";
+          const combined = whereParts.length > 0
+            ? `WHERE ${whereParts.join(" AND ")} AND ${closedFilter}`
+            : `WHERE ${closedFilter}`;
+          soql = `SELECT IsWon, COUNT(Id) c FROM Opportunity ${combined} GROUP BY IsWon`;
+          parse = (raw) => {
+            const r = raw as { records?: Array<{ IsWon?: boolean; c?: number }> };
+            const rows = r?.records ?? [];
+            let won = 0;
+            let lost = 0;
+            for (const row of rows) {
+              const c = typeof row.c === "number" ? row.c : 0;
+              if (row.IsWon === true) won += c;
+              else if (row.IsWon === false) lost += c;
+            }
+            return { type: "rate", numerator: won, denominator: won + lost };
+          };
+        } else {
+          /* operation === "top": list the top-N records ordered by field. */
+          const field = spec.field || (sobject === "Opportunity" ? "Amount" : "AnnualRevenue");
+          const limit = spec.limit && spec.limit > 0 ? Math.min(spec.limit, 25) : 5;
+          const fields =
+            sobject === "Opportunity"
+              ? "Id,Name,StageName,Amount,CloseDate,AccountId,Account.Name"
+              : sobject === "Contact"
+              ? "Id,Name,Email,Phone,AccountId,Account.Name"
+              : "Id,Name,Industry,Phone,AnnualRevenue";
+          soql = `SELECT ${fields} FROM ${sobject} ${whereClause} ORDER BY ${field} DESC NULLS LAST LIMIT ${limit}`.trim();
+          parse = (raw) => {
+            const r = raw as { records?: Array<Record<string, unknown>> };
+            return { type: "list", rows: Array.isArray(r?.records) ? r.records : [] };
+          };
+        }
+
+        const path = `/services/data/v59.0/query?${sfEncode(soql)}`;
+        return { path, parse };
       },
     },
     filterSearch: {

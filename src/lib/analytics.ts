@@ -483,6 +483,9 @@ export type InstinctEventType =
   // closing this month"). Metadata flags which clause types were
   // present so we can dashboard the most-used filter shapes.
   | "assistant.connector_filter_executed"
+  // Aggregate query executed (count / sum / avg / win-rate / top-N).
+  // Metadata: { connector, object_type, operation, result_type }.
+  | "assistant.connector_aggregate_executed"
   // Invite was looked up but the expires_at column says it lapsed.
   // Drives the "ask your admin to resend" UX hint + a tenant-side
   // dashboard counter so admins see expirations before users complain.
