@@ -16,6 +16,10 @@ import {
   parseSharepointFolderUrl,
   resolveSiteAndDrive,
 } from "@/lib/sharepoint/url-parser";
+import {
+  isShortShareLink,
+  resolveShareLink,
+} from "@/lib/connectors/sharepoint/resolve-share-link";
 
 export async function GET(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
@@ -47,10 +51,34 @@ export async function POST(req: NextRequest) {
   if (!name) return NextResponse.json({ error: "name_required" }, { status: 400 });
   if (!siteUrl) return NextResponse.json({ error: "site_url_required" }, { status: 400 });
 
-  const parsed = parseSharepointFolderUrl(siteUrl);
+  /* Two URL shapes the operator might paste:
+   *   1. Canonical "open in browser" form: /sites/X/Shared Documents/...
+   *      parseSharepointFolderUrl handles this directly.
+   *   2. Short share link (Teams "Copy link", SharePoint "Share > Copy"):
+   *      /:f:/s/X/<guid> — has no folder path. We call Graph's
+   *      /shares/{token}/driveItem to resolve it to a canonical webUrl,
+   *      then re-parse.
+   */
+  let parsed = parseSharepointFolderUrl(siteUrl);
+  let canonicalUrl = siteUrl;
+  if (!parsed && isShortShareLink(siteUrl)) {
+    const resolved = await resolveShareLink(user.id, siteUrl);
+    if (resolved.ok && resolved.webUrl) {
+      canonicalUrl = resolved.webUrl;
+      parsed = parseSharepointFolderUrl(resolved.webUrl);
+    } else if (resolved.error === "no_token") {
+      return NextResponse.json(
+        { error: "Microsoft account isn't connected. Connect Outlook first, then add this source." },
+        { status: 400 },
+      );
+    }
+  }
   if (!parsed) {
     return NextResponse.json(
-      { error: "We couldn't parse that SharePoint folder URL. Copy it from your browser address bar while viewing the folder." },
+      {
+        error:
+          "We couldn't parse that SharePoint folder URL. Open the folder in your browser and copy the URL from the address bar (the one with `/sites/.../Shared Documents/...`).",
+      },
       { status: 400 },
     );
   }
@@ -74,7 +102,10 @@ export async function POST(req: NextRequest) {
     source = await repo.insertSource({
       workspaceId,
       name,
-      siteUrl,
+      /* Store the canonical resolved URL (not the short share token)
+       * so the source row stays meaningful after the share GUID
+       * expires or is revoked. */
+      siteUrl: canonicalUrl,
       siteId: resolved.resolved.site_id,
       driveId: resolved.resolved.drive_id,
       folderPath: resolved.resolved.folder_path,

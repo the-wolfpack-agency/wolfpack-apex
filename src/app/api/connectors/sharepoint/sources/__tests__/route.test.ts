@@ -10,6 +10,8 @@ const mockGetUser = jest.fn();
 const mockTrackEvent = jest.fn();
 const mockParse = jest.fn();
 const mockResolve = jest.fn();
+const mockResolveShareLink = jest.fn();
+const mockIsShortShareLink = jest.fn();
 const mockInsertSource = jest.fn();
 const mockListSources = jest.fn();
 
@@ -22,6 +24,10 @@ jest.mock("@/lib/analytics", () => ({
 jest.mock("@/lib/sharepoint/url-parser", () => ({
   parseSharepointFolderUrl: (...a: any[]) => mockParse(...a),
   resolveSiteAndDrive: (...a: any[]) => mockResolve(...a),
+}));
+jest.mock("@/lib/connectors/sharepoint/resolve-share-link", () => ({
+  isShortShareLink: (...a: any[]) => mockIsShortShareLink(...a),
+  resolveShareLink: (...a: any[]) => mockResolveShareLink(...a),
 }));
 jest.mock("@/lib/connectors/sharepoint/repo", () => ({
   createRepo: () => ({
@@ -52,8 +58,14 @@ beforeEach(() => {
   mockTrackEvent.mockReset();
   mockParse.mockReset();
   mockResolve.mockReset();
+  mockResolveShareLink.mockReset();
+  mockIsShortShareLink.mockReset();
   mockInsertSource.mockReset();
   mockListSources.mockReset();
+  /* Default: URL is canonical, not a short share link. Specific tests
+   * override mockIsShortShareLink + mockResolveShareLink to exercise
+   * the share-link fallback path. */
+  mockIsShortShareLink.mockReturnValue(false);
 });
 
 describe("POST /api/connectors/sharepoint/sources", () => {
@@ -119,6 +131,62 @@ describe("POST /api/connectors/sharepoint/sources", () => {
       "connectors.sharepoint.source_added", "u1", "cto",
       expect.objectContaining({ source_id: "src-1", workspace_id: "ws1" }),
     );
+  });
+
+  test("short share link (:f:/s/) is auto-resolved via Graph before parsing", async () => {
+    mockGetUser.mockReturnValue({ id: "u1", role: "cto", workspaceId: "ws1" });
+    /* First parse attempt on the raw short link fails. */
+    mockParse.mockReturnValueOnce(null);
+    mockIsShortShareLink.mockReturnValue(true);
+    mockResolveShareLink.mockResolvedValue({
+      ok: true,
+      webUrl: "https://x.sharepoint.com/sites/PCNAINTERNAL/Shared%20Documents/Program%20Evals",
+      driveId: "D",
+      itemId: "I",
+    });
+    /* Second parse attempt on the resolved canonical URL succeeds. */
+    mockParse.mockReturnValueOnce({
+      site_host: "x.sharepoint.com",
+      site_path: "sites/PCNAINTERNAL",
+      folder_path: "Shared Documents/Program Evals",
+    });
+    mockResolve.mockResolvedValue({
+      ok: true,
+      resolved: { site_id: "S", drive_id: "D", folder_path: "Shared Documents/Program Evals" },
+    });
+    mockInsertSource.mockResolvedValue({
+      id: "src-1", workspaceId: "ws1", name: "PCNA Evals",
+      siteUrl: "https://x.sharepoint.com/sites/PCNAINTERNAL/Shared%20Documents/Program%20Evals",
+      siteId: "S", driveId: "D", folderPath: "Shared Documents/Program Evals",
+      createdBy: "u1", createdAt: "now", lastSyncedAt: null, isActive: true,
+    });
+
+    const res = await POST(req({
+      name: "PCNA Evals",
+      siteUrl: "https://x.sharepoint.com/:f:/s/PCNAINTERNAL/abc123",
+    }));
+    expect(res.status).toBe(201);
+    /* Stored siteUrl is the canonical webUrl, NOT the short share token,
+     * so the row survives share-token expiry. */
+    expect(mockInsertSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        siteUrl: "https://x.sharepoint.com/sites/PCNAINTERNAL/Shared%20Documents/Program%20Evals",
+      }),
+    );
+  });
+
+  test("short share link + no_token error → friendly 'connect Outlook' message", async () => {
+    mockGetUser.mockReturnValue({ id: "u1", role: "cto" });
+    mockParse.mockReturnValue(null);
+    mockIsShortShareLink.mockReturnValue(true);
+    mockResolveShareLink.mockResolvedValue({ ok: false, error: "no_token" });
+    const res = await POST(req({
+      name: "PCNA",
+      siteUrl: "https://x.sharepoint.com/:f:/s/X/abc",
+    }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/Microsoft account isn't connected/);
   });
 
   test("409 on duplicate folder (pg unique-index violation)", async () => {
