@@ -15,6 +15,8 @@
 
 import type { WidgetSpec } from "@/lib/assistant/widgets/types";
 import { CalendarWidget } from "@/components/widgets/CalendarWidget";
+import { EmailThreadWidget } from "@/components/widgets/EmailThreadWidget";
+import { TaskListWidget } from "@/components/widgets/TaskListWidget";
 
 export interface ChatWidgetProps {
   spec: WidgetSpec;
@@ -25,6 +27,10 @@ export function ChatWidget({ spec }: ChatWidgetProps) {
   switch (spec.kind) {
     case "calendar":
       return <CalendarWidget spec={spec} />;
+    case "email_thread":
+      return <EmailThreadWidget spec={spec} />;
+    case "task_list":
+      return <TaskListWidget spec={spec} />;
     default:
       /* Forward-compat: silently render nothing for unknown kinds.
        * The text answer above the widget still surfaces, so the

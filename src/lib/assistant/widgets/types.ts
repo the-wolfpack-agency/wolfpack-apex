@@ -51,6 +51,61 @@ export interface CalendarWidgetSpec {
   title?: string;
 }
 
+/** A single message in an email-thread widget. */
+export interface EmailThreadMessage {
+  id: string;
+  subject: string;
+  from: string;
+  fromEmail: string;
+  /** ISO timestamp Graph returned (receivedDateTime). */
+  receivedAt: string;
+  /** Short snippet (Graph's bodyPreview) — capped server-side. */
+  preview: string;
+  isRead: boolean;
+  importance: "low" | "normal" | "high";
+  /** Outlook web link (open in Outlook). */
+  webLink?: string;
+  /** In-app deep link (when we have a reader for the id). */
+  instinctDetailHref?: string;
+}
+
+export interface EmailThreadWidgetSpec {
+  kind: "email_thread";
+  /** Heading rendered above the list (e.g. "Recent inbox",
+   *  "Emails from Hoxsie"). */
+  title: string;
+  /** Optional filter description shown under the title in muted text
+   *  ("from hoxsie@…", "last 24h"). */
+  subtitle?: string;
+  messages: EmailThreadMessage[];
+}
+
+/** A single row in a task-list widget. */
+export interface TaskListItem {
+  id: string;
+  title: string;
+  status: "notStarted" | "inProgress" | "completed" | "waitingOnOthers" | "deferred";
+  importance: "low" | "normal" | "high";
+  /** ISO timestamp; null when the task has no due date. */
+  dueAt: string | null;
+  /** Local list UUID (used by the optimistic-complete handler to scope
+   *  the PATCH call). */
+  listId: string;
+  /** Friendly list name shown next to the title ("Inbox", "Work"). */
+  listName?: string;
+}
+
+export interface TaskListWidgetSpec {
+  kind: "task_list";
+  title: string;
+  /** Optional filter description (e.g. "due today", "all open"). */
+  subtitle?: string;
+  tasks: TaskListItem[];
+}
+
 /** Discriminated union of every widget kind. Add new entries as the
  *  framework expands. */
-export type WidgetSpec = CalendarWidgetSpec;
+export type WidgetSpec =
+  | CalendarWidgetSpec
+  | EmailThreadWidgetSpec
+  | TaskListWidgetSpec;

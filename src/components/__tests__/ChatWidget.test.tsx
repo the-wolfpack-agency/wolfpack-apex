@@ -26,10 +26,32 @@ const calendarSpec: WidgetSpec = {
   events: [],
 };
 
+const emailSpec: WidgetSpec = {
+  kind: "email_thread",
+  title: "Recent inbox",
+  messages: [],
+};
+
+const tasksSpec: WidgetSpec = {
+  kind: "task_list",
+  title: "Open tasks",
+  tasks: [],
+};
+
 describe("ChatWidget", () => {
   test("renders CalendarWidget for kind=calendar", () => {
     render(<ChatWidget spec={calendarSpec} />);
     expect(screen.getByTestId("calendar-widget")).toBeInTheDocument();
+  });
+
+  test("renders EmailThreadWidget for kind=email_thread", () => {
+    render(<ChatWidget spec={emailSpec} />);
+    expect(screen.getByTestId("email-thread-widget")).toBeInTheDocument();
+  });
+
+  test("renders TaskListWidget for kind=task_list", () => {
+    render(<ChatWidget spec={tasksSpec} />);
+    expect(screen.getByTestId("task-list-widget")).toBeInTheDocument();
   });
 
   test("renders nothing for unknown kind (forward-compat)", () => {

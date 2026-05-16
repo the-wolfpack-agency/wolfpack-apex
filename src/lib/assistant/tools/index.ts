@@ -75,10 +75,14 @@ import "./create-okr-form-tool";
 import "./create-feature-form-tool";
 
 /* Widget tools — return an interactive surface (calendar grid, email
-   thread, task list, etc.) instead of free-form text. First instance
-   is the calendar widget; the framework is shared so future widgets
-   plug in via the same WidgetSpec discriminator. */
+   thread, task list, etc.) instead of free-form text. The framework
+   is shared so future widgets plug in via the same WidgetSpec
+   discriminator. Order between widget tools doesn't matter — their
+   INTENT_RE patterns are anchored ^/$ on disjoint nouns
+   ("calendar" vs "inbox/emails" vs "tasks/todos"). */
 import "./calendar-widget-tool";
+import "./email-thread-widget-tool";
+import "./task-list-widget-tool";
 
 export { tryDispatchTool } from "./dispatcher";
 export { getTools, getToolByName, registerTool, __resetRegistryForTests } from "./registry";

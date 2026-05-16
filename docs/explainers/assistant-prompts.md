@@ -229,6 +229,27 @@ Renders a mini month grid for the current month with dots on days that have meet
 
 Bare day-of-week prompts (`Calendar Monday`, `my schedule Friday`) still go to the text-based meetings-on-a-day lookup above — the widget is reserved for the "show me the whole month" intent.
 
+### Email thread widget
+- `inbox`
+- `show me my inbox`
+- `recent emails`
+- `show my email`
+- `email widget`
+
+Renders the user's 10 most recent emails as a scannable list. Unread messages render in bold. Each row links to Outlook on the web. A header "Open full inbox" link jumps to `/emails`.
+
+Specific-search phrasings (`find emails about Q3`, `any emails from hoxsie`) still go to the text-based mail-search tool — the widget is reserved for the "just show me my inbox" intent.
+
+### Task list widget
+- `tasks`
+- `my tasks`
+- `open tasks`
+- `task list`
+- `to-do list` / `todos` / `todo`
+- `show tasks`
+
+Renders the user's open MS To-Do tasks with check-off buttons inline. Click the circle to complete a task (writes through to Graph + the local cache). Click the title to open the task on the `/tasks` page. Overdue tasks render in red.
+
 ---
 
 ## Action forms — structured create flows
