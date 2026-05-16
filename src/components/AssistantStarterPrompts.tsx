@@ -12,6 +12,8 @@
 
 "use client";
 
+import { useState } from "react";
+
 interface StarterCategory {
   title: string;
   emoji: string;
@@ -78,57 +80,101 @@ export interface AssistantStarterPromptsProps {
 }
 
 export function AssistantStarterPrompts({ onPick }: AssistantStarterPromptsProps) {
+  /* On mobile (default), only the first category is expanded so the
+     empty state stays compact and the chip rows don't push the
+     greeting above the fold. Tapping a category header expands it.
+     On desktop the screenshot bug doesn't apply — every category is
+     expanded by default. We detect via a useState seeded from
+     window.innerWidth so SSR + first paint are stable. */
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
+    const out: Record<string, boolean> = {};
+    const isMobile =
+      typeof window !== "undefined" && window.innerWidth < 640;
+    STARTER_CATEGORIES.forEach((c, i) => {
+      out[c.title] = isMobile ? i === 0 : true;
+    });
+    return out;
+  });
+
+  const toggle = (title: string) =>
+    setExpanded((prev) => ({ ...prev, [title]: !prev[title] }));
+
   return (
     <div
-      className="mt-6 w-full max-w-2xl"
+      className="mt-4 sm:mt-6 w-full max-w-2xl px-3"
       data-testid="assistant-starter-prompts"
     >
       <div
-        className="text-xs uppercase tracking-wide mb-3 text-center"
+        className="text-xs uppercase tracking-wide mb-2 sm:mb-3 text-center"
         style={{ color: "var(--wp-text-muted, #6b7280)", letterSpacing: 1 }}
       >
         Try one of these
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {STARTER_CATEGORIES.map((cat) => (
-          <div
-            key={cat.title}
-            className="rounded-md p-3"
-            style={{
-              background: "var(--wp-dark-surface2, #1a1a1a)",
-              border: "1px solid var(--wp-dark-border, #333)",
-            }}
-          >
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-3">
+        {STARTER_CATEGORIES.map((cat) => {
+          const isOpen = expanded[cat.title];
+          const slug = cat.title.toLowerCase().replace(/\W+/g, "-");
+          return (
             <div
-              className="text-xs font-semibold mb-2"
-              style={{ color: "var(--wp-text-dim, #aaa)" }}
+              key={cat.title}
+              className="rounded-md"
+              style={{
+                background: "var(--wp-dark-surface2, #1a1a1a)",
+                border: "1px solid var(--wp-dark-border, #333)",
+              }}
             >
-              <span className="mr-1.5">{cat.emoji}</span>
-              {cat.title}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {cat.prompts.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => onPick(p)}
-                  data-testid={`starter-prompt-${cat.title.toLowerCase().replace(/\W+/g, "-")}-${p.slice(0, 20).replace(/\W+/g, "-")}`}
-                  className="text-xs px-2 py-1 rounded-md transition-colors hover:opacity-90 text-left"
-                  style={{
-                    background: "rgba(234,179,8,0.08)",
-                    color: "var(--wp-gold, #eab308)",
-                    border: "1px solid rgba(234,179,8,0.25)",
-                  }}
+              <button
+                type="button"
+                onClick={() => toggle(cat.title)}
+                data-testid={`starter-category-toggle-${slug}`}
+                className="flex w-full items-center justify-between p-2.5 sm:p-3 text-left"
+                aria-expanded={isOpen}
+              >
+                <span
+                  className="text-xs font-semibold"
+                  style={{ color: "var(--wp-text-dim, #aaa)" }}
                 >
-                  {p}
-                </button>
-              ))}
+                  <span className="mr-1.5">{cat.emoji}</span>
+                  {cat.title}
+                </span>
+                <svg
+                  className={`w-3.5 h-3.5 transition-transform ${isOpen ? "rotate-180" : ""}`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  style={{ color: "var(--wp-text-muted, #6b7280)" }}
+                  aria-hidden
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {isOpen && (
+                <div className="flex flex-wrap gap-1.5 px-2.5 sm:px-3 pb-2.5 sm:pb-3">
+                  {cat.prompts.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => onPick(p)}
+                      data-testid={`starter-prompt-${slug}-${p.slice(0, 20).replace(/\W+/g, "-")}`}
+                      className="text-xs px-2 py-1 rounded-md transition-colors hover:opacity-90 text-left"
+                      style={{
+                        background: "rgba(234,179,8,0.08)",
+                        color: "var(--wp-gold, #eab308)",
+                        border: "1px solid rgba(234,179,8,0.25)",
+                      }}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div
-        className="text-xs mt-3 text-center"
+        className="text-xs mt-2 sm:mt-3 text-center px-3"
         style={{ color: "var(--wp-text-muted, #6b7280)" }}
       >
         Full prompt catalogue: <code>docs/explainers/assistant-prompts.md</code>

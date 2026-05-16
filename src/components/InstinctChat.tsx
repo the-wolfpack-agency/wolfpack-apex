@@ -1053,9 +1053,11 @@ export default function InstinctChat({
             )}
 
             {/* Brain icon — pulse-glow gives the AI surface a subtle
-                "alive" feel; honors prefers-reduced-motion via globals. */}
+                "alive" feel; honors prefers-reduced-motion via globals.
+                Hidden on small screens so the title fits on one line
+                next to the hamburger + "New" button. */}
             <svg
-              className="w-6 h-6 shrink-0 wp-pulse-glow"
+              className="w-6 h-6 shrink-0 wp-pulse-glow hidden sm:block"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -1071,7 +1073,7 @@ export default function InstinctChat({
             </svg>
 
             <h1
-              className={`${position === "floating" ? "text-sm" : "text-lg"} font-bold`}
+              className={`${position === "floating" ? "text-sm" : "text-base sm:text-lg"} font-bold truncate min-w-0`}
               style={{ color: "var(--wp-gold, #eab308)" }}
             >
               Wolfpack Assistant
@@ -1109,9 +1111,14 @@ export default function InstinctChat({
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
             {messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-center">
+              /* Anchor to the TOP (not center) so the title + greeting
+                 are always visible above the fold on mobile. The
+                 starter-prompt chips scroll into view below. Previously
+                 the centered layout pushed the greeting above the
+                 viewport on narrow screens. */
+              <div className="flex flex-col items-center text-center pt-4 sm:pt-8 pb-4">
                 <svg
-                  className="w-16 h-16 mb-4"
+                  className="w-10 h-10 sm:w-16 sm:h-16 mb-2 sm:mb-4"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -1124,12 +1131,12 @@ export default function InstinctChat({
                     d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
                   />
                 </svg>
-                <h2 className="text-lg font-medium mb-2" style={{ color: "var(--wp-text-dim, #aaa)" }}>
+                <h2 className="text-base sm:text-lg font-medium mb-1 sm:mb-2" style={{ color: "var(--wp-text-dim, #aaa)" }}>
                   Your AI-powered team assistant
                 </h2>
-                <p className="text-sm max-w-md" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
+                <p className="text-xs sm:text-sm max-w-md px-3" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
                   Ask about projects, clients, processes, or anything work-related.
-                  Get instant answers — no digging through files or emails.
+                  Get instant answers without digging through files or emails.
                 </p>
                 {/* Starter-prompt chips. Helps new users discover the
                     Assistant's surface area. Clicking a chip drops the

@@ -23,7 +23,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
-import { notify } from "@/lib/notifications/in-app";
+/* notify() import removed 2026-05-16: sent-by-me actions don't
+   create notifications anymore. See note below the result return. */
 import { sendMail } from "@/lib/integrations/microsoft-mail";
 
 // ---------------------------------------------------------------------------
@@ -144,16 +145,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Optional notification — fire-and-forget, never blocks the response.
-  notify({
-    userId: user.id,
-    category: "email",
-    priority: "low",
-    title: "Email sent",
-    body: `"${input.subject}" to ${input.to.length} recipient${input.to.length === 1 ? "" : "s"}`,
-    source: "instinct.mail",
-    sourceId: result.value.id,
-  }).catch(() => {});
+  /* Removed the "Email sent" notification (2026-05-16): notifications
+     should be reserved for RECEIVED items. Notifying the sender about
+     their own action is noise — they just clicked Send, the in-form
+     ack pill already confirms it. Other actor-initiated send paths
+     (Teams chat, calendar events, tasks) intentionally don't notify
+     the sender either; this brought email in line. */
 
   return NextResponse.json(
     { id: result.value.id, savedToSent: result.value.savedToSent },

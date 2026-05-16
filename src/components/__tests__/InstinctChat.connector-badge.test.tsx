@@ -263,8 +263,12 @@ describe("InstinctChat — connector badge renders after a successful tool dispa
       render(<InstinctChat showHistory={true} />);
     });
 
-    /* Click the conversation in the sidebar — there should only be one. */
-    const convoButton = await screen.findByRole("button", { name: /Top 3 deals/i });
+    /* Click the conversation in the sidebar. Filter to wp-conv-item
+       to avoid matching the new starter-prompt chip "top 3 deals"
+       (which has the same text). */
+    const convoButtons = await screen.findAllByRole("button", { name: /Top 3 deals/i });
+    const convoButton = convoButtons.find((b) => b.className.includes("wp-conv-item"));
+    if (!convoButton) throw new Error("conversation sidebar button not found");
     await act(async () => {
       fireEvent.click(convoButton);
     });
