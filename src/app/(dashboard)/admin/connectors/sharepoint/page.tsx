@@ -27,7 +27,10 @@ export default function AdminSharepointPage() {
   const [name, setName] = useState("");
   const [siteUrl, setSiteUrl] = useState("");
   const [adding, setAdding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  /* Two separate error channels so a sync failure doesn't render
+   * inside the Add Source form (the previous shared-state bug). */
+  const [addError, setAddError] = useState<string | null>(null);
+  const [syncErrors, setSyncErrors] = useState<Record<string, string>>({});
   const [syncingId, setSyncingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -38,7 +41,9 @@ export default function AdminSharepointPage() {
       const data = await res.json();
       setSources(data.sources ?? []);
     } catch (err) {
-      setError((err as Error).message);
+      /* Load errors surface in the global add-error slot since they
+       * affect the whole page, not a single row. */
+      setAddError((err as Error).message);
     } finally {
       setLoading(false);
     }
@@ -48,9 +53,20 @@ export default function AdminSharepointPage() {
     void load();
   }, [load]);
 
+  /* Background poll: while ANY source is currently syncing, refresh
+   * the list every 4 seconds so last_synced_at + status updates flow
+   * in without a manual reload. Stops when no syncs are in flight. */
+  useEffect(() => {
+    if (!syncingId) return;
+    const handle = setInterval(() => {
+      void load();
+    }, 4000);
+    return () => clearInterval(handle);
+  }, [syncingId, load]);
+
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
+    setAddError(null);
     setAdding(true);
     try {
       const res = await fetchWithRefresh("/api/connectors/sharepoint/sources", {
@@ -60,35 +76,92 @@ export default function AdminSharepointPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error ?? "Couldn't add the source.");
+        setAddError(data.error ?? "Couldn't add the source.");
         return;
       }
       setName("");
       setSiteUrl("");
       await load();
     } catch (err) {
-      setError((err as Error).message);
+      setAddError((err as Error).message);
     } finally {
       setAdding(false);
     }
   }
 
+  /** Poll the source's GET endpoint until the latest job has an
+   *  ended_at (meaning the background sync finished). Caps at a few
+   *  minutes so a runaway job doesn't poll forever. */
+  async function pollSyncCompletion(id: string, startedBefore: string) {
+    const POLL_MS = 4000;
+    const MAX_MS = 6 * 60 * 1000;
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < MAX_MS) {
+      await new Promise((r) => setTimeout(r, POLL_MS));
+      try {
+        const res = await fetchWithRefresh(
+          `/api/connectors/sharepoint/sources/${encodeURIComponent(id)}`,
+        );
+        if (!res.ok) continue;
+        const data = await res.json();
+        const latestJob = Array.isArray(data?.jobs) ? data.jobs[0] : null;
+        if (latestJob && latestJob.startedAt > startedBefore && latestJob.endedAt) {
+          await load();
+          if (latestJob.status === "failed" || latestJob.error) {
+            setSyncErrors((prev) => ({
+              ...prev,
+              [id]:
+                latestJob.error ??
+                `Sync failed (${latestJob.failCount}/${latestJob.fileCount} files).`,
+            }));
+          }
+          return;
+        }
+      } catch {
+        /* keep polling */
+      }
+    }
+    /* Timed out polling; surface a soft warning. The job may still
+     * complete in the background. */
+    setSyncErrors((prev) => ({
+      ...prev,
+      [id]: "Sync is taking longer than expected. Check back in a few minutes.",
+    }));
+    await load();
+  }
+
   async function handleSync(id: string) {
     setSyncingId(id);
-    setError(null);
+    setSyncErrors((prev) => {
+      const { [id]: _, ...rest } = prev;
+      return rest;
+    });
+    const startedBefore = new Date().toISOString();
     try {
       const res = await fetchWithRefresh(
         `/api/connectors/sharepoint/sources/${encodeURIComponent(id)}/sync`,
         { method: "POST", headers: jsonHeaders() },
       );
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data?.result?.error ?? data?.error ?? "Sync failed.");
+      /* 202 means the sync was accepted and is running in the
+       * background. We start polling for completion. */
+      if (res.status === 202) {
+        void pollSyncCompletion(id, startedBefore).finally(() => {
+          setSyncingId((cur) => (cur === id ? null : cur));
+        });
+        return;
       }
-      await load();
+      /* Anything else is an immediate-fail path. */
+      let errMsg = `Sync failed (HTTP ${res.status}).`;
+      try {
+        const data = await res.json();
+        errMsg = data?.error ?? errMsg;
+      } catch {
+        /* response wasn't JSON */
+      }
+      setSyncErrors((prev) => ({ ...prev, [id]: errMsg }));
+      setSyncingId(null);
     } catch (err) {
-      setError((err as Error).message);
-    } finally {
+      setSyncErrors((prev) => ({ ...prev, [id]: (err as Error).message }));
       setSyncingId(null);
     }
   }
@@ -102,12 +175,15 @@ export default function AdminSharepointPage() {
       );
       if (!res.ok) {
         const data = await res.json();
-        setError(data?.error ?? "Couldn't remove source.");
+        setSyncErrors((prev) => ({
+          ...prev,
+          [id]: data?.error ?? "Couldn't remove source.",
+        }));
         return;
       }
       await load();
     } catch (err) {
-      setError((err as Error).message);
+      setSyncErrors((prev) => ({ ...prev, [id]: (err as Error).message }));
     }
   }
 
@@ -172,7 +248,7 @@ export default function AdminSharepointPage() {
         >
           {adding ? "Adding..." : "Add source"}
         </button>
-        {error && (
+        {addError && (
           <div
             data-testid="add-source-error"
             className="mt-3 rounded p-2 text-xs"
@@ -182,7 +258,7 @@ export default function AdminSharepointPage() {
               color: "var(--wp-error, #ef4444)",
             }}
           >
-            {error}
+            {addError}
           </div>
         )}
       </form>
@@ -248,6 +324,19 @@ export default function AdminSharepointPage() {
                   </button>
                 </div>
               </div>
+              {syncErrors[s.id] && (
+                <div
+                  data-testid={`sync-error-${s.id}`}
+                  className="mt-2 rounded p-2 text-xs"
+                  style={{
+                    background: "rgba(239,68,68,0.08)",
+                    border: "1px solid rgba(239,68,68,0.4)",
+                    color: "var(--wp-error, #ef4444)",
+                  }}
+                >
+                  {syncErrors[s.id]}
+                </div>
+              )}
             </li>
           ))}
         </ul>

@@ -12,6 +12,12 @@ import { getUserFromRequest } from "@/lib/auth";
 import { createRepo } from "@/lib/connectors/sharepoint/repo";
 import { syncSource } from "@/lib/connectors/sharepoint/sync";
 
+/* Maximize background-execution window on Vercel so large folders
+ * (training videos, etc.) have a chance to complete. The route itself
+ * returns 202 in well under a second; this allotment is for the
+ * fire-and-forget syncSource() that runs after the response is sent. */
+export const maxDuration = 300;
+
 export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
@@ -27,13 +33,28 @@ export async function POST(
     if (!source) return NextResponse.json({ error: "not_found" }, { status: 404 });
     if (!source.isActive) return NextResponse.json({ error: "source_inactive" }, { status: 410 });
 
-    const result = await syncSource(source, user.id, user.role);
-    const httpStatus = result.status === "failed" ? 502 : 200;
-    return NextResponse.json({ result }, { status: httpStatus });
+    /* Fire-and-forget so the HTTP response returns immediately. The
+     * caller polls GET /sources/[id] for job status. Without this,
+     * Vercel's 60-second function timeout would 504 us mid-sync on
+     * any folder with more than a handful of large files (training
+     * videos in particular), and the UI would show an "Unexpected
+     * token <" HTML parse error. */
+    void syncSource(source, user.id, user.role).catch((err) => {
+      /* syncSource handles per-file failures internally; this catch
+       * is for catastrophic crashes (e.g. token revocation mid-run).
+       * The job row stays at status='running' until a reconciler
+       * sweeps it up — a TODO follow-up. */
+      console.error(
+        "[connectors/sharepoint/sync] background syncSource crashed:",
+        err,
+      );
+    });
+
+    return NextResponse.json(
+      { accepted: true, sourceId: id },
+      { status: 202 },
+    );
   } catch (err) {
-    /* syncSource itself catches per-file failures and never throws,
-     * but downloads to /content can throw on network issues that
-     * bubble past the inner try/catch. Always return JSON. */
     console.error("[connectors/sharepoint/sync POST] uncaught error:", err);
     return NextResponse.json(
       { error: `Sync failed unexpectedly: ${(err as Error)?.message ?? "unknown"}` },
