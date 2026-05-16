@@ -531,21 +531,41 @@ async function dbGetConversationMessages(
 async function appendSourceFooter(
   answer: string,
   keptRefs: string[],
+  /* Fallback: brain hits that were prompted to the LLM but the LLM
+   * didn't emit [ref:<id>] markers for (it ignored the citation
+   * format instruction). When non-empty AND keptRefs is empty, we
+   * append a "Sources retrieved" section so the user still sees
+   * which documents the answer drew from. */
+  fallbackHits: Array<{ document_id: string }> = [],
 ): Promise<string> {
-  if (!answer || keptRefs.length === 0) return answer;
+  if (!answer) return answer;
+  /* Prefer the cited refs (the LLM explicitly tied them to its
+   * answer). Fall back to the prompted hits when the LLM ignored the
+   * ref-marker instruction but clearly used the content. */
+  const idsToLookup =
+    keptRefs.length > 0 ? keptRefs : fallbackHits.map((h) => h.document_id);
+  if (idsToLookup.length === 0) return answer;
+
   let refs;
   try {
-    refs = await getCitationRefs(keptRefs);
+    refs = await getCitationRefs(idsToLookup);
   } catch {
     return answer;
   }
   if (refs.length === 0) return answer;
+
+  /* Replace [ref:<id>] markers with [N] footnotes when the LLM DID
+   * emit them. When falling back from hits, there are no markers to
+   * replace — the footer just appends. */
   const idToNum = new Map(refs.map((r, i) => [r.id, i + 1]));
   const replaced = answer.replace(/\s?\[ref:([A-Za-z0-9_-]+)\]/g, (_m, id) => {
     const n = idToNum.get(String(id).trim());
     return n ? ` [${n}]` : "";
   });
-  const lines: string[] = [replaced.trim(), "", "**Sources:**"];
+
+  const headerLabel =
+    keptRefs.length > 0 ? "**Sources:**" : "**Sources retrieved:**";
+  const lines: string[] = [replaced.trim(), "", headerLabel];
   refs.forEach((r, i) => {
     const num = i + 1;
     if (r.web_url) {
@@ -1124,9 +1144,15 @@ export async function chat(
     /* Convert [ref:<id>] markers into a numbered Sources footer with
      * clickable links to each cited document's web_url. Skipped on
      * rejected answers (the deterministic fallback message has no
-     * citations to enrich). */
-    if (quality.verdict !== "reject" && citationCheck.keptRefs.length > 0) {
-      safeContent = await appendSourceFooter(safeContent, citationCheck.keptRefs);
+     * citations to enrich). Passes the prompted brain hits as a
+     * fallback so the LLM ignoring our citation-format instruction
+     * still produces a useful Sources block. */
+    if (quality.verdict !== "reject") {
+      safeContent = await appendSourceFooter(
+        safeContent,
+        citationCheck.keptRefs,
+        brainContext?.hits ?? [],
+      );
     }
 
     const msgId = await dbSaveMessage(convId, "assistant", safeContent, "ai", aiResult.tokensUsed);
@@ -1937,7 +1963,9 @@ async function callAI(
         );
       }
       lines.push(
-        "When you draw on any of the passages above, cite the matching [ref:<id>] inline. Never invent a [ref:] you have not been given.",
+        "CITATION FORMAT: When you reference any of the passages above, you MUST include the exact [ref:<id>] marker inline. DO NOT write 'Source: <filename>' or '(see <filename>)' or any other format. Use [ref:<id>] only.",
+        "Example: 'The Brand Ambassador 101 training covers customer engagement [ref:abc-123].'",
+        "Never invent a [ref:] you have not been given.",
       );
       brainBlock = lines.join("\n");
     }
