@@ -51,6 +51,7 @@ import {
   SystemEventPill,
   AttachmentSummaryPill,
   shouldRenderAsPill,
+  isNoiseMessage,
 } from "@/lib/messages/system-event-renderer";
 import type {
   ChatMessageAttachment,
@@ -2561,7 +2562,18 @@ export default function MessagesPage() {
                     </Link>
                   </div>
                 ) : (messages ?? []).length === 0 ? null : (
-                  (messages ?? []).map((m) => {
+                  (messages ?? [])
+                    /* Bug fix 2026-05-16: Teams emits truly empty
+                       message rows (deleted-then-restored, reaction-
+                       only, empty body wrappers) that aren't system
+                       events and have no attachments. Rendering them
+                       produces noise bubbles showing only a timestamp
+                       — the inbox screenshot bug. Drop them before
+                       the renderer runs. Pending (optimistic) messages
+                       are always kept so the user sees their own
+                       outgoing message render immediately. */
+                    .filter((m) => m.pending || !isNoiseMessage(m))
+                    .map((m) => {
                     /* Bug fix 2026-04-29: Teams emits non-text rows
                        (call started/ended, members added, topic
                        updated, attachment-only) inline with user

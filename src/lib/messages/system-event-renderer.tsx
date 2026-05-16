@@ -180,6 +180,37 @@ export function shouldRenderAsPill(message: RenderableMessage): boolean {
 }
 
 /**
+ * True when the message carries no useful payload at all — empty body
+ * text, no attachments, not a system event. Teams emits these for
+ * reactions, deleted messages, and various edge cases. Rendering them
+ * as a normal bubble produces a noise row with only a timestamp ("21h")
+ * and no content — every dealer who looked at the inbox flagged this
+ * as broken. Filter them out at the page level.
+ *
+ * NOTE: we intentionally only call this BEFORE the pill check so
+ * legitimate system events + attachments still render. Only truly
+ * empty rows are dropped.
+ */
+export function isNoiseMessage(message: RenderableMessage): boolean {
+  if (message.messageType === "systemEventMessage") return false;
+  if (Array.isArray(message.attachments) && message.attachments.length > 0) {
+    return false;
+  }
+  const bodyText = (message.bodyText || "").trim();
+  const bodyContent = (message.body?.content || "").trim();
+  /* Strip the common Teams empty-wrapper HTML before checking length.
+     "<div></div>", "<p>&nbsp;</p>", "<p><br></p>" all read as empty
+     to a human. We don't import a full HTML stripper here — page-level
+     stripHtmlToText would create a circular dependency — but the
+     common wrappers are well-known and worth catching. */
+  const visible = (bodyText.length > 0 ? bodyText : bodyContent)
+    .replace(/<\s*\/?\s*(?:div|p|br|span)[^>]*>/gi, "")
+    .replace(/&nbsp;|&#160;|\s+/g, "")
+    .trim();
+  return visible.length === 0;
+}
+
+/**
  * Fire a server-side analytics POST without a hard `await` — the
  * callers are inside React render bodies and must never block.
  */

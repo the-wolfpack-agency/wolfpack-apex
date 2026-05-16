@@ -15,6 +15,7 @@ import {
   describeAttachment,
   isAttachmentOnly,
   shouldRenderAsPill,
+  isNoiseMessage,
   SystemEventPill,
   AttachmentSummaryPill,
   type RenderableMessage,
@@ -155,6 +156,88 @@ describe("isAttachmentOnly + shouldRenderAsPill", () => {
 
   test("shouldRenderAsPill: text-with-attachment → false (let normal bubble render)", () => {
     expect(shouldRenderAsPill(text)).toBe(false);
+  });
+});
+
+describe("isNoiseMessage — filters truly blank Teams rows from the inbox", () => {
+  /* Regression 2026-05-16: dealer screenshots showed empty bubbles
+     with only a timestamp ("21h" / "4d") for messages that had:
+       - messageType = "message" (so not caught by SystemEventPill)
+       - no attachments (so not caught by AttachmentSummaryPill)
+       - body.content = empty string OR a Teams empty wrapper
+     These produce noise rows. The page now filters them BEFORE the
+     pill-or-bubble switch. */
+
+  test("empty-string body + no attachments → noise", () => {
+    const m: RenderableMessage = {
+      id: "n1",
+      messageType: "message",
+      body: { content: "", contentType: "html" },
+      bodyText: "",
+      attachments: [],
+    };
+    expect(isNoiseMessage(m)).toBe(true);
+  });
+
+  test("Teams empty wrapper <div></div> → noise", () => {
+    const m: RenderableMessage = {
+      id: "n2",
+      messageType: "message",
+      body: { content: "<div></div>", contentType: "html" },
+      attachments: [],
+    };
+    expect(isNoiseMessage(m)).toBe(true);
+  });
+
+  test("Teams '&nbsp;' placeholder → noise", () => {
+    const m: RenderableMessage = {
+      id: "n3",
+      messageType: "message",
+      body: { content: "<p>&nbsp;</p>", contentType: "html" },
+      attachments: [],
+    };
+    expect(isNoiseMessage(m)).toBe(true);
+  });
+
+  test("Teams '<p><br></p>' empty paragraph → noise", () => {
+    const m: RenderableMessage = {
+      id: "n4",
+      messageType: "message",
+      body: { content: "<p><br></p>", contentType: "html" },
+      attachments: [],
+    };
+    expect(isNoiseMessage(m)).toBe(true);
+  });
+
+  test("real text body → NOT noise (keep it)", () => {
+    const m: RenderableMessage = {
+      id: "n5",
+      messageType: "message",
+      body: { content: "Sounds good", contentType: "text" },
+      bodyText: "Sounds good",
+      attachments: [],
+    };
+    expect(isNoiseMessage(m)).toBe(false);
+  });
+
+  test("empty body + attachment → NOT noise (AttachmentSummaryPill renders it)", () => {
+    const m: RenderableMessage = {
+      id: "n6",
+      messageType: "message",
+      body: { content: "", contentType: "html" },
+      attachments: [{ contentType: "reference", name: "doc.pdf" }],
+    };
+    expect(isNoiseMessage(m)).toBe(false);
+  });
+
+  test("systemEventMessage → NOT noise (SystemEventPill renders it)", () => {
+    const m: RenderableMessage = {
+      id: "n7",
+      messageType: "systemEventMessage",
+      bodyText: "",
+      eventDetail: { subtype: "callEnded" },
+    };
+    expect(isNoiseMessage(m)).toBe(false);
   });
 });
 
