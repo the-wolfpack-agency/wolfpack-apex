@@ -213,6 +213,24 @@ The Assistant understands a wide range of phrasings for "show me what's on my ca
 
 ---
 
+## Interactive widgets — act inside the chat
+
+Some prompts return an **inline widget** — a small interactive surface (a calendar grid, an email thread, a task list) rendered below the answer text. The user can click into the widget without leaving the chat: expand a day, click out to a detail page, or jump to the underlying tool.
+
+### Calendar widget
+- `calendar`
+- `show me my calendar`
+- `show my calendar`
+- `open calendar`
+- `calendar widget`
+- `show calendar`
+
+Renders a mini month grid for the current month with dots on days that have meetings. Click any day to expand its meeting list, then click into Instinct (in-app detail page) or Outlook (web link) for each event. A header "Open full calendar" link jumps to `/calendar`.
+
+Bare day-of-week prompts (`Calendar Monday`, `my schedule Friday`) still go to the text-based meetings-on-a-day lookup above — the widget is reserved for the "show me the whole month" intent.
+
+---
+
 ## Action forms — structured create flows
 
 For destructive or external actions (sending email, creating tasks, booking meetings, posting to a Teams chat) the Assistant returns an **inline form** in the chat instead of free-text. The Send/Create button stays disabled until every required field is filled — no accidental sends.

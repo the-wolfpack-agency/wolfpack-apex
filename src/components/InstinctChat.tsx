@@ -16,7 +16,9 @@ import {
 } from "@/lib/assistant/chat-ingest";
 import { ConnectorBadge } from "@/components/ConnectorBadge";
 import { ChatActionForm } from "@/components/ChatActionForm";
+import { ChatWidget } from "@/components/ChatWidget";
 import type { FormSpec } from "@/lib/assistant/forms/types";
+import type { WidgetSpec } from "@/lib/assistant/widgets/types";
 import { AssistantStarterPrompts } from "@/components/AssistantStarterPrompts";
 
 // ---------------------------------------------------------------------------
@@ -71,6 +73,9 @@ interface Message {
    *  / task). When set, the chat surface renders ChatActionForm
    *  inline below the bubble. */
   form?: import("@/lib/assistant/forms/types").FormSpec;
+  /** Interactive widget spec (calendar grid, email thread, task list,
+   *  dashboard chart). Rendered via the ChatWidget dispatcher. */
+  widget?: import("@/lib/assistant/widgets/types").WidgetSpec;
 }
 
 interface Conversation {
@@ -550,6 +555,7 @@ export default function InstinctChat({
                renders ChatActionForm inline so the user fills required
                fields before any side effect fires. */
             form: result.form as FormSpec | undefined,
+            widget: result.widget as WidgetSpec | undefined,
             tokensUsed: result.tokens_used ?? 0,
             timestamp: new Date().toISOString(),
             fromCache: result.from_cache,
@@ -693,6 +699,10 @@ export default function InstinctChat({
         connectorSource:
           typeof data.connectorSource === "string" ? data.connectorSource : undefined,
         form: data.form && typeof data.form === "object" ? (data.form as FormSpec) : undefined,
+        widget:
+          data.widget && typeof data.widget === "object"
+            ? (data.widget as WidgetSpec)
+            : undefined,
         tokensUsed: data.tokensUsed,
         timestamp: new Date().toISOString(),
         relatedPages: Array.isArray(data.relatedPages) ? data.relatedPages : undefined,
@@ -775,6 +785,9 @@ export default function InstinctChat({
         }
         if (!next.form && m.metadata?.form && typeof m.metadata.form === "object") {
           next.form = m.metadata.form as FormSpec;
+        }
+        if (!next.widget && m.metadata?.widget && typeof m.metadata.widget === "object") {
+          next.widget = m.metadata.widget as WidgetSpec;
         }
         return next;
       });
@@ -1233,6 +1246,10 @@ export default function InstinctChat({
                       submit + ack lifecycle. */}
                   {msg.role === "assistant" && msg.form && (
                     <ChatActionForm spec={msg.form} />
+                  )}
+
+                  {msg.role === "assistant" && msg.widget && (
+                    <ChatWidget spec={msg.widget} />
                   )}
 
                   {msg.role === "assistant" &&

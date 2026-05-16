@@ -508,6 +508,14 @@ export type InstinctEventType =
   | "assistant.form_create_okr_submitted"
   | "assistant.form_create_feature_submitted"
   | "assistant.form_create_crm_record_submitted"
+  // Widget surface returned by a tool. Metadata: { widget_kind, ... }.
+  // Fires whenever a tool returns a WidgetSpec; the renderer also
+  // fires assistant.widget_rendered when the chat surface actually
+  // mounts the widget (for funnel analysis: offered vs. rendered vs.
+  // interacted-with).
+  | "assistant.widget_offered"
+  | "assistant.widget_rendered"
+  | "assistant.widget_interaction"
   // SharePoint connector lifecycle events (migration 139).
   // source_added/removed: admin UI added or soft-deleted a folder source.
   // sync_started/finished: every sync run is bracketed by these two.

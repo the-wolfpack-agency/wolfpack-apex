@@ -30,6 +30,7 @@
 import type { ZodSchema } from "zod";
 import type { AssistantSourceRef } from "@/lib/assistant";
 import type { FormSpec } from "@/lib/assistant/forms/types";
+import type { WidgetSpec } from "@/lib/assistant/widgets/types";
 
 export interface ToolContext {
   /** Authenticated user firing the question. */
@@ -61,6 +62,11 @@ export interface ToolSuccess<R> {
    *  tools — the answer is a one-line intro ("Fill in the details
    *  below…") and the form captures the structured input. */
   form?: FormSpec;
+  /** When set, the chat surface renders an interactive widget below
+   *  `answer`. Used by calendar / email-thread / task-list / etc.
+   *  tools so the user can act inside the chat (click a day, click
+   *  out to a detail page) instead of leaving for another app. */
+  widget?: WidgetSpec;
 }
 
 /** Failed tool dispatch — explicit failure code so the caller can react. */

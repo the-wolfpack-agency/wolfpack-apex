@@ -73,6 +73,9 @@ export interface AssistantRagResult {
   /** Structured form spec (create email / message / calendar event /
    *  task) — surfaced to the chat UI which renders ChatActionForm. */
   form?: unknown;
+  /** Interactive widget spec (calendar grid, email thread, …) the
+   *  chat UI renders via ChatWidget. */
+  widget?: unknown;
 }
 
 export interface QueryAssistantOptions {
@@ -159,6 +162,7 @@ export async function queryAssistantWithCache(
           connectorSource?: string;
           relatedPages?: Array<Record<string, unknown>>;
           form?: unknown;
+          widget?: unknown;
         };
 
         const answer = data.response ?? "";
@@ -212,6 +216,8 @@ export async function queryAssistantWithCache(
           /* Forward chat-action form spec so the UI can render
              ChatActionForm inline on the no-attachments fast path. */
           ...(data.form && typeof data.form === "object" ? { form: data.form } : {}),
+          /* Same for interactive widgets (calendar, email thread, etc.). */
+          ...(data.widget && typeof data.widget === "object" ? { widget: data.widget } : {}),
         };
       }
       // Non-OK response → fall through to cache lookup (we still want

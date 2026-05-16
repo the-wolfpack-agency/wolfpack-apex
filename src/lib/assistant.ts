@@ -103,6 +103,11 @@ export interface AssistantResponse {
    *  the chat UI imports the strict FormSpec type from
    *  @/lib/assistant/forms/types. */
   form?: unknown;
+  /** Interactive widget spec (calendar grid, email thread, task list,
+   *  …) when the tool returned one. Same `unknown` rationale as
+   *  `form`; the chat UI imports the strict WidgetSpec type from
+   *  @/lib/assistant/widgets/types. */
+  widget?: unknown;
 }
 
 export interface ConversationSummary {
@@ -752,13 +757,16 @@ export async function chat(
       typeof toolData?.connector === "string" && toolData.connector
         ? toolData.connector
         : undefined;
-    /* Structured form (chat-action create_* tools). We persist it in
-       message metadata so a page refresh / conversation reload still
-       shows the form in its filled-or-empty state. */
+    /* Structured form (chat-action create_* tools) and widget
+       (interactive surfaces like the calendar). Both persist in
+       message metadata so a page refresh / conversation reload
+       restores them on historical messages. */
     const formSpec = (toolResult.result as { form?: unknown }).form;
+    const widgetSpec = (toolResult.result as { widget?: unknown }).widget;
     const meta: Record<string, unknown> = {};
     if (connectorSource) meta.connector_source = connectorSource;
     if (formSpec) meta.form = formSpec;
+    if (widgetSpec) meta.widget = widgetSpec;
     const msgId = await dbSaveMessage(
       convId,
       "assistant",
@@ -777,6 +785,7 @@ export async function chat(
       sources: toolResult.result.sources,
       ...(connectorSource ? { connectorSource } : {}),
       ...(formSpec ? { form: formSpec } : {}),
+      ...(widgetSpec ? { widget: widgetSpec } : {}),
     };
   }
   // Tool intent matched but execution failed (validation / capability /

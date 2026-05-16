@@ -74,6 +74,12 @@ import "./create-task-form-tool";
 import "./create-okr-form-tool";
 import "./create-feature-form-tool";
 
+/* Widget tools — return an interactive surface (calendar grid, email
+   thread, task list, etc.) instead of free-form text. First instance
+   is the calendar widget; the framework is shared so future widgets
+   plug in via the same WidgetSpec discriminator. */
+import "./calendar-widget-tool";
+
 export { tryDispatchTool } from "./dispatcher";
 export { getTools, getToolByName, registerTool, __resetRegistryForTests } from "./registry";
 export type {

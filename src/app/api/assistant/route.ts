@@ -222,6 +222,10 @@ export async function POST(req: NextRequest) {
     if (result?.form && typeof result.form === "object") {
       response.form = result.form;
     }
+    /* Widgets ride the same explicit pass-through pattern. */
+    if (result?.widget && typeof result.widget === "object") {
+      response.widget = result.widget;
+    }
     if (gateResults.length > 0) {
       response.gateResults = gateResults.map((r) => ({
         name: r.name,

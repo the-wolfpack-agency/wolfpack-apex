@@ -311,7 +311,7 @@ describe("formatPageFactsAnswer", () => {
   test("related-pages line renders as inline markdown links", () => {
     const out = formatPageFactsAnswer(PAGE_FACTS.calendar);
     // Calendar → related: meetings, people, settings
-    expect(out).toMatch(/\[Meetings\]\(\/meetings\)/);
+    expect(out).toMatch(/\[Meetings\]\(\/meetings\/feeds\)/);
     expect(out).toMatch(/\[People\]\(\/people\)/);
     expect(out).toMatch(/\[Settings\]\(\/settings\)/);
   });
@@ -366,7 +366,10 @@ describe("chat() integration — page_facts priority", () => {
 
   test("fires system.ai_call_skipped with reason=page_facts_hit", async () => {
     const { chat } = await import("@/lib/assistant");
-    await chat("Calendar", "u1", "dev");
+    /* Bare "Calendar" now goes to the calendar_widget tool (renders the
+     * mini grid inline) — use a how-to phrasing so the page_facts
+     * matcher claims it. */
+    await chat("how do I use Calendar", "u1", "dev");
 
     expect(mockTrackEvent).toHaveBeenCalledWith(
       "system.ai_call_skipped",
