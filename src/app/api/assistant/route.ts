@@ -217,6 +217,11 @@ export async function POST(req: NextRequest) {
     if (typeof result?.connectorSource === "string" && result.connectorSource) {
       response.connectorSource = result.connectorSource;
     }
+    /* Same belt-and-suspenders for chat-action forms — required so
+     * the UI can render the inline form. */
+    if (result?.form && typeof result.form === "object") {
+      response.form = result.form;
+    }
     if (gateResults.length > 0) {
       response.gateResults = gateResults.map((r) => ({
         name: r.name,

@@ -95,6 +95,13 @@ export interface AssistantResponse {
    *  the user can tell which system the data came from. Undefined for
    *  non-connector answers (page-facts / brain / pure AI / etc.). */
   connectorSource?: string;
+  /** Structured form spec when the answer included a chat-action form
+   *  (create email / message / calendar event / task). The UI renders
+   *  it inline below the answer text. Typed as `unknown` here to keep
+   *  the assistant.ts module free of a forms/ runtime dependency —
+   *  the chat UI imports the strict FormSpec type from
+   *  @/lib/assistant/forms/types. */
+  form?: unknown;
 }
 
 export interface ConversationSummary {
@@ -675,13 +682,20 @@ export async function chat(
       typeof toolData?.connector === "string" && toolData.connector
         ? toolData.connector
         : undefined;
+    /* Structured form (chat-action create_* tools). We persist it in
+       message metadata so a page refresh / conversation reload still
+       shows the form in its filled-or-empty state. */
+    const formSpec = (toolResult.result as { form?: unknown }).form;
+    const meta: Record<string, unknown> = {};
+    if (connectorSource) meta.connector_source = connectorSource;
+    if (formSpec) meta.form = formSpec;
     const msgId = await dbSaveMessage(
       convId,
       "assistant",
       toolResult.result.answer,
       "tool",
       0,
-      connectorSource ? { connector_source: connectorSource } : {},
+      meta,
     );
     await dbUpdateConversationStats(convId, 0);
     return {
@@ -692,6 +706,7 @@ export async function chat(
       messageId: msgId,
       sources: toolResult.result.sources,
       ...(connectorSource ? { connectorSource } : {}),
+      ...(formSpec ? { form: formSpec } : {}),
     };
   }
   // Tool intent matched but execution failed (validation / capability /

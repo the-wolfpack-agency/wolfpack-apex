@@ -491,6 +491,20 @@ export type InstinctEventType =
   // Drives the GitHub-routing dashboard so we can dashboard the
   // most-used query shapes and spot 401/403 spikes after PAT rotation.
   | "assistant.github_query_executed"
+  // Chat action form was offered to the user (the tool returned a
+  // FormSpec instead of free text). Metadata: { form_kind,
+  // prefilled_* booleans }.
+  | "assistant.form_offered"
+  // User submitted a chat action form. Metadata: { form_kind, ok,
+  // duration_ms, code? }.
+  | "assistant.form_submitted"
+  // Per-form-kind events fired by the tool's `analyticsEvent` value
+  // and the submit endpoint. Kept as a single union literal so the
+  // type system catches typos at the call site.
+  | "assistant.form_create_email_submitted"
+  | "assistant.form_create_message_submitted"
+  | "assistant.form_create_calendar_event_submitted"
+  | "assistant.form_create_task_submitted"
   // Invite was looked up but the expires_at column says it lapsed.
   // Drives the "ask your admin to resend" UX hint + a tenant-side
   // dashboard counter so admins see expirations before users complain.

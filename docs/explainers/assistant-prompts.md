@@ -213,6 +213,50 @@ The Assistant understands a wide range of phrasings for "show me what's on my ca
 
 ---
 
+## Action forms — structured create flows
+
+For destructive or external actions (sending email, creating tasks, booking meetings, posting to a Teams chat) the Assistant returns an **inline form** in the chat instead of free-text. The Send/Create button stays disabled until every required field is filled — no accidental sends.
+
+### Create email
+- `create email`
+- `compose an email`
+- `draft an email`
+- `send an email`
+- `create email to alice@example.com about Q3 plan` *(pre-fills To + Subject)*
+
+Required fields: To, Subject, Message. Optional: Cc.
+
+### Create message (Teams chat)
+- `create message`
+- `send a teams message`
+- `draft a teams message`
+- `new message`
+
+Required: Teams chat id, message body. (Chat-name autocomplete is on the roadmap; for now, paste the id from the URL of `/messages`.)
+
+### Create calendar event
+- `create calendar event`
+- `create event`
+- `schedule a meeting`
+- `book a meeting`
+- `set up a call`
+- `schedule a meeting titled Q3 review` *(pre-fills title)*
+
+Required: Title, Start, End. Optional: Attendees, Notes.
+
+### Create task
+- `create task`
+- `add a task`
+- `new task`
+- `create a todo`
+- `create task titled Ship Q3` *(pre-fills title)*
+
+Required: Title. Optional: Details, Due date, Priority.
+
+> Note: `create a task to follow up Friday` is intentionally routed to the CRM action tool (Salesforce / HubSpot) instead of MS To-Do — the verb-form "to follow up" signals a CRM activity. Use bare `create task` for an MS To-Do task.
+
+---
+
 ## Mail — inbox search
 
 - `find emails from Max`

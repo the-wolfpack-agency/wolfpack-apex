@@ -29,6 +29,7 @@
 
 import type { ZodSchema } from "zod";
 import type { AssistantSourceRef } from "@/lib/assistant";
+import type { FormSpec } from "@/lib/assistant/forms/types";
 
 export interface ToolContext {
   /** Authenticated user firing the question. */
@@ -55,6 +56,11 @@ export interface ToolSuccess<R> {
   answer: string;
   /** Optional source citations for the answer (Knowledge / Brain / etc). */
   sources?: AssistantSourceRef[];
+  /** When set, the chat surface renders an inline form below `answer`.
+   *  Used by the "create email / message / calendar event / task"
+   *  tools — the answer is a one-line intro ("Fill in the details
+   *  below…") and the form captures the structured input. */
+  form?: FormSpec;
 }
 
 /** Failed tool dispatch — explicit failure code so the caller can react. */

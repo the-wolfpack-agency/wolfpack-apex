@@ -15,6 +15,8 @@ import {
   formatIngestSystemMessage,
 } from "@/lib/assistant/chat-ingest";
 import { ConnectorBadge } from "@/components/ConnectorBadge";
+import { ChatActionForm } from "@/components/ChatActionForm";
+import type { FormSpec } from "@/lib/assistant/forms/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,6 +66,10 @@ interface Message {
   /** Free-form metadata persisted with the message (e.g. connector_source).
    *  Hydrated into typed fields at message-load time. */
   metadata?: Record<string, unknown>;
+  /** Structured chat-action form spec (create email / message / event
+   *  / task). When set, the chat surface renders ChatActionForm
+   *  inline below the bubble. */
+  form?: import("@/lib/assistant/forms/types").FormSpec;
 }
 
 interface Conversation {
@@ -127,6 +133,20 @@ export default function InstinctChat({
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  /* Desktop-only collapse — independent of `sidebarOpen` (mobile drawer).
+   * Persisted to localStorage so a user who prefers the wider chat area
+   * keeps it across sessions. */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("instinct.chat.sidebar_collapsed") === "1";
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      "instinct.chat.sidebar_collapsed",
+      sidebarCollapsed ? "1" : "0",
+    );
+  }, [sidebarCollapsed]);
   const [floatingOpen, setFloatingOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -525,6 +545,10 @@ export default function InstinctChat({
                since the badge feature shipped on 2026-05-16). */
             connectorSource: result.connector_source,
             relatedPages: result.related_pages as RelatedPage[] | undefined,
+            /* Chat-action form spec — when present, the message bubble
+               renders ChatActionForm inline so the user fills required
+               fields before any side effect fires. */
+            form: result.form as FormSpec | undefined,
             tokensUsed: result.tokens_used ?? 0,
             timestamp: new Date().toISOString(),
             fromCache: result.from_cache,
@@ -667,6 +691,7 @@ export default function InstinctChat({
         source: data.source,
         connectorSource:
           typeof data.connectorSource === "string" ? data.connectorSource : undefined,
+        form: data.form && typeof data.form === "object" ? (data.form as FormSpec) : undefined,
         tokensUsed: data.tokensUsed,
         timestamp: new Date().toISOString(),
         relatedPages: Array.isArray(data.relatedPages) ? data.relatedPages : undefined,
@@ -738,15 +763,19 @@ export default function InstinctChat({
       setConversationId(convId);
       /* Reloaded messages from the DB don't have connectorSource as a
          top-level column — it's persisted in metadata.connector_source.
-         Hydrate it onto the Message so the badge renders for historical
-         tool answers too. */
+         Same story for chat-action form specs (metadata.form). Hydrate
+         both onto the Message so the badge AND the inline form render
+         for historical tool answers too. */
       const messages: Message[] = (data.messages || []).map((m: Message & { metadata?: Record<string, unknown> }) => {
-        if (m.role !== "assistant" || m.connectorSource) return m;
-        const fromMeta = m.metadata?.connector_source;
-        if (typeof fromMeta === "string" && fromMeta) {
-          return { ...m, connectorSource: fromMeta };
+        if (m.role !== "assistant") return m;
+        const next: Message = { ...m };
+        if (!next.connectorSource && typeof m.metadata?.connector_source === "string") {
+          next.connectorSource = m.metadata.connector_source as string;
         }
-        return m;
+        if (!next.form && m.metadata?.form && typeof m.metadata.form === "object") {
+          next.form = m.metadata.form as FormSpec;
+        }
+        return next;
       });
       setMessages(messages);
       setSidebarOpen(false);
@@ -845,9 +874,13 @@ export default function InstinctChat({
               />
             )}
             <aside
+              data-testid="conversations-sidebar"
+              data-collapsed={sidebarCollapsed ? "true" : "false"}
               className={`${
                 position === "floating" ? "hidden" : ""
-              } fixed lg:static inset-y-0 left-0 z-30 w-64 border-r flex flex-col transition-transform lg:translate-x-0 ${
+              } fixed lg:static inset-y-0 left-0 z-30 ${
+                sidebarCollapsed ? "lg:w-12" : "lg:w-64"
+              } w-64 border-r flex flex-col transition-all lg:translate-x-0 ${
                 sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
               }`}
               style={{
@@ -859,20 +892,52 @@ export default function InstinctChat({
                 className="flex items-center justify-between px-4 py-3 border-b"
                 style={{ borderColor: "var(--wp-dark-border, #333)" }}
               >
-                <span className="text-sm font-medium" style={{ color: "var(--wp-text-dim, #aaa)" }}>
-                  Conversations
-                </span>
-                <button
-                  onClick={() => setSidebarOpen(false)}
-                  className="lg:hidden p-1"
-                  style={{ color: "var(--wp-text-muted, #6b7280)" }}
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+                {!sidebarCollapsed && (
+                  <span className="text-sm font-medium" style={{ color: "var(--wp-text-dim, #aaa)" }}>
+                    Conversations
+                  </span>
+                )}
+                <div className="flex items-center gap-1 ml-auto">
+                  {/* Desktop collapse toggle — hidden on mobile (the mobile
+                      drawer uses the X button below). Icon flips direction
+                      based on current state so the affordance is clear. */}
+                  <button
+                    onClick={() => setSidebarCollapsed((c) => !c)}
+                    className="hidden lg:flex p-1 rounded hover:opacity-80"
+                    style={{ color: "var(--wp-text-muted, #6b7280)" }}
+                    aria-label={sidebarCollapsed ? "Expand conversations panel" : "Collapse conversations panel"}
+                    title={sidebarCollapsed ? "Expand" : "Collapse"}
+                    data-testid="sidebar-collapse-toggle"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d={
+                          sidebarCollapsed
+                            ? "M13 5l7 7-7 7M5 5l7 7-7 7"
+                            : "M11 19l-7-7 7-7M19 19l-7-7 7-7"
+                        }
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => setSidebarOpen(false)}
+                    className="lg:hidden p-1"
+                    style={{ color: "var(--wp-text-muted, #6b7280)" }}
+                    aria-label="Close conversations"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
               </div>
-              <div className="flex-1 overflow-y-auto">
+              <div
+                className={`flex-1 overflow-y-auto ${
+                  sidebarCollapsed ? "lg:hidden" : ""
+                }`}
+              >
                 {conversations.length === 0 ? (
                   <div className="px-4 py-8 text-center text-xs" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
                     No conversations yet
@@ -1103,6 +1168,15 @@ export default function InstinctChat({
                   >
                     {renderMessageContent(msg.content)}
                   </div>
+
+                  {/* Chat-action form (create email / message / event /
+                      task). Rendered below the answer text so the
+                      one-line intro ("Fill in the email below…") still
+                      shows in the bubble. ChatActionForm owns its own
+                      submit + ack lifecycle. */}
+                  {msg.role === "assistant" && msg.form && (
+                    <ChatActionForm spec={msg.form} />
+                  )}
 
                   {msg.role === "assistant" &&
                     msg.relatedPages &&

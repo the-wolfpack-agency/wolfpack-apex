@@ -70,6 +70,9 @@ export interface AssistantRagResult {
   /** Related Instinct pages the answer touches — passes through from
    *  the server so chip rows render on the offline-RAG path too. */
   related_pages?: Array<Record<string, unknown>>;
+  /** Structured form spec (create email / message / calendar event /
+   *  task) — surfaced to the chat UI which renders ChatActionForm. */
+  form?: unknown;
 }
 
 export interface QueryAssistantOptions {
@@ -155,6 +158,7 @@ export async function queryAssistantWithCache(
           docs?: Array<{ id: string; title?: string; score?: number; content?: string }>;
           connectorSource?: string;
           relatedPages?: Array<Record<string, unknown>>;
+          form?: unknown;
         };
 
         const answer = data.response ?? "";
@@ -205,6 +209,9 @@ export async function queryAssistantWithCache(
           ...(Array.isArray(data.relatedPages) && data.relatedPages.length > 0
             ? { related_pages: data.relatedPages }
             : {}),
+          /* Forward chat-action form spec so the UI can render
+             ChatActionForm inline on the no-attachments fast path. */
+          ...(data.form && typeof data.form === "object" ? { form: data.form } : {}),
         };
       }
       // Non-OK response → fall through to cache lookup (we still want

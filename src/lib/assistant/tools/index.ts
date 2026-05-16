@@ -55,6 +55,15 @@ import "./search-github-pull-requests-tool";
 import "./search-github-issues-tool";
 import "./recent-workflow-runs-tool";
 
+/* Form-trigger tools — return a FormSpec the chat UI renders inline so
+   the user fills required fields before any side effect fires. Order:
+   message first because "create message" is a stricter regex than the
+   email/calendar/task triggers (which share the "create an X" stem). */
+import "./create-message-form-tool";
+import "./create-email-form-tool";
+import "./create-calendar-event-form-tool";
+import "./create-task-form-tool";
+
 export { tryDispatchTool } from "./dispatcher";
 export { getTools, getToolByName, registerTool, __resetRegistryForTests } from "./registry";
 export type {
