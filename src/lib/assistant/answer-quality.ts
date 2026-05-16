@@ -223,6 +223,38 @@ const SENTENCE_STARTERS = new Set([
   "and", "but", "or", "if", "when", "while", "as", "with",
 ]);
 
+/** Common English verbs/nouns that often appear capitalized as
+ *  sentence starters, list-item headers, or section labels. None of
+ *  these are proper names regardless of position. Adding a token
+ *  here is the safest way to silence a recurring false positive. */
+const COMMON_NON_NAMES = new Set([
+  // Action verbs commonly used to lead a bullet or sentence
+  "includes", "covers", "features", "focuses", "emphasizes", "adds",
+  "updates", "provides", "delivers", "supports", "enables", "creates",
+  "describes", "shows", "explains", "details", "outlines", "summarizes",
+  "lists", "highlights", "introduces", "presents", "demonstrates",
+  // Common section / list-item labels
+  "source", "sources", "type", "size", "watch", "note", "summary",
+  "training", "module", "modules", "section", "sections", "day", "days",
+  "topic", "topics", "overview", "introduction", "conclusion",
+  // Common labels in product/training content
+  "video", "videos", "audio", "image", "document", "documents",
+  "file", "files", "folder", "folders", "page", "pages",
+]);
+
+/** Multi-word phrases that look like proper nouns but are actually
+ *  job titles, role names, or common business-document headers. */
+const COMMON_NON_NAME_PHRASES = new Set([
+  "brand ambassador", "brand ambassadors", "account manager",
+  "account managers", "program director", "program manager",
+  "project manager", "product manager", "operations manager",
+  "sales manager", "marketing manager", "creative director",
+  "technical director", "executive director", "managing director",
+  "chief executive", "chief operating", "chief technical",
+  "vice president", "senior vice president",
+  "porsche brand ambassador", "porsche brand ambassadors",
+]);
+
 export function validateEntities(
   answer: string,
   knownNames: string[],
@@ -239,11 +271,14 @@ export function validateEntities(
   while ((m = PROPER_NAME_RE.exec(answer))) {
     const phrase = m[1].toLowerCase().trim();
     if (ALLOWED_PROPER_NOUNS.has(phrase)) continue;
+    if (COMMON_NON_NAMES.has(phrase)) continue;
+    if (COMMON_NON_NAME_PHRASES.has(phrase)) continue;
     if (known.has(phrase) || knownFirstTokens.has(phrase)) continue;
     const tokens = phrase.split(/\s+/);
     const firstToken = tokens[0];
     if (known.has(firstToken) || knownFirstTokens.has(firstToken)) continue;
     if (ALLOWED_PROPER_NOUNS.has(firstToken)) continue;
+    if (COMMON_NON_NAMES.has(firstToken)) continue;
     /* If ANY token in the phrase is a sentence-starter or month/day,
        drop the first token and re-test the trailing token. Catches
        "On April" (starter + month) and "And Monday". */

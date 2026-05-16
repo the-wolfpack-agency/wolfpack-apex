@@ -105,6 +105,60 @@ describe("validateEntities", () => {
       validateEntities("Max joined the call.", ["max fuerst"]),
     ).toBeNull();
   });
+
+  /* Regression 2026-05-16: SharePoint-grounded answer flagged
+     "Brand Ambassador", "Training", "Includes" as unfamiliar names.
+     None of these are personal names. Several false-positive
+     categories addressed below. */
+
+  test("ignores common verbs/nouns capitalized as list-item leads", () => {
+    /* "Includes" and "Covers" lead bullets; both are verbs, not names. */
+    expect(
+      validateEntities(
+        "- Includes foundational skills for the program.\n- Covers customer engagement.",
+        [],
+      ),
+    ).toBeNull();
+  });
+
+  test("ignores common section labels like 'Training' / 'Source' at line start", () => {
+    expect(
+      validateEntities(
+        "Training: foundational skills.\nSource: BA101 document.",
+        [],
+      ),
+    ).toBeNull();
+  });
+
+  test("ignores job-title phrases (Brand Ambassador, Account Manager)", () => {
+    expect(
+      validateEntities(
+        "The Brand Ambassador 101 training covers customer engagement.",
+        [],
+      ),
+    ).toBeNull();
+    expect(
+      validateEntities(
+        "Account Manager training is also available.",
+        [],
+      ),
+    ).toBeNull();
+  });
+
+  test("still flags real unknown names (no over-correction)", () => {
+    const flag = validateEntities(
+      "Cyrus Vanderpool joined the meeting yesterday.",
+      [],
+    );
+    expect(flag).not.toBeNull();
+    expect(flag?.reason).toMatch(/Cyrus Vanderpool/);
+  });
+
+  test("real names still flagged even at sentence start (no over-correction)", () => {
+    const flag = validateEntities("Mortimer joined the deal.", []);
+    expect(flag).not.toBeNull();
+    expect(flag?.reason).toMatch(/Mortimer/);
+  });
 });
 
 /* ------------------------------------------------------------------ */
