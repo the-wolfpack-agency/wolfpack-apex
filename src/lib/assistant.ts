@@ -1092,6 +1092,68 @@ export async function chat(
 }
 
 // ---------------------------------------------------------------------------
+// persistToolAnswer -- Save the user message + tool answer to the
+// conversation, bump message_count, and refresh last_message_at.
+//
+// Used by the legacy intent-router fast-path in /api/assistant which
+// returns BEFORE chat() runs. Without this helper, every calendar /
+// mail / financial / goals query would silently skip persistence,
+// leaving the sidebar's conversation list ordered by stale timestamps
+// (2026-05-16 bug: active "calendar 22 messages" convos sank below
+// older RAG-handled ones because their last_message_at never moved).
+//
+// Returns { conversationId, messageId } so the route can echo them back
+// to the client (the UI needs both to render the new message + keep the
+// sidebar in sync). Best-effort: failures don't throw — a missed
+// persistence is bad UX, but losing the answer text would be worse.
+// ---------------------------------------------------------------------------
+
+export async function persistToolAnswer(opts: {
+  userId: string;
+  conversationId?: string | null;
+  userMessage: string;
+  assistantAnswer: string;
+  /* "tool" for orchestrator answers; other AssistantSource values are
+     accepted in case a caller wants finer attribution. */
+  source?: AssistantSource;
+  metadata?: Record<string, unknown>;
+}): Promise<{ conversationId: string; messageId: string } | null> {
+  try {
+    let convId = opts.conversationId || null;
+    if (!convId) {
+      const recent = await dbGetRecentActiveConversation(opts.userId);
+      if (recent && recent.last_message_at) {
+        const age = Date.now() - new Date(recent.last_message_at).getTime();
+        if (age < STALE_CONVERSATION_MS) convId = recent.id;
+      }
+    }
+    if (!convId) {
+      convId = await dbCreateConversation(opts.userId);
+    }
+    await dbSaveMessage(convId, "user", opts.userMessage, null, 0);
+    const msgId = await dbSaveMessage(
+      convId,
+      "assistant",
+      opts.assistantAnswer,
+      opts.source ?? "tool",
+      0,
+      opts.metadata ?? {},
+    );
+    /* Two stats bumps because dbUpdateConversationStats increments by
+       exactly one per call (matches the user+assistant message pair). */
+    await dbUpdateConversationStats(convId, 0);
+    await dbUpdateConversationStats(convId, 0);
+    return { conversationId: convId, messageId: msgId };
+  } catch (err) {
+    /* Persistence failure is non-fatal — the user already got the
+       answer. Log so the next session can see it in the analytics
+       feed; do NOT throw. */
+    console.warn("[assistant] persistToolAnswer failed:", (err as Error).message);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // getConversations -- List all conversations for a user
 // ---------------------------------------------------------------------------
 

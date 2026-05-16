@@ -7,6 +7,7 @@ import {
   getConversationMessages,
   rateMessage,
   archiveConversation,
+  persistToolAnswer,
 } from "@/lib/assistant";
 import { checkDocQuality, trackGateResult, type GateResult } from "@/lib/doc-quality-gate";
 import { tryToolAnswer, classifyIntent } from "@/lib/assistant/orchestrator";
@@ -165,6 +166,18 @@ export async function POST(req: NextRequest) {
           primary && !alreadyLinked
             ? `${toolAnswer.answer}\n\nSee more: [${primary.label}](${primary.href})`
             : toolAnswer.answer;
+        /* Persist the user+assistant exchange so the conversation list
+           in the sidebar refreshes its last_message_at and stays in
+           newest-first order. Without this, every calendar/mail/goals
+           query was silently dropped from persistence — active convos
+           sank below stale ones. */
+        const persisted = await persistToolAnswer({
+          userId: user.id,
+          conversationId,
+          userMessage: message,
+          assistantAnswer: answerWithLink,
+          source: "tool",
+        });
         return NextResponse.json({
           response: answerWithLink,
           answer: answerWithLink,
@@ -172,7 +185,8 @@ export async function POST(req: NextRequest) {
           intent: toolAnswer.intent,
           data: toolAnswer.data,
           tokensUsed: 0,
-          conversationId: conversationId ?? null,
+          conversationId: persisted?.conversationId ?? conversationId ?? null,
+          messageId: persisted?.messageId,
           sources: [
             {
               id: `tool:${toolAnswer.intent}`,

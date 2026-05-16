@@ -27,6 +27,9 @@ jest.mock("@/lib/assistant", () => ({
   getConversationMessages: jest.fn(),
   rateMessage: jest.fn(),
   archiveConversation: jest.fn(),
+  persistToolAnswer: jest.fn().mockResolvedValue({
+    conversationId: "c-persist", messageId: "m-persist",
+  }),
 }));
 jest.mock("@/lib/assistant/orchestrator", () => ({
   tryToolAnswer: (...a: any[]) => mockTryTool(...a),

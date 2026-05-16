@@ -36,12 +36,15 @@ let mockAuthUser: { id: string; role: string; name: string; email: string } | nu
   email: "n@x.co",
 };
 
+const mockPersistToolAnswer = jest.fn();
+
 jest.mock("@/lib/assistant", () => ({
   chat: (...a: any[]) => mockChat(...a),
   getConversations: jest.fn(),
   getConversationMessages: jest.fn(),
   rateMessage: jest.fn(),
   archiveConversation: jest.fn(),
+  persistToolAnswer: (...a: any[]) => mockPersistToolAnswer(...a),
 }));
 jest.mock("@/lib/assistant/orchestrator", () => ({
   tryToolAnswer: (...a: any[]) => mockTryTool(...a),
@@ -84,7 +87,11 @@ beforeEach(() => {
   mockTrackEvent.mockReset();
   mockCheckDocQuality.mockReset();
   mockTrackGateResult.mockReset();
+  mockPersistToolAnswer.mockReset();
   mockClassifyIntent.mockReturnValue({ intent: "unknown", confidence: 0, slots: {} });
+  /* Default: persistence succeeds and echoes back a conversationId so
+     the route's response stays well-formed. */
+  mockPersistToolAnswer.mockResolvedValue({ conversationId: "c-persist", messageId: "m-persist" });
   mockAuthUser = { id: "u1", role: "ceo", name: "Nick", email: "n@x.co" };
 });
 
@@ -276,6 +283,87 @@ describe("POST /api/assistant — tool path contract", () => {
 
     // chat() must NOT have been invoked — tool short-circuits.
     expect(mockChat).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/assistant — conversation persistence on tool path", () => {
+  /* Regression 2026-05-16: the legacy intent-router fast-path returned
+     a tool answer WITHOUT saving the message or bumping
+     last_message_at. Result: the conversation sidebar showed convos
+     in stale order — actively-used calendar/mail/financials convos
+     sank below older RAG-handled ones because their timestamps never
+     moved. Now persistToolAnswer runs on every tool dispatch. */
+
+  test("calendar tool answer persists user+assistant message + bumps stats", async () => {
+    mockClassifyIntent.mockReturnValue({
+      intent: "calendar_availability",
+      confidence: 0.95,
+      slots: { person: "__self__" },
+    });
+    mockTryTool.mockResolvedValue({
+      intent: "calendar_availability",
+      answer: "You look free Monday.",
+      data: {},
+      source: "tool",
+    });
+
+    const res = await POST(postMessage("what is on my calendar monday?", true));
+    expect(res.status).toBe(200);
+
+    expect(mockPersistToolAnswer).toHaveBeenCalledTimes(1);
+    expect(mockPersistToolAnswer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "u1",
+        userMessage: "what is on my calendar monday?",
+        source: "tool",
+      }),
+    );
+    const persistArgs = mockPersistToolAnswer.mock.calls[0][0];
+    expect(persistArgs.assistantAnswer).toContain("You look free Monday");
+  });
+
+  test("conversationId from persistence is echoed back to the client", async () => {
+    mockClassifyIntent.mockReturnValue({
+      intent: "goals_lookup",
+      confidence: 0.85,
+      slots: {},
+    });
+    mockTryTool.mockResolvedValue({
+      intent: "goals_lookup",
+      answer: "Q3 OKRs: ...",
+      data: {},
+      source: "tool",
+    });
+    mockPersistToolAnswer.mockResolvedValueOnce({
+      conversationId: "c-new",
+      messageId: "m-new",
+    });
+
+    const res = await POST(postMessage("what are our OKRs"));
+    const body = await res.json();
+    expect(body.conversationId).toBe("c-new");
+    expect(body.messageId).toBe("m-new");
+  });
+
+  test("persistence failure (returns null) does NOT block the answer", async () => {
+    mockClassifyIntent.mockReturnValue({
+      intent: "mail_search",
+      confidence: 0.8,
+      slots: { from: "alice" },
+    });
+    mockTryTool.mockResolvedValue({
+      intent: "mail_search",
+      answer: "Found 3 emails from Alice.",
+      data: {},
+      source: "tool",
+    });
+    mockPersistToolAnswer.mockResolvedValueOnce(null);
+
+    const res = await POST(postMessage("find emails from alice"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    /* User still sees the answer even when persistence failed. */
+    expect(body.response).toContain("Found 3 emails");
   });
 });
 
