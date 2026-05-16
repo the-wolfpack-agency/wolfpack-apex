@@ -82,6 +82,7 @@ export async function ingest(req: IngestRequest): Promise<IngestResult> {
     uploadedBy: req.uploadedBy,
     uploaderRole: req.uploaderRole,
     tags: req.tags,
+    webUrl: req.webUrl,
   });
 
   // 4. extraction

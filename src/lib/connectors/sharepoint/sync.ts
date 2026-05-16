@@ -253,6 +253,10 @@ export async function syncSource(
                 `sp-source-name:${source.name}`,
                 `workspace:${source.workspaceId}`,
               ],
+              /* Watch URL of the original SharePoint file. Stored on
+               * brain_documents.web_url so chat citations can render
+               * as clickable "Sources" links. */
+              webUrl: f.webUrl,
             });
             successCount++;
             bytesIngested += buf.length;
@@ -293,6 +297,8 @@ export async function syncSource(
             `sp-source-name:${source.name}`,
             `workspace:${source.workspaceId}`,
           ],
+          /* Original-file URL for clickable citations on the chat side. */
+          webUrl: f.webUrl,
         });
         successCount++;
         bytesIngested += buf.length;

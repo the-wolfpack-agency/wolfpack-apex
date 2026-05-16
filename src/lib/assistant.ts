@@ -13,6 +13,7 @@
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
 import { queryBrain, markCited as markBrainCited } from "@/lib/brain/query";
 import { neutralizeInjection } from "@/lib/brain/security";
+import { getCitationRefs } from "@/lib/brain/repo";
 import { searchMeetingTranscripts } from "@/lib/plaud";
 
 import { trackEvent } from "@/lib/analytics";
@@ -505,6 +506,55 @@ async function dbGetConversationMessages(
     rating: r.rating ?? undefined,
     metadata: r.metadata,
   }));
+}
+
+/**
+ * Convert [ref:<uuid>] citation markers into a numbered Sources footer
+ * with clickable links (when the source document has a web_url) and
+ * inline footnote markers ([1], [2], ...).
+ *
+ * Before:
+ *   "We have the Options Awareness training [ref:abc-123] and PCBA
+ *   101 [ref:def-456]."
+ *
+ * After:
+ *   "We have the Options Awareness training [1] and PCBA 101 [2].
+ *
+ *   **Sources:**
+ *   1. [Options Awareness training](https://...)
+ *   2. [PCBA 101](https://...)"
+ *
+ * Best-effort: if a brain lookup fails or returns no rows, we leave
+ * the raw [ref:<id>] markers in place rather than corrupting the
+ * answer.
+ */
+async function appendSourceFooter(
+  answer: string,
+  keptRefs: string[],
+): Promise<string> {
+  if (!answer || keptRefs.length === 0) return answer;
+  let refs;
+  try {
+    refs = await getCitationRefs(keptRefs);
+  } catch {
+    return answer;
+  }
+  if (refs.length === 0) return answer;
+  const idToNum = new Map(refs.map((r, i) => [r.id, i + 1]));
+  const replaced = answer.replace(/\s?\[ref:([A-Za-z0-9_-]+)\]/g, (_m, id) => {
+    const n = idToNum.get(String(id).trim());
+    return n ? ` [${n}]` : "";
+  });
+  const lines: string[] = [replaced.trim(), "", "**Sources:**"];
+  refs.forEach((r, i) => {
+    const num = i + 1;
+    if (r.web_url) {
+      lines.push(`${num}. [${r.filename}](${r.web_url})`);
+    } else {
+      lines.push(`${num}. ${r.filename}`);
+    }
+  });
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -1068,8 +1118,15 @@ export async function chat(
     } else if (quality.verdict === "low_confidence") {
       const flagReasons = quality.flags.map((f) => f.reason).join("; ");
       safeContent =
-        `_Note: this answer may need a second look — ${flagReasons}._\n\n` +
+        `_Note: this answer may need a second look. ${flagReasons}._\n\n` +
         citationCheck.cleanAnswer;
+    }
+    /* Convert [ref:<id>] markers into a numbered Sources footer with
+     * clickable links to each cited document's web_url. Skipped on
+     * rejected answers (the deterministic fallback message has no
+     * citations to enrich). */
+    if (quality.verdict !== "reject" && citationCheck.keptRefs.length > 0) {
+      safeContent = await appendSourceFooter(safeContent, citationCheck.keptRefs);
     }
 
     const msgId = await dbSaveMessage(convId, "assistant", safeContent, "ai", aiResult.tokensUsed);

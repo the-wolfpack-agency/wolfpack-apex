@@ -102,6 +102,10 @@ export interface IngestRequest {
   tags?: string[];
   /** OneDrive parent folder id when we also want to mirror to Graph. */
   onedriveParentId?: string;
+  /** Source URL where this document can be opened (SharePoint webUrl,
+   *  Stream Watch URL, etc.). Stored on brain_documents.web_url so
+   *  chat citations can render as clickable links to the original. */
+  webUrl?: string;
 }
 
 export interface IngestResult {

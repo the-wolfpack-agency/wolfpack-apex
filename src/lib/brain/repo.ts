@@ -54,6 +54,27 @@ export async function getDocument(id: string): Promise<BrainDocument | null> {
   return res.rows[0] ?? null;
 }
 
+/** Batch fetch citation-render data (filename + web_url) for a list of
+ *  document IDs. Used by the chat layer to convert [ref:<id>] citation
+ *  markers into clickable Sources links. Returns one row per id that
+ *  exists, in the same order as the input array. Missing IDs are
+ *  filtered out (citation validator already strips invented refs). */
+export async function getCitationRefs(
+  ids: string[],
+): Promise<Array<{ id: string; filename: string; web_url: string | null }>> {
+  if (ids.length === 0) return [];
+  const res = await query<{ id: string; filename: string; web_url: string | null }>(
+    `SELECT id, filename, web_url
+       FROM brain_documents
+      WHERE id = ANY($1::uuid[])`,
+    [ids],
+  );
+  /* Preserve input order so the rendered Sources list matches the
+   * order citations appear in the answer. */
+  const byId = new Map(res.rows.map((r) => [r.id, r]));
+  return ids.map((id) => byId.get(id)).filter((r): r is { id: string; filename: string; web_url: string | null } => Boolean(r));
+}
+
 export async function listDocuments(opts: {
   uploadedBy?: string;
   kind?: BrainKind;
