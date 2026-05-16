@@ -25,6 +25,50 @@ The Assistant runs the tools in registration order. When two tools could plausib
 
 ---
 
+## Try-it tour: 5-minute demo
+
+Copy any of these into the chat. Each one exercises a different capability. Run them in order for a full feature tour, or grab the one that matches what you're trying to show off.
+
+### Morning glance: widgets only
+> Show off the "interface inside the chat" pattern. Zero tokens, three taps, one mental model.
+
+1. `calendar` → mini month grid renders inline. Click today; meetings expand below.
+2. `inbox` → top 10 emails render with unread bolded. Click any → opens Outlook.
+3. `tasks` → open MS To-Do tasks render with check-off circles. Tick one to complete it without leaving the chat.
+
+### Q3 deep-dive: read-only lookups
+> Show off the deterministic CRM + financials + calendar combo. Token cost: still zero.
+
+1. `find the deal for Acme` → CRM record card with stage, amount, close date.
+2. `deals over $50k closing this month` → filtered list with vendor badge.
+3. `top 5 deals by amount` → aggregate rollup.
+4. `what's our revenue this quarter` *(CTO / CEO only)* → financials metric.
+5. `what meetings do I have on Monday` → text answer with weekday resolution.
+
+### Action flow: confirm before mutate
+> Show off the "fill the form, then send" inline-form pattern. Required fields stay locked until filled.
+
+1. `create email to alice@example.com about Q3 plan` → form opens with To + Subject pre-filled. Type a body and send.
+2. `schedule a meeting titled Q3 review` → calendar-event form with title pre-filled. Pick attendees + a time.
+3. `create a $10k deal with Acme` → CRM record form with StageName + CloseDate required.
+4. `add a task to follow up with hoxsie next Tuesday` → task form.
+
+### Knowledge + memory
+> Show off Brain RAG (citations) + the org-facts memory layer.
+
+1. `what training videos do we have for PCNA` → answers from Brain + a Sources footer with deep links.
+2. `who is Hoxsie` → org-facts card (role, email, recent activity).
+3. `remember that the Porsche pitch is on June 5` → save-team-fact confirmation; recall it later with `what do we know about the Porsche pitch`.
+
+### GitHub triage
+> Show off the standalone GitHub tools (PRs, issues, runs).
+
+1. `open pull requests in wolfpack-apex` → list with author + age.
+2. `recent workflow runs in wolfpack-apex` → CI status with pass/fail.
+3. `issues about flaky tests` → search results.
+
+---
+
 ## CRM — Salesforce, HubSpot
 
 Every CRM answer ends with a styled vendor badge next to "Zero tokens" (Salesforce cyan, HubSpot orange, etc.) so multi-CRM workspaces can tell at a glance which system answered.
@@ -227,6 +271,13 @@ Some prompts return an **inline widget** — a small interactive surface (a cale
 
 Renders a mini month grid for the current month with dots on days that have meetings. Click any day to expand its meeting list, then click into Instinct (in-app detail page) or Outlook (web link) for each event. A header "Open full calendar" link jumps to `/calendar`.
 
+**Example workflow, "what does my week look like":**
+1. Type `calendar` → grid renders, today auto-expands.
+2. Eyeball the dots to spot busy stretches without scrolling a full calendar app.
+3. Click any other day → meetings expand below the grid.
+4. Click a meeting's "Open in Instinct" link → land on the meeting detail page (prep notes, transcript, attendees).
+5. Or click "Open in Outlook" → jump to the event in Outlook on the web.
+
 Bare day-of-week prompts (`Calendar Monday`, `my schedule Friday`) still go to the text-based meetings-on-a-day lookup above — the widget is reserved for the "show me the whole month" intent.
 
 ### Email thread widget
@@ -237,6 +288,12 @@ Bare day-of-week prompts (`Calendar Monday`, `my schedule Friday`) still go to t
 - `email widget`
 
 Renders the user's 10 most recent emails as a scannable list. Unread messages render in bold. Each row links to Outlook on the web. A header "Open full inbox" link jumps to `/emails`.
+
+**Example workflow, "anything urgent in my inbox":**
+1. Type `inbox` → 10 most recent emails render with unread count in the subtitle ("3 unread").
+2. Scan bolded rows first; the preview line shows the first ~120 chars of body.
+3. Click "Open in Outlook" on any urgent row → opens that message in Outlook.
+4. If nothing's urgent, click "Open full inbox" in the header → land on `/emails` for the full triage view.
 
 Specific-search phrasings (`find emails about Q3`, `any emails from hoxsie`) still go to the text-based mail-search tool — the widget is reserved for the "just show me my inbox" intent.
 
@@ -249,6 +306,12 @@ Specific-search phrasings (`find emails about Q3`, `any emails from hoxsie`) sti
 - `show tasks`
 
 Renders the user's open MS To-Do tasks with check-off buttons inline. Click the circle to complete a task (writes through to Graph + the local cache). Click the title to open the task on the `/tasks` page. Overdue tasks render in red.
+
+**Example workflow, "clear out the easy stuff":**
+1. Type `tasks` → open tasks render; overdue ones are flagged in red ("2d overdue").
+2. Tick the circle on any task you've already done → row strikes through immediately, writes to MS To-Do in the background, fires `complete_task` analytics.
+3. Click a title to open the task on `/tasks` for full body + notes.
+4. New tasks: combine with the form flow. `create task to call hoxsie tomorrow` → form opens → submit.
 
 ---
 
