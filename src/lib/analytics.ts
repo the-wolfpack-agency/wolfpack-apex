@@ -508,6 +508,15 @@ export type InstinctEventType =
   | "assistant.form_create_okr_submitted"
   | "assistant.form_create_feature_submitted"
   | "assistant.form_create_crm_record_submitted"
+  // SharePoint connector lifecycle events (migration 139).
+  // source_added/removed: admin UI added or soft-deleted a folder source.
+  // sync_started/finished: every sync run is bracketed by these two.
+  // file_ingest_failed: per-file failures inside a sync (don't abort run).
+  | "connectors.sharepoint.source_added"
+  | "connectors.sharepoint.source_removed"
+  | "connectors.sharepoint.sync_started"
+  | "connectors.sharepoint.sync_finished"
+  | "connectors.sharepoint.file_ingest_failed"
   // Invite was looked up but the expires_at column says it lapsed.
   // Drives the "ask your admin to resend" UX hint + a tenant-side
   // dashboard counter so admins see expirations before users complain.
