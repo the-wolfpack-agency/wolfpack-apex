@@ -149,29 +149,73 @@ describe("syncSource", () => {
     expect(result.failCount).toBe(0);
   });
 
-  test("skips files larger than BRAIN_MAX_SIZE_BYTES BEFORE downloading (OOM guard)", async () => {
+  test("oversized non-media files skipped before downloading (OOM guard)", async () => {
     const repo = fakeRepo();
     const walkFn = jest.fn().mockResolvedValue([
       { id: "f1", name: "small.pdf", size: 1024, file: { mimeType: "application/pdf" } },
-      { id: "f2", name: "huge-video.mp4", size: 500 * 1024 * 1024, file: { mimeType: "video/mp4" } },
+      { id: "f2", name: "huge.zip", size: 500 * 1024 * 1024, file: { mimeType: "application/zip" } },
     ]);
     const downloadFn = jest.fn().mockResolvedValue(Buffer.from("ok"));
     const ingestFn = jest.fn().mockResolvedValue({ document_id: "d", status: "indexed", chunk_count: 1, extracted_chars: 2 });
 
     const result = await syncSource(source, "u1", "cto", { repo, walkFn, downloadFn, ingestFn });
-    /* Small file ingested, huge file skipped without download. */
+    /* Small file ingested, huge zip skipped without download. No
+     * placeholder for non-media types. */
     expect(downloadFn).toHaveBeenCalledTimes(1);
     expect(downloadFn).toHaveBeenCalledWith("u1", "drive-xyz", "f1");
     expect(result.successCount).toBe(1);
     expect(result.failCount).toBe(1);
     expect(result.status).toBe("partial");
-    /* Analytics records the size-skip with a clear error code. */
+    /* Per-file failure surfaced into the job-level error so the UI
+     * isn't left with a null reason. */
+    expect(result.error).toContain("huge.zip");
+    expect(result.error).toContain("file too large");
     const skipCall = mockTrackEvent.mock.calls.find((c) =>
       c[0] === "connectors.sharepoint.file_ingest_failed" &&
-      c[3]?.file_name === "huge-video.mp4",
+      c[3]?.file_name === "huge.zip",
     );
-    expect(skipCall).toBeDefined();
     expect(skipCall?.[3]?.error).toBe("file_too_large_skipped_before_download");
+  });
+
+  test("oversized VIDEO files get a placeholder text doc ingested (searchable by name)", async () => {
+    const repo = fakeRepo();
+    const walkFn = jest.fn().mockResolvedValue([
+      {
+        id: "f-video",
+        name: "training-master.mp4",
+        size: 500 * 1024 * 1024,
+        webUrl: "https://x.sharepoint.com/sites/Y/Shared%20Documents/training-master.mp4",
+        parentReference: { path: "/drives/D/root:/Shared Documents/Training" },
+        file: { mimeType: "video/mp4" },
+      },
+    ]);
+    const downloadFn = jest.fn();
+    const ingestFn = jest.fn().mockResolvedValue({ document_id: "d", status: "indexed", chunk_count: 1, extracted_chars: 200 });
+
+    const result = await syncSource(source, "u1", "cto", { repo, walkFn, downloadFn, ingestFn });
+
+    /* Download was NOT called — we never pull the huge bytes. */
+    expect(downloadFn).not.toHaveBeenCalled();
+    /* ingestFn was called with a placeholder doc whose body contains
+     * the video metadata so chat queries surface the file by name. */
+    expect(ingestFn).toHaveBeenCalledTimes(1);
+    const ingestArgs = ingestFn.mock.calls[0][0];
+    expect(ingestArgs.filename).toBe("training-master.mp4.placeholder.txt");
+    expect(ingestArgs.contentType).toBe("text/plain");
+    expect(ingestArgs.tags).toEqual(expect.arrayContaining(["sp-video-placeholder"]));
+    const body = ingestArgs.buffer.toString("utf-8");
+    expect(body).toContain("training-master.mp4");
+    expect(body).toContain("video/mp4");
+    expect(body).toContain("https://x.sharepoint.com/sites/Y/Shared%20Documents/training-master.mp4");
+
+    expect(result.successCount).toBe(1);
+    expect(result.failCount).toBe(0);
+    expect(result.status).toBe("succeeded");
+    /* Placeholder-indexed analytics event fired. */
+    const placeholderCall = mockTrackEvent.mock.calls.find(
+      (c) => c[0] === "connectors.sharepoint.placeholder_indexed",
+    );
+    expect(placeholderCall).toBeDefined();
   });
 
   test("fires sync_started + sync_finished analytics", async () => {

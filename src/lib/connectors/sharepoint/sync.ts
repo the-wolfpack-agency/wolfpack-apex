@@ -40,9 +40,38 @@ interface DriveItem {
   id: string;
   name: string;
   size?: number;
+  webUrl?: string;
   file?: { mimeType?: string };
   folder?: { childCount?: number };
   parentReference?: { path?: string };
+}
+
+/** MIME-type prefixes that get a placeholder text doc when the file
+ *  is too large to ingest directly. So a 500MB training video at
+ *  least becomes searchable by name + clickable to watch. */
+const PLACEHOLDER_MIME_PREFIXES = ["video/", "audio/"];
+
+function isPlaceholderable(mimeType: string | undefined): boolean {
+  if (!mimeType) return false;
+  return PLACEHOLDER_MIME_PREFIXES.some((p) => mimeType.startsWith(p));
+}
+
+function placeholderBuffer(f: DriveItem): Buffer {
+  const lines: string[] = [
+    `# ${f.name}`,
+    "",
+    `Type: ${f.file?.mimeType ?? "unknown media"}`,
+    `Size: ${typeof f.size === "number" ? `${f.size.toLocaleString()} bytes` : "unknown"}`,
+  ];
+  if (f.parentReference?.path) lines.push(`Folder: ${f.parentReference.path}`);
+  if (f.webUrl) lines.push(`Watch: ${f.webUrl}`);
+  lines.push("");
+  lines.push(
+    "This is a placeholder for a media file too large to ingest into the searchable index directly.",
+    "The placeholder makes the file discoverable by name in chat and provides a link to view it.",
+    "If a transcript (.vtt or .txt) exists alongside the original in the same SharePoint folder, that transcript is indexed normally.",
+  );
+  return Buffer.from(lines.join("\n"), "utf-8");
 }
 
 interface DriveChildrenPage {
@@ -160,6 +189,11 @@ export async function syncSource(
    * env var to stay in sync. */
   const MAX_FILE_BYTES = Number(process.env.BRAIN_MAX_SIZE_BYTES ?? 50 * 1024 * 1024);
 
+  /* Per-file errors accumulated so the job's top-level error field
+   * tells the operator WHY each file failed. Was previously null,
+   * which left the UI showing "failed" with no diagnosis. */
+  const perFileErrors: string[] = [];
+
   try {
     const files = await walkFn(triggeredBy, source.driveId, source.folderPath);
     fileCount = files.length;
@@ -167,7 +201,41 @@ export async function syncSource(
     for (const f of files) {
       try {
         if (typeof f.size === "number" && f.size > MAX_FILE_BYTES) {
+          /* Oversized media (video/audio): index a placeholder so the
+           * file is at least searchable by name + clickable. Without
+           * this the operator silently loses every large video. */
+          if (isPlaceholderable(f.file?.mimeType)) {
+            const buf = placeholderBuffer(f);
+            await ingestFn({
+              filename: `${f.name}.placeholder.txt`,
+              contentType: "text/plain",
+              buffer: buf,
+              uploadedBy: triggeredBy,
+              uploaderRole: triggeredByRole,
+              tags: [
+                "sharepoint",
+                "sp-video-placeholder",
+                `sp-source:${source.id}`,
+                `workspace:${source.workspaceId}`,
+              ],
+            });
+            successCount++;
+            bytesIngested += buf.length;
+            trackEvent("connectors.sharepoint.placeholder_indexed", triggeredBy, triggeredByRole, {
+              source_id: source.id,
+              job_id: job.id,
+              file_name: f.name,
+              file_size: f.size,
+              mime_type: f.file?.mimeType ?? "",
+            });
+            continue;
+          }
+          /* Non-media oversized files (massive PDFs, etc.) get the
+           * old skip path: we don't have a useful placeholder shape
+           * for them, so just log and continue. */
           failCount++;
+          const msg = `${f.name}: file too large (${f.size.toLocaleString()} bytes)`;
+          perFileErrors.push(msg);
           trackEvent("connectors.sharepoint.file_ingest_failed", triggeredBy, triggeredByRole, {
             source_id: source.id,
             job_id: job.id,
@@ -190,11 +258,13 @@ export async function syncSource(
         bytesIngested += buf.length;
       } catch (err) {
         failCount++;
+        const errMsg = (err as Error).message.slice(0, 200);
+        perFileErrors.push(`${f.name}: ${errMsg}`);
         trackEvent("connectors.sharepoint.file_ingest_failed", triggeredBy, triggeredByRole, {
           source_id: source.id,
           job_id: job.id,
           file_name: f.name,
-          error: (err as Error).message.slice(0, 200),
+          error: errMsg,
         });
       }
     }
@@ -202,8 +272,22 @@ export async function syncSource(
     topLevelError = (err as Error).message;
   }
 
+  /* Roll per-file failures into the job-level error so the UI and
+   * audit log surface a meaningful diagnosis. Keep it bounded so the
+   * column doesn't bloat. */
+  if (!topLevelError && perFileErrors.length > 0) {
+    const sample = perFileErrors.slice(0, 5).join("; ");
+    const more = perFileErrors.length > 5 ? ` (+${perFileErrors.length - 5} more)` : "";
+    topLevelError = `${perFileErrors.length} file(s) failed: ${sample}${more}`;
+  }
+
+  /* Walker-level crash always means 'failed' regardless of file
+   * counts (we didn't even get to iterate files). Per-file failures
+   * rolled into topLevelError above DON'T trigger this branch; they
+   * fall into the partial/failed by-count logic below. */
+  const walkerCrashed = topLevelError && fileCount === 0;
   const status: IngestJobStatus =
-    topLevelError ? "failed" :
+    walkerCrashed ? "failed" :
     failCount > 0 && successCount > 0 ? "partial" :
     failCount > 0 ? "failed" :
     "succeeded";

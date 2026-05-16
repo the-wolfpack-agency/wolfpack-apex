@@ -517,6 +517,7 @@ export type InstinctEventType =
   | "connectors.sharepoint.sync_started"
   | "connectors.sharepoint.sync_finished"
   | "connectors.sharepoint.file_ingest_failed"
+  | "connectors.sharepoint.placeholder_indexed"
   // Invite was looked up but the expires_at column says it lapsed.
   // Drives the "ask your admin to resend" UX hint + a tenant-side
   // dashboard counter so admins see expirations before users complain.
