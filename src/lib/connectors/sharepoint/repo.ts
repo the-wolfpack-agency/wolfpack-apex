@@ -107,6 +107,12 @@ export interface SharepointRepo {
     },
   ): Promise<void>;
   listJobsForSource(sourceId: string, limit?: number): Promise<IngestJob[]>;
+  /** Sweep stuck jobs whose status is still 'running' more than
+   *  `staleMinutes` minutes after they started. Marks them as
+   *  'failed' with a synthesized error message. Returns the count of
+   *  rows updated. Called from the GET /sources/[id] route so the UI
+   *  sees consistent state without a separate cron job. */
+  reconcileStuckJobs(staleMinutes?: number): Promise<number>;
 }
 
 export function createRepo(qr: QueryRunner = defaultQuery): SharepointRepo {
@@ -207,6 +213,19 @@ export function createRepo(qr: QueryRunner = defaultQuery): SharepointRepo {
         [sourceId, limit],
       );
       return res.rows.map(rowToJob);
+    },
+
+    async reconcileStuckJobs(staleMinutes = 6) {
+      const res = await qr(
+        `UPDATE instinct_sharepoint_ingest_jobs
+            SET status = 'failed',
+                ended_at = NOW(),
+                error = COALESCE(error, 'reconciler: job exceeded ' || $1::text || ' min running without completion')
+          WHERE status = 'running'
+            AND started_at < NOW() - (INTERVAL '1 minute' * $1)`,
+        [staleMinutes],
+      );
+      return res.rowCount ?? 0;
     },
   };
 }

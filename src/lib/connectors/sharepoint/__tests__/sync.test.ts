@@ -47,6 +47,7 @@ function fakeRepo() {
     touchLastSynced: jest.fn().mockResolvedValue(undefined),
     insertSource: jest.fn(), listSources: jest.fn(), getSource: jest.fn(),
     deactivateSource: jest.fn(), listJobsForSource: jest.fn(),
+    reconcileStuckJobs: jest.fn().mockResolvedValue(0),
   };
 }
 

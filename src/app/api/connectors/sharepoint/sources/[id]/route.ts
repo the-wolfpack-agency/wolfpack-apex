@@ -21,6 +21,12 @@ export async function GET(
     const repo = createRepo();
     const source = await repo.getSource(id, workspaceId);
     if (!source) return NextResponse.json({ error: "not_found" }, { status: 404 });
+    /* Reconcile stuck jobs BEFORE returning so the UI sees consistent
+     * state. Jobs older than 6 minutes still marked 'running' are
+     * almost certainly killed by Vercel mid-sync; mark them failed
+     * so the poll loop stops and the operator sees what happened.
+     * 6 min > the function maxDuration (300s) by a 60s buffer. */
+    await repo.reconcileStuckJobs(6);
     const jobs = await repo.listJobsForSource(id, 20);
     return NextResponse.json({ source, jobs });
   } catch (err) {

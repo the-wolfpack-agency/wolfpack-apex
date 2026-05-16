@@ -9,6 +9,7 @@
 const mockGetUser = jest.fn();
 const mockGetSource = jest.fn();
 const mockSyncSource = jest.fn();
+const mockAfter = jest.fn();
 
 jest.mock("@/lib/auth", () => ({
   getUserFromRequest: (...a: any[]) => mockGetUser(...a),
@@ -21,6 +22,16 @@ jest.mock("@/lib/connectors/sharepoint/repo", () => ({
 jest.mock("@/lib/connectors/sharepoint/sync", () => ({
   syncSource: (...a: any[]) => mockSyncSource(...a),
 }));
+/* Mock Next.js after() so we can capture the background callback +
+ * verify it would invoke syncSource without actually awaiting it
+ * during the request. */
+jest.mock("next/server", () => {
+  const actual = jest.requireActual("next/server");
+  return {
+    ...actual,
+    after: (cb: () => void | Promise<void>) => mockAfter(cb),
+  };
+});
 
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/connectors/sharepoint/sources/[id]/sync/route";
@@ -46,34 +57,38 @@ beforeEach(() => {
   mockGetUser.mockReset();
   mockGetSource.mockReset();
   mockSyncSource.mockReset();
+  mockAfter.mockReset();
 });
 
 describe("POST /api/connectors/sharepoint/sources/[id]/sync", () => {
-  test("returns 202 immediately, fires syncSource as void promise", async () => {
+  test("returns 202 immediately and schedules syncSource via after()", async () => {
     mockGetUser.mockReturnValue({ id: "u1", role: "cto", workspaceId: "ws1" });
     mockGetSource.mockResolvedValue(activeSource);
-    /* Block syncSource so we can confirm the route returned BEFORE it
-     * resolves. The route must not await syncSource. */
-    let releaseSync: (() => void) | null = null;
-    mockSyncSource.mockImplementation(
-      () => new Promise((resolve) => { releaseSync = resolve; }),
-    );
+    mockSyncSource.mockResolvedValue({ status: "succeeded" });
 
     const res = await POST(req(), ctx);
     expect(res.status).toBe(202);
     const body = await res.json();
     expect(body.accepted).toBe(true);
     expect(body.sourceId).toBe("abc");
+
+    /* after() received a callback. The route did NOT await syncSource
+     * directly. */
+    expect(mockAfter).toHaveBeenCalledTimes(1);
+    expect(mockSyncSource).not.toHaveBeenCalled();
+
+    /* Now invoke the after-callback to confirm it would run syncSource
+     * with the right args. This is what Vercel does post-response. */
+    const afterCb = mockAfter.mock.calls[0][0] as () => Promise<void>;
+    await afterCb();
     expect(mockSyncSource).toHaveBeenCalledWith(activeSource, "u1", "cto");
-    /* Release the background promise so the test doesn't leak it. */
-    releaseSync?.();
   });
 
   test("401 unauthenticated", async () => {
     mockGetUser.mockReturnValue(null);
     const res = await POST(req(), ctx);
     expect(res.status).toBe(401);
-    expect(mockSyncSource).not.toHaveBeenCalled();
+    expect(mockAfter).not.toHaveBeenCalled();
   });
 
   test("404 when source doesn't exist in workspace", async () => {
@@ -81,7 +96,7 @@ describe("POST /api/connectors/sharepoint/sources/[id]/sync", () => {
     mockGetSource.mockResolvedValue(null);
     const res = await POST(req(), ctx);
     expect(res.status).toBe(404);
-    expect(mockSyncSource).not.toHaveBeenCalled();
+    expect(mockAfter).not.toHaveBeenCalled();
   });
 
   test("410 when source is soft-deleted (isActive=false)", async () => {
@@ -89,18 +104,19 @@ describe("POST /api/connectors/sharepoint/sources/[id]/sync", () => {
     mockGetSource.mockResolvedValue({ ...activeSource, isActive: false });
     const res = await POST(req(), ctx);
     expect(res.status).toBe(410);
-    expect(mockSyncSource).not.toHaveBeenCalled();
+    expect(mockAfter).not.toHaveBeenCalled();
   });
 
-  test("background syncSource failure is logged but doesn't surface to caller", async () => {
+  test("background syncSource failure is caught inside after() and doesn't surface to caller", async () => {
     mockGetUser.mockReturnValue({ id: "u1", role: "cto", workspaceId: "ws1" });
     mockGetSource.mockResolvedValue(activeSource);
-    /* The background promise rejecting must NOT change the 202
-     * response. The route's .catch attaches a logger; the caller is
-     * unaffected (status is polled via GET /sources/[id]). */
     mockSyncSource.mockRejectedValue(new Error("boom"));
     const res = await POST(req(), ctx);
     expect(res.status).toBe(202);
+    /* Invoke the after-callback. It must NOT throw — the try/catch
+     * inside it logs and swallows so Vercel doesn't see a rejection. */
+    const afterCb = mockAfter.mock.calls[0][0] as () => Promise<void>;
+    await expect(afterCb()).resolves.toBeUndefined();
   });
 
   test("uncaught error before 202 returns JSON 500 (not HTML)", async () => {

@@ -144,6 +144,18 @@ describe("createRepo", () => {
     expect(fake.calls[0].params).toEqual(["src-1"]);
   });
 
+  test("reconcileStuckJobs: marks running jobs older than threshold as failed", async () => {
+    const fake = fakeQR();
+    fake.rowCount = 3;
+    const repo = createRepo(fake.qr);
+    const updated = await repo.reconcileStuckJobs(6);
+    expect(updated).toBe(3);
+    expect(fake.calls[0].sql).toMatch(/UPDATE instinct_sharepoint_ingest_jobs/);
+    expect(fake.calls[0].sql).toMatch(/SET status = 'failed'/);
+    expect(fake.calls[0].sql).toMatch(/started_at < NOW\(\) - \(INTERVAL '1 minute' \* \$1\)/);
+    expect(fake.calls[0].params).toEqual([6]);
+  });
+
   test("listJobsForSource: handles bytes_ingested coming back as string (pg bigint)", async () => {
     const fake = fakeQR();
     fake.rows.push({

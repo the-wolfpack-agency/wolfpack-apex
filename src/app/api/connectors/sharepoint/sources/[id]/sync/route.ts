@@ -7,7 +7,7 @@
  * bottleneck and it's already async-friendly.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { createRepo } from "@/lib/connectors/sharepoint/repo";
 import { syncSource } from "@/lib/connectors/sharepoint/sync";
@@ -33,21 +33,24 @@ export async function POST(
     if (!source) return NextResponse.json({ error: "not_found" }, { status: 404 });
     if (!source.isActive) return NextResponse.json({ error: "source_inactive" }, { status: 410 });
 
-    /* Fire-and-forget so the HTTP response returns immediately. The
-     * caller polls GET /sources/[id] for job status. Without this,
-     * Vercel's 60-second function timeout would 504 us mid-sync on
-     * any folder with more than a handful of large files (training
-     * videos in particular), and the UI would show an "Unexpected
-     * token <" HTML parse error. */
-    void syncSource(source, user.id, user.role).catch((err) => {
-      /* syncSource handles per-file failures internally; this catch
-       * is for catastrophic crashes (e.g. token revocation mid-run).
-       * The job row stays at status='running' until a reconciler
-       * sweeps it up — a TODO follow-up. */
-      console.error(
-        "[connectors/sharepoint/sync] background syncSource crashed:",
-        err,
-      );
+    /* Background execution via Next.js `after()` so the response
+     * returns NOW and Vercel keeps the function alive until the
+     * sync finishes (up to maxDuration above). Raw fire-and-forget
+     * doesn't work on Vercel; the runtime kills the function shortly
+     * after the response is sent unless `after()` or waitUntil()
+     * tells it to keep going. */
+    after(async () => {
+      try {
+        await syncSource(source, user.id, user.role);
+      } catch (err) {
+        /* syncSource handles per-file failures internally; this
+         * catch is for catastrophic crashes (token revocation
+         * mid-run, DB outage, etc.). Reconciler sweeps stuck rows. */
+        console.error(
+          "[connectors/sharepoint/sync] background syncSource crashed:",
+          err,
+        );
+      }
     });
 
     return NextResponse.json(
