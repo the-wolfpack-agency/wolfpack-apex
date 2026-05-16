@@ -22,12 +22,20 @@ import {
 } from "@/lib/connectors/sharepoint/resolve-share-link";
 
 export async function GET(req: NextRequest) {
-  const user = getUserFromRequest(req.headers.get("authorization"));
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const workspaceId = (user as { workspaceId?: string }).workspaceId ?? "default";
-  const repo = createRepo();
-  const sources = await repo.listSources(workspaceId);
-  return NextResponse.json({ sources });
+  try {
+    const user = getUserFromRequest(req.headers.get("authorization"));
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const workspaceId = (user as { workspaceId?: string }).workspaceId ?? "default";
+    const repo = createRepo();
+    const sources = await repo.listSources(workspaceId);
+    return NextResponse.json({ sources });
+  } catch (err) {
+    console.error("[connectors/sharepoint/sources GET] uncaught error:", err);
+    return NextResponse.json(
+      { error: `Couldn't list sources: ${(err as Error)?.message ?? "unknown"}` },
+      { status: 500 },
+    );
+  }
 }
 
 interface AddBody {
@@ -36,6 +44,25 @@ interface AddBody {
 }
 
 export async function POST(req: NextRequest) {
+  /* Top-level try/catch so this route NEVER returns an HTML error page.
+   * Any uncaught exception in resolveSiteAndDrive or the repo (Graph
+   * call timeouts, network errors, transient DB issues) would otherwise
+   * cause Next.js to render its default HTML 500, which the client
+   * parses as `Unexpected token '<'`. Always return JSON. */
+  try {
+    return await runAddSource(req);
+  } catch (err) {
+    console.error("[connectors/sharepoint/sources POST] uncaught error:", err);
+    return NextResponse.json(
+      {
+        error: `Server error while adding the source: ${(err as Error)?.message ?? "unknown"}. Try again, or scope to a smaller subfolder if the URL is the whole library.`,
+      },
+      { status: 500 },
+    );
+  }
+}
+
+async function runAddSource(req: NextRequest): Promise<NextResponse> {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const workspaceId = (user as { workspaceId?: string }).workspaceId ?? "default";
