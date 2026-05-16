@@ -146,13 +146,11 @@ describe("handler — count", () => {
       expect(r.answer).toContain("**17** deals");
       expect(r.answer).toContain("amount > $50,000");
       expect(r.answer).toContain("this month");
-      /* Connector attribution is BOTH:
-         1. in the typed data block (UI badge rendering, fresh messages)
-         2. inline in the answer body as "*— Source: Salesforce*" (UI
-            strips + renders badge; also survives transcript exports,
-            conversation reload, analytics). */
+      /* Connector attribution flows through the typed data field only
+         — the chat UI renders it as a styled badge. The answer body
+         is kept clean of inline source text. */
       expect(r.data.connector).toBe("salesforce");
-      expect(r.answer).toContain("*— Source: Salesforce*");
+      expect(r.answer).not.toContain("*— Source:");
     }
   });
 });

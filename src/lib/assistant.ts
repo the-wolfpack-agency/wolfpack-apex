@@ -662,18 +662,12 @@ export async function chat(
     workspaceId,
   });
   if (toolResult && toolResult.result.ok) {
-    const msgId = await dbSaveMessage(
-      convId,
-      "assistant",
-      toolResult.result.answer,
-      "tool",
-      0,
-    );
-    await dbUpdateConversationStats(convId, 0);
     /* Extract connector attribution from the tool's typed result data
-       when present (CRM tools all put `connector` at the top level of
-       their data block). The UI renders this as a styled badge so
-       multi-CRM workspaces can tell which system the data came from. */
+       when present (CRM/GitHub tools all put `connector` at the top
+       level of their data block). The UI renders this as a styled
+       badge so multi-CRM workspaces can tell which system the data
+       came from. We persist it in message metadata so the badge
+       survives conversation reload too. */
     const toolData = toolResult.result.data as
       | { connector?: string }
       | undefined;
@@ -681,6 +675,15 @@ export async function chat(
       typeof toolData?.connector === "string" && toolData.connector
         ? toolData.connector
         : undefined;
+    const msgId = await dbSaveMessage(
+      convId,
+      "assistant",
+      toolResult.result.answer,
+      "tool",
+      0,
+      connectorSource ? { connector_source: connectorSource } : {},
+    );
+    await dbUpdateConversationStats(convId, 0);
     return {
       response: toolResult.result.answer,
       source: "tool",

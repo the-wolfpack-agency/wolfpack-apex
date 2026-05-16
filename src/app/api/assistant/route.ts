@@ -195,6 +195,14 @@ export async function POST(req: NextRequest) {
 
     // Include gate results (warnings) alongside the response
     const response: Record<string, unknown> = { ...result };
+    /* Explicit pass-through for connectorSource (chat UI renders the
+       styled vendor badge from this). Belt-and-suspenders alongside
+       the spread above — if a future refactor changes `result`'s
+       shape, this line catches the regression at the API boundary
+       rather than at the user-visible UI. */
+    if (typeof result?.connectorSource === "string" && result.connectorSource) {
+      response.connectorSource = result.connectorSource;
+    }
     if (gateResults.length > 0) {
       response.gateResults = gateResults.map((r) => ({
         name: r.name,
