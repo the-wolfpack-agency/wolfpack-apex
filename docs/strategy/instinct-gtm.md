@@ -7,8 +7,8 @@
 Wolfpack has built three things that, taken together, are uncommon in agency-land:
 
 1. **A working multi-system AI assistant** (Instinct) that already aggregates CRM + mail + calendar + GitHub + knowledge into one chat surface, with a learning loop that captures org-wide corrections.
-2. **A delivery muscle** — a small team that has shipped Wolfpack Auto, Wolfpack Weekend, AgenticQA, and Instinct in months, not years.
-3. **An agency book** — existing client relationships across mid-market services businesses (dealer groups, brand engagements, professional services) that buy on relationship and outcomes, not feature lists.
+2. **A delivery muscle**: a small team that has shipped Wolfpack Auto, Wolfpack Weekend, AgenticQA, and Instinct in months, not years.
+3. **An agency book**: existing client relationships across mid-market services businesses (dealer groups, brand engagements, professional services) that buy on relationship and outcomes, not feature lists.
 
 The mistake to avoid: turning this into "another AI productivity SaaS" priced at $20/user/mo. There are 200 of those, they all lose money, and Wolfpack has no advantage in that race.
 
@@ -36,7 +36,7 @@ Each of the platform players has a **structural conflict** that prevents them fr
 Our position is **multi-vendor by design**, which is a sustainable wedge as long as we don't become a vendor ourselves on either side.
 
 ### The 30-second pitch
-> "Your team's institutional memory, in one chat. Ask any question your data already has the answer to — your CRM, your inbox, your calendar, your GitHub, your knowledge base — get the answer in plain English with a link to the source. Correct it once, the whole team learns. No more 'hunting through five tabs.'"
+> "Your team's institutional memory, in one chat. Ask any question your data already has the answer to. Your CRM, your inbox, your calendar, your GitHub, your knowledge base. Get the answer in plain English with a link to the source. Correct it once, the whole team learns. No more 'hunting through five tabs.'"
 
 ---
 
@@ -44,7 +44,7 @@ Our position is **multi-vendor by design**, which is a sustainable wedge as long
 
 Start narrow. Three concentric circles:
 
-### Tier A — beachhead (year 1)
+### Tier A: beachhead (year 1)
 **Mid-market professional-services firms, 25–150 employees, multi-system stack.**
 - Run on Microsoft 365 + Salesforce or HubSpot + GitHub or similar dev tool
 - $5M–$50M ARR
@@ -52,12 +52,12 @@ Start narrow. Three concentric circles:
 - Leadership feels the "context tax" of switching between 8+ tools
 - Examples: marketing agencies, boutique consultancies, dev shops, small law firms, financial advisory groups
 
-### Tier B — expand (year 2)
+### Tier B: expand (year 2)
 **Dealer groups, franchised SMBs, regulated mid-market.**
 - Wolfpack Auto already has dealer relationships → cross-sell Instinct as the "team brain" alongside the dealer platform
 - Regulated industries (insurance, fin, healthcare) value the audit-log + source-attribution properties Instinct already has
 
-### Tier C — enterprise (year 3+)
+### Tier C: enterprise (year 3+)
 **Multi-BU enterprises that want the platform but need SSO, data residency, on-prem.**
 - Not a year-1 priority. Building enterprise sales motion is a separate company.
 
@@ -76,7 +76,7 @@ Start narrow. Three concentric circles:
 
 Three tiers, designed so each step changes the buyer's expectation and price anchor.
 
-### Tier 1: Instinct Starter — $12 / user / month
+### Tier 1: Instinct Starter: $12 / user / month
 **The MS 365 wedge.** Lowest-friction onboarding. Customer brings their own Microsoft tenant; we wire calendar / mail / Teams / GitHub. No CRM connector. Token budget capped.
 
 Capabilities:
@@ -89,7 +89,7 @@ Why this exists: low-friction signup, gives the team a reason to use it daily, s
 
 **Target conversion: 30% of Starter → Pro within 6 months.**
 
-### Tier 2: Instinct Pro — $35 / user / month
+### Tier 2: Instinct Pro: $35 / user / month
 **The wedge that pays the bills.** Adds the CRM layer + structured actions + cross-system queries that justify the price.
 
 Adds:
@@ -103,7 +103,7 @@ Adds:
 
 **Target ARPA (annual revenue per account) at Pro: $25K / year @ 60-seat workspace.**
 
-### Tier 3: Instinct Managed — $X / month, custom
+### Tier 3: Instinct Managed: $X / month, custom
 **The agency-led tier. Where Wolfpack actually wins.** Not a per-seat product; a managed engagement.
 
 Includes:
@@ -121,7 +121,7 @@ Includes:
 ### Why this ladder works
 1. The price ratios (12 → 35 → custom) train the buyer that **going up is a meaningful unlock**, not just more seats.
 2. Each tier matches Wolfpack's delivery capacity at scale: Starter = self-serve, Pro = light sales touch, Managed = agency engagement (what you already know how to do).
-3. Tier 3 sells time + relationship + custom work — the highest-margin part of an agency business — wrapped in the recurring software pricing model.
+3. Tier 3 sells time + relationship + custom work (the highest-margin part of an agency business) wrapped in the recurring software pricing model.
 
 ---
 
@@ -144,7 +144,7 @@ Selling the full Instinct platform is a multi-month sale. **Unbundling parts of 
 1. **Lower CAC.** A $300/mo onboarding bot is a no-brainer for an HR director; $35/seat × 50 seats is a budget meeting.
 2. **Pricing power on the full platform.** When clients have already paid for two wedges, "everything in one chat" is an obvious consolidation play.
 3. **Diversification.** If Instinct's enterprise tier sales cycle slows down, the wedges keep recurring revenue stable.
-4. **Reuses what's built.** Every wedge above is built on code already in the Instinct repo — the engineering cost is productization (packaging, docs, billing, support), not feature work.
+4. **Reuses what's built.** Every wedge above is built on code already in the Instinct repo: the engineering cost is productization (packaging, docs, billing, support), not feature work.
 
 ### Recommended first three wedges to ship
 1. **CRM hygiene scanner** (most defensible, leverages our unique aggregation), 4-week productization
@@ -155,10 +155,10 @@ Selling the full Instinct platform is a multi-month sale. **Unbundling parts of 
 
 ## 6. GTM motion: design partners first
 
-### Phase 0 — internal dogfooding (current state, complete)
+### Phase 0: internal dogfooding (current state, complete)
 Wolfpack uses Instinct daily. All connectors verified live. ~437 tool tests green. Source-attribution + form-based actions shipped.
 
-### Phase 1 — design partner cohort (next 90 days)
+### Phase 1: design partner cohort (next 90 days)
 **5–10 mid-market clients on Instinct Pro at $0–$1K/mo for 6 months in exchange for:**
 - Weekly check-in (Wolfpack-led; we drive)
 - Permission to publish a written case study
@@ -177,12 +177,12 @@ Why this works:
 2. Wolfpack Auto dealer customers (existing trust, immediate cross-sell opportunity)
 3. Wolfpack Weekend brands (the marketing connection lets you pitch this as a "team brain" for their internal ops)
 
-### Phase 2 — managed-tier sales (months 4–9)
+### Phase 2: managed-tier sales (months 4–9)
 Take the 2–3 best design partners and **convert them to paid Managed-tier contracts ($150K+ ARR each).** Use those case studies to outbound to similar firms.
 
 This is the phase where Wolfpack's agency motion shines: relationship-led sales, custom scoping, success-engineering delivery. You already do this for branding work; you're just selling a different deliverable.
 
-### Phase 3 — Pro tier self-serve (months 9–15)
+### Phase 3: Pro tier self-serve (months 9–15)
 Open up self-serve Pro signup once:
 - The product is stable for 6 months under design-partner load
 - You have at least 5 paid Managed customers (revenue floor)
@@ -191,12 +191,12 @@ Open up self-serve Pro signup once:
 
 Premature self-serve is the most common SaaS-from-services failure mode. Don't.
 
-### Phase 4 — Starter tier wedge (year 2)
+### Phase 4: Starter tier wedge (year 2)
 Open the $12 MS 365 starter tier as a top-of-funnel motion. By now Pro is the anchor product; Starter is the lead magnet.
 
 ---
 
-## 7. Revenue model — three-year sketch
+## 7. Revenue model: three-year sketch
 
 These are **directional, not projections.** Reality will diverge. The point is to see what the shape has to look like for this to be worth doing.
 
@@ -209,7 +209,7 @@ These are **directional, not projections.** Reality will diverge. The point is t
 | **Wedge subscriptions** | 20 | 100 | 400 |
 | **Avg ARPA wedge** | $5K | $6K | $7K |
 | **Starter (self-serve)** | 0 | 200 | 1500 |
-| **Avg ARPA Starter** | — | $1K | $1.2K |
+| **Avg ARPA Starter** |: | $1K | $1.2K |
 | **Annual Recurring Revenue** | $675K | $3.4M | $11.6M |
 | **Wolfpack delivery headcount on Instinct** | 4 | 8 | 18 |
 
@@ -262,6 +262,6 @@ Things this plan doesn't answer that the CEO + CTO need to decide together:
 2. **Are you willing to turn away agency work to protect Instinct delivery capacity?** Year 2 is when this conflict becomes real.
 3. **What's the bar for "we've succeeded"? $1M ARR? $5M? An exit?** Different bars imply different execution paces.
 4. **Equity carve-out for Instinct contributors?** A SaaS product inside an agency is unusual; the team that builds it usually wants a different upside.
-5. **First wedge product — CRM hygiene, meeting prep, or GitHub digest?** All three are short ships. Pick the one that maps to the warmest existing-client conversation you can have *this week*.
+5. **First wedge product: CRM hygiene, meeting prep, or GitHub digest?** All three are short ships. Pick the one that maps to the warmest existing-client conversation you can have *this week*.
 
 The answers shape everything downstream. Worth a 90-minute working session before the design-partner outreach starts.
