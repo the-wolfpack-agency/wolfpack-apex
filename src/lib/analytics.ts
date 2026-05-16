@@ -505,6 +505,9 @@ export type InstinctEventType =
   | "assistant.form_create_message_submitted"
   | "assistant.form_create_calendar_event_submitted"
   | "assistant.form_create_task_submitted"
+  | "assistant.form_create_okr_submitted"
+  | "assistant.form_create_feature_submitted"
+  | "assistant.form_create_crm_record_submitted"
   // Invite was looked up but the expires_at column says it lapsed.
   // Drives the "ask your admin to resend" UX hint + a tenant-side
   // dashboard counter so admins see expirations before users complain.

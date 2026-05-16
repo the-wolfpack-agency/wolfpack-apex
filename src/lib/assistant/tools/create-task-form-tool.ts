@@ -54,8 +54,7 @@ export const createTaskFormTool: ToolDef<Params, CreateTaskFormData> = {
     return {
       ok: true,
       data: { formKind: "create_task" },
-      answer:
-        "Fill in the task below. Title is required — the Create button stays disabled until it's set.",
+      answer: "Fill in the task below.",
       form: taskFormSpec({
         title: params.title,
       }),

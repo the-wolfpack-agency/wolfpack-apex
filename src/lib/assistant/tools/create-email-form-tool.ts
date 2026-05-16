@@ -58,8 +58,7 @@ export const createEmailFormTool: ToolDef<Params, CreateEmailFormData> = {
     return {
       ok: true,
       data: { formKind: "create_email" },
-      answer:
-        "Fill in the email below. To, subject, and message are required — the Send button stays disabled until they're set.",
+      answer: "Fill in the email below.",
       form: emailFormSpec({
         to: params.to,
         subject: params.subject,

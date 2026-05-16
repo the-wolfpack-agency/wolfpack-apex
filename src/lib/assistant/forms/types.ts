@@ -57,7 +57,10 @@ export type FormKind =
   | "create_email"
   | "create_message"
   | "create_calendar_event"
-  | "create_task";
+  | "create_task"
+  | "create_okr"
+  | "create_feature"
+  | "create_crm_record";
 
 export interface FormSpec {
   /** Stable kind id — used by the submit endpoint to dispatch. */

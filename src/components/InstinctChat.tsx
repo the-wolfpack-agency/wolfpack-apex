@@ -17,6 +17,7 @@ import {
 import { ConnectorBadge } from "@/components/ConnectorBadge";
 import { ChatActionForm } from "@/components/ChatActionForm";
 import type { FormSpec } from "@/lib/assistant/forms/types";
+import { AssistantStarterPrompts } from "@/components/AssistantStarterPrompts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -888,25 +889,60 @@ export default function InstinctChat({
                 borderColor: "var(--wp-dark-border, #333)",
               }}
             >
+              {/* Sidebar header — fixed height + matching px/py to the
+                  main chat header so the bottom border lines up
+                  pixel-perfect across the divide. Was misaligned because
+                  the collapsed-mode content was shorter than the chat
+                  header's icon+title. h-[52px] = matches the 14h of
+                  the main header (icon 24 + py-3 = 24+12+12+border). */}
               <div
-                className="flex items-center justify-between px-4 py-3 border-b"
-                style={{ borderColor: "var(--wp-dark-border, #333)" }}
+                className="flex items-center px-3 border-b shrink-0"
+                style={{
+                  borderColor: "var(--wp-dark-border, #333)",
+                  height: 53,
+                }}
               >
                 {!sidebarCollapsed && (
-                  <span className="text-sm font-medium" style={{ color: "var(--wp-text-dim, #aaa)" }}>
+                  <span
+                    className="text-sm font-medium"
+                    style={{ color: "var(--wp-text-dim, #aaa)" }}
+                  >
                     Conversations
                   </span>
                 )}
+                {/* Chat-bubble icon — shown only when collapsed so the
+                    rail says "I'm the conversations panel" at a glance.
+                    Without it, the bare "»" toggle was opaque (the
+                    screenshot bug). */}
+                {sidebarCollapsed && (
+                  <svg
+                    className="w-5 h-5 hidden lg:block mx-auto"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={1.5}
+                    style={{ color: "var(--wp-text-dim, #aaa)" }}
+                    aria-hidden
+                    data-testid="sidebar-collapsed-icon"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.068.157 2.148.279 3.238.364.466.037.893.281 1.153.671L12 21l2.652-3.978c.26-.39.687-.634 1.153-.67 1.09-.086 2.17-.208 3.238-.365 1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"
+                    />
+                  </svg>
+                )}
                 <div className="flex items-center gap-1 ml-auto">
-                  {/* Desktop collapse toggle — hidden on mobile (the mobile
-                      drawer uses the X button below). Icon flips direction
-                      based on current state so the affordance is clear. */}
+                  {/* Desktop collapse toggle — hidden on mobile (the
+                      mobile drawer uses the X button below). Icon flips
+                      direction based on current state so the
+                      affordance is clear. */}
                   <button
                     onClick={() => setSidebarCollapsed((c) => !c)}
                     className="hidden lg:flex p-1 rounded hover:opacity-80"
                     style={{ color: "var(--wp-text-muted, #6b7280)" }}
                     aria-label={sidebarCollapsed ? "Expand conversations panel" : "Collapse conversations panel"}
-                    title={sidebarCollapsed ? "Expand" : "Collapse"}
+                    title={sidebarCollapsed ? "Show conversations" : "Collapse"}
                     data-testid="sidebar-collapse-toggle"
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -997,10 +1033,12 @@ export default function InstinctChat({
               </div>
             </div>
           )}
-          {/* Header */}
+          {/* Header — fixed height matches the sidebar header so the
+              two bottom borders line up across the divide (the misaligned
+              line was the 2026-05-16 screenshot bug). */}
           <div
-            className="flex items-center gap-3 px-4 py-3 border-b shrink-0"
-            style={{ borderColor: "var(--wp-dark-border, #333)" }}
+            className="flex items-center gap-3 px-4 border-b shrink-0"
+            style={{ borderColor: "var(--wp-dark-border, #333)", height: 53 }}
           >
             {showHistory && position !== "floating" && (
               <button
@@ -1093,6 +1131,18 @@ export default function InstinctChat({
                   Ask about projects, clients, processes, or anything work-related.
                   Get instant answers — no digging through files or emails.
                 </p>
+                {/* Starter-prompt chips. Helps new users discover the
+                    Assistant's surface area. Clicking a chip drops the
+                    prompt into the composer; the user can edit before
+                    sending or just hit Enter. */}
+                <AssistantStarterPrompts
+                  onPick={(prompt) => {
+                    setInput(prompt);
+                    /* Focus + scroll into view so the user can see what
+                       they're about to send (or edit). */
+                    setTimeout(() => inputRef.current?.focus(), 0);
+                  }}
+                />
               </div>
             )}
 

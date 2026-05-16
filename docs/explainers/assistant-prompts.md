@@ -253,7 +253,41 @@ Required: Title, Start, End. Optional: Attendees, Notes.
 
 Required: Title. Optional: Details, Due date, Priority.
 
-> Note: `create a task to follow up Friday` is intentionally routed to the CRM action tool (Salesforce / HubSpot) instead of MS To-Do — the verb-form "to follow up" signals a CRM activity. Use bare `create task` for an MS To-Do task.
+> Note: `create a task to follow up Friday` is intentionally routed to the CRM action tool (Salesforce / HubSpot) instead of MS To-Do. The verb-form "to follow up" signals a CRM activity. Use bare `create task` for an MS To-Do task.
+
+### Create OKR (CEO / CTO / EVP only)
+- `create OKR`
+- `new OKR`
+- `add OKR`
+- `create objective`
+- `draft OKR titled Ship Q3 launch` *(pre-fills the objective)*
+
+Required: Quarter (defaults to current), Objective, one Key Result (metric + numeric target). Other roles get a 403 on submit.
+
+### Create feature request
+- `create feature`
+- `new feature request`
+- `request a feature`
+- `file a feature`
+- `add a roadmap item`
+
+Required: Title, Description. Optional: Target product, Priority, Category.
+
+### Create CRM record (deal / contact / account / task)
+The form is vendor-aware. Fields adapt per object type so the write succeeds first try (no more "StageName required" 400s).
+
+- `create deal`
+- `create a $10k deal with Acme Industries` *(pre-fills name + amount)*
+- `add new opportunity`
+- `create contact jane@example.com` *(pre-fills email)*
+- `create account named Acme Industries`
+- `create CRM task` *(distinguished from MS To-Do `create task`)*
+
+Required per type:
+- **Deal**: Name, Amount, Stage (defaults Prospecting), Close date (defaults today)
+- **Contact**: Last name
+- **Account**: Name
+- **CRM task**: Subject
 
 ---
 

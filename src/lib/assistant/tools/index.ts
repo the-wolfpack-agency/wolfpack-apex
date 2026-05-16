@@ -37,8 +37,13 @@ import "@/lib/assistant/connectors";
    single-word names. */
 import "./search-external-records-tool";
 import "./get-external-record-tool";
-/* Action tools — go through the Phase-3 confirmation flow before
-   firing a real write against the vendor. */
+/* CRM record FORM — registered before the legacy regex-confirm
+   create_external_record so "create a $10k deal with X" surfaces a
+   form (with required StageName + CloseDate baked in) instead of
+   the parse-confirm-write path that 400'd at the vendor. */
+import "./create-crm-record-form-tool";
+/* Legacy create / update — still handles "log a call with X about Y"
+   (action-verb phrasings the form tool intentionally doesn't claim). */
 import "./create-external-record-tool";
 import "./update-external-record-tool";
 /* Read-only advanced queries — related records ("Acme's opportunities")
@@ -57,12 +62,17 @@ import "./recent-workflow-runs-tool";
 
 /* Form-trigger tools — return a FormSpec the chat UI renders inline so
    the user fills required fields before any side effect fires. Order:
-   message first because "create message" is a stricter regex than the
-   email/calendar/task triggers (which share the "create an X" stem). */
+   message before email so "send message" doesn't match email's
+   verb-noun stem. The other tools (OKR / feature / calendar / task)
+   have disjoint object nouns so order between them doesn't matter.
+   (create_crm_record_form is registered earlier alongside the CRM
+   connector tools — see above.) */
 import "./create-message-form-tool";
 import "./create-email-form-tool";
 import "./create-calendar-event-form-tool";
 import "./create-task-form-tool";
+import "./create-okr-form-tool";
+import "./create-feature-form-tool";
 
 export { tryDispatchTool } from "./dispatcher";
 export { getTools, getToolByName, registerTool, __resetRegistryForTests } from "./registry";

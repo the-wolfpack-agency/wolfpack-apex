@@ -50,8 +50,7 @@ export const createCalendarEventFormTool: ToolDef<Params, CreateCalendarEventFor
     return {
       ok: true,
       data: { formKind: "create_calendar_event" },
-      answer:
-        "Fill in the event below. Title, start, and end are required — the Create button stays disabled until they're set.",
+      answer: "Fill in the event below.",
       form: calendarEventFormSpec({
         title: params.title,
       }),

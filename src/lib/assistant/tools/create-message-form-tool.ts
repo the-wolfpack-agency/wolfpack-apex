@@ -46,8 +46,7 @@ export const createMessageFormTool: ToolDef<Params, CreateMessageFormData> = {
     return {
       ok: true,
       data: { formKind: "create_message" },
-      answer:
-        "Fill in the Teams message below. Both fields are required — the Send button stays disabled until they're set.",
+      answer: "Fill in the Teams message below.",
       form: messageFormSpec({}),
     };
   },

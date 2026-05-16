@@ -18,6 +18,9 @@ import { createEmailFormTool } from "@/lib/assistant/tools/create-email-form-too
 import { createMessageFormTool } from "@/lib/assistant/tools/create-message-form-tool";
 import { createCalendarEventFormTool } from "@/lib/assistant/tools/create-calendar-event-form-tool";
 import { createTaskFormTool } from "@/lib/assistant/tools/create-task-form-tool";
+import { createOkrFormTool } from "@/lib/assistant/tools/create-okr-form-tool";
+import { createFeatureFormTool } from "@/lib/assistant/tools/create-feature-form-tool";
+import { createCrmRecordFormTool } from "@/lib/assistant/tools/create-crm-record-form-tool";
 
 const ctx = { userId: "u1", userRole: "cto", workspaceId: "ws1" };
 
@@ -112,12 +115,12 @@ describe("create_message_form — intent", () => {
 });
 
 describe("create_message_form — handler", () => {
-  test("returns form with chatId + body required", async () => {
+  test("returns form with recipient + body required (username resolves server-side to chat id)", async () => {
     const r = await createMessageFormTool.handler({}, ctx);
     if (!r.ok) throw new Error("expected ok");
     expect(r.form?.formKind).toBe("create_message");
     const fields = r.form?.fields ?? [];
-    expect(fields.find((f) => f.name === "chatId")?.required).toBe(true);
+    expect(fields.find((f) => f.name === "recipient")?.required).toBe(true);
     expect(fields.find((f) => f.name === "body")?.required).toBe(true);
   });
 });
@@ -205,5 +208,171 @@ describe("create_task_form — handler", () => {
     expect(fields.find((f) => f.name === "title")?.required).toBe(true);
     expect(fields.find((f) => f.name === "dueAt")?.required).toBe(false);
     expect(fields.find((f) => f.name === "importance")?.type).toBe("select");
+  });
+});
+
+/* ---------------------------------------------------------------------
+ * OKR
+ * ------------------------------------------------------------------- */
+
+describe("create_okr_form — intent", () => {
+  test.each([
+    "create OKR",
+    "new OKR",
+    "add OKR",
+    "create objective",
+    "draft OKR",
+  ])("'%s' matches", (msg) => {
+    expect(createOkrFormTool.matchIntent(msg)).not.toBeNull();
+  });
+
+  test.each([
+    "what are our OKRs",
+    "show me OKRs",
+  ])("'%s' does NOT match (lookup, not create)", (msg) => {
+    expect(createOkrFormTool.matchIntent(msg)).toBeNull();
+  });
+});
+
+describe("create_okr_form — handler", () => {
+  test("returns form with quarter, objective, kr_metric, kr_target required", async () => {
+    const r = await createOkrFormTool.handler({}, ctx);
+    if (!r.ok) throw new Error("expected ok");
+    expect(r.form?.formKind).toBe("create_okr");
+    const fields = r.form?.fields ?? [];
+    expect(fields.find((f) => f.name === "quarter")?.required).toBe(true);
+    expect(fields.find((f) => f.name === "objective")?.required).toBe(true);
+    expect(fields.find((f) => f.name === "kr_metric")?.required).toBe(true);
+    expect(fields.find((f) => f.name === "kr_target")?.required).toBe(true);
+    expect(fields.find((f) => f.name === "kr_unit")?.required).toBe(false);
+    /* Quarter pre-filled with current YYYY-Qn so a quick submit works. */
+    expect(fields.find((f) => f.name === "quarter")?.defaultValue).toMatch(/^\d{4}-Q[1-4]$/);
+  });
+});
+
+/* ---------------------------------------------------------------------
+ * Feature
+ * ------------------------------------------------------------------- */
+
+describe("create_feature_form — intent", () => {
+  test.each([
+    "create feature",
+    "new feature request",
+    "request a feature",
+    "file a feature",
+    "add a roadmap item",
+  ])("'%s' matches", (msg) => {
+    expect(createFeatureFormTool.matchIntent(msg)).not.toBeNull();
+  });
+
+  test("'create email' does NOT match (email tool's job)", () => {
+    expect(createFeatureFormTool.matchIntent("create email")).toBeNull();
+  });
+});
+
+describe("create_feature_form — handler", () => {
+  test("returns form with title + description required, target_product/priority as selects", async () => {
+    const r = await createFeatureFormTool.handler({}, ctx);
+    if (!r.ok) throw new Error("expected ok");
+    expect(r.form?.formKind).toBe("create_feature");
+    const fields = r.form?.fields ?? [];
+    expect(fields.find((f) => f.name === "title")?.required).toBe(true);
+    expect(fields.find((f) => f.name === "description")?.required).toBe(true);
+    expect(fields.find((f) => f.name === "target_product")?.type).toBe("select");
+    expect(fields.find((f) => f.name === "priority")?.type).toBe("select");
+  });
+});
+
+/* ---------------------------------------------------------------------
+ * CRM record (replaces the brittle regex-confirm path)
+ * ------------------------------------------------------------------- */
+
+describe("create_crm_record_form — intent", () => {
+  test("'create a $10k deal with Jesus Christ' captures objectType=deal + amount + name", () => {
+    const p = createCrmRecordFormTool.matchIntent("create a $10k deal with Jesus Christ");
+    expect(p?.objectType).toBe("deal");
+    expect(p?.amount).toBe("10000");
+    expect(p?.name).toBe("Jesus Christ");
+  });
+
+  test("'create a deal for Acme' captures account name", () => {
+    const p = createCrmRecordFormTool.matchIntent("create a deal for Acme Industries");
+    expect(p?.objectType).toBe("deal");
+    expect(p?.name).toBe("Acme Industries");
+  });
+
+  test("'add new opportunity' → objectType=deal (opportunity aliases to deal)", () => {
+    const p = createCrmRecordFormTool.matchIntent("add new opportunity");
+    expect(p?.objectType).toBe("deal");
+  });
+
+  test("'create contact jane@example.com' captures email", () => {
+    const p = createCrmRecordFormTool.matchIntent("create contact jane@example.com");
+    expect(p?.objectType).toBe("contact");
+    expect(p?.email).toBe("jane@example.com");
+  });
+
+  test("'create account Acme' captures name", () => {
+    const p = createCrmRecordFormTool.matchIntent("create account named Acme Industries");
+    expect(p?.objectType).toBe("account");
+    expect(p?.name).toBe("Acme Industries");
+  });
+
+  test.each([
+    "create task",                // bare → MS To-Do form tool
+    "create email",
+    "create message",
+    "create calendar event",
+  ])("'%s' does NOT match (other tools own these)", (msg) => {
+    expect(createCrmRecordFormTool.matchIntent(msg)).toBeNull();
+  });
+
+  test("'create CRM task' explicitly matches (vs bare 'create task')", () => {
+    const p = createCrmRecordFormTool.matchIntent("create CRM task");
+    expect(p?.objectType).toBe("task");
+  });
+});
+
+describe("create_crm_record_form — handler renders the right form per object type", () => {
+  test("deal form includes Stage + CloseDate as required (the regex-confirm bug fix)", async () => {
+    const r = await createCrmRecordFormTool.handler({ objectType: "deal" }, ctx);
+    if (!r.ok) throw new Error("expected ok");
+    expect(r.form?.formKind).toBe("create_crm_record");
+    const fields = r.form?.fields ?? [];
+    expect(fields.find((f) => f.name === "stage")?.required).toBe(true);
+    expect(fields.find((f) => f.name === "closeDate")?.required).toBe(true);
+    expect(fields.find((f) => f.name === "amount")?.required).toBe(true);
+    expect(fields.find((f) => f.name === "name")?.required).toBe(true);
+    /* Stage defaults to Prospecting + closeDate defaults to today so a
+       fast submit succeeds without manual input. */
+    expect(fields.find((f) => f.name === "stage")?.defaultValue).toBe("Prospecting");
+    expect(fields.find((f) => f.name === "closeDate")?.defaultValue).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  test("contact form requires only LastName", async () => {
+    const r = await createCrmRecordFormTool.handler({ objectType: "contact" }, ctx);
+    if (!r.ok) throw new Error("expected ok");
+    const fields = r.form?.fields ?? [];
+    expect(fields.find((f) => f.name === "lastName")?.required).toBe(true);
+    expect(fields.find((f) => f.name === "firstName")?.required).toBe(false);
+    expect(fields.find((f) => f.name === "email")?.required).toBe(false);
+  });
+
+  test("account form requires only Name", async () => {
+    const r = await createCrmRecordFormTool.handler({ objectType: "account" }, ctx);
+    if (!r.ok) throw new Error("expected ok");
+    const fields = r.form?.fields ?? [];
+    expect(fields.find((f) => f.name === "name")?.required).toBe(true);
+  });
+
+  test("pre-fills name + amount + email from intent extraction", async () => {
+    const r = await createCrmRecordFormTool.handler(
+      { objectType: "deal", name: "Acme Renewal", amount: "50000", email: "x@y.co" },
+      ctx,
+    );
+    if (!r.ok) throw new Error("expected ok");
+    const fields = r.form?.fields ?? [];
+    expect(fields.find((f) => f.name === "name")?.defaultValue).toBe("Acme Renewal");
+    expect(fields.find((f) => f.name === "amount")?.defaultValue).toBe("50000");
   });
 });

@@ -298,7 +298,7 @@ function FieldRow({ field, value, touched, serverError, onChange }: FieldRowProp
           onChange={(e: ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}
           style={commonStyle}
         >
-          <option value="">— pick one —</option>
+          <option value="">Pick one</option>
           {(field.options ?? []).map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
