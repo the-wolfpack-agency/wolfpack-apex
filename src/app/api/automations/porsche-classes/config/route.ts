@@ -18,7 +18,6 @@
  *       graph_connected: boolean,
  *       inbox_filter_set: boolean,
  *       sharepoint_set: boolean,
- *       anthropic_set: boolean
  *     }
  *   }
  *
@@ -67,7 +66,6 @@ interface ConfigResponse {
     graph_connected: boolean;
     inbox_filter_set: boolean;
     sharepoint_set: boolean;
-    anthropic_set: boolean;
   };
 }
 
@@ -103,7 +101,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       (filters.sender_match.length ?? 0) > 0 ||
       (filters.subject_match.length ?? 0) > 0,
     sharepoint_set: sharepoint !== null,
-    anthropic_set: !!process.env.ANTHROPIC_API_KEY,
   };
 
   trackEvent("automations.config_viewed", auth.user.id, auth.user.role, {
@@ -291,7 +288,6 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
       inbox_filter_set:
         filters.sender_match.length > 0 || filters.subject_match.length > 0,
       sharepoint_set: sharepoint !== null,
-      anthropic_set: !!process.env.ANTHROPIC_API_KEY,
     },
   };
   return NextResponse.json(responseBody);

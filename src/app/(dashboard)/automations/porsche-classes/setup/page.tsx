@@ -46,7 +46,6 @@ interface ConfigResponse {
     graph_connected: boolean;
     inbox_filter_set: boolean;
     sharepoint_set: boolean;
-    anthropic_set: boolean;
   };
 }
 
@@ -666,28 +665,10 @@ export default function PorscheClassesSetupPage() {
         </form>
       </StepCard>
 
-      {/* Anthropic key — informational only; non-technical operators can't
-          set it themselves. We surface a status line so the page tells the
-          full truth instead of silently ignoring the env-var dependency. */}
-      {!config.status.anthropic_set && (
-        <section
-          data-testid="anthropic-warning"
-          style={{
-            background: "rgba(229,180,69,0.10)",
-            border: "1px solid rgba(229,180,69,0.45)",
-            borderLeftWidth: 4,
-            borderRadius: 6,
-            padding: "0.7rem 0.9rem",
-            marginTop: "1rem",
-            color: "var(--wp-text)",
-            fontSize: "0.9rem",
-          }}
-        >
-          One more thing: AI summaries need an Anthropic API key. Ask the
-          CTO to add it before your next class — once it&apos;s set, this
-          banner will go away.
-        </section>
-      )}
+      {/* Anthropic-key banner removed 2026-05-16. The summary assembler
+          is deterministic template stitching, no LLM call. The
+          ANTHROPIC_API_KEY check was leftover from an earlier spec
+          draft. */}
     </main>
   );
 }

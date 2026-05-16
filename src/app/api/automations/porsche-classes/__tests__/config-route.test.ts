@@ -123,7 +123,6 @@ describe("GET /api/automations/porsche-classes/config", () => {
         graph_connected: boolean;
         inbox_filter_set: boolean;
         sharepoint_set: boolean;
-        anthropic_set: boolean;
       };
     };
     expect(body.inbox_filters.sender_match).toContain(
