@@ -85,97 +85,73 @@ export default function AdminSharepointPage() {
     }
   }
 
-  /** Poll for a SPECIFIC job's completion (by jobId returned from
-   *  POST). Stops as soon as that job has endedAt. Bounded so the
-   *  UI never busy-polls forever, with a clear "continuing in
-   *  background" state if the poll cap is reached before completion. */
-  async function pollSyncCompletion(sourceId: string, jobId: string) {
-    const POLL_MS = 4000;
-    const MAX_MS = 90 * 1000; // 90s cap, then surface "continuing in background"
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < MAX_MS) {
-      await new Promise((r) => setTimeout(r, POLL_MS));
-      try {
-        const res = await fetchWithRefresh(
-          `/api/connectors/sharepoint/sources/${encodeURIComponent(sourceId)}`,
-        );
-        if (!res.ok) continue;
-        const data = await res.json();
-        const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
-        /* Find OUR job by id, not by timestamp guessing. */
-        const job = jobs.find((j: { id: string }) => j.id === jobId);
-        if (job && job.endedAt) {
-          await load();
-          if (job.status === "failed" || job.error) {
-            setSyncErrors((prev) => ({
-              ...prev,
-              [sourceId]:
-                job.error ??
-                `Sync failed (${job.failCount}/${job.fileCount} files).`,
-            }));
-          }
-          return;
-        }
-      } catch {
-        /* keep polling */
-      }
-    }
-    /* Hit the poll cap. The job may still complete in the background;
-     * reconciler will mark it failed if it stays stuck >6 min. Show
-     * a clear "continuing" message so the user knows they can move on. */
-    setSyncErrors((prev) => ({
-      ...prev,
-      [sourceId]:
-        "Sync is still running in the background. Refresh this page in a few minutes to see the result.",
-    }));
-    await load();
-  }
-
   async function handleSync(id: string) {
     setSyncingId(id);
     setSyncErrors((prev) => {
-      const { [id]: _, ...rest } = prev;
+      const { [id]: _unused, ...rest } = prev;
       return rest;
     });
     try {
+      /* Synchronous sync: the route awaits syncSource() so the
+       * response is the final result. No polling, no job-id juggling,
+       * no infinite refresh. Bounded by the route's maxDuration
+       * (300s on Pro). Large folders that exceed that need the
+       * Clear stuck button + a separate queue worker (TODO). */
       const res = await fetchWithRefresh(
         `/api/connectors/sharepoint/sources/${encodeURIComponent(id)}/sync`,
         { method: "POST", headers: jsonHeaders() },
       );
-      /* 202 means the sync was accepted and is running in the
-       * background. The response includes a jobId we poll for. */
-      if (res.status === 202) {
-        let jobId: string | undefined;
-        try {
-          const data = await res.json();
-          jobId = typeof data?.jobId === "string" ? data.jobId : undefined;
-        } catch {
-          /* fall through; we'll just surface a generic completion */
-        }
-        if (jobId) {
-          void pollSyncCompletion(id, jobId).finally(() => {
-            setSyncingId((cur) => (cur === id ? null : cur));
-          });
-        } else {
-          /* No jobId returned (older deploy?). Reload once and stop. */
-          await load();
-          setSyncingId(null);
-        }
+      let data: { result?: { status?: string; successCount?: number; failCount?: number; fileCount?: number; error?: string | null }; error?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        /* If the body isn't JSON it's almost certainly a Vercel
+         * timeout HTML page; tell the user directly. */
+        setSyncErrors((prev) => ({
+          ...prev,
+          [id]: `Sync timed out (HTTP ${res.status}). Folder may be too large for one sync. Try a smaller subfolder.`,
+        }));
         return;
       }
-      /* Anything else is an immediate-fail path. */
-      let errMsg = `Sync failed (HTTP ${res.status}).`;
-      try {
-        const data = await res.json();
-        errMsg = data?.error ?? errMsg;
-      } catch {
-        /* response wasn't JSON */
+      if (!res.ok) {
+        const errMsg =
+          data?.result?.error ??
+          data?.error ??
+          `Sync failed (HTTP ${res.status}).`;
+        setSyncErrors((prev) => ({ ...prev, [id]: errMsg }));
+      } else if (data.result?.status === "partial") {
+        setSyncErrors((prev) => ({
+          ...prev,
+          [id]: `Sync finished with errors (${data.result?.failCount}/${data.result?.fileCount} files failed).`,
+        }));
       }
-      setSyncErrors((prev) => ({ ...prev, [id]: errMsg }));
-      setSyncingId(null);
+      await load();
     } catch (err) {
       setSyncErrors((prev) => ({ ...prev, [id]: (err as Error).message }));
+    } finally {
       setSyncingId(null);
+    }
+  }
+
+  async function handleClearStuck(id: string) {
+    if (!confirm("Force-mark all running syncs for this source as failed? Use this if a sync is hung.")) return;
+    try {
+      const res = await fetchWithRefresh(
+        `/api/connectors/sharepoint/sources/${encodeURIComponent(id)}/clear-stuck`,
+        { method: "POST", headers: jsonHeaders() },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setSyncErrors((prev) => ({ ...prev, [id]: data?.error ?? "Couldn't clear stuck syncs." }));
+      } else {
+        setSyncErrors((prev) => {
+          const { [id]: _unused, ...rest } = prev;
+          return rest;
+        });
+      }
+      await load();
+    } catch (err) {
+      setSyncErrors((prev) => ({ ...prev, [id]: (err as Error).message }));
     }
   }
 
@@ -322,6 +298,19 @@ export default function AdminSharepointPage() {
                     }}
                   >
                     {syncingId === s.id ? "Syncing..." : "Sync now"}
+                  </button>
+                  <button
+                    onClick={() => handleClearStuck(s.id)}
+                    data-testid={`clear-stuck-btn-${s.id}`}
+                    className="text-xs px-3 py-1 rounded"
+                    style={{
+                      background: "var(--wp-dark-surface2, #222)",
+                      border: "1px solid var(--wp-dark-border, #555)",
+                      color: "var(--wp-text-dim, #aaa)",
+                    }}
+                    title="Force-mark any hung sync as failed"
+                  >
+                    Clear stuck
                   </button>
                   <button
                     onClick={() => handleRemove(s.id)}
