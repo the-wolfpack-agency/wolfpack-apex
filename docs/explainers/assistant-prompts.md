@@ -184,11 +184,26 @@ Pulls from Microsoft 365 calendar (Graph API) plus internal transcripts and Team
 - `is Hoxsie busy this afternoon?`
 - `what's on Hoxsie's calendar tomorrow`
 
+### What's on my calendar (verbose phrasing)
+
+The Assistant understands a wide range of phrasings for "show me what's on my calendar for X". Day-of-week names ("monday", "next wednesday", "this thursday") resolve to the right date — they don't fall back to today.
+
+| Prompt | Resolves to |
+| --- | --- |
+| `what is on my calendar monday?` | upcoming Monday |
+| `what's on my calendar tuesday` | upcoming Tuesday |
+| `what is on my calendar next wednesday` | next week's Wednesday |
+| `what's on my schedule friday?` | upcoming Friday |
+| `what's on my agenda this thursday` | this week's Thursday (may be past) |
+| `what's on my calendar today` | today |
+| `what's on my calendar tomorrow` | tomorrow |
+
 ### Meetings on a specific day
 - `what meetings do I have on Monday`
 - `any meetings tomorrow?`
 - `my meetings next week`
 - `my schedule Friday`
+- `my calendar saturday`
 - `Calendar Monday` *(bare day-of-week)*
 - `Agenda next week`
 
