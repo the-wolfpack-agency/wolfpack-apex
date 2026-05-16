@@ -114,6 +114,10 @@ export interface SyncOpts {
   downloadFn?: typeof downloadDriveItem;
   /** Override repo (for tests). */
   repo?: SharepointRepo;
+  /** Use an existing job row instead of creating a new one. The POST
+   *  route uses this so it can return the jobId to the UI before the
+   *  background sync runs. */
+  existingJobId?: string;
 }
 
 /** Run one sync of the given source. Never throws — failures surface
@@ -129,7 +133,12 @@ export async function syncSource(
   const walkFn = opts.walkFn ?? walkFolder;
   const downloadFn = opts.downloadFn ?? downloadDriveItem;
 
-  const job = await repo.startJob(source.id, triggeredBy);
+  /* Caller can pre-create the job row (POST route does this so it can
+   * return the jobId in the 202 response). When provided we wrap it
+   * minimally — we only need its id for finishJob(). */
+  const job = opts.existingJobId
+    ? { id: opts.existingJobId }
+    : await repo.startJob(source.id, triggeredBy);
 
   trackEvent("connectors.sharepoint.sync_started", triggeredBy, triggeredByRole, {
     source_id: source.id,

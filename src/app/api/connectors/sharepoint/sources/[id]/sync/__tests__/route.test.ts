@@ -8,6 +8,7 @@
 
 const mockGetUser = jest.fn();
 const mockGetSource = jest.fn();
+const mockStartJob = jest.fn();
 const mockSyncSource = jest.fn();
 const mockAfter = jest.fn();
 
@@ -17,6 +18,7 @@ jest.mock("@/lib/auth", () => ({
 jest.mock("@/lib/connectors/sharepoint/repo", () => ({
   createRepo: () => ({
     getSource: mockGetSource,
+    startJob: mockStartJob,
   }),
 }));
 jest.mock("@/lib/connectors/sharepoint/sync", () => ({
@@ -56,12 +58,20 @@ const activeSource = {
 beforeEach(() => {
   mockGetUser.mockReset();
   mockGetSource.mockReset();
+  mockStartJob.mockReset();
   mockSyncSource.mockReset();
   mockAfter.mockReset();
+  /* Default: startJob returns a synthetic job row. Tests that need to
+   * exercise startJob failure paths override this. */
+  mockStartJob.mockResolvedValue({
+    id: "job-xyz", sourceId: "abc", triggeredBy: "u1",
+    startedAt: "2026-05-16T15:00:00Z", endedAt: null, status: "running",
+    fileCount: 0, successCount: 0, failCount: 0, bytesIngested: 0, error: null,
+  });
 });
 
 describe("POST /api/connectors/sharepoint/sources/[id]/sync", () => {
-  test("returns 202 immediately and schedules syncSource via after()", async () => {
+  test("returns 202 + jobId, creates job synchronously, schedules syncSource via after()", async () => {
     mockGetUser.mockReturnValue({ id: "u1", role: "cto", workspaceId: "ws1" });
     mockGetSource.mockResolvedValue(activeSource);
     mockSyncSource.mockResolvedValue({ status: "succeeded" });
@@ -71,17 +81,21 @@ describe("POST /api/connectors/sharepoint/sources/[id]/sync", () => {
     const body = await res.json();
     expect(body.accepted).toBe(true);
     expect(body.sourceId).toBe("abc");
+    /* jobId must be returned so the UI polls for THIS specific job
+     * (no timestamp-comparison guessing). */
+    expect(body.jobId).toBe("job-xyz");
+    expect(mockStartJob).toHaveBeenCalledWith("abc", "u1");
 
-    /* after() received a callback. The route did NOT await syncSource
-     * directly. */
     expect(mockAfter).toHaveBeenCalledTimes(1);
     expect(mockSyncSource).not.toHaveBeenCalled();
 
-    /* Now invoke the after-callback to confirm it would run syncSource
-     * with the right args. This is what Vercel does post-response. */
     const afterCb = mockAfter.mock.calls[0][0] as () => Promise<void>;
     await afterCb();
-    expect(mockSyncSource).toHaveBeenCalledWith(activeSource, "u1", "cto");
+    /* syncSource gets the pre-created jobId so it skips startJob inside. */
+    expect(mockSyncSource).toHaveBeenCalledWith(
+      activeSource, "u1", "cto",
+      { existingJobId: "job-xyz" },
+    );
   });
 
   test("401 unauthenticated", async () => {

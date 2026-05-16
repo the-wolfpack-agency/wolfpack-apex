@@ -53,16 +53,12 @@ export default function AdminSharepointPage() {
     void load();
   }, [load]);
 
-  /* Background poll: while ANY source is currently syncing, refresh
-   * the list every 4 seconds so last_synced_at + status updates flow
-   * in without a manual reload. Stops when no syncs are in flight. */
-  useEffect(() => {
-    if (!syncingId) return;
-    const handle = setInterval(() => {
-      void load();
-    }, 4000);
-    return () => clearInterval(handle);
-  }, [syncingId, load]);
+  /* Note: we used to also have a generic 4s poll that reloaded the
+   * sources list while syncingId was non-null. That created an
+   * "infinite refresh" feel even when the targeted job poller had
+   * everything under control. Targeted pollSyncCompletion() now
+   * handles its own reload on completion — we don't need a second
+   * poll. */
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -89,30 +85,33 @@ export default function AdminSharepointPage() {
     }
   }
 
-  /** Poll the source's GET endpoint until the latest job has an
-   *  ended_at (meaning the background sync finished). Caps at a few
-   *  minutes so a runaway job doesn't poll forever. */
-  async function pollSyncCompletion(id: string, startedBefore: string) {
+  /** Poll for a SPECIFIC job's completion (by jobId returned from
+   *  POST). Stops as soon as that job has endedAt. Bounded so the
+   *  UI never busy-polls forever, with a clear "continuing in
+   *  background" state if the poll cap is reached before completion. */
+  async function pollSyncCompletion(sourceId: string, jobId: string) {
     const POLL_MS = 4000;
-    const MAX_MS = 6 * 60 * 1000;
+    const MAX_MS = 90 * 1000; // 90s cap, then surface "continuing in background"
     const startedAt = Date.now();
     while (Date.now() - startedAt < MAX_MS) {
       await new Promise((r) => setTimeout(r, POLL_MS));
       try {
         const res = await fetchWithRefresh(
-          `/api/connectors/sharepoint/sources/${encodeURIComponent(id)}`,
+          `/api/connectors/sharepoint/sources/${encodeURIComponent(sourceId)}`,
         );
         if (!res.ok) continue;
         const data = await res.json();
-        const latestJob = Array.isArray(data?.jobs) ? data.jobs[0] : null;
-        if (latestJob && latestJob.startedAt > startedBefore && latestJob.endedAt) {
+        const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
+        /* Find OUR job by id, not by timestamp guessing. */
+        const job = jobs.find((j: { id: string }) => j.id === jobId);
+        if (job && job.endedAt) {
           await load();
-          if (latestJob.status === "failed" || latestJob.error) {
+          if (job.status === "failed" || job.error) {
             setSyncErrors((prev) => ({
               ...prev,
-              [id]:
-                latestJob.error ??
-                `Sync failed (${latestJob.failCount}/${latestJob.fileCount} files).`,
+              [sourceId]:
+                job.error ??
+                `Sync failed (${job.failCount}/${job.fileCount} files).`,
             }));
           }
           return;
@@ -121,11 +120,13 @@ export default function AdminSharepointPage() {
         /* keep polling */
       }
     }
-    /* Timed out polling; surface a soft warning. The job may still
-     * complete in the background. */
+    /* Hit the poll cap. The job may still complete in the background;
+     * reconciler will mark it failed if it stays stuck >6 min. Show
+     * a clear "continuing" message so the user knows they can move on. */
     setSyncErrors((prev) => ({
       ...prev,
-      [id]: "Sync is taking longer than expected. Check back in a few minutes.",
+      [sourceId]:
+        "Sync is still running in the background. Refresh this page in a few minutes to see the result.",
     }));
     await load();
   }
@@ -136,18 +137,30 @@ export default function AdminSharepointPage() {
       const { [id]: _, ...rest } = prev;
       return rest;
     });
-    const startedBefore = new Date().toISOString();
     try {
       const res = await fetchWithRefresh(
         `/api/connectors/sharepoint/sources/${encodeURIComponent(id)}/sync`,
         { method: "POST", headers: jsonHeaders() },
       );
       /* 202 means the sync was accepted and is running in the
-       * background. We start polling for completion. */
+       * background. The response includes a jobId we poll for. */
       if (res.status === 202) {
-        void pollSyncCompletion(id, startedBefore).finally(() => {
-          setSyncingId((cur) => (cur === id ? null : cur));
-        });
+        let jobId: string | undefined;
+        try {
+          const data = await res.json();
+          jobId = typeof data?.jobId === "string" ? data.jobId : undefined;
+        } catch {
+          /* fall through; we'll just surface a generic completion */
+        }
+        if (jobId) {
+          void pollSyncCompletion(id, jobId).finally(() => {
+            setSyncingId((cur) => (cur === id ? null : cur));
+          });
+        } else {
+          /* No jobId returned (older deploy?). Reload once and stop. */
+          await load();
+          setSyncingId(null);
+        }
         return;
       }
       /* Anything else is an immediate-fail path. */
