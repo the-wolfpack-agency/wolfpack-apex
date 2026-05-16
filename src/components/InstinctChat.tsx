@@ -43,6 +43,9 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   source?: string;
+  /** Connector name when the answer came from a CRM/external system
+   *  (salesforce, hubspot, github, …). Rendered as a styled badge. */
+  connectorSource?: string;
   tokensUsed: number;
   timestamp: string;
   rating?: number;
@@ -97,6 +100,22 @@ const SOURCE_BADGE: Record<string, { label: string; color: string }> = {
   ai: { label: "AI generated", color: "var(--wp-gold, #eab308)" },
   fallback: { label: "No match found", color: "var(--wp-text-muted, #6b7280)" },
 };
+
+/** Connector-source badges. Each external system gets a distinct color
+ *  so a multi-CRM workspace can scan a long conversation and see at a
+ *  glance "this came from Salesforce, that came from HubSpot." */
+const CONNECTOR_BADGE: Record<string, { label: string; color: string }> = {
+  salesforce: { label: "Salesforce", color: "#00a1e0" },
+  hubspot: { label: "HubSpot", color: "#ff7a59" },
+  quickbooks: { label: "QuickBooks", color: "#2ca01c" },
+  jira: { label: "Jira", color: "#2684ff" },
+  github: { label: "GitHub", color: "var(--wp-text, #fff)" },
+  zendesk: { label: "Zendesk", color: "#03363d" },
+};
+
+function connectorBadge(name: string): { label: string; color: string } {
+  return CONNECTOR_BADGE[name] ?? { label: name, color: "var(--wp-text-muted, #6b7280)" };
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -648,6 +667,7 @@ export default function InstinctChat({
         role: "assistant",
         content: responseContent,
         source: data.source,
+        connectorSource: typeof data.connectorSource === "string" ? data.connectorSource : undefined,
         tokensUsed: data.tokensUsed,
         timestamp: new Date().toISOString(),
         relatedPages: Array.isArray(data.relatedPages) ? data.relatedPages : undefined,
@@ -1199,6 +1219,27 @@ export default function InstinctChat({
                           {SOURCE_BADGE[msg.source].label}
                         </span>
                       )}
+
+                      {/* Connector-source badge — when the answer came
+                          from a CRM/external system (salesforce, hubspot,
+                          github, …). Distinct color per vendor so a
+                          multi-CRM workspace can tell at a glance which
+                          system answered. */}
+                      {showSource && msg.connectorSource && (() => {
+                        const b = connectorBadge(msg.connectorSource);
+                        return (
+                          <span
+                            className="inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium"
+                            style={{
+                              background: `${b.color}20`,
+                              color: b.color,
+                              border: `1px solid ${b.color}40`,
+                            }}
+                          >
+                            {b.label}
+                          </span>
+                        );
+                      })()}
 
                       {/* Zero tokens badge */}
                       {showSource && msg.source !== "ai" && (

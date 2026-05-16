@@ -27,25 +27,31 @@ describe("sourceLabel — known vendors get friendly capitalized names", () => {
 });
 
 describe("withSourceFooter", () => {
-  test("appends italic Source: line to the answer", () => {
-    const out = withSourceFooter("Found 1 contact.", "salesforce");
-    expect(out).toContain("Found 1 contact.");
-    expect(out).toContain("*— Source: Salesforce*");
-    /* Separator is a blank line — answer + footer don't run together. */
-    expect(out).toMatch(/Found 1 contact\.\s*\n\s*\n\s*\*— Source/);
+  test("no-op by default — UI renders connectorSource as a badge instead", () => {
+    /* 2026-05-16: switched from inline italic footer to a styled
+       badge in the chat UI. The helper now returns the answer
+       unchanged unless the caller passes { inline: true }. */
+    expect(withSourceFooter("Found 1 contact.", "salesforce")).toBe("Found 1 contact.");
   });
 
-  test("strips trailing whitespace from answer before appending", () => {
-    const out = withSourceFooter("Found 1 contact.   \n\n\n", "hubspot");
-    /* Exactly one blank line between answer and footer. */
-    const split = out.split("\n\n");
-    expect(split).toHaveLength(2);
-    expect(split[1]).toBe("*— Source: HubSpot*");
-  });
-
-  test("returns answer unchanged when connector is null/undefined/empty", () => {
+  test("returns answer unchanged when connector is null/undefined/empty (regardless of inline flag)", () => {
     expect(withSourceFooter("Found 1 contact.", null)).toBe("Found 1 contact.");
     expect(withSourceFooter("Found 1 contact.", undefined)).toBe("Found 1 contact.");
     expect(withSourceFooter("Found 1 contact.", "")).toBe("Found 1 contact.");
+    expect(withSourceFooter("Found 1 contact.", null, { inline: true })).toBe("Found 1 contact.");
+  });
+
+  test("inline: true → appends italic Source: footer (analytics export / transcript path)", () => {
+    const out = withSourceFooter("Found 1 contact.", "salesforce", { inline: true });
+    expect(out).toContain("Found 1 contact.");
+    expect(out).toContain("*— Source: Salesforce*");
+    expect(out).toMatch(/Found 1 contact\.\s*\n\s*\n\s*\*— Source/);
+  });
+
+  test("inline: true strips trailing whitespace before appending", () => {
+    const out = withSourceFooter("Found 1 contact.   \n\n\n", "hubspot", { inline: true });
+    const split = out.split("\n\n");
+    expect(split).toHaveLength(2);
+    expect(split[1]).toBe("*— Source: HubSpot*");
   });
 });

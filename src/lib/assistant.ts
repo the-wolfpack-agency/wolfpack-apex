@@ -89,6 +89,12 @@ export interface AssistantResponse {
   /** Source attributions surfaced to the UI. Empty array when the answer
    *  is generic (fallback / pure AI / etc.). */
   sources?: AssistantSourceRef[];
+  /** Connector name when the answer was served by a CRM/external-system
+   *  tool (salesforce, hubspot, github, jira, …). The UI renders this
+   *  as a styled badge alongside the existing source-class badge so
+   *  the user can tell which system the data came from. Undefined for
+   *  non-connector answers (page-facts / brain / pure AI / etc.). */
+  connectorSource?: string;
 }
 
 export interface ConversationSummary {
@@ -664,6 +670,17 @@ export async function chat(
       0,
     );
     await dbUpdateConversationStats(convId, 0);
+    /* Extract connector attribution from the tool's typed result data
+       when present (CRM tools all put `connector` at the top level of
+       their data block). The UI renders this as a styled badge so
+       multi-CRM workspaces can tell which system the data came from. */
+    const toolData = toolResult.result.data as
+      | { connector?: string }
+      | undefined;
+    const connectorSource =
+      typeof toolData?.connector === "string" && toolData.connector
+        ? toolData.connector
+        : undefined;
     return {
       response: toolResult.result.answer,
       source: "tool",
@@ -671,6 +688,7 @@ export async function chat(
       conversationId: convId,
       messageId: msgId,
       sources: toolResult.result.sources,
+      ...(connectorSource ? { connectorSource } : {}),
     };
   }
   // Tool intent matched but execution failed (validation / capability /

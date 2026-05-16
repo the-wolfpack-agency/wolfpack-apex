@@ -146,10 +146,11 @@ describe("handler — count", () => {
       expect(r.answer).toContain("**17** deals");
       expect(r.answer).toContain("amount > $50,000");
       expect(r.answer).toContain("this month");
-      /* Source attribution appears at the bottom — pins the contract
-         that connector-backed tool answers always say which system the
-         data came from. Critical when a workspace has multiple CRMs. */
-      expect(r.answer).toContain("*— Source: Salesforce*");
+      /* Connector attribution flows through the typed data field so the
+         chat UI can render it as a styled badge — the inline footer
+         was removed 2026-05-16 in favor of the badge. The data block
+         still carries the connector name. */
+      expect(r.data.connector).toBe("salesforce");
     }
   });
 });

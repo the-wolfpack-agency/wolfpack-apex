@@ -29,11 +29,31 @@ export function sourceLabel(connectorName: string): string {
   return CONNECTOR_LABELS[connectorName] ?? connectorName;
 }
 
-/** Append the source attribution to an answer. Returns the answer
- *  unchanged when no connector is provided (e.g. "not configured"
- *  paths where the source is implicit / irrelevant). */
-export function withSourceFooter(answer: string, connectorName?: string | null): string {
-  if (!connectorName) return answer;
+/** Append the source attribution to an answer.
+ *
+ *  As of 2026-05-16 the chat UI renders the connector source as a
+ *  styled badge alongside "Zero tokens" — sourced from the
+ *  `connectorSource` field on AssistantResponse, populated by the
+ *  dispatcher from the tool's typed data. The badge replaced the
+ *  inline italic markdown footer for clarity (the markdown blended
+ *  in with the answer body).
+ *
+ *  This helper is now a NO-OP for the chat surface (returns answer
+ *  unchanged) but kept so:
+ *    1. Tool tests keep the call site → easy to flip back if the
+ *       badge UX regresses.
+ *    2. Non-UI consumers of the answer string (analytics export,
+ *       transcript download) can opt in via `inline: true`.
+ *
+ *  Migration path complete: every connector tool already calls this;
+ *  flipping to `inline: true` re-adds the footer everywhere if
+ *  needed. */
+export function withSourceFooter(
+  answer: string,
+  connectorName?: string | null,
+  opts: { inline?: boolean } = {},
+): string {
+  if (!connectorName || !opts.inline) return answer;
   const trimmed = answer.replace(/\s+$/g, "");
   return `${trimmed}\n\n*— Source: ${sourceLabel(connectorName)}*`;
 }
