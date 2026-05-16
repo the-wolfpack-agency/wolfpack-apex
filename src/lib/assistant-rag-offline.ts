@@ -62,6 +62,14 @@ export interface AssistantRagResult {
   /** Which source the server classified the answer as (e.g. "knowledge_cache", "ai"). */
   source_kind?: string;
   tokens_used?: number;
+  /** Connector name when the answer came from a CRM/external system
+   *  (salesforce, hubspot, github, …). The chat UI renders this as a
+   *  styled vendor badge alongside "Zero tokens". Undefined for non-
+   *  connector answers. */
+  connector_source?: string;
+  /** Related Instinct pages the answer touches — passes through from
+   *  the server so chip rows render on the offline-RAG path too. */
+  related_pages?: Array<Record<string, unknown>>;
 }
 
 export interface QueryAssistantOptions {
@@ -145,6 +153,8 @@ export async function queryAssistantWithCache(
           messageId?: string;
           sources?: AssistantRagSource[];
           docs?: Array<{ id: string; title?: string; score?: number; content?: string }>;
+          connectorSource?: string;
+          relatedPages?: Array<Record<string, unknown>>;
         };
 
         const answer = data.response ?? "";
@@ -187,6 +197,14 @@ export async function queryAssistantWithCache(
           conversation_id: data.conversationId ?? null,
           source_kind: data.source,
           tokens_used: data.tokensUsed,
+          /* Forward connector attribution + related-page chips so the
+             chat surface can render the vendor badge + page chips. */
+          ...(typeof data.connectorSource === "string" && data.connectorSource
+            ? { connector_source: data.connectorSource }
+            : {}),
+          ...(Array.isArray(data.relatedPages) && data.relatedPages.length > 0
+            ? { related_pages: data.relatedPages }
+            : {}),
         };
       }
       // Non-OK response → fall through to cache lookup (we still want

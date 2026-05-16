@@ -279,6 +279,80 @@ describe("POST /api/assistant — tool path contract", () => {
   });
 });
 
+describe("POST /api/assistant — connector source badge contract", () => {
+  /* The chat UI renders the connector (Salesforce / HubSpot / GitHub /
+     etc.) as a styled badge alongside "Zero tokens". The contract:
+     when chat() returns connectorSource, the API response MUST include
+     it as a top-level string field. A regression here breaks every
+     multi-CRM workspace's source-attribution at the UI layer. */
+
+  test("connectorSource passes through from chat() to the JSON response", async () => {
+    mockChat.mockResolvedValue({
+      response: "Top 3 deals:\n1. Acme",
+      source: "tool",
+      tokensUsed: 0,
+      conversationId: "c-cs",
+      messageId: "m-cs",
+      connectorSource: "salesforce",
+    });
+
+    const res = await POST(postMessage("top 3 deals"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.connectorSource).toBe("salesforce");
+  });
+
+  test("connectorSource flows for the GitHub tools too (string is opaque to the API)", async () => {
+    mockChat.mockResolvedValue({
+      response: "Recent 5 workflow runs in `wolfpack-apex`.",
+      source: "tool",
+      tokensUsed: 0,
+      conversationId: "c-gh",
+      messageId: "m-gh",
+      connectorSource: "github",
+    });
+
+    const res = await POST(postMessage("failed CI in wolfpack-apex"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.connectorSource).toBe("github");
+  });
+
+  test("when chat() omits connectorSource the field is absent (not stringified 'undefined')", async () => {
+    mockChat.mockResolvedValue({
+      response: "Plain answer.",
+      source: "ai",
+      tokensUsed: 12,
+      conversationId: "c-none",
+      messageId: "m-none",
+      /* no connectorSource */
+    });
+
+    const res = await POST(postMessage("hello"));
+    const body = await res.json();
+    expect(body.connectorSource).toBeUndefined();
+    expect(body).not.toHaveProperty("connectorSource");
+  });
+
+  test("connectorSource survives the relatedPages augmentation path", async () => {
+    /* The route may rewrite response.response to append a "Go to: ..."
+       line when relatedPages were detected — verify that mutation
+       doesn't clobber connectorSource. */
+    mockChat.mockResolvedValue({
+      response: "Top 3 deals: ...",
+      source: "tool",
+      tokensUsed: 0,
+      conversationId: "c-rp",
+      messageId: "m-rp",
+      connectorSource: "salesforce",
+    });
+
+    const res = await POST(postMessage("top 3 deals"));
+    const body = await res.json();
+    expect(body.connectorSource).toBe("salesforce");
+  });
+});
+
 describe("POST /api/assistant — auth gates", () => {
   test("(g) unauthorized POST returns 401 and does not call chat()", async () => {
     mockAuthUser = null;

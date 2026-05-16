@@ -14,6 +14,7 @@ import {
   ingestFileFromChat,
   formatIngestSystemMessage,
 } from "@/lib/assistant/chat-ingest";
+import { ConnectorBadge } from "@/components/ConnectorBadge";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -104,25 +105,8 @@ const SOURCE_BADGE: Record<string, { label: string; color: string }> = {
   fallback: { label: "No match found", color: "var(--wp-text-muted, #6b7280)" },
 };
 
-/** Connector-source badges. Each external system gets a distinct color
- *  so a multi-CRM workspace can scan a long conversation and see at a
- *  glance "this came from Salesforce, that came from HubSpot." */
-const CONNECTOR_BADGE: Record<string, { label: string; color: string }> = {
-  salesforce: { label: "Salesforce", color: "#00a1e0" },
-  hubspot: { label: "HubSpot", color: "#ff7a59" },
-  quickbooks: { label: "QuickBooks", color: "#2ca01c" },
-  jira: { label: "Jira", color: "#2684ff" },
-  /* GitHub doesn't have a strong brand color we can rely on across
-     light + dark themes. #6e7681 is the gray they use for muted UI in
-     primer.style — readable on white AND on dark backgrounds with the
-     20%-alpha pill we render. */
-  github: { label: "GitHub", color: "#6e7681" },
-  zendesk: { label: "Zendesk", color: "#03363d" },
-};
-
-function connectorBadge(name: string): { label: string; color: string } {
-  return CONNECTOR_BADGE[name] ?? { label: name, color: "var(--wp-text-muted, #6b7280)" };
-}
+/* Connector badge styling + map lives in @/components/ConnectorBadge so
+   it can be unit-tested + reused. Imported above. */
 
 // ---------------------------------------------------------------------------
 // Component
@@ -534,6 +518,13 @@ export default function InstinctChat({
             role: "assistant",
             content: result.answer,
             source: result.source_kind,
+            /* Forward the connector vendor badge + chip rows from the
+               server response. The offline-RAG wrapper preserves these
+               fields so the badge renders on the no-attachments path
+               (which is 99% of message sends — the fix that was missing
+               since the badge feature shipped on 2026-05-16). */
+            connectorSource: result.connector_source,
+            relatedPages: result.related_pages as RelatedPage[] | undefined,
             tokensUsed: result.tokens_used ?? 0,
             timestamp: new Date().toISOString(),
             fromCache: result.from_cache,
@@ -1244,22 +1235,12 @@ export default function InstinctChat({
                           from a CRM/external system (salesforce, hubspot,
                           github, …). Distinct color per vendor so a
                           multi-CRM workspace can tell at a glance which
-                          system answered. */}
-                      {showSource && msg.connectorSource && (() => {
-                        const b = connectorBadge(msg.connectorSource);
-                        return (
-                          <span
-                            className="inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium"
-                            style={{
-                              background: `${b.color}20`,
-                              color: b.color,
-                              border: `1px solid ${b.color}40`,
-                            }}
-                          >
-                            {b.label}
-                          </span>
-                        );
-                      })()}
+                          system answered. ConnectorBadge returns null
+                          when connector is falsy, so the gate is just
+                          showSource. */}
+                      {showSource && (
+                        <ConnectorBadge connector={msg.connectorSource} />
+                      )}
 
                       {/* Zero tokens badge */}
                       {showSource && msg.source !== "ai" && (
