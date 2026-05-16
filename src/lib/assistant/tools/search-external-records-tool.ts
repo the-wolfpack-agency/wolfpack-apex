@@ -31,6 +31,7 @@ import type { Connector } from "@/lib/assistant/connectors";
 import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
 import type { ToolDef, ToolResult } from "./types";
+import { withSourceFooter } from "./source-footer";
 
 const OBJECT_TYPES = ["contact", "deal", "company", "account"] as const;
 type ObjectType = (typeof OBJECT_TYPES)[number];
@@ -316,7 +317,10 @@ export const searchExternalRecordsTool: ToolDef<Params, SearchExternalRecordsDat
         matchCount: records.length,
         records,
       },
-      answer: renderAnswer(params.query, params.objectType, records),
+      answer: withSourceFooter(
+        renderAnswer(params.query, params.objectType, records),
+        resolvedConnectorName,
+      ),
     };
   },
 };

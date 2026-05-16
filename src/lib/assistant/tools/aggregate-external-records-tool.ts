@@ -28,6 +28,7 @@ import type {
   AggregateResult,
   AggregateSpec,
 } from "@/lib/assistant/connectors/vendor-presets";
+import { withSourceFooter } from "./source-footer";
 
 const OBJECT_TYPES = ["contact", "deal", "opportunity", "account"] as const;
 type ObjectType = (typeof OBJECT_TYPES)[number];
@@ -337,7 +338,10 @@ export const aggregateExternalRecordsTool: ToolDef<Params, AggregateData> = {
         operation: params.operation,
         result: result.data ?? { type: "scalar", value: 0 },
       },
-      answer: renderAnswer(params, result.data ?? { type: "scalar", value: 0 }),
+      answer: withSourceFooter(
+        renderAnswer(params, result.data ?? { type: "scalar", value: 0 }),
+        resolvedConnectorName,
+      ),
     };
   },
 };

@@ -20,6 +20,7 @@ import {
 import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
 import type { ToolDef, ToolResult } from "./types";
+import { withSourceFooter } from "./source-footer";
 
 const PARENT_TYPES = ["account", "company", "contact"] as const;
 const RELATED_TYPES = ["opportunity", "deal", "contact", "account", "task"] as const;
@@ -247,7 +248,7 @@ export const getRelatedRecordsTool: ToolDef<Params, RelatedRecordsData> = {
         matchCount: records.length,
         records,
       },
-      answer: renderAnswer(params, records),
+      answer: withSourceFooter(renderAnswer(params, records), resolvedConnectorName),
     };
   },
 };

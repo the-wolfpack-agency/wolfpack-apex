@@ -146,6 +146,10 @@ describe("handler — count", () => {
       expect(r.answer).toContain("**17** deals");
       expect(r.answer).toContain("amount > $50,000");
       expect(r.answer).toContain("this month");
+      /* Source attribution appears at the bottom — pins the contract
+         that connector-backed tool answers always say which system the
+         data came from. Critical when a workspace has multiple CRMs. */
+      expect(r.answer).toContain("*— Source: Salesforce*");
     }
   });
 });

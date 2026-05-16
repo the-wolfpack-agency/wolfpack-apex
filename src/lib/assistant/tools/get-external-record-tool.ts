@@ -24,6 +24,7 @@ import {
 import type { Connector } from "@/lib/assistant/connectors";
 import { registerTool } from "./registry";
 import type { ToolDef, ToolResult } from "./types";
+import { withSourceFooter } from "./source-footer";
 
 const ParamSchema = z.object({
   objectType: z.enum([
@@ -162,7 +163,10 @@ export const getExternalRecordTool: ToolDef<Params, ExternalRecordData> = {
         id: params.id,
         record,
       },
-      answer: formatRecordAnswer(params.objectType, params.id, record),
+      answer: withSourceFooter(
+        formatRecordAnswer(params.objectType, params.id, record),
+        resolvedConnectorName,
+      ),
     };
   },
 };

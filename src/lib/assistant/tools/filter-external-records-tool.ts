@@ -25,6 +25,7 @@ import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
 import type { ToolDef, ToolResult } from "./types";
 import type { FilterSpec } from "@/lib/assistant/connectors/vendor-presets";
+import { withSourceFooter } from "./source-footer";
 
 const OBJECT_TYPES = ["contact", "deal", "opportunity", "account"] as const;
 type ObjectType = (typeof OBJECT_TYPES)[number];
@@ -315,7 +316,7 @@ export const filterExternalRecordsTool: ToolDef<Params, FilterRecordsData> = {
         matchCount: records.length,
         records,
       },
-      answer: renderAnswer(params, records),
+      answer: withSourceFooter(renderAnswer(params, records), resolvedConnectorName),
     };
   },
 };
