@@ -14,6 +14,10 @@ import {
   ingestFileFromChat,
   formatIngestSystemMessage,
 } from "@/lib/assistant/chat-ingest";
+import {
+  extractSourceFooter,
+  connectorNameFromLabel,
+} from "@/lib/assistant/tools/source-footer";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -109,7 +113,11 @@ const CONNECTOR_BADGE: Record<string, { label: string; color: string }> = {
   hubspot: { label: "HubSpot", color: "#ff7a59" },
   quickbooks: { label: "QuickBooks", color: "#2ca01c" },
   jira: { label: "Jira", color: "#2684ff" },
-  github: { label: "GitHub", color: "var(--wp-text, #fff)" },
+  /* GitHub doesn't have a strong brand color we can rely on across
+     light + dark themes. #6e7681 is the gray they use for muted UI in
+     primer.style — readable on white AND on dark backgrounds with the
+     20%-alpha pill we render. */
+  github: { label: "GitHub", color: "#6e7681" },
   zendesk: { label: "Zendesk", color: "#03363d" },
 };
 
@@ -662,12 +670,31 @@ export default function InstinctChat({
           "\n\n" + passedFiles.map((n: string) => `Added to knowledge base: ${n}`).join("\n");
       }
 
+      /* Connector attribution: the API sets `connectorSource` for fresh
+         tool dispatches, but historical/reloaded messages don't carry
+         that field. Every tool answer also carries an inline
+         "*— Source: <Vendor>*" footer that we extract + strip here so
+         the badge renders regardless of provenance and the body stays
+         clean. The API field wins when both are present (it's the
+         canonical name, e.g. "salesforce"; the footer carries the
+         display label, e.g. "Salesforce"). */
+      let displayContent = responseContent;
+      let resolvedConnectorSource: string | undefined =
+        typeof data.connectorSource === "string" ? data.connectorSource : undefined;
+      const extracted = extractSourceFooter(responseContent);
+      if (extracted) {
+        displayContent = extracted.bodyWithoutFooter;
+        if (!resolvedConnectorSource) {
+          resolvedConnectorSource = connectorNameFromLabel(extracted.label);
+        }
+      }
+
       const assistantMsg: Message = {
         id: data.messageId,
         role: "assistant",
-        content: responseContent,
+        content: displayContent,
         source: data.source,
-        connectorSource: typeof data.connectorSource === "string" ? data.connectorSource : undefined,
+        connectorSource: resolvedConnectorSource,
         tokensUsed: data.tokensUsed,
         timestamp: new Date().toISOString(),
         relatedPages: Array.isArray(data.relatedPages) ? data.relatedPages : undefined,
@@ -737,7 +764,20 @@ export default function InstinctChat({
       if (!res.ok) return;
       const data = await res.json();
       setConversationId(convId);
-      setMessages(data.messages || []);
+      /* Reloaded messages from the DB don't have connectorSource as a
+         column — pull it from the inline footer and strip from body so
+         the badge renders on historical tool answers too. */
+      const messages: Message[] = (data.messages || []).map((m: Message) => {
+        if (m.role !== "assistant" || !m.content) return m;
+        const extracted = extractSourceFooter(m.content);
+        if (!extracted) return m;
+        return {
+          ...m,
+          content: extracted.bodyWithoutFooter,
+          connectorSource: m.connectorSource ?? connectorNameFromLabel(extracted.label),
+        };
+      });
+      setMessages(messages);
       setSidebarOpen(false);
     } catch {
       // Load failure is non-fatal

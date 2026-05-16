@@ -31,29 +31,50 @@ export function sourceLabel(connectorName: string): string {
 
 /** Append the source attribution to an answer.
  *
- *  As of 2026-05-16 the chat UI renders the connector source as a
- *  styled badge alongside "Zero tokens" — sourced from the
- *  `connectorSource` field on AssistantResponse, populated by the
- *  dispatcher from the tool's typed data. The badge replaced the
- *  inline italic markdown footer for clarity (the markdown blended
- *  in with the answer body).
+ *  Every CRM/external-system tool answer carries this footer in the
+ *  body so the source is preserved even when the answer is read by a
+ *  non-chat consumer (analytics export, transcript download, a refresh
+ *  of a saved conversation message where the connectorSource field
+ *  didn't get persisted). The chat UI extracts the footer at render
+ *  time and renders it as a styled badge alongside "Zero tokens" (see
+ *  `extractSourceFooter` below + InstinctChat consuming it).
  *
- *  This helper is now a NO-OP for the chat surface (returns answer
- *  unchanged) but kept so:
- *    1. Tool tests keep the call site → easy to flip back if the
- *       badge UX regresses.
- *    2. Non-UI consumers of the answer string (analytics export,
- *       transcript download) can opt in via `inline: true`.
- *
- *  Migration path complete: every connector tool already calls this;
- *  flipping to `inline: true` re-adds the footer everywhere if
- *  needed. */
+ *  Callers MAY pass `{ inline: false }` to skip the footer for
+ *  contexts where the data is already attributed (e.g. a dashboard
+ *  card that names the connector in the heading). */
 export function withSourceFooter(
   answer: string,
   connectorName?: string | null,
   opts: { inline?: boolean } = {},
 ): string {
-  if (!connectorName || !opts.inline) return answer;
+  const inline = opts.inline ?? true;
+  if (!connectorName || !inline) return answer;
   const trimmed = answer.replace(/\s+$/g, "");
   return `${trimmed}\n\n*— Source: ${sourceLabel(connectorName)}*`;
+}
+
+/** Reverse of withSourceFooter: pull the source attribution back out of
+ *  an answer body. Returns the connector label (e.g. "Salesforce") and
+ *  the answer with the footer stripped, or null when no footer present.
+ *  Used by the chat UI to render the badge + show a clean body. */
+export function extractSourceFooter(
+  answer: string,
+): { label: string; bodyWithoutFooter: string } | null {
+  const m = /\n\n\*— Source: ([^*\n]+)\*\s*$/.exec(answer);
+  if (!m) return null;
+  return {
+    label: m[1].trim(),
+    bodyWithoutFooter: answer.slice(0, m.index),
+  };
+}
+
+/** Inverse lookup for the badge UI: vendor display label → canonical
+ *  connector name. Lets the UI extract "Salesforce" from a stripped
+ *  footer and route to the right badge color. Falls back to lowercase
+ *  of the label for unknown vendors. */
+export function connectorNameFromLabel(label: string): string {
+  for (const [name, l] of Object.entries(CONNECTOR_LABELS)) {
+    if (l === label) return name;
+  }
+  return label.toLowerCase();
 }

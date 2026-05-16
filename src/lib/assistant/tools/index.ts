@@ -47,6 +47,14 @@ import "./get-related-records-tool";
 import "./filter-external-records-tool";
 import "./aggregate-external-records-tool";
 
+/* GitHub query tools — read-only against the org PAT. Standalone (not
+   routed through the CRM connector framework) because PRs/Issues/Runs
+   don't fit the Contact/Deal/Account model. PR tool first so the
+   "issue" tool doesn't claim phrases containing "pull request". */
+import "./search-github-pull-requests-tool";
+import "./search-github-issues-tool";
+import "./recent-workflow-runs-tool";
+
 export { tryDispatchTool } from "./dispatcher";
 export { getTools, getToolByName, registerTool, __resetRegistryForTests } from "./registry";
 export type {
