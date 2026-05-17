@@ -644,6 +644,9 @@ export type InstinctEventType =
   | "system.task_viewed"
   | "system.task_completed"
   | "system.task_created"
+  // Integration health (AgenticQA nightly orchestrator)
+  | "integration.health_sweep"
+  | "integration.health_drift_detected"
   // Microsoft Teams (personal chat) + OneNote
   | "system.ms_teams_chats_synced"
   | "system.ms_teams_messages_synced"
