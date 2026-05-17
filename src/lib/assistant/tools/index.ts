@@ -87,6 +87,7 @@ import "./recent-workflow-runs-tool";
 import "./calendar-widget-tool";
 import "./email-thread-widget-tool";
 import "./task-list-widget-tool";
+import "./good-morning-widget-tool";
 
 export { tryDispatchTool } from "./dispatcher";
 export { getTools, getToolByName, registerTool, __resetRegistryForTests } from "./registry";

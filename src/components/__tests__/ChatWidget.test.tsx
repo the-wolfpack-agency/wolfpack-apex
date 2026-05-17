@@ -38,6 +38,15 @@ const tasksSpec: WidgetSpec = {
   tasks: [],
 };
 
+const goodMorningSpec: WidgetSpec = {
+  kind: "good_morning",
+  greeting: "Good morning",
+  summary: "Clear today.",
+  schedule: { eventCount: 0, events: [] },
+  actionItems: [],
+  connected: true,
+};
+
 describe("ChatWidget", () => {
   test("renders CalendarWidget for kind=calendar", () => {
     render(<ChatWidget spec={calendarSpec} />);
@@ -52,6 +61,11 @@ describe("ChatWidget", () => {
   test("renders TaskListWidget for kind=task_list", () => {
     render(<ChatWidget spec={tasksSpec} />);
     expect(screen.getByTestId("task-list-widget")).toBeInTheDocument();
+  });
+
+  test("renders GoodMorningWidget for kind=good_morning", () => {
+    render(<ChatWidget spec={goodMorningSpec} />);
+    expect(screen.getByTestId("good-morning-widget")).toBeInTheDocument();
   });
 
   test("renders nothing for unknown kind (forward-compat)", () => {

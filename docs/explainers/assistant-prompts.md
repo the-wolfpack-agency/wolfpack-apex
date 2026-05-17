@@ -297,6 +297,15 @@ Renders the user's 10 most recent emails as a scannable list. Unread messages re
 
 Specific-search phrasings (`find emails about Q3`, `any emails from hoxsie`) still go to the text-based mail-search tool — the widget is reserved for the "just show me my inbox" intent.
 
+### Good morning widget
+- `good morning`
+- `morning`
+- `morning briefing` / `morning brief`
+- `daily briefing` / `today's briefing`
+- `my day` / `what's on for today`
+
+Renders the dashboard's "Good morning" panel inline in chat: greeting + summary, Today's Schedule, and Action Items. Same data source as the dashboard card (`generateBriefing`). Action items keep their priority chip (High / Med / Low) and click out to the underlying email or meeting. If MS 365 isn't connected, the widget renders a Settings hint instead of an empty panel.
+
 ### Task list widget
 - `tasks`
 - `my tasks`

@@ -1,0 +1,144 @@
+/**
+ * good_morning_widget tool — intent + handler shape.
+ *
+ * Same data source as the dashboard panel (generateBriefing); the
+ * tool just trims to greeting/schedule/action-items and maps to a
+ * WidgetSpec.
+ */
+
+const mockGenerateBriefing = jest.fn();
+const mockTrackEvent = jest.fn();
+
+jest.mock("@/lib/morning-briefing", () => ({
+  generateBriefing: (...a: unknown[]) => mockGenerateBriefing(...a),
+}));
+jest.mock("@/lib/analytics", () => ({
+  trackEvent: (...a: unknown[]) => mockTrackEvent(...a),
+}));
+jest.mock("@/lib/db", () => ({ safeQuery: jest.fn() }));
+
+import { goodMorningWidgetTool } from "@/lib/assistant/tools/good-morning-widget-tool";
+
+const match = (q: string) => goodMorningWidgetTool.matchIntent!(q);
+const CTX = { userId: "u1", userRole: "cto", userEmail: "nick@thewolfpack.agency" };
+
+beforeEach(() => {
+  mockGenerateBriefing.mockReset();
+  mockTrackEvent.mockReset();
+});
+
+describe("good_morning_widget intent matching", () => {
+  test.each([
+    "good morning",
+    "Good morning",
+    "morning",
+    "morning briefing",
+    "morning brief",
+    "daily briefing",
+    "what's on for today",
+    "whats on today",
+    "my day",
+    "today's briefing",
+  ])("'%s' matches", (q) => {
+    expect(match(q)).not.toBeNull();
+  });
+
+  test.each([
+    "good morning team",
+    "morning meeting",
+    "my day looks busy",
+    "create a task for the morning briefing",
+  ])("'%s' does NOT match (left to other tools)", (q) => {
+    expect(match(q)).toBeNull();
+  });
+});
+
+describe("good_morning_widget handler", () => {
+  test("maps generateBriefing output into a GoodMorningWidgetSpec", async () => {
+    mockGenerateBriefing.mockResolvedValue({
+      generatedAt: "2026-05-17T11:00:00Z",
+      greeting: "Good morning, Nick",
+      summary: "Your calendar is clear today.",
+      calendar: {
+        eventCount: 1,
+        nextEvent: null,
+        events: [
+          {
+            subject: "Jorge traveling: VA - FL",
+            startTime: "2026-05-17T20:00:00Z",
+            endTime: "2026-05-17T21:00:00Z",
+            attendees: ["Jorge", "Alicia", "Ashley"],
+            location: "",
+          },
+        ],
+      },
+      email: { unreadCount: 0, importantEmails: [] },
+      financial: { cashPosition: 0, revenueThisMonth: 0, netProfit: 0, unpaidInvoiceCount: 0, overdueCount: 0, recentPayments: [] },
+      clients: { needingAttention: [] },
+      team: { activeMembers: 0, recentHighlights: [] },
+      actionItems: [
+        { priority: "high", text: "Reply to client", context: "from hoxsie", source: "email" },
+      ],
+    });
+    const res = await goodMorningWidgetTool.handler({}, CTX);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const spec = res.widget as { kind: "good_morning"; schedule: { events: unknown[] }; actionItems: unknown[]; connected: boolean };
+    expect(spec.kind).toBe("good_morning");
+    expect(spec.schedule.events).toHaveLength(1);
+    expect(spec.actionItems).toHaveLength(1);
+    expect(spec.connected).toBe(true);
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "assistant.widget_offered",
+      "u1",
+      "cto",
+      expect.objectContaining({ widget_kind: "good_morning", event_count: 1, action_count: 1 }),
+    );
+  });
+
+  test("notConnected briefing → connected: false in spec", async () => {
+    mockGenerateBriefing.mockResolvedValue({
+      generatedAt: "2026-05-17T11:00:00Z",
+      greeting: "Good morning",
+      summary: "Connect your accounts.",
+      calendar: { eventCount: 0, nextEvent: null, events: [] },
+      email: { unreadCount: 0, importantEmails: [] },
+      financial: { cashPosition: 0, revenueThisMonth: 0, netProfit: 0, unpaidInvoiceCount: 0, overdueCount: 0, recentPayments: [] },
+      clients: { needingAttention: [] },
+      team: { activeMembers: 0, recentHighlights: [] },
+      actionItems: [],
+      notConnected: true,
+    });
+    const res = await goodMorningWidgetTool.handler({}, CTX);
+    if (!res.ok) return;
+    const spec = res.widget as { connected: boolean };
+    expect(spec.connected).toBe(false);
+  });
+
+  test("generateBriefing throw → friendly fallback spec", async () => {
+    mockGenerateBriefing.mockRejectedValue(new Error("Graph down"));
+    const res = await goodMorningWidgetTool.handler({}, CTX);
+    if (!res.ok) return;
+    const spec = res.widget as { connected: boolean; schedule: { events: unknown[] } };
+    expect(spec.connected).toBe(false);
+    expect(spec.schedule.events).toEqual([]);
+    expect(res.answer).toMatch(/couldn't reach/i);
+  });
+
+  test("empty day → 'day's clear' message", async () => {
+    mockGenerateBriefing.mockResolvedValue({
+      generatedAt: "2026-05-17T11:00:00Z",
+      greeting: "Good morning",
+      summary: "Clear today.",
+      calendar: { eventCount: 0, nextEvent: null, events: [] },
+      email: { unreadCount: 0, importantEmails: [] },
+      financial: { cashPosition: 0, revenueThisMonth: 0, netProfit: 0, unpaidInvoiceCount: 0, overdueCount: 0, recentPayments: [] },
+      clients: { needingAttention: [] },
+      team: { activeMembers: 0, recentHighlights: [] },
+      actionItems: [],
+    });
+    const res = await goodMorningWidgetTool.handler({}, CTX);
+    if (!res.ok) return;
+    expect(res.answer).toMatch(/clear/i);
+  });
+});

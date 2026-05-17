@@ -103,9 +103,49 @@ export interface TaskListWidgetSpec {
   tasks: TaskListItem[];
 }
 
+/** A single attendee in a meeting pre-brief. */
+export interface GoodMorningAttendee {
+  name: string;
+}
+
+/** Today's calendar events surfaced in the good-morning widget. */
+export interface GoodMorningEvent {
+  subject: string;
+  startTime: string;
+  endTime: string;
+  attendees: string[];
+  location?: string;
+}
+
+/** A queued action item (high-signal email, overdue invoice, etc.). */
+export interface GoodMorningActionItem {
+  priority: "high" | "medium" | "low";
+  text: string;
+  context: string;
+  link?: string;
+  source?: "email" | "meeting" | "invoice" | "client" | "receivable";
+}
+
+export interface GoodMorningWidgetSpec {
+  kind: "good_morning";
+  /** Localized greeting line, e.g. "Good morning, Nick". */
+  greeting: string;
+  /** One-line summary under the greeting. */
+  summary: string;
+  schedule: {
+    eventCount: number;
+    events: GoodMorningEvent[];
+  };
+  actionItems: GoodMorningActionItem[];
+  /** When false, the widget shows a "connect Microsoft 365" hint
+   *  instead of the populated panels. */
+  connected: boolean;
+}
+
 /** Discriminated union of every widget kind. Add new entries as the
  *  framework expands. */
 export type WidgetSpec =
   | CalendarWidgetSpec
   | EmailThreadWidgetSpec
-  | TaskListWidgetSpec;
+  | TaskListWidgetSpec
+  | GoodMorningWidgetSpec;
