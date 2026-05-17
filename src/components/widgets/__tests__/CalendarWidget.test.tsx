@@ -95,6 +95,25 @@ describe("CalendarWidget", () => {
     expect(screen.queryByText("Open in Outlook")).not.toBeInTheDocument();
   });
 
+  /* ----------------------------------------------------------------
+   * Regression: 2026-05-17 — clicking May 17 (Sun) printed
+   * "Saturday, May 16" in the selected-day header because
+   * `new Date("2026-05-17")` parses as UTC midnight, which renders
+   * as the previous local day in any TZ west of UTC. The fix parses
+   * day-keys as local-noon dates. This test fires regardless of the
+   * test runner's TZ.
+   * ---------------------------------------------------------------- */
+  test("selected-day header matches the clicked day (no UTC-shift)", () => {
+    render(<CalendarWidget spec={spec} />);
+    fireEvent.click(screen.getByTestId("calendar-day-2026-05-20"));
+    const panel = screen.getByTestId("calendar-day-events-2026-05-20");
+    /* May 20, 2026 is a Wednesday — assert the weekday + day match
+     * the clicked cell, NOT the UTC-shifted previous day. */
+    expect(panel.textContent).toMatch(/Wednesday/);
+    expect(panel.textContent).toMatch(/May 20/);
+    expect(panel.textContent).not.toMatch(/May 19/);
+  });
+
   test("event with webLink shows Outlook link", () => {
     render(<CalendarWidget spec={spec} />);
     /* Pick a day that's not today. Force-toggle into 05-16 by clicking

@@ -98,6 +98,16 @@ function isToday(dateStr: string): boolean {
   return dateStr === todayKey;
 }
 
+/** Parse a "YYYY-MM-DD" cell key as a local-time Date (noon to dodge
+ *  DST edge cases). `new Date("2026-05-17")` parses as UTC midnight,
+ *  which in any TZ west of UTC renders as the PREVIOUS day under
+ *  `toLocaleDateString` — that's what produced "Saturday, May 16"
+ *  in the May 17 cell. */
+function parseDayKeyLocal(dayKey: string): Date {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1, 12, 0, 0);
+}
+
 export interface CalendarWidgetProps {
   spec: CalendarWidgetSpec;
 }
@@ -230,7 +240,7 @@ export function CalendarWidget({ spec }: CalendarWidgetProps) {
             className="text-xs font-semibold mb-1"
             style={{ color: "var(--wp-text-dim, #aaa)" }}
           >
-            {new Date(selectedDay).toLocaleDateString("default", {
+            {parseDayKeyLocal(selectedDay).toLocaleDateString("default", {
               weekday: "long",
               month: "short",
               day: "numeric",
