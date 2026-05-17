@@ -1080,6 +1080,25 @@ export async function chat(
     module: "assistant",
   });
 
+  /* Unmet-intent capture: we reached the AI fallback, which means no
+   * deterministic tool matched + no page_facts hit + no brain hit.
+   * Log the raw message (truncated) so the admin insights page can
+   * surface a backlog of phrasings to build for. This is the
+   * single highest-value signal for "what should we build next."
+   * Stored separately from the other ai_call_skipped reasons because
+   * those represent SUCCESS (deterministic path won) — this is the
+   * miss. */
+  trackEvent("assistant.intent_unmatched", userId, userRole, {
+    /* Raw text capped at 500 chars so a runaway paste doesn't bloat
+     * the analytics row. We log the message itself so the admin
+     * page can cluster + rank by frequency. */
+    message_text: message.slice(0, 500),
+    message_length: message.length,
+    module: "assistant",
+    has_brain_context: brainContext.hits.length > 0,
+    has_page_context: !!pageContext,
+  });
+
   const aiResult = await callAI(message, history, userMemory, userId, userRole, pageContext, brainContext);
   if (aiResult) {
     trackEvent("system.ai_call_made", userId, userRole, {

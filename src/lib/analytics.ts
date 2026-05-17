@@ -647,6 +647,10 @@ export type InstinctEventType =
   // Integration health (AgenticQA nightly orchestrator)
   | "integration.health_sweep"
   | "integration.health_drift_detected"
+  // Unmet-intent capture — fires when no deterministic tool matched
+  // and we fell through to the LLM. Highest-value signal for "what
+  // should we build next." Surfaced on the admin insights page.
+  | "assistant.intent_unmatched"
   // Microsoft Teams (personal chat) + OneNote
   | "system.ms_teams_chats_synced"
   | "system.ms_teams_messages_synced"
