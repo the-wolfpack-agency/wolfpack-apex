@@ -63,9 +63,32 @@ interface LatestRow {
 }
 
 export async function GET(req: NextRequest) {
-  const user = getUserFromRequest(req.headers.get("authorization"));
+  const authHeader = req.headers.get("authorization");
+  const user = getUserFromRequest(authHeader);
   if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    /* Diagnostic — surfaces in Vercel logs (and as a header on the
+     * 401 response) so we can tell WHY verify failed without
+     * granting unrestricted token-decode endpoints. Safe to log:
+     * never includes the token itself, only its length + structural
+     * shape + the verify failure reason. */
+    let diag = "no-header";
+    if (authHeader?.startsWith("Bearer ")) {
+      const tok = authHeader.slice(7);
+      diag = `len=${tok.length} dots=${tok.split(".").length - 1}`;
+      try {
+        const { verifyToken: vt } = await import("@/lib/crypto/sign");
+        const r = vt(tok);
+        diag += ` valid=${r.valid}`;
+        if (!r.valid) diag += ` reason=${r.reason}`;
+      } catch (e) {
+        diag += ` threw=${(e as Error).message.slice(0, 60)}`;
+      }
+    }
+    console.warn("[health/integrations] auth_failed:", diag);
+    return NextResponse.json(
+      { error: "Unauthorized" },
+      { status: 401, headers: { "x-auth-diag": diag } },
+    );
   }
   /* Auth gate: principle of least privilege. Privileged roles
    * (CEO/CTO/EVP) always allowed for hands-on debugging. A
