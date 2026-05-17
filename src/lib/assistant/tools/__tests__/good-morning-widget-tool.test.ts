@@ -7,10 +7,16 @@
  */
 
 const mockGenerateBriefing = jest.fn();
+const mockListUpcomingMeetings = jest.fn();
+const mockPickDefaultMeeting = jest.fn();
 const mockTrackEvent = jest.fn();
 
 jest.mock("@/lib/morning-briefing", () => ({
   generateBriefing: (...a: unknown[]) => mockGenerateBriefing(...a),
+}));
+jest.mock("@/lib/meetings/upcoming", () => ({
+  listUpcomingMeetings: (...a: unknown[]) => mockListUpcomingMeetings(...a),
+  pickDefaultMeeting: (...a: unknown[]) => mockPickDefaultMeeting(...a),
 }));
 jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: unknown[]) => mockTrackEvent(...a),
@@ -24,7 +30,13 @@ const CTX = { userId: "u1", userRole: "cto", userEmail: "nick@thewolfpack.agency
 
 beforeEach(() => {
   mockGenerateBriefing.mockReset();
+  mockListUpcomingMeetings.mockReset();
+  mockPickDefaultMeeting.mockReset();
   mockTrackEvent.mockReset();
+  /* Default the upcoming-meetings mocks to empty — individual tests
+   * override when they care. */
+  mockListUpcomingMeetings.mockResolvedValue([]);
+  mockPickDefaultMeeting.mockReturnValue(null);
 });
 
 describe("good_morning_widget intent matching", () => {
@@ -150,5 +162,78 @@ describe("good_morning_widget handler", () => {
     const res = await goodMorningWidgetTool.handler({}, CTX);
     if (!res.ok) return;
     expect(res.answer).toMatch(/clear/i);
+  });
+});
+
+describe("good_morning_widget — meeting pre-brief", () => {
+  const STUB_BRIEFING = {
+    generatedAt: "2026-05-17T11:00:00Z",
+    greeting: "Good afternoon, Nick",
+    summary: "Clear afternoon.",
+    calendar: { eventCount: 0, nextEvent: null, events: [] },
+    email: { unreadCount: 0, importantEmails: [] },
+    financial: { cashPosition: 0, revenueThisMonth: 0, netProfit: 0, unpaidInvoiceCount: 0, overdueCount: 0, recentPayments: [] },
+    clients: { needingAttention: [] },
+    team: { activeMembers: 0, recentHighlights: [] },
+    actionItems: [],
+  };
+
+  test("bakes upcoming meetings + server-picked default into preBrief", async () => {
+    mockGenerateBriefing.mockResolvedValue(STUB_BRIEFING);
+    const upcoming = [
+      { id: "m1", subject: "Demo prep", start: "2026-05-17T20:00:00Z", end: "2026-05-17T21:00:00Z",
+        location: "Zoom", attendees: ["a@x.co"], isOnlineMeeting: true, minutesUntil: 30, inProgress: false },
+      { id: "m2", subject: "1:1 with Hoxsie", start: "2026-05-18T15:00:00Z", end: "2026-05-18T15:30:00Z",
+        location: "", attendees: ["b@x.co", "c@x.co"], isOnlineMeeting: false, minutesUntil: 1200, inProgress: false },
+    ];
+    mockListUpcomingMeetings.mockResolvedValue(upcoming);
+    mockPickDefaultMeeting.mockReturnValue(upcoming[0]);
+
+    const res = await goodMorningWidgetTool.handler({}, CTX);
+    if (!res.ok) throw new Error("expected ok");
+    const spec = res.widget as { preBrief?: { meetings: unknown[]; defaultMeetingId: string | null; lookaheadHours: number } };
+    expect(spec.preBrief).toBeDefined();
+    expect(spec.preBrief?.meetings).toHaveLength(2);
+    expect(spec.preBrief?.defaultMeetingId).toBe("m1");
+    expect(spec.preBrief?.lookaheadHours).toBe(48);
+    expect(res.answer).toMatch(/Demo prep/);
+  });
+
+  test("no upcoming meetings → preBrief with empty list + null default", async () => {
+    mockGenerateBriefing.mockResolvedValue(STUB_BRIEFING);
+    mockListUpcomingMeetings.mockResolvedValue([]);
+    mockPickDefaultMeeting.mockReturnValue(null);
+    const res = await goodMorningWidgetTool.handler({}, CTX);
+    if (!res.ok) throw new Error("expected ok");
+    const spec = res.widget as { preBrief?: { meetings: unknown[]; defaultMeetingId: string | null } };
+    expect(spec.preBrief?.meetings).toEqual([]);
+    expect(spec.preBrief?.defaultMeetingId).toBeNull();
+  });
+
+  test("upcoming fetch failure does not break the briefing — empty preBrief", async () => {
+    mockGenerateBriefing.mockResolvedValue(STUB_BRIEFING);
+    mockListUpcomingMeetings.mockRejectedValue(new Error("Graph 503"));
+    mockPickDefaultMeeting.mockReturnValue(null);
+    const res = await goodMorningWidgetTool.handler({}, CTX);
+    if (!res.ok) throw new Error("expected ok");
+    const spec = res.widget as { preBrief?: { meetings: unknown[] }; connected: boolean };
+    expect(spec.preBrief?.meetings).toEqual([]);
+    expect(spec.connected).toBe(true); // briefing itself still resolved
+  });
+
+  test("analytics include prebrief_count", async () => {
+    mockGenerateBriefing.mockResolvedValue(STUB_BRIEFING);
+    mockListUpcomingMeetings.mockResolvedValue([
+      { id: "m1", subject: "x", start: "2026-05-17T20:00:00Z", end: "2026-05-17T21:00:00Z",
+        location: "", attendees: [], isOnlineMeeting: false, minutesUntil: 1, inProgress: false },
+    ]);
+    mockPickDefaultMeeting.mockReturnValue(null);
+    await goodMorningWidgetTool.handler({}, CTX);
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "assistant.widget_offered",
+      "u1",
+      "cto",
+      expect.objectContaining({ prebrief_count: 1 }),
+    );
   });
 });

@@ -126,6 +126,35 @@ export interface GoodMorningActionItem {
   source?: "email" | "meeting" | "invoice" | "client" | "receivable";
 }
 
+/** A meeting surfaced in the Pre-Brief section. The widget bakes the
+ *  full list of upcoming meetings (next 48h) + a default selection so
+ *  the renderer can switch between them client-side without refetching. */
+export interface GoodMorningPreBriefMeeting {
+  id: string;
+  subject: string;
+  /** ISO start. */
+  start: string;
+  /** ISO end. */
+  end: string;
+  location: string;
+  attendees: string[];
+  isOnlineMeeting: boolean;
+  /** Computed server-side; renderer re-derives live so the countdown
+   *  ticks forward without refetching. */
+  minutesUntil: number | null;
+  inProgress: boolean;
+}
+
+export interface GoodMorningPreBrief {
+  /** When null, the section renders a "no meetings in the next 48h"
+   *  hint matching the dashboard panel's empty state. */
+  defaultMeetingId: string | null;
+  /** Up to ~20 upcoming + just-ended meetings. */
+  meetings: GoodMorningPreBriefMeeting[];
+  /** Window the server used (so the empty-state message stays in sync). */
+  lookaheadHours: number;
+}
+
 export interface GoodMorningWidgetSpec {
   kind: "good_morning";
   /** Localized greeting line, e.g. "Good morning, Nick". */
@@ -137,6 +166,10 @@ export interface GoodMorningWidgetSpec {
     events: GoodMorningEvent[];
   };
   actionItems: GoodMorningActionItem[];
+  /** Meeting Pre-Brief section — same source as the dashboard panel.
+   *  Optional so older persisted widgets don't crash; the renderer
+   *  treats missing as "no pre-brief available". */
+  preBrief?: GoodMorningPreBrief;
   /** When false, the widget shows a "connect Microsoft 365" hint
    *  instead of the populated panels. */
   connected: boolean;

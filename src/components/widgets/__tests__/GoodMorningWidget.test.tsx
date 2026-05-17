@@ -7,7 +7,7 @@
  */
 
 import "@testing-library/jest-dom";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 
 const mockFetch = jest.fn();
 jest.mock("@/lib/client-auth", () => ({
@@ -22,6 +22,9 @@ beforeEach(() => {
   mockFetch.mockReset();
   mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
 });
+
+const futureIso = (minsFromNow: number) =>
+  new Date(Date.now() + minsFromNow * 60_000).toISOString();
 
 const fullSpec: GoodMorningWidgetSpec = {
   kind: "good_morning",
@@ -54,6 +57,34 @@ const fullSpec: GoodMorningWidgetSpec = {
       source: "meeting",
     },
   ],
+  preBrief: {
+    defaultMeetingId: "m1",
+    lookaheadHours: 48,
+    meetings: [
+      {
+        id: "m1",
+        subject: "Demo prep",
+        start: futureIso(30),
+        end: futureIso(60),
+        location: "Zoom",
+        attendees: ["alice@x.co", "bob@x.co", "carol@x.co"],
+        isOnlineMeeting: true,
+        minutesUntil: 30,
+        inProgress: false,
+      },
+      {
+        id: "m2",
+        subject: "1:1 with Hoxsie",
+        start: futureIso(1200),
+        end: futureIso(1230),
+        location: "",
+        attendees: ["hoxsie@x.co"],
+        isOnlineMeeting: false,
+        minutesUntil: 1200,
+        inProgress: false,
+      },
+    ],
+  },
   connected: true,
 };
 
@@ -68,10 +99,11 @@ describe("GoodMorningWidget", () => {
 
   test("schedule section renders each event with time + attendee count + location", () => {
     render(<GoodMorningWidget spec={fullSpec} />);
-    expect(screen.getByTestId("good-morning-event-0")).toBeInTheDocument();
-    expect(screen.getByText("Jorge traveling: VA - FL")).toBeInTheDocument();
-    expect(screen.getByText(/4 attendees/)).toBeInTheDocument();
-    expect(screen.getByText(/Zoom/)).toBeInTheDocument();
+    const row = screen.getByTestId("good-morning-event-0");
+    expect(row).toBeInTheDocument();
+    expect(within(row).getByText("Jorge traveling: VA - FL")).toBeInTheDocument();
+    expect(within(row).getByText(/4 attendees/)).toBeInTheDocument();
+    expect(within(row).getByText(/Zoom/)).toBeInTheDocument();
   });
 
   test("action items render priority chip + link wiring", () => {
@@ -124,5 +156,60 @@ describe("GoodMorningWidget", () => {
         body: expect.stringContaining("open_dashboard"),
       }),
     );
+  });
+
+  test("Meeting Pre-Brief section renders with default selection", () => {
+    render(<GoodMorningWidget spec={fullSpec} />);
+    expect(screen.getByTestId("good-morning-prebrief")).toBeInTheDocument();
+    expect(screen.getByTestId("good-morning-prebrief-picker")).toBeInTheDocument();
+    /* Default meeting is m1 (Demo prep) — its subject shows in the
+     * selected-details panel. */
+    const selected = screen.getByTestId("good-morning-prebrief-selected");
+    expect(selected).toHaveTextContent("Demo prep");
+    expect(selected).toHaveTextContent(/3 attendees/);
+    expect(selected).toHaveTextContent(/Zoom/);
+    expect(selected).toHaveTextContent(/Teams/);
+  });
+
+  test("changing the pre-brief picker swaps the selected meeting", () => {
+    render(<GoodMorningWidget spec={fullSpec} />);
+    const picker = screen.getByTestId("good-morning-prebrief-picker") as HTMLSelectElement;
+    fireEvent.change(picker, { target: { value: "m2" } });
+    const selected = screen.getByTestId("good-morning-prebrief-selected");
+    expect(selected).toHaveTextContent("1:1 with Hoxsie");
+    expect(selected).toHaveTextContent(/1 attendee/);
+  });
+
+  test("changing the picker fires select_prebrief_meeting analytics", () => {
+    render(<GoodMorningWidget spec={fullSpec} />);
+    mockFetch.mockClear();
+    fireEvent.change(screen.getByTestId("good-morning-prebrief-picker"), {
+      target: { value: "m2" },
+    });
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/analytics",
+      expect.objectContaining({
+        body: expect.stringContaining("select_prebrief_meeting"),
+      }),
+    );
+  });
+
+  test("empty pre-brief renders 'No meetings in the next X hours' hint", () => {
+    render(
+      <GoodMorningWidget
+        spec={{
+          ...fullSpec,
+          preBrief: { defaultMeetingId: null, meetings: [], lookaheadHours: 48 },
+        }}
+      />,
+    );
+    expect(screen.getByTestId("good-morning-prebrief-empty")).toBeInTheDocument();
+  });
+
+  test("missing preBrief field → section is not rendered (forward-compat)", () => {
+    const noBrief: GoodMorningWidgetSpec = { ...fullSpec };
+    delete (noBrief as { preBrief?: unknown }).preBrief;
+    render(<GoodMorningWidget spec={noBrief} />);
+    expect(screen.queryByTestId("good-morning-prebrief")).not.toBeInTheDocument();
   });
 });

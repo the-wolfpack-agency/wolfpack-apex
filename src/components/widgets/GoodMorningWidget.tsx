@@ -6,11 +6,12 @@
 
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { fetchWithRefresh } from "@/lib/client-auth";
 import type {
   GoodMorningWidgetSpec,
   GoodMorningActionItem,
+  GoodMorningPreBriefMeeting,
 } from "@/lib/assistant/widgets/types";
 
 const PRIORITY_STYLES: Record<
@@ -28,11 +29,74 @@ function formatTimeRange(start: string, end: string): string {
   return `${fmt(start)} - ${fmt(end)}`;
 }
 
+/* Live status helpers mirrored from MeetingPreBriefPanel so the countdown
+ * ticks forward without a server round-trip. Computing minutesUntil and
+ * inProgress from the ISO start/end + Date.now() keeps a long-open chat
+ * tab from showing stale "in 1h" labels. */
+function liveStatus(
+  m: GoodMorningPreBriefMeeting,
+  nowMs: number,
+): { minutesUntil: number | null; inProgress: boolean } {
+  const startMs = Date.parse(m.start);
+  const endMs = Date.parse(m.end);
+  if (Number.isNaN(startMs)) {
+    return { minutesUntil: m.minutesUntil, inProgress: m.inProgress };
+  }
+  const minutesUntil = Math.round((startMs - nowMs) / 60_000);
+  const inProgress =
+    !Number.isNaN(endMs) && startMs <= nowMs && endMs > nowMs;
+  return { minutesUntil, inProgress };
+}
+
+function formatCountdown(m: GoodMorningPreBriefMeeting, nowMs: number): string {
+  const { minutesUntil, inProgress } = liveStatus(m, nowMs);
+  if (inProgress) return "In progress";
+  if (minutesUntil === null) return "";
+  if (minutesUntil < 0) {
+    const ago = -minutesUntil;
+    if (ago < 60) return `Ended ${ago}m ago`;
+    const h = Math.floor(ago / 60);
+    const r = ago - h * 60;
+    return `Ended ${h}h${r > 0 ? ` ${r}m` : ""} ago`;
+  }
+  if (minutesUntil < 60) return `in ${minutesUntil}m`;
+  const h = Math.floor(minutesUntil / 60);
+  const r = minutesUntil - h * 60;
+  return `in ${h}h${r > 0 ? ` ${r}m` : ""}`;
+}
+
+function formatWhen(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString([], {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export interface GoodMorningWidgetProps {
   spec: GoodMorningWidgetSpec;
 }
 
 export function GoodMorningWidget({ spec }: GoodMorningWidgetProps) {
+  /* Pre-brief selector state. Defaults to the server-picked meeting
+   * (in-progress > soonest > most-recently-ended). */
+  const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(
+    spec.preBrief?.defaultMeetingId ?? null,
+  );
+  /* Tick every 30s so the countdown stays accurate without a refetch. */
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (!spec.preBrief || spec.preBrief.meetings.length === 0) return;
+    const id = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, [spec.preBrief]);
+
+  const selectedMeeting = useMemo(() => {
+    if (!spec.preBrief || !selectedMeetingId) return null;
+    return spec.preBrief.meetings.find((m) => m.id === selectedMeetingId) ?? null;
+  }, [spec.preBrief, selectedMeetingId]);
+
   useEffect(() => {
     fetchWithRefresh("/api/analytics", {
       method: "POST",
@@ -232,6 +296,118 @@ export function GoodMorningWidget({ spec }: GoodMorningWidgetProps) {
           </ul>
         )}
       </div>
+
+      {/* Meeting Pre-Brief — same source as dashboard panel */}
+      {spec.preBrief && (
+        <div
+          data-testid="good-morning-prebrief"
+          className="rounded-md p-2 mt-2"
+          style={{
+            background: "var(--wp-dark, #111)",
+            border: "1px solid var(--wp-dark-border, #333)",
+          }}
+        >
+          <div
+            className="text-xs font-semibold mb-1"
+            style={{ color: "var(--wp-text-dim, #aaa)" }}
+          >
+            Meeting Pre-Brief
+          </div>
+          {spec.preBrief.meetings.length === 0 ? (
+            <div
+              data-testid="good-morning-prebrief-empty"
+              className="text-xs"
+              style={{ color: "var(--wp-text-muted, #6b7280)" }}
+            >
+              No meetings in the next {spec.preBrief.lookaheadHours} hours.
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 mb-2">
+                <label
+                  htmlFor="good-morning-prebrief-picker"
+                  className="text-[11px] shrink-0"
+                  style={{ color: "var(--wp-text-muted, #6b7280)" }}
+                >
+                  Meeting
+                </label>
+                <select
+                  id="good-morning-prebrief-picker"
+                  data-testid="good-morning-prebrief-picker"
+                  value={selectedMeetingId ?? ""}
+                  onChange={(e) => {
+                    setSelectedMeetingId(e.target.value);
+                    trackInteraction("select_prebrief_meeting", {
+                      meeting_id: e.target.value,
+                    });
+                  }}
+                  className="text-xs rounded border px-2 py-1 flex-1 min-w-0"
+                  style={{
+                    background: "var(--wp-dark-surface2, #1a1a1a)",
+                    borderColor: "var(--wp-dark-border, #333)",
+                    color: "var(--wp-text, #eee)",
+                  }}
+                >
+                  {spec.preBrief.meetings.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {formatWhen(m.start)} · {m.subject} ({formatCountdown(m, nowMs)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {selectedMeeting && (
+                <div data-testid="good-morning-prebrief-selected" className="text-xs space-y-1">
+                  <div className="font-medium" style={{ color: "var(--wp-gold, #eab308)" }}>
+                    {selectedMeeting.subject}
+                  </div>
+                  <div
+                    className="flex flex-wrap gap-x-2 gap-y-0.5"
+                    style={{ color: "var(--wp-text-muted, #6b7280)" }}
+                  >
+                    <span className="whitespace-nowrap">
+                      {formatCountdown(selectedMeeting, nowMs)}
+                    </span>
+                    <span className="whitespace-nowrap">
+                      · {formatWhen(selectedMeeting.start)}
+                    </span>
+                    {selectedMeeting.location && (
+                      <span className="truncate max-w-full">· {selectedMeeting.location}</span>
+                    )}
+                    {selectedMeeting.isOnlineMeeting && <span>· Teams</span>}
+                  </div>
+                  {selectedMeeting.attendees.length > 0 && (
+                    <div style={{ color: "var(--wp-text-dim, #aaa)" }}>
+                      <span className="font-semibold">
+                        {selectedMeeting.attendees.length}{" "}
+                        {selectedMeeting.attendees.length === 1 ? "attendee" : "attendees"}:
+                      </span>{" "}
+                      <span style={{ color: "var(--wp-text-muted, #6b7280)" }}>
+                        {selectedMeeting.attendees.slice(0, 5).join(", ")}
+                        {selectedMeeting.attendees.length > 5
+                          ? `, +${selectedMeeting.attendees.length - 5} more`
+                          : ""}
+                      </span>
+                    </div>
+                  )}
+                  <div className="mt-1">
+                    <a
+                      href={`/meetings/${encodeURIComponent(selectedMeeting.id)}`}
+                      onClick={() =>
+                        trackInteraction("open_prebrief_detail", {
+                          meeting_id: selectedMeeting.id,
+                        })
+                      }
+                      style={{ color: "var(--wp-gold, #eab308)" }}
+                    >
+                      Open full pre-brief
+                    </a>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {!spec.connected && (
         <div
