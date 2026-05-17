@@ -1121,8 +1121,10 @@ export default function InstinctChat({
             )}
           </div>
 
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+          {/* Messages. overflow-x-hidden so a wide widget can't push the
+              chat column sideways on mobile; min-w-0 lets flex children
+              shrink instead of demanding their content width. */}
+          <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 px-4 py-4 space-y-4">
             {messages.length === 0 && (
               /* Anchor to the TOP (not center) so the title + greeting
                  are always visible above the fold on mobile. The
@@ -1177,13 +1179,16 @@ export default function InstinctChat({
                      * panels, so they get full width on mobile (where 80%
                      * forced widgets to wrap awkwardly) and a generous cap
                      * on desktop. User bubbles stay narrow so the chat
-                     * still reads like a conversation. */
+                     * still reads like a conversation. min-w-0 + overflow-
+                     * hidden keep the bubble inside the column even when
+                     * a widget renders something wide (long meeting
+                     * subject, attendee list, etc.). */
                     position === "floating"
                       ? "max-w-[90%]"
                       : msg.role === "user"
                       ? "max-w-[80%] lg:max-w-[60%]"
                       : "w-full lg:max-w-[85%]"
-                  } rounded-xl px-4 py-3`}
+                  } min-w-0 overflow-hidden rounded-xl px-4 py-3`}
                   style={{
                     background:
                       msg.role === "user"

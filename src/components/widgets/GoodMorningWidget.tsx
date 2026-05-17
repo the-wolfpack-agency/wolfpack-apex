@@ -127,7 +127,7 @@ export function GoodMorningWidget({ spec }: GoodMorningWidgetProps) {
   return (
     <div
       data-testid="good-morning-widget"
-      className="mt-2 rounded-md p-3"
+      className="mt-2 rounded-md p-3 min-w-0 max-w-full overflow-hidden"
       style={{
         background: "var(--wp-dark-surface2, #1a1a1a)",
         border: "1px solid var(--wp-dark-border, #333)",
@@ -376,7 +376,10 @@ export function GoodMorningWidget({ spec }: GoodMorningWidgetProps) {
                     {selectedMeeting.isOnlineMeeting && <span>· Teams</span>}
                   </div>
                   {selectedMeeting.attendees.length > 0 && (
-                    <div style={{ color: "var(--wp-text-dim, #aaa)" }}>
+                    <div
+                      className="break-words"
+                      style={{ color: "var(--wp-text-dim, #aaa)" }}
+                    >
                       <span className="font-semibold">
                         {selectedMeeting.attendees.length}{" "}
                         {selectedMeeting.attendees.length === 1 ? "attendee" : "attendees"}:
