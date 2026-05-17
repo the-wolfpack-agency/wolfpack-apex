@@ -170,6 +170,75 @@ describe("ChatActionForm — submit failure", () => {
   });
 });
 
+describe("ChatActionForm — field-level analytics", () => {
+  test("submitting with an optional field blank fires assistant.form_field_skipped", async () => {
+    const specWithOptionalCc: FormSpec = {
+      ...emailSpec,
+      fields: [
+        ...emailSpec.fields,
+        { name: "cc", label: "Cc", type: "email", required: false },
+      ],
+    };
+    /* First call is the analytics POST for `cc`, second is the
+     * submit. Both succeed. */
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, message: "Sent." }),
+    });
+    render(<ChatActionForm spec={specWithOptionalCc} />);
+    typeInto("chat-action-form-input-to", "a@b.co");
+    typeInto("chat-action-form-input-subject", "s");
+    typeInto("chat-action-form-input-body", "b");
+    await act(async () => fireEvent.click(getSubmitButton()));
+    /* Confirm at least one analytics call carried form_field_skipped + field_name=cc. */
+    const analyticsCalls = mockFetch.mock.calls.filter(
+      (c) => c[0] === "/api/analytics",
+    );
+    const skipBodies = analyticsCalls
+      .map((c) => c[1]?.body || "")
+      .filter((b: string) => b.includes("form_field_skipped"));
+    expect(skipBodies.length).toBeGreaterThan(0);
+    expect(skipBodies[0]).toContain('"field_name":"cc"');
+  });
+
+  test("server-side fieldErrors fire one assistant.form_field_invalid per field", async () => {
+    /* Default mock so the trackFieldEvent analytics POSTs return a
+     * resolvable Promise (otherwise undefined.catch throws + halts
+     * the iteration after the first field). */
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({
+        ok: false,
+        code: "validation",
+        message: "Check the highlighted fields.",
+        fieldErrors: { to: "Invalid email", subject: "Required" },
+      }),
+    });
+    render(<ChatActionForm spec={emailSpec} />);
+    typeInto("chat-action-form-input-to", "alice@example.com");
+    typeInto("chat-action-form-input-subject", "Q3");
+    typeInto("chat-action-form-input-body", "body");
+    await act(async () => fireEvent.click(getSubmitButton()));
+    await waitFor(() => {
+      /* Surface the field-level error rendered by the form so we
+       * know the submit response was consumed before asserting on
+       * the analytics side-effects. */
+      expect(screen.getByTestId("chat-action-form-field-error-to")).toBeInTheDocument();
+    });
+    /* Wait for both per-field analytics calls. The for-loop is
+     * synchronous in the handler but the fetchWithRefresh side-
+     * effects complete on subsequent microtasks. waitFor polls
+     * until both lands. */
+    await waitFor(() => {
+      const analyticsCalls = mockFetch.mock.calls.filter((c) => c[0] === "/api/analytics");
+      const merged = analyticsCalls.map((c) => c[1]?.body || "").join("\n");
+      expect(merged).toContain('"field_name":"to"');
+      expect(merged).toContain('"field_name":"subject"');
+    });
+  });
+});
+
 describe("ChatActionForm — default values pre-fill", () => {
   test("defaultValue is rendered in the input on mount", () => {
     const spec: FormSpec = {

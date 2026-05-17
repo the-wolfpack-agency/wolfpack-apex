@@ -651,6 +651,11 @@ export type InstinctEventType =
   // and we fell through to the LLM. Highest-value signal for "what
   // should we build next." Surfaced on the admin insights page.
   | "assistant.intent_unmatched"
+  // Form-field-level analytics: which fields users skip + which
+  // fields trip server validation. Tells us which optional fields
+  // earn their space and which required fields are confusing.
+  | "assistant.form_field_skipped"
+  | "assistant.form_field_invalid"
   // Microsoft Teams (personal chat) + OneNote
   | "system.ms_teams_chats_synced"
   | "system.ms_teams_messages_synced"

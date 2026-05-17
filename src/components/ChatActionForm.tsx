@@ -88,6 +88,25 @@ export function ChatActionForm({ spec, onSubmitted }: ChatActionFormProps) {
     f.required ? !isEmpty(fields[f.name]?.value ?? "") : true,
   );
 
+  /* Fire-and-forget analytics ping. Best-effort; failure can't block
+   * the user. Used for per-field skipped + invalid signals so the
+   * admin dashboard can aggregate "field X skipped 80% of the time
+   * → consider hiding by default." */
+  function trackFieldEvent(
+    event: "assistant.form_field_skipped" | "assistant.form_field_invalid",
+    fieldName: string,
+    extra: Record<string, unknown> = {},
+  ) {
+    fetchWithRefresh("/api/analytics", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        event,
+        metadata: { form_kind: spec.formKind, field_name: fieldName, ...extra },
+      }),
+    }).catch(() => undefined);
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!allRequiredFilled || submitting || submitted) return;
@@ -99,7 +118,15 @@ export function ChatActionForm({ spec, onSubmitted }: ChatActionFormProps) {
     const payload: Record<string, string> = {};
     for (const f of spec.fields) {
       const v = fields[f.name]?.value ?? "";
-      if (v.length > 0) payload[f.name] = v;
+      if (v.length > 0) {
+        payload[f.name] = v;
+      } else if (!f.required) {
+        /* Optional field left blank — log it once per submit so the
+         * dashboard can show "X% of users skip the cc field." */
+        trackFieldEvent("assistant.form_field_skipped", f.name, {
+          field_type: f.type,
+        });
+      }
     }
 
     try {
@@ -125,7 +152,17 @@ export function ChatActionForm({ spec, onSubmitted }: ChatActionFormProps) {
         });
       } else {
         setTopError(data.message);
-        if (data.fieldErrors) setFieldErrors(data.fieldErrors);
+        if (data.fieldErrors) {
+          setFieldErrors(data.fieldErrors);
+          /* Server rejected one or more fields. Log each so we know
+           * which fields are confusing users in production. */
+          for (const [fieldName, errorMessage] of Object.entries(data.fieldErrors)) {
+            trackFieldEvent("assistant.form_field_invalid", fieldName, {
+              error_code: data.code,
+              error_message: String(errorMessage).slice(0, 100),
+            });
+          }
+        }
       }
     } catch (err) {
       setTopError(`Couldn't submit: ${(err as Error).message}`);
