@@ -20,28 +20,20 @@ interface StarterCategory {
   prompts: string[];
 }
 
-/**
- * Pick the right daily-briefing trigger for the current time of day.
- * The widget itself shows "Good morning / afternoon / evening" based
- * on clock; the chip label should match so the user doesn't fire
- * "Good evening" at 9am.
- */
-function timeOfDayBriefingPrompt(): string {
-  const hour = typeof window !== "undefined" ? new Date().getHours() : 9;
-  if (hour < 12) return "good morning";
-  if (hour < 17) return "good afternoon";
-  return "good evening";
-}
-
 function buildStarterCategories(): StarterCategory[] {
   return [
     {
       /* Widgets first — they're the "interface inside the chat"
-         pattern and the most-visited capability on mobile. */
+         pattern and the most-visited capability on mobile. Lead
+         with `briefing` because it's the densest panel (greeting +
+         schedule + action items + meeting pre-brief). The
+         time-of-day phrases ("good morning" / "good afternoon")
+         resolve to the SAME tool, so we don't duplicate them as
+         chips — the widget's greeting line already adapts to the
+         clock. */
       title: "Widgets",
       emoji: "✨",
       prompts: [
-        timeOfDayBriefingPrompt(),
         "briefing",
         "calendar",
         "inbox",
