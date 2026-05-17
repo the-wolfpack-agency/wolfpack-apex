@@ -133,29 +133,33 @@ export function GoodMorningWidget({ spec }: GoodMorningWidgetProps) {
         border: "1px solid var(--wp-dark-border, #333)",
       }}
     >
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <div className="min-w-0">
+      {/* Header: full-width greeting on mobile; on sm+ the
+          "Open dashboard" link sits in the top-right gutter. The
+          flex-wrap variant prevents the greeting from getting cropped
+          to "Good mor..." on narrow viewports. */}
+      <div className="mb-3">
+        <div className="flex items-start justify-between gap-3">
           <div
-            className="text-sm font-semibold truncate"
+            className="text-sm font-semibold break-words"
             style={{ color: "var(--wp-gold, #eab308)" }}
           >
             {spec.greeting}
           </div>
-          <div
-            className="text-xs mt-0.5"
-            style={{ color: "var(--wp-text-dim, #aaa)" }}
+          <a
+            href="/"
+            onClick={() => trackInteraction("open_dashboard")}
+            className="text-xs whitespace-nowrap shrink-0 pt-0.5"
+            style={{ color: "var(--wp-gold, #eab308)" }}
           >
-            {spec.summary}
-          </div>
+            Open dashboard →
+          </a>
         </div>
-        <a
-          href="/"
-          onClick={() => trackInteraction("open_dashboard")}
-          className="text-xs whitespace-nowrap"
-          style={{ color: "var(--wp-gold, #eab308)" }}
+        <div
+          className="text-xs mt-1"
+          style={{ color: "var(--wp-text-dim, #aaa)" }}
         >
-          Open dashboard
-        </a>
+          {spec.summary}
+        </div>
       </div>
 
       {/* Today's schedule */}
@@ -323,41 +327,51 @@ export function GoodMorningWidget({ spec }: GoodMorningWidgetProps) {
             </div>
           ) : (
             <>
-              <div className="flex items-center gap-2 mb-2">
-                <label
-                  htmlFor="good-morning-prebrief-picker"
-                  className="text-[11px] shrink-0"
-                  style={{ color: "var(--wp-text-muted, #6b7280)" }}
-                >
-                  Meeting
-                </label>
-                <select
-                  id="good-morning-prebrief-picker"
-                  data-testid="good-morning-prebrief-picker"
-                  value={selectedMeetingId ?? ""}
-                  onChange={(e) => {
-                    setSelectedMeetingId(e.target.value);
-                    trackInteraction("select_prebrief_meeting", {
-                      meeting_id: e.target.value,
-                    });
-                  }}
-                  className="text-xs rounded border px-2 py-1 flex-1 min-w-0"
-                  style={{
-                    background: "var(--wp-dark-surface2, #1a1a1a)",
-                    borderColor: "var(--wp-dark-border, #333)",
-                    color: "var(--wp-text, #eee)",
-                  }}
-                >
-                  {spec.preBrief.meetings.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {formatWhen(m.start)} · {m.subject} ({formatCountdown(m, nowMs)})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Stacked picker: label on its own line, select takes
+                  the full row. Side-by-side ate too much horizontal
+                  space on mobile. Only show the picker when there's
+                  more than one meeting to pick — a single-meeting
+                  panel doesn't need a chooser. */}
+              {spec.preBrief.meetings.length > 1 && (
+                <div className="mb-2">
+                  <label
+                    htmlFor="good-morning-prebrief-picker"
+                    className="block text-[11px] mb-1"
+                    style={{ color: "var(--wp-text-muted, #6b7280)" }}
+                  >
+                    Pick a meeting
+                  </label>
+                  <select
+                    id="good-morning-prebrief-picker"
+                    data-testid="good-morning-prebrief-picker"
+                    value={selectedMeetingId ?? ""}
+                    onChange={(e) => {
+                      setSelectedMeetingId(e.target.value);
+                      trackInteraction("select_prebrief_meeting", {
+                        meeting_id: e.target.value,
+                      });
+                    }}
+                    className="text-xs rounded border px-2 py-1.5 w-full"
+                    style={{
+                      background: "var(--wp-dark-surface2, #1a1a1a)",
+                      borderColor: "var(--wp-dark-border, #333)",
+                      color: "var(--wp-text, #eee)",
+                    }}
+                  >
+                    {spec.preBrief.meetings.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {formatWhen(m.start)} · {m.subject} ({formatCountdown(m, nowMs)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {selectedMeeting && (
-                <div data-testid="good-morning-prebrief-selected" className="text-xs space-y-1">
-                  <div className="font-medium" style={{ color: "var(--wp-gold, #eab308)" }}>
+                <div data-testid="good-morning-prebrief-selected" className="text-xs space-y-1.5">
+                  <div
+                    className="font-semibold break-words"
+                    style={{ color: "var(--wp-gold, #eab308)" }}
+                  >
                     {selectedMeeting.subject}
                   </div>
                   <div
@@ -378,33 +392,31 @@ export function GoodMorningWidget({ spec }: GoodMorningWidgetProps) {
                   {selectedMeeting.attendees.length > 0 && (
                     <div
                       className="break-words"
-                      style={{ color: "var(--wp-text-dim, #aaa)" }}
+                      style={{ color: "var(--wp-text-muted, #6b7280)" }}
                     >
-                      <span className="font-semibold">
+                      <span style={{ color: "var(--wp-text-dim, #aaa)" }}>
                         {selectedMeeting.attendees.length}{" "}
-                        {selectedMeeting.attendees.length === 1 ? "attendee" : "attendees"}:
-                      </span>{" "}
-                      <span style={{ color: "var(--wp-text-muted, #6b7280)" }}>
-                        {selectedMeeting.attendees.slice(0, 5).join(", ")}
-                        {selectedMeeting.attendees.length > 5
-                          ? `, +${selectedMeeting.attendees.length - 5} more`
-                          : ""}
+                        {selectedMeeting.attendees.length === 1 ? "attendee" : "attendees"}
                       </span>
+                      {" · "}
+                      {selectedMeeting.attendees.slice(0, 3).join(", ")}
+                      {selectedMeeting.attendees.length > 3
+                        ? `, +${selectedMeeting.attendees.length - 3} more`
+                        : ""}
                     </div>
                   )}
-                  <div className="mt-1">
-                    <a
-                      href={`/meetings/${encodeURIComponent(selectedMeeting.id)}`}
-                      onClick={() =>
-                        trackInteraction("open_prebrief_detail", {
-                          meeting_id: selectedMeeting.id,
-                        })
-                      }
-                      style={{ color: "var(--wp-gold, #eab308)" }}
-                    >
-                      Open full pre-brief
-                    </a>
-                  </div>
+                  <a
+                    href={`/meetings/${encodeURIComponent(selectedMeeting.id)}`}
+                    onClick={() =>
+                      trackInteraction("open_prebrief_detail", {
+                        meeting_id: selectedMeeting.id,
+                      })
+                    }
+                    className="inline-block pt-0.5"
+                    style={{ color: "var(--wp-gold, #eab308)" }}
+                  >
+                    Open full pre-brief →
+                  </a>
                 </div>
               )}
             </>

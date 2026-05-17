@@ -94,7 +94,7 @@ describe("GoodMorningWidget", () => {
     expect(screen.getByTestId("good-morning-widget")).toBeInTheDocument();
     expect(screen.getByText("Good morning, Nick")).toBeInTheDocument();
     expect(screen.getByText("Your calendar is clear today.")).toBeInTheDocument();
-    expect(screen.getByText("Open dashboard")).toBeInTheDocument();
+    expect(screen.getByText(/Open dashboard/)).toBeInTheDocument();
   });
 
   test("schedule section renders each event with time + attendee count + location", () => {
@@ -149,7 +149,7 @@ describe("GoodMorningWidget", () => {
   test("clicking the dashboard link fires widget_interaction", () => {
     render(<GoodMorningWidget spec={fullSpec} />);
     mockFetch.mockClear();
-    fireEvent.click(screen.getByText("Open dashboard"));
+    fireEvent.click(screen.getByText(/Open dashboard/));
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/analytics",
       expect.objectContaining({
