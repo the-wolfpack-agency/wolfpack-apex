@@ -42,8 +42,26 @@ import "./get-external-record-tool";
    form (with required StageName + CloseDate baked in) instead of
    the parse-confirm-write path that 400'd at the vendor. */
 import "./create-crm-record-form-tool";
+
+/* Form-trigger tools — return a FormSpec the chat UI renders inline so
+   the user fills required fields before any side effect fires. These
+   MUST be registered BEFORE the legacy create_external_record /
+   update_external_record so "create task" / "create feature" /
+   "create okr" route to their page-modal-parity forms instead of
+   being swallowed by the loose CRM create regex
+   (/\b(?:create|add|new)\b.*\b(?:task|activity)\b/) which would write
+   to Salesforce instead. Order within the form group: message before
+   email so "send message" doesn't match email's verb-noun stem; the
+   other tools have disjoint object nouns. */
+import "./create-message-form-tool";
+import "./create-email-form-tool";
+import "./create-calendar-event-form-tool";
+import "./create-task-form-tool";
+import "./create-okr-form-tool";
+import "./create-feature-form-tool";
+
 /* Legacy create / update — still handles "log a call with X about Y"
-   (action-verb phrasings the form tool intentionally doesn't claim). */
+   (action-verb phrasings the form tools intentionally don't claim). */
 import "./create-external-record-tool";
 import "./update-external-record-tool";
 /* Read-only advanced queries — related records ("Acme's opportunities")
@@ -59,20 +77,6 @@ import "./aggregate-external-records-tool";
 import "./search-github-pull-requests-tool";
 import "./search-github-issues-tool";
 import "./recent-workflow-runs-tool";
-
-/* Form-trigger tools — return a FormSpec the chat UI renders inline so
-   the user fills required fields before any side effect fires. Order:
-   message before email so "send message" doesn't match email's
-   verb-noun stem. The other tools (OKR / feature / calendar / task)
-   have disjoint object nouns so order between them doesn't matter.
-   (create_crm_record_form is registered earlier alongside the CRM
-   connector tools — see above.) */
-import "./create-message-form-tool";
-import "./create-email-form-tool";
-import "./create-calendar-event-form-tool";
-import "./create-task-form-tool";
-import "./create-okr-form-tool";
-import "./create-feature-form-tool";
 
 /* Widget tools — return an interactive surface (calendar grid, email
    thread, task list, etc.) instead of free-form text. The framework
