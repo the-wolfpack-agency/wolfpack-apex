@@ -108,6 +108,13 @@ export interface AssistantResponse {
    *  `form`; the chat UI imports the strict WidgetSpec type from
    *  @/lib/assistant/widgets/types. */
   widget?: unknown;
+  /** Stable id for this assistant turn — same UUID is included in
+   *  every analytics event fired during the turn so funnels can be
+   *  reconstructed post-hoc (intent → tool → widget render →
+   *  widget click → form submit). The chat UI may forward it on
+   *  follow-up POSTs (analytics events, form submits) to extend the
+   *  funnel client-side. */
+  workflowId?: string;
 }
 
 export interface ConversationSummary {
@@ -598,6 +605,14 @@ export async function chat(
      call below. Once every caller is updated, this becomes required. */
   workspaceId: string = "default",
 ): Promise<AssistantResponse> {
+  /* workflow_id correlates every analytics event fired during this
+   * single chat() turn (tool dispatch, page-facts hit, brain hit,
+   * intent_unmatched, AI fallback, etc.). Lets the admin dashboard
+   * reconstruct funnels from the event stream. UUID-ish; the
+   * exact format doesn't matter as long as it's collision-resistant
+   * within a turn-volume horizon. */
+  const workflowId = generateId();
+
   // --- Resolve or create conversation ---
   let convId = conversationId || null;
 
@@ -676,6 +691,7 @@ export async function chat(
 
   // Track every question
   trackEvent("knowledge.question_asked", userId, userRole, {
+    workflow_id: workflowId,
     question_length: message.length,
     conversation_id: convId,
     module: "assistant",
@@ -742,6 +758,7 @@ export async function chat(
        every tool that reads workspace-scoped state (connector
        credentials, brain pack, strictness) reads it from here. */
     workspaceId,
+    workflowId,
   });
   if (toolResult && toolResult.result.ok) {
     /* Extract connector attribution from the tool's typed result data
@@ -1097,6 +1114,7 @@ export async function chat(
     module: "assistant",
     has_brain_context: brainContext.hits.length > 0,
     has_page_context: !!pageContext,
+    workflow_id: workflowId,
   });
 
   const aiResult = await callAI(message, history, userMemory, userId, userRole, pageContext, brainContext);
@@ -1104,6 +1122,7 @@ export async function chat(
     trackEvent("system.ai_call_made", userId, userRole, {
       module: "assistant",
       tokens_used: aiResult.tokensUsed,
+      workflow_id: workflowId,
     });
 
     // Cache AI response for future zero-token retrieval

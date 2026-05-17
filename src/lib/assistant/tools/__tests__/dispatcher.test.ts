@@ -190,3 +190,37 @@ describe("tryDispatchTool — handler exception", () => {
     }
   });
 });
+
+/* ---------------------------------------------------------------------
+ * Workflow correlation — ctx.workflowId threads through into every
+ * dispatch-side analytics event so the admin dashboard can rebuild
+ * funnels (intent → tool → widget render → widget click) from the
+ * event stream.
+ * --------------------------------------------------------------- */
+describe("tryDispatchTool — workflow_id propagation", () => {
+  test("includes workflow_id in tool_invoked + tool_succeeded when ctx carries one", async () => {
+    registerTool(mkTool({ name: "ok_tool" }));
+    await tryDispatchTool("test:x", { ...ctx, workflowId: "wf-abc" });
+    const invoked = mockTrack.mock.calls.find((c) => c[0] === "assistant.tool_invoked");
+    expect(invoked?.[3]).toMatchObject({ workflow_id: "wf-abc" });
+    const succeeded = mockTrack.mock.calls.find((c) => c[0] === "assistant.tool_succeeded");
+    expect(succeeded?.[3]).toMatchObject({ workflow_id: "wf-abc" });
+  });
+
+  test("omits workflow_id when ctx doesn't carry one (back-compat)", async () => {
+    registerTool(mkTool({ name: "ok_tool" }));
+    await tryDispatchTool("test:x", ctx);
+    const invoked = mockTrack.mock.calls.find((c) => c[0] === "assistant.tool_invoked");
+    expect(invoked?.[3]).not.toHaveProperty("workflow_id");
+  });
+
+  test("threads workflow_id into tool_failed on validation error", async () => {
+    registerTool(mkTool({
+      name: "validator",
+      paramSchema: z.object({ q: z.string().min(99) }),
+    }));
+    await tryDispatchTool("test:short", { ...ctx, workflowId: "wf-fail" });
+    const failed = mockTrack.mock.calls.find((c) => c[0] === "assistant.tool_failed");
+    expect(failed?.[3]).toMatchObject({ workflow_id: "wf-fail" });
+  });
+});

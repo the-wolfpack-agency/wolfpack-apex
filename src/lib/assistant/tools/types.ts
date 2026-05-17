@@ -46,6 +46,16 @@ export interface ToolContext {
    * resolve this from the session.
    */
   workspaceId?: string;
+  /**
+   * Stable identifier for this assistant turn (one user message →
+   * its tool call(s) → its widget renders → its form submit).
+   * Lets the analytics layer correlate events into funnels:
+   *   intent_unmatched → tool_invoked → widget_offered → widget_rendered
+   *   → widget_interaction → form_submitted
+   * all sharing the same workflow_id.
+   * UUID v4; generated at the top of chat() and threaded through.
+   */
+  workflowId?: string;
 }
 
 /** Successful tool dispatch — the handler ran and produced data. */

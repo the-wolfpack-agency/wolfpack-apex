@@ -54,22 +54,31 @@ export async function tryDispatchTool(
     const result = await runOneTool(tool, params, ctx);
     const durationMs = Date.now() - started;
 
+    /* workflow_id correlates this dispatch back to the user message
+     * that triggered it — same id is on the intent_unmatched event
+     * (when it would have fired) + every widget interaction the
+     * resulting render produces. Optional so legacy callers that
+     * don't generate one still work. */
+    const wid = ctx.workflowId;
     trackEvent("assistant.tool_invoked", ctx.userId, ctx.userRole, {
       tool: tool.name,
       success: result.ok,
       code: result.ok ? "ok" : result.code,
       duration_ms: durationMs,
+      ...(wid ? { workflow_id: wid } : {}),
     });
     if (!result.ok) {
       trackEvent("assistant.tool_failed", ctx.userId, ctx.userRole, {
         tool: tool.name,
         code: result.code,
         message: result.message.slice(0, 200),
+        ...(wid ? { workflow_id: wid } : {}),
       });
     } else {
       trackEvent("assistant.tool_succeeded", ctx.userId, ctx.userRole, {
         tool: tool.name,
         duration_ms: durationMs,
+        ...(wid ? { workflow_id: wid } : {}),
       });
     }
 
