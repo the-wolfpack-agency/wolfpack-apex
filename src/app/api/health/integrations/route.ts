@@ -210,3 +210,12 @@ async function computeDriftMap(
   }
   return drift;
 }
+
+/**
+ * POST alias. The AgenticQA nightly orchestrator POSTs ?run=true
+ * because the sweep is a side effect; POST is more correct than GET
+ * for a write-shaped action. Same handler, no body required.
+ */
+export async function POST(req: NextRequest) {
+  return GET(req);
+}
