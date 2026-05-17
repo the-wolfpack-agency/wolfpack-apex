@@ -29,12 +29,13 @@ The Assistant runs the tools in registration order. When two tools could plausib
 
 Copy any of these into the chat. Each one exercises a different capability. Run them in order for a full feature tour, or grab the one that matches what you're trying to show off.
 
-### Morning glance: widgets only
-> Show off the "interface inside the chat" pattern. Zero tokens, three taps, one mental model.
+### Daily glance: widgets only
+> Show off the "interface inside the chat" pattern. Zero tokens, four taps, one mental model.
 
-1. `calendar` → mini month grid renders inline. Click today; meetings expand below.
-2. `inbox` → top 10 emails render with unread bolded. Click any → opens Outlook.
-3. `tasks` → open MS To-Do tasks render with check-off circles. Tick one to complete it without leaving the chat.
+1. `briefing` (or `good morning` / `good afternoon` / `good evening`) → full dashboard panel inline: greeting, Today's Schedule, Action Items, Meeting Pre-Brief with picker + countdown.
+2. `calendar` → mini month grid renders inline. Click today; meetings expand below.
+3. `inbox` → top 10 emails render with unread bolded. Click any → opens Outlook.
+4. `tasks` → open MS To-Do tasks render with check-off circles. Tick one to complete it without leaving the chat.
 
 ### Q3 deep-dive: read-only lookups
 > Show off the deterministic CRM + financials + calendar combo. Token cost: still zero.

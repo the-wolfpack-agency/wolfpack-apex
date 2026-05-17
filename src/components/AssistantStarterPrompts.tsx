@@ -20,58 +20,90 @@ interface StarterCategory {
   prompts: string[];
 }
 
-const STARTER_CATEGORIES: StarterCategory[] = [
-  {
-    title: "Create something",
-    emoji: "✏️",
-    prompts: [
-      "create email",
-      "create task",
-      "create message",
-      "schedule a meeting",
-      "create feature",
-      "create OKR",
-    ],
-  },
-  {
-    title: "CRM (Salesforce / HubSpot)",
-    emoji: "🤝",
-    prompts: [
-      "top 3 deals",
-      "deals over $50k closing this month",
-      "what's my win rate",
-      "Acme's opportunities",
-      "average deal size",
-    ],
-  },
-  {
-    title: "GitHub",
-    emoji: "🐙",
-    prompts: [
-      "what PRs are open",
-      "failed CI in wolfpack-apex",
-      "open issues in wolfpack-auto",
-    ],
-  },
-  {
-    title: "Calendar & Mail",
-    emoji: "📅",
-    prompts: [
-      "what is on my calendar monday?",
-      "am I free Thursday at 2pm",
-      "find emails from Max",
-    ],
-  },
-  {
-    title: "Internal",
-    emoji: "📚",
-    prompts: [
-      "what are our OKRs",
-      "what's our revenue this quarter?",
-      "what do we know about Acme",
-    ],
-  },
-];
+/**
+ * Pick the right daily-briefing trigger for the current time of day.
+ * The widget itself shows "Good morning / afternoon / evening" based
+ * on clock; the chip label should match so the user doesn't fire
+ * "Good evening" at 9am.
+ */
+function timeOfDayBriefingPrompt(): string {
+  const hour = typeof window !== "undefined" ? new Date().getHours() : 9;
+  if (hour < 12) return "good morning";
+  if (hour < 17) return "good afternoon";
+  return "good evening";
+}
+
+function buildStarterCategories(): StarterCategory[] {
+  return [
+    {
+      /* Widgets first — they're the "interface inside the chat"
+         pattern and the most-visited capability on mobile. */
+      title: "Widgets",
+      emoji: "✨",
+      prompts: [
+        timeOfDayBriefingPrompt(),
+        "briefing",
+        "calendar",
+        "inbox",
+        "tasks",
+      ],
+    },
+    {
+      title: "Create something",
+      emoji: "✏️",
+      prompts: [
+        "create email",
+        "create task",
+        "create message",
+        "schedule a meeting",
+        "create feature",
+        "create OKR",
+      ],
+    },
+    {
+      title: "CRM (Salesforce / HubSpot)",
+      emoji: "🤝",
+      prompts: [
+        "top 3 deals",
+        "deals over $50k closing this month",
+        "what's my win rate",
+        "Acme's opportunities",
+        "average deal size",
+      ],
+    },
+    {
+      title: "GitHub",
+      emoji: "🐙",
+      prompts: [
+        "what PRs are open",
+        "failed CI in wolfpack-apex",
+        "open issues in wolfpack-auto",
+      ],
+    },
+    {
+      title: "Calendar & Mail",
+      emoji: "📅",
+      prompts: [
+        "what is on my calendar monday?",
+        "am I free Thursday at 2pm",
+        "find emails from Max",
+        "any meetings tomorrow",
+      ],
+    },
+    {
+      title: "Knowledge & memory",
+      emoji: "📚",
+      prompts: [
+        "what are our OKRs",
+        "what's our revenue this quarter?",
+        "what do we know about Acme",
+        "who is Hoxsie",
+      ],
+    },
+  ];
+}
+
+const STARTER_CATEGORIES: StarterCategory[] = buildStarterCategories();
 
 export interface AssistantStarterPromptsProps {
   /** Called when the user clicks a chip. The parent (InstinctChat)
