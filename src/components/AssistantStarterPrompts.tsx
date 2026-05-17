@@ -78,7 +78,8 @@ function buildStarterCategories(): StarterCategory[] {
       prompts: [
         "what is on my calendar monday?",
         "am I free Thursday at 2pm",
-        "find emails from Max",
+        "find emails from <person>",
+        "find emails to <person>",
         "any meetings tomorrow",
       ],
     },

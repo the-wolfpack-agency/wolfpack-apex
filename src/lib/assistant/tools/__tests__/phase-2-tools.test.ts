@@ -97,6 +97,10 @@ describe("get_calendar_availability — handler", () => {
 describe("search_mail — intent", () => {
   test.each([
     ["find emails from Max", { from: "Max" }],
+    ["find emails to Hoxsie", { to: "Hoxsie" }],
+    ["search emails to Sarah about Q3", { to: "Sarah", topic: "Q3" }],
+    ["did I email Hoxsie about the proposal", { to: "Hoxsie", topic: "the proposal" }],
+    ["have I emailed Max", { to: "Max" }],
     ["search emails about Q3 launch", { topic: "Q3 launch" }],
     ["find emails from Jorge about renewal", { from: "Jorge", topic: "renewal" }],
     ["did Max email me about pricing?", { from: "Max", topic: "pricing" }],
@@ -109,9 +113,10 @@ describe("search_mail — intent", () => {
     expect(searchMailTool.matchIntent("am i free thursday")).toBeNull();
   });
 
-  test("paramSchema requires at least one of from/topic", () => {
+  test("paramSchema requires at least one of from/to/topic", () => {
     expect(searchMailTool.paramSchema.safeParse({}).success).toBe(false);
     expect(searchMailTool.paramSchema.safeParse({ from: "x" }).success).toBe(true);
+    expect(searchMailTool.paramSchema.safeParse({ to: "x" }).success).toBe(true);
     expect(searchMailTool.paramSchema.safeParse({ topic: "y" }).success).toBe(true);
   });
 });

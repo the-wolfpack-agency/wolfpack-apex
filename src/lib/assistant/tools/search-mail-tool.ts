@@ -16,31 +16,57 @@ import type { ToolDef, ToolResult } from "./types";
 
 const ParamSchema = z.object({
   from: z.string().min(1).max(120).optional(),
+  to: z.string().min(1).max(120).optional(),
   topic: z.string().min(1).max(120).optional(),
-}).refine((d) => !!(d.from || d.topic), {
-  message: "mail search needs at least one of 'from' or 'topic'",
+}).refine((d) => !!(d.from || d.to || d.topic), {
+  message: "mail search needs at least one of 'from', 'to', or 'topic'",
 });
 type Params = z.infer<typeof ParamSchema>;
 
 const PATTERNS: Array<{ re: RegExp; build(m: RegExpExecArray): Params | null }> = [
+  /* Most-specific first: from + topic, to + topic, from + to. */
   {
     re: /\b(?:find|search|look\s+up|show)\s+(?:my\s+)?emails?\s+from\s+(.+?)\s+about\s+(.+?)\??$/i,
     build: (m) => ({ from: m[1].trim(), topic: m[2].trim() }),
   },
   {
+    re: /\b(?:find|search|look\s+up|show)\s+(?:my\s+)?emails?\s+to\s+(.+?)\s+about\s+(.+?)\??$/i,
+    build: (m) => ({ to: m[1].trim(), topic: m[2].trim() }),
+  },
+  {
+    re: /\b(?:find|search|look\s+up|show)\s+(?:my\s+)?emails?\s+from\s+(.+?)\s+to\s+(.+?)\??$/i,
+    build: (m) => ({ from: m[1].trim(), to: m[2].trim() }),
+  },
+  /* Single-slot from / to. */
+  {
     re: /\b(?:find|search|look\s+up|show)\s+(?:my\s+)?emails?\s+from\s+(.+?)\??$/i,
     build: (m) => ({ from: m[1].trim() }),
   },
   {
+    re: /\b(?:find|search|look\s+up|show)\s+(?:my\s+)?emails?\s+to\s+(.+?)\??$/i,
+    build: (m) => ({ to: m[1].trim() }),
+  },
+  /* Topic-only. */
+  {
     re: /\b(?:find|search|look\s+up|show|any)\s+emails?\s+about\s+(.+?)\??$/i,
     build: (m) => ({ topic: m[1].trim() }),
   },
+  /* "did X email me/us about Y" — incoming. */
   {
     re: /\b(?:did|has)\s+(.+?)\s+email(?:ed)?\s+(?:me|us)\s+(?:about\s+)?(.+?)?\??$/i,
     build: (m) =>
       m[2]
         ? { from: m[1].trim(), topic: m[2].trim() }
         : { from: m[1].trim() },
+  },
+  /* "did I email X about Y" — outgoing. */
+  {
+    re: /\b(?:did|have)\s+(?:i|we)\s+email(?:ed)?\s+(.+?)\s+about\s+(.+?)\??$/i,
+    build: (m) => ({ to: m[1].trim(), topic: m[2].trim() }),
+  },
+  {
+    re: /\b(?:did|have)\s+(?:i|we)\s+email(?:ed)?\s+(.+?)\??$/i,
+    build: (m) => ({ to: m[1].trim() }),
   },
 ];
 
@@ -50,7 +76,7 @@ function matchMailIntent(message: string): Params | null {
     const m = re.exec(trimmed);
     if (m) {
       const built = build(m);
-      if (built && (built.from || built.topic)) return built;
+      if (built && (built.from || built.to || built.topic)) return built;
     }
   }
   return null;
@@ -68,6 +94,7 @@ export const searchMailTool: ToolDef<Params, MailSearchResult> = {
       const result = await runMailSearch({
         userId: ctx.userId,
         from: params.from,
+        to: params.to,
         topic: params.topic,
         limit: 10,
       });
@@ -92,21 +119,21 @@ export const searchMailTool: ToolDef<Params, MailSearchResult> = {
   },
 };
 
+function qualifierString(p: Params): string {
+  const parts: string[] = [];
+  if (p.from) parts.push(`from "${p.from}"`);
+  if (p.to) parts.push(`to "${p.to}"`);
+  if (p.topic) parts.push(`about "${p.topic}"`);
+  return parts.join(" ");
+}
+
 function buildEmptyMessage(p: Params): string {
-  if (p.from && p.topic) return `I didn't find any emails from "${p.from}" about "${p.topic}".`;
-  if (p.from) return `I didn't find any emails from "${p.from}".`;
-  return `I didn't find any emails about "${p.topic}".`;
+  return `I didn't find any emails ${qualifierString(p)}.`;
 }
 
 function formatFromCount(p: Params, count: number): string {
   if (count === 0) return buildEmptyMessage(p);
-  const whoWhat =
-    p.from && p.topic
-      ? `from "${p.from}" about "${p.topic}"`
-      : p.from
-      ? `from "${p.from}"`
-      : `about "${p.topic}"`;
-  return `Found ${count} email${count === 1 ? "" : "s"} ${whoWhat}.`;
+  return `Found ${count} email${count === 1 ? "" : "s"} ${qualifierString(p)}.`;
 }
 
 registerTool(searchMailTool);

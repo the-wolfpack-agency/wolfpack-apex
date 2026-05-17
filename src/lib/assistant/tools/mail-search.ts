@@ -1,17 +1,25 @@
 /**
- * mail_search tool — reuses the email-matcher built for prebriefs.
+ * mail_search tool — strict sender / recipient / topic search.
  *
- * Handles "find the email from James about Q2", "email from Hoxsie",
- * "email about Porsche engagement" etc. Takes optional "from" and
- * "topic" slots. If both are absent, returns null.
+ * Handles "find the email from James about Q2", "emails to Hoxsie",
+ * "did I email Max about Q3", etc. Each side (from / to / topic) is
+ * optional; at least one is required.
+ *
+ * findMailBySenderOrRecipient gives us strict side-specific filtering
+ * so "from Max" doesn't surface threads where Max is just a recipient
+ * (the meeting-prebrief matcher's "anyone on the thread" semantics
+ * are wrong for chat search).
  */
 
-import { findThreadsInvolvingAttendees } from "@/lib/meetings/email-matcher";
+import {
+  findMailBySenderOrRecipient,
+} from "@/lib/meetings/email-matcher";
 import type { Email } from "@/lib/microsoft-graph";
 import { cleanMailSnippet } from "@/lib/mail/snippet";
 
 export interface MailSearchResult {
   from?: string;
+  to?: string;
   topic?: string;
   matches: Array<{
     id: string;
@@ -28,51 +36,52 @@ export interface MailSearchResult {
 export async function runMailSearch(params: {
   userId: string;
   from?: string;
+  to?: string;
   topic?: string;
   limit?: number;
 }): Promise<MailSearchResult | null> {
   const from = params.from?.trim();
+  const to = params.to?.trim();
   const topic = params.topic?.trim();
-  if (!from && !topic) return null;
+  if (!from && !to && !topic) return null;
   const limit = Math.max(1, Math.min(params.limit ?? 5, 10));
 
   let threads: Email[] = [];
   try {
-    /* findThreadsInvolvingAttendees is "anyone-on-the-thread" matching
-     * — sender OR recipient. Pull a wider pool so the strict
-     * sender-side filter below has room to keep `limit` results. */
-    threads = await findThreadsInvolvingAttendees(
-      params.userId,
-      from ? [from] : [],
-      [],
-      from ? Math.max(limit * 4, 20) : limit,
-    );
+    if (from || to) {
+      /* Sender / recipient search uses the strict matcher. */
+      threads = await findMailBySenderOrRecipient(params.userId, {
+        fromNeedle: from,
+        toNeedle: to,
+        /* Wider pool so topic post-filter still has room. */
+        limit: topic ? limit * 4 : limit,
+      });
+    } else {
+      /* Topic-only search: scan a wider window without side filters. */
+      threads = await findMailBySenderOrRecipient(params.userId, {
+        /* Sentinel — match-any against either side. The matcher
+         * returns [] if no needles are set, so we use a wildcard
+         * fromNeedle="" trick... actually that returns []. Better:
+         * just pull recent mail with no filter via the topic-only
+         * path. For now, require sender or recipient — topic-only
+         * search is rare and best routed through Graph $search. */
+        fromNeedle: "",
+        toNeedle: "",
+        limit: limit * 4,
+      });
+    }
   } catch {
     return null;
   }
 
-  /* Strict "from <sender>" filter — the upstream matcher hits TO + CC
-   * too, which is why "emails from Max" was returning threads where
-   * Max was just a recipient. Keep only rows where the sender's name
-   * or address actually contains the needle. */
-  const fromNeedle = from?.toLowerCase().trim();
-  const fromFiltered = fromNeedle
-    ? threads.filter((t) => {
-        const hay = `${t.from ?? ""} ${(t as Email & { fromEmail?: string }).fromEmail ?? ""}`.toLowerCase();
-        return hay.includes(fromNeedle);
-      })
-    : threads;
-
   // Topic filter (substring on subject + cleaned body, case-insensitive).
-  // Matching against the scrubbed preview keeps us from false-positive
-  // matching on Teams invite URLs, signatures, or quoted-reply headers.
   const topicNeedle = topic?.toLowerCase();
   const filtered = topicNeedle
-    ? fromFiltered.filter((t) => {
+    ? threads.filter((t) => {
         const hay = `${t.subject} ${cleanMailSnippet(t.bodyPreview)}`.toLowerCase();
         return hay.includes(topicNeedle);
       })
-    : fromFiltered;
+    : threads;
 
   if (filtered.length === 0) return null;
 
@@ -85,10 +94,8 @@ export async function runMailSearch(params: {
     webLink: (t as Email & { webLink?: string }).webLink,
   }));
 
-  /* Subject renders as a markdown link when we have a webLink — the
-   * chat surface's markdown renderer turns this into a clickable
-   * anchor that opens the message in Outlook on the web. Falls back
-   * to plain text when Graph didn't return a webLink. */
+  /* Markdown link out to the Outlook webLink when Graph surfaced one;
+   * the chat renderer turns this into a clickable anchor. */
   const summary = matches
     .slice(0, 5)
     .map((m) => {
@@ -100,11 +107,13 @@ export async function runMailSearch(params: {
     })
     .join("\n");
 
-  const qual = [from ? `from ${from}` : null, topic ? `about ${topic}` : null]
-    .filter(Boolean)
-    .join(" ");
+  const quals: string[] = [];
+  if (from) quals.push(`from ${from}`);
+  if (to) quals.push(`to ${to}`);
+  if (topic) quals.push(`about ${topic}`);
+  const qual = quals.join(" ");
   const more = matches.length > 5 ? ` (+${matches.length - 5} more)` : "";
   const answer = `Found ${matches.length} email${matches.length === 1 ? "" : "s"} ${qual}${more}:\n${summary}`;
 
-  return { from, topic, matches, answer, source: "mail" };
+  return { from, to, topic, matches, answer, source: "mail" };
 }

@@ -218,3 +218,91 @@ export async function findThreadsInvolvingAttendees(
   );
   return hits.slice(0, limit).map(toEmail);
 }
+
+/* ----------------------------------------------------------------------
+ * Strict sender/recipient mail search — sibling to the matcher above.
+ *
+ * findThreadsInvolvingAttendees treats sender + recipients identically,
+ * which is right for the meeting-prebrief use case ("anyone on the
+ * thread") but wrong for the chat's mail search ("emails FROM Max"
+ * shouldn't surface threads where Max is just CC'd). This function
+ * applies strict, side-specific substring matching against the FROM
+ * address (when `fromNeedle` is set) or the TO/CC recipients (when
+ * `toNeedle` is set).
+ *
+ * Reuses the same bulk-fetch cache as findThreadsInvolvingAttendees
+ * so back-to-back searches stay fast.
+ * -------------------------------------------------------------------- */
+
+function fromHaystack(msg: RawMessage): string {
+  const bits: string[] = [];
+  const a = msg.from?.emailAddress;
+  if (a?.name) bits.push(a.name);
+  if (a?.address) bits.push(a.address);
+  return bits.join(" ").toLowerCase();
+}
+
+function recipientHaystack(msg: RawMessage): string {
+  const bits: string[] = [];
+  for (const r of msg.toRecipients ?? []) {
+    if (r.emailAddress?.name) bits.push(r.emailAddress.name);
+    if (r.emailAddress?.address) bits.push(r.emailAddress.address);
+  }
+  for (const r of msg.ccRecipients ?? []) {
+    if (r.emailAddress?.name) bits.push(r.emailAddress.name);
+    if (r.emailAddress?.address) bits.push(r.emailAddress.address);
+  }
+  return bits.join(" ").toLowerCase();
+}
+
+export interface FindMailOptions {
+  fromNeedle?: string;
+  toNeedle?: string;
+  limit?: number;
+  poolSize?: number;
+}
+
+export async function findMailBySenderOrRecipient(
+  userId: string,
+  opts: FindMailOptions,
+): Promise<Email[]> {
+  const fromNeedle = opts.fromNeedle?.trim().toLowerCase();
+  const toNeedle = opts.toNeedle?.trim().toLowerCase();
+  if (!fromNeedle && !toNeedle) return [];
+  const limit = opts.limit ?? 10;
+  const poolSize = opts.poolSize ?? 50;
+
+  const cacheKey = `${userId}:${poolSize}`;
+  let combined = bulkCacheGet(cacheKey);
+  if (!combined) {
+    const token = await getValidToken(userId).catch(() => null);
+    if (!token) return [];
+    const [inbox, sent] = await Promise.all([
+      fetchFolderPage(userId, "inbox", poolSize, token.accessToken),
+      fetchFolderPage(userId, "sentitems", poolSize, token.accessToken),
+    ]);
+    combined = [...inbox, ...sent];
+    bulkCacheSet(cacheKey, combined);
+  }
+
+  const seen = new Set<string>();
+  const hits: RawMessage[] = [];
+  for (const m of combined) {
+    if (seen.has(m.id)) continue;
+    if (isCalendarResponseNoise(m.subject)) continue;
+    /* AND semantics: both needles must match when both are set
+     * (e.g. "emails from Max to Hoxsie"). */
+    if (fromNeedle && !fromHaystack(m).includes(fromNeedle)) continue;
+    if (toNeedle && !recipientHaystack(m).includes(toNeedle)) continue;
+    seen.add(m.id);
+    hits.push(m);
+  }
+  hits.sort((a, b) =>
+    a.receivedDateTime < b.receivedDateTime
+      ? 1
+      : a.receivedDateTime > b.receivedDateTime
+        ? -1
+        : 0,
+  );
+  return hits.slice(0, limit).map(toEmail);
+}
