@@ -76,9 +76,10 @@ function formatWhen(iso: string): string {
 
 export interface GoodMorningWidgetProps {
   spec: GoodMorningWidgetSpec;
+  workflowId?: string;
 }
 
-export function GoodMorningWidget({ spec }: GoodMorningWidgetProps) {
+export function GoodMorningWidget({ spec, workflowId }: GoodMorningWidgetProps) {
   /* Pre-brief selector state. Defaults to the server-picked meeting
    * (in-progress > soonest > most-recently-ended). */
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(
@@ -108,10 +109,11 @@ export function GoodMorningWidget({ spec }: GoodMorningWidgetProps) {
           event_count: spec.schedule.events.length,
           action_count: spec.actionItems.length,
           connected: spec.connected,
+          ...(workflowId ? { workflow_id: workflowId } : {}),
         },
       }),
     }).catch(() => undefined);
-  }, [spec.schedule.events.length, spec.actionItems.length, spec.connected]);
+  }, [spec.schedule.events.length, spec.actionItems.length, spec.connected, workflowId]);
 
   function trackInteraction(action: string, meta: Record<string, unknown> = {}) {
     fetchWithRefresh("/api/analytics", {
@@ -119,7 +121,12 @@ export function GoodMorningWidget({ spec }: GoodMorningWidgetProps) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         event: "assistant.widget_interaction",
-        metadata: { widget_kind: "good_morning", action, ...meta },
+        metadata: {
+          widget_kind: "good_morning",
+          action,
+          ...(workflowId ? { workflow_id: workflowId } : {}),
+          ...meta,
+        },
       }),
     }).catch(() => undefined);
   }

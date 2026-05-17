@@ -76,6 +76,10 @@ export interface AssistantRagResult {
   /** Interactive widget spec (calendar grid, email thread, …) the
    *  chat UI renders via ChatWidget. */
   widget?: unknown;
+  /** Per-turn correlation id from the server. The chat UI forwards
+   *  it on widget + form interaction events so client-side analytics
+   *  rows join the same funnel as the originating turn. */
+  workflowId?: string;
 }
 
 export interface QueryAssistantOptions {
@@ -163,6 +167,7 @@ export async function queryAssistantWithCache(
           relatedPages?: Array<Record<string, unknown>>;
           form?: unknown;
           widget?: unknown;
+          workflowId?: string;
         };
 
         const answer = data.response ?? "";
@@ -218,6 +223,9 @@ export async function queryAssistantWithCache(
           ...(data.form && typeof data.form === "object" ? { form: data.form } : {}),
           /* Same for interactive widgets (calendar, email thread, etc.). */
           ...(data.widget && typeof data.widget === "object" ? { widget: data.widget } : {}),
+          /* workflow_id passthrough — chat UI forwards on follow-up
+           * client analytics events so funnels reconstruct. */
+          ...(typeof data.workflowId === "string" ? { workflowId: data.workflowId } : {}),
         };
       }
       // Non-OK response → fall through to cache lookup (we still want

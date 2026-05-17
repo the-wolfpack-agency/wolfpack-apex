@@ -48,6 +48,7 @@ const PER_KIND_SUCCESS_EVENT: Record<FormKind, InstinctEventType> = {
 interface SubmitBody {
   formKind?: unknown;
   fields?: unknown;
+  workflowId?: unknown;
 }
 
 const KNOWN_KINDS: FormKind[] = [
@@ -128,6 +129,10 @@ export async function POST(req: NextRequest) {
     );
   }
   const fields = (body.fields ?? {}) as Record<string, string>;
+  /* Optional per-turn correlation id forwarded by the chat client.
+   * When present, every per-kind analytics event we fire below
+   * carries workflow_id so funnels reconstruct end-to-end. */
+  const workflowId = typeof body.workflowId === "string" ? body.workflowId : undefined;
 
   const started = Date.now();
   const origin = req.nextUrl.origin;
@@ -174,6 +179,7 @@ export async function POST(req: NextRequest) {
       ok: response.status >= 200 && response.status < 300,
       duration_ms: Date.now() - started,
       http_status: response.status,
+      ...(workflowId ? { workflow_id: workflowId } : {}),
     });
     /* Per-form-kind analytics so each action shows up on its own
      * dashboard line. */
@@ -184,6 +190,7 @@ export async function POST(req: NextRequest) {
         resource_id: typeof (respPayload as { resourceId?: string }).resourceId === "string"
           ? (respPayload as { resourceId: string }).resourceId
           : "",
+        ...(workflowId ? { workflow_id: workflowId } : {}),
       });
     }
     return response;
@@ -193,6 +200,7 @@ export async function POST(req: NextRequest) {
       ok: false,
       duration_ms: Date.now() - started,
       error: (err as Error).message.slice(0, 200),
+      ...(workflowId ? { workflow_id: workflowId } : {}),
     });
     return failure("internal", `Submit failed: ${(err as Error).message}`);
   }

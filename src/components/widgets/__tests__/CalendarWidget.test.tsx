@@ -164,4 +164,33 @@ describe("CalendarWidget", () => {
     /* No dots anywhere. */
     expect(screen.queryByTestId(/calendar-dot-/)).not.toBeInTheDocument();
   });
+
+  /* ----------------------------------------------------------------
+   * Workflow correlation: workflowId prop threads into every analytics
+   * event the widget fires (mount + click) so client-side rows join
+   * the funnel started by the originating chat() turn.
+   * ---------------------------------------------------------------- */
+  test("workflowId is forwarded into widget_rendered + widget_interaction analytics", () => {
+    render(<CalendarWidget spec={spec} workflowId="wf-abc" />);
+    /* Mount fires widget_rendered. */
+    const renderedBody = mockFetch.mock.calls.find((c) =>
+      (c[1]?.body || "").includes("widget_rendered"),
+    )?.[1]?.body;
+    expect(renderedBody).toContain('"workflow_id":"wf-abc"');
+    /* Click any day-with-events → widget_interaction. */
+    mockFetch.mockClear();
+    fireEvent.click(screen.getByTestId("calendar-day-2026-05-20"));
+    const interactionBody = mockFetch.mock.calls.find((c) =>
+      (c[1]?.body || "").includes("widget_interaction"),
+    )?.[1]?.body;
+    expect(interactionBody).toContain('"workflow_id":"wf-abc"');
+  });
+
+  test("workflowId omitted when prop not passed (back-compat)", () => {
+    render(<CalendarWidget spec={spec} />);
+    const renderedBody = mockFetch.mock.calls.find((c) =>
+      (c[1]?.body || "").includes("widget_rendered"),
+    )?.[1]?.body;
+    expect(renderedBody).not.toContain("workflow_id");
+  });
 });

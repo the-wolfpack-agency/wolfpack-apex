@@ -226,6 +226,12 @@ export async function POST(req: NextRequest) {
     if (result?.widget && typeof result.widget === "object") {
       response.widget = result.widget;
     }
+    /* workflowId — per-turn correlation id from chat(). Client
+     * forwards it on widget + form interaction events so the funnel
+     * reconstructs end-to-end. */
+    if (typeof result?.workflowId === "string") {
+      response.workflowId = result.workflowId;
+    }
     if (gateResults.length > 0) {
       response.gateResults = gateResults.map((r) => ({
         name: r.name,

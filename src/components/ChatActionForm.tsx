@@ -31,6 +31,10 @@ export interface ChatActionFormProps {
   /** Called after a successful submit so the parent (InstinctChat) can
    *  append a follow-up confirmation message. Optional. */
   onSubmitted?: (result: { ok: true; message: string; resourceId?: string }) => void;
+  /** Per-turn correlation id from the originating chat() call.
+   *  Forwarded into every analytics emission (skipped, invalid,
+   *  submitted) so the funnel can be reconstructed end-to-end. */
+  workflowId?: string;
 }
 
 interface FieldState {
@@ -54,7 +58,7 @@ function buildInitialState(spec: FormSpec): Record<string, FieldState> {
   return out;
 }
 
-export function ChatActionForm({ spec, onSubmitted }: ChatActionFormProps) {
+export function ChatActionForm({ spec, onSubmitted, workflowId }: ChatActionFormProps) {
   const [fields, setFields] = useState<Record<string, FieldState>>(() =>
     buildInitialState(spec),
   );
@@ -102,7 +106,12 @@ export function ChatActionForm({ spec, onSubmitted }: ChatActionFormProps) {
       headers: jsonHeaders(),
       body: JSON.stringify({
         event,
-        metadata: { form_kind: spec.formKind, field_name: fieldName, ...extra },
+        metadata: {
+          form_kind: spec.formKind,
+          field_name: fieldName,
+          ...(workflowId ? { workflow_id: workflowId } : {}),
+          ...extra,
+        },
       }),
     }).catch(() => undefined);
   }
@@ -136,6 +145,9 @@ export function ChatActionForm({ spec, onSubmitted }: ChatActionFormProps) {
         body: JSON.stringify({
           formKind: spec.formKind,
           fields: payload,
+          /* Forward the turn's workflow_id so the server-side
+           * form_submitted event joins the funnel. */
+          ...(workflowId ? { workflowId } : {}),
         }),
       });
       const data = (await res.json()) as FormSubmitResult;

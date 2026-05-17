@@ -41,24 +41,32 @@ function formatDue(iso: string | null): { label: string; overdue: boolean } {
   };
 }
 
-function trackInteraction(action: string, taskId?: string) {
-  fetchWithRefresh("/api/analytics", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      event: "assistant.widget_interaction",
-      metadata: { widget_kind: "task_list", action, task_id: taskId },
-    }),
-  }).catch(() => undefined);
-}
-
 export interface TaskListWidgetProps {
   spec: TaskListWidgetSpec;
+  workflowId?: string;
 }
 
-export function TaskListWidget({ spec }: TaskListWidgetProps) {
+export function TaskListWidget({ spec, workflowId }: TaskListWidgetProps) {
   const [completedLocal, setCompletedLocal] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Set<string>>(new Set());
+
+  /* Closed over workflowId so every interaction event carries the
+   * funnel correlation id when the widget came from a chat() turn. */
+  function trackInteraction(action: string, taskId?: string) {
+    fetchWithRefresh("/api/analytics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event: "assistant.widget_interaction",
+        metadata: {
+          widget_kind: "task_list",
+          action,
+          task_id: taskId,
+          ...(workflowId ? { workflow_id: workflowId } : {}),
+        },
+      }),
+    }).catch(() => undefined);
+  }
 
   useEffect(() => {
     fetchWithRefresh("/api/analytics", {
@@ -66,10 +74,14 @@ export function TaskListWidget({ spec }: TaskListWidgetProps) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         event: "assistant.widget_rendered",
-        metadata: { widget_kind: "task_list", task_count: spec.tasks.length },
+        metadata: {
+          widget_kind: "task_list",
+          task_count: spec.tasks.length,
+          ...(workflowId ? { workflow_id: workflowId } : {}),
+        },
       }),
     }).catch(() => undefined);
-  }, [spec.tasks.length]);
+  }, [spec.tasks.length, workflowId]);
 
   async function completeTask(task: TaskListItem) {
     if (pending.has(task.id) || completedLocal.has(task.id)) return;

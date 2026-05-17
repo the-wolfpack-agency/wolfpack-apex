@@ -76,6 +76,11 @@ interface Message {
   /** Interactive widget spec (calendar grid, email thread, task list,
    *  dashboard chart). Rendered via the ChatWidget dispatcher. */
   widget?: import("@/lib/assistant/widgets/types").WidgetSpec;
+  /** Per-turn correlation id. Threaded through every analytics event
+   *  fired during the originating chat() call; forwarded by widget +
+   *  form children so their client-side interaction events join the
+   *  same funnel. */
+  workflowId?: string;
 }
 
 interface Conversation {
@@ -556,6 +561,7 @@ export default function InstinctChat({
                fields before any side effect fires. */
             form: result.form as FormSpec | undefined,
             widget: result.widget as WidgetSpec | undefined,
+            workflowId: typeof result.workflowId === "string" ? result.workflowId : undefined,
             tokensUsed: result.tokens_used ?? 0,
             timestamp: new Date().toISOString(),
             fromCache: result.from_cache,
@@ -703,6 +709,7 @@ export default function InstinctChat({
           data.widget && typeof data.widget === "object"
             ? (data.widget as WidgetSpec)
             : undefined,
+        workflowId: typeof data.workflowId === "string" ? data.workflowId : undefined,
         tokensUsed: data.tokensUsed,
         timestamp: new Date().toISOString(),
         relatedPages: Array.isArray(data.relatedPages) ? data.relatedPages : undefined,
@@ -788,6 +795,9 @@ export default function InstinctChat({
         }
         if (!next.widget && m.metadata?.widget && typeof m.metadata.widget === "object") {
           next.widget = m.metadata.widget as WidgetSpec;
+        }
+        if (!next.workflowId && typeof m.metadata?.workflow_id === "string") {
+          next.workflowId = m.metadata.workflow_id;
         }
         return next;
       });
@@ -1259,11 +1269,11 @@ export default function InstinctChat({
                       shows in the bubble. ChatActionForm owns its own
                       submit + ack lifecycle. */}
                   {msg.role === "assistant" && msg.form && (
-                    <ChatActionForm spec={msg.form} />
+                    <ChatActionForm spec={msg.form} workflowId={msg.workflowId} />
                   )}
 
                   {msg.role === "assistant" && msg.widget && (
-                    <ChatWidget spec={msg.widget} />
+                    <ChatWidget spec={msg.widget} workflowId={msg.workflowId} />
                   )}
 
                   {msg.role === "assistant" &&

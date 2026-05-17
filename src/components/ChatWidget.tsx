@@ -21,19 +21,23 @@ import { GoodMorningWidget } from "@/components/widgets/GoodMorningWidget";
 
 export interface ChatWidgetProps {
   spec: WidgetSpec;
+  /** Per-turn correlation id. Forwarded to every renderer so its
+   *  client-side interaction analytics events join the same funnel
+   *  as the originating chat() turn. */
+  workflowId?: string;
 }
 
-export function ChatWidget({ spec }: ChatWidgetProps) {
+export function ChatWidget({ spec, workflowId }: ChatWidgetProps) {
   if (!spec || typeof spec !== "object") return null;
   switch (spec.kind) {
     case "calendar":
-      return <CalendarWidget spec={spec} />;
+      return <CalendarWidget spec={spec} workflowId={workflowId} />;
     case "email_thread":
-      return <EmailThreadWidget spec={spec} />;
+      return <EmailThreadWidget spec={spec} workflowId={workflowId} />;
     case "task_list":
-      return <TaskListWidget spec={spec} />;
+      return <TaskListWidget spec={spec} workflowId={workflowId} />;
     case "good_morning":
-      return <GoodMorningWidget spec={spec} />;
+      return <GoodMorningWidget spec={spec} workflowId={workflowId} />;
     default:
       /* Forward-compat: silently render nothing for unknown kinds.
        * The text answer above the widget still surfaces, so the

@@ -28,9 +28,10 @@ function formatRelative(iso: string): string {
 
 export interface EmailThreadWidgetProps {
   spec: EmailThreadWidgetSpec;
+  workflowId?: string;
 }
 
-export function EmailThreadWidget({ spec }: EmailThreadWidgetProps) {
+export function EmailThreadWidget({ spec, workflowId }: EmailThreadWidgetProps) {
   useEffect(() => {
     fetchWithRefresh("/api/analytics", {
       method: "POST",
@@ -40,10 +41,11 @@ export function EmailThreadWidget({ spec }: EmailThreadWidgetProps) {
         metadata: {
           widget_kind: "email_thread",
           message_count: spec.messages.length,
+          ...(workflowId ? { workflow_id: workflowId } : {}),
         },
       }),
     }).catch(() => undefined);
-  }, [spec.messages.length]);
+  }, [spec.messages.length, workflowId]);
 
   function trackInteraction(action: string, messageId?: string) {
     fetchWithRefresh("/api/analytics", {
@@ -51,7 +53,12 @@ export function EmailThreadWidget({ spec }: EmailThreadWidgetProps) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         event: "assistant.widget_interaction",
-        metadata: { widget_kind: "email_thread", action, message_id: messageId },
+        metadata: {
+          widget_kind: "email_thread",
+          action,
+          message_id: messageId,
+          ...(workflowId ? { workflow_id: workflowId } : {}),
+        },
       }),
     }).catch(() => undefined);
   }

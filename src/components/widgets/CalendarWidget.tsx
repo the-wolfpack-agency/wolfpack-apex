@@ -109,10 +109,13 @@ function parseDayKeyLocal(dayKey: string): Date {
 }
 
 export interface CalendarWidgetProps {
+  /** Per-turn correlation id forwarded into every analytics event
+   *  the widget fires (mount + click). */
+  workflowId?: string;
   spec: CalendarWidgetSpec;
 }
 
-export function CalendarWidget({ spec }: CalendarWidgetProps) {
+export function CalendarWidget({ spec, workflowId }: CalendarWidgetProps) {
   const cells = useMemo(() => buildMonthGrid(spec), [spec]);
   /* Default: expand today if it falls in this month and has events. */
   const initialDay = useMemo(() => {
@@ -123,17 +126,23 @@ export function CalendarWidget({ spec }: CalendarWidgetProps) {
 
   /* Fire a one-shot analytics event when the widget mounts so the
    * learning loop sees the funnel: offered (server-side) -> rendered
-   * (this hook). */
+   * (this hook). workflow_id (when present) ties this back to the
+   * originating chat() turn. */
   useEffect(() => {
     fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         event: "assistant.widget_rendered",
-        metadata: { widget_kind: "calendar", event_count: spec.events.length, month: spec.month },
+        metadata: {
+          widget_kind: "calendar",
+          event_count: spec.events.length,
+          month: spec.month,
+          ...(workflowId ? { workflow_id: workflowId } : {}),
+        },
       }),
     }).catch(() => undefined);
-  }, [spec.month, spec.events.length]);
+  }, [spec.month, spec.events.length, workflowId]);
 
   const selectedEvents = selectedDay
     ? cells.find((c) => c.date === selectedDay)?.events ?? []
@@ -145,7 +154,11 @@ export function CalendarWidget({ spec }: CalendarWidgetProps) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         event: "assistant.widget_interaction",
-        metadata: { widget_kind: "calendar", action },
+        metadata: {
+          widget_kind: "calendar",
+          action,
+          ...(workflowId ? { workflow_id: workflowId } : {}),
+        },
       }),
     }).catch(() => undefined);
   }

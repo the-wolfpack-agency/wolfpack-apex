@@ -800,6 +800,7 @@ export async function chat(
       conversationId: convId,
       messageId: msgId,
       sources: toolResult.result.sources,
+      workflowId,
       ...(connectorSource ? { connectorSource } : {}),
       ...(formSpec ? { form: formSpec } : {}),
       ...(widgetSpec ? { widget: widgetSpec } : {}),
@@ -1088,6 +1089,7 @@ export async function chat(
       conversationId: convId,
       messageId: msgId,
       sources: brainResult.sources,
+      workflowId,
     };
   }
 
@@ -1211,6 +1213,7 @@ export async function chat(
       tokensUsed: aiResult.tokensUsed,
       conversationId: convId,
       messageId: msgId,
+      workflowId,
     };
   }
 
@@ -1233,6 +1236,7 @@ export async function chat(
     tokensUsed: 0,
     conversationId: convId,
     messageId: msgId,
+    workflowId,
   };
 }
 
