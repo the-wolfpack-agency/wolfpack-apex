@@ -1,12 +1,15 @@
 /**
- * good_morning_widget — renders the Dashboard's "Good morning" panel
+ * good_morning_widget — renders the Dashboard's daily-briefing panel
  * inline in the chat. Same data source (generateBriefing), trimmed to
  * the three highest-signal sections: greeting + summary, today's
  * schedule, action items.
  *
- * Trigger phrases:
- *   "good morning" / "morning" / "morning briefing" / "morning brief"
- *   "daily briefing" / "what's on for today" / "my day"
+ * Trigger phrases (time-of-day neutral; the greeting text inside the
+ * widget already adapts via getGreeting):
+ *   "briefing" / "brief me" / "my brief" / "daily briefing"
+ *   "my day" / "today's agenda" / "my agenda" / "today's briefing"
+ *   "what's on for today" / "what's on today"
+ *   "good morning" / "good afternoon" / "good evening" / "morning"
  *
  * Implementation note: we deliberately don't include the financials,
  * client-attention, or team-highlights sections in the chat widget.
@@ -35,7 +38,7 @@ interface GoodMorningData {
 }
 
 const INTENT_RE =
-  /^(?:good\s+morning|morning|morning\s+brief(?:ing)?|daily\s+brief(?:ing)?|what'?s\s+on\s+(?:for\s+)?today|my\s+day|today'?s\s+brief(?:ing)?)[\s.?!]*$/i;
+  /^(?:brief(?:ing)?|brief\s+me|my\s+brief(?:ing)?|daily\s+brief(?:ing)?|today'?s\s+brief(?:ing)?|today'?s\s+agenda|my\s+agenda|my\s+day|what'?s\s+on\s+(?:for\s+)?today|good\s+(?:morning|afternoon|evening)|morning|afternoon\s+brief(?:ing)?)[\s.?!]*$/i;
 
 function matchGoodMorningIntent(message: string): Params | null {
   if (!INTENT_RE.test(message.trim())) return null;
@@ -45,7 +48,7 @@ function matchGoodMorningIntent(message: string): Params | null {
 export const goodMorningWidgetTool: ToolDef<Params, GoodMorningData> = {
   name: "good_morning_widget",
   description:
-    "Render the daily-briefing panel inline in chat: greeting, today's meetings, and action items. Same data source as the dashboard's Good morning card.",
+    "Render the daily-briefing panel inline in chat at any time of day: time-aware greeting, today's meetings, and action items. Same data source as the dashboard's briefing card.",
   paramSchema: ParamSchema,
   capability: "*",
   matchIntent: matchGoodMorningIntent,

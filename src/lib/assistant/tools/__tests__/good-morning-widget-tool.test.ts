@@ -29,16 +29,25 @@ beforeEach(() => {
 
 describe("good_morning_widget intent matching", () => {
   test.each([
-    "good morning",
-    "Good morning",
-    "morning",
-    "morning briefing",
-    "morning brief",
+    /* time-of-day-neutral triggers */
+    "briefing",
+    "Brief me",
+    "my brief",
+    "my briefing",
+    "daily brief",
     "daily briefing",
+    "today's briefing",
+    "today's agenda",
+    "my agenda",
+    "my day",
     "what's on for today",
     "whats on today",
-    "my day",
-    "today's briefing",
+    /* time-of-day triggers still work */
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "morning",
+    "afternoon briefing",
   ])("'%s' matches", (q) => {
     expect(match(q)).not.toBeNull();
   });
@@ -48,6 +57,7 @@ describe("good_morning_widget intent matching", () => {
     "morning meeting",
     "my day looks busy",
     "create a task for the morning briefing",
+    "schedule the daily briefing",
   ])("'%s' does NOT match (left to other tools)", (q) => {
     expect(match(q)).toBeNull();
   });

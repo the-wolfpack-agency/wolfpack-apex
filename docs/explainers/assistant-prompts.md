@@ -297,14 +297,17 @@ Renders the user's 10 most recent emails as a scannable list. Unread messages re
 
 Specific-search phrasings (`find emails about Q3`, `any emails from hoxsie`) still go to the text-based mail-search tool — the widget is reserved for the "just show me my inbox" intent.
 
-### Good morning widget
-- `good morning`
-- `morning`
-- `morning briefing` / `morning brief`
-- `daily briefing` / `today's briefing`
+### Daily briefing widget
+Time-of-day-neutral triggers:
+- `briefing` / `brief me` / `my brief`
+- `daily briefing` / `today's briefing` / `today's agenda` / `my agenda`
 - `my day` / `what's on for today`
 
-Renders the dashboard's "Good morning" panel inline in chat: greeting + summary, Today's Schedule, and Action Items. Same data source as the dashboard card (`generateBriefing`). Action items keep their priority chip (High / Med / Low) and click out to the underlying email or meeting. If MS 365 isn't connected, the widget renders a Settings hint instead of an empty panel.
+Time-of-day triggers (work too):
+- `good morning` / `good afternoon` / `good evening`
+- `morning` / `afternoon briefing`
+
+Renders the dashboard's daily-briefing panel inline in chat: greeting + summary, Today's Schedule, and Action Items. Same data source as the dashboard card (`generateBriefing`). The greeting line inside the widget adapts to the time of day (`Good morning` before noon, `Good afternoon` until 5pm, `Good evening` after) so you can fire `briefing` at 3pm and not see a "morning" salutation. Action items keep their priority chip (High / Med / Low) and click out to the underlying email or meeting. If MS 365 isn't connected, the widget renders a Settings hint instead of an empty panel.
 
 ### Task list widget
 - `tasks`
