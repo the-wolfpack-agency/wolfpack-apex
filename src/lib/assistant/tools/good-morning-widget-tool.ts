@@ -38,8 +38,10 @@ const PREBRIEF_LOOKAHEAD_HOURS = 48;
  * Resolve the user's first name for the greeting. The dashboard's
  * /api/briefing route pulls `user.name.split(" ")[0]` from the JWT;
  * the tool context doesn't carry that, so look it up by userId in
- * instinct_team_members. Falls back to the email handle, then to
- * "there" if nothing's available.
+ * instinct_team_members. Falls back to the email handle. Returns
+ * empty string when neither is available — generateBriefing's
+ * getGreeting honors an empty name and emits "Good morning" with
+ * no trailing ", there".
  */
 async function resolveUserFirstName(
   userId: string,
@@ -58,8 +60,7 @@ async function resolveUserFirstName(
   } catch {
     /* DB miss / column missing — fall through to email handle. */
   }
-  const handle = userEmail?.split("@")[0]?.trim();
-  return handle || "there";
+  return userEmail?.split("@")[0]?.trim() ?? "";
 }
 
 const ParamSchema = z.object({});

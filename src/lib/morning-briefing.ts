@@ -127,9 +127,15 @@ function setCache(userId: string, data: MorningBriefing): void {
 
 function getGreeting(name: string): string {
   const hour = new Date().getHours();
-  if (hour < 12) return `Good morning, ${name}`;
-  if (hour < 17) return `Good afternoon, ${name}`;
-  return `Good evening, ${name}`;
+  /* Empty name → bare salutation. The chat widget's resolver returns
+   * "" when neither the team-members table nor the email handle has
+   * anything usable; "Good morning, there" reads worse than just
+   * "Good morning". */
+  const trimmed = name.trim();
+  const suffix = trimmed ? `, ${trimmed}` : "";
+  if (hour < 12) return `Good morning${suffix}`;
+  if (hour < 17) return `Good afternoon${suffix}`;
+  return `Good evening${suffix}`;
 }
 
 // ---------------------------------------------------------------------------
