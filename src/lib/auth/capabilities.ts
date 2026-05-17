@@ -99,6 +99,12 @@ export const CAPABILITIES = {
   // Admin
   "admin.audit_log.view": "View the audit log",
   "admin.roles.assign": "Change other users' roles and capability overrides",
+  /* Granular: lets the AgenticQA nightly orchestrator (or any
+   * service-account principal) trigger integration health probes
+   * without granting broader CTO/CEO/EVP access. Principle of
+   * least privilege — issue a JWT for a low-role service user and
+   * grant ONLY this capability. */
+  "admin.health.probe": "Trigger integration health probes and read the latest status",
 
   // Tasks (forward-looking — tasks stream owns implementation)
   "tasks.view": "View own tasks",

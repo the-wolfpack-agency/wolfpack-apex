@@ -15,6 +15,7 @@ const mockSafeQuery = jest.fn();
 const mockRunProbe = jest.fn();
 const mockPersistProbeResult = jest.fn();
 const mockTrackEvent = jest.fn();
+const mockEffectiveCaps = jest.fn();
 
 jest.mock("@/lib/db", () => ({
   safeQuery: (...a: unknown[]) => mockSafeQuery(...a),
@@ -25,6 +26,9 @@ jest.mock("@/lib/health/integration-probes", () => ({
 }));
 jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: unknown[]) => mockTrackEvent(...a),
+}));
+jest.mock("@/lib/auth/require-capability", () => ({
+  effectiveCapabilitiesFor: (...a: unknown[]) => mockEffectiveCaps(...a),
 }));
 
 const AUTH_USER = { id: "u1", role: "cto", name: "Nick", email: "n@x.co", workspaceId: "ws1" };
@@ -47,6 +51,7 @@ beforeEach(() => {
   mockRunProbe.mockReset();
   mockPersistProbeResult.mockReset();
   mockTrackEvent.mockReset();
+  mockEffectiveCaps.mockReset();
   process.env.DATABASE_URL = "postgres://test";
   mockSafeQuery.mockResolvedValue({ rows: [] });
 });
@@ -58,6 +63,42 @@ describe("GET /api/health/integrations", () => {
     const { GET: FreshGET } = await import("../route");
     const res = await FreshGET(get());
     expect(res.status).toBe(401);
+  });
+
+  /* Principle-of-least-privilege gate. Service accounts get the
+   * admin.health.probe capability; privileged roles always pass. */
+  test("403 when role isn't privileged AND lacks admin.health.probe", async () => {
+    jest.resetModules();
+    jest.doMock("@/lib/auth", () => ({
+      getUserFromRequest: () => ({ id: "u9", role: "dev", name: "Dev", email: "d@x.co", workspaceId: "ws1" }),
+    }));
+    jest.doMock("@/lib/auth/require-capability", () => ({
+      effectiveCapabilitiesFor: async () => ({ capabilities: new Set<string>() }),
+    }));
+    const { GET: FreshGET } = await import("../route");
+    const res = await FreshGET(get());
+    expect(res.status).toBe(403);
+  });
+
+  test("allows a low-role service user that holds admin.health.probe", async () => {
+    jest.resetModules();
+    jest.doMock("@/lib/auth", () => ({
+      getUserFromRequest: () => ({ id: "svc-1", role: "dev", name: "AgenticQA Bot", email: "bot@x.co", workspaceId: "ws1" }),
+    }));
+    jest.doMock("@/lib/auth/require-capability", () => ({
+      effectiveCapabilitiesFor: async () => ({
+        capabilities: new Set(["admin.health.probe"]),
+      }),
+    }));
+    jest.doMock("@/lib/db", () => ({ safeQuery: async () => ({ rows: [] }) }));
+    jest.doMock("@/lib/health/integration-probes", () => ({
+      runProbe: async () => ({ vendor: "microsoft", probeKind: "connectivity", ok: true, durationMs: 1 }),
+      persistProbeResult: async () => undefined,
+    }));
+    jest.doMock("@/lib/analytics", () => ({ trackEvent: () => undefined }));
+    const { GET: FreshGET } = await import("../route");
+    const res = await FreshGET(get());
+    expect(res.status).toBe(200);
   });
 
   test("returns the per-vendor envelope from the latest view", async () => {

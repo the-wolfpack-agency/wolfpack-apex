@@ -30,11 +30,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
+import { effectiveCapabilitiesFor } from "@/lib/auth/require-capability";
+import type { Capability } from "@/lib/auth/capabilities";
 import {
   runProbe,
   persistProbeResult,
   type ProbeKind,
 } from "@/lib/health/integration-probes";
+
+const PROBE_CAPABILITY = "admin.health.probe" as Capability;
 
 /* Default vendor x object set probed on ?run=true. AgenticQA's
  * orchestrator can pass ?vendors=...&objects=... to narrow if a
@@ -62,6 +66,25 @@ export async function GET(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  /* Auth gate: principle of least privilege. Privileged roles
+   * (CEO/CTO/EVP) always allowed for hands-on debugging. A
+   * service-account user with the admin.health.probe capability is
+   * the right principal for the AgenticQA nightly orchestrator —
+   * grants probe access without exposing every CTO surface. */
+  const isPrivileged =
+    user.role === "ceo" || user.role === "cto" || user.role === "evp";
+  if (!isPrivileged) {
+    let hasCap = false;
+    try {
+      const { capabilities } = await effectiveCapabilitiesFor(user);
+      hasCap = capabilities.has(PROBE_CAPABILITY);
+    } catch {
+      /* Capability stream may not be available — fall through to deny. */
+    }
+    if (!hasCap) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
   const workspaceId = (user as { workspaceId?: string }).workspaceId ?? "default";
   const url = new URL(req.url);
