@@ -28,7 +28,12 @@ import { z } from "zod";
 import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
 import type { ToolDef, ToolResult } from "./types";
-import { crmRecordFormSpec } from "@/lib/assistant/forms/specs";
+import {
+  crmRecordFormSpec,
+  crmRecordFormSpecFromDescribe,
+} from "@/lib/assistant/forms/specs";
+import { describeCrmObject } from "@/lib/integrations/describe-crm";
+import { pickConfiguredConnector } from "@/lib/assistant/connectors/credentials";
 
 const ObjectType = z.enum(["deal", "contact", "account", "task"]);
 
@@ -104,13 +109,59 @@ export const createCrmRecordFormTool: ToolDef<Params, CreateCrmRecordFormData> =
   capability: "*",
   matchIntent: matchCrmRecordIntent,
   async handler(params, ctx): Promise<ToolResult<CreateCrmRecordFormData>> {
+    const workspaceId = ctx.workspaceId ?? "default";
+    /* Pick the CRM connector configured for this workspace so the
+     * describe call targets the right vendor. Falls back to legacy
+     * hand-curated spec if no connector is configured. */
+    const configured = await pickConfiguredConnector(workspaceId).catch(() => null);
+    const vendor =
+      configured === "salesforce" || configured === "hubspot" ? configured : null;
+
+    let formSpec = null as ReturnType<typeof crmRecordFormSpecFromDescribe> | null;
+    let describeSource: "live" | "fallback" | "none" = "none";
+
+    if (vendor) {
+      const result = await describeCrmObject(vendor, params.objectType, workspaceId);
+      describeSource = result.source;
+      if (result.fields.length > 0) {
+        formSpec = crmRecordFormSpecFromDescribe({
+          objectType: params.objectType,
+          vendor,
+          fields: result.fields,
+          source: result.source,
+          prefill: {
+            crmObjectType: params.objectType,
+            crmName: params.name,
+            crmAmount: params.amount,
+            crmEmail: params.email,
+          },
+        });
+      }
+    }
+
+    /* Fall back to the legacy hand-curated spec when describe yielded
+     * nothing (no connector, no template, vendor unsupported). The
+     * old form still writes through the same submit endpoint, so the
+     * user gets a working form regardless. */
+    const finalForm =
+      formSpec ??
+      crmRecordFormSpec({
+        crmObjectType: params.objectType,
+        crmName: params.name,
+        crmAmount: params.amount,
+        crmEmail: params.email,
+      });
+
     trackEvent("assistant.form_offered", ctx.userId, ctx.userRole, {
       form_kind: "create_crm_record",
       object_type: params.objectType,
       prefilled_name: params.name ? true : false,
       prefilled_amount: params.amount ? true : false,
       prefilled_email: params.email ? true : false,
+      describe_source: formSpec ? describeSource : "hand_curated",
+      field_count: finalForm.fields.length,
     });
+
     return {
       ok: true,
       data: { formKind: "create_crm_record", objectType: params.objectType },
@@ -122,12 +173,7 @@ export const createCrmRecordFormTool: ToolDef<Params, CreateCrmRecordFormData> =
           : params.objectType === "account"
           ? "Fill in the account below."
           : "Fill in the CRM task below.",
-      form: crmRecordFormSpec({
-        crmObjectType: params.objectType,
-        crmName: params.name,
-        crmAmount: params.amount,
-        crmEmail: params.email,
-      }),
+      form: finalForm,
     };
   },
 };

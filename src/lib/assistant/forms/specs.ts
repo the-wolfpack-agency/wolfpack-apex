@@ -6,7 +6,8 @@
  * UI, AND the submit-endpoint validator).
  */
 
-import type { FormSpec, FormField } from "./types";
+import type { FormSpec, FormField, FormFieldType } from "./types";
+import type { DescribedField } from "@/lib/integrations/describe-crm";
 
 /** Optional pre-filled values extracted from the user's phrasing. */
 export interface FormPrefill {
@@ -636,5 +637,110 @@ export function taskFormSpec(
     ],
     submitLabel: "Create task",
     analyticsEvent: "assistant.form_create_task_submitted",
+  };
+}
+
+/* -------------------------------------------------------------------
+ * Describe-driven CRM form. Replaces the hand-curated field set with
+ * whatever the vendor's describe endpoint actually surfaced — so the
+ * tenant's custom fields appear automatically and a Salesforce push
+ * that adds a new required field doesn't 400 our submit until we
+ * redeploy.
+ *
+ * Field-type coverage today (sufficient for the standard objects):
+ *   string / number / date / datetime / select / boolean → text or
+ *   typed input. reference / other → text input with the vendor's
+ *   raw type as a helper string.
+ * ------------------------------------------------------------------- */
+
+function describedTypeToFormType(t: DescribedField["type"]): FormFieldType {
+  switch (t) {
+    case "select":
+      return "select";
+    case "date":
+      return "date";
+    case "datetime":
+      return "datetime-local";
+    case "number":
+    case "string":
+    case "boolean":
+    case "reference":
+    case "other":
+    default:
+      return "text";
+  }
+}
+
+/**
+ * Cap the field count so a Salesforce describe with 80+ standard +
+ * custom fields doesn't render a wall of inputs. Required fields
+ * always render; optional fields render up to this cap (sorted by
+ * label for stability). The form's "More fields" disclosure (v2)
+ * surfaces the rest.
+ */
+const OPTIONAL_FIELD_CAP = 6;
+
+export function crmRecordFormSpecFromDescribe(args: {
+  objectType: "deal" | "contact" | "account" | "task";
+  vendor: "salesforce" | "hubspot";
+  fields: DescribedField[];
+  source: "live" | "fallback" | "none";
+  prefill?: FormPrefill;
+}): FormSpec {
+  const required = args.fields.filter((f) => f.required);
+  const optional = args.fields
+    .filter((f) => !f.required)
+    .sort((a, b) => (a.label ?? a.name).localeCompare(b.label ?? b.name))
+    .slice(0, OPTIONAL_FIELD_CAP);
+  const selected = [...required, ...optional];
+
+  const formFields: FormField[] = selected.map((f) => {
+    const labelBase = f.label ?? f.name;
+    const label = f.required ? `${labelBase} *` : labelBase;
+    const base: FormField = {
+      name: f.name,
+      label,
+      type: describedTypeToFormType(f.type),
+      required: f.required,
+    };
+    if (f.maxLength) base.maxLength = f.maxLength;
+    if (f.type === "select" && f.options && f.options.length > 0) {
+      base.options = f.options;
+    }
+    if (f.type === "reference" || f.type === "other") {
+      base.helpText = `Vendor type: ${f.type}`;
+    }
+    /* Light prefill — only the obvious pairs from the user phrasing. */
+    if (args.prefill) {
+      if (
+        (f.name === "Name" || f.name === "name" || f.name === "dealname") &&
+        args.prefill.crmName
+      ) {
+        base.defaultValue = args.prefill.crmName;
+      }
+      if ((f.name === "Amount" || f.name === "amount") && args.prefill.crmAmount) {
+        base.defaultValue = args.prefill.crmAmount;
+      }
+      if ((f.name === "Email" || f.name === "email") && args.prefill.crmEmail) {
+        base.defaultValue = args.prefill.crmEmail;
+      }
+    }
+    return base;
+  });
+
+  const sourceNote =
+    args.source === "live"
+      ? `Fields mirror your ${args.vendor === "salesforce" ? "Salesforce" : "HubSpot"} schema.`
+      : args.source === "fallback"
+      ? "Showing a cached field set — vendor describe was unavailable. Submit may need updates after the next sync."
+      : "No schema available; submit at your own risk.";
+
+  return {
+    formKind: "create_crm_record",
+    title: `Create ${args.objectType}`,
+    description: sourceNote,
+    fields: formFields,
+    submitLabel: `Create ${args.objectType}`,
+    analyticsEvent: "assistant.form_create_crm_record_submitted",
   };
 }
