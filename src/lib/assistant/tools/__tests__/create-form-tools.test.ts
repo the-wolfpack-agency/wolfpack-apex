@@ -209,6 +209,14 @@ describe("create_task_form — handler", () => {
     expect(fields.find((f) => f.name === "dueAt")?.required).toBe(false);
     expect(fields.find((f) => f.name === "importance")?.type).toBe("select");
   });
+
+  test("includes a required listId field (Graph rejects literal 'default')", async () => {
+    const r = await createTaskFormTool.handler({}, ctx);
+    if (!r.ok) throw new Error("expected ok");
+    const listField = r.form?.fields.find((f) => f.name === "listId");
+    expect(listField).toBeDefined();
+    expect(listField?.required).toBe(true);
+  });
 });
 
 /* ---------------------------------------------------------------------

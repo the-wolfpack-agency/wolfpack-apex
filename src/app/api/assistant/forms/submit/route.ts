@@ -406,23 +406,26 @@ async function submitTask(
   fields: Record<string, string>,
 ): Promise<NextResponse> {
   const title = (fields.title ?? "").trim();
+  const listId = (fields.listId ?? "").trim();
   const taskBody = (fields.body ?? "").trim();
   const dueAt = (fields.dueAt ?? "").trim();
   const importance = (fields.importance ?? "").trim();
 
   const fieldErrors: Record<string, string> = {};
   if (!title) fieldErrors.title = "Required";
+  /* "default" was a sentinel sent by older form specs that the upstream
+   * route can't resolve — Graph rejects it with ErrorInvalidIdMalformed.
+   * Reject early so the user sees the right "pick a list" message. */
+  if (!listId || listId === "default") {
+    fieldErrors.listId =
+      "Pick a To-Do list. If none appear, sync from the Tasks page first.";
+  }
   if (Object.keys(fieldErrors).length > 0) {
-    return failure("validation", "Title is required.", fieldErrors);
+    return failure("validation", "Check the highlighted fields.", fieldErrors);
   }
 
-  /* The tasks endpoint requires a listId. For the Assistant we resolve
-   * the user's default list server-side — that lookup lives in
-   * /api/tasks/lists. To keep this proxy focused we forward an empty
-   * listId and let the upstream route's default-list resolver handle
-   * it. If the upstream complains, we surface a helpful error. */
   const { status, data } = await forwardJson(origin, authHeader, "/api/tasks", {
-    listId: "default",
+    listId,
     title,
     ...(taskBody ? { body: taskBody } : {}),
     ...(dueAt ? { dueAt } : {}),

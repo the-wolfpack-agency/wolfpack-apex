@@ -555,7 +555,39 @@ export function calendarEventFormSpec(prefill: FormPrefill = {}): FormSpec {
   };
 }
 
-export function taskFormSpec(prefill: FormPrefill = {}): FormSpec {
+export interface TaskListOption {
+  value: string; // ms_list_id
+  label: string; // display name
+}
+
+export function taskFormSpec(
+  prefill: FormPrefill = {},
+  listOptions: TaskListOption[] = [],
+): FormSpec {
+  const listField =
+    listOptions.length > 0
+      ? {
+          name: "listId",
+          label: "List *",
+          type: "select" as const,
+          required: true,
+          defaultValue: listOptions[0].value,
+          options: listOptions,
+        }
+      : {
+          /* No writable lists found (user not connected to MS To-Do or
+           * sync hasn't run yet). Surface a text input so the form still
+           * renders, with helpful guidance text. The submit handler
+           * will reject + display the failure inline. */
+          name: "listId",
+          label: "List *",
+          type: "text" as const,
+          required: true,
+          placeholder: "Connect Microsoft To-Do in Settings",
+          helpText:
+            "We couldn't find your To-Do lists. Sync from the Tasks page, then try again.",
+        };
+
   return {
     formKind: "create_task",
     title: "Create task",
@@ -572,6 +604,7 @@ export function taskFormSpec(prefill: FormPrefill = {}): FormSpec {
         },
         prefill.title,
       ),
+      listField,
       {
         name: "body",
         label: "Details",

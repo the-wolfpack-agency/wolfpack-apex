@@ -10,9 +10,19 @@
 
 import { z } from "zod";
 import { trackEvent } from "@/lib/analytics";
+import { listCachedTaskLists } from "@/lib/integrations/microsoft-tasks";
 import { registerTool } from "./registry";
 import type { ToolDef, ToolResult } from "./types";
-import { taskFormSpec } from "@/lib/assistant/forms/specs";
+import { taskFormSpec, type TaskListOption } from "@/lib/assistant/forms/specs";
+
+/* MS To-Do lists named like "Flagged Emails" are read-only and would
+ * 400 on POST. The tasks page filters them out — same logic here so
+ * the dropdown only offers writable destinations. */
+const READ_ONLY_LIST_NAMES = new Set<string>([
+  "Flagged Emails",
+  "Flagged emails",
+  "flaggedEmails",
+]);
 
 const ParamSchema = z.object({
   title: z.string().min(1).max(200).optional(),
@@ -47,17 +57,31 @@ export const createTaskFormTool: ToolDef<Params, CreateTaskFormData> = {
   capability: "*",
   matchIntent: matchTaskFormIntent,
   async handler(params, ctx): Promise<ToolResult<CreateTaskFormData>> {
+    /* Pull the user's writable To-Do lists so the form can offer a
+     * real dropdown instead of falling back to the literal "default"
+     * string (Graph rejects that with ErrorInvalidIdMalformed). */
+    let listOptions: TaskListOption[] = [];
+    try {
+      const lists = await listCachedTaskLists(ctx.userId);
+      listOptions = lists
+        .filter((l) => !READ_ONLY_LIST_NAMES.has(l.displayName))
+        .map((l) => ({ value: l.msListId, label: l.displayName }));
+    } catch (err) {
+      /* Cache miss / DB down — surface an empty list so the form
+       * renders with a "connect MS To-Do" hint instead of crashing. */
+      console.warn("[create-task-form] listCachedTaskLists failed:", (err as Error).message);
+    }
+
     trackEvent("assistant.form_offered", ctx.userId, ctx.userRole, {
       form_kind: "create_task",
       prefilled_title: params.title ? true : false,
+      list_count: listOptions.length,
     });
     return {
       ok: true,
       data: { formKind: "create_task" },
       answer: "Fill in the task below.",
-      form: taskFormSpec({
-        title: params.title,
-      }),
+      form: taskFormSpec({ title: params.title }, listOptions),
     };
   },
 };
