@@ -1173,7 +1173,16 @@ export default function InstinctChat({
               >
                 <div
                   className={`${
-                    position === "floating" ? "max-w-[90%]" : "max-w-[80%] lg:max-w-[60%]"
+                    /* Assistant bubbles host widgets + forms + multi-section
+                     * panels, so they get full width on mobile (where 80%
+                     * forced widgets to wrap awkwardly) and a generous cap
+                     * on desktop. User bubbles stay narrow so the chat
+                     * still reads like a conversation. */
+                    position === "floating"
+                      ? "max-w-[90%]"
+                      : msg.role === "user"
+                      ? "max-w-[80%] lg:max-w-[60%]"
+                      : "w-full lg:max-w-[85%]"
                   } rounded-xl px-4 py-3`}
                   style={{
                     background:
