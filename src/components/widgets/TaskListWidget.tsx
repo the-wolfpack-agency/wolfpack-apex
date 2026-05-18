@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react";
 import { fetchWithRefresh } from "@/lib/client-auth";
 import type { TaskListWidgetSpec, TaskListItem } from "@/lib/assistant/widgets/types";
+import { StaggeredItem, useStaggeredReveal } from "./StaggeredItem";
 
 function formatDue(iso: string | null): { label: string; overdue: boolean } {
   if (!iso) return { label: "", overdue: false };
@@ -82,6 +83,12 @@ export function TaskListWidget({ spec, workflowId }: TaskListWidgetProps) {
       }),
     }).catch(() => undefined);
   }, [spec.tasks.length, workflowId]);
+
+  useStaggeredReveal({
+    widgetKind: "task_list",
+    itemCount: spec.tasks.length,
+    workflowId,
+  });
 
   async function completeTask(task: TaskListItem) {
     if (pending.has(task.id) || completedLocal.has(task.id)) return;
@@ -149,19 +156,24 @@ export function TaskListWidget({ spec, workflowId }: TaskListWidgetProps) {
         </div>
       ) : (
         <ul className="space-y-1">
-          {spec.tasks.map((t) => {
+          {spec.tasks.map((t, idx) => {
             const done = completedLocal.has(t.id);
             const isPending = pending.has(t.id);
             const due = formatDue(t.dueAt);
             return (
-              <li
+              <StaggeredItem
                 key={t.id}
+                index={idx}
                 data-testid={`task-list-item-${t.id}`}
                 className="text-xs rounded px-2 py-1.5 flex items-start gap-2"
                 style={{
                   background: "var(--wp-dark, #111)",
                   border: "1px solid var(--wp-dark-border, #333)",
-                  opacity: done ? 0.6 : 1,
+                  /* Reveal animation finishes in <250ms; user-driven
+                   * complete (which sets `done`) happens long after,
+                   * so the dim takes effect without competing with
+                   * the animation's opacity track. */
+                  opacity: done ? 0.6 : undefined,
                 }}
               >
                 <button
@@ -201,7 +213,7 @@ export function TaskListWidget({ spec, workflowId }: TaskListWidgetProps) {
                     )}
                   </div>
                 </div>
-              </li>
+              </StaggeredItem>
             );
           })}
         </ul>

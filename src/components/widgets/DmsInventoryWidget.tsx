@@ -12,6 +12,7 @@
 import { useEffect } from "react";
 import { fetchWithRefresh } from "@/lib/client-auth";
 import type { DmsInventoryWidgetSpec } from "@/lib/assistant/widgets/types";
+import { StaggeredItem, useStaggeredReveal } from "./StaggeredItem";
 
 function formatPrice(p: number | null): string {
   if (p === null) return "—";
@@ -39,6 +40,12 @@ export function DmsInventoryWidget({ spec, workflowId }: DmsInventoryWidgetProps
       }),
     }).catch(() => undefined);
   }, [spec.vendor, spec.items.length, workflowId]);
+
+  useStaggeredReveal({
+    widgetKind: "dms_inventory",
+    itemCount: spec.items.length,
+    workflowId,
+  });
 
   function trackInteraction(action: string, vin?: string) {
     fetchWithRefresh("/api/analytics", {
@@ -102,8 +109,9 @@ export function DmsInventoryWidget({ spec, workflowId }: DmsInventoryWidgetProps
       ) : (
         <ul className="space-y-1.5">
           {spec.items.map((item, i) => (
-            <li
+            <StaggeredItem
               key={item.vin ?? `${item.title}-${i}`}
+              index={i}
               data-testid={`dms-inventory-item-${item.vin ?? i}`}
               className="text-xs rounded p-2"
               style={{
@@ -151,7 +159,7 @@ export function DmsInventoryWidget({ spec, workflowId }: DmsInventoryWidgetProps
                   </div>
                 </div>
               )}
-            </li>
+            </StaggeredItem>
           ))}
         </ul>
       )}

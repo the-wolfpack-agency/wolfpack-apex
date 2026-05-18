@@ -22,6 +22,7 @@ import type {
   CalendarWidgetEvent,
 } from "@/lib/assistant/widgets/types";
 import { fetchWithRefresh } from "@/lib/client-auth";
+import { StaggeredItem, useStaggeredReveal } from "./StaggeredItem";
 
 const DAY_NAMES = ["S", "M", "T", "W", "T", "F", "S"];
 
@@ -148,6 +149,16 @@ export function CalendarWidget({ spec, workflowId }: CalendarWidgetProps) {
     ? cells.find((c) => c.date === selectedDay)?.events ?? []
     : [];
 
+  /* Stagger the expanded-day event rows. Keyed on selectedDay so
+   * each expansion re-runs the reveal (otherwise switching days
+   * would render the new list flat). itemCount=0 short-circuits
+   * the analytics fire. */
+  useStaggeredReveal({
+    widgetKind: "calendar",
+    itemCount: selectedEvents.length,
+    workflowId,
+  });
+
   function trackInteraction(action: string) {
     fetchWithRefresh("/api/analytics", {
       method: "POST",
@@ -262,10 +273,11 @@ export function CalendarWidget({ spec, workflowId }: CalendarWidgetProps) {
               ? " · no meetings"
               : ` · ${selectedEvents.length} meeting${selectedEvents.length === 1 ? "" : "s"}`}
           </div>
-          <ul className="space-y-1">
-            {selectedEvents.map((ev) => (
-              <li
+          <ul key={selectedDay} className="space-y-1">
+            {selectedEvents.map((ev, idx) => (
+              <StaggeredItem
                 key={ev.id}
+                index={idx}
                 data-testid={`calendar-event-${ev.id}`}
                 className="text-xs rounded px-2 py-1.5"
                 style={{
@@ -312,7 +324,7 @@ export function CalendarWidget({ spec, workflowId }: CalendarWidgetProps) {
                     </a>
                   )}
                 </div>
-              </li>
+              </StaggeredItem>
             ))}
           </ul>
         </div>

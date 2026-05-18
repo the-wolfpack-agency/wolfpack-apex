@@ -13,6 +13,7 @@ import type {
   GoodMorningActionItem,
   GoodMorningPreBriefMeeting,
 } from "@/lib/assistant/widgets/types";
+import { StaggeredItem, useStaggeredReveal } from "./StaggeredItem";
 
 const PRIORITY_STYLES: Record<
   GoodMorningActionItem["priority"],
@@ -115,6 +116,18 @@ export function GoodMorningWidget({ spec, workflowId }: GoodMorningWidgetProps) 
     }).catch(() => undefined);
   }, [spec.schedule.events.length, spec.actionItems.length, spec.connected, workflowId]);
 
+  /* Reveal counts both schedule rows + action items + pre-brief
+   * meeting options. Use the combined visible-row count so the
+   * analytics signal reflects everything the user saw cascade in. */
+  const revealItemCount =
+    Math.min(spec.schedule.events.length, 5) +
+    Math.min(spec.actionItems.length, 8);
+  useStaggeredReveal({
+    widgetKind: "good_morning",
+    itemCount: revealItemCount,
+    workflowId,
+  });
+
   function trackInteraction(action: string, meta: Record<string, unknown> = {}) {
     fetchWithRefresh("/api/analytics", {
       method: "POST",
@@ -199,8 +212,9 @@ export function GoodMorningWidget({ spec, workflowId }: GoodMorningWidgetProps) 
         ) : (
           <ul className="space-y-1">
             {spec.schedule.events.slice(0, 5).map((e, i) => (
-              <li
+              <StaggeredItem
                 key={`${e.subject}-${i}`}
+                index={i}
                 data-testid={`good-morning-event-${i}`}
                 className="text-xs"
               >
@@ -232,7 +246,7 @@ export function GoodMorningWidget({ spec, workflowId }: GoodMorningWidgetProps) 
                     )}
                   </div>
                 </a>
-              </li>
+              </StaggeredItem>
             ))}
           </ul>
         )}
@@ -278,9 +292,15 @@ export function GoodMorningWidget({ spec, workflowId }: GoodMorningWidgetProps) 
                     ...(external ? { target: "_blank", rel: "noreferrer noopener" } : {}),
                   }
                 : {};
+              /* Continue the cascade after schedule rows: action items
+               * land staggered from where the schedule list left off,
+               * so the eye reads top section → bottom section, not
+               * two parallel reveals. */
+              const scheduleCount = Math.min(spec.schedule.events.length, 5);
               return (
-                <li
+                <StaggeredItem
                   key={`${a.text}-${i}`}
+                  index={scheduleCount + i}
                   data-testid={`good-morning-action-${i}`}
                   className="text-xs flex items-start gap-2"
                 >
@@ -309,7 +329,7 @@ export function GoodMorningWidget({ spec, workflowId }: GoodMorningWidgetProps) 
                       </div>
                     )}
                   </Tag>
-                </li>
+                </StaggeredItem>
               );
             })}
           </ul>

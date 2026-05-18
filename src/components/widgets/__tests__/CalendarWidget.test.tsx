@@ -193,4 +193,42 @@ describe("CalendarWidget", () => {
     )?.[1]?.body;
     expect(renderedBody).not.toContain("workflow_id");
   });
+
+  /* ----------------------------------------------------------------
+   * Staggered reveal — expanding a day with events stamps each event
+   * row with the .wp-stagger-item class + a per-index animation
+   * delay. The combined widget_rendered + items_revealed analytics
+   * fire on mount/expand so the funnel sees motion telemetry.
+   * ---------------------------------------------------------------- */
+  test("expanded events render with staggered animation classes", () => {
+    /* Use a spec where the default-expand picks 05-16 (today logic
+     * may or may not apply, so explicitly toggle). */
+    render(<CalendarWidget spec={spec} />);
+    fireEvent.click(screen.getByTestId("calendar-day-2026-05-16"));
+    if (!screen.queryByTestId("calendar-day-events-2026-05-16")) {
+      /* If today happened to be 05-16 (initial expand collapsed it),
+       * click again to open. */
+      fireEvent.click(screen.getByTestId("calendar-day-2026-05-16"));
+    }
+    const eventRow = screen.getByTestId("calendar-event-evt-a");
+    expect(eventRow.className).toContain("wp-stagger-item");
+    expect(eventRow.getAttribute("style") || "").toContain("0ms");
+  });
+
+  test("fires widget.items_revealed analytics when events are expanded", () => {
+    render(<CalendarWidget spec={spec} />);
+    /* The default expand for May 2026 picks any "today" cell with
+     * events — if jsdom's today doesn't match, force-expand. */
+    if (!screen.queryByTestId(/calendar-day-events-/)) {
+      fireEvent.click(screen.getByTestId("calendar-day-2026-05-20"));
+    }
+    const revealCall = mockFetch.mock.calls.find((c) =>
+      String(c[1]?.body || "").includes("widget.items_revealed"),
+    );
+    expect(revealCall).toBeDefined();
+    const body = JSON.parse(String(revealCall?.[1]?.body || "{}"));
+    expect(body.metadata.widget_kind).toBe("calendar");
+    expect(body.metadata.item_count).toBeGreaterThan(0);
+    expect(body.metadata.stagger_ms).toBe(40);
+  });
 });

@@ -168,6 +168,26 @@ a:hover { color: var(--wp-gold-hover); }
 .wp-fade-in    { animation: wp-fade-in 140ms ease-out both; }
 .wp-pop-in     { animation: wp-pop-in 180ms cubic-bezier(.2,.8,.2,1) both; }
 
+/*
+ * Staggered item reveal — used by chat widget list rows
+ * (CalendarWidget, EmailThreadWidget, TaskListWidget, GoodMorningWidget,
+ * DmsInventoryWidget). Each item delays its visibility by
+ * `--wp-stagger-delay` (set inline per index) and fades + translates
+ * from 8px down into place over 180ms with ease-out. Mirrors
+ * ChatGPT / Linear list-reveal motion. `will-change` keeps the
+ * compositor happy; both opacity + transform animate on the GPU so
+ * intrinsic layout (heights, scroll anchors) stays stable.
+ */
+@keyframes wp-stagger-reveal {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.wp-stagger-item {
+  animation: wp-stagger-reveal 180ms ease-out both;
+  animation-delay: var(--wp-stagger-delay, 0ms);
+  will-change: opacity, transform;
+}
+
 /* Hover-lift utility — apply to interactive cards */
 .wp-hover-lift {
   transition: transform 150ms ease-out, border-color 150ms ease-out, box-shadow 150ms ease-out;
@@ -200,9 +220,15 @@ a:hover { color: var(--wp-gold-hover); }
 @media (prefers-reduced-motion: reduce) {
   .wp-fade-in, .wp-pop-in,
   .wp-hover-lift,
+  .wp-stagger-item,
   [data-skeleton="true"] {
     animation: none !important;
     transition: none !important;
+  }
+  .wp-stagger-item {
+    /* Snap to final visible state — no half-faded items left mid-anim. */
+    opacity: 1 !important;
+    transform: none !important;
   }
 }
 
@@ -331,6 +357,42 @@ a:hover { color: var(--wp-gold-hover); }
 }
 .wp-send-btn:active:not(:disabled) {
   transform: scale(0.96);
+}
+
+/* Stop button — replaces Send while a generation is in flight.
+   Quieter palette than Send (it's a "bail out" not a "go") with a
+   subtle hover lift so it still feels interactive. */
+.wp-stop-btn {
+  transition: transform 120ms ease-out, border-color 160ms ease-out, color 160ms ease-out;
+}
+.wp-stop-btn:hover {
+  border-color: var(--wp-gold) !important;
+  color: var(--wp-gold);
+}
+.wp-stop-btn:active {
+  transform: scale(0.96);
+}
+
+/* Loading-state skeleton rows under the typing dots. Single
+   shimmer gradient swept right-to-left so the eye reads "content
+   on the way" instead of "thinking." Uses the existing
+   wp-skeleton-shimmer keyframes. */
+.wp-skeleton-row {
+  background: linear-gradient(
+    90deg,
+    var(--wp-dark, #111) 0%,
+    var(--wp-dark-border, #333) 50%,
+    var(--wp-dark, #111) 100%
+  );
+  background-size: 200% 100%;
+  animation: wp-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wp-skeleton-row {
+    animation: none !important;
+    background: var(--wp-dark-border, #333) !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

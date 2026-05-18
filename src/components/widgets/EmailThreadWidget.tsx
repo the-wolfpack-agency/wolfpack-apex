@@ -11,6 +11,7 @@
 import { useEffect } from "react";
 import { fetchWithRefresh } from "@/lib/client-auth";
 import type { EmailThreadWidgetSpec } from "@/lib/assistant/widgets/types";
+import { StaggeredItem, useStaggeredReveal } from "./StaggeredItem";
 
 function formatRelative(iso: string): string {
   const d = Date.parse(iso);
@@ -46,6 +47,13 @@ export function EmailThreadWidget({ spec, workflowId }: EmailThreadWidgetProps) 
       }),
     }).catch(() => undefined);
   }, [spec.messages.length, workflowId]);
+
+  /* Fire items_revealed once per mount alongside widget_rendered. */
+  useStaggeredReveal({
+    widgetKind: "email_thread",
+    itemCount: spec.messages.length,
+    workflowId,
+  });
 
   function trackInteraction(action: string, messageId?: string) {
     fetchWithRefresh("/api/analytics", {
@@ -104,9 +112,10 @@ export function EmailThreadWidget({ spec, workflowId }: EmailThreadWidgetProps) 
         </div>
       ) : (
         <ul className="space-y-1">
-          {spec.messages.map((m) => (
-            <li
+          {spec.messages.map((m, idx) => (
+            <StaggeredItem
               key={m.id}
+              index={idx}
               data-testid={`email-thread-message-${m.id}`}
               className="text-xs rounded px-2 py-1.5"
               style={{
@@ -158,7 +167,7 @@ export function EmailThreadWidget({ spec, workflowId }: EmailThreadWidgetProps) 
                   </a>
                 )}
               </div>
-            </li>
+            </StaggeredItem>
           ))}
         </ul>
       )}

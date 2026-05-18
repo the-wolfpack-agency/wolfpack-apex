@@ -135,4 +135,45 @@ describe("TaskListWidget", () => {
     render(<TaskListWidget spec={{ ...spec, tasks: [] }} />);
     expect(screen.getByTestId("task-list-empty")).toBeInTheDocument();
   });
+
+  /* ----------------------------------------------------------------
+   * Staggered reveal — task rows get wp-stagger-item, ordered
+   * delays. complete-button still works (animation does not block
+   * pointer events).
+   * ---------------------------------------------------------------- */
+  test("rows render with staggered animation class + ordered delays", () => {
+    render(<TaskListWidget spec={spec} />);
+    const row0 = screen.getByTestId("task-list-item-t1");
+    const row1 = screen.getByTestId("task-list-item-t2");
+    expect(row0.className).toContain("wp-stagger-item");
+    expect(row1.className).toContain("wp-stagger-item");
+    expect(row0.getAttribute("style") || "").toContain("0ms");
+    expect(row1.getAttribute("style") || "").toContain("40ms");
+  });
+
+  test("complete button still fires after the animation wrap", async () => {
+    /* Regression guard: the animation wrapper must not swallow the
+     * checkbox click. */
+    render(<TaskListWidget spec={spec} />);
+    mockFetch.mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("task-list-complete-t1"));
+    });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/tasks/t1/complete",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+  });
+
+  test("fires widget.items_revealed on mount with correct metadata", () => {
+    render(<TaskListWidget spec={spec} />);
+    const call = mockFetch.mock.calls.find((c) =>
+      String(c[1]?.body || "").includes("widget.items_revealed"),
+    );
+    const body = JSON.parse(String(call?.[1]?.body || "{}"));
+    expect(body.metadata.widget_kind).toBe("task_list");
+    expect(body.metadata.item_count).toBe(2);
+  });
 });

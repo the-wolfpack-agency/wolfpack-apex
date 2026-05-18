@@ -162,6 +162,15 @@ export default function InstinctChat({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /* Stop-button state. When the user clicks Stop mid-send, we flip
+   * this ref to true. Each await landing in handleSend checks it
+   * before mutating messages, so a slow tool call no longer drops a
+   * stale assistant bubble after the user has bailed. The network
+   * request itself isn't cancelled — server saves a few KB at most
+   * by aborting and the bookkeeping cost isn't worth threading an
+   * AbortSignal through queryAssistantWithCache + every fetch
+   * fallback. Reset to false at the top of every handleSend. */
+  const cancelledRef = useRef(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -183,6 +192,18 @@ export default function InstinctChat({
       window.removeEventListener("offline", off);
     };
   }, []);
+
+  /* Auto-resize the composer textarea so a longer prompt grows the
+   * input up to maxHeight (120px), then scrolls inside the textarea.
+   * Matches ChatGPT / Claude composer behavior; fixed-height inputs
+   * feel primitive on multi-line prompts. */
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    /* maxHeight is enforced via CSS; we just grow up to it. */
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [input]);
 
   // --- File attachment constants ---
   const MAX_FILE_SIZE = 512_000; // 512KB per file
@@ -488,6 +509,30 @@ export default function InstinctChat({
     }
   }
 
+  /* Stop button — user-initiated bail-out of an in-flight generation.
+   * The in-flight network request keeps running (we don't thread an
+   * AbortSignal through every fallback), but the UI immediately
+   * returns to a ready state and any late-arriving response is
+   * dropped via cancelledRef inside handleSend. Fires
+   * assistant.generation_stopped so the learning loop sees which
+   * intents users abandon — useful signal for slow-tool detection. */
+  function handleStop() {
+    if (!loading) return;
+    cancelledRef.current = true;
+    setLoading(false);
+    void fetchWithRefresh("/api/analytics", {
+      method: "POST",
+      headers: canonicalJsonHeaders(),
+      body: JSON.stringify({
+        event: "assistant.generation_stopped",
+        metadata: {
+          conversation_id: conversationId,
+          had_attachments: attachedFiles.length > 0,
+        },
+      }),
+    }).catch(() => undefined);
+  }
+
   async function handleSend() {
     const trimmed = input.trim();
     if (!trimmed || loading) return;
@@ -507,6 +552,9 @@ export default function InstinctChat({
     setAttachedFiles([]);
     setFileError(null);
     setLoading(true);
+    /* Fresh send — clear any prior cancellation so a previous Stop
+     * click doesn't poison this turn. */
+    cancelledRef.current = false;
 
     // Build the message with file context prepended
     const isBinaryType = (t: string) =>
@@ -538,6 +586,10 @@ export default function InstinctChat({
             pageContext,
             contextData,
           });
+
+          /* User clicked Stop mid-await — drop the result silently
+           * rather than rendering a stale assistant bubble. */
+          if (cancelledRef.current) return;
 
           if (!conversationId && result.conversation_id) {
             setConversationId(result.conversation_id);
@@ -633,6 +685,10 @@ export default function InstinctChat({
         body: JSON.stringify(body),
       });
 
+      /* User bailed mid-flight — don't apply anything from this
+       * response. */
+      if (cancelledRef.current) return;
+
       if (res.status === 401) {
         // Session expired — redirect to login
         clearInstinctSession();
@@ -643,6 +699,7 @@ export default function InstinctChat({
       if (!res.ok) throw new Error("Request failed");
 
       const data = await res.json();
+      if (cancelledRef.current) return;
 
       // Handle quality gate rejection
       if (data.source === "quality_gate" && !data.response) {
@@ -718,16 +775,20 @@ export default function InstinctChat({
 
       setMessages((prev) => [...prev, assistantMsg]);
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "Something went wrong. Please try again.",
-          source: "fallback",
-          tokensUsed: 0,
-          timestamp: new Date().toISOString(),
-        },
-      ]);
+      /* Don't surface a generic error toast when the user just
+       * clicked Stop — the bail-out is intentional, not a failure. */
+      if (!cancelledRef.current) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: "Something went wrong. Please try again.",
+            source: "fallback",
+            tokensUsed: 0,
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+      }
     } finally {
       setLoading(false);
       inputRef.current?.focus();
@@ -1472,14 +1533,19 @@ export default function InstinctChat({
               </div>
             ))}
 
-            {/* Typing indicator */}
+            {/* Typing + skeleton indicator. Bouncing dots alone read as
+                "thinking." Adding two shimmer rows under them signals
+                "structured content is on the way" — better match for an
+                assistant that often returns widgets/lists than pure
+                LLM chat. The skeleton block is purely cosmetic; it's
+                replaced as soon as the real assistant message renders. */}
             {loading && (
-              <div className="flex justify-start">
+              <div className="flex justify-start" data-testid="assistant-typing-indicator">
                 <div
-                  className="rounded-xl px-4 py-3"
+                  className="rounded-xl px-4 py-3 w-full lg:max-w-[85%] min-w-0"
                   style={{ background: "var(--wp-dark-surface2, #222)" }}
                 >
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 mb-2.5">
                     <div
                       className="w-2 h-2 rounded-full animate-bounce"
                       style={{ background: "var(--wp-gold, #eab308)", animationDelay: "0ms" }}
@@ -1493,6 +1559,18 @@ export default function InstinctChat({
                       style={{ background: "var(--wp-gold, #eab308)", animationDelay: "300ms" }}
                     />
                   </div>
+                  <div
+                    className="wp-skeleton-row h-2.5 rounded mb-1.5"
+                    style={{ width: "85%" }}
+                    data-testid="assistant-skeleton-row-1"
+                    aria-hidden
+                  />
+                  <div
+                    className="wp-skeleton-row h-2.5 rounded"
+                    style={{ width: "60%" }}
+                    data-testid="assistant-skeleton-row-2"
+                    aria-hidden
+                  />
                 </div>
               </div>
             )}
@@ -1608,6 +1686,9 @@ export default function InstinctChat({
                 }}
                 placeholder="Ask anything..."
                 rows={1}
+                data-testid="assistant-composer-input"
+                /* wp-input-focus drives the focus glow defined in
+                 * globals.css — soft gold halo on focus. */
                 className="wp-input-focus flex-1 min-w-0 resize-none rounded-xl px-3 py-3 text-sm outline-none"
                 style={{
                   background: "var(--wp-dark-surface2, #222)",
@@ -1616,21 +1697,50 @@ export default function InstinctChat({
                   maxHeight: "120px",
                   fontFamily: "system-ui, -apple-system, sans-serif",
                 }}
-                disabled={loading}
+                /* Keep the textarea editable while loading so a user
+                 * can queue the next message OR click Stop without
+                 * losing keyboard focus. The send-button gate below
+                 * is what actually prevents double-submits. */
               />
-              <button
-                onClick={handleSend}
-                disabled={!input.trim() || loading}
-                className="wp-send-btn shrink-0 rounded-xl px-4 py-3 text-sm font-medium disabled:opacity-40"
-                style={{
-                  background: "var(--wp-gold, #eab308)",
-                  color: "var(--wp-dark, #111)",
-                }}
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-                </svg>
-              </button>
+              {loading ? (
+                <button
+                  onClick={handleStop}
+                  data-testid="assistant-stop-btn"
+                  className="wp-stop-btn shrink-0 rounded-xl px-4 py-3 text-sm font-medium"
+                  style={{
+                    background: "var(--wp-dark-surface2, #222)",
+                    color: "var(--wp-text, #eee)",
+                    border: "1px solid var(--wp-dark-border, #333)",
+                  }}
+                  aria-label="Stop generating"
+                  title="Stop"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    aria-hidden
+                  >
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim()}
+                  data-testid="assistant-send-btn"
+                  className="wp-send-btn shrink-0 rounded-xl px-4 py-3 text-sm font-medium disabled:opacity-40 transition-transform active:scale-95"
+                  style={{
+                    background: "var(--wp-gold, #eab308)",
+                    color: "var(--wp-dark, #111)",
+                  }}
+                  aria-label="Send"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                  </svg>
+                </button>
+              )}
             </div>
             <p className="text-center text-xs mt-2" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
               Cmd+Enter to send | Drop files for context

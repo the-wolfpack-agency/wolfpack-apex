@@ -99,4 +99,44 @@ describe("EmailThreadWidget", () => {
     render(<EmailThreadWidget spec={{ ...spec, messages: [] }} />);
     expect(screen.getByTestId("email-thread-empty")).toBeInTheDocument();
   });
+
+  /* ----------------------------------------------------------------
+   * Staggered reveal — message rows get the wp-stagger-item class
+   * and a per-index animation delay. items_revealed fires once
+   * with item_count + stagger_ms metadata. Empty state does NOT
+   * fire items_revealed.
+   * ---------------------------------------------------------------- */
+  test("rows render with staggered animation class + correct delay order", () => {
+    render(<EmailThreadWidget spec={spec} />);
+    const row0 = screen.getByTestId("email-thread-message-m-1");
+    const row1 = screen.getByTestId("email-thread-message-m-2");
+    expect(row0.className).toContain("wp-stagger-item");
+    expect(row1.className).toContain("wp-stagger-item");
+    expect(row0.getAttribute("style") || "").toContain("0ms");
+    expect(row1.getAttribute("style") || "").toContain("40ms");
+    /* DOM order matches spec order. */
+    const parent = row0.parentElement;
+    expect(parent?.children[0]).toBe(row0);
+    expect(parent?.children[1]).toBe(row1);
+  });
+
+  test("fires widget.items_revealed analytics on mount", () => {
+    render(<EmailThreadWidget spec={spec} />);
+    const call = mockFetch.mock.calls.find((c) =>
+      String(c[1]?.body || "").includes("widget.items_revealed"),
+    );
+    expect(call).toBeDefined();
+    const body = JSON.parse(String(call?.[1]?.body || "{}"));
+    expect(body.metadata.widget_kind).toBe("email_thread");
+    expect(body.metadata.item_count).toBe(2);
+    expect(body.metadata.stagger_ms).toBe(40);
+  });
+
+  test("empty-message spec does NOT fire items_revealed", () => {
+    render(<EmailThreadWidget spec={{ ...spec, messages: [] }} />);
+    const revealCalls = mockFetch.mock.calls.filter((c) =>
+      String(c[1]?.body || "").includes("widget.items_revealed"),
+    );
+    expect(revealCalls).toHaveLength(0);
+  });
 });

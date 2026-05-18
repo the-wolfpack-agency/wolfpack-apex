@@ -212,4 +212,46 @@ describe("GoodMorningWidget", () => {
     render(<GoodMorningWidget spec={noBrief} />);
     expect(screen.queryByTestId("good-morning-prebrief")).not.toBeInTheDocument();
   });
+
+  /* ----------------------------------------------------------------
+   * Staggered reveal — schedule rows + action items both wrapped.
+   * Action items continue the cascade after the schedule rows so
+   * the eye reads top-section then bottom-section instead of two
+   * parallel reveals.
+   * ---------------------------------------------------------------- */
+  test("schedule + action rows render with staggered classes", () => {
+    render(<GoodMorningWidget spec={fullSpec} />);
+    const schedule = screen.getByTestId("good-morning-event-0");
+    expect(schedule.className).toContain("wp-stagger-item");
+    expect(schedule.getAttribute("style") || "").toContain("0ms");
+
+    const action0 = screen.getByTestId("good-morning-action-0");
+    const action1 = screen.getByTestId("good-morning-action-1");
+    expect(action0.className).toContain("wp-stagger-item");
+    expect(action1.className).toContain("wp-stagger-item");
+    /* fullSpec has 1 schedule event → action items start at index 1
+     * (40ms) and 2 (80ms). */
+    expect(action0.getAttribute("style") || "").toContain("40ms");
+    expect(action1.getAttribute("style") || "").toContain("80ms");
+  });
+
+  test("action item link still fires (animation wrap doesn't block clicks)", () => {
+    render(<GoodMorningWidget spec={fullSpec} />);
+    mockFetch.mockClear();
+    fireEvent.click(screen.getByText("Reply to client about Q3"));
+    const calls = mockFetch.mock.calls.filter((c) => c[0] === "/api/analytics");
+    const bodies = calls.map((c) => String(c[1]?.body || ""));
+    expect(bodies.some((b) => b.includes("open_action_item"))).toBe(true);
+  });
+
+  test("fires widget.items_revealed once with combined item count", () => {
+    render(<GoodMorningWidget spec={fullSpec} />);
+    const call = mockFetch.mock.calls.find((c) =>
+      String(c[1]?.body || "").includes("widget.items_revealed"),
+    );
+    const body = JSON.parse(String(call?.[1]?.body || "{}"));
+    expect(body.metadata.widget_kind).toBe("good_morning");
+    /* 1 schedule event + 2 action items = 3. */
+    expect(body.metadata.item_count).toBe(3);
+  });
 });
