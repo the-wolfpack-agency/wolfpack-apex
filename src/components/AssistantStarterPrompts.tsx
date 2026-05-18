@@ -59,7 +59,7 @@ function buildStarterCategories(): StarterCategory[] {
         "top 3 deals",
         "deals over $50k closing this month",
         "what's my win rate",
-        "Acme's opportunities",
+        "<account>'s opportunities",
         "average deal size",
       ],
     },
@@ -68,8 +68,8 @@ function buildStarterCategories(): StarterCategory[] {
       emoji: "🐙",
       prompts: [
         "what PRs are open",
-        "failed CI in wolfpack-apex",
-        "open issues in wolfpack-auto",
+        "failed CI in <repo>",
+        "open issues in <repo>",
       ],
     },
     {
@@ -89,8 +89,8 @@ function buildStarterCategories(): StarterCategory[] {
       prompts: [
         "what are our OKRs",
         "what's our revenue this quarter?",
-        "what do we know about Acme",
-        "who is Hoxsie",
+        "what do we know about <account>",
+        "who is <teammate>",
       ],
     },
   ];
