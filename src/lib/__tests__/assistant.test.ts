@@ -1327,3 +1327,139 @@ describe("regression 2026-04-30 — callAI routes through AI router", () => {
     expect(mockAIComplete).toHaveBeenCalledTimes(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fallback chips — role-tailored starter prompts inlined on dead-end
+// responses. Renders as clickable chips in the chat UI; presence of the
+// fallbackChips field is the UI's gate.
+//
+// Acceptance rules being asserted here:
+//   1. Bare-fallback path (no AI provider) carries 3 role-tailored chips
+//   2. Successful tool / knowledge / RAG hits do NOT carry chips
+//   3. Chip text reflects the user role passed into chat()
+//   4. assistant.fallback_chips_offered analytics event fires once per
+//      fallback response with { role, chip_count: 3, source }
+// ---------------------------------------------------------------------------
+
+describe("fallback chips", () => {
+  /* Pull the canonical role-mapping straight from the source of truth
+     so the test breaks loudly if either side drifts. We assert against
+     this map, not hard-coded literals — the welcome-prompts module
+     owns the strings, this test owns the wiring. */
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { welcomePromptTextsForRole } = require("@/lib/assistant/welcome-prompts");
+
+  test("bare fallback path (no AI provider) carries 3 role-tailored chips", async () => {
+    const result = await chat("Unknown question with no keywords", "u1", "cto");
+
+    expect(result.source).toBe("fallback");
+    expect(result.fallbackChips).toBeDefined();
+    expect(result.fallbackChips).toHaveLength(3);
+    expect(result.fallbackChips).toEqual(welcomePromptTextsForRole("cto"));
+  });
+
+  test("fallback prose appends 'Try one of these instead:' lead-in", async () => {
+    const result = await chat("Unknown question no keywords", "u1", "cto");
+
+    expect(result.source).toBe("fallback");
+    expect(result.response).toContain("Try one of these instead:");
+  });
+
+  test("chips reflect role: cto kit differs from pm kit", async () => {
+    const ctoResult = await chat("Unknown question no keywords", "u1", "cto");
+    const pmResult = await chat("Unknown question no keywords", "u2", "pm");
+
+    expect(ctoResult.fallbackChips).toEqual(welcomePromptTextsForRole("cto"));
+    expect(pmResult.fallbackChips).toEqual(welcomePromptTextsForRole("pm"));
+    /* Sanity-check the two kits diverge — if welcomePromptTextsForRole
+       ever collapsed all roles to the same list, this test would still
+       pass on equality but the role-aware wiring would be dead. */
+    expect(ctoResult.fallbackChips).not.toEqual(pmResult.fallbackChips);
+  });
+
+  test("unknown role still gets a 3-prompt generic kit", async () => {
+    const result = await chat("Unknown question no keywords", "u1", "intern-not-in-roster");
+
+    expect(result.fallbackChips).toBeDefined();
+    expect(result.fallbackChips).toHaveLength(3);
+  });
+
+  test("fires assistant.fallback_chips_offered analytics with role + count + source", async () => {
+    await chat("Unknown question no keywords", "u1", "cto");
+
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "assistant.fallback_chips_offered",
+      "u1",
+      "cto",
+      expect.objectContaining({
+        role: "cto",
+        chip_count: 3,
+        source: "fallback",
+      }),
+    );
+  });
+
+  test("knowledge_cache hit does NOT carry fallbackChips", async () => {
+    mockSearchKnowledge.mockResolvedValue([
+      {
+        id: "k-1",
+        question: "How does auth work?",
+        answer: "JWT-based auth with role hierarchy.",
+        source: "docs",
+        rating: 5,
+        view_count: 10,
+        tokens_used: 0,
+        tags: ["auth"],
+      },
+    ]);
+
+    const result = await chat("How does auth work?", "u1", "cto");
+
+    expect(result.source).toBe("knowledge_cache");
+    expect(result.fallbackChips).toBeUndefined();
+  });
+
+  test("knowledge_cache hit does NOT fire fallback_chips_offered analytics", async () => {
+    mockSearchKnowledge.mockResolvedValue([
+      {
+        id: "k-1",
+        question: "How does auth work?",
+        answer: "JWT-based auth.",
+        source: "docs",
+        rating: 5,
+        view_count: 10,
+        tokens_used: 0,
+        tags: ["auth"],
+      },
+    ]);
+
+    await chat("How does auth work?", "u1", "cto");
+
+    expect(mockTrackEvent).not.toHaveBeenCalledWith(
+      "assistant.fallback_chips_offered",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  test("successful AI response (not rejected) does NOT carry fallbackChips", async () => {
+    mockAIComplete.mockResolvedValueOnce({
+      content: "Quantum computing uses qubits.",
+      model_used: "test-model",
+      provider_used: "test-provider",
+      input_tokens: 100,
+      output_tokens: 50,
+      cost_usd: 0,
+      latency_ms: 1,
+    });
+
+    const result = await chat("What is quantum computing?", "u1", "cto");
+
+    expect(result.source).toBe("ai");
+    /* Default brainContext has 0 hits → confidence gate does NOT fire
+       (block requires hits>0 AND low score). No other quality gate
+       trips on this answer, so verdict = "ok", no chips. */
+    expect(result.fallbackChips).toBeUndefined();
+  });
+});

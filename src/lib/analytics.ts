@@ -651,6 +651,24 @@ export type InstinctEventType =
   // and we fell through to the LLM. Highest-value signal for "what
   // should we build next." Surfaced on the admin insights page.
   | "assistant.intent_unmatched"
+  // Fallback-chips affordance — fires once per fallback / low-confidence
+  // reject response when we surface 3 role-tailored starter prompts as
+  // inline clickable chips. Numerator for chip-CTR; pairs with a
+  // future click-side event (UI emits assistant.fallback_chip_clicked
+  // on tap) so we can measure whether the affordance actually rescues
+  // dead-end conversations.
+  | "assistant.fallback_chips_offered"
+  // Rollout polish (2026-05-18) — first-visit welcome modal +
+  // fallback chip click-through. Round out the chip funnel:
+  //   welcome_shown          (modal renders on first visit)
+  //   welcome_dismissed      (X / backdrop click — gives up)
+  //   welcome_prompt_clicked (user picks one of the starter prompts)
+  //   fallback_chip_clicked  (user salvages a dead-end response via
+  //     a role-tailored chip surfaced inline)
+  | "assistant.welcome_shown"
+  | "assistant.welcome_dismissed"
+  | "assistant.welcome_prompt_clicked"
+  | "assistant.fallback_chip_clicked"
   // Form-field-level analytics: which fields users skip + which
   // fields trip server validation. Tells us which optional fields
   // earn their space and which required fields are confusing.

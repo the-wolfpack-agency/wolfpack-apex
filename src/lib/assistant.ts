@@ -33,6 +33,7 @@ import {
   runAnswerQualityChecks,
   validateCitations,
 } from "@/lib/assistant/answer-quality";
+import { welcomePromptTextsForRole } from "@/lib/assistant/welcome-prompts";
 import {
   tryDispatchTool,
   savePendingAction,
@@ -115,6 +116,15 @@ export interface AssistantResponse {
    *  follow-up POSTs (analytics events, form submits) to extend the
    *  funnel client-side. */
   workflowId?: string;
+  /** Role-tailored starter prompts surfaced inline when the assistant
+   *  returns a low-confidence / fallback response. Always exactly 3
+   *  strings when present. ONLY attached on fallback branches (bare
+   *  fallback + AI low-confidence reject) — the chat UI uses the
+   *  field's presence as the gate to render clickable chips. Absent
+   *  on successful tool / knowledge / RAG / brain hits so we don't
+   *  clutter a confident answer with "try one of these instead"
+   *  affordances. Source of truth: welcomePromptTextsForRole(). */
+  fallbackChips?: string[];
 }
 
 export interface ConversationSummary {
@@ -1183,7 +1193,12 @@ export async function chat(
     );
     let safeContent = citationCheck.cleanAnswer;
     if (quality.verdict === "reject") {
-      safeContent = lowConfidenceMessage();
+      /* Append the "Try one of these instead:" lead-in so the inline
+         chips the chat UI renders below have a visual anchor — without
+         this, the chips appear orphaned underneath the prose. Keep the
+         base lowConfidenceMessage() untouched (it's reused by tests +
+         other call-sites). */
+      safeContent = `${lowConfidenceMessage()} Try one of these instead:`;
     } else if (quality.verdict === "low_confidence") {
       const flagReasons = quality.flags.map((f) => f.reason).join("; ");
       safeContent =
@@ -1207,6 +1222,31 @@ export async function chat(
     const msgId = await dbSaveMessage(convId, "assistant", safeContent, "ai", aiResult.tokensUsed);
     await dbUpdateConversationStats(convId, aiResult.tokensUsed);
 
+    /* AI low-confidence reject path: the quality gate forced the
+       deterministic low-confidence message, so the user is effectively
+       in a dead-end. Surface role-tailored starter prompts as inline
+       chips and fire one analytics event so we can measure how often
+       the fallback affordance gets shown (numerator for chip-CTR). */
+    if (quality.verdict === "reject") {
+      const fallbackChips = welcomePromptTextsForRole(userRole);
+      trackEvent("assistant.fallback_chips_offered", userId, userRole, {
+        role: userRole,
+        chip_count: fallbackChips.length,
+        source: "ai",
+        module: "assistant",
+        workflow_id: workflowId,
+      });
+      return {
+        response: safeContent,
+        source: "ai",
+        tokensUsed: aiResult.tokensUsed,
+        conversationId: convId,
+        messageId: msgId,
+        workflowId,
+        fallbackChips,
+      };
+    }
+
     return {
       response: safeContent,
       source: "ai",
@@ -1225,10 +1265,22 @@ export async function chat(
     "- Tech stack and infrastructure\n" +
     "- Costs and pricing\n" +
     "- Features and capabilities\n\n" +
-    "The more the team adds to the knowledge base, the more I can answer without AI.";
+    "The more the team adds to the knowledge base, the more I can answer without AI. Try one of these instead:";
 
   const msgId = await dbSaveMessage(convId, "assistant", fallbackMsg, "fallback", 0);
   await dbUpdateConversationStats(convId, 0);
+
+  /* Bare-fallback path (no AI provider configured / AI call returned
+     null). Same chip-affordance rationale as the AI-reject branch
+     above: the user otherwise gets a dead-end response. */
+  const fallbackChips = welcomePromptTextsForRole(userRole);
+  trackEvent("assistant.fallback_chips_offered", userId, userRole, {
+    role: userRole,
+    chip_count: fallbackChips.length,
+    source: "fallback",
+    module: "assistant",
+    workflow_id: workflowId,
+  });
 
   return {
     response: fallbackMsg,
@@ -1237,6 +1289,7 @@ export async function chat(
     conversationId: convId,
     messageId: msgId,
     workflowId,
+    fallbackChips,
   };
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, KeyboardEvent, DragEvent, ChangeEvent } from "react";
-import { getInstinctToken, clearInstinctSession, jsonHeaders as canonicalJsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import { getInstinctToken, getInstinctUser, clearInstinctSession, jsonHeaders as canonicalJsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
 import {
   queryAssistantWithCache,
   RagOfflineMissError,
@@ -20,6 +20,7 @@ import { ChatWidget } from "@/components/ChatWidget";
 import type { FormSpec } from "@/lib/assistant/forms/types";
 import type { WidgetSpec } from "@/lib/assistant/widgets/types";
 import { AssistantStarterPrompts } from "@/components/AssistantStarterPrompts";
+import { AssistantWelcomeModal } from "@/components/AssistantWelcomeModal";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,6 +82,12 @@ interface Message {
    *  form children so their client-side interaction events join the
    *  same funnel. */
   workflowId?: string;
+  /** Role-tailored chips appended by the server on fallback / low-
+   *  confidence branches. When set, the bubble renders these as
+   *  clickable chips below the answer so a stuck user has somewhere
+   *  to go. Successful responses (tool / RAG / knowledge) never
+   *  carry this. */
+  fallbackChips?: string[];
 }
 
 interface Conversation {
@@ -615,6 +622,7 @@ export default function InstinctChat({
             form: result.form as FormSpec | undefined,
             widget: result.widget as WidgetSpec | undefined,
             workflowId: typeof result.workflowId === "string" ? result.workflowId : undefined,
+            fallbackChips: Array.isArray(result.fallbackChips) && result.fallbackChips.length > 0 ? result.fallbackChips : undefined,
             tokensUsed: result.tokens_used ?? 0,
             timestamp: new Date().toISOString(),
             fromCache: result.from_cache,
@@ -768,6 +776,10 @@ export default function InstinctChat({
             ? (data.widget as WidgetSpec)
             : undefined,
         workflowId: typeof data.workflowId === "string" ? data.workflowId : undefined,
+        fallbackChips:
+          Array.isArray(data.fallbackChips) && data.fallbackChips.length > 0
+            ? (data.fallbackChips as string[])
+            : undefined,
         tokensUsed: data.tokensUsed,
         timestamp: new Date().toISOString(),
         relatedPages: Array.isArray(data.relatedPages) ? data.relatedPages : undefined,
@@ -947,8 +959,22 @@ export default function InstinctChat({
           background: "var(--wp-dark, #111)",
         };
 
+  /* Pull the signed-in user once for the welcome modal greeting +
+   * role-based prompt selection. AssistantWelcomeModal handles its
+   * own first-visit gate via localStorage, so we don't need to
+   * track "have we shown it" here. */
+  const sessionUser = (getInstinctUser<{ name?: string; role?: string }>() ?? null);
+
   return (
     <div className={wrapperClass} style={wrapperStyle}>
+      <AssistantWelcomeModal
+        userName={sessionUser?.name}
+        userRole={sessionUser?.role}
+        onPickPrompt={(prompt) => {
+          setInput(prompt);
+          setTimeout(() => inputRef.current?.focus(), 0);
+        }}
+      />
       <div className="flex h-full">
         {/* Conversation sidebar */}
         {showHistory && (
@@ -1446,6 +1472,53 @@ export default function InstinctChat({
                             ))}
                           </ul>
                         )}
+                      </div>
+                    )}
+
+                  {/* Fallback chips — rendered when the server marked
+                       this response as a dead-end (low-confidence or bare
+                       fallback) and attached role-tailored starter
+                       prompts. Clicking a chip fills the composer with
+                       the prompt and fires an analytics event so the
+                       learning loop knows the affordance rescued the
+                       conversation. */}
+                  {msg.role === "assistant" &&
+                    msg.fallbackChips &&
+                    msg.fallbackChips.length > 0 && (
+                      <div
+                        data-testid="assistant-fallback-chips"
+                        className="flex flex-wrap gap-1.5 mt-3"
+                      >
+                        {msg.fallbackChips.map((chip) => (
+                          <button
+                            key={chip}
+                            type="button"
+                            onClick={() => {
+                              setInput(chip);
+                              setTimeout(() => inputRef.current?.focus(), 0);
+                              void fetchWithRefresh("/api/analytics", {
+                                method: "POST",
+                                headers: canonicalJsonHeaders(),
+                                body: JSON.stringify({
+                                  event: "assistant.fallback_chip_clicked",
+                                  metadata: {
+                                    prompt: chip,
+                                    workflow_id: msg.workflowId,
+                                  },
+                                }),
+                              }).catch(() => undefined);
+                            }}
+                            data-testid={`fallback-chip-${chip.slice(0, 24).replace(/\W+/g, "-")}`}
+                            className="text-xs px-2 py-1 rounded-md transition-colors hover:opacity-90 text-left"
+                            style={{
+                              background: "rgba(234,179,8,0.08)",
+                              color: "var(--wp-gold, #eab308)",
+                              border: "1px solid rgba(234,179,8,0.25)",
+                            }}
+                          >
+                            {chip}
+                          </button>
+                        ))}
                       </div>
                     )}
 

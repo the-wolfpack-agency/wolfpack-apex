@@ -19,10 +19,20 @@
 import { useEffect, useState } from "react";
 import { fetchWithRefresh } from "@/lib/client-auth";
 
+/** A single starter chip. `text` is what fires when clicked (and is
+ *  rendered in the chip). `description` is a one-line plain-English
+ *  explainer surfaced via the native `title=` tooltip on hover, so
+ *  users discover what a chip will do before committing to the click.
+ *  Hover events are intentionally not analytics-tracked — too noisy. */
+export interface StarterPrompt {
+  text: string;
+  description: string;
+}
+
 interface StarterCategory {
   title: string;
   emoji: string;
-  prompts: string[];
+  prompts: StarterPrompt[];
   /** Provider keys required for chips in this category to actually
    *  work. Empty array = always shown. ANY = shown if any one of the
    *  listed providers is connected (CRM works with SF *or* HubSpot). */
@@ -52,10 +62,23 @@ function buildStarterCategories(): StarterCategory[] {
       title: "Widgets",
       emoji: "✨",
       prompts: [
-        "briefing",
-        "calendar",
-        "inbox",
-        "tasks",
+        {
+          text: "briefing",
+          description:
+            "Your morning summary: greeting, today's schedule, unread email digest, and action items.",
+        },
+        {
+          text: "calendar",
+          description: "Inline calendar widget for today and the next few days.",
+        },
+        {
+          text: "inbox",
+          description: "Inline inbox widget showing your most recent unread messages.",
+        },
+        {
+          text: "tasks",
+          description: "Inline task list pulled from Microsoft To Do and Planner.",
+        },
       ],
       requires: { any: ["microsoft"] },
     },
@@ -63,12 +86,30 @@ function buildStarterCategories(): StarterCategory[] {
       title: "Create something",
       emoji: "✏️",
       prompts: [
-        "create email",
-        "create task",
-        "create message",
-        "schedule a meeting",
-        "create feature",
-        "create OKR",
+        {
+          text: "create email",
+          description: "Draft a new email; you'll be asked for recipient, subject, and body.",
+        },
+        {
+          text: "create task",
+          description: "Add a task to Microsoft To Do with optional due date and reminder.",
+        },
+        {
+          text: "create message",
+          description: "Send a Teams chat message to a teammate or channel.",
+        },
+        {
+          text: "schedule a meeting",
+          description: "Book a calendar meeting with attendees, time, and optional Teams link.",
+        },
+        {
+          text: "create feature",
+          description: "File a new feature request in the internal product backlog.",
+        },
+        {
+          text: "create OKR",
+          description: "Add a new objective or key result to the team's OKR tracker.",
+        },
       ],
       /* `create feature` and `create OKR` are internal-only and would
          survive a no-MS state, but the majority require MS Graph.
@@ -81,11 +122,26 @@ function buildStarterCategories(): StarterCategory[] {
       title: "CRM (Salesforce / HubSpot)",
       emoji: "🤝",
       prompts: [
-        "top 3 deals",
-        "deals over $50k closing this month",
-        "what's my win rate",
-        "<account>'s opportunities",
-        "average deal size",
+        {
+          text: "top 3 deals",
+          description: "Your three largest open opportunities by amount.",
+        },
+        {
+          text: "deals over $50k closing this month",
+          description: "Pipeline filtered to high-value deals with a close date this month.",
+        },
+        {
+          text: "what's my win rate",
+          description: "Percentage of your closed opportunities marked Won over the last quarter.",
+        },
+        {
+          text: "<account>'s opportunities",
+          description: "Every open and recent opportunity tied to a named account.",
+        },
+        {
+          text: "average deal size",
+          description: "Mean closed-won deal value across your recent pipeline.",
+        },
       ],
       requires: { any: ["salesforce", "hubspot"] },
     },
@@ -93,9 +149,18 @@ function buildStarterCategories(): StarterCategory[] {
       title: "GitHub",
       emoji: "🐙",
       prompts: [
-        "what PRs are open",
-        "failed CI in <repo>",
-        "open issues in <repo>",
+        {
+          text: "what PRs are open",
+          description: "Open pull requests across the repos you have access to.",
+        },
+        {
+          text: "failed CI in <repo>",
+          description: "Most recent failing GitHub Actions runs for the chosen repository.",
+        },
+        {
+          text: "open issues in <repo>",
+          description: "Currently open issues in the chosen repository, newest first.",
+        },
       ],
       requires: { any: ["github"] },
     },
@@ -103,11 +168,26 @@ function buildStarterCategories(): StarterCategory[] {
       title: "Calendar & Mail",
       emoji: "📅",
       prompts: [
-        "what is on my calendar monday?",
-        "am I free Thursday at 2pm",
-        "find emails from <person>",
-        "find emails to <person>",
-        "any meetings tomorrow",
+        {
+          text: "what is on my calendar monday?",
+          description: "Every event on your calendar for the upcoming Monday.",
+        },
+        {
+          text: "am I free Thursday at 2pm",
+          description: "Checks your calendar for conflicts at the given day and time.",
+        },
+        {
+          text: "find emails from <person>",
+          description: "Search your inbox for messages sent by a named person.",
+        },
+        {
+          text: "find emails to <person>",
+          description: "Search your sent items for messages you addressed to a named person.",
+        },
+        {
+          text: "any meetings tomorrow",
+          description: "Lists tomorrow's scheduled meetings and their attendees.",
+        },
       ],
       requires: { any: ["microsoft"] },
     },
@@ -115,10 +195,22 @@ function buildStarterCategories(): StarterCategory[] {
       title: "Knowledge & memory",
       emoji: "📚",
       prompts: [
-        "what are our OKRs",
-        "what's our revenue this quarter?",
-        "what do we know about <account>",
-        "who is <teammate>",
+        {
+          text: "what are our OKRs",
+          description: "Pulls the team's current objectives and key results from the knowledge base.",
+        },
+        {
+          text: "what's our revenue this quarter?",
+          description: "Quarter-to-date revenue from the financial knowledge store.",
+        },
+        {
+          text: "what do we know about <account>",
+          description: "Everything the assistant has indexed about a named account: notes, deals, contacts.",
+        },
+        {
+          text: "who is <teammate>",
+          description: "Role, team, and recent activity for a named teammate from the org directory.",
+        },
       ],
     },
   ];
@@ -241,10 +333,14 @@ export function AssistantStarterPrompts({ onPick }: AssistantStarterPromptsProps
                 <div className="flex flex-wrap gap-1.5 px-2.5 sm:px-3 pb-2.5 sm:pb-3">
                   {cat.prompts.map((p) => (
                     <button
-                      key={p}
+                      key={p.text}
                       type="button"
-                      onClick={() => onPick(p)}
-                      data-testid={`starter-prompt-${slug}-${p.slice(0, 20).replace(/\W+/g, "-")}`}
+                      onClick={() => onPick(p.text)}
+                      /* Native browser tooltip on hover. No design lib;
+                         intentionally not analytics-tracked because hover
+                         volume drowns out clicks. */
+                      title={p.description}
+                      data-testid={`starter-prompt-${slug}-${p.text.slice(0, 20).replace(/\W+/g, "-")}`}
                       className="text-xs px-2 py-1 rounded-md transition-colors hover:opacity-90 text-left"
                       style={{
                         background: "rgba(234,179,8,0.08)",
@@ -252,7 +348,7 @@ export function AssistantStarterPrompts({ onPick }: AssistantStarterPromptsProps
                         border: "1px solid rgba(234,179,8,0.25)",
                       }}
                     >
-                      {p}
+                      {p.text}
                     </button>
                   ))}
                 </div>

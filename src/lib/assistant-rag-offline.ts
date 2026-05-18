@@ -80,6 +80,10 @@ export interface AssistantRagResult {
    *  it on widget + form interaction events so client-side analytics
    *  rows join the same funnel as the originating turn. */
   workflowId?: string;
+  /** Role-tailored chips appended by the server on fallback / low-
+   *  confidence branches. Presence is the chat UI's gate to render
+   *  the chip row — non-fallback responses never carry this. */
+  fallbackChips?: string[];
 }
 
 export interface QueryAssistantOptions {
@@ -168,6 +172,7 @@ export async function queryAssistantWithCache(
           form?: unknown;
           widget?: unknown;
           workflowId?: string;
+          fallbackChips?: string[];
         };
 
         const answer = data.response ?? "";
@@ -226,6 +231,12 @@ export async function queryAssistantWithCache(
           /* workflow_id passthrough — chat UI forwards on follow-up
            * client analytics events so funnels reconstruct. */
           ...(typeof data.workflowId === "string" ? { workflowId: data.workflowId } : {}),
+          /* Fallback-chip passthrough — chat UI renders these as
+           * clickable chips inline below a dead-end response so the
+           * user always has somewhere to go next. */
+          ...(Array.isArray(data.fallbackChips) && data.fallbackChips.length > 0
+            ? { fallbackChips: data.fallbackChips }
+            : {}),
         };
       }
       // Non-OK response → fall through to cache lookup (we still want

@@ -40,18 +40,23 @@ function mockStatus(body: unknown) {
 }
 
 describe("filterCategoriesByStatus (pure)", () => {
+  /* Chip shape changed from `string` to `{ text, description }` when we
+   * added native-tooltip hover hints. The filter logic is independent
+   * of chip shape; we use minimal placeholder chips here so the suite
+   * still exercises the gating rules. */
+  const stub = (t: string) => ({ text: t, description: `desc-${t}` });
   const cats = [
-    { title: "Always", emoji: "📚", prompts: ["x"] },
+    { title: "Always", emoji: "📚", prompts: [stub("x")] },
     {
       title: "Needs MS",
       emoji: "📅",
-      prompts: ["x"],
+      prompts: [stub("x")],
       requires: { any: ["microsoft" as const] },
     },
     {
       title: "Needs CRM",
       emoji: "🤝",
-      prompts: ["x"],
+      prompts: [stub("x")],
       requires: { any: ["salesforce" as const, "hubspot" as const] },
     },
   ];
@@ -161,5 +166,58 @@ describe("AssistantStarterPrompts (rendered)", () => {
     await waitFor(() => {
       expect(screen.getByText(/Knowledge & memory/)).toBeInTheDocument();
     });
+  });
+
+  /* --- Hover tooltips (native `title=`) ----------------------------
+   * Every chip must carry a non-empty, prompt-specific `title` so a
+   * hovering user sees what the chip will actually do before they
+   * click. Catches the regression where the data shape ships back to
+   * `string[]` and the tooltip silently disappears. */
+
+  test("every visible chip has a non-empty title attribute", async () => {
+    mockStatus({
+      microsoft: { connected: true },
+      salesforce: { connected: true },
+      github: { connected: true },
+    });
+    const { container } = render(
+      <AssistantStarterPrompts onPick={() => undefined} />,
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/Salesforce \/ HubSpot/)).toBeInTheDocument();
+    });
+    const chipButtons = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(
+        'button[data-testid^="starter-prompt-"]',
+      ),
+    );
+    expect(chipButtons.length).toBeGreaterThan(0);
+    for (const btn of chipButtons) {
+      const title = btn.getAttribute("title") ?? "";
+      expect(title.trim()).not.toEqual("");
+    }
+  });
+
+  test("chip title matches the description from buildStarterCategories", async () => {
+    mockStatus({
+      microsoft: { connected: true },
+    });
+    render(<AssistantStarterPrompts onPick={() => undefined} />);
+    /* Wait for status to resolve so the Widgets category is visible. */
+    await waitFor(() => {
+      expect(screen.getByText(/^Widgets$/)).toBeInTheDocument();
+    });
+    /* "briefing" is the first Widgets chip and lives in a category
+     * gated on `microsoft`, so it only renders once status resolves. */
+    const briefing = screen.getByTestId("starter-prompt-widgets-briefing");
+    expect(briefing.getAttribute("title")).toBe(
+      "Your morning summary: greeting, today's schedule, unread email digest, and action items.",
+    );
+    /* Knowledge & memory is always visible; assert one of its chips too
+     * to lock the wire from data shape to DOM for the no-requires path. */
+    const okrs = screen.getByTestId("starter-prompt-knowledge-memory-what-are-our-OKRs");
+    expect(okrs.getAttribute("title")).toBe(
+      "Pulls the team's current objectives and key results from the knowledge base.",
+    );
   });
 });
