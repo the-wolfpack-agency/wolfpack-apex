@@ -83,7 +83,7 @@ describe("calendar_widget handler", () => {
     const spec = res.widget as { kind: "calendar"; events: { id: string; instinctDetailHref: string }[] };
     expect(spec.events).toHaveLength(1);
     expect(spec.events[0].id).toBe("evt-1");
-    expect(spec.events[0].instinctDetailHref).toBe("/meetings/feeds/event/evt-1");
+    expect(spec.events[0].instinctDetailHref).toBe("/calendar");
 
     expect(mockTrackEvent).toHaveBeenCalledWith(
       "assistant.widget_offered",

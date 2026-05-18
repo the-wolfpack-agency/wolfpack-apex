@@ -204,26 +204,34 @@ export function GoodMorningWidget({ spec, workflowId }: GoodMorningWidgetProps) 
                 data-testid={`good-morning-event-${i}`}
                 className="text-xs"
               >
-                <div
-                  className="font-medium truncate"
+                {/* Click into /calendar — the full month view shows
+                    today's events. We don't have a per-event detail
+                    route, but landing on /calendar lets the user
+                    drill from there. */}
+                <a
+                  href="/calendar"
+                  onClick={() =>
+                    trackInteraction("open_schedule_event", { subject: e.subject })
+                  }
+                  className="block hover:underline"
                   style={{ color: "var(--wp-text, #eee)" }}
                 >
-                  {e.subject}
-                </div>
-                <div
-                  className="flex items-center flex-wrap gap-x-2 gap-y-0.5"
-                  style={{ color: "var(--wp-text-muted, #6b7280)" }}
-                >
-                  <span className="whitespace-nowrap">
-                    {formatTimeRange(e.startTime, e.endTime)}
-                  </span>
-                  {e.location && <span className="truncate max-w-full">· {e.location}</span>}
-                  {e.attendees.length > 0 && (
-                    <span>
-                      · {e.attendees.length} {e.attendees.length === 1 ? "attendee" : "attendees"}
+                  <div className="font-medium truncate">{e.subject}</div>
+                  <div
+                    className="flex items-center flex-wrap gap-x-2 gap-y-0.5"
+                    style={{ color: "var(--wp-text-muted, #6b7280)" }}
+                  >
+                    <span className="whitespace-nowrap">
+                      {formatTimeRange(e.startTime, e.endTime)}
                     </span>
-                  )}
-                </div>
+                    {e.location && <span className="truncate max-w-full">· {e.location}</span>}
+                    {e.attendees.length > 0 && (
+                      <span>
+                        · {e.attendees.length} {e.attendees.length === 1 ? "attendee" : "attendees"}
+                      </span>
+                    )}
+                  </div>
+                </a>
               </li>
             ))}
           </ul>
@@ -412,8 +420,12 @@ export function GoodMorningWidget({ spec, workflowId }: GoodMorningWidgetProps) 
                         : ""}
                     </div>
                   )}
+                  {/* The full pre-brief panel lives on the dashboard
+                      (see components/MorningBriefing → MeetingPreBriefPanel).
+                      No per-event detail route exists; the dashboard
+                      panel re-picks the same default meeting. */}
                   <a
-                    href={`/meetings/${encodeURIComponent(selectedMeeting.id)}`}
+                    href="/"
                     onClick={() =>
                       trackInteraction("open_prebrief_detail", {
                         meeting_id: selectedMeeting.id,

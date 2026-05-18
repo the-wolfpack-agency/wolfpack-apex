@@ -81,8 +81,11 @@ export const calendarWidgetTool: ToolDef<Params, CalendarWidgetData> = {
         location: e.location || undefined,
         isOnlineMeeting: e.isOnlineMeeting,
         webLink: e.webLink ?? null,
-        /* Instinct's meetings-feed detail page is the in-app deep link. */
-        instinctDetailHref: `/meetings/feeds/event/${encodeURIComponent(e.id)}`,
+        /* No per-event detail route exists yet, so the in-app deep
+         * link points to /calendar (the month view that shows the
+         * event in context). Drop this when an event-detail page
+         * lands; the renderer only renders the link when set. */
+        instinctDetailHref: "/calendar",
       }));
     } catch (err) {
       /* Calendar fetch fails should not break the widget; return an
