@@ -46,6 +46,12 @@ describe("dms_inventory intent matching", () => {
     "create task to wash my car",
     "I drive a Toyota",
     "calendar",
+    /* Regression 2026-05-18: a meeting / date query with no make
+     * keyword used to false-positive because the year ("2026") +
+     * verb ("have") combo tripped the loose intent gate. Locked. */
+    "which meetings did wolfpack have on April 20, 2026?",
+    "what meetings did we have in 2025",
+    "do we have any meetings in 2026",
   ])("'%s' does NOT match (left to other tools)", (q) => {
     expect(match(q)).toBeNull();
   });

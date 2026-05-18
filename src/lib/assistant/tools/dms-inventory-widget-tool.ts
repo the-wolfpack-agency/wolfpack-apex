@@ -66,7 +66,13 @@ function matchDmsIntent(message: string): Params | null {
   const makeMatch = MAKE_RE.exec(trimmed);
   const yearMatch = YEAR_RE.exec(trimmed);
   const inventoryKw = INVENTORY_KEYWORD_RE.test(trimmed);
-  if (!makeMatch && !yearMatch && !inventoryKw) return null;
+  /* Required signal: a make keyword OR an explicit inventory/dms/stock
+   * keyword. A year alone is NOT enough — "which meetings did
+   * wolfpack have on April 20, 2026?" used to false-positive because
+   * "2026" looks like a model year + "have" satisfied the verb gate.
+   * Real vehicle queries always carry a make OR an inventory keyword;
+   * date-bound meeting queries carry neither. */
+  if (!makeMatch && !inventoryKw) return null;
   /* Tighten: also require a "search-y" verb so casual mentions
    * ("I drive a Toyota") don't fire the tool. */
   if (!/\b(show|find|search|look\s+up|list|browse|any|got|have|inventory|stock|dms)\b/i.test(trimmed)) {
