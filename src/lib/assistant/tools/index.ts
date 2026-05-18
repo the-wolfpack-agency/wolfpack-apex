@@ -29,10 +29,15 @@ import "./save-team-fact-tool";
 // generic REST adapter). Register AFTER connectors so the registry
 // has them at tool-handler invocation time.
 import "@/lib/assistant/connectors";
+/* who_is OWNS "who is <name>" — team-first, CRM-fallback. Registered
+   BEFORE search_external_records so the cascade stops at the right
+   answer: a literal teammate returns their roster info instead of
+   the old "no contact match in the CRM" message. */
+import "./who-is-tool";
 /* Order matters: search claims free-text queries (multi-word names,
-   emails, "who is X") via strict looksLikeIdNotName rejection of ID-
-   shaped strings. get_external_record then claims the remaining
-   "look up <object> id <id>" phrases. Reversing the order makes
+   emails) via strict looksLikeIdNotName rejection of ID-shaped
+   strings. get_external_record then claims the remaining "look up
+   <object> id <id>" phrases. Reversing the order makes
    get_external_record's loose ID regex accidentally swallow
    single-word names. */
 import "./search-external-records-tool";

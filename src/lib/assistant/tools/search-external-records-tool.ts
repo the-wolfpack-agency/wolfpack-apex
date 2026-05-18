@@ -14,8 +14,12 @@
  *   "look up Grimace Fromcdonalds"     → name search across contacts
  *   "find grimace@mcdonalds.com"       → email search
  *   "search for McDonald's"            → free-text
- *   "who is Grimace Fromcdonalds"      → entity question
  *   "find the contact for Grimace"     → typed object + name
+ *
+ * Note: "who is X" is owned by who_is (team-first, CRM-fallback).
+ * If you add it back here, the chat will surface "no contact match
+ * in the CRM" for every literal teammate — which was the original
+ * bug. Don't.
  *
  * Disambiguation: 0 results → "no match", 1 result → full render,
  * 2–5 results → numbered list so user can refine, >5 → top 5 + count.
@@ -140,17 +144,10 @@ const PATTERNS: Array<{ re: RegExp; build(m: RegExpExecArray): Partial<Params> |
       return { objectType: "contact", query: q };
     },
   },
-  {
-    /* Identity / entity questions: "who is Grimace Fromcdonalds",
-       "what is Acme Industries". Defaults to contact for "who",
-       account for "what … company/business". */
-    re: /\bwho\s+is\s+(.{2,160})\??$/i,
-    build: (m) => {
-      const q = cleanQuery(m[1]);
-      if (looksLikeIdNotName(q)) return null;
-      return { objectType: "contact", query: q };
-    },
-  },
+  /* Removed: "who is <name>" used to land here and surface "No
+     contact matches found in the configured CRM" for every literal
+     teammate. The who_is tool now owns that intent and falls back
+     to CRM internally on team-roster miss. */
 ];
 
 function matchSearchIntent(message: string): Params | null {

@@ -37,7 +37,7 @@ describe("matchIntent — name searches", () => {
     ["look up Grimace Fromcdonalds", "contact", "Grimace Fromcdonalds"],
     ["find Grimace Fromcdonalds", "contact", "Grimace Fromcdonalds"],
     ["search for McDonald's", "contact", "McDonald's"],
-    ["who is Grimace Fromcdonalds?", "contact", "Grimace Fromcdonalds"],
+    /* "who is X" is now owned by who_is (team-first, CRM-fallback). */
     ["find the contact for Grimace Fromcdonalds", "contact", "Grimace Fromcdonalds"],
     ["look up account Acme Industries", "account", "Acme Industries"],
     ["find the opportunity called Q3 Renewal", "deal", "Q3 Renewal"],
