@@ -22,6 +22,7 @@ import { safeQuery } from "@/lib/db";
 import { getConnectionStatus as getMsStatus, graphFetch, getValidToken } from "@/lib/microsoft-graph";
 import { getConnectionStatus as getQboStatus } from "@/lib/quickbooks";
 import { loadConnectorCredentials } from "@/lib/assistant/connectors/credentials";
+import { refreshConnectorAccessToken } from "@/lib/assistant/connectors/oauth/refresh";
 
 export type ProbeKind = "connectivity" | "schema" | "action";
 
@@ -35,6 +36,13 @@ export interface ProbeResult {
   schemaPayload?: unknown;
   errorMessage?: string;
   durationMs: number;
+  /** When true, the vendor isn't configured for this workspace
+   *  (no credentials, no token, never connected). Distinct from
+   *  `ok=false` with an error — those mean "should work but
+   *  doesn't" and warrant an alert. `notConfigured=true` is
+   *  expected state for vendors the user hasn't set up; the
+   *  orchestrator suppresses these from regression alerts. */
+  notConfigured?: boolean;
 }
 
 export interface ProbeContext {
@@ -89,6 +97,9 @@ async function probeMicrosoftConnectivity(ctx: ProbeContext): Promise<ProbeResul
       probeKind: "connectivity",
       ok: status.connected,
       errorMessage: status.connected ? undefined : "Not connected",
+      /* "Not connected" = no token exists for this user; treat as
+       * unconfigured rather than broken so the alert stays quiet. */
+      notConfigured: !status.connected,
       durationMs: Date.now() - started,
     };
   } catch (err) {
@@ -196,6 +207,7 @@ async function probeQuickbooksConnectivity(_ctx: ProbeContext): Promise<ProbeRes
       probeKind: "connectivity",
       ok: status.connected,
       errorMessage: status.connected ? undefined : "Not connected",
+      notConfigured: !status.connected,
       durationMs: Date.now() - started,
     };
   } catch (err) {
@@ -237,19 +249,57 @@ const CRM_SCHEMA_PATHS: Record<CrmConnector, Record<string, string>> = {
   },
 };
 
+/**
+ * Load credentials + proactively refresh the OAuth access token if
+ * it's near expiry. Returns null when the connector isn't configured
+ * (so callers can flag notConfigured=true). Returns the credential
+ * record with a freshly-rotated authHeader when refresh succeeds, or
+ * the existing record on refresh failure (and the probe will see the
+ * vendor's 401 — that's the regression we want to alert on).
+ *
+ * Without this step, raw fetch() probes hit the vendor with a stale
+ * token and get 401 — which surfaced as the Salesforce regression on
+ * 2026-05-18. The rest-connector calls refresh REACTIVELY on 401, but
+ * probes don't go through rest-connector.
+ */
+async function loadFreshCrmCreds(
+  vendor: CrmConnector,
+  workspaceId: string,
+): Promise<{ baseUrl: string; authHeader: string } | null> {
+  const creds = await loadConnectorCredentials(workspaceId, vendor);
+  if (!creds || !creds.isActive) return null;
+  /* If OAuth + near expiry, proactively refresh. The refresh layer
+   * is a no-op for static-bearer connectors so this is safe to call
+   * unconditionally. */
+  try {
+    const refreshed = await refreshConnectorAccessToken({
+      workspaceId,
+      connectorName: vendor,
+    });
+    if (refreshed && refreshed.authHeader) {
+      return { baseUrl: refreshed.baseUrl, authHeader: refreshed.authHeader };
+    }
+  } catch {
+    /* refresh failed — fall through with existing creds and let the
+     * vendor's 401 surface as the regression. */
+  }
+  return { baseUrl: creds.baseUrl, authHeader: creds.authHeader };
+}
+
 async function probeCrmConnectivity(
   vendor: CrmConnector,
   ctx: ProbeContext,
 ): Promise<ProbeResult> {
   const started = Date.now();
   try {
-    const creds = await loadConnectorCredentials(ctx.workspaceId, vendor);
-    if (!creds || !creds.isActive) {
+    const creds = await loadFreshCrmCreds(vendor, ctx.workspaceId);
+    if (!creds) {
       return {
         vendor,
         probeKind: "connectivity",
         ok: false,
         errorMessage: "No active credentials for this workspace",
+        notConfigured: true,
         durationMs: Date.now() - started,
       };
     }
@@ -299,14 +349,15 @@ async function probeCrmSchema(
     };
   }
   try {
-    const creds = await loadConnectorCredentials(ctx.workspaceId, vendor);
-    if (!creds || !creds.isActive) {
+    const creds = await loadFreshCrmCreds(vendor, ctx.workspaceId);
+    if (!creds) {
       return {
         vendor,
         probeKind: "schema",
         objectType,
         ok: false,
         errorMessage: "No active credentials for this workspace",
+        notConfigured: true,
         durationMs: Date.now() - started,
       };
     }

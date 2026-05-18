@@ -50,6 +50,21 @@ const DEFAULT_VENDORS: Array<{ vendor: string; objects: string[]; needsUserId: b
   { vendor: "quickbooks", objects: [], needsUserId: false },
 ];
 
+/**
+ * Detect "vendor isn't configured for this workspace" outcomes by
+ * matching the exact strings the probe layer sets. Keeps the route
+ * portable (no extra DB column needed) while letting the orchestrator
+ * suppress these from regression alerts.
+ */
+function isNotConfigured(errorMessage: string | null): boolean {
+  if (!errorMessage) return false;
+  const msg = errorMessage.toLowerCase();
+  return (
+    msg.includes("not connected") ||
+    msg.includes("no active credentials")
+  );
+}
+
 interface LatestRow {
   vendor: string;
   probe_kind: string;
@@ -175,6 +190,7 @@ export async function GET(req: NextRequest) {
         schemaHash: r.schema_hash,
         drifted: driftMap.get(`${r.vendor}:${r.object_type ?? ""}`) ?? false,
         errorMessage: r.error_message,
+        notConfigured: isNotConfigured(r.error_message),
         probedAt: r.probed_at,
       }));
     return {
@@ -184,6 +200,10 @@ export async function GET(req: NextRequest) {
             ok: connectivity.ok,
             statusCode: connectivity.status_code,
             errorMessage: connectivity.error_message,
+            /* Distinguishes "vendor not set up for this workspace"
+             * (expected, suppressed from alerts) from "vendor IS
+             * configured but probe failed" (real regression). */
+            notConfigured: isNotConfigured(connectivity.error_message),
             probedAt: connectivity.probed_at,
           }
         : null,
