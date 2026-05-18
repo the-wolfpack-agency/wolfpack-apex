@@ -98,16 +98,38 @@ export async function runCalendarAvailability(params: {
   });
 
   const busy = overlapping.length > 0;
-  const summary = overlapping
-    .slice(0, 3)
-    .map((e) => `${e.subject} (${formatTime(e.start, params.timeZone)}–${formatTime(e.end, params.timeZone)})`)
-    .join(", ");
-
   const subject = isSelf ? "You" : resolved.displayName;
   const haveVerb = isSelf ? "have" : "has";
   const freeVerb = isSelf ? "look" : "looks";
+
+  /* Vertical Markdown list, one meeting per line, title clickable to
+   * the Outlook deep-link when Graph returned a webLink (it usually
+   * does). Times stay on the same row as the title so the eye can
+   * scan a day in seconds rather than parsing a comma-joined run-on. */
+  const renderLine = (e: CalendarEvent): string => {
+    const time = `${formatTime(e.start, params.timeZone)}–${formatTime(e.end, params.timeZone)}`;
+    const title = e.webLink ? `[${e.subject}](${e.webLink})` : e.subject;
+    return `- ${title} (${time})`;
+  };
+
+  const header = busy
+    ? `${subject} ${haveVerb} ${overlapping.length} meeting${overlapping.length === 1 ? "" : "s"} ${range.label}:`
+    : null;
+
+  const list = busy
+    ? overlapping
+        .slice(0, 5)
+        .map(renderLine)
+        .concat(
+          overlapping.length > 5
+            ? [`- …and ${overlapping.length - 5} more`]
+            : [],
+        )
+        .join("\n")
+    : "";
+
   const core = busy
-    ? `${subject} ${haveVerb} ${overlapping.length} meeting${overlapping.length === 1 ? "" : "s"} ${range.label}: ${summary}${overlapping.length > 3 ? ", …" : "."}`
+    ? `${header}\n${list}`
     : `${subject} ${freeVerb} free ${range.label}.`;
   const clarifier =
     range.resolved === false && params.timeframeToken

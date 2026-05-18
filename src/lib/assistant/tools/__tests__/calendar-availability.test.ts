@@ -121,6 +121,105 @@ describe("runCalendarAvailability", () => {
     expect(out?.busy).toBe(true);
     expect(out?.answer).toMatch(/^You have 1 meeting /);
     expect(out?.answer.toLowerCase()).toContain("q2 review");
+    /* Vertical list, one meeting per line. */
+    expect(out?.answer).toMatch(/\n-\s.*q2 review/i);
+  });
+
+  test("renders multiple meetings vertically (one per line) with webLinks", async () => {
+    mockFetchCalendarEvents.mockResolvedValue([
+      {
+        id: "m1",
+        subject: "1-1 Weekly Strategy",
+        start: "2026-04-21T15:00:00Z",
+        end: "2026-04-21T15:30:00Z",
+        location: "",
+        attendees: [],
+        attendeeEmails: [],
+        isOnlineMeeting: false,
+        webLink: "https://outlook.office.com/calendar/item/abc",
+      },
+      {
+        id: "m2",
+        subject: "Wolfpack Kickoff",
+        start: "2026-04-21T18:00:00Z",
+        end: "2026-04-21T19:00:00Z",
+        location: "",
+        attendees: [],
+        attendeeEmails: [],
+        isOnlineMeeting: false,
+        webLink: "https://outlook.office.com/calendar/item/def",
+      },
+    ]);
+    const out = await runCalendarAvailability({
+      personName: "__self__",
+      timeframeToken: "today",
+      nowMs: NOW,
+      selfUser: { userId: "nick@wolfpack.dev", displayName: "Nick Homyk" },
+    });
+    /* Header on its own line, each meeting on its own line as a
+     * Markdown bullet with the title as a link to the Outlook
+     * deep-link. */
+    expect(out?.answer).toMatch(/^You have 2 meetings today:\n/);
+    expect(out?.answer).toContain(
+      "- [1-1 Weekly Strategy](https://outlook.office.com/calendar/item/abc)",
+    );
+    expect(out?.answer).toContain(
+      "- [Wolfpack Kickoff](https://outlook.office.com/calendar/item/def)",
+    );
+    /* Each meeting on its own line — count the bullets. */
+    const bulletLines = out!.answer.split("\n").filter((l) => l.startsWith("- "));
+    expect(bulletLines).toHaveLength(2);
+    /* No comma-joined inline run-on like the old format. */
+    expect(out?.answer).not.toMatch(/\), .+\(/);
+  });
+
+  test("plain text title when Graph omits webLink", async () => {
+    mockFetchCalendarEvents.mockResolvedValue([
+      {
+        id: "m1",
+        subject: "Internal hold",
+        start: "2026-04-21T15:00:00Z",
+        end: "2026-04-21T15:30:00Z",
+        location: "",
+        attendees: [],
+        attendeeEmails: [],
+        isOnlineMeeting: false,
+        /* webLink intentionally undefined */
+      },
+    ]);
+    const out = await runCalendarAvailability({
+      personName: "__self__",
+      timeframeToken: "today",
+      nowMs: NOW,
+      selfUser: { userId: "nick@wolfpack.dev", displayName: "Nick Homyk" },
+    });
+    /* Bare title, no Markdown link wrapper. */
+    expect(out?.answer).toMatch(/-\sInternal hold \(/);
+    expect(out?.answer).not.toMatch(/\[Internal hold\]/);
+  });
+
+  test("caps the visible list at 5 with '…and N more' overflow tail", async () => {
+    const events = Array.from({ length: 7 }, (_, i) => ({
+      id: `m${i}`,
+      subject: `Meeting ${i}`,
+      start: `2026-04-21T${String(13 + i).padStart(2, "0")}:00:00Z`,
+      end: `2026-04-21T${String(13 + i).padStart(2, "0")}:30:00Z`,
+      location: "",
+      attendees: [],
+      attendeeEmails: [],
+      isOnlineMeeting: false,
+    }));
+    mockFetchCalendarEvents.mockResolvedValue(events);
+    const out = await runCalendarAvailability({
+      personName: "__self__",
+      timeframeToken: "today",
+      nowMs: NOW,
+      selfUser: { userId: "nick@wolfpack.dev", displayName: "Nick Homyk" },
+    });
+    const bulletLines = out!.answer.split("\n").filter((l) => l.startsWith("- "));
+    /* 5 meetings + 1 overflow tail */
+    expect(bulletLines).toHaveLength(6);
+    expect(out?.answer).toMatch(/…and 2 more/);
   });
 
   test("selfUser renders first-person 'free' answer when empty", async () => {
