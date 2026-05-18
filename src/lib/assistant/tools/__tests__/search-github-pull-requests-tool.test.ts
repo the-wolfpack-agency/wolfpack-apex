@@ -113,6 +113,14 @@ describe("handler — success rendering", () => {
       expect(r.answer).toContain("feat: shiny widget");
       expect(r.answer).toContain("@nhomyk");
       expect(r.answer).toContain("🚧"); // draft tag on PR 43
+      /* Identifier links out to the PR on github.com so a click in
+       * chat lands on the PR page, not a dead-text identifier. */
+      expect(r.answer).toContain(
+        "[the-wolfpack-agency/wolfpack-apex#42](https://github.com/x/y/pull/42)",
+      );
+      expect(r.answer).toContain(
+        "[the-wolfpack-agency/wolfpack-apex#43](https://github.com/x/y/pull/43)",
+      );
       /* Connector attribution flows through the data block so the chat
          UI can render the badge. */
       expect(r.data.connector).toBe("github");

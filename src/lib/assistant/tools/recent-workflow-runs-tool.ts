@@ -90,7 +90,9 @@ function statusEmoji(run: WorkflowRunSummary): string {
 function renderOneRun(run: WorkflowRunSummary): string {
   const branch = run.head_branch ? `\`${run.head_branch}\`` : "";
   const event = run.event ? ` · ${run.event}` : "";
-  return `${statusEmoji(run)} **${run.name}** ${branch}${event} (@${run.actor})`;
+  /* Name clicks out to the run summary page on GitHub Actions
+   * (logs + jobs + re-run button). */
+  return `${statusEmoji(run)} [**${run.name}**](${run.html_url}) ${branch}${event} (@${run.actor})`;
 }
 
 function renderAnswer(p: Params, runs: WorkflowRunSummary[]): string {

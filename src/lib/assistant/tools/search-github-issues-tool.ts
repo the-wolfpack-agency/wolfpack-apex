@@ -100,7 +100,8 @@ function matchIssueIntent(message: string): Params | null {
 
 function renderOneIssue(issue: IssueSummary): string {
   const labelTag = issue.labels.length > 0 ? ` [${issue.labels.slice(0, 3).join(", ")}]` : "";
-  return `${issue.repo}#${issue.number} — **${issue.title}** (@${issue.user})${labelTag}`;
+  /* Identifier clicks out to the issue on GitHub. */
+  return `[${issue.repo}#${issue.number}](${issue.html_url}) — **${issue.title}** (@${issue.user})${labelTag}`;
 }
 
 function renderAnswer(p: Params, issues: IssueSummary[]): string {

@@ -90,6 +90,12 @@ describe("handler — success rendering", () => {
       expect(r.answer).toContain("❌");
       expect(r.answer).toContain("`main`");
       expect(r.answer).toContain("push");
+      /* Run name clicks out to the run page on github.com (logs +
+       * re-run button). */
+      expect(r.answer).toContain("[**CI**](https://github.com/x/y/actions/runs/1)");
+      expect(r.answer).toContain(
+        "[**Deploy**](https://github.com/x/y/actions/runs/2)",
+      );
       expect(r.data.connector).toBe("github");
       expect(r.data.repo).toBe("wolfpack-apex");
     }

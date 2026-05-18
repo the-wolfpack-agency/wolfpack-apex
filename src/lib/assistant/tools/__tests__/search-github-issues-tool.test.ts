@@ -98,6 +98,10 @@ describe("handler — success rendering", () => {
       expect(r.answer).toContain("Login broken on iOS");
       expect(r.answer).toContain("@alice");
       expect(r.answer).toContain("[bug, mobile]");
+      /* Identifier clicks out to the issue on github.com. */
+      expect(r.answer).toContain(
+        "[the-wolfpack-agency/wolfpack-apex#17](https://github.com/x/y/issues/17)",
+      );
       expect(r.data.connector).toBe("github");
     }
   });

@@ -84,7 +84,10 @@ function matchPRIntent(message: string): Params | null {
 
 function renderOnePr(pr: PullRequestSummary): string {
   const draftTag = pr.draft ? " 🚧" : "";
-  return `${pr.repo}#${pr.number} — **${pr.title}**${draftTag} (@${pr.user})`;
+  /* Title clicks straight to the PR on GitHub. Repo+number stays as
+   * the leading identifier (familiar shape) but also wraps in the
+   * link so either click lands in the same place. */
+  return `[${pr.repo}#${pr.number}](${pr.html_url}) — **${pr.title}**${draftTag} (@${pr.user})`;
 }
 
 function renderAnswer(p: Params, prs: PullRequestSummary[]): string {
