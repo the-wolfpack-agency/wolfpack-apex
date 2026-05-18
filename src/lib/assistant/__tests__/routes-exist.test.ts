@@ -103,7 +103,12 @@ describe("every non-dynamic (dashboard)/<route> folder has a PAGE_FACTS entry", 
     // points at a subroute — allowlist the bare folder. `setup` and
     // `tools` now have their own PAGE_FACTS entries (added 2026-04-23
     // after user-reported gaps), so they no longer need to be here.
-    const allowlist = new Set(["admin"]);
+    // `meetings` deliberately points at /meetings/feeds (first-tab
+    // landing pattern) so the bare /meetings folder is allowlisted
+    // even though we have a meetings PAGE_FACTS entry.
+    // `programs/` has no top-level page; the actual page lives at
+    // /programs/budgets and PAGE_FACTS points there.
+    const allowlist = new Set(["admin", "meetings", "programs"]);
     for (const name of entries) {
       // Skip layout/page/metadata files, dynamic routes, parallel
       // routes, and co-located test folders.

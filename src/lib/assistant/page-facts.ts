@@ -592,6 +592,110 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["settings", "directory", "dashboard"],
   },
+  bulletin: {
+    domain: "bulletin",
+    route: "/bulletin",
+    title: "Bulletin",
+    purpose: "Shared sticky-note boards — quick visual coordination for the team without a meeting.",
+    what_you_can_do: [
+      "Spin up a new board for any topic and share it with the team.",
+      "Drop sticky notes anywhere on the canvas — drag to rearrange.",
+      "Group notes by color, archive boards once a project wraps.",
+      "Open older boards from the Archived section when you need to look something up.",
+    ],
+    how_to: [
+      "Click Create new board, name it, and pick a color.",
+      "Drag notes onto the canvas — text edits inline.",
+      "Archive the board from its menu when the conversation is done.",
+    ],
+    related_pages: ["discussions", "messages", "tasks"],
+  },
+  principles: {
+    domain: "principles",
+    route: "/principles",
+    title: "Principles",
+    purpose: "Operating principles dashboard — track how the team is living the values, both for self-improvement and team alignment.",
+    what_you_can_do: [
+      "Read each principle in plain English with examples of what it looks like in practice.",
+      "Log your own observations against a principle to track your own growth.",
+      "(Leads only) See team-wide aggregates and per-member evidence.",
+    ],
+    how_to: [
+      "Open Principles from the left nav.",
+      "Pick a principle to read the explainer and example log entries.",
+      "Click Add observation to log how you applied it.",
+    ],
+    related_pages: ["goals", "people", "journal"],
+  },
+  programs: {
+    domain: "programs",
+    route: "/programs/budgets",
+    title: "Programs",
+    purpose: "Cross-team programs — multi-month initiatives that need a budget, owners, and tracked milestones.",
+    what_you_can_do: [
+      "See every active program with its current spend vs budget.",
+      "Drill into a program to see owners, milestones, and the budget breakdown.",
+      "Spot programs trending over budget before quarter end.",
+    ],
+    how_to: [
+      "Open Programs → Budgets from the left nav.",
+      "Click any program to see its full plan.",
+      "Use the filter at the top to focus on one team or one budget cycle.",
+    ],
+    related_pages: ["financials", "goals", "reports"],
+  },
+  qr: {
+    domain: "qr",
+    route: "/qr",
+    title: "QR Generator",
+    purpose: "Mint short-link QR codes the team can print on physical assets, then track scans per code.",
+    what_you_can_do: [
+      "Generate a QR code from a slug and a destination URL.",
+      "Edit the destination later without reprinting — the slug stays the same.",
+      "View scan counts per code so you know which printed assets are working.",
+      "Export the QR image in PNG / SVG / PDF / EPS for print.",
+    ],
+    how_to: [
+      "Open QR Generator from the left nav.",
+      "Enter a memorable slug and the URL you want it to point to.",
+      "Download the QR image in the format your printer expects.",
+    ],
+    related_pages: ["sites", "analytics", "messages"],
+  },
+  search: {
+    domain: "search",
+    route: "/search",
+    title: "Search",
+    purpose: "Universal search across every Instinct surface — chats, channels, emails, calendar, and the knowledge base.",
+    what_you_can_do: [
+      "Type a query once and see results grouped by chats, channels, emails, calendar, and knowledge.",
+      "Narrow by type with the filter chips at the top.",
+      "Open any result directly into its source surface — link state is shareable.",
+    ],
+    how_to: [
+      "Open Search from the left nav.",
+      "Type a query — results stream in as you type.",
+      "Click a filter chip to narrow to one source.",
+    ],
+    related_pages: ["knowledge", "emails", "calendar"],
+  },
+  support: {
+    domain: "support",
+    route: "/support",
+    title: "Support",
+    purpose: "Internal support ticket list — every ticket the operator has access to, filterable by status.",
+    what_you_can_do: [
+      "See all open / closed / pending tickets in one view.",
+      "Filter by status with the pill row at the top.",
+      "Click into any ticket to see the conversation and update its status.",
+    ],
+    how_to: [
+      "Open Support from the left nav.",
+      "Pick a status filter to focus the list.",
+      "Click a row to open the ticket detail.",
+    ],
+    related_pages: ["messages", "notifications", "people"],
+  },
 };
 
 /** Alphabetical list of every known domain key. Stable across runs. */

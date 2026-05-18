@@ -155,29 +155,34 @@ describe("<EmailNavBadge />", () => {
   });
 });
 
-// Layout integration — assert the badge is mounted next to the
-// Emails nav item via source-text inspection (mirrors the
-// MessagesNavBadge integration check).
-describe("dashboard layout — EmailNavBadge mount", () => {
-  test("layout imports EmailNavBadge", async () => {
+// Layout integration — the Emails nav item is currently hidden from
+// the sidebar until the inbox is production-ready, so EmailNavBadge
+// is intentionally NOT mounted in the dashboard layout. Both prior
+// tests asserted the badge WAS mounted; we flip them so the absence
+// is the locked-in invariant. If someone re-adds the import without
+// also unhiding the route, this test will surface the omission.
+describe("dashboard layout — EmailNavBadge intentionally absent", () => {
+  test("layout does NOT import EmailNavBadge while /emails is hidden from nav", async () => {
     const { readFileSync } = await import("node:fs");
     const { resolve } = await import("node:path");
     const layout = readFileSync(
       resolve(__dirname, "../../app/(dashboard)/layout.tsx"),
       "utf8",
     );
-    expect(layout).toMatch(/import\s+EmailNavBadge\s+from/);
+    expect(layout).not.toMatch(/^import\s+EmailNavBadge\s+from/m);
   });
 
-  test("layout renders EmailNavBadge only for the /emails nav item", async () => {
+  test("layout has a comment explaining why the badge is currently disabled", async () => {
+    /* When we unhide the inbox + restore the badge, this guard fires
+     * to remind the editor to also remove the stale comment. Keeps
+     * the codebase from accumulating commentary about deletions
+     * indefinitely. */
     const { readFileSync } = await import("node:fs");
     const { resolve } = await import("node:path");
     const layout = readFileSync(
       resolve(__dirname, "../../app/(dashboard)/layout.tsx"),
       "utf8",
     );
-    expect(layout).toMatch(
-      /item\.href\s*===\s*["']\/emails["']\s*\?\s*<EmailNavBadge/,
-    );
+    expect(layout).toMatch(/EmailNavBadge import removed/i);
   });
 });

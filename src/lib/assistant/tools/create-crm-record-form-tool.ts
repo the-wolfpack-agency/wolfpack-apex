@@ -66,8 +66,11 @@ const OBJECT_ALIAS: Record<string, "deal" | "contact" | "account" | "task"> = {
 
 const AMOUNT_RE = /\$?(\d+(?:,\d{3})*(?:\.\d+)?)\s*([kKmM])?/;
 const EMAIL_RE = /([\w.+-]+@[\w-]+\.[\w.-]+)/i;
+/* Stop the name at common adjoining fields ("email", "amount", "phone",
+ * "at", "of", currency signs) so "named Jane Doe email jane@acme.com"
+ * captures "Jane Doe" rather than "Jane Doe email jane". */
 const NAME_AFTER_OBJECT_RE =
-  /\b(?:with|for|named|called|titled)\s+([A-Z][\w'.& -]{1,80})\b/;
+  /\b(?:with|for|named|called|titled)\s+([A-Z][\w'.& -]{1,80}?)(?=\s+(?:email|amount|phone|address|at|of|for|with)\b|\s*[,$@]|$)/;
 
 function matchCrmRecordIntent(message: string): Params | null {
   if (!VERB.test(message)) return null;
@@ -162,17 +165,23 @@ export const createCrmRecordFormTool: ToolDef<Params, CreateCrmRecordFormData> =
       field_count: finalForm.fields.length,
     });
 
+    /* Phase-3 contract: the answer string says what we're about to
+     * do AND asks the user to confirm via the form submit. Submitting
+     * the form IS the confirmation — we never silently fire the write
+     * on the first turn. Threading the parsed name through the answer
+     * (when present) makes the preview specific instead of generic. */
+    const subject = params.name ? ` for ${params.name}` : "";
     return {
       ok: true,
       data: { formKind: "create_crm_record", objectType: params.objectType },
       answer:
         params.objectType === "deal"
-          ? "Fill in the deal below. Stage and Close date have safe defaults."
+          ? `Create a deal${subject}. Stage and Close date have safe defaults — confirm by submitting the form below.`
           : params.objectType === "contact"
-          ? "Fill in the contact below."
+          ? `Create a contact${subject}. Confirm by submitting the form below.`
           : params.objectType === "account"
-          ? "Fill in the account below."
-          : "Fill in the CRM task below.",
+          ? `Create an account${subject}. Confirm by submitting the form below.`
+          : `Create a CRM task${subject}. Confirm by submitting the form below.`,
       form: finalForm,
     };
   },
