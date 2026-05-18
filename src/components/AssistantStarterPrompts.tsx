@@ -1,23 +1,45 @@
 /**
  * AssistantStarterPrompts — categorized prompt chips for the empty
  * chat state. Helps a new user discover the Assistant's surface
- * area: there's enough breadth (CRM / GitHub / calendar / mail /
- * forms / goals) that "Ask anything" leaves users staring at a blank
- * box.
+ * area without staring at a blank box.
  *
- * Categories map 1:1 to docs/explainers/assistant-prompts.md so the
- * docs and the UI stay in lockstep. Each chip injects a known-good
- * verified prompt — clicking sends it as a real user message.
+ * Connection-aware: on mount, we read /api/integrations/status and
+ * hide categories whose prompts would 400 because the underlying
+ * integration isn't configured. Reason: an unconnected user clicking
+ * "top 3 deals" used to get a Salesforce error, which is a terrible
+ * first impression and we're the ones who put the chip in front of
+ * them. Internal-only categories (Knowledge & memory, Create something
+ * partial) always render so the empty state never collapses to nothing.
+ *
+ * Categories map 1:1 to docs/explainers/assistant-prompts.md.
  */
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { fetchWithRefresh } from "@/lib/client-auth";
 
 interface StarterCategory {
   title: string;
   emoji: string;
   prompts: string[];
+  /** Provider keys required for chips in this category to actually
+   *  work. Empty array = always shown. ANY = shown if any one of the
+   *  listed providers is connected (CRM works with SF *or* HubSpot). */
+  requires?: { any: ProviderKey[] };
+}
+
+type ProviderKey =
+  | "microsoft"
+  | "salesforce"
+  | "hubspot"
+  | "github";
+
+interface IntegrationStatus {
+  microsoft?: { connected?: boolean };
+  salesforce?: { connected?: boolean };
+  hubspot?: { connected?: boolean };
+  github?: { connected?: boolean };
 }
 
 function buildStarterCategories(): StarterCategory[] {
@@ -26,11 +48,7 @@ function buildStarterCategories(): StarterCategory[] {
       /* Widgets first — they're the "interface inside the chat"
          pattern and the most-visited capability on mobile. Lead
          with `briefing` because it's the densest panel (greeting +
-         schedule + action items + meeting pre-brief). The
-         time-of-day phrases ("good morning" / "good afternoon")
-         resolve to the SAME tool, so we don't duplicate them as
-         chips — the widget's greeting line already adapts to the
-         clock. */
+         schedule + action items + meeting pre-brief). */
       title: "Widgets",
       emoji: "✨",
       prompts: [
@@ -39,6 +57,7 @@ function buildStarterCategories(): StarterCategory[] {
         "inbox",
         "tasks",
       ],
+      requires: { any: ["microsoft"] },
     },
     {
       title: "Create something",
@@ -51,6 +70,12 @@ function buildStarterCategories(): StarterCategory[] {
         "create feature",
         "create OKR",
       ],
+      /* `create feature` and `create OKR` are internal-only and would
+         survive a no-MS state, but the majority require MS Graph.
+         Rather than split this into two categories we hide it as a
+         block — the internal-only fallbacks still appear in
+         Knowledge & memory. */
+      requires: { any: ["microsoft"] },
     },
     {
       title: "CRM (Salesforce / HubSpot)",
@@ -62,6 +87,7 @@ function buildStarterCategories(): StarterCategory[] {
         "<account>'s opportunities",
         "average deal size",
       ],
+      requires: { any: ["salesforce", "hubspot"] },
     },
     {
       title: "GitHub",
@@ -71,6 +97,7 @@ function buildStarterCategories(): StarterCategory[] {
         "failed CI in <repo>",
         "open issues in <repo>",
       ],
+      requires: { any: ["github"] },
     },
     {
       title: "Calendar & Mail",
@@ -82,6 +109,7 @@ function buildStarterCategories(): StarterCategory[] {
         "find emails to <person>",
         "any meetings tomorrow",
       ],
+      requires: { any: ["microsoft"] },
     },
     {
       title: "Knowledge & memory",
@@ -98,6 +126,22 @@ function buildStarterCategories(): StarterCategory[] {
 
 const STARTER_CATEGORIES: StarterCategory[] = buildStarterCategories();
 
+export function filterCategoriesByStatus(
+  cats: StarterCategory[],
+  status: IntegrationStatus | null,
+): StarterCategory[] {
+  /* Pre-connection-check (status still loading): show only categories
+   * with no requirements. This avoids briefly flashing chips the user
+   * can't use, then yanking them. */
+  if (status === null) {
+    return cats.filter((c) => !c.requires || c.requires.any.length === 0);
+  }
+  return cats.filter((c) => {
+    if (!c.requires || c.requires.any.length === 0) return true;
+    return c.requires.any.some((key) => status[key]?.connected === true);
+  });
+}
+
 export interface AssistantStarterPromptsProps {
   /** Called when the user clicks a chip. The parent (InstinctChat)
    *  is expected to populate the composer and fire the message. */
@@ -105,12 +149,31 @@ export interface AssistantStarterPromptsProps {
 }
 
 export function AssistantStarterPrompts({ onPick }: AssistantStarterPromptsProps) {
-  /* On mobile (default), only the first category is expanded so the
-     empty state stays compact and the chip rows don't push the
+  const [status, setStatus] = useState<IntegrationStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchWithRefresh("/api/integrations/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: IntegrationStatus | null) => {
+        if (!cancelled) setStatus(data ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setStatus({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const visibleCategories = filterCategoriesByStatus(STARTER_CATEGORIES, status);
+  const missingConnections = collectMissingConnections(STARTER_CATEGORIES, status);
+
+  /* On mobile (default), only the first visible category is expanded
+     so the empty state stays compact and chip rows don't push the
      greeting above the fold. Tapping a category header expands it.
      On desktop the screenshot bug doesn't apply — every category is
-     expanded by default. We detect via a useState seeded from
-     window.innerWidth so SSR + first paint are stable. */
+     expanded by default. */
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
     const out: Record<string, boolean> = {};
     const isMobile =
@@ -136,7 +199,7 @@ export function AssistantStarterPrompts({ onPick }: AssistantStarterPromptsProps
         Try one of these
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-3">
-        {STARTER_CATEGORIES.map((cat) => {
+        {visibleCategories.map((cat) => {
           const isOpen = expanded[cat.title];
           const slug = cat.title.toLowerCase().replace(/\W+/g, "-");
           return (
@@ -198,6 +261,23 @@ export function AssistantStarterPrompts({ onPick }: AssistantStarterPromptsProps
           );
         })}
       </div>
+      {missingConnections.length > 0 && (
+        <div
+          data-testid="starter-prompts-connect-hint"
+          className="text-xs mt-3 text-center px-3"
+          style={{ color: "var(--wp-text-muted, #6b7280)" }}
+        >
+          Unlock {missingConnections.join(", ")} prompts in{" "}
+          <a
+            href="/settings/integrations"
+            className="underline"
+            style={{ color: "var(--wp-gold, #eab308)" }}
+          >
+            Settings → Integrations
+          </a>
+          .
+        </div>
+      )}
       <div
         className="text-xs mt-2 sm:mt-3 text-center px-3"
         style={{ color: "var(--wp-text-muted, #6b7280)" }}
@@ -206,4 +286,33 @@ export function AssistantStarterPrompts({ onPick }: AssistantStarterPromptsProps
       </div>
     </div>
   );
+}
+
+/** Human-readable list of integration groups the workspace has not
+ *  connected yet, used to drive the "unlock more prompts" footer.
+ *  Returns an empty list while status is still loading so the hint
+ *  doesn't flash. */
+function collectMissingConnections(
+  cats: StarterCategory[],
+  status: IntegrationStatus | null,
+): string[] {
+  if (status === null) return [];
+  const missing = new Set<string>();
+  for (const c of cats) {
+    if (!c.requires || c.requires.any.length === 0) continue;
+    const anyConnected = c.requires.any.some(
+      (k) => status[k]?.connected === true,
+    );
+    if (!anyConnected) {
+      if (c.requires.any.includes("microsoft")) missing.add("Microsoft 365");
+      if (
+        c.requires.any.includes("salesforce") ||
+        c.requires.any.includes("hubspot")
+      ) {
+        missing.add("CRM");
+      }
+      if (c.requires.any.includes("github")) missing.add("GitHub");
+    }
+  }
+  return Array.from(missing);
 }

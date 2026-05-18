@@ -16,6 +16,7 @@ const mockMs = jest.fn();
 const mockQb = jest.fn();
 const mockPlaudStatus = jest.fn();
 const mockPlaudConfigured = jest.fn();
+const mockListConnectorCredentials = jest.fn();
 
 jest.mock("@/lib/microsoft-graph", () => ({
   getConnectionStatus: (...a: any[]) => mockMs(...a),
@@ -27,8 +28,11 @@ jest.mock("@/lib/plaud", () => ({
   getConnectionStatus: (...a: any[]) => mockPlaudStatus(...a),
   isPlaudConfigured: (...a: any[]) => mockPlaudConfigured(...a),
 }));
+jest.mock("@/lib/assistant/connectors", () => ({
+  listConnectorCredentials: (...a: any[]) => mockListConnectorCredentials(...a),
+}));
 
-const AUTH_USER = { id: "u1", role: "ceo", name: "Nick", email: "n@x.co" };
+const AUTH_USER = { id: "u1", role: "ceo", name: "Nick", email: "n@x.co", workspaceId: "ws-1" };
 jest.mock("@/lib/auth", () => ({
   getUserFromRequest: () => AUTH_USER,
 }));
@@ -48,7 +52,10 @@ beforeEach(() => {
   mockQb.mockReset();
   mockPlaudStatus.mockReset();
   mockPlaudConfigured.mockReset();
+  mockListConnectorCredentials.mockReset();
   mockPlaudConfigured.mockReturnValue(false);
+  mockListConnectorCredentials.mockResolvedValue([]);
+  delete process.env.GITHUB_TOKEN_WOLFPACK_AGENCY;
 });
 
 describe("GET /api/integrations/status", () => {
@@ -108,8 +115,73 @@ describe("GET /api/integrations/status", () => {
       getConnectionStatus: () => Promise.resolve({ connected: false }),
       isPlaudConfigured: () => false,
     }));
+    jest.doMock("@/lib/assistant/connectors", () => ({
+      listConnectorCredentials: () => Promise.resolve([]),
+    }));
     const { GET: FreshGET } = await import("../route");
     const res = await FreshGET(get());
     expect(res.status).toBe(401);
+  });
+
+  test("salesforce row → salesforce.connected: true", async () => {
+    mockMs.mockResolvedValue({ connected: false, mode: "live" });
+    mockQb.mockResolvedValue({ connected: false });
+    mockPlaudStatus.mockResolvedValue({ connected: false });
+    mockListConnectorCredentials.mockResolvedValue([
+      { connectorName: "salesforce", isActive: true },
+    ]);
+
+    const res = await GET(get());
+    const data = await res.json();
+    expect(data.salesforce.connected).toBe(true);
+    expect(data.hubspot.connected).toBe(false);
+    expect(mockListConnectorCredentials).toHaveBeenCalledWith(AUTH_USER.workspaceId);
+  });
+
+  test("inactive connector row does NOT count as connected", async () => {
+    mockMs.mockResolvedValue({ connected: false, mode: "live" });
+    mockQb.mockResolvedValue({ connected: false });
+    mockPlaudStatus.mockResolvedValue({ connected: false });
+    mockListConnectorCredentials.mockResolvedValue([
+      { connectorName: "hubspot", isActive: false },
+    ]);
+
+    const res = await GET(get());
+    const data = await res.json();
+    expect(data.hubspot.connected).toBe(false);
+  });
+
+  test("github env var present → github.connected: true", async () => {
+    process.env.GITHUB_TOKEN_WOLFPACK_AGENCY = "ghp_test";
+    mockMs.mockResolvedValue({ connected: false, mode: "live" });
+    mockQb.mockResolvedValue({ connected: false });
+    mockPlaudStatus.mockResolvedValue({ connected: false });
+
+    const res = await GET(get());
+    const data = await res.json();
+    expect(data.github.connected).toBe(true);
+  });
+
+  test("github env var absent → github.connected: false", async () => {
+    mockMs.mockResolvedValue({ connected: false, mode: "live" });
+    mockQb.mockResolvedValue({ connected: false });
+    mockPlaudStatus.mockResolvedValue({ connected: false });
+
+    const res = await GET(get());
+    const data = await res.json();
+    expect(data.github.connected).toBe(false);
+  });
+
+  test("connector lookup failure does not 500 the endpoint", async () => {
+    mockMs.mockResolvedValue({ connected: false, mode: "live" });
+    mockQb.mockResolvedValue({ connected: false });
+    mockPlaudStatus.mockResolvedValue({ connected: false });
+    mockListConnectorCredentials.mockRejectedValue(new Error("db down"));
+
+    const res = await GET(get());
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.salesforce.connected).toBe(false);
+    expect(data.hubspot.connected).toBe(false);
   });
 });
