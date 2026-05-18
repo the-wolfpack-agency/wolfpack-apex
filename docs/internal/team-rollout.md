@@ -197,5 +197,4 @@ Personally kickoff Alicia and Ashley. Don't leave the room until each one has su
 ## Open questions
 
 - Ashley's tech-savviness — default to not-tech-savvy until confirmed.
-- Should Sites editor (`/sites`) be hidden from the team nav entirely, or stay accessible at the URL for ad-hoc use? Currently leaving accessible.
 - Cheat sheet print run — how many copies and what size paper does Hoxsie want.
