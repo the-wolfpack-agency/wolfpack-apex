@@ -88,6 +88,11 @@ import "./calendar-widget-tool";
 import "./email-thread-widget-tool";
 import "./task-list-widget-tool";
 import "./good-morning-widget-tool";
+/* DMS inventory widget — bridges to the AgenticQA browser-driver
+ * server. Proves the "we drive any DMS web UI" pattern; first
+ * vendor is wolfpack-auto (we own it). CDK / Tekion / Reynolds
+ * plug in server-side without changing this tool. */
+import "./dms-inventory-widget-tool";
 
 export { tryDispatchTool } from "./dispatcher";
 export { getTools, getToolByName, registerTool, __resetRegistryForTests } from "./registry";

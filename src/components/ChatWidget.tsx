@@ -18,6 +18,7 @@ import { CalendarWidget } from "@/components/widgets/CalendarWidget";
 import { EmailThreadWidget } from "@/components/widgets/EmailThreadWidget";
 import { TaskListWidget } from "@/components/widgets/TaskListWidget";
 import { GoodMorningWidget } from "@/components/widgets/GoodMorningWidget";
+import { DmsInventoryWidget } from "@/components/widgets/DmsInventoryWidget";
 
 export interface ChatWidgetProps {
   spec: WidgetSpec;
@@ -38,6 +39,8 @@ export function ChatWidget({ spec, workflowId }: ChatWidgetProps) {
       return <TaskListWidget spec={spec} workflowId={workflowId} />;
     case "good_morning":
       return <GoodMorningWidget spec={spec} workflowId={workflowId} />;
+    case "dms_inventory":
+      return <DmsInventoryWidget spec={spec} workflowId={workflowId} />;
     default:
       /* Forward-compat: silently render nothing for unknown kinds.
        * The text answer above the widget still surfaces, so the

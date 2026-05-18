@@ -175,10 +175,35 @@ export interface GoodMorningWidgetSpec {
   connected: boolean;
 }
 
+/** A single row in a DMS inventory widget. Vendor-neutral shape; each
+ *  DMS driver maps its native fields into this canonical form so the
+ *  widget renders the same regardless of which dealer system was
+ *  driven under the hood. */
+export interface DmsInventoryItem {
+  title: string;
+  year: number | null;
+  make: string | null;
+  model: string | null;
+  price: number | null;
+  vin: string | null;
+  imageUrl: string | null;
+  detailUrl: string | null;
+}
+
+export interface DmsInventoryWidgetSpec {
+  kind: "dms_inventory";
+  /** Which DMS the driver targeted (wolfpack-auto, cdk, tekion, ...). */
+  vendor: string;
+  title: string;
+  subtitle?: string;
+  items: DmsInventoryItem[];
+}
+
 /** Discriminated union of every widget kind. Add new entries as the
  *  framework expands. */
 export type WidgetSpec =
   | CalendarWidgetSpec
   | EmailThreadWidgetSpec
   | TaskListWidgetSpec
-  | GoodMorningWidgetSpec;
+  | GoodMorningWidgetSpec
+  | DmsInventoryWidgetSpec;
