@@ -281,6 +281,36 @@ describe("InstinctChat composer — auto-resize textarea", () => {
     expect(textarea.style.height).toBe("88px");
   });
 
+  test("auto-resize floor is 46px so the empty composer doesn't collapse below the send button", async () => {
+    mockDeferredApi();
+    const InstinctChat = await importComponent();
+    await act(async () => {
+      render(<InstinctChat showHistory={false} />);
+    });
+
+    const textarea = (await screen.findByTestId(
+      "assistant-composer-input",
+    )) as HTMLTextAreaElement;
+
+    /* Empty textarea — scrollHeight tiny (24px is the rendered
+     * line-height in jsdom). The clamp should floor to 46. */
+    Object.defineProperty(textarea, "scrollHeight", {
+      configurable: true,
+      get: () => 24,
+    });
+
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )?.set;
+    await act(async () => {
+      setter?.call(textarea, "");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(textarea.style.height).toBe("46px");
+  });
+
   test("auto-resize caps at the 120px maxHeight even when content overflows", async () => {
     mockDeferredApi();
     const InstinctChat = await importComponent();

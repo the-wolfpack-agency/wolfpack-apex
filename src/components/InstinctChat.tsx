@@ -196,13 +196,14 @@ export default function InstinctChat({
   /* Auto-resize the composer textarea so a longer prompt grows the
    * input up to maxHeight (120px), then scrolls inside the textarea.
    * Matches ChatGPT / Claude composer behavior; fixed-height inputs
-   * feel primitive on multi-line prompts. */
+   * feel primitive on multi-line prompts. Clamped between 46px
+   * (matches the adjacent send button so the empty composer doesn't
+   * shrink below it) and 120px. */
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
     el.style.height = "auto";
-    /* maxHeight is enforced via CSS; we just grow up to it. */
-    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 46), 120)}px`;
   }, [input]);
 
   // --- File attachment constants ---
@@ -1694,6 +1695,11 @@ export default function InstinctChat({
                   background: "var(--wp-dark-surface2, #222)",
                   color: "var(--wp-text, #eee)",
                   border: "1px solid var(--wp-dark-border, #333)",
+                  /* min-height matches the send button (py-3 + w-5
+                   * icon + 1px border ≈ 46px) so the empty composer
+                   * doesn't visually collapse below the button when
+                   * auto-resize sets height to scrollHeight. */
+                  minHeight: "46px",
                   maxHeight: "120px",
                   fontFamily: "system-ui, -apple-system, sans-serif",
                 }}
