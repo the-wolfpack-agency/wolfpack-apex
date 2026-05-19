@@ -34,12 +34,15 @@ import "@/lib/assistant/connectors";
    answer: a literal teammate returns their roster info instead of
    the old "no contact match in the CRM" message. */
 import "./who-is-tool";
-/* Order matters: search claims free-text queries (multi-word names,
-   emails) via strict looksLikeIdNotName rejection of ID-shaped
-   strings. get_external_record then claims the remaining "look up
-   <object> id <id>" phrases. Reversing the order makes
-   get_external_record's loose ID regex accidentally swallow
-   single-word names. */
+/* Order matters: search_external_records claims TYPED CRM phrasings
+   ("find the contact for X", "look up account X", "find
+   grimace@x.com"). Bare-search phrasings ("search Acme", "look up
+   Acme") used to land here too but now flow to Universal Search
+   (registered later in this file) so the CRM provider fans in
+   alongside chats/emails/calendar/knowledge. get_external_record
+   then claims "look up <object> id <id>" phrases. Reversing this
+   pair makes get_external_record's loose ID regex accidentally
+   swallow single-word names. */
 import "./search-external-records-tool";
 import "./get-external-record-tool";
 /* CRM record FORM — registered before the legacy regex-confirm
@@ -98,6 +101,19 @@ import "./good-morning-widget-tool";
  * vendor is wolfpack-auto (we own it). CDK / Tekion / Reynolds
  * plug in server-side without changing this tool. */
 import "./dms-inventory-widget-tool";
+
+/* Universal Search tool — returns IDENTICAL results to the /search
+   page by delegating to lib/search/runSearch (which fans into the CRM
+   connector via its `crm` provider). Registered AFTER the CRM tools
+   so a typed-object phrasing the search tool's crmToolClaims missed
+   would still cascade through to search_external_records on the
+   second pass; in practice the typed regex catches them all. Bare-
+   search phrasings ("search Acme", "look up Acme") flow here because
+   search_external_records no longer claims the bare verb pattern
+   (PATTERN 3 removed 2026-05-19) — Universal Search wins and its
+   crm provider fans the same query back into the CRM in parallel
+   with chats, emails, calendar, and knowledge. */
+import "./search";
 
 export { tryDispatchTool } from "./dispatcher";
 export { getTools, getToolByName, registerTool, __resetRegistryForTests } from "./registry";

@@ -343,6 +343,11 @@ export type InstinctEventType =
   | "system.ai_call_made"
   | "system.ai_call_skipped"
   | "system.search_performed"
+  // A Universal Search provider (chats, emails, calendar, knowledge,
+  // CRM, …) threw or rejected. Total response degrades gracefully —
+  // other providers' results still flow through. Payload: { provider,
+  // message } — no PII, error text only.
+  | "system.search_provider_failed"
   | "system.analytics_queried"
   // Dashboard — personalized Quick Actions tile.
   //
@@ -373,6 +378,26 @@ export type InstinctEventType =
   // Tool failed (validation, capability, no_match, needs_confirmation, internal).
   // Metadata: { tool, code, message }.
   | "assistant.tool_failed"
+  // Universal-search assistant tool (`search`). Fired by the tool's
+  // handler after runSearch returns successfully so the learning loop
+  // sees parity with the /search page route's `insight.search.queried`
+  // event, but namespaced under `assistant.*` so the funnel slices
+  // chat-driven searches independently from page-driven ones.
+  //   assistant.search_executed   { query_length, total_results,
+  //                                  took_ms, types, workflow_id? }
+  //   assistant.search_no_results { query_length, types, workflow_id? }
+  //     — fires when total_results === 0; pairs with the page-surface
+  //       `insight.search.no_results` for docs-gap heatmaps.
+  | "assistant.search_executed"
+  | "assistant.search_no_results"
+  // Per-provider telemetry for Universal Search. One event fires per
+  // provider per request — chats, channels, emails, calendar,
+  // knowledge, crm, and any future provider — so the learning loop
+  // can rank providers by latency and recall independently. Payload:
+  //   assistant.search_provider_executed { provider, query_length,
+  //                                         match_count, took_ms,
+  //                                         workflow_id? }
+  | "assistant.search_provider_executed"
   // Action tool dispatch persisted a pending confirmation (waiting on
   // the user's next-turn "confirm" / "cancel"). Metadata: { tool,
   // pending_id, description, expires_at }.

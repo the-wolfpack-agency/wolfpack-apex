@@ -308,6 +308,52 @@
         "answerContains": ["BA101", "Smith", "Jones"],
         "answerNotContains": ["I don't have a confident answer"]
       }
+    },
+    {
+      "id": "regression-2026-05-19-search-topic",
+      "category": "regression",
+      "rationale": "Topical search must route to the new `search` tool, not knowledge_cache or AI. Locks in the Universal Search shipping contract: a bare 'search <topic>' phrasing is owned by the tool layer; if a future change pulls the search tool out of the registry the answer falls back to AI and this case catches it.",
+      "question": "search porsche",
+      "expect": {
+        "source": "tool",
+        "answerNotContains": ["I don't have a confident answer"]
+      }
+    },
+    {
+      "id": "regression-2026-05-19-search-typed-crm-still-wins",
+      "category": "regression",
+      "rationale": "Typed-object CRM intent must continue to win over the broader `search` tool when both are registered. 'find the contact for Acme' belongs to search_external_records — it has object-type-aware rendering Universal Search can't replicate. If TYPED_CRM_RE inside search.matchIntent ever stops claiming the typed phrasings, this case catches the shadowing regression.",
+      "question": "find the contact for Acme",
+      "expect": {
+        "source": "tool",
+        "answerNotContains": [
+          "I don't have a confident answer",
+          "Found 0 results"
+        ]
+      }
+    },
+    {
+      "id": "regression-2026-05-19-search-bare-crm-universal",
+      "category": "regression",
+      "rationale": "Bare-search phrasings must now flow to Universal Search so its `crm` provider fans the query into the configured CRM alongside chats/emails/calendar/knowledge. 'search Acme' previously landed in search_external_records (CRM-only); v2 routes it to the universal `search` tool. If search.ts loses the bare-phrasing match OR search-external-records-tool re-introduces PATTERN 3, this case catches the regression.",
+      "question": "search Acme",
+      "expect": {
+        "source": "tool",
+        "answerNotContains": [
+          "I don't have a confident answer"
+        ]
+      }
+    },
+    {
+      "id": "regression-2026-05-19-search-zero-results",
+      "category": "regression",
+      "rationale": "Zero-results path must produce a graceful answer, not fall through to AI hallucination. The search tool's summary renderer emits 'No results found for ...' when every retriever returns empty; if a future change removes the tool's ok-with-empty-results contract this drops to AI which would confabulate.",
+      "question": "search xyznotarealthing",
+      "expect": {
+        "source": "tool",
+        "answerContains": ["No results"],
+        "answerNotContains": ["I don't have a confident answer"]
+      }
     }
   ]
 }

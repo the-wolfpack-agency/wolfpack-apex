@@ -32,21 +32,37 @@ beforeEach(() => {
  * Intent matching
  * ------------------------------------------------------------------- */
 
-describe("matchIntent — name searches", () => {
+describe("matchIntent — TYPED-object searches (only kind this tool still claims)", () => {
   test.each([
-    ["look up Grimace Fromcdonalds", "contact", "Grimace Fromcdonalds"],
-    ["find Grimace Fromcdonalds", "contact", "Grimace Fromcdonalds"],
-    ["search for McDonald's", "contact", "McDonald's"],
-    /* "who is X" is now owned by who_is (team-first, CRM-fallback). */
+    /* "who is X" is owned by who_is (team-first, CRM-fallback). */
     ["find the contact for Grimace Fromcdonalds", "contact", "Grimace Fromcdonalds"],
     ["look up account Acme Industries", "account", "Acme Industries"],
     ["find the opportunity called Q3 Renewal", "deal", "Q3 Renewal"],
     ["search for the company named Acme", "company", "Acme"],
+    ["look up contact Grimace Fromcdonalds", "contact", "Grimace Fromcdonalds"],
   ])("'%s' → objectType=%s, query=%s", (msg, objectType, query) => {
     const p = searchExternalRecordsTool.matchIntent(msg);
     expect(p).not.toBeNull();
     expect(p?.objectType).toBe(objectType);
     expect(p?.query).toBe(query);
+  });
+});
+
+describe("matchIntent — BARE phrasings now route to Universal Search (v2 2026-05-19)", () => {
+  /* Previously this tool claimed "look up X" / "find X" / "search
+     for X" via PATTERN 3 (generic free-text). v2 removed that
+     pattern so Universal Search can fan the same query into chats,
+     emails, calendar, knowledge, AND the CRM provider at once. The
+     `search` tool's matchIntent now claims these phrasings. */
+  test.each([
+    "look up Grimace Fromcdonalds",
+    "find Grimace Fromcdonalds",
+    "search for McDonald's",
+    "look up Acme",
+    "find Acme",
+    "search for Acme",
+  ])("'%s' → null (Universal Search wins)", (msg) => {
+    expect(searchExternalRecordsTool.matchIntent(msg)).toBeNull();
   });
 });
 
@@ -76,14 +92,14 @@ describe("matchIntent — rejection (let get_external_record handle these)", () 
   });
 });
 
-describe("matchIntent — stopword stripping", () => {
-  test("'find Grimace in salesforce' → query is 'Grimace' (no trailing stopwords)", () => {
-    const p = searchExternalRecordsTool.matchIntent("find Grimace in salesforce");
+describe("matchIntent — stopword stripping (typed phrasings only)", () => {
+  test("'find the contact for Grimace in salesforce' → query is 'Grimace' (no trailing stopwords)", () => {
+    const p = searchExternalRecordsTool.matchIntent("find the contact for Grimace in salesforce");
     expect(p?.query).toBe("Grimace");
   });
 
-  test("'look up Acme in our CRM' strips 'in our CRM'", () => {
-    const p = searchExternalRecordsTool.matchIntent("look up Acme in our CRM");
+  test("'look up account Acme in our CRM' strips 'in our CRM'", () => {
+    const p = searchExternalRecordsTool.matchIntent("look up account Acme in our CRM");
     expect(p?.query).toBe("Acme");
   });
 });

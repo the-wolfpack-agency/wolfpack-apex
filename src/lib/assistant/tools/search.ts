@@ -1,0 +1,293 @@
+/**
+ * search tool — Universal Search inside the assistant.
+ *
+ * Returns IDENTICAL results to the /search page by delegating to the
+ * shared `runSearch()` engine. The chat surface gets a one-line
+ * summary ("Found 12 results for …: 4 chats, 0 channels, …, 2 CRM
+ * records") plus citation-grade source refs so the user can click
+ * straight through.
+ *
+ * Intent matching is intentionally NARROW: only the explicit verbs
+ * "search" / "look up" / "find" / "show me", with an optional
+ * "in <surface>" suffix. STRUCTURED CRM phrasings — typed-object
+ * queries ("find the contact for Acme", "show me Acme's
+ * opportunities", "deals over $50k") — still defer to the specialized
+ * CRM tools because those have richer disambiguation surfaces.
+ * BARE-search phrasings ("search Acme", "look up Acme") now flow
+ * through Universal Search so the CRM provider fans in alongside
+ * chats, emails, calendar, and knowledge — one query, all surfaces.
+ */
+
+import { z } from "zod";
+import { trackEvent } from "@/lib/analytics";
+import {
+  runSearch,
+  type RunSearchParams,
+  type SearchResponse,
+  type SearchType,
+} from "@/lib/search/runSearch";
+import { getExternalRecordTool } from "./get-external-record-tool";
+import { getRelatedRecordsTool } from "./get-related-records-tool";
+import { filterExternalRecordsTool } from "./filter-external-records-tool";
+import { registerTool } from "./registry";
+import type { AssistantSourceRef } from "@/lib/assistant";
+import type { ToolDef, ToolResult } from "./types";
+
+const SEARCH_TYPE_VALUES = [
+  "chat",
+  "channel",
+  "email",
+  "calendar",
+  "knowledge",
+  "crm",
+] as const;
+
+const ParamSchema = z.object({
+  query: z.string().min(1).max(200),
+  types: z.array(z.enum(SEARCH_TYPE_VALUES)).optional(),
+  limit: z.number().int().min(1).max(50).optional(),
+});
+type Params = z.infer<typeof ParamSchema>;
+
+/* ---------------------------------------------------------------------
+ * Intent matching
+ *
+ * Accepted phrasings (anchored ^/$, optional trailing punctuation):
+ *   "search <query>"
+ *   "search for <query>"
+ *   "look up <query>"
+ *   "find <query>"
+ *   "show me <query>"
+ * Optional "in (my )?(messages|emails|chats|calendar|knowledge|everywhere)"
+ * suffix narrows to a single surface (chats and messages both → "chat";
+ * "everywhere" → leave types undefined so all five are queried).
+ *
+ * Hard guard: any input claimed by a CRM connector tool returns null
+ * here so the cascade falls through to the more-specific tool.
+ * ------------------------------------------------------------------- */
+
+const SURFACE_TO_TYPE: Record<string, SearchType | "all"> = {
+  messages: "chat",
+  message: "chat",
+  chats: "chat",
+  chat: "chat",
+  emails: "email",
+  email: "email",
+  calendar: "calendar",
+  knowledge: "knowledge",
+  crm: "crm",
+  salesforce: "crm",
+  hubspot: "crm",
+  everywhere: "all",
+};
+
+const INTENT_RE =
+  /^\s*(?:search(?:\s+for)?|look\s+up|find|show\s+me)\s+(.+?)(?:\s+in\s+(?:my\s+)?(messages|message|chats|chat|emails|email|calendar|knowledge|crm|salesforce|hubspot|everywhere))?\s*[?.!]?\s*$/i;
+
+/* ---------------------------------------------------------------------
+ * CRM-shadow guard — narrowed for Universal Search v2
+ * ---------------------------------------------------------------------
+ * v1 deferred to EVERY CRM-shaped phrasing, which meant "look up Acme"
+ * and "search for Acme" never reached Universal Search even though the
+ * user almost certainly wanted to fan out (CRM, chats, emails, …) at
+ * once. v2 keeps the defer for the SPECIALIZED phrasings — typed
+ * object queries, related-record queries, filter queries, ID lookups
+ * — because those carry disambiguation context the CRM tools handle
+ * better. Bare-search phrasings ("search Acme", "look up Acme") now
+ * fall through so Universal Search wins and fans into CRM via the CRM
+ * provider.
+ *
+ * Intents that STILL defer:
+ *   - ID-shape lookups (claimed by get_external_record).
+ *   - Typed-object: "find the contact for X" / "look up contact X" /
+ *     "search for the account called X" (claimed by search_external_records).
+ *   - Possessive related: "show me Acme's opportunities" / "Jorge's
+ *     deals" (claimed by get_related_records).
+ *   - Filter: "deals over $50k closing this month" / "stuck deals"
+ *     (claimed by filter_external_records).
+ *
+ * Intents that USED TO defer and now flow through:
+ *   - Generic verbs without a typed-object word: "look up Acme",
+ *     "find Acme", "search for Acme".
+ *   - Email-shape: "find grimace@x.com" (now searches all surfaces;
+ *     a CRM contact match still surfaces via the CRM provider).
+ * ------------------------------------------------------------------- */
+
+/** Typed-object CRM phrasings. These have richer disambiguation
+ *  (object-type aware result rendering) so the more specific tool
+ *  should keep claiming them. Mirrors the typed-object PATTERN regex
+ *  in search-external-records-tool.ts but only the typed arm. */
+const TYPED_CRM_RE =
+  /\b(?:look\s+up|find|search\s+for|fetch|pull|show\s+(?:me\s+)?(?:the\s+)?)(?:\s+the)?\s+(?:contacts?|people|person|deals?|opportunit(?:y|ies)|accounts?|compan(?:y|ies))(?:\s+(?:for|called|named|with\s+name))?\s+.{2,160}$/i;
+
+function crmToolClaims(message: string): boolean {
+  /* Typed-object CRM ("find the contact for Acme"). Same regex shape
+   *  as PATTERNS[0] in search-external-records-tool. */
+  if (TYPED_CRM_RE.test(message)) return true;
+  /* Possessive related — "Acme's opportunities", "Jorge's open deals". */
+  try {
+    if (getRelatedRecordsTool.matchIntent(message) !== null) return true;
+  } catch { /* swallow */ }
+  /* Filter — "deals over $50k closing this month". */
+  try {
+    if (filterExternalRecordsTool.matchIntent(message) !== null) return true;
+  } catch { /* swallow */ }
+  /* ID-shape — "look up contact id 003abc". */
+  try {
+    if (getExternalRecordTool.matchIntent(message) !== null) return true;
+  } catch { /* swallow */ }
+  return false;
+}
+
+function matchSearchIntent(message: string): Params | null {
+  const trimmed = (message ?? "").trim();
+  if (!trimmed) return null;
+  /* CRM-shaped queries belong to the CRM tools. Check FIRST so the
+     more-specific intent always wins regardless of registration
+     order. */
+  if (crmToolClaims(trimmed)) return null;
+  const m = INTENT_RE.exec(trimmed);
+  if (!m) return null;
+  const query = m[1].trim().replace(/[?.!,]+$/g, "").trim();
+  if (!query) return null;
+  /* Reject queries that look like a CRM ID lookup — these still get
+     captured by the broad "find <X>" arm but belong to
+     get_external_record. The CRM tools' matchIntent already does the
+     heavy lifting; this is a backup so single-word ALL-CAPS IDs
+     ("ACME") don't fire a Graph search. */
+  if (/^[A-Z0-9_-]{3,12}$/.test(query) && !query.includes(" ")) return null;
+
+  const surface = m[2]?.toLowerCase();
+  let types: SearchType[] | undefined;
+  if (surface) {
+    const mapped = SURFACE_TO_TYPE[surface];
+    if (mapped && mapped !== "all") types = [mapped];
+  }
+  const params: Params = { query };
+  if (types) params.types = types;
+  return params;
+}
+
+/* ---------------------------------------------------------------------
+ * Answer rendering
+ * ------------------------------------------------------------------- */
+
+function summaryAnswer(query: string, body: SearchResponse): string {
+  const c = body.counts;
+  const total = body.results.length;
+  if (total === 0) return `No results found for "${query}".`;
+  return (
+    `Found ${total} result${total === 1 ? "" : "s"} for "${query}":` +
+    ` ${c.chats} chat${c.chats === 1 ? "" : "s"},` +
+    ` ${c.channels} channel${c.channels === 1 ? "" : "s"},` +
+    ` ${c.emails} email${c.emails === 1 ? "" : "s"},` +
+    ` ${c.calendar} calendar event${c.calendar === 1 ? "" : "s"},` +
+    ` ${c.knowledge} knowledge entr${c.knowledge === 1 ? "y" : "ies"},` +
+    ` ${c.crm} CRM record${c.crm === 1 ? "" : "s"}.`
+  );
+}
+
+/** Map runSearch hits onto AssistantSourceRef shape. Each result type
+ *  maps to a citation `type` the chat surface knows how to badge. */
+function buildSources(body: SearchResponse): AssistantSourceRef[] {
+  const TYPE_MAP: Record<SearchType, string> = {
+    chat: "chat",
+    channel: "channel",
+    email: "email",
+    calendar: "meeting",
+    knowledge: "knowledge",
+    crm: "crm",
+  };
+  const out: AssistantSourceRef[] = [];
+  const seen = new Set<string>();
+  for (const r of body.results.slice(0, 5)) {
+    /* De-dupe by id+type — runSearch can in principle return the same
+       chat id twice (preview match + body match) and the chat handler
+       guards against it, but defending here keeps the citation
+       surface clean regardless of upstream changes. */
+    const key = `${r.type}:${r.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      id: r.id,
+      title: r.title,
+      url: r.url ?? "",
+      type: TYPE_MAP[r.type] ?? r.type,
+    });
+  }
+  return out;
+}
+
+/* ---------------------------------------------------------------------
+ * Tool definition
+ * ------------------------------------------------------------------- */
+
+export const searchTool: ToolDef<Params, SearchResponse> = {
+  name: "search",
+  description:
+    "Universal Search across the user's chats, channels, emails, calendar, and Instinct knowledge. Returns identical results to the /search page.",
+  paramSchema: ParamSchema,
+  capability: "*",
+  matchIntent: matchSearchIntent,
+  async handler(params, ctx): Promise<ToolResult<SearchResponse>> {
+    try {
+      const runParams: RunSearchParams = {
+        query: params.query,
+        ...(params.types ? { types: params.types } : {}),
+        ...(typeof params.limit === "number" ? { limit: params.limit } : {}),
+      };
+      const body = await runSearch(runParams, {
+        userId: ctx.userId,
+        ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
+        ...(ctx.workflowId ? { workflowId: ctx.workflowId } : {}),
+      });
+
+      const typesLabel = (params.types ?? [
+        "chat",
+        "channel",
+        "email",
+        "calendar",
+        "knowledge",
+        "crm",
+      ]).join(",");
+
+      /* Analytics — mirrors the page surface's `insight.search.queried`
+         but namespaced under assistant.* so the learning loop can
+         distinguish chat-driven from page-driven searches. */
+      trackEvent("assistant.search_executed", ctx.userId, ctx.userRole, {
+        query_length: params.query.length,
+        total_results: body.results.length,
+        took_ms: body.took_ms,
+        types: typesLabel,
+        ...(ctx.workflowId ? { workflow_id: ctx.workflowId } : {}),
+      });
+      if (body.results.length === 0) {
+        trackEvent(
+          "assistant.search_no_results",
+          ctx.userId,
+          ctx.userRole,
+          {
+            query_length: params.query.length,
+            types: typesLabel,
+            ...(ctx.workflowId ? { workflow_id: ctx.workflowId } : {}),
+          },
+        );
+      }
+
+      return {
+        ok: true,
+        data: body,
+        answer: summaryAnswer(params.query, body),
+        sources: buildSources(body),
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        code: "internal",
+        message: `search error: ${(err as Error)?.message ?? "unknown"}`,
+      };
+    }
+  },
+};
+
+registerTool(searchTool);

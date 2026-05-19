@@ -50,6 +50,15 @@ Reference material for adding code that fits the existing system. If it isn't wr
 2. Call `trackEvent(...)` from the code path that performs the action.
 3. If the event should surface in learning, add a row consumer in `src/lib/learning/<surface>-signals.ts`.
 
+## Universal search providers
+
+Universal Search (`src/lib/search/runSearch.ts` + the `search` assistant tool + `/api/search`) fans every query out to every registered provider in `src/lib/search/providers/`. Adding a new tool that exposes searchable data? You must do ONE of these:
+
+1. **Expose a provider.** Create `src/lib/search/providers/<surface>.ts` exporting a `SearchProvider` (or re-export one from your tool module as `searchProvider`). Append it to `SEARCH_PROVIDERS` in `src/lib/search/providers/index.ts`. Add the provider's `type` to the `SearchType` union in `runSearch.ts` and bump `SearchResponseCounts` if you're introducing a new `countKey`.
+2. **Add to the exempt allowlist.** If the tool truly has nothing searchable (a mutation, a widget, an ID-by-lookup), add an entry to `SEARCH_PROVIDER_EXEMPT_TOOLS` in `src/lib/search/__tests__/provider-coverage.test.ts` with a one-phrase reason.
+
+The `provider-coverage` guardrail test walks every file in `src/lib/assistant/tools/` and fails the build until each is covered by path (1) or (2).
+
 ## Error handling for integrations
 
 External integrations (Graph, Plaud, QuickBooks, Resend) return typed `Result<T, IntegrationError>`; they never throw. Route handlers translate `error` into the right HTTP status and a user-facing message ("scope missing", "service unavailable"). This is non-negotiable — throwing from an integration corrupts the UX everywhere.

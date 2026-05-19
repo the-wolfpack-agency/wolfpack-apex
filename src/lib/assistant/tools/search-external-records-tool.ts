@@ -133,21 +133,22 @@ const PATTERNS: Array<{ re: RegExp; build(m: RegExpExecArray): Partial<Params> |
     re: /\b(?:find|look\s+up|search\s+(?:for\s+)?|who\s+(?:is|owns))\s+(?:someone\s+with\s+email\s+)?([\w.+-]+@[\w-]+(?:\.[\w-]+)+)/i,
     build: (m) => ({ objectType: "contact", query: cleanQuery(m[1]) }),
   },
-  {
-    /* Generic "look up <free-text>" / "find <free-text>" WITHOUT an
-       object type. Routes to contact (most common). The pre-check
-       rejects IDs so get_external_record claims those. */
-    re: /\b(?:look\s+up|find|search\s+for)\s+(.{2,160})$/i,
-    build: (m) => {
-      const q = cleanQuery(m[1]);
-      if (looksLikeIdNotName(q)) return null;
-      return { objectType: "contact", query: q };
-    },
-  },
-  /* Removed: "who is <name>" used to land here and surface "No
-     contact matches found in the configured CRM" for every literal
-     teammate. The who_is tool now owns that intent and falls back
-     to CRM internally on team-roster miss. */
+  /* Removed (2026-05-19): "Generic look up <free-text> / find
+     <free-text> WITHOUT an object type" used to land here and route
+     every bare-search phrasing straight to the CRM. That shadowed
+     Universal Search — the user expected "search Acme" / "look up
+     Acme" to fan out across chats, emails, calendar, knowledge, AND
+     the CRM at once. The Universal Search `search` tool now owns
+     bare-search phrasings and its `crm` provider re-fans them into
+     the CRM, so a single "search Acme" hits every surface. The
+     typed-object pattern above STILL claims "find the contact for X"
+     / "look up account X" because those carry object-type
+     disambiguation that the per-object renderer here handles better
+     than Universal Search's interleaved result list. */
+  /* Removed earlier: "who is <name>" used to land here and surface
+     "No contact matches found in the configured CRM" for every
+     literal teammate. The who_is tool now owns that intent and
+     falls back to CRM internally on team-roster miss. */
 ];
 
 function matchSearchIntent(message: string): Params | null {
