@@ -109,16 +109,38 @@ export interface QueryAssistantOptions {
   fetcher?: typeof fetchWithRefresh;
 }
 
+/** Why the fresh request didn't succeed. Lets the UI distinguish a real
+ *  offline from a 401 / 500 / cold-start timeout so we don't lie to the
+ *  user with a "you're offline" message when the network is fine. */
+export type RagFailureReason =
+  | "offline"           // navigator.onLine === false
+  | "unauthorized"      // 401 from /api/assistant
+  | "forbidden"         // 403
+  | "server_error"      // 5xx
+  | "timeout"           // fetch aborted / timeout
+  | "network_error"     // generic fetch failure
+  | "bad_request"       // 4xx other
+  | "unknown";
+
 export class RagOfflineMissError extends Error {
   public readonly query: string;
   public readonly scope: "assistant" | "knowledge" | "brain";
-  constructor(scope: "assistant" | "knowledge" | "brain", query: string) {
+  public readonly reason: RagFailureReason;
+  public readonly httpStatus?: number;
+  constructor(
+    scope: "assistant" | "knowledge" | "brain",
+    query: string,
+    reason: RagFailureReason = "unknown",
+    httpStatus?: number,
+  ) {
     super(
-      `No cached RAG result for scope="${scope}" query="${query.slice(0, 80)}"`,
+      `No cached RAG result for scope="${scope}" query="${query.slice(0, 80)}" reason="${reason}"${httpStatus ? ` status=${httpStatus}` : ""}`,
     );
     this.name = "RagOfflineMissError";
     this.scope = scope;
     this.query = query;
+    this.reason = reason;
+    if (httpStatus !== undefined) this.httpStatus = httpStatus;
   }
 }
 
@@ -143,6 +165,13 @@ export async function queryAssistantWithCache(
   const online = isOnline();
   const tryFresh = online || forceRefresh;
 
+  /* Captures *why* the fresh fetch failed so the eventual
+   *  RagOfflineMissError surfaces a real reason instead of always
+   *  "offline". Set inside the try/catch below. */
+  let freshFailure: { reason: RagFailureReason; httpStatus?: number } = {
+    reason: online ? "unknown" : "offline",
+  };
+
   if (tryFresh) {
     try {
       const body: Record<string, unknown> = { message: query };
@@ -157,6 +186,14 @@ export async function queryAssistantWithCache(
         headers: jsonHeaders(),
         body: JSON.stringify(body),
       });
+
+      if (!res.ok) {
+        /* Classify the failure so the error carries it forward. */
+        if (res.status === 401) freshFailure = { reason: "unauthorized", httpStatus: 401 };
+        else if (res.status === 403) freshFailure = { reason: "forbidden", httpStatus: 403 };
+        else if (res.status >= 500) freshFailure = { reason: "server_error", httpStatus: res.status };
+        else freshFailure = { reason: "bad_request", httpStatus: res.status };
+      }
 
       if (res.ok) {
         const data = (await res.json()) as {
@@ -241,8 +278,15 @@ export async function queryAssistantWithCache(
       }
       // Non-OK response → fall through to cache lookup (we still want
       // offline-like semantics for a 5xx).
-    } catch {
-      // Network error → fall through.
+    } catch (err) {
+      /* Network error / abort / timeout → classify before falling
+       *  through to the cache path so the eventual miss carries it. */
+      const name = (err as { name?: unknown } | null)?.name;
+      if (name === "AbortError" || name === "TimeoutError") {
+        freshFailure = { reason: "timeout" };
+      } else {
+        freshFailure = { reason: "network_error" };
+      }
     }
   }
 
@@ -265,5 +309,10 @@ export async function queryAssistantWithCache(
     };
   }
 
-  throw new RagOfflineMissError("assistant", query);
+  throw new RagOfflineMissError(
+    "assistant",
+    query,
+    freshFailure.reason,
+    freshFailure.httpStatus,
+  );
 }

@@ -153,6 +153,81 @@ describe("queryAssistantWithCache — offline + no cache", () => {
     expect(fetcher).not.toHaveBeenCalled();
     expect(events.some(([e]) => e === "rag.cache_miss_offline")).toBe(true);
   });
+
+  /* Regression 2026-05-19: the thrown error must carry the real failure
+   *  reason so the UI doesn't blanket-label everything "you're offline".
+   *  Each case below pins one HTTP / network failure mode. */
+  it.each([
+    [401, "unauthorized" as const],
+    [403, "forbidden" as const],
+    [500, "server_error" as const],
+    [502, "server_error" as const],
+    [503, "server_error" as const],
+    [400, "bad_request" as const],
+  ])(
+    "RagOfflineMissError.reason is correct for HTTP %i",
+    async (status, expectedReason) => {
+      const fetcher = jest.fn().mockResolvedValue(
+        jsonResponse({ error: "err" }, status),
+      );
+      try {
+        await queryAssistantWithCache("anything", {
+          isOnline: onlineTrue,
+          fetcher: fetcher as unknown as typeof fetch,
+        });
+        throw new Error("expected to throw");
+      } catch (err) {
+        expect(err).toBeInstanceOf(RagOfflineMissError);
+        const e = err as RagOfflineMissError;
+        expect(e.reason).toBe(expectedReason);
+        expect(e.httpStatus).toBe(status);
+      }
+    },
+  );
+
+  it("RagOfflineMissError.reason is 'offline' when navigator.onLine is false", async () => {
+    const fetcher = jest.fn();
+    try {
+      await queryAssistantWithCache("anything", {
+        isOnline: onlineFalse,
+        fetcher: fetcher as unknown as typeof fetch,
+      });
+      throw new Error("expected to throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(RagOfflineMissError);
+      expect((err as RagOfflineMissError).reason).toBe("offline");
+    }
+  });
+
+  it("RagOfflineMissError.reason is 'timeout' on AbortError", async () => {
+    const abort = new Error("aborted");
+    abort.name = "AbortError";
+    const fetcher = jest.fn().mockRejectedValue(abort);
+    try {
+      await queryAssistantWithCache("anything", {
+        isOnline: onlineTrue,
+        fetcher: fetcher as unknown as typeof fetch,
+      });
+      throw new Error("expected to throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(RagOfflineMissError);
+      expect((err as RagOfflineMissError).reason).toBe("timeout");
+    }
+  });
+
+  it("RagOfflineMissError.reason is 'network_error' on generic fetch failure", async () => {
+    const fetcher = jest.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+    try {
+      await queryAssistantWithCache("anything", {
+        isOnline: onlineTrue,
+        fetcher: fetcher as unknown as typeof fetch,
+      });
+      throw new Error("expected to throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(RagOfflineMissError);
+      expect((err as RagOfflineMissError).reason).toBe("network_error");
+    }
+  });
 });
 
 describe("queryAssistantWithCache — forceRefresh", () => {

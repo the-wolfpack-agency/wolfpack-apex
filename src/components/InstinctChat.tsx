@@ -634,26 +634,65 @@ export default function InstinctChat({
           return;
         } catch (wrapErr) {
           if (wrapErr instanceof RagOfflineMissError) {
-            // Offline + no RAG cache hit: queue the user message via
-            // the assistant-drafts-offline wrapper so flush-on-online
-            // (owned by OfflineStatusPill) replays it once we reconnect.
-            // Best-effort — the queue itself shouldn't throw.
-            try {
-              await sendAssistantMessageOffline({
-                message: fullMessage,
-                conversationId,
-                pageContext,
-                contextData,
-              });
-            } catch {
-              /* queue failure is non-fatal; fall through to the fallback msg */
+            /* Pick a message that reflects WHY the fresh request didn't
+             *  succeed. The previous code always said "you're offline"
+             *  which lies on every 401 / 500 / cold-start timeout. */
+            const reason = wrapErr.reason;
+            const status = wrapErr.httpStatus;
+            let content: string;
+            switch (reason) {
+              case "offline":
+                content =
+                  "You're offline and this question hasn't been asked before. Your message will send when you're back online.";
+                break;
+              case "unauthorized":
+                content =
+                  "Your session expired. Refresh the page to sign in again.";
+                break;
+              case "forbidden":
+                content =
+                  "You don't have permission to ask the assistant that.";
+                break;
+              case "server_error":
+                content = `The assistant is starting up or temporarily unavailable (server returned ${status ?? "5xx"}). Retry in a few seconds.`;
+                break;
+              case "timeout":
+                content =
+                  "The assistant didn't respond in time (likely a cold start). Retry in a few seconds.";
+                break;
+              case "network_error":
+                content =
+                  "Couldn't reach the assistant. Check your connection or retry in a few seconds.";
+                break;
+              case "bad_request":
+                content = `The assistant rejected the request (HTTP ${status ?? "4xx"}).`;
+                break;
+              default:
+                content =
+                  "Couldn't reach the assistant right now. Retry in a few seconds.";
             }
+
+            /* Only queue for replay on real-offline; on 5xx / timeout
+             *  the network IS up so the OfflineStatusPill flush would
+             *  never trigger and we'd silently hold the message. */
+            if (reason === "offline") {
+              try {
+                await sendAssistantMessageOffline({
+                  message: fullMessage,
+                  conversationId,
+                  pageContext,
+                  contextData,
+                });
+              } catch {
+                /* queue failure is non-fatal */
+              }
+            }
+
             setMessages((prev) => [
               ...prev,
               {
                 role: "assistant",
-                content:
-                  "You're offline and this question hasn't been asked before. Your message will send when you're back online.",
+                content,
                 source: "fallback",
                 tokensUsed: 0,
                 timestamp: new Date().toISOString(),
