@@ -14,7 +14,7 @@
  */
 
 import "@testing-library/jest-dom";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 
 const mockFetch = jest.fn();
 jest.mock("@/lib/client-auth", () => ({
@@ -186,6 +186,16 @@ describe("AssistantStarterPrompts (rendered)", () => {
     await waitFor(() => {
       expect(screen.getByText(/Salesforce \/ HubSpot/)).toBeInTheDocument();
     });
+    /* Categories now collapse by default (2026-05-19 layout fix), so
+     * expand every visible header before asserting chips. */
+    const categoryToggles = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(
+        'button[data-testid^="starter-category-toggle-"]',
+      ),
+    );
+    for (const toggle of categoryToggles) {
+      fireEvent.click(toggle);
+    }
     const chipButtons = Array.from(
       container.querySelectorAll<HTMLButtonElement>(
         'button[data-testid^="starter-prompt-"]',
@@ -207,6 +217,12 @@ describe("AssistantStarterPrompts (rendered)", () => {
     await waitFor(() => {
       expect(screen.getByText(/^Widgets$/)).toBeInTheDocument();
     });
+    /* Sections default to collapsed; expand Widgets + Knowledge & memory
+     * before asserting their chip titles. */
+    fireEvent.click(screen.getByTestId("starter-category-toggle-widgets"));
+    fireEvent.click(
+      screen.getByTestId("starter-category-toggle-knowledge-memory"),
+    );
     /* "briefing" is the first Widgets chip and lives in a category
      * gated on `microsoft`, so it only renders once status resolves. */
     const briefing = screen.getByTestId("starter-prompt-widgets-briefing");

@@ -421,23 +421,19 @@ export function AssistantStarterPrompts({ onPick }: AssistantStarterPromptsProps
     };
   }, []);
 
-  const visibleCategories = filterCategoriesByStatus(STARTER_CATEGORIES, status);
+  /* Filter empty categories so a section never renders an expanded
+   *  header above zero chips. The connector-status filter handles
+   *  the typical case; this is a belt-and-suspenders guard for any
+   *  category whose prompts list resolves to zero at render time. */
+  const visibleCategories = filterCategoriesByStatus(STARTER_CATEGORIES, status)
+    .filter((c) => c.prompts.length > 0);
   const missingConnections = collectMissingConnections(STARTER_CATEGORIES, status);
 
-  /* On mobile (default), only the first visible category is expanded
-     so the empty state stays compact and chip rows don't push the
-     greeting above the fold. Tapping a category header expands it.
-     On desktop the screenshot bug doesn't apply — every category is
-     expanded by default. */
-  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
-    const out: Record<string, boolean> = {};
-    const isMobile =
-      typeof window !== "undefined" && window.innerWidth < 640;
-    STARTER_CATEGORIES.forEach((c, i) => {
-      out[c.title] = isMobile ? i === 0 : true;
-    });
-    return out;
-  });
+  /* All categories collapsed by default so the empty state stays
+   *  compact and the greeting stays above the fold. Tap a header to
+   *  expand. Both mobile and desktop start fully collapsed — desktop
+   *  users get a denser overview and choose what to explore. */
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const toggle = (title: string) =>
     setExpanded((prev) => ({ ...prev, [title]: !prev[title] }));
@@ -453,7 +449,11 @@ export function AssistantStarterPrompts({ onPick }: AssistantStarterPromptsProps
       >
         Try one of these
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-3">
+      {/* CSS multi-column packs collapsed cards tightly (no row-by-row
+       *  dead space that grid-cols-2 produces when one column has a
+       *  much taller expanded section than the other). break-inside-
+       *  avoid keeps each card together. */}
+      <div className="columns-1 sm:columns-2 gap-2 sm:gap-3 [&>div]:break-inside-avoid [&>div]:mb-2 [&>div:last-child]:mb-0">
         {visibleCategories.map((cat) => {
           const isOpen = expanded[cat.title];
           const slug = cat.title.toLowerCase().replace(/\W+/g, "-");
