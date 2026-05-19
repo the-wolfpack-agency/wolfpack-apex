@@ -105,11 +105,26 @@ function extractTimeframe(text: string): string | undefined {
   return undefined;
 }
 
+/* Prep/brief queries route to the meeting_prep tool, not the calendar
+ *  list/availability router. Without this guard, "prep for my next
+ *  meeting" matches SELF_MEETINGS_RE ("my next meeting") and returns a
+ *  bare meetings list instead of the synthesis widget. The tool
+ *  dispatcher claims these via meeting-prep.ts when classifyIntent
+ *  returns "unknown". */
+const MEETING_PREP_RE =
+  /\b(prep|brief)\s+(?:me\s+)?(?:for\s+)?(?:my\s+)?(?:next\s+|upcoming\s+)?(?:meeting|call|sync)\b|^\s*meeting\s+prep\b|\bwhat\s+should\s+i\s+know\s+(?:about|for)\s+my\s+(?:next\s+|upcoming\s+)?(?:meeting|call)\b/i;
+
 export function classifyIntent(text: string): IntentMatch {
   const q = text.trim();
   const slots: Record<string, string> = {};
   const tf = extractTimeframe(q);
   if (tf) slots.timeframe = tf;
+
+  /* Short-circuit: prep/brief queries leave the router so meeting_prep
+   *  tool can claim them downstream. */
+  if (MEETING_PREP_RE.test(q)) {
+    return { intent: "unknown", slots, confidence: 0 };
+  }
 
   const selfBusy = SELF_BUSY_RE.exec(q);
   if (selfBusy) {

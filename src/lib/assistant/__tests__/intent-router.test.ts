@@ -76,6 +76,21 @@ describe("classifyIntent (token-free)", () => {
     expect(m.confidence).toBe(0);
   });
 
+  // Regression 2026-05-19: "prep for my next meeting" used to hit
+  // SELF_MEETINGS_RE ("my next meeting") and route to calendar_schedule,
+  // shadowing the new meeting_prep synthesis tool. Lock it.
+  test.each([
+    "prep for my next meeting",
+    "brief me for my next call",
+    "meeting prep",
+    "prep me for my upcoming sync",
+    "what should I know for my next meeting",
+  ])("'%s' returns unknown so meeting_prep tool can claim it", (q) => {
+    const m = classifyIntent(q);
+    expect(m.intent).toBe("unknown");
+    expect(m.confidence).toBe(0);
+  });
+
   // Regression 2026-04-30: identical org-wide meeting questions burned
   // tokens twice because nothing matched and the cache was bypassed for
   // date-bound queries. Now they route to the meetings_on_date tool.
