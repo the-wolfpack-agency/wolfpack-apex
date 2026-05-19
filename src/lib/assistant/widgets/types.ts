@@ -124,6 +124,10 @@ export interface GoodMorningActionItem {
   context: string;
   link?: string;
   source?: "email" | "meeting" | "invoice" | "client" | "receivable";
+  /** Optional ISO meeting start. When present, the widget substitutes
+   *  the `{time}` token in `context` with the locally-formatted time.
+   *  Server emits the raw ISO because Vercel functions run in UTC. */
+  meetingStartTime?: string;
 }
 
 /** A meeting surfaced in the Pre-Brief section. The widget bakes the

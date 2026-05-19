@@ -54,6 +54,15 @@ export interface ActionItem {
   /** Stable analytics key for this action item — `email`, `meeting`,
    *  `invoice`, etc. Tied into dashboard.action_item_clicked. */
   source?: "email" | "meeting" | "invoice" | "client" | "receivable";
+  /** When this action item is tied to a meeting, the meeting's ISO
+   *  start. Server emits the raw ISO so the client can format it in
+   *  the user's local timezone. (Vercel functions run in UTC; calling
+   *  toLocaleTimeString() server-side returns UTC, which surfaced as
+   *  the 2026-05-19 bug where schedule showed 3:30 PM local but the
+   *  same meeting in action items showed 7:30 PM UTC.) When present,
+   *  the widget substitutes the `{time}` token in `context` with the
+   *  locally-formatted time. */
+  meetingStartTime?: string;
 }
 
 export interface ClientAttention {
@@ -371,7 +380,10 @@ function generateActionItems(
     items.push({
       priority: "medium",
       text: `Prepare for "${meeting.subject}"`,
-      context: `${meeting.attendees.length} attendees, starts at ${new Date(meeting.startTime).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`,
+      /* `{time}` token is substituted client-side using the user's
+       *  local timezone — see ActionItem.meetingStartTime comment. */
+      context: `${meeting.attendees.length} attendees, starts at {time}`,
+      meetingStartTime: meeting.startTime,
     });
   }
 

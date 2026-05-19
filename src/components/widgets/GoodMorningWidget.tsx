@@ -325,7 +325,20 @@ export function GoodMorningWidget({ spec, workflowId }: GoodMorningWidgetProps) 
                         className="truncate"
                         style={{ color: "var(--wp-text-muted, #6b7280)" }}
                       >
-                        {a.context}
+                        {/* When meetingStartTime is set, substitute the
+                         *  `{time}` token with the user's LOCAL time.
+                         *  Server runs in UTC, so it can't format this
+                         *  itself — see ActionItem comment in
+                         *  morning-briefing.ts. */}
+                        {a.meetingStartTime
+                          ? a.context.replace(
+                              "{time}",
+                              new Date(a.meetingStartTime).toLocaleTimeString([], {
+                                hour: "numeric",
+                                minute: "2-digit",
+                              }),
+                            )
+                          : a.context}
                       </div>
                     )}
                   </Tag>

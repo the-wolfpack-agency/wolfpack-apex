@@ -117,6 +117,7 @@ export const goodMorningWidgetTool: ToolDef<Params, GoodMorningData> = {
         context: a.context,
         link: a.link,
         source: a.source,
+        ...(a.meetingStartTime ? { meetingStartTime: a.meetingStartTime } : {}),
       }));
 
       const prebriefMeetings: GoodMorningPreBriefMeeting[] = upcoming.map((m) => ({
