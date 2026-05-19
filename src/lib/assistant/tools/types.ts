@@ -32,6 +32,25 @@ import type { AssistantSourceRef } from "@/lib/assistant";
 import type { FormSpec } from "@/lib/assistant/forms/types";
 import type { WidgetSpec } from "@/lib/assistant/widgets/types";
 
+/**
+ * IP-geolocation snapshot resolved from Vercel's edge headers
+ * (x-vercel-ip-city, x-vercel-ip-country, x-vercel-ip-latitude,
+ * x-vercel-ip-longitude). Populated by the route handler on every
+ * authenticated turn; tools read it when the user's prompt didn't
+ * carry an explicit location (e.g. bare "weather"). Skip the geo
+ * round-trip and answer for the user's actual city. Absent on local
+ * dev / non-Vercel deployments — tools must treat geo as best-effort
+ * and degrade gracefully when it's missing.
+ */
+export interface VercelGeo {
+  city?: string;
+  country?: string;
+  /** Decimal degrees, e.g. 40.7128. */
+  latitude?: number;
+  /** Decimal degrees, e.g. -74.006. */
+  longitude?: number;
+}
+
 export interface ToolContext {
   /** Authenticated user firing the question. */
   userId: string;
@@ -56,6 +75,16 @@ export interface ToolContext {
    * UUID v4; generated at the top of chat() and threaded through.
    */
   workflowId?: string;
+  /**
+   * Best-effort IP geolocation of the requester, sourced from Vercel
+   * edge headers in the route handler. Tools use it as the location
+   * fallback when the prompt didn't carry an explicit city — fixes
+   * the bug where a NYC user typing "weather" got Houston because
+   * the tool's default location was hard-coded. Always optional;
+   * tools that need a city when geo is missing must surface a
+   * friendly "tell me a city" message rather than guessing.
+   */
+  geo?: VercelGeo;
 }
 
 /** Successful tool dispatch — the handler ran and produced data. */

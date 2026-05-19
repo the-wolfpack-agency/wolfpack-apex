@@ -614,6 +614,12 @@ export async function chat(
      5 args; falls back to "default" via the literal in the dispatcher
      call below. Once every caller is updated, this becomes required. */
   workspaceId: string = "default",
+  /* Best-effort IP geolocation extracted from Vercel edge headers by
+     the route handler. Threaded through to tools (currently: weather)
+     so a bare prompt like "weather" lands on the user's actual city
+     instead of a hard-coded default. Optional — local dev / non-
+     Vercel deployments pass nothing and downstream tools degrade. */
+  geo?: import("@/lib/assistant/tools/types").VercelGeo,
 ): Promise<AssistantResponse> {
   /* workflow_id correlates every analytics event fired during this
    * single chat() turn (tool dispatch, page-facts hit, brain hit,
@@ -770,6 +776,11 @@ export async function chat(
        credentials, brain pack, strictness) reads it from here. */
     workspaceId,
     workflowId,
+    /* Vercel IP geo flows from the route handler through chat() into
+       every tool dispatch. Tools (e.g. weather) use it as the
+       location fallback when the user's message didn't capture a
+       specific city — fixes the NYC-user-gets-Houston bug. */
+    ...(geo ? { geo } : {}),
   });
   if (toolResult && toolResult.result.ok) {
     /* Extract connector attribution from the tool's typed result data

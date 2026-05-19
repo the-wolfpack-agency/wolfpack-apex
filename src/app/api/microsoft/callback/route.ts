@@ -284,7 +284,10 @@ export async function GET(req: NextRequest) {
     trackEvent("system.login", provisioned.id, provisioned.role, {
       method: "microsoft_signin",
     });
-    const redirectUrl = new URL("/", req.url);
+    /* Post-sign-in landing is /assistant — the surface users actually
+     *  interact with. Connection-status flash params ride along for
+     *  any banner handler on that route to consume. */
+    const redirectUrl = new URL("/assistant", req.url);
     redirectUrl.searchParams.set("ms", "connected");
     if (displayName) redirectUrl.searchParams.set("account", displayName);
     const res = NextResponse.redirect(redirectUrl);

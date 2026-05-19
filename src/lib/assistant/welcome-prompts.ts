@@ -131,8 +131,8 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "Quick availability check before booking a call.",
     },
     {
-      text: "find emails from Jorge",
-      description: "Pull a recent thread before the next conversation. Swap in any sender.",
+      text: "find emails about pricing",
+      description: "Pull a recent thread by topic. Swap in any subject you care about.",
     },
     {
       text: "deals over $50k closing this month",
@@ -175,8 +175,8 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "Today's meetings, in order.",
     },
     {
-      text: "find emails from Jorge",
-      description: "Pull a recent thread by sender; swap in your prospect or teammate.",
+      text: "find emails about pricing",
+      description: "Pull a recent thread by topic; swap in any subject you care about.",
     },
     {
       text: "upload to brain",
@@ -224,16 +224,16 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "Highest-value open opportunities.",
     },
     {
-      text: "find emails from Jorge",
-      description: "Pull a recent thread by sender. Swap in your prospect or teammate.",
+      text: "find emails about pricing",
+      description: "Pull a recent thread by topic. Swap in any subject you care about.",
     },
     {
       text: "deals over $50k closing this month",
       description: "High-value pipeline with a close date this month.",
     },
     {
-      text: "find the contact for Grimace",
-      description: "Pull a CRM contact by name (replace with your prospect).",
+      text: "search the CRM for a contact",
+      description: "Universal-search phrasing that fans into the CRM alongside chat, email, calendar, and knowledge.",
     },
   ],
   ops: [
@@ -264,8 +264,8 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "Today's prep at a glance.",
     },
     {
-      text: "who is Grimace",
-      description: "Roster + CRM-fallback lookup for a named person. Swap in any name.",
+      text: "who is on our team",
+      description: "Roster lookup. Type a name after `who is` to look up a specific person.",
     },
     {
       text: "what is on my calendar today",

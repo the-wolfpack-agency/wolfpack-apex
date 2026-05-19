@@ -133,6 +133,9 @@ describe("AssistantStarterPrompts coverage — every chip routes to a tool", () 
  * for one of these tools, replace it with another that still claims
  * the same tool name before removing the entry from REQUIRED_TOOLS. */
 describe("required-tools coverage — every shipped tool is advertised somewhere", () => {
+  /* Tools advertised by at least one chip across welcome-prompts.ts OR
+   *  AssistantStarterPrompts.tsx. Note: `search_external_records` is
+   *  deliberately absent (see inline comment below). */
   const REQUIRED_TOOLS: string[] = [
     "search",
     "weather",
@@ -151,7 +154,14 @@ describe("required-tools coverage — every shipped tool is advertised somewhere
     "task_list_widget",
     "get_calendar_availability",
     "search_mail",
-    "search_external_records",
+    /* `search_external_records` is intentionally NOT advertised by a
+     *  starter chip anymore. The 2026-05-19 chip rename stripped all
+     *  name-bound CRM-lookup chips ("find the contact for Grimace") at
+     *  the user's request. CRM lookups now route through the universal
+     *  `search` tool's CRM provider for bare-search phrasings; the
+     *  search-external-records tool still serves typed phrasings
+     *  ("find the contact for <name>") when a user types them directly
+     *  but is no longer discoverable via a chip. */
     "get_related_records",
     "filter_external_records",
     "aggregate_external_records",

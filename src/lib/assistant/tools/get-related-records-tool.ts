@@ -146,7 +146,6 @@ function valueOf(record: Record<string, unknown>, ...keys: string[]): string | u
 
 function renderOneLine(record: Record<string, unknown>, relatedType: string): string {
   const name = valueOf(record, "Name", "name") ?? "(unnamed)";
-  const id = valueOf(record, "Id", "id") ?? "?";
   const extras: string[] = [];
   if (relatedType === "opportunity" || relatedType === "deal") {
     const stage = valueOf(record, "StageName");
@@ -158,13 +157,31 @@ function renderOneLine(record: Record<string, unknown>, relatedType: string): st
     if (email) extras.push(email);
   }
   const tail = extras.length > 0 ? ` — ${extras.join(" · ")}` : "";
-  return `**${name}** \`${id}\`${tail}`;
+  /* Salesforce record IDs go into the sources array for the citation
+   *  surface; they don't belong inline in the user-facing answer. */
+  return `**${name}**${tail}`;
+}
+
+/* Irregular plurals — naive `+ "s"` produces "opportunitys",
+ *  "companys", "personss". Map known relatedTypes to their proper
+ *  English plural. */
+const PLURAL_FORM: Record<string, string> = {
+  opportunity: "opportunities",
+  deal: "deals",
+  contact: "contacts",
+  account: "accounts",
+  task: "tasks",
+  company: "companies",
+};
+
+function pluralize(relatedType: string): string {
+  return PLURAL_FORM[relatedType] ?? `${relatedType}s`;
 }
 
 function renderAnswer(p: Params, records: Array<Record<string, unknown>>): string {
   const label = p.relatedType.charAt(0).toUpperCase() + p.relatedType.slice(1);
   if (records.length === 0) {
-    return `No ${p.relatedType}s found for ${p.parentName} in the configured CRM.`;
+    return `No ${pluralize(p.relatedType)} found for ${p.parentName} in the configured CRM.`;
   }
   const top = records.slice(0, 10);
   const head =

@@ -97,7 +97,17 @@ function LoginContent() {
         body: JSON.stringify({ event: "system.login", metadata: { page: "login" } }),
       }).catch(() => {});
 
-      router.push("/");
+      /* Post-login landing page is /assistant — that's the surface
+       *  users actually interact with all day. Honor an explicit
+       *  ?next=<path> override (deep-link sign-in, "you must log in
+       *  to view X" flows). Defensive: only accept same-origin paths
+       *  starting with "/" to prevent open-redirect. */
+      const nextRaw = searchParams?.get("next") ?? "";
+      const next =
+        nextRaw && nextRaw.startsWith("/") && !nextRaw.startsWith("//")
+          ? nextRaw
+          : "/assistant";
+      router.push(next);
     } catch {
       setError("Network error. Please try again.");
       setLoading(false);

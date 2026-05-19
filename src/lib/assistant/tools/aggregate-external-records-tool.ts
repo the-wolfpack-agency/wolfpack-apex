@@ -256,11 +256,13 @@ function renderAnswer(p: Params, result: AggregateResult): string {
     const list = rows
       .map((r, i) => {
         const name = (r.Name as string | undefined) ?? "(unnamed)";
-        const id = (r.Id as string | undefined) ?? "?";
         const fieldName = p.field ?? "Amount";
         const v = r[fieldName];
         const formatted = typeof v === "number" ? fmtCurrency(v) : String(v ?? "?");
-        return `${i + 1}. **${name}** \`${id}\` — ${fieldName}: ${formatted}`;
+        /* Salesforce record IDs (006g500...) are noise in the user-
+         *  facing answer; they show up in the sources array for the
+         *  citation surface but don't belong inline. */
+        return `${i + 1}. **${name}** — ${fieldName}: ${formatted}`;
       })
       .join("\n");
     return `${head}\n\n${list}`;

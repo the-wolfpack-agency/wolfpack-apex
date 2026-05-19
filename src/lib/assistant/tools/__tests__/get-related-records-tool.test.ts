@@ -124,7 +124,9 @@ describe("handler — happy path", () => {
       ctx,
     );
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.answer).toContain("No opportunitys found");
+    /* Proper plural: pluralize() maps opportunity → opportunities;
+     *  the previous "opportunitys" was the bug this regression locks. */
+    if (r.ok) expect(r.answer).toContain("No opportunities found");
   });
 
   test("connector without searchRelated → internal error", async () => {

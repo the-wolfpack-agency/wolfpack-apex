@@ -97,7 +97,7 @@ function buildStarterCategories(): StarterCategory[] {
           description: "Universal search across chats, emails, calendar, knowledge, and CRM.",
         },
         {
-          text: "look up anything about Acme",
+          text: "look up anything about Q2 planning",
           description: "Bare-search phrasing that fans into every connected surface in parallel.",
         },
       ],
@@ -187,31 +187,31 @@ function buildStarterCategories(): StarterCategory[] {
           description: "Percentage of your closed opportunities marked Won over the last quarter.",
         },
         {
-          text: "Acme's opportunities",
-          description: "Every open and recent opportunity tied to a named account.",
+          text: "Q3's open opportunities",
+          description: "Every open and recent opportunity tied to a parent account or owner. Swap in any name.",
         },
         {
           text: "average deal size",
           description: "Mean closed-won deal value across your recent pipeline.",
         },
         {
-          text: "find the contact for Grimace",
-          description: "Look up a CRM contact by name (replace Grimace with your prospect).",
+          text: "search the CRM for a contact",
+          description: "Universal-search phrasing that fans into the CRM alongside chats, emails, calendar, and knowledge. Type a name to narrow.",
         },
         {
-          text: "search for the account called Acme",
-          description: "Look up an account in the CRM by name.",
+          text: "search the CRM for an account",
+          description: "Same as above but scoped to accounts/companies.",
         },
         {
-          text: "create a contact named Jane Doe at jane@example.com",
-          description: "Open a CRM contact form pre-filled with name + email.",
+          text: "create a new contact",
+          description: "Open a CRM contact form so you can fill in name, email, and account.",
         },
         {
-          text: "create a deal for Acme",
+          text: "create a new deal",
           description: "Open a CRM deal form so you can capture amount, stage, and close date.",
         },
         {
-          text: "move opportunity Acme Renewal to Closed Won",
+          text: "move an opportunity to Closed Won",
           description: "Update an opportunity's stage. Confirms before writing.",
         },
         {
@@ -261,12 +261,12 @@ function buildStarterCategories(): StarterCategory[] {
           description: "Checks your calendar for conflicts at the given day and time.",
         },
         {
-          text: "find emails from Jorge",
-          description: "Search your inbox for messages sent by a named person.",
+          text: "find emails about pricing",
+          description: "Search your inbox for messages on a topic. Swap in any subject.",
         },
         {
-          text: "find emails to Jane",
-          description: "Search your sent items for messages you addressed to a named person.",
+          text: "find emails about Q2 planning",
+          description: "Topic-based mail search. Swap in any subject you care about.",
         },
         {
           text: "any meetings tomorrow",
@@ -277,8 +277,8 @@ function buildStarterCategories(): StarterCategory[] {
           description: "Block-of-day availability check before booking a call.",
         },
         {
-          text: "find emails from Acme about pricing",
-          description: "Two-slot mail search — sender plus topic.",
+          text: "find emails about a project",
+          description: "Topic-only mail search. Swap in any subject you care about.",
         },
       ],
       requires: { any: ["microsoft"] },
@@ -300,23 +300,23 @@ function buildStarterCategories(): StarterCategory[] {
           description: "One-line org summary pulled from the knowledge store.",
         },
         {
-          text: "what do we know about Acme",
-          description: "Everything the assistant has indexed about a named account: notes, deals, contacts.",
+          text: "what do we know about our pipeline",
+          description: "Everything the assistant has indexed about a subject: notes, deals, contacts.",
         },
         {
-          text: "who is Grimace",
-          description: "Roster + CRM-fallback lookup for a named person.",
+          text: "who is on our team",
+          description: "Roster lookup. Type a name after `who is` to look up a specific person.",
         },
         {
           text: "tell me about our Q2 plan",
           description: "Org-facts retrieval against any indexed subject.",
         },
         {
-          text: "remember that Acme's tier is enterprise",
+          text: "remember that our team's priority is shipping",
           description: "Save a team fact. The Assistant confirms before persisting.",
         },
         {
-          text: "remember that Q2 OKR's owner is Jane Doe",
+          text: "remember that Q3's target is high growth",
           description: "Save an attribute-style fact. The Assistant confirms before writing.",
         },
       ],

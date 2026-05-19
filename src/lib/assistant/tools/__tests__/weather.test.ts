@@ -84,8 +84,13 @@ describe("weather intent matching", () => {
     expect(match(q)).not.toBeNull();
   });
 
-  test("default location used when none captured", () => {
-    expect(match("weather")?.location).toBe("Houston");
+  test("bare prompt yields empty-string location sentinel (handler defers to ctx.geo)", () => {
+    /* Locks the 2026-05-19 fix for the NYC-user-gets-Houston bug. The
+     * legacy DEFAULT_LOCATION = "Houston" branch was removed; the
+     * intent classifier now signals "no city captured" with an empty
+     * string and the handler resolves the target from ctx.geo. */
+    expect(match("weather")?.location).toBe("");
+    expect(match("weather?")?.location).toBe("");
   });
 
   test("captured location is preserved", () => {
@@ -178,5 +183,116 @@ describe("weather handler", () => {
       "cto",
       expect.objectContaining({ success: true }),
     );
+  });
+});
+
+/* ----------------------------------------------------------------------
+ * 2026-05-19 — bare-prompt + Vercel IP-geo plumbing
+ *
+ * Locks the fix for the NYC-user-types-"weather"-gets-Houston bug.
+ * The handler must:
+ *   - Use ctx.geo.latitude / longitude directly when present (skip the
+ *     geocode round-trip; only the forecast call hits the network).
+ *   - Geocode ctx.geo.city when only the city header is set.
+ *   - Return a friendly "tell me a city" answer (ok=true so it renders
+ *     as a normal message, not an error toast) when neither the prompt
+ *     nor ctx.geo gives us anything usable.
+ * -------------------------------------------------------------------- */
+describe("weather handler — IP geo fallback", () => {
+  test("bare prompt + geo lat/lng → uses coords directly, skips geocode", async () => {
+    /* Only ONE fetch — the forecast call. The geocode round-trip is
+     * skipped because Vercel handed us coordinates. */
+    mockFetch.mockResolvedValueOnce(forecastResp({ temperature: 12 }));
+    const r = await weatherTool.handler(
+      { location: "" },
+      {
+        ...CTX,
+        geo: { city: "New York", country: "US", latitude: 40.7128, longitude: -74.006 },
+      },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0]).toMatch(/api\.open-meteo\.com\/v1\/forecast/);
+    expect(mockFetch.mock.calls[0][0]).toMatch(/latitude=40\.7128/);
+    expect(mockFetch.mock.calls[0][0]).toMatch(/longitude=-74\.006/);
+    expect(r.answer).toMatch(/New York/);
+    /* Telemetry distinguishes the resolution path so the learning loop
+     * sees when geo headers are landing. */
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "assistant.weather_executed",
+      "u1",
+      "cto",
+      expect.objectContaining({ source: "geo_ll", success: true }),
+    );
+  });
+
+  test("bare prompt + geo lat/lng but no city → labels as 'your location'", async () => {
+    mockFetch.mockResolvedValueOnce(forecastResp({ temperature: 5 }));
+    const r = await weatherTool.handler(
+      { location: "" },
+      { ...CTX, geo: { latitude: 51.5074, longitude: -0.1278 } },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.answer).toMatch(/your location/);
+  });
+
+  test("bare prompt + geo city only (no lat/lng) → geocodes the city", async () => {
+    mockFetch
+      .mockResolvedValueOnce(geocodeResp("Brooklyn", 40.65, -73.95))
+      .mockResolvedValueOnce(forecastResp({ temperature: 15 }));
+    const r = await weatherTool.handler(
+      { location: "" },
+      { ...CTX, geo: { city: "Brooklyn", country: "US" } },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch.mock.calls[0][0]).toMatch(/geocoding-api\.open-meteo\.com/);
+    expect(mockFetch.mock.calls[0][0]).toMatch(/name=Brooklyn/);
+    expect(r.answer).toMatch(/Brooklyn/);
+  });
+
+  test("bare prompt + NO geo → friendly 'tell me a city' answer (no network)", async () => {
+    const r = await weatherTool.handler({ location: "" }, CTX);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    /* Zero fetches: we never burn an API call on a guess. */
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(r.answer).toMatch(/Tell me a city/i);
+    expect(r.answer).toMatch(/weather in Boston/);
+    /* Friendly path is NOT a tool failure — no widget either. */
+    expect(r.widget).toBeUndefined();
+  });
+
+  test("bare prompt + empty geo object → same friendly fallback", async () => {
+    const r = await weatherTool.handler({ location: "" }, { ...CTX, geo: {} });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(r.answer).toMatch(/Tell me a city/i);
+  });
+
+  test("explicit 'weather in Boston' ignores geo and geocodes the city", async () => {
+    /* User asked for Boston while the edge headers say London. Boston
+     * wins — the prompt always trumps geo for explicit queries. */
+    mockFetch
+      .mockResolvedValueOnce(geocodeResp("Boston", 42.36, -71.06))
+      .mockResolvedValueOnce(forecastResp({ temperature: 10 }));
+    const r = await weatherTool.handler(
+      { location: "Boston" },
+      {
+        ...CTX,
+        geo: { city: "London", country: "GB", latitude: 51.5074, longitude: -0.1278 },
+      },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch.mock.calls[0][0]).toMatch(/geocoding-api\.open-meteo\.com/);
+    expect(mockFetch.mock.calls[0][0]).toMatch(/name=Boston/);
+    expect(r.answer).toMatch(/Boston/);
+    expect(r.answer).not.toMatch(/London/);
   });
 });

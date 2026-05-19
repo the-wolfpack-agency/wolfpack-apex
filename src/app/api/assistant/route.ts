@@ -16,6 +16,7 @@ import {
   sourceLabelForIntent,
   type RelatedPage,
 } from "@/lib/assistant/related-pages";
+import { readVercelGeo } from "@/lib/assistant/vercel-geo";
 
 /**
  * POST /api/assistant -- Send a message, rate, or archive.
@@ -205,7 +206,15 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const result = await chat(message, user.id, user.role, conversationId, pageContext, user.workspaceId);
+    /* Vercel injects x-vercel-ip-city / -country / -latitude /
+       -longitude on every request automatically (no project config
+       required). Lift them off the request headers and thread through
+       to chat() → dispatcher → tools so a bare prompt like "weather"
+       lands on the user's actual location instead of a hard-coded
+       default. Empty object on local dev / non-Vercel deployments;
+       tools degrade gracefully when fields are absent. */
+    const geo = readVercelGeo(req.headers);
+    const result = await chat(message, user.id, user.role, conversationId, pageContext, user.workspaceId, geo);
 
     // Include gate results (warnings) alongside the response
     const response: Record<string, unknown> = { ...result };
