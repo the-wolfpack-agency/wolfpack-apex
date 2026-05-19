@@ -102,6 +102,28 @@ import "./good-morning-widget-tool";
  * plug in server-side without changing this tool. */
 import "./dms-inventory-widget-tool";
 
+/* Empty-state demo tools — weather / headlines / fx. Backed by free
+ * public APIs (Open-Meteo, BBC RSS, exchangerate.host) so a brand-new
+ * user with zero integrations connected still sees value within the
+ * first 30 seconds. Registered AFTER the connector tools so a typed
+ * connector phrasing never gets shadowed, but BEFORE Universal Search
+ * so the very specific intent regexes ("weather in <city>", "top
+ * headlines", "fx rate") aren't swallowed by the generic search
+ * cascade. Each tool's INTENT_RE is anchored ^/$ on disjoint nouns
+ * so they don't compete with each other. */
+import "./weather";
+import "./headlines";
+import "./fx";
+
+/* Upload-to-Brain tool — opens the dedicated drag/drop widget that
+ * pushes files into the user's Brain via /api/brain/upload (filter
+ * gate + existing ingest pipeline). Registered BEFORE the universal
+ * `search` tool so "/upload" / "upload to brain" can't fall through
+ * to the search cascade. INTENT_RE is anchored ^/$ on the literal
+ * "upload" verb so it doesn't compete with the demo / connector
+ * tools above. */
+import "./upload-to-brain";
+
 /* Universal Search tool — returns IDENTICAL results to the /search
    page by delegating to lib/search/runSearch (which fans into the CRM
    connector via its `crm` provider). Registered AFTER the CRM tools

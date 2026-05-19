@@ -91,7 +91,12 @@ export function AssistantWelcomeModal({
     markSeen();
     track("assistant.welcome_prompt_clicked", {
       prompt: prompt.text,
+      /* chip_label is the visible button text (may differ from prompt
+       * when a short label is paired with a longer natural-language
+       * prompt). Lets the funnel report on the surface users see. */
+      chip_label: prompt.label ?? prompt.text,
       role: userRole ?? "unknown",
+      user_role: userRole ?? "unknown",
     });
     onPickPrompt(prompt.text);
   }
@@ -171,7 +176,7 @@ export function AssistantWelcomeModal({
                   className="text-sm font-semibold"
                   style={{ color: "var(--wp-gold, #eab308)" }}
                 >
-                  {p.text}
+                  {p.label ?? p.text}
                 </div>
                 <div
                   className="text-xs mt-0.5"

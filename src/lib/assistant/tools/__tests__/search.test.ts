@@ -339,6 +339,77 @@ describe("handler — analytics + result framing", () => {
     expect(crmRef?.type).toBe("crm");
   });
 
+  test("handler attaches a search_results widget on every success", async () => {
+    /* Mirrors the SearchResponse shape — the widget spec is built
+     *  by copying results, counts, and took_ms straight through plus
+     *  echoing the user's query string for the empty-state and
+     *  refresh prompt. The chat surface then dispatches it to
+     *  SearchResultsWidget via ChatWidget's kind switch. */
+    mockRunSearch.mockResolvedValueOnce({
+      results: [
+        {
+          type: "chat",
+          id: "c1",
+          title: "Chat 1",
+          snippet: "s",
+          timestamp: "2026-04-22T10:00:00Z",
+          url: "/messages?chat=c1",
+        },
+        {
+          type: "email",
+          id: "e1",
+          title: "Email 1",
+          snippet: "s",
+          timestamp: "2026-04-22T08:00:00Z",
+          url: "https://outlook.test/e1",
+        },
+      ],
+      took_ms: 9,
+      counts: { chats: 1, channels: 0, emails: 1, calendar: 0, knowledge: 0, crm: 0 },
+    });
+
+    const r = await searchTool.handler({ query: "porsche" }, ctx);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.widget).toBeDefined();
+    expect(r.widget?.kind).toBe("search_results");
+    if (!r.widget || r.widget.kind !== "search_results") return;
+    expect(r.widget.query).toBe("porsche");
+    expect(r.widget.took_ms).toBe(9);
+    expect(r.widget.counts).toEqual({
+      chats: 1,
+      channels: 0,
+      emails: 1,
+      calendar: 0,
+      knowledge: 0,
+      crm: 0,
+    });
+    expect(r.widget.results).toHaveLength(2);
+    expect(r.widget.results[0]).toEqual({
+      type: "chat",
+      id: "c1",
+      title: "Chat 1",
+      snippet: "s",
+      timestamp: "2026-04-22T10:00:00Z",
+      url: "/messages?chat=c1",
+    });
+  });
+
+  test("zero-results path still attaches the widget (renders the empty state inline)", async () => {
+    /* Default mock has zero results. The widget rides along even
+     *  when results.length === 0; the renderer detects the empty
+     *  list and renders the "no results" inline state rather than
+     *  the checkbox row. */
+    const r = await searchTool.handler({ query: "xyznotfound" }, ctx);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.widget).toBeDefined();
+    expect(r.widget?.kind).toBe("search_results");
+    if (!r.widget || r.widget.kind !== "search_results") return;
+    expect(r.widget.results).toEqual([]);
+    expect(r.widget.query).toBe("xyznotfound");
+  });
+
   test("workflowId is threaded into analytics payload when present", async () => {
     const r = await searchTool.handler(
       { query: "porsche" },

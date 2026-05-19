@@ -22,24 +22,35 @@
 export interface WelcomePrompt {
   /** The literal prompt string fed into the composer. */
   text: string;
+  /** Optional short display label shown on the chip. Falls back to
+   *  `text` when omitted. Lets us show "today's calendar" while still
+   *  firing the longer natural-language prompt "what's on my calendar
+   *  today". */
+  label?: string;
   /** One-line hover description rendered as a tooltip / explainer. */
   description: string;
 }
 
-/* Generic kit used when role is unknown. Bias toward "every team
- * member gets value from these" — briefing, calendar, knowledge. */
+/* Generic kit used when role is unknown OR role is anything other
+ * than `dev`. Non-dev users (the bulk of the team) get the same
+ * three-prompt starter: briefing + today's calendar + inbox. GitHub
+ * chips are gated to `dev` because Nick is the only teammate with a
+ * GitHub login wired up — chips that 400 on click are a worse first
+ * impression than chips that don't exist. */
 const GENERIC_KIT: WelcomePrompt[] = [
   {
     text: "briefing",
     description: "Your morning summary: schedule, emails, action items.",
   },
   {
-    text: "what is on my calendar today",
-    description: "Today's meetings, in order.",
+    text: "what's on my calendar today",
+    label: "today's calendar",
+    description: "Your meetings and events for today.",
   },
   {
-    text: "what do we know about <client>",
-    description: "Pull internal knowledge before a call (replace <client>).",
+    text: "show me my recent emails",
+    label: "inbox",
+    description: "Recent unread + flagged emails.",
   },
 ];
 
@@ -59,17 +70,23 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     },
   ],
   cto: [
+    /* CTO defaults to the non-dev kit: briefing + calendar + inbox.
+     * GitHub chips are reserved for `dev` (Nick switches role to dev
+     * to opt in). Non-dev demo surface is more valuable to the team
+     * at large than GitHub triage chips that only one user can fire. */
     {
       text: "briefing",
       description: "Morning panel: schedule + emails + action items.",
     },
     {
-      text: "what PRs are open in wolfpack-apex",
-      description: "Open pull requests across the codebase.",
+      text: "what's on my calendar today",
+      label: "today's calendar",
+      description: "Your meetings and events for today.",
     },
     {
-      text: "failed CI in wolfpack-apex",
-      description: "Recent failed Actions runs to triage.",
+      text: "show me my recent emails",
+      label: "inbox",
+      description: "Recent unread + flagged emails.",
     },
   ],
   vp: [
@@ -115,17 +132,22 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     },
   ],
   dev: [
+    /* `dev` is the ONLY role that surfaces GitHub chips on the welcome
+     * modal. Nick is the only teammate with a wired-up GitHub login,
+     * so other roles get calendar/inbox chips instead — see GENERIC_KIT
+     * above. Keep both GitHub chips here so dev role retains the full
+     * triage surface (open PRs + failed CI). */
     {
       text: "briefing",
       description: "Morning panel: schedule + emails + action items.",
     },
     {
-      text: "what PRs are open in wolfpack-apex",
+      text: "what PRs are open in wolfpack-instinct",
       description: "Open pull requests across the codebase.",
     },
     {
-      text: "create task to <thing>",
-      description: "Add a task to Microsoft To Do.",
+      text: "failed CI in wolfpack-instinct",
+      description: "Recent failed Actions runs to triage.",
     },
   ],
   sales: [

@@ -199,6 +199,125 @@ export interface DmsInventoryWidgetSpec {
   items: DmsInventoryItem[];
 }
 
+/** Universal-search results rendered inline in the chat surface.
+ *  Mirrors the /search page's source-filter UX (one checkbox per
+ *  source that has non-zero results; toggling hides rows of that
+ *  type client-side). The shape is intentionally identical to
+ *  `SearchResponse` from `src/lib/search/runSearch.ts` — the tool
+ *  hands its data through unchanged.
+ *
+ *  Why duplicate the SearchResult shape here instead of importing
+ *  it: keeps `src/lib/assistant/widgets/types.ts` import-graph small
+ *  (no transitive `runSearch` provider load) and matches the
+ *  "widget specs are pure JSON shapes" convention every other widget
+ *  follows. The fields are kept structurally identical and the
+ *  guardrail test asserts that. */
+export interface SearchResultsWidgetResult {
+  type: "chat" | "channel" | "email" | "calendar" | "knowledge" | "crm";
+  id: string;
+  title: string;
+  snippet: string;
+  /** ISO timestamp; may be empty when the source has no timestamp. */
+  timestamp: string;
+  url?: string;
+}
+
+export interface SearchResultsWidgetCounts {
+  chats: number;
+  channels: number;
+  emails: number;
+  calendar: number;
+  knowledge: number;
+  crm: number;
+  [key: string]: number;
+}
+
+export interface SearchResultsWidgetSpec {
+  kind: "search_results";
+  /** The query the user typed; surfaced in the "Search again" prompt
+   *  and the no-results empty state. */
+  query: string;
+  /** The full result list — the renderer filters client-side based on
+   *  the active source checkboxes, so no refetch is needed when the
+   *  user toggles a source off and back on. */
+  results: SearchResultsWidgetResult[];
+  /** Per-source totals. Keys with `> 0` get a checkbox; sources with
+   *  zero hits are hidden from the filter row (mirrors /search). */
+  counts: SearchResultsWidgetCounts;
+  /** Wall-clock latency the engine reported. Surfaced in the meta
+   *  line under the filter row ("12 results in 87ms"). */
+  took_ms: number;
+}
+
+/** Empty-state demo widgets — weather, headlines, fx. Backed by free
+ *  public APIs (no key required) so a brand-new user with zero
+ *  integrations connected still sees value within the first 30 seconds.
+ *  Pure data shapes; the renderers live in `src/components/widgets/`. */
+export interface WeatherWidgetSpec {
+  kind: "weather";
+  /** Resolved place name, e.g. "Boston, Massachusetts, US". */
+  location: string;
+  temperatureC: number;
+  temperatureF: number;
+  /** Human-friendly condition string ("Partly cloudy", "Rainy", …) */
+  condition: string;
+  highC: number;
+  lowC: number;
+  /** Relative humidity (0..100). */
+  humidity: number;
+  windMph: number;
+}
+
+export interface HeadlineWidgetItem {
+  title: string;
+  link: string;
+  /** Original feed pubDate string (kept as-is so the renderer can
+   *  format it relative to "now" in the browser TZ). */
+  published: string;
+  source: string;
+}
+
+export interface HeadlinesWidgetSpec {
+  kind: "headlines";
+  title: string;
+  subtitle?: string;
+  items: HeadlineWidgetItem[];
+}
+
+export interface FxWidgetRate {
+  code: string;
+  value: number;
+}
+
+export interface FxWidgetSpec {
+  kind: "fx";
+  base: string;
+  /** YYYY-MM-DD of the rate snapshot. */
+  asOf: string;
+  rates: FxWidgetRate[];
+}
+
+/** Upload-to-Brain widget. The canonical "user-driven Brain ingest"
+ *  surface — a dedicated drag/drop panel rendered inline in the chat
+ *  with a per-file accepted/rejected status board. Backed by the
+ *  data-quality filter at /api/brain/upload (see
+ *  `src/lib/brain/upload-filter.ts`). The chat-input drag/drop in
+ *  `InstinctChat.tsx` is the secondary path into the same pipeline. */
+export interface UploadToBrainWidgetSpec {
+  kind: "upload_to_brain";
+  /** Route the widget POSTs each file to (multipart). Plumbed so the
+   *  spec is self-contained — the widget never hard-codes endpoints. */
+  uploadUrl: string;
+  /** Hard size cap surfaced in the help text + used for client-side
+   *  validation before the POST. Should match the server filter's
+   *  UPLOAD_FILTER_MAX_FILE_SIZE_BYTES. */
+  maxFileSize: number;
+  /** MIME allowlist surfaced as the drag/drop hint + used by the
+   *  client to short-circuit obviously-disallowed drops. Server still
+   *  enforces independently. */
+  allowedMimeTypes: readonly string[];
+}
+
 /** Discriminated union of every widget kind. Add new entries as the
  *  framework expands. */
 export type WidgetSpec =
@@ -206,4 +325,9 @@ export type WidgetSpec =
   | EmailThreadWidgetSpec
   | TaskListWidgetSpec
   | GoodMorningWidgetSpec
-  | DmsInventoryWidgetSpec;
+  | DmsInventoryWidgetSpec
+  | SearchResultsWidgetSpec
+  | WeatherWidgetSpec
+  | HeadlinesWidgetSpec
+  | FxWidgetSpec
+  | UploadToBrainWidgetSpec;

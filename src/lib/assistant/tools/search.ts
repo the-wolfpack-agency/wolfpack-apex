@@ -279,6 +279,26 @@ export const searchTool: ToolDef<Params, SearchResponse> = {
         data: body,
         answer: summaryAnswer(params.query, body),
         sources: buildSources(body),
+        /* Inline interactive surface: the SearchResultsWidget renders
+         *  the per-source filter checkboxes + result rows in chat so
+         *  the user can narrow / refilter without leaving the
+         *  conversation. The shape is identical to the SearchResponse
+         *  data above; the widget renderer owns its own client-side
+         *  filter state. */
+        widget: {
+          kind: "search_results",
+          query: params.query,
+          results: body.results.map((r) => ({
+            type: r.type,
+            id: r.id,
+            title: r.title,
+            snippet: r.snippet,
+            timestamp: r.timestamp,
+            ...(r.url ? { url: r.url } : {}),
+          })),
+          counts: { ...body.counts },
+          took_ms: body.took_ms,
+        },
       };
     } catch (err) {
       return {

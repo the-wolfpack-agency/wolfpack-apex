@@ -19,6 +19,11 @@ import { EmailThreadWidget } from "@/components/widgets/EmailThreadWidget";
 import { TaskListWidget } from "@/components/widgets/TaskListWidget";
 import { GoodMorningWidget } from "@/components/widgets/GoodMorningWidget";
 import { DmsInventoryWidget } from "@/components/widgets/DmsInventoryWidget";
+import { SearchResultsWidget } from "@/components/widgets/SearchResultsWidget";
+import { WeatherWidget } from "@/components/widgets/WeatherWidget";
+import { HeadlinesWidget } from "@/components/widgets/HeadlinesWidget";
+import { FxWidget } from "@/components/widgets/FxWidget";
+import { UploadToBrainWidget } from "@/components/widgets/UploadToBrainWidget";
 
 export interface ChatWidgetProps {
   spec: WidgetSpec;
@@ -41,6 +46,16 @@ export function ChatWidget({ spec, workflowId }: ChatWidgetProps) {
       return <GoodMorningWidget spec={spec} workflowId={workflowId} />;
     case "dms_inventory":
       return <DmsInventoryWidget spec={spec} workflowId={workflowId} />;
+    case "search_results":
+      return <SearchResultsWidget spec={spec} workflowId={workflowId} />;
+    case "weather":
+      return <WeatherWidget spec={spec} workflowId={workflowId} />;
+    case "headlines":
+      return <HeadlinesWidget spec={spec} workflowId={workflowId} />;
+    case "fx":
+      return <FxWidget spec={spec} workflowId={workflowId} />;
+    case "upload_to_brain":
+      return <UploadToBrainWidget spec={spec} workflowId={workflowId} />;
     default:
       /* Forward-compat: silently render nothing for unknown kinds.
        * The text answer above the widget still surfaces, so the

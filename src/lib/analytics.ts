@@ -37,6 +37,24 @@ export type InstinctEventType =
   | "brain.upload_started"
   | "brain.upload_completed"
   | "brain.upload_rejected"
+  // Upload-to-Brain widget pre-ingest filter lifecycle. Fires from the
+  // /api/brain/upload route which runs the data-quality filter BEFORE
+  // delegating to ingest(). `brain.upload_attempted` fires for every
+  // POST regardless of outcome (pre-filter audit, never lost). The
+  // accepted variant fires when the filter passes AND ingest succeeds.
+  // The rejected variant carries the `reasons` array from the filter
+  // so the learning loop sees which gates fire most. Metadata:
+  //   brain.upload_attempted  { content_hash, file_size, mime_type }
+  //   brain.upload_accepted   { content_hash, document_id }
+  //   brain.upload_rejected   { reasons: string[], content_hash?, mime_type? }
+  //     (NOTE: brain.upload_rejected is shared with the legacy ingest
+  //      path; the widget-driven path always passes a `reasons` array.)
+  | "brain.upload_attempted"
+  | "brain.upload_accepted"
+  // Upload widget opened — the assistant served an UploadToBrainWidget
+  // and the user has the panel mounted. Tracks demand for the surface
+  // independent of whether the user actually drops anything.
+  | "assistant.upload_widget_opened"
   | "brain.extraction_started"
   | "brain.extraction_succeeded"
   | "brain.extraction_failed"
@@ -541,6 +559,26 @@ export type InstinctEventType =
   | "assistant.widget_offered"
   | "assistant.widget_rendered"
   | "assistant.widget_interaction"
+  // Empty-state demo tools — weather, headlines, fx. Each fires on a
+  // happy path; failures auto-emit `assistant.tool_failed` via the
+  // dispatcher. Metadata sketched per-event so dashboards can slice
+  // by location/base/source.
+  //   assistant.weather_executed   { location, success, cache_hit?,
+  //                                    reason? }
+  //   assistant.headlines_executed { item_count, success, cache_hit?,
+  //                                    reason? }
+  //   assistant.fx_executed        { base, success, cache_hit?,
+  //                                    reason? }
+  | "assistant.weather_executed"
+  | "assistant.headlines_executed"
+  | "assistant.fx_executed"
+  // Search-results widget — user clicked "Search again" after toggling
+  // one or more source checkboxes off. Stub event today (the chat
+  // surface doesn't yet expose a programmatic re-prompt path); the
+  // learning loop tracks demand so the wiring lands when a user-facing
+  // re-prompt API is added. Metadata: { widget_kind, query, types,
+  // workflow_id? }.
+  | "assistant.search_refilter_requested"
   // SharePoint connector lifecycle events (migration 139).
   // source_added/removed: admin UI added or soft-deleted a folder source.
   // sync_started/finished: every sync run is bracketed by these two.

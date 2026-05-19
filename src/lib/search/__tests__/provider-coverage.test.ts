@@ -94,8 +94,13 @@ export const SEARCH_PROVIDER_EXEMPT_TOOLS: Record<string, string> = {
   "search.ts": "the Universal Search tool itself — delegates to the provider registry",
   "task-list-widget-tool.ts": "task widget; tasks aren't searchable today",
   "update-external-record-tool.ts": "mutation tool (write only)",
+  "upload-to-brain.ts":
+    "action tool, not a searchable data source — opens the drag/drop widget that pushes files into the Brain ingest pipeline",
   "who-is-tool.ts":
     "team-roster lookup with CRM fallback — name-only, not arbitrary free text",
+  "weather.ts": "demo tool, ephemeral data, not searchable",
+  "headlines.ts": "demo tool, ephemeral data, not searchable",
+  "fx.ts": "demo tool, ephemeral data, not searchable",
 };
 
 const SEARCH_PROVIDER_EXPORT_RE = /export\s+(?:const|let|var)\s+searchProvider\b/;

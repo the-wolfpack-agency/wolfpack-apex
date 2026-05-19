@@ -354,6 +354,54 @@
         "answerContains": ["No results"],
         "answerNotContains": ["I don't have a confident answer"]
       }
+    },
+    {
+      "id": "regression-2026-05-19-weather",
+      "category": "regression",
+      "rationale": "Empty-state demo tool — a brand-new user with zero integrations connected can ask 'weather in Boston' and the `weather` tool routes the dispatch, hits Open-Meteo, and returns a populated WeatherWidget. Pins the routing contract; if a future change shadows the intent OR removes the tool from the registry, the answer drops to AI fallback and this case catches it. The eval harness doesn't mock external HTTP, so a real-time Open-Meteo failure could surface here — accept either the populated answer OR the explicit external_api_failed error, as long as the dispatcher routed to a tool.",
+      "question": "weather in Boston",
+      "expect": {
+        "source": "tool",
+        "answerNotContains": [
+          "I don't have a confident answer"
+        ]
+      }
+    },
+    {
+      "id": "regression-2026-05-19-headlines",
+      "category": "regression",
+      "rationale": "Empty-state demo tool — 'top news' / 'top headlines' must route to the `headlines` tool. Pins the routing contract; the BBC RSS feed may be unreachable in CI but the dispatcher still hands the answer to the tool layer (success or external_api_failed), never to AI fallback. If a future change shadows the intent the answer drops to AI and this case catches it.",
+      "question": "top news",
+      "expect": {
+        "source": "tool",
+        "answerNotContains": [
+          "I don't have a confident answer"
+        ]
+      }
+    },
+    {
+      "id": "regression-2026-05-19-fx",
+      "category": "regression",
+      "rationale": "Empty-state demo tool — 'fx rate' must route to the `fx` tool. Same routing-contract logic as the weather + headlines cases above. exchangerate.host failure in CI still keeps the dispatch inside the tool layer; if a future change removes the tool from the registry the answer drops to AI fallback and this case catches it.",
+      "question": "fx rate",
+      "expect": {
+        "source": "tool",
+        "answerNotContains": [
+          "I don't have a confident answer"
+        ]
+      }
+    },
+    {
+      "id": "regression-2026-05-19-upload-to-brain",
+      "category": "regression",
+      "rationale": "Slash-style upload command routes to the upload-to-brain tool. The tool returns the UploadToBrainWidget so the user can drag/drop files into the data-quality-filtered ingest path. If a future change shadows the intent OR removes the tool from the registry, the answer drops to AI fallback and this case catches it.",
+      "question": "/upload",
+      "expect": {
+        "source": "tool",
+        "answerNotContains": [
+          "I don't have a confident answer"
+        ]
+      }
     }
   ]
 }

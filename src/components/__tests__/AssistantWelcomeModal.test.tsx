@@ -127,23 +127,69 @@ describe("AssistantWelcomeModal — role-tailored prompts", () => {
     expect(screen.queryByText(/create task to/)).not.toBeInTheDocument();
   });
 
-  test("CTO role shows GitHub-flavored prompts", () => {
+  test("CTO role shows non-dev chips (briefing + today's calendar + inbox) — GitHub chips are dev-only", () => {
     render(
       <AssistantWelcomeModal userRole="cto" onPickPrompt={() => undefined} />,
     );
-    expect(screen.getByText(/what PRs are open/)).toBeInTheDocument();
+    expect(screen.getByText("briefing")).toBeInTheDocument();
+    expect(screen.getByText("today's calendar")).toBeInTheDocument();
+    expect(screen.getByText("inbox")).toBeInTheDocument();
+    expect(screen.queryByText(/what PRs are open/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/failed CI/)).not.toBeInTheDocument();
   });
 
-  test("Unknown role falls back to the generic kit", () => {
+  test("Unknown role falls back to the generic kit (briefing + today's calendar + inbox)", () => {
     render(
       <AssistantWelcomeModal
         userRole="intern_special"
         onPickPrompt={() => undefined}
       />,
     );
-    /* Generic kit always includes briefing + calendar today. */
     expect(screen.getByText("briefing")).toBeInTheDocument();
-    expect(screen.getByText("what is on my calendar today")).toBeInTheDocument();
+    expect(screen.getByText("today's calendar")).toBeInTheDocument();
+    expect(screen.getByText("inbox")).toBeInTheDocument();
+  });
+});
+
+describe("AssistantWelcomeModal — role-gated GitHub chips", () => {
+  test("role=dev → GitHub chips visible (open PRs + failed CI)", () => {
+    render(
+      <AssistantWelcomeModal userRole="dev" onPickPrompt={() => undefined} />,
+    );
+    expect(screen.getByText(/what PRs are open/)).toBeInTheDocument();
+    expect(screen.getByText(/failed CI/)).toBeInTheDocument();
+    /* Non-dev chips should NOT appear for dev role. */
+    expect(screen.queryByText("today's calendar")).not.toBeInTheDocument();
+    expect(screen.queryByText("inbox")).not.toBeInTheDocument();
+  });
+
+  test("role=user (non-dev) → calendar + inbox chips visible, no GitHub", () => {
+    render(
+      <AssistantWelcomeModal userRole="user" onPickPrompt={() => undefined} />,
+    );
+    expect(screen.getByText("today's calendar")).toBeInTheDocument();
+    expect(screen.getByText("inbox")).toBeInTheDocument();
+    expect(screen.queryByText(/what PRs are open/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/failed CI/)).not.toBeInTheDocument();
+  });
+
+  test("picking the calendar chip fires the natural-language prompt (not the label)", () => {
+    const onPick = jest.fn();
+    render(
+      <AssistantWelcomeModal
+        userRole="user"
+        onPickPrompt={onPick}
+      />,
+    );
+    act(() => {
+      fireEvent.click(screen.getByText("today's calendar"));
+    });
+    expect(onPick).toHaveBeenCalledWith("what's on my calendar today");
+    const event = lastTrackEvent();
+    expect(event.event).toBe("assistant.welcome_prompt_clicked");
+    expect(event.metadata?.chip_label).toBe("today's calendar");
+    expect(event.metadata?.user_role).toBe("user");
+    expect(event.metadata?.prompt).toBe("what's on my calendar today");
   });
 });
 
@@ -171,10 +217,10 @@ describe("AssistantWelcomeModal — pick a prompt", () => {
     expect(window.localStorage.getItem("instinct_welcome_seen")).toBe("1");
   });
 
-  test("picking a prompt fires the prompt + role in analytics metadata", () => {
+  test("picking a prompt fires the prompt + role in analytics metadata (dev role exercises the GitHub chip)", () => {
     render(
       <AssistantWelcomeModal
-        userRole="cto"
+        userRole="dev"
         onPickPrompt={() => undefined}
       />,
     );
@@ -183,8 +229,11 @@ describe("AssistantWelcomeModal — pick a prompt", () => {
     });
     const event = lastTrackEvent();
     expect(event.event).toBe("assistant.welcome_prompt_clicked");
-    expect(event.metadata?.role).toBe("cto");
+    expect(event.metadata?.role).toBe("dev");
+    expect(event.metadata?.user_role).toBe("dev");
     expect(String(event.metadata?.prompt)).toMatch(/what PRs are open/);
+    /* For chips without a separate label, chip_label === prompt text. */
+    expect(String(event.metadata?.chip_label)).toMatch(/what PRs are open/);
   });
 });
 
