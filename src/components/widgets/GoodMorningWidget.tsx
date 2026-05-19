@@ -7,6 +7,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { fetchWithRefresh } from "@/lib/client-auth";
 import type {
   GoodMorningWidgetSpec,
@@ -165,14 +166,13 @@ export function GoodMorningWidget({ spec, workflowId }: GoodMorningWidgetProps) 
           >
             {spec.greeting}
           </div>
-          <a
+          <Link
             href="/"
             onClick={() => trackInteraction("open_dashboard")}
             className="text-xs whitespace-nowrap shrink-0 pt-0.5"
             style={{ color: "var(--wp-gold, #eab308)" }}
           >
-            Open dashboard →
-          </a>
+            Open dashboard →</Link>
         </div>
         <div
           className="text-xs mt-1"
@@ -444,7 +444,7 @@ export function GoodMorningWidget({ spec, workflowId }: GoodMorningWidgetProps) 
                       (see components/MorningBriefing → MeetingPreBriefPanel).
                       No per-event detail route exists; the dashboard
                       panel re-picks the same default meeting. */}
-                  <a
+                  <Link
                     href="/"
                     onClick={() =>
                       trackInteraction("open_prebrief_detail", {
@@ -455,7 +455,7 @@ export function GoodMorningWidget({ spec, workflowId }: GoodMorningWidgetProps) 
                     style={{ color: "var(--wp-gold, #eab308)" }}
                   >
                     Open full pre-brief →
-                  </a>
+                  </Link>
                 </div>
               )}
             </>
