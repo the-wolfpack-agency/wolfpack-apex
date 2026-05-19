@@ -474,6 +474,37 @@ export type InstinctEventType =
   // source grounding errors are uniformly trackable.
   // Metadata: { status, code, scope_missing }.
   | "assistant.porsche_class_lookup_failed"
+  // Meeting Pre-Brief synthesis (migration 142 + src/lib/insights/meeting-prep.ts).
+  // The first cross-source synthesis tool — fans out across 5+ sources in
+  // parallel, then makes a SINGLE Haiku call on cache miss. Cache key is
+  // (workspace_id, meeting_id, source_hash) so every teammate sees the
+  // same insight; source_hash bakes in CRM lastModified, last email
+  // received timestamp, and last brain edit so stale data invalidates
+  // implicitly. Learning loop: every click/expand on a talking point or
+  // source ref persists to instinct_meeting_prep_signals.
+  //   assistant.meeting_prep_executed       { meeting_id, workspace_id,
+  //       cache_status }
+  //   assistant.meeting_prep_cache_hit      { meeting_id, workspace_id,
+  //       source_hash, hit_count }
+  //   assistant.meeting_prep_cache_miss     { meeting_id, workspace_id,
+  //       source_hash, latency_ms, model_used, input_tokens,
+  //       output_tokens }
+  //   assistant.meeting_prep_synthesis_failed { meeting_id, workspace_id,
+  //       code, message }
+  //   assistant.meeting_prep_regenerated    { meeting_id, workspace_id,
+  //       source_hash, latency_ms, model_used, input_tokens,
+  //       output_tokens } — manager+ clicked the regenerate button.
+  //   assistant.meeting_prep_source_clicked { meeting_id, ref_type,
+  //       item_index }
+  //   system.meeting_prep_source_degraded   { source, error } — per
+  //       source-fetch failure so we see which integrations are slow.
+  | "assistant.meeting_prep_executed"
+  | "assistant.meeting_prep_cache_hit"
+  | "assistant.meeting_prep_cache_miss"
+  | "assistant.meeting_prep_synthesis_failed"
+  | "assistant.meeting_prep_regenerated"
+  | "assistant.meeting_prep_source_clicked"
+  | "system.meeting_prep_source_degraded"
   // OAuth lifecycle for connector credentials (migration 138 +
   // src/lib/assistant/connectors/oauth/). The orchestrator fires
   // these uniformly across providers (Salesforce, HubSpot, future

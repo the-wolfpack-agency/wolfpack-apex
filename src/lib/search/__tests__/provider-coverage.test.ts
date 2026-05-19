@@ -67,7 +67,11 @@ export const SEARCH_PROVIDER_EXEMPT_TOOLS: Record<string, string> = {
   "create-okr-form-tool.ts": "form trigger (mutation, not searchable)",
   "create-task-form-tool.ts": "form trigger (mutation, not searchable)",
   "dms-inventory-widget-tool.ts":
-    "widget over DMS inventory; AgenticQA-driven browser session, not a free-text index",
+    "specialized inventory widget with structured make/model/year/price filters; free-text DMS search lives in the dms provider (src/lib/search/providers/dms.ts)",
+  "meeting-prep.ts":
+    "synthesis tool — generates a per-meeting brief from cross-source data, not itself a searchable index",
+  "portal-link.ts":
+    "shared helper module (not a tool) — produces portal-link source refs for other tools",
   "email-thread-widget-tool.ts":
     "widget rendering one specific thread; email search lives in the emails provider",
   "filter-external-records-tool.ts":
@@ -139,6 +143,7 @@ describe("Universal Search provider coverage", () => {
       "calendar",
       "knowledge",
       "crm",
+      "dms",
     ]);
     for (const provider of SEARCH_PROVIDERS) {
       expect(SEARCH_TYPE_VALUES.has(provider.type)).toBe(true);

@@ -40,6 +40,7 @@ const SEARCH_TYPE_VALUES = [
   "calendar",
   "knowledge",
   "crm",
+  "dms",
 ] as const;
 
 const ParamSchema = z.object({
@@ -78,11 +79,14 @@ const SURFACE_TO_TYPE: Record<string, SearchType | "all"> = {
   crm: "crm",
   salesforce: "crm",
   hubspot: "crm",
+  dms: "dms",
+  inventory: "dms",
+  vehicles: "dms",
   everywhere: "all",
 };
 
 const INTENT_RE =
-  /^\s*(?:search(?:\s+for)?|look\s+up|find|show\s+me)\s+(.+?)(?:\s+in\s+(?:my\s+)?(messages|message|chats|chat|emails|email|calendar|knowledge|crm|salesforce|hubspot|everywhere))?\s*[?.!]?\s*$/i;
+  /^\s*(?:search(?:\s+for)?|look\s+up|find|show\s+me)\s+(.+?)(?:\s+in\s+(?:my\s+)?(messages|message|chats|chat|emails|email|calendar|knowledge|crm|salesforce|hubspot|dms|inventory|vehicles|everywhere))?\s*[?.!]?\s*$/i;
 
 /* ---------------------------------------------------------------------
  * CRM-shadow guard — narrowed for Universal Search v2
@@ -183,7 +187,8 @@ function summaryAnswer(query: string, body: SearchResponse): string {
     ` ${c.emails} email${c.emails === 1 ? "" : "s"},` +
     ` ${c.calendar} calendar event${c.calendar === 1 ? "" : "s"},` +
     ` ${c.knowledge} knowledge entr${c.knowledge === 1 ? "y" : "ies"},` +
-    ` ${c.crm} CRM record${c.crm === 1 ? "" : "s"}.`
+    ` ${c.crm} CRM record${c.crm === 1 ? "" : "s"},` +
+    ` ${c.dms} inventory match${c.dms === 1 ? "" : "es"}.`
   );
 }
 
@@ -197,6 +202,7 @@ function buildSources(body: SearchResponse): AssistantSourceRef[] {
     calendar: "meeting",
     knowledge: "knowledge",
     crm: "crm",
+    dms: "dms",
   };
   const out: AssistantSourceRef[] = [];
   const seen = new Set<string>();

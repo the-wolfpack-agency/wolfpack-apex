@@ -96,6 +96,12 @@ import "./calendar-widget-tool";
 import "./email-thread-widget-tool";
 import "./task-list-widget-tool";
 import "./good-morning-widget-tool";
+/* Meeting Pre-Brief — the first cross-source synthesis tool. Single
+ * Haiku call per (workspace, meeting, source_hash); shared across the
+ * org. Registered alongside the calendar/email/task widget tools — its
+ * intent regex is anchored ^/$ on "prep|brief … meeting" so it doesn't
+ * compete with the bare "calendar"/"inbox" verbs above. */
+import "./meeting-prep";
 /* DMS inventory widget — bridges to the AgenticQA browser-driver
  * server. Proves the "we drive any DMS web UI" pattern; first
  * vendor is wolfpack-auto (we own it). CDK / Tekion / Reynolds

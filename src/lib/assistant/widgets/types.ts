@@ -213,7 +213,7 @@ export interface DmsInventoryWidgetSpec {
  *  follows. The fields are kept structurally identical and the
  *  guardrail test asserts that. */
 export interface SearchResultsWidgetResult {
-  type: "chat" | "channel" | "email" | "calendar" | "knowledge" | "crm";
+  type: "chat" | "channel" | "email" | "calendar" | "knowledge" | "crm" | "dms";
   id: string;
   title: string;
   snippet: string;
@@ -318,6 +318,65 @@ export interface UploadToBrainWidgetSpec {
   allowedMimeTypes: readonly string[];
 }
 
+/** Meeting Pre-Brief widget — the first cross-source synthesis surface.
+ *  Shape mirrors the MeetingPrep type from src/lib/insights/meeting-prep-synthesize
+ *  so the widget can render the LLM-synthesized fields plus the cache
+ *  metadata the route returns. The full prep object lives at `data`;
+ *  the renderer reads it straight without re-fetching. */
+export interface MeetingPrepWidgetSourceRef {
+  type: string;
+  id: string;
+  label: string;
+  url?: string;
+}
+
+export interface MeetingPrepWidgetTalkingPoint {
+  point: string;
+  source_refs: MeetingPrepWidgetSourceRef[];
+}
+
+export interface MeetingPrepWidgetRiskFlag {
+  flag: string;
+  severity: "low" | "med" | "high";
+  source_refs: MeetingPrepWidgetSourceRef[];
+}
+
+export interface MeetingPrepWidgetAttendeeBrief {
+  email: string;
+  name?: string;
+  one_liner: string;
+  key_facts: string[];
+  links: MeetingPrepWidgetSourceRef[];
+}
+
+export interface MeetingPrepWidgetSpec {
+  kind: "meeting_prep";
+  /** Meeting Graph id — used by the regenerate handler to call the API
+   *  route with the same event. */
+  meetingId: string;
+  /** Header text: meeting subject. */
+  subject: string;
+  /** ISO start timestamp. */
+  start: string;
+  /** "hit" → shared-with-team pill; "miss" / "regenerated" → fresh pill. */
+  cacheStatus: "hit" | "miss" | "regenerated";
+  /** ISO timestamp of the underlying synthesis (or the cached row). */
+  generatedAt: string;
+  /** When true, the route returned `synthesis_unavailable` and the
+   *  widget renders the raw sources instead of the synthesized prep. */
+  synthesisUnavailable: boolean;
+  summary: string;
+  goal: string;
+  talking_points: MeetingPrepWidgetTalkingPoint[];
+  risk_flags: MeetingPrepWidgetRiskFlag[];
+  attendee_briefs: MeetingPrepWidgetAttendeeBrief[];
+  open_questions: string[];
+  /** Role on the viewer's account — gates the "Regenerate" button to
+   *  manager+. Computed server-side so the widget doesn't trust the
+   *  client to enforce. */
+  viewerCanRegenerate: boolean;
+}
+
 /** Discriminated union of every widget kind. Add new entries as the
  *  framework expands. */
 export type WidgetSpec =
@@ -330,4 +389,5 @@ export type WidgetSpec =
   | WeatherWidgetSpec
   | HeadlinesWidgetSpec
   | FxWidgetSpec
-  | UploadToBrainWidgetSpec;
+  | UploadToBrainWidgetSpec
+  | MeetingPrepWidgetSpec;

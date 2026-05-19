@@ -78,6 +78,21 @@ function matchDmsIntent(message: string): Params | null {
   if (!/\b(show|find|search|look\s+up|list|browse|any|got|have|inventory|stock|dms)\b/i.test(trimmed)) {
     return null;
   }
+  /* Universal-search shadow guard: bare "search <make>" / "find <make>" /
+   * "look up <make>" with NO additional vehicle signal (year, model,
+   * price, inventory keyword) should fall through to the universal
+   * `search` tool so it can fan out across chat/email/CRM/calendar/
+   * knowledge/DMS instead of being captured here. Porsche, Toyota etc.
+   * are valid topical searches when the user isn't asking about inventory. */
+  const universalSearchVerb = /\b(search|find|look\s+up)\b/i.test(trimmed);
+  const dealershipVerb = /\b(show|list|browse|any|got|have|inventory|stock|dms)\b/i.test(trimmed);
+  const hasExtraVehicleSignal = !!yearMatch
+    || MODEL_AFTER_MAKE_RE.test(trimmed)
+    || PRICE_RE.test(trimmed)
+    || inventoryKw;
+  if (universalSearchVerb && !dealershipVerb && !hasExtraVehicleSignal) {
+    return null;
+  }
 
   const params: Params = { limit: 8 };
   if (makeMatch) {

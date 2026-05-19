@@ -42,7 +42,8 @@ export type SearchType =
   | "email"
   | "calendar"
   | "knowledge"
-  | "crm";
+  | "crm"
+  | "dms";
 
 export interface SearchResult {
   type: SearchType;
@@ -69,6 +70,7 @@ export interface SearchResponseCounts {
   calendar: number;
   knowledge: number;
   crm: number;
+  dms: number;
   [key: string]: number;
 }
 
@@ -95,6 +97,7 @@ export const ALL_SEARCH_TYPES: ReadonlyArray<SearchType> = [
   "calendar",
   "knowledge",
   "crm",
+  "dms",
 ];
 export const DEFAULT_LIMIT = 20;
 export const MAX_LIMIT = 50;
@@ -177,6 +180,7 @@ export async function runSearch(
     calendar: 0,
     knowledge: 0,
     crm: 0,
+    dms: 0,
   };
 
   if (enabled.length === 0) {

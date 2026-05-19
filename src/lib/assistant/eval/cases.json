@@ -402,6 +402,18 @@
           "I don't have a confident answer"
         ]
       }
+    },
+    {
+      "id": "regression-2026-05-19-meeting-prep",
+      "category": "tool_dispatch",
+      "rationale": "Meeting-prep synthesis tool — 'prep for my next meeting' must route to the meeting_prep tool (NOT AI fallback). The tool fans out across 5+ sources and emits a single Haiku call on cache miss (ONE LLM call per workspace+meeting+source-hash). If a future change shadows the intent OR removes the tool from the registry, the answer drops to AI fallback and this case catches it.",
+      "question": "prep for my next meeting",
+      "expect": {
+        "source": "tool",
+        "answerNotContains": [
+          "I don't have a confident answer"
+        ]
+      }
     }
   ]
 }

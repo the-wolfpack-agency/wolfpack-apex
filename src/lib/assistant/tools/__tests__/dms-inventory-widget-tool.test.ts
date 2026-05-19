@@ -52,8 +52,33 @@ describe("dms_inventory intent matching", () => {
     "which meetings did wolfpack have on April 20, 2026?",
     "what meetings did we have in 2025",
     "do we have any meetings in 2026",
+    /* Regression 2026-05-19: bare "search <make>" / "find <make>" /
+     * "look up <make>" with NO extra vehicle signal must fall through
+     * to the universal `search` tool. Porsche is a make AND a client AND
+     * a topical search term — when phrased generically, fan out to chat/
+     * email/CRM/calendar/knowledge/DMS rather than only inventory. */
+    "search Porsche",
+    "search porsche",
+    "find Porsche",
+    "look up Porsche",
+    "find Toyota",
+    "find Honda",
   ])("'%s' does NOT match (left to other tools)", (q) => {
     expect(match(q)).toBeNull();
+  });
+
+  test.each([
+    /* These DO match — they carry an explicit vehicle signal beyond the
+     * make keyword (year, model, price, or inventory keyword), so the
+     * DMS tool's specialized handling is preferred over universal
+     * search's fan-out. */
+    "search Porsche 911",
+    "find 2022 Porsche",
+    "search Porsche inventory",
+    "find Porsche under 100k",
+    "show me Porsches",
+  ])("'%s' STILL matches (extra vehicle signal present)", (q) => {
+    expect(match(q)).not.toBeNull();
   });
 
   test("extracts make + model", () => {

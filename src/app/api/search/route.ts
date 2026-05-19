@@ -68,6 +68,9 @@ function parseTypes(raw: string | null): SearchType[] | undefined {
     crm: "crm",
     salesforce: "crm",
     hubspot: "crm",
+    dms: "dms",
+    inventory: "dms",
+    vehicles: "dms",
   };
   const out: SearchType[] = [];
   /* Hard cap on the number of comma-separated entries we'll even look

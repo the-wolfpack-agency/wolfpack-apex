@@ -24,6 +24,7 @@ import { WeatherWidget } from "@/components/widgets/WeatherWidget";
 import { HeadlinesWidget } from "@/components/widgets/HeadlinesWidget";
 import { FxWidget } from "@/components/widgets/FxWidget";
 import { UploadToBrainWidget } from "@/components/widgets/UploadToBrainWidget";
+import { MeetingPrepWidget } from "@/components/widgets/MeetingPrepWidget";
 
 export interface ChatWidgetProps {
   spec: WidgetSpec;
@@ -56,6 +57,8 @@ export function ChatWidget({ spec, workflowId }: ChatWidgetProps) {
       return <FxWidget spec={spec} workflowId={workflowId} />;
     case "upload_to_brain":
       return <UploadToBrainWidget spec={spec} workflowId={workflowId} />;
+    case "meeting_prep":
+      return <MeetingPrepWidget spec={spec} workflowId={workflowId} />;
     default:
       /* Forward-compat: silently render nothing for unknown kinds.
        * The text answer above the widget still surfaces, so the

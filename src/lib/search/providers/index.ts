@@ -17,6 +17,7 @@ import { emailsProvider } from "./emails";
 import { calendarProvider } from "./calendar";
 import { knowledgeProvider } from "./knowledge";
 import { crmProvider } from "./crm";
+import { dmsProvider } from "./dms";
 import type { SearchProvider } from "./types";
 
 export const SEARCH_PROVIDERS: SearchProvider[] = [
@@ -26,6 +27,7 @@ export const SEARCH_PROVIDERS: SearchProvider[] = [
   channelsProvider,
   knowledgeProvider,
   crmProvider,
+  dmsProvider,
 ];
 
 export type { SearchProvider, RunSearchContext } from "./types";
