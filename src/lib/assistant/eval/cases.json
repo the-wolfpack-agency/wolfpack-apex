@@ -414,6 +414,18 @@
           "I don't have a confident answer"
         ]
       }
+    },
+    {
+      "id": "regression-2026-05-19-feedback",
+      "category": "tool_dispatch",
+      "rationale": "Slash-style /feedback command must route to the feedback tool (NOT AI fallback). The tool writes to instinct_user_feedback (migration 143), fires assistant.feedback_recorded analytics, and returns the FeedbackWidget so the user sees their note echoed back. If a future change shadows the intent OR removes the tool from the registry, the answer drops to AI fallback and this case catches it.",
+      "question": "/feedback this is great",
+      "expect": {
+        "source": "tool",
+        "answerNotContains": [
+          "I don't have a confident answer"
+        ]
+      }
     }
   ]
 }

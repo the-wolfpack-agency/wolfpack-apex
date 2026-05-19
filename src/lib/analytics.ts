@@ -610,6 +610,23 @@ export type InstinctEventType =
   // re-prompt API is added. Metadata: { widget_kind, query, types,
   // workflow_id? }.
   | "assistant.search_refilter_requested"
+  // User-feedback capture (`/feedback`) — slash command + dedicated
+  // widget the team-onboarding session (2026-05) uses to solicit
+  // honest reactions without first wiring Slack/Linear.
+  //   assistant.feedback_recorded       { feedback_id, surface,
+  //                                       message_length, workflow_id? }
+  //     — fires from recordUserFeedback() on every successful insert
+  //       (both the slash-command path and the widget-textarea path).
+  //   assistant.feedback_widget_opened  { workflow_id? }
+  //     — fires when FeedbackWidget mounts, so the funnel sees
+  //       opened vs. submitted regardless of where the entry came from.
+  //   assistant.feedback_submitted_from_widget  { workflow_id? }
+  //     — distinguishes the "user typed /feedback (bare)" -> widget ->
+  //       textarea -> submit path from the direct slash-command path
+  //       so the dashboard can rank discovery vs. one-shot use.
+  | "assistant.feedback_recorded"
+  | "assistant.feedback_widget_opened"
+  | "assistant.feedback_submitted_from_widget"
   // SharePoint connector lifecycle events (migration 139).
   // source_added/removed: admin UI added or soft-deleted a folder source.
   // sync_started/finished: every sync run is bracketed by these two.

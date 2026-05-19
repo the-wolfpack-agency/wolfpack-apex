@@ -176,6 +176,10 @@ describe("required-tools coverage — every shipped tool is advertised somewhere
     "create_feature_form",
     "create_okr_form",
     "dms_inventory_widget",
+    /* Feedback slash command (2026-05-19). Discoverable via the
+     *  "Help us improve" starter category — non-dev teammates can drop
+     *  honest reactions without first wiring Slack/Linear. */
+    "feedback",
   ];
 
   test("each required tool is claimed by at least one advertised chip", () => {

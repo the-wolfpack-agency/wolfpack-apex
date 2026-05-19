@@ -347,6 +347,26 @@ function buildStarterCategories(): StarterCategory[] {
       ],
     },
     {
+      /* Help-us-improve category — surfaces the /feedback slash
+         command so non-dev teammates have a one-click way to file
+         honest reactions during the team-onboarding session. Always
+         renders (no requires); writes go through the assistant tool
+         + /api/feedback (capability: assistant.use). Kept name-free
+         per the chip-text convention. */
+      title: "Help us improve",
+      emoji: "🗣",
+      prompts: [
+        {
+          text: "share feedback about Instinct",
+          description: "Open a feedback note. The team sees every reply.",
+        },
+        {
+          text: "/feedback the calendar widget is broken",
+          description: "Slash-command form: type /feedback followed by your note to file it immediately.",
+        },
+      ],
+    },
+    {
       /* Dealership / inventory category — only useful for workspaces
          that have a DMS adapter configured (wolfpack-auto first; CDK /
          Tekion / Reynolds plug in server-side). Chip stays visible

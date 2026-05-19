@@ -381,6 +381,41 @@ export interface MeetingPrepWidgetSpec {
   viewerCanRegenerate: boolean;
 }
 
+/** Feedback widget — surfaced by the `feedback` assistant tool. Two
+ *  shapes share one component so a single widget kind covers both paths
+ *  the team-onboarding flow needs:
+ *    1. Slash command with body (`/feedback the calendar widget is
+ *       broken`) → the tool already wrote the row; widget renders the
+ *       "thanks, recorded as #<short>" confirmation echoing the
+ *       captured text.
+ *    2. Bare slash command (`/feedback`) → the tool returns the widget
+ *       with `mode: "compose"` so the user fills in a textarea and the
+ *       widget POSTs to /api/feedback. On 200 it swaps to the recorded
+ *       state in place. */
+export interface FeedbackWidgetSpec {
+  kind: "feedback";
+  /** "recorded" → the slash command carried a body that's already
+   *  written; widget renders confirmation only. "compose" → the user
+   *  typed a bare `/feedback`, so the widget renders a textarea +
+   *  submit and POSTs to /api/feedback on click. */
+  mode: "recorded" | "compose";
+  /** UUID of the inserted row (mode=recorded only). The widget shows
+   *  the first 8 characters as a human-readable confirmation token. */
+  feedbackId?: string;
+  /** Echo of what the user said (mode=recorded only). Keeps the
+   *  thank-you self-evident so the user can verify capture without
+   *  scrolling back up. */
+  message?: string;
+  /** Optional surface label included in the recorded row + analytics
+   *  ("/assistant", "/sites", "/brain"). Best-effort; absent in tests
+   *  and server-to-server callers. */
+  surface?: string;
+  /** Endpoint the compose-mode widget POSTs to. Self-contained so the
+   *  widget never hard-codes routes — keeps the spec testable in
+   *  isolation. */
+  submitUrl: string;
+}
+
 /** Discriminated union of every widget kind. Add new entries as the
  *  framework expands. */
 export type WidgetSpec =
@@ -394,4 +429,5 @@ export type WidgetSpec =
   | HeadlinesWidgetSpec
   | FxWidgetSpec
   | UploadToBrainWidgetSpec
-  | MeetingPrepWidgetSpec;
+  | MeetingPrepWidgetSpec
+  | FeedbackWidgetSpec;

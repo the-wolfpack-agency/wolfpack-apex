@@ -130,6 +130,14 @@ import "./fx";
  * tools above. */
 import "./upload-to-brain";
 
+/* Feedback tool — the team-onboarding `/feedback <message>` slash
+ * command. Writes to instinct_user_feedback (migration 143) and
+ * returns the FeedbackWidget for the thank-you / compose surface.
+ * Registered BEFORE the universal `search` tool so the slash-command
+ * verb isn't shadowed; the intent regex anchors on the "feedback"
+ * verb stem so it doesn't compete with other tools. */
+import "./feedback";
+
 /* Universal Search tool — returns IDENTICAL results to the /search
    page by delegating to lib/search/runSearch (which fans into the CRM
    connector via its `crm` provider). Registered AFTER the CRM tools
