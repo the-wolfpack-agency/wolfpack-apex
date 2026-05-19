@@ -8,10 +8,12 @@
  *     assistant returns a low-confidence answer, so the user has
  *     somewhere to go next instead of a dead-end).
  *
- * Why these three: per the internal rollout plan, every teammate gets
- * a starting kit of 3 prompts that work day-one for their role. More
- * than three overwhelms non-tech users; fewer doesn't show enough
- * surface area. Three is the sweet spot.
+ * Why this size: every teammate gets a starting kit of 3–5 prompts
+ * that work day-one for their role. More than five overwhelms
+ * non-tech users; fewer doesn't show enough surface area. The first
+ * three are the hero set (briefing + calendar + one role-specific);
+ * the remainder are useful extras that exercise the broader tool
+ * library (CRM, financials, goals, knowledge, brain upload, etc.).
  *
  * Roles map 1:1 with the role values produced by /api/auth/whoami —
  * see ROLE_HIERARCHY in tools/dispatcher.ts for the canonical list.
@@ -52,6 +54,20 @@ const GENERIC_KIT: WelcomePrompt[] = [
     label: "inbox",
     description: "Recent unread + flagged emails.",
   },
+  {
+    /* Free zero-token capability so a brand-new user with no
+     * integrations still gets a useful answer from chip #4. Routes
+     * to the public weather tool. */
+    text: "weather",
+    description: "Current conditions and a short forecast for your default location.",
+  },
+  {
+    /* Always-available zero-auth chip. Routes to the headlines tool
+     * (BBC public RSS) so demos for an unconnected workspace always
+     * have a working fifth chip. */
+    text: "top news",
+    description: "A short public-news digest, no integrations required.",
+  },
 ];
 
 const ROLE_KITS: Record<string, WelcomePrompt[]> = {
@@ -61,12 +77,20 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "Morning panel: today's schedule + flagged emails + action items.",
     },
     {
-      text: "top 3 deals",
-      description: "Highest-value open opportunities from the CRM.",
+      text: "deals over $50k closing this month",
+      description: "High-value pipeline closing this month, from the CRM.",
     },
     {
       text: "what is on my calendar this week",
       description: "Week-at-a-glance for the schedule.",
+    },
+    {
+      text: "what's our MRR",
+      description: "Current monthly recurring revenue from the financials store.",
+    },
+    {
+      text: "what are our OKRs",
+      description: "Active objectives and key-results from the goals tracker.",
     },
   ],
   cto: [
@@ -88,6 +112,14 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       label: "inbox",
       description: "Recent unread + flagged emails.",
     },
+    {
+      text: "what's our MRR",
+      description: "Current monthly recurring revenue from the financials store.",
+    },
+    {
+      text: "upload to brain",
+      description: "Drop a file into your Brain so the Assistant can cite it later.",
+    },
   ],
   vp: [
     {
@@ -99,8 +131,16 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "Quick availability check before booking a call.",
     },
     {
-      text: "find emails from <client>",
-      description: "Pull recent thread before the next conversation.",
+      text: "find emails from Jorge",
+      description: "Pull a recent thread before the next conversation. Swap in any sender.",
+    },
+    {
+      text: "deals over $50k closing this month",
+      description: "High-value pipeline closing this month, from the CRM.",
+    },
+    {
+      text: "tell me about our company",
+      description: "One-line org summary pulled from the knowledge store.",
     },
   ],
   pm: [
@@ -113,8 +153,16 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "Today's meetings, in order.",
     },
     {
-      text: "create task to <thing> by friday",
-      description: "Add a new task without leaving the chat.",
+      text: "create task",
+      description: "Open the new-task form without leaving the chat.",
+    },
+    {
+      text: "what are our OKRs",
+      description: "Active objectives and key-results from the goals tracker.",
+    },
+    {
+      text: "tasks",
+      description: "Inline list of your open tasks.",
     },
   ],
   designer: [
@@ -127,8 +175,16 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "Today's meetings, in order.",
     },
     {
-      text: "find emails from <client>",
-      description: "Pull recent client thread (replace <client>).",
+      text: "find emails from Jorge",
+      description: "Pull a recent thread by sender; swap in your prospect or teammate.",
+    },
+    {
+      text: "upload to brain",
+      description: "Drop a brief, deck, or reference into your Brain.",
+    },
+    {
+      text: "search Q2 planning",
+      description: "Universal search across chats, emails, calendar, knowledge, and CRM.",
     },
   ],
   dev: [
@@ -149,6 +205,14 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       text: "failed CI in wolfpack-instinct",
       description: "Recent failed Actions runs to triage.",
     },
+    {
+      text: "upload to brain",
+      description: "Drop a doc into your Brain so the Assistant can cite it later.",
+    },
+    {
+      text: "open issues in wolfpack-instinct",
+      description: "Currently open GitHub issues, newest first.",
+    },
   ],
   sales: [
     {
@@ -160,8 +224,16 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "Highest-value open opportunities.",
     },
     {
-      text: "find emails from <client>",
-      description: "Pull recent thread before a call.",
+      text: "find emails from Jorge",
+      description: "Pull a recent thread by sender. Swap in your prospect or teammate.",
+    },
+    {
+      text: "deals over $50k closing this month",
+      description: "High-value pipeline with a close date this month.",
+    },
+    {
+      text: "find the contact for Grimace",
+      description: "Pull a CRM contact by name (replace with your prospect).",
     },
   ],
   ops: [
@@ -174,8 +246,16 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "Today's meetings, in order.",
     },
     {
-      text: "create task to <thing> by friday",
-      description: "Add a task without leaving the chat.",
+      text: "create task",
+      description: "Open the new-task form without leaving the chat.",
+    },
+    {
+      text: "tell me about our company",
+      description: "One-line org summary from the knowledge store.",
+    },
+    {
+      text: "top news",
+      description: "A quick public-news digest.",
     },
   ],
   hr: [
@@ -184,22 +264,30 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "Today's prep at a glance.",
     },
     {
-      text: "who is <teammate>",
-      description: "Look up a teammate's role + email.",
+      text: "who is Grimace",
+      description: "Roster + CRM-fallback lookup for a named person. Swap in any name.",
     },
     {
       text: "what is on my calendar today",
       description: "Today's meetings, in order.",
     },
+    {
+      text: "what are our OKRs",
+      description: "Active objectives and key-results from the goals tracker.",
+    },
+    {
+      text: "upload to brain",
+      description: "Drop an HR policy or doc into your Brain so the Assistant can cite it.",
+    },
   ],
 };
 
 /**
- * Look up the 3-prompt starter kit for a given role.
+ * Look up the starter kit for a given role.
  * Case-insensitive. Unknown roles fall back to GENERIC_KIT.
  *
- * Always returns exactly 3 prompts so the UI never has to handle a
- * variable-length empty/short array.
+ * Returns 3–5 prompts (the kit length is fixed per role at this
+ * module; callers can slice if they want a shorter chip strip).
  */
 export function welcomePromptsForRole(role: string | undefined | null): WelcomePrompt[] {
   if (!role) return GENERIC_KIT;

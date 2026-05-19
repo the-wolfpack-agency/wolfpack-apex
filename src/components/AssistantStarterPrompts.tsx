@@ -55,6 +55,54 @@ interface IntegrationStatus {
 function buildStarterCategories(): StarterCategory[] {
   return [
     {
+      /* Always-on demo category — backed by free public APIs (no auth
+         required). Lives at the top of the empty state so a brand-new
+         user with zero integrations connected still has something
+         useful to click in the first 30 seconds. Routes to the
+         weather / headlines / fx / search / upload-to-brain tools
+         that were added 2026-05-19. */
+      title: "Try right now",
+      emoji: "👋",
+      prompts: [
+        {
+          text: "weather",
+          description: "Current conditions and a short forecast for your default location.",
+        },
+        {
+          text: "what's the weather in Boston",
+          description: "Forecast for a specific city. Replace the city name as needed.",
+        },
+        {
+          text: "top news",
+          description: "A short public-news digest from a free RSS feed.",
+        },
+        {
+          text: "headlines",
+          description: "Same public-news digest under its other common name.",
+        },
+        {
+          text: "exchange rate from USD to EUR",
+          description: "FX rate between two currencies; works for any 3-letter ISO pair.",
+        },
+        {
+          text: "fx rate from GBP to JPY",
+          description: "Alternative FX phrasing the same tool understands.",
+        },
+        {
+          text: "upload to brain",
+          description: "Drop a file into your Brain so the Assistant can cite it later.",
+        },
+        {
+          text: "search Q2 planning",
+          description: "Universal search across chats, emails, calendar, knowledge, and CRM.",
+        },
+        {
+          text: "look up anything about Acme",
+          description: "Bare-search phrasing that fans into every connected surface in parallel.",
+        },
+      ],
+    },
+    {
       /* Widgets first — they're the "interface inside the chat"
          pattern and the most-visited capability on mobile. Lead
          with `briefing` because it's the densest panel (greeting +
@@ -100,7 +148,11 @@ function buildStarterCategories(): StarterCategory[] {
         },
         {
           text: "schedule a meeting",
-          description: "Book a calendar meeting with attendees, time, and optional Teams link.",
+          description: "Check your free/busy calendar before booking.",
+        },
+        {
+          text: "create a calendar event",
+          description: "Open the new-event form with attendees, time, and optional Teams link.",
         },
         {
           text: "create feature",
@@ -135,12 +187,36 @@ function buildStarterCategories(): StarterCategory[] {
           description: "Percentage of your closed opportunities marked Won over the last quarter.",
         },
         {
-          text: "<account>'s opportunities",
+          text: "Acme's opportunities",
           description: "Every open and recent opportunity tied to a named account.",
         },
         {
           text: "average deal size",
           description: "Mean closed-won deal value across your recent pipeline.",
+        },
+        {
+          text: "find the contact for Grimace",
+          description: "Look up a CRM contact by name (replace Grimace with your prospect).",
+        },
+        {
+          text: "search for the account called Acme",
+          description: "Look up an account in the CRM by name.",
+        },
+        {
+          text: "create a contact named Jane Doe at jane@example.com",
+          description: "Open a CRM contact form pre-filled with name + email.",
+        },
+        {
+          text: "create a deal for Acme",
+          description: "Open a CRM deal form so you can capture amount, stage, and close date.",
+        },
+        {
+          text: "move opportunity Acme Renewal to Closed Won",
+          description: "Update an opportunity's stage. Confirms before writing.",
+        },
+        {
+          text: "total pipeline value",
+          description: "Sum of open opportunity amounts across the pipeline.",
         },
       ],
       requires: { any: ["salesforce", "hubspot"] },
@@ -154,12 +230,20 @@ function buildStarterCategories(): StarterCategory[] {
           description: "Open pull requests across the repos you have access to.",
         },
         {
-          text: "failed CI in <repo>",
+          text: "failed CI in wolfpack-instinct",
           description: "Most recent failing GitHub Actions runs for the chosen repository.",
         },
         {
-          text: "open issues in <repo>",
+          text: "open issues in wolfpack-instinct",
           description: "Currently open issues in the chosen repository, newest first.",
+        },
+        {
+          text: "what PRs are open in wolfpack-instinct",
+          description: "Open pull requests scoped to a single repo.",
+        },
+        {
+          text: "recent workflow runs in wolfpack-instinct",
+          description: "Latest GitHub Actions runs (pass + fail) for the chosen repository.",
         },
       ],
       requires: { any: ["github"] },
@@ -177,16 +261,24 @@ function buildStarterCategories(): StarterCategory[] {
           description: "Checks your calendar for conflicts at the given day and time.",
         },
         {
-          text: "find emails from <person>",
+          text: "find emails from Jorge",
           description: "Search your inbox for messages sent by a named person.",
         },
         {
-          text: "find emails to <person>",
+          text: "find emails to Jane",
           description: "Search your sent items for messages you addressed to a named person.",
         },
         {
           text: "any meetings tomorrow",
           description: "Lists tomorrow's scheduled meetings and their attendees.",
+        },
+        {
+          text: "am I free Wednesday afternoon",
+          description: "Block-of-day availability check before booking a call.",
+        },
+        {
+          text: "find emails from Acme about pricing",
+          description: "Two-slot mail search — sender plus topic.",
         },
       ],
       requires: { any: ["microsoft"] },
@@ -200,16 +292,80 @@ function buildStarterCategories(): StarterCategory[] {
           description: "Pulls the team's current objectives and key results from the knowledge base.",
         },
         {
-          text: "what's our revenue this quarter?",
-          description: "Quarter-to-date revenue from the financial knowledge store.",
+          text: "show me my goals",
+          description: "Your active goals and progress from the goals tracker.",
         },
         {
-          text: "what do we know about <account>",
+          text: "tell me about our company",
+          description: "One-line org summary pulled from the knowledge store.",
+        },
+        {
+          text: "what do we know about Acme",
           description: "Everything the assistant has indexed about a named account: notes, deals, contacts.",
         },
         {
-          text: "who is <teammate>",
-          description: "Role, team, and recent activity for a named teammate from the org directory.",
+          text: "who is Grimace",
+          description: "Roster + CRM-fallback lookup for a named person.",
+        },
+        {
+          text: "tell me about our Q2 plan",
+          description: "Org-facts retrieval against any indexed subject.",
+        },
+        {
+          text: "remember that Acme's tier is enterprise",
+          description: "Save a team fact. The Assistant confirms before persisting.",
+        },
+        {
+          text: "remember that Q2 OKR's owner is Jane Doe",
+          description: "Save an attribute-style fact. The Assistant confirms before writing.",
+        },
+      ],
+    },
+    {
+      /* Financials — restricted by capability (CTO/CEO) at dispatch
+         time, not at chip render time. Anyone can click; the
+         dispatcher returns a polite capability error for non-execs. */
+      title: "Financials",
+      emoji: "💵",
+      prompts: [
+        {
+          text: "what's our MRR",
+          description: "Current monthly recurring revenue.",
+        },
+        {
+          text: "what's our revenue this quarter",
+          description: "Quarter-to-date revenue from the financials store.",
+        },
+        {
+          text: "what's our burn",
+          description: "Current monthly burn rate.",
+        },
+        {
+          text: "what's our runway",
+          description: "Months of cash runway at current burn.",
+        },
+      ],
+    },
+    {
+      /* Dealership / inventory category — only useful for workspaces
+         that have a DMS adapter configured (wolfpack-auto first; CDK /
+         Tekion / Reynolds plug in server-side). Chip stays visible
+         everywhere; the tool itself returns "no inventory data" if
+         the adapter isn't wired. */
+      title: "Inventory",
+      emoji: "🚗",
+      prompts: [
+        {
+          text: "show me Honda inventory",
+          description: "Open the DMS inventory widget filtered to a make.",
+        },
+        {
+          text: "Toyota Camry inventory under $30k",
+          description: "Filter by make, model, and price ceiling.",
+        },
+        {
+          text: "2024 Ford F-150 stock",
+          description: "Year + make + model search against the dealership DMS.",
         },
       ],
     },
@@ -217,6 +373,13 @@ function buildStarterCategories(): StarterCategory[] {
 }
 
 const STARTER_CATEGORIES: StarterCategory[] = buildStarterCategories();
+
+/** Test seam — surfaces the same data the component renders so coverage
+ *  suites can assert every chip routes to a tool. Mirrors the internal
+ *  buildStarterCategories() result; not used at runtime. */
+export function buildStarterCategoriesForTest(): StarterCategory[] {
+  return buildStarterCategories();
+}
 
 export function filterCategoriesByStatus(
   cats: StarterCategory[],

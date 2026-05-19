@@ -17,10 +17,10 @@ const ParamSchema = z.object({});
 type Params = z.infer<typeof ParamSchema>;
 
 const PATTERNS: RegExp[] = [
-  /\bwhat\s+are\s+(?:our|the)\s+okrs?\b/i,
-  /\b(?:show|tell)\s+me\s+(?:our|the)\s+(?:goals|okrs|objectives|targets)\b/i,
+  /\bwhat\s+are\s+(?:our|the|my)\s+okrs?\b/i,
+  /\b(?:show|tell)\s+me\s+(?:our|the|my)\s+(?:goals|okrs|objectives|targets)\b/i,
   /\bwhat'?s\s+(?:our|the)\s+north[\s-]?star\b/i,
-  /\bhow\s+are\s+we\s+doing\s+on\s+(?:our|the)\s+(?:goals|okrs|objectives)\b/i,
+  /\bhow\s+are\s+we\s+doing\s+on\s+(?:our|the|my)\s+(?:goals|okrs|objectives)\b/i,
   /\b(?:current|active)\s+(?:goals|okrs|objectives)\b/i,
   /\bnorth[\s-]?star\s+metric\b/i,
 ];

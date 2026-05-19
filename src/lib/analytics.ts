@@ -2028,7 +2028,25 @@ export type InstinctEventType =
   | "bulletin.note_updated"
   | "bulletin.note_deleted"
   | "bulletin.snapshot_saved"
-  | "bulletin.snapshot_viewed";
+  | "bulletin.snapshot_viewed"
+  // Portal (Salesforce widget proof-of-pattern) — full-page surface
+  // reachable from the assistant. Each route fires one of these so the
+  // learning loop sees which CRM views drive engagement vs the chat-only
+  // path.
+  //
+  //   portal.salesforce_dashboard_viewed         { connector }
+  //   portal.salesforce_list_viewed              { type, query_length,
+  //                                                  result_count, connector }
+  //   portal.salesforce_record_viewed            { type, connector }
+  //   portal.salesforce_record_updated           { type, field, connector }
+  //   portal.salesforce_record_created           { type, connector }
+  //   portal.salesforce_quick_search             { query_length }
+  | "portal.salesforce_dashboard_viewed"
+  | "portal.salesforce_list_viewed"
+  | "portal.salesforce_record_viewed"
+  | "portal.salesforce_record_updated"
+  | "portal.salesforce_record_created"
+  | "portal.salesforce_quick_search";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

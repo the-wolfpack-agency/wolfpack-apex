@@ -748,6 +748,7 @@ export async function chat(
         tokensUsed: 0,
         conversationId: convId,
         messageId: msgId,
+        sources: exec.sources,
       };
     }
     /* Confirmation phrase but no pending row — treat as ordinary text
@@ -1776,7 +1777,7 @@ async function executePendingAction(
   userId: string,
   userRole: string,
   workspaceId?: string,
-): Promise<{ answer: string }> {
+): Promise<{ answer: string; sources?: AssistantSourceRef[] }> {
   if (row.tool_name === "save_team_fact") {
     const p = row.params as { subject?: string; attribute?: string; value?: string };
     if (!p.subject || !p.attribute || !p.value) {
@@ -1800,26 +1801,48 @@ async function executePendingAction(
   }
   if (row.tool_name === "create_external_record") {
     const mod = await import("@/lib/assistant/tools/create-external-record-tool");
+    const portalMod = await import("@/lib/assistant/tools/portal-link");
     const result = await mod.executeCreateExternalRecord(
       row.params as unknown as Parameters<typeof mod.executeCreateExternalRecord>[0],
       { userId, userRole, workspaceId },
     );
     if (result.ok) {
+      /* Salesforce success → append a "Open in Wolfpack portal" link so
+         the user lands on the new record without retyping its id. */
+      const objectType =
+        (row.params as { objectType?: string } | undefined)?.objectType ?? "contact";
+      const portal = portalMod.maybePortalSource({
+        connectorName: result.connector,
+        objectType,
+        id: result.id,
+      });
+      const portalLink = portal ? ` [Open in Wolfpack portal](${portal.url})` : "";
       return {
-        answer: `✓ Created in ${result.connector}. New record id: \`${result.id}\`. Use \`look up contact id ${result.id}\` (or the matching object type) to drill in.`,
+        answer: `✓ Created in ${result.connector}. New record id: \`${result.id}\`.${portalLink}`,
+        sources: portal ? [portal] : undefined,
       };
     }
     return { answer: `I tried to create the record but the write was refused (${result.reason}). Nothing was saved.` };
   }
   if (row.tool_name === "update_external_record") {
     const mod = await import("@/lib/assistant/tools/update-external-record-tool");
+    const portalMod = await import("@/lib/assistant/tools/portal-link");
     const result = await mod.executeUpdateExternalRecord(
       row.params as unknown as Parameters<typeof mod.executeUpdateExternalRecord>[0],
       { userId, userRole, workspaceId },
     );
     if (result.ok) {
+      const objectType =
+        (row.params as { objectType?: string } | undefined)?.objectType ?? "contact";
+      const portal = portalMod.maybePortalSource({
+        connectorName: result.connector,
+        objectType,
+        id: result.id,
+      });
+      const portalLink = portal ? ` [Open in Wolfpack portal](${portal.url})` : "";
       return {
-        answer: `✓ Updated record \`${result.id}\` in ${result.connector}.`,
+        answer: `✓ Updated record \`${result.id}\` in ${result.connector}.${portalLink}`,
+        sources: portal ? [portal] : undefined,
       };
     }
     if (result.reason === "ambiguous") {

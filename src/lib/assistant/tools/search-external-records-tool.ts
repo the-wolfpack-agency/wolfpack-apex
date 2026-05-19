@@ -36,6 +36,8 @@ import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
 import type { ToolDef, ToolResult } from "./types";
 import { withSourceFooter } from "./source-footer";
+import { maybePortalSource } from "./portal-link";
+import type { AssistantSourceRef } from "@/lib/assistant";
 
 const OBJECT_TYPES = ["contact", "deal", "company", "account"] as const;
 type ObjectType = (typeof OBJECT_TYPES)[number];
@@ -306,6 +308,28 @@ export const searchExternalRecordsTool: ToolDef<Params, SearchExternalRecordsDat
       query_length: params.query.length,
       match_count: records.length,
     });
+    /* Salesforce matches get "Open in Wolfpack portal" source chips so
+       users can drop straight into the portal drill-in. Top 5 matches
+       at most (matches the rendered list); we'd flood the chip strip
+       otherwise. Non-Salesforce connectors get an empty source list
+       (portal is Salesforce-only in the MVP). */
+    const portalSources: AssistantSourceRef[] = [];
+    if (resolvedConnectorName === "salesforce") {
+      for (const r of records.slice(0, 5)) {
+        const id = typeof r.Id === "string" ? r.Id : typeof r.id === "string" ? r.id : "";
+        const source = maybePortalSource({
+          connectorName: resolvedConnectorName,
+          objectType: params.objectType,
+          id,
+        });
+        if (source) {
+          /* Title the chip with the record name (when present) so the
+             user can tell which one they're clicking into. */
+          const name = typeof r.Name === "string" ? r.Name : null;
+          portalSources.push(name ? { ...source, title: `${name} — open in portal` } : source);
+        }
+      }
+    }
     return {
       ok: true,
       data: {
@@ -319,6 +343,7 @@ export const searchExternalRecordsTool: ToolDef<Params, SearchExternalRecordsDat
         renderAnswer(params.query, params.objectType, records),
         resolvedConnectorName,
       ),
+      sources: portalSources.length > 0 ? portalSources : undefined,
     };
   },
 };

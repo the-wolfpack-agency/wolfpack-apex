@@ -25,6 +25,7 @@ import type { Connector } from "@/lib/assistant/connectors";
 import { registerTool } from "./registry";
 import type { ToolDef, ToolResult } from "./types";
 import { withSourceFooter } from "./source-footer";
+import { maybePortalSource } from "./portal-link";
 
 const ParamSchema = z.object({
   objectType: z.enum([
@@ -155,6 +156,16 @@ export const getExternalRecordTool: ToolDef<Params, ExternalRecordData> = {
       };
     }
     const record = (result.data ?? {}) as Record<string, unknown>;
+    /* Salesforce records also get a "Open in Wolfpack portal" source
+       chip — the existing Salesforce instance-URL link surfaces in the
+       record's body, the portal link gives users a one-click drop into
+       the same view inside Instinct. Non-Salesforce connectors get
+       null (no portal yet). */
+    const portalSource = maybePortalSource({
+      connectorName: resolvedConnectorName,
+      objectType: params.objectType,
+      id: params.id,
+    });
     return {
       ok: true,
       data: {
@@ -167,6 +178,7 @@ export const getExternalRecordTool: ToolDef<Params, ExternalRecordData> = {
         formatRecordAnswer(params.objectType, params.id, record),
         resolvedConnectorName,
       ),
+      sources: portalSource ? [portalSource] : undefined,
     };
   },
 };
