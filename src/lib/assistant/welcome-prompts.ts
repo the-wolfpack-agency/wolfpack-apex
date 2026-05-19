@@ -153,7 +153,7 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "Today's meetings, in order.",
     },
     {
-      text: "create task",
+      text: "create task to send the agenda",
       description: "Open the new-task form without leaving the chat.",
     },
     {
@@ -246,7 +246,7 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "Today's meetings, in order.",
     },
     {
-      text: "create task",
+      text: "create task to send the agenda",
       description: "Open the new-task form without leaving the chat.",
     },
     {
