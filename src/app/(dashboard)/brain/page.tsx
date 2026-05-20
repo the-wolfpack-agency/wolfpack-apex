@@ -329,16 +329,17 @@ export default function BrainPage() {
             e.preventDefault();
             runQuery();
           }}
-          style={{ display: "flex", gap: "0.5rem" }}
+          className="flex flex-col sm:flex-row gap-2"
         >
           <input
             type="text"
             value={queryText}
             onChange={(e) => setQueryText(e.target.value)}
             placeholder="e.g. How do we handle a dealer escalation?"
+            className="flex-1 min-w-0"
             style={{
-              flex: 1,
               padding: "0.6rem 0.9rem",
+              fontSize: "16px",
               borderRadius: "6px",
               border: "1px solid var(--wp-border)",
               background: "var(--wp-input-bg, var(--wp-card))",
@@ -348,6 +349,7 @@ export default function BrainPage() {
           <button
             type="submit"
             disabled={querying || !queryText.trim()}
+            className="w-full sm:w-auto"
             style={{
               padding: "0.6rem 1.2rem",
               background: "var(--wp-gold)",

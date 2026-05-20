@@ -564,14 +564,17 @@ function NavCustomizerModal({
           })}
         </ul>
         <div
-          className="px-5 py-3 border-t flex justify-end gap-2"
+          className="px-5 py-3 border-t flex flex-col-reverse sm:flex-row sm:justify-end gap-2"
           style={{ borderColor: "var(--wp-dark-border)" }}
         >
+          {/* Mobile: stack reversed so Save is on top + both buttons
+             are full-width, clear of the floating assistant chip
+             anchored at the bottom-right of the viewport. */}
           <button
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="px-3 py-1.5 rounded text-xs"
+            className="w-full sm:w-auto px-3 py-2 sm:py-1.5 rounded text-sm sm:text-xs"
             style={{
               background: "var(--wp-dark-surface2)",
               color: "var(--wp-text)",
@@ -584,7 +587,7 @@ function NavCustomizerModal({
             onClick={handleSave}
             disabled={busy}
             data-testid="nav-customizer-save"
-            className="px-3 py-1.5 rounded text-xs font-medium"
+            className="w-full sm:w-auto px-3 py-2 sm:py-1.5 rounded text-sm sm:text-xs font-medium"
             style={{
               background: "var(--wp-gold)",
               color: "var(--wp-dark)",
