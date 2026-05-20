@@ -69,17 +69,25 @@ describe("validateHiddenHrefs", () => {
 });
 
 describe("KNOWN_NAV_HREFS", () => {
-  test("matches the NAV_ITEMS array in (dashboard)/layout.tsx", () => {
-    /* If a developer adds a nav entry to the layout but forgets to
-       update KNOWN_NAV_HREFS, this test fails loudly so the new item
-       can't silently bypass the customize-nav validator. */
-    const layout = readFileSync(
-      join(__dirname, "../../app/(dashboard)/layout.tsx"),
+  test("matches the NAV_ITEMS array in src/lib/dashboard-nav.ts", () => {
+    /* If a developer adds a nav entry to dashboard-nav.ts but forgets
+       to update KNOWN_NAV_HREFS, this test fails loudly so the new
+       item can't silently bypass the customize-nav validator. The
+       source moved from layout.tsx to dashboard-nav.ts; the regex
+       follows. */
+    const navSource = readFileSync(
+      join(__dirname, "../dashboard-nav.ts"),
       "utf-8",
     );
-    /* Match { label: "...", href: "...", ... } occurrences in NAV_ITEMS. */
+    /* Strip line-comments before matching so commented-out nav rows
+       (e.g. the `/emails` placeholder waiting on inbox work) don't
+       trip the validator. */
+    const stripped = navSource
+      .split("\n")
+      .map((line) => (line.trim().startsWith("//") ? "" : line))
+      .join("\n");
     const hrefs = Array.from(
-      layout.matchAll(/\{\s*label:\s*"[^"]+"\s*,\s*href:\s*"([^"]+)"/g),
+      stripped.matchAll(/\{\s*label:\s*"[^"]+"\s*,\s*href:\s*"([^"]+)"/g),
     ).map((m) => m[1]);
     expect(hrefs.length).toBeGreaterThan(10);
     for (const h of hrefs) {

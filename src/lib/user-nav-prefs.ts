@@ -17,6 +17,10 @@ export interface UserNavPrefs {
   userId: string;
   hiddenHrefs: string[];
   updatedAt: string;
+  /** True when no row exists in instinct_user_nav_prefs yet. The
+   *  layout uses this to apply role-based default-hidden lists
+   *  (e.g. minimal nav for VP/CCO/Ops) on the user's first visit. */
+  isFirstTime: boolean;
 }
 
 interface NavPrefsRow {
@@ -52,6 +56,7 @@ export const KNOWN_NAV_HREFS: readonly string[] = [
   "/bulletin",
   "/docs",
   "/reports",
+  "/programs/budgets",
   "/clients",
   "/sites",
   "/hr",
@@ -100,6 +105,7 @@ function rowToPrefs(row: NavPrefsRow): UserNavPrefs {
     userId: row.user_id,
     hiddenHrefs: Array.isArray(row.hidden_hrefs) ? row.hidden_hrefs : [],
     updatedAt: row.updated_at,
+    isFirstTime: false,
   };
 }
 
@@ -109,6 +115,7 @@ export async function getNavPrefs(userId: string): Promise<UserNavPrefs> {
       userId: "",
       hiddenHrefs: [],
       updatedAt: new Date(0).toISOString(),
+      isFirstTime: true,
     };
   }
   const result = await safeQuery<NavPrefsRow>(
@@ -116,12 +123,14 @@ export async function getNavPrefs(userId: string): Promise<UserNavPrefs> {
     [userId],
   );
   if (result.rows[0]) return rowToPrefs(result.rows[0]);
-  /* No row yet = default visibility. Return an unsaved object so
-     callers don't have to special-case null. */
+  /* No row yet — callers (the layout) apply role-based default-hidden
+     lists when isFirstTime is true (e.g. minimal nav for VP/CCO/Ops),
+     then persist on first save so this flag stays accurate. */
   return {
     userId,
     hiddenHrefs: [],
     updatedAt: new Date(0).toISOString(),
+    isFirstTime: true,
   };
 }
 

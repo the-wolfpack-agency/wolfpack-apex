@@ -22,7 +22,7 @@ import WelcomeTooltip from "@/components/WelcomeTooltip";
 import CommandPalette from "@/components/ui/CommandPalette";
 import { useAmbientRefresh } from "@/lib/hooks/useAmbientRefresh";
 import { useEmailArrivalPoll } from "@/lib/hooks/useEmailArrivalPoll";
-import { NAV_ITEMS, PINNED_NAV_HREFS } from "@/lib/dashboard-nav";
+import { NAV_ITEMS, PINNED_NAV_HREFS, defaultHiddenForRole } from "@/lib/dashboard-nav";
 
 interface User {
   id: string;
@@ -117,14 +117,35 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   // Load per-user nav prefs once we have a token. Fire-and-forget; on
   // any failure we fall through with the default (all visible) so a
   // bad fetch doesn't block dashboard render.
+  //
+  // First-time seeding: when the server reports isFirstTime=true (no
+  // row in instinct_user_nav_prefs yet) AND the user's role has a
+  // default-hidden list (VP/CCO/Ops land on minimum nav), apply those
+  // defaults locally AND persist them via PUT so subsequent loads
+  // come back with the user's chosen starting point.
   useEffect(() => {
     if (!user) return;
     void fetchWithRefresh("/api/user-nav-prefs")
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { hiddenHrefs?: string[] } | null) => {
-        if (data && Array.isArray(data.hiddenHrefs)) {
-          setHiddenHrefs(data.hiddenHrefs);
+      .then((data: { hiddenHrefs?: string[]; isFirstTime?: boolean } | null) => {
+        if (!data) return;
+        const saved = Array.isArray(data.hiddenHrefs) ? data.hiddenHrefs : [];
+        if (data.isFirstTime) {
+          const roleDefaults = defaultHiddenForRole(user.role);
+          if (roleDefaults.length > 0) {
+            setHiddenHrefs(roleDefaults);
+            /* Persist so the customizer modal sees the user's actual
+               starting point and so the next page load doesn't
+               re-seed (isFirstTime flips to false after a PUT). */
+            void fetchWithRefresh("/api/user-nav-prefs", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ hiddenHrefs: roleDefaults }),
+            }).catch(() => undefined);
+            return;
+          }
         }
+        setHiddenHrefs(saved);
       })
       .catch(() => undefined);
   }, [user]);

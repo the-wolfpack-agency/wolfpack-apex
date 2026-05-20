@@ -58,3 +58,51 @@ export const NAV_ITEMS: NavItem[] = [
  * Recovery surface (Dashboard) + Settings (where the customizer lives).
  */
 export const PINNED_NAV_HREFS = ["/", "/settings"];
+
+/**
+ * Per-role default `hiddenHrefs` applied the FIRST time a user opens
+ * the dashboard (before they've customized anything). Lets less-
+ * technical roles (VP, CCO, Ops) land on a minimal nav and opt-in
+ * to extras via the customizer modal — instead of being overwhelmed
+ * by the full 26-item list.
+ *
+ * After the first save, the user's stored prefs are the source of
+ * truth and this map is no longer consulted.
+ *
+ * Roles NOT listed here keep the current behavior: full nav visible
+ * on first sign-in.
+ */
+const MINIMAL_HIDDEN_FOR_NON_TECH: string[] = [
+  /* Operational / engineering surfaces — hidden for the
+     simplified-nav roles. They can opt-in via Customize. */
+  "/knowledge",
+  "/meetings/feeds",
+  "/goals",
+  "/principles",
+  "/journal",
+  "/features",
+  "/discussions",
+  "/bulletin",
+  "/docs",
+  "/reports",
+  "/programs/budgets",
+  "/clients",
+  "/financials",
+  "/analytics",
+  "/tools",
+  "/qr",
+  "/automations",
+  "/support",
+];
+
+export const DEFAULT_HIDDEN_BY_ROLE: Record<string, readonly string[]> = {
+  vp: MINIMAL_HIDDEN_FOR_NON_TECH,
+  cco: MINIMAL_HIDDEN_FOR_NON_TECH,
+  ops: MINIMAL_HIDDEN_FOR_NON_TECH,
+};
+
+/** Returns the role's default hidden hrefs (empty array if no default). */
+export function defaultHiddenForRole(role: string | undefined): string[] {
+  if (!role) return [];
+  return [...(DEFAULT_HIDDEN_BY_ROLE[role.toLowerCase()] ?? [])];
+}

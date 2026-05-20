@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     hiddenHrefs: prefs.hiddenHrefs,
     updatedAt: prefs.updatedAt,
+    isFirstTime: prefs.isFirstTime,
   });
 }
 

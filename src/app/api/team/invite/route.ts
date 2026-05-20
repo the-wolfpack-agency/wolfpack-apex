@@ -33,7 +33,7 @@ interface InviteResult {
   emailReason?: string;
 }
 
-const VALID_ROLES = ["ceo", "cto", "evp", "dev", "sales", "ops", "hr"];
+const VALID_ROLES = ["ceo", "cto", "evp", "vp", "cco", "dev", "sales", "ops", "hr"];
 
 /**
  * Optional `mailer` injection seam — tests can pass a stub via the

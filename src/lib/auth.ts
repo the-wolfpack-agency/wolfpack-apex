@@ -17,7 +17,7 @@ import { query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { signToken, verifyToken as cryptoVerifyToken } from "@/lib/crypto/sign";
 
-export type TeamRole = "ceo" | "cto" | "evp" | "dev" | "sales" | "ops" | "hr";
+export type TeamRole = "ceo" | "cto" | "evp" | "vp" | "cco" | "dev" | "sales" | "ops" | "hr";
 
 export interface TeamMember {
   id: string;
@@ -192,7 +192,7 @@ export function getUserFromRequest(authHeader: string | null): TeamMember | null
 /**
  * Role hierarchy check.
  */
-const ROLE_LEVEL: Record<TeamRole, number> = { ceo: 5, cto: 5, evp: 5, hr: 4, dev: 3, ops: 2, sales: 1 };
+const ROLE_LEVEL: Record<TeamRole, number> = { ceo: 5, cto: 5, evp: 5, vp: 5, cco: 5, hr: 4, dev: 3, ops: 2, sales: 1 };
 
 export function hasRole(userRole: TeamRole, requiredRole: TeamRole): boolean {
   return ROLE_LEVEL[userRole] >= ROLE_LEVEL[requiredRole];

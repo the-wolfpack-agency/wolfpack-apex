@@ -26,7 +26,7 @@
 import type { Capability } from "./capabilities";
 import { CAPABILITIES } from "./capabilities";
 
-export type TeamRole = "ceo" | "cto" | "evp" | "dev" | "sales" | "ops" | "hr" | "designer";
+export type TeamRole = "ceo" | "cto" | "evp" | "vp" | "cco" | "dev" | "sales" | "ops" | "hr" | "designer";
 
 const ALL_CAPS: readonly Capability[] = Object.keys(CAPABILITIES) as Capability[];
 
@@ -238,6 +238,13 @@ const ROLE_MAP: Record<TeamRole, readonly Capability[]> = {
   cto: CTO,
   ceo: CEO,
   evp: EVP,
+  /* VP and CCO mirror EVP per CTO 2026-05-20 ask (added for Jorge =
+     VP, Meghan = CCO). Same capability set; if either later needs a
+     narrower slice we'll fork a dedicated array. Keeping a single
+     source of truth for now avoids drift between the senior-leader
+     roles. */
+  vp: EVP,
+  cco: EVP,
   hr: HR,
   sales: SALES,
   ops: OPS,

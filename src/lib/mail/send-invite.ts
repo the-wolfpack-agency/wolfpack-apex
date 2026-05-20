@@ -60,6 +60,8 @@ const ROLE_DISPLAY: Record<string, string> = {
   ceo: "Chief Executive Officer",
   cto: "Chief Technology Officer",
   evp: "Executive Vice President",
+  vp: "Vice President",
+  cco: "Chief Creative Officer",
   hr: "HR",
   dev: "Developer",
   sales: "Sales",
