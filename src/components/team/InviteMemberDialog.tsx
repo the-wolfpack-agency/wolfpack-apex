@@ -19,7 +19,9 @@ const ROLES: Array<{ value: string; label: string }> = [
   { value: "dev", label: "Developer" },
   { value: "sales", label: "Sales" },
   { value: "hr", label: "HR" },
+  { value: "vp", label: "VP" },
   { value: "evp", label: "EVP" },
+  { value: "cco", label: "CCO" },
   { value: "cto", label: "CTO" },
   { value: "ceo", label: "CEO" },
 ];
