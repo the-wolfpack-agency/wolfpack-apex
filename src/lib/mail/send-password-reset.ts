@@ -6,6 +6,8 @@
  * back to the requester for hand-delivery — same UX shipped for the
  * invite flow).
  */
+import { sendViaGraph, isGraphMailConfigured } from "@/lib/mail/send-via-graph";
+
 export interface ResetEmailArgs {
   to: string;
   name: string;
@@ -15,7 +17,15 @@ export interface ResetEmailArgs {
 
 export interface ResetEmailResult {
   delivered: boolean;
-  reason?: "no_api_key" | "test_env" | "provider_error" | "ok";
+  reason?:
+    | "no_api_key"
+    | "test_env"
+    | "provider_error"
+    | "ok"
+    | "no_mail_from"
+    | "no_app_token"
+    | "scope_missing";
+  provider?: "graph" | "resend";
 }
 
 const DEFAULT_FROM = "Wolfpack Instinct <invites@wolfpack.agency>";
@@ -75,22 +85,44 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * Provider priority matches send-invite:
+ *   1. Microsoft Graph (`sendViaGraph`) — free via M365 when configured.
+ *   2. Resend when RESEND_API_KEY is set.
+ *   3. Skip and let the API return dev_link for hand-delivery.
+ */
 export async function defaultSendResetEmail(
   args: ResetEmailArgs,
 ): Promise<ResetEmailResult> {
   if (process.env.NODE_ENV === "test") {
     return { delivered: false, reason: "test_env" };
   }
+  const { subject, text, html } = buildResetEmailBody(args);
+
+  if (isGraphMailConfigured()) {
+    const graph = await sendViaGraph({ to: args.to, subject, text, html });
+    if (graph.delivered) {
+      return { delivered: true, reason: "ok", provider: "graph" };
+    }
+    console.warn(
+      "[send-password-reset] graph send failed:",
+      graph.reason,
+      graph.detail ?? "",
+    );
+    if (!process.env.RESEND_API_KEY) {
+      return { delivered: false, reason: graph.reason, provider: "graph" };
+    }
+  }
+
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.warn(
-      "[send-password-reset] RESEND_API_KEY not set — reset email skipped for",
+      "[send-password-reset] no mail provider configured — reset email skipped for",
       args.to.replace(/@.*/, "@..."),
     );
     return { delivered: false, reason: "no_api_key" };
   }
   const from = process.env.INSTINCT_INVITE_FROM ?? DEFAULT_FROM;
-  const { subject, text, html } = buildResetEmailBody(args);
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -105,15 +137,15 @@ export async function defaultSendResetEmail(
       console.warn(
         `[send-password-reset] resend ${res.status}: ${body.slice(0, 200)}`,
       );
-      return { delivered: false, reason: "provider_error" };
+      return { delivered: false, reason: "provider_error", provider: "resend" };
     }
-    return { delivered: true, reason: "ok" };
+    return { delivered: true, reason: "ok", provider: "resend" };
   } catch (err) {
     console.warn(
       "[send-password-reset] network error:",
       (err as Error).message,
     );
-    return { delivered: false, reason: "provider_error" };
+    return { delivered: false, reason: "provider_error", provider: "resend" };
   }
 }
 

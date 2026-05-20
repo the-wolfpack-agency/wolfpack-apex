@@ -14,6 +14,8 @@
  * NEVER throws. The invite-row insert has already happened by the time
  * this is called — losing the email must not roll that back.
  */
+import { sendViaGraph, isGraphMailConfigured } from "@/lib/mail/send-via-graph";
+
 export interface InviteEmailArgs {
   to: string;
   inviterName: string;
@@ -24,7 +26,17 @@ export interface InviteEmailArgs {
 
 export interface InviteEmailResult {
   delivered: boolean;
-  reason?: "no_api_key" | "test_env" | "provider_error" | "ok";
+  reason?:
+    | "no_api_key"
+    | "test_env"
+    | "provider_error"
+    | "ok"
+    | "no_mail_from"
+    | "no_app_token"
+    | "scope_missing";
+  /** Which provider actually delivered (or attempted). Lets the UI
+   *  show "sent via M365" vs "sent via Resend" for debugging. */
+  provider?: "graph" | "resend";
 }
 
 const DEFAULT_FROM = "Wolfpack Instinct <invites@wolfpack.agency>";
@@ -83,7 +95,16 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Default Resend-backed sender. Tests inject their own.
+ * Default sender. Provider priority:
+ *   1. Microsoft Graph (`sendViaGraph`) when MS_MAIL_FROM is set AND
+ *      app-only token + Mail.Send permission resolve. Free (M365) and
+ *      sends from a real wolfpack mailbox — no DNS dance.
+ *   2. Resend when RESEND_API_KEY is set. Existing path, requires
+ *      DNS verification on the sending domain.
+ *   3. Skip + report no_api_key so the API route can return dev_link
+ *      for hand-delivery (the May 8 / May 20 fallback flow).
+ *
+ * Tests inject their own override.
  */
 export async function defaultSendInviteEmail(
   args: InviteEmailArgs,
@@ -91,16 +112,35 @@ export async function defaultSendInviteEmail(
   if (process.env.NODE_ENV === "test") {
     return { delivered: false, reason: "test_env" };
   }
+  const { subject, text, html } = buildInviteEmailBody(args);
+
+  if (isGraphMailConfigured()) {
+    const graph = await sendViaGraph({ to: args.to, subject, text, html });
+    if (graph.delivered) {
+      return { delivered: true, reason: "ok", provider: "graph" };
+    }
+    // Graph attempted but failed — log once and fall through to Resend
+    // if available, otherwise return the Graph-specific reason so the
+    // API surface knows which gap to surface.
+    console.warn(
+      "[send-invite] graph send failed:",
+      graph.reason,
+      graph.detail ?? "",
+    );
+    if (!process.env.RESEND_API_KEY) {
+      return { delivered: false, reason: graph.reason, provider: "graph" };
+    }
+  }
+
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.warn(
-      "[send-invite] RESEND_API_KEY not set — invite email skipped for",
+      "[send-invite] no mail provider configured (MS_MAIL_FROM and RESEND_API_KEY both unset) — invite email skipped for",
       args.to.replace(/@.*/, "@..."),
     );
     return { delivered: false, reason: "no_api_key" };
   }
   const from = process.env.INSTINCT_INVITE_FROM ?? DEFAULT_FROM;
-  const { subject, text, html } = buildInviteEmailBody(args);
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -115,15 +155,15 @@ export async function defaultSendInviteEmail(
       console.warn(
         `[send-invite] resend ${res.status}: ${body.slice(0, 200)}`,
       );
-      return { delivered: false, reason: "provider_error" };
+      return { delivered: false, reason: "provider_error", provider: "resend" };
     }
-    return { delivered: true, reason: "ok" };
+    return { delivered: true, reason: "ok", provider: "resend" };
   } catch (err) {
     console.warn(
       "[send-invite] network error:",
       (err as Error).message,
     );
-    return { delivered: false, reason: "provider_error" };
+    return { delivered: false, reason: "provider_error", provider: "resend" };
   }
 }
 

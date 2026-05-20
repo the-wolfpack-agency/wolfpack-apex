@@ -1016,6 +1016,7 @@ export type InstinctEventType =
   | "system.capability_granted_override"
   | "system.capability_revoked_override"
   | "system.role_changed"
+  | "system.team_member_renamed"
   // Microsoft 365 Mail (Mail.Send + Mail.ReadWrite for inbox surface)
   | "system.ms_mail_sent"
   | "system.ms_mail_reply_sent"
