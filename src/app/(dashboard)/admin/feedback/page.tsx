@@ -54,6 +54,10 @@ export default function FeedbackPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<StatusFilter>("open");
   const [busyId, setBusyId] = useState<string | null>(null);
+  /* Which row is currently composing a resolution note. Only one note
+     textarea is open at a time so the page stays focused. */
+  const [composingNoteFor, setComposingNoteFor] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,24 +84,41 @@ export default function FeedbackPage() {
     void load();
   }, [load]);
 
-  async function toggleResolved(row: FeedbackRow) {
+  async function toggleResolved(row: FeedbackRow, note?: string) {
     const action = row.resolved_at ? "reopen" : "resolve";
     setBusyId(row.id);
     try {
       const res = await fetchWithRefresh(`/api/admin/feedback/${row.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({
+          action,
+          /* note is only sent on resolve; reopen never carries one (the
+             API ignores it anyway, but no point sending). */
+          ...(action === "resolve" && note && note.trim() ? { note: note.trim() } : {}),
+        }),
       });
       if (!res.ok) {
         const b = (await res.json().catch(() => ({}))) as { error?: string };
         setError(b.error || `Could not ${action} (HTTP ${res.status})`);
         return;
       }
+      setComposingNoteFor(null);
+      setNoteDraft("");
       await load();
     } finally {
       setBusyId(null);
     }
+  }
+
+  function startComposing(rowId: string) {
+    setComposingNoteFor(rowId);
+    setNoteDraft("");
+  }
+
+  function cancelComposing() {
+    setComposingNoteFor(null);
+    setNoteDraft("");
   }
 
   return (
@@ -253,26 +274,122 @@ export default function FeedbackPage() {
                   {r.resolution_note && ` · ${r.resolution_note}`}
                 </div>
               )}
-              <div style={{ marginTop: "0.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
-                <div style={{ fontSize: "0.7rem", color: "var(--wp-text-muted, #6b7280)" }}>#{r.id.slice(0, 8)}</div>
-                <button
-                  type="button"
-                  data-testid={`admin-feedback-toggle-${r.id}`}
-                  onClick={() => void toggleResolved(r)}
-                  disabled={busyId === r.id}
-                  style={{
-                    padding: "0.35rem 0.85rem",
-                    borderRadius: "6px",
-                    fontSize: "0.8rem",
-                    cursor: busyId === r.id ? "not-allowed" : "pointer",
-                    background: isResolved ? "var(--wp-dark-surface2, #1a1a1a)" : "var(--wp-gold, #f1c233)",
-                    color: isResolved ? "var(--wp-text-dim, #aaa)" : "var(--wp-dark, #111)",
-                    border: `1px solid ${isResolved ? "var(--wp-dark-border, #333)" : "var(--wp-gold, #f1c233)"}`,
-                    fontWeight: 500,
-                  }}
+              {composingNoteFor === r.id && !isResolved && (
+                <div
+                  data-testid={`admin-feedback-note-form-${r.id}`}
+                  style={{ marginTop: "0.6rem" }}
                 >
-                  {busyId === r.id ? "…" : isResolved ? "Reopen" : "Mark resolved"}
-                </button>
+                  <textarea
+                    value={noteDraft}
+                    onChange={(e) => setNoteDraft(e.target.value)}
+                    placeholder="What did you do to address this? (optional, but helpful for the team)"
+                    data-testid={`admin-feedback-note-input-${r.id}`}
+                    rows={3}
+                    maxLength={1000}
+                    autoFocus
+                    style={{
+                      width: "100%",
+                      padding: "0.5rem 0.75rem",
+                      fontSize: "0.85rem",
+                      background: "var(--wp-dark-surface2, #1a1a1a)",
+                      color: "var(--wp-text, #eee)",
+                      border: "1px solid var(--wp-dark-border, #333)",
+                      borderRadius: "6px",
+                      resize: "vertical",
+                      fontFamily: "inherit",
+                    }}
+                  />
+                  <div
+                    style={{
+                      marginTop: "0.4rem",
+                      display: "flex",
+                      gap: "0.4rem",
+                      justifyContent: "flex-end",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span style={{ fontSize: "0.7rem", color: "var(--wp-text-muted, #6b7280)", marginRight: "auto" }}>
+                      {noteDraft.length}/1000
+                    </span>
+                    <button
+                      type="button"
+                      onClick={cancelComposing}
+                      data-testid={`admin-feedback-note-cancel-${r.id}`}
+                      style={{
+                        padding: "0.3rem 0.75rem",
+                        borderRadius: "6px",
+                        fontSize: "0.75rem",
+                        background: "transparent",
+                        color: "var(--wp-text-dim, #aaa)",
+                        border: "1px solid var(--wp-dark-border, #333)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void toggleResolved(r, noteDraft)}
+                      disabled={busyId === r.id}
+                      data-testid={`admin-feedback-note-submit-${r.id}`}
+                      style={{
+                        padding: "0.3rem 0.85rem",
+                        borderRadius: "6px",
+                        fontSize: "0.75rem",
+                        fontWeight: 500,
+                        background: "var(--wp-gold, #f1c233)",
+                        color: "var(--wp-dark, #111)",
+                        border: "1px solid var(--wp-gold, #f1c233)",
+                        cursor: busyId === r.id ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {busyId === r.id ? "…" : "Resolve with note"}
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div style={{ marginTop: "0.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem", flexWrap: "wrap" }}>
+                <div style={{ fontSize: "0.7rem", color: "var(--wp-text-muted, #6b7280)" }}>#{r.id.slice(0, 8)}</div>
+                <div style={{ display: "flex", gap: "0.4rem" }}>
+                  {!isResolved && composingNoteFor !== r.id && (
+                    <button
+                      type="button"
+                      onClick={() => startComposing(r.id)}
+                      data-testid={`admin-feedback-add-note-${r.id}`}
+                      style={{
+                        padding: "0.35rem 0.85rem",
+                        borderRadius: "6px",
+                        fontSize: "0.8rem",
+                        cursor: "pointer",
+                        background: "var(--wp-dark-surface2, #1a1a1a)",
+                        color: "var(--wp-text-dim, #aaa)",
+                        border: "1px solid var(--wp-dark-border, #333)",
+                        fontWeight: 500,
+                      }}
+                    >
+                      Comment + resolve
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    data-testid={`admin-feedback-toggle-${r.id}`}
+                    onClick={() => void toggleResolved(r)}
+                    disabled={busyId === r.id || composingNoteFor === r.id}
+                    style={{
+                      padding: "0.35rem 0.85rem",
+                      borderRadius: "6px",
+                      fontSize: "0.8rem",
+                      cursor: busyId === r.id || composingNoteFor === r.id ? "not-allowed" : "pointer",
+                      background: isResolved ? "var(--wp-dark-surface2, #1a1a1a)" : "var(--wp-gold, #f1c233)",
+                      color: isResolved ? "var(--wp-text-dim, #aaa)" : "var(--wp-dark, #111)",
+                      border: `1px solid ${isResolved ? "var(--wp-dark-border, #333)" : "var(--wp-gold, #f1c233)"}`,
+                      fontWeight: 500,
+                      opacity: composingNoteFor === r.id ? 0.5 : 1,
+                    }}
+                  >
+                    {busyId === r.id ? "…" : isResolved ? "Reopen" : "Mark resolved"}
+                  </button>
+                </div>
               </div>
             </li>
           );

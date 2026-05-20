@@ -30,14 +30,45 @@ import type {
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
-/* The filename pattern we search for. Kept loose enough that
-   "Wolfpack 2026 Job Codes.xlsx" and "Wolfpack_2026_Job Codes.xlsx"
+/* Source-discovery hierarchy (most reliable first):
+ *   1. JOB_CODES_SHARE_URL — full SharePoint URL of the workbook. We
+ *      decode it via Graph's /shares/{id}/driveItem endpoint, which
+ *      works cleanly with the app-only Sites.Read.All Application
+ *      permission. THIS IS THE PRODUCTION PATH on 2026-05-20 after
+ *      /search/query app-only returned HTTP 401 for our tenant.
+ *   2. Cache hint (source_drive_id + source_item_id from a previous
+ *      successful refresh). Skips discovery entirely.
+ *   3. JOB_CODES_SEARCH_QUERY filename search via /search/query.
+ *      Last resort — many tenants reject app-only /search/query.
+ */
+export const JOB_CODES_SHARE_URL = process.env.JOB_CODES_SHARE_URL ?? "";
+
+/* The filename pattern we search for (fallback only). Kept loose enough
+   that "Wolfpack 2026 Job Codes.xlsx" and "Wolfpack_2026_Job Codes.xlsx"
    both match Graph search (which is keyword-based, not exact). */
 export const JOB_CODES_FILE_QUERY = process.env.JOB_CODES_SEARCH_QUERY
   ?? "Wolfpack Job Codes filetype:xlsx";
 
 /** Sheet name to read when the workbook has one. Fallback: first sheet. */
 export const JOB_CODES_PREFERRED_SHEET = process.env.JOB_CODES_SHEET_NAME ?? "Job Codes";
+
+/**
+ * Encode a SharePoint URL for the Microsoft Graph /shares endpoint.
+ * Per Microsoft docs: base64-encode the URL, trim trailing '=', replace
+ * '/' with '_' and '+' with '-', then prepend "u!".
+ * Exported for unit tests.
+ */
+export function encodeShareUrl(url: string): string {
+  const b64 = Buffer.from(url, "utf8").toString("base64");
+  const urlSafe = b64.replace(/=+$/, "").replace(/\//g, "_").replace(/\+/g, "-");
+  return `u!${urlSafe}`;
+}
+
+interface GraphShareDriveItemResponse {
+  id?: string;
+  webUrl?: string;
+  parentReference?: { driveId?: string };
+}
 
 interface GraphSearchResponse {
   value?: Array<{
@@ -251,6 +282,43 @@ export async function fetchJobCodesFromSharePoint(
   if (opts.hint) {
     driveId = opts.hint.driveId;
     itemId = opts.hint.itemId;
+  } else if (JOB_CODES_SHARE_URL) {
+    /* Production path: decode the configured SharePoint URL via Graph's
+       /shares endpoint. Works with app-only Sites.Read.All — unlike
+       /search/query which our tenant rejects (HTTP 401) for app-only
+       auth even with the same scope. */
+    const encoded = encodeShareUrl(JOB_CODES_SHARE_URL);
+    const shareRes = await graphGet<GraphShareDriveItemResponse>(
+      `shares/${encodeURIComponent(encoded)}/driveItem`,
+      token,
+    );
+    if (!shareRes.ok) {
+      /* 404 from /shares means the URL is wrong or the app can't see it
+         — surface as source_file_not_found so the page shows a clear
+         "check JOB_CODES_SHARE_URL" rather than a generic Graph error. */
+      if (shareRes.error.code === "graph_unavailable" && shareRes.error.detail.startsWith("HTTP 404")) {
+        return {
+          ok: false,
+          error: {
+            code: "source_file_not_found",
+            detail: `JOB_CODES_SHARE_URL "${JOB_CODES_SHARE_URL}" did not resolve to a SharePoint item (HTTP 404)`,
+          },
+        };
+      }
+      return shareRes;
+    }
+    if (!shareRes.value.id || !shareRes.value.parentReference?.driveId) {
+      return {
+        ok: false,
+        error: {
+          code: "source_file_not_found",
+          detail: "share URL resolved but driveItem is missing driveId/id",
+        },
+      };
+    }
+    driveId = shareRes.value.parentReference.driveId;
+    itemId = shareRes.value.id;
+    webUrl = shareRes.value.webUrl ?? JOB_CODES_SHARE_URL;
   } else {
     const search = await graphSearch<GraphSearchResponse>(JOB_CODES_FILE_QUERY, token);
     if (!search.ok) return search;

@@ -436,6 +436,34 @@ function NewTaskModal({
   const [listId, setListId] = useState(writableLists[0]?.msListId ?? "");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  /* No lists in cache yet → the modal is unusable. This was the 2026-
+     05-20 Safari bug: the empty <select> rendered as a blank box and
+     the user couldn't tell why. Now we surface the cause + give a one-
+     click Sync action so the modal can become usable without leaving. */
+  const noListsAvailable = writableLists.length === 0;
+
+  async function handleSyncLists() {
+    setSyncing(true);
+    setError(null);
+    try {
+      const res = await fetchWithRefresh("/api/tasks/sync", {
+        method: "POST",
+        headers: jsonHeaders(),
+      });
+      if (!res.ok) {
+        const b = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(b.error || `Sync failed (HTTP ${res.status}).`);
+        return;
+      }
+      /* Trigger a parent reload so `lists` repopulates; closing+reopening
+         the modal is the simplest signal we can send the parent here. */
+      onCreated();
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   async function handleCreate() {
     if (!title.trim() || !listId) return;
@@ -473,16 +501,55 @@ function NewTaskModal({
           className="w-full px-3 py-2 rounded-md text-sm border mb-3"
           style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
         />
-        <select
-          value={listId}
-          onChange={(e) => setListId(e.target.value)}
-          className="w-full px-3 py-2 rounded-md text-sm border mb-4"
-          style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
-        >
-          {writableLists.map((l) => (
-            <option key={l.id} value={l.msListId}>{l.displayName}</option>
-          ))}
-        </select>
+        {noListsAvailable ? (
+          <div
+            data-testid="new-task-no-lists"
+            className="rounded-md px-3 py-3 mb-4 text-xs"
+            style={{
+              background: "rgba(241,194,51,0.08)",
+              border: "1px solid var(--wp-gold, #f1c233)",
+              color: "var(--wp-text-dim, #aaa)",
+            }}
+          >
+            <p style={{ margin: 0, marginBottom: "0.5rem" }}>
+              No task lists in your cache yet. Sync from Microsoft To Do
+              first so we know where to file this task.
+            </p>
+            <button
+              type="button"
+              data-testid="new-task-sync"
+              onClick={() => void handleSyncLists()}
+              disabled={syncing}
+              className="px-3 py-1.5 rounded text-xs font-medium"
+              style={{
+                background: syncing ? "var(--wp-dark-surface2, #1a1a1a)" : "var(--wp-gold, #f1c233)",
+                color: syncing ? "var(--wp-text-muted, #6b7280)" : "var(--wp-dark, #111)",
+                border: "none",
+                cursor: syncing ? "not-allowed" : "pointer",
+              }}
+            >
+              {syncing ? "Syncing…" : "Sync lists now"}
+            </button>
+          </div>
+        ) : (
+          <select
+            data-testid="new-task-list-select"
+            value={listId}
+            onChange={(e) => setListId(e.target.value)}
+            className="w-full px-3 py-2 rounded-md text-sm border mb-4"
+            style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
+          >
+            {/* Explicit placeholder option so Safari renders something
+                instead of a blank box when no value matches an option
+                (e.g. stale listId after lists changed). */}
+            <option value="" disabled>
+              Choose a list…
+            </option>
+            {writableLists.map((l) => (
+              <option key={l.id} value={l.msListId}>{l.displayName}</option>
+            ))}
+          </select>
+        )}
         {error && (
           <p
             data-testid="new-task-error"
@@ -503,8 +570,13 @@ function NewTaskModal({
           <button
             onClick={handleCreate}
             disabled={creating || !title.trim() || !listId}
+            data-testid="new-task-create"
             className="flex-1 px-3 py-2 rounded-md text-sm font-medium"
-            style={{ background: "var(--wp-gold)", color: "var(--wp-dark)" }}
+            style={{
+              background: !title.trim() || !listId ? "var(--wp-dark-surface2)" : "var(--wp-gold)",
+              color: !title.trim() || !listId ? "var(--wp-text-muted, #6b7280)" : "var(--wp-dark)",
+              cursor: creating || !title.trim() || !listId ? "not-allowed" : "pointer",
+            }}
           >
             {creating ? "Creating…" : "Create"}
           </button>

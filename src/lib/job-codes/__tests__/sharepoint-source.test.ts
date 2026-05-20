@@ -12,6 +12,7 @@
 import {
   parseUsedRange,
   fetchJobCodesFromSharePoint,
+  encodeShareUrl,
 } from "@/lib/job-codes/sharepoint-source";
 
 jest.mock("@/lib/microsoft-graph", () => ({
@@ -248,6 +249,84 @@ describe("fetchJobCodesFromSharePoint", () => {
     expect(res.value.itemId).toBe("itm-2");
     expect(res.value.rows[0].code).toBe("X-1");
     expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("encodes a SharePoint URL into the Graph /shares form", () => {
+    /* Microsoft's encoding spec: base64, trim '=', '/'→'_', '+'→'-',
+       then prefix 'u!'. */
+    const url = "https://contoso.sharepoint.com/sites/foo/Shared%20Documents/x.xlsx";
+    const out = encodeShareUrl(url);
+    expect(out.startsWith("u!")).toBe(true);
+    expect(out).not.toMatch(/[=]/);
+    expect(out).not.toMatch(/[+/]/);
+    /* Round-trip: undo the URL-safe transformation, base64-decode,
+       and confirm we get the original URL back. */
+    const stripped = out.slice(2).replace(/-/g, "+").replace(/_/g, "/");
+    const padded = stripped + "=".repeat((4 - (stripped.length % 4)) % 4);
+    expect(Buffer.from(padded, "base64").toString("utf8")).toBe(url);
+  });
+
+  it("uses /shares/{id}/driveItem when JOB_CODES_SHARE_URL is set (production path)", async () => {
+    process.env.JOB_CODES_SHARE_URL = "https://example.sharepoint.com/sites/x/Shared Documents/JobCodes.xlsx";
+    /* The module reads the env var at import time as a const, so we
+       need a fresh module load. jest.isolateModules gives us that. */
+    let res: Awaited<ReturnType<typeof fetchJobCodesFromSharePoint>>;
+    await jest.isolateModulesAsync(async () => {
+      jest.doMock("@/lib/microsoft-graph", () => ({
+        getAppOnlyToken: jest.fn().mockResolvedValue("test-token"),
+      }));
+      jest.doMock("@/lib/analytics", () => ({
+        trackEvent: jest.fn().mockResolvedValue(undefined),
+      }));
+      mockFetchSequence([
+        /* /shares/{id}/driveItem response */
+        {
+          ok: true,
+          body: {
+            id: "itm-share",
+            webUrl: "https://example.sharepoint.com/sites/x/Shared%20Documents/JobCodes.xlsx",
+            parentReference: { driveId: "drv-share" },
+          },
+        },
+        /* worksheets list */
+        { ok: true, body: { value: [{ name: "Job Codes" }] } },
+        /* usedRange */
+        {
+          ok: true,
+          body: { values: [["Code", "Description"], ["VIA-SHARE", "from share URL"]] },
+        },
+      ]);
+      const { fetchJobCodesFromSharePoint: fresh } = await import("@/lib/job-codes/sharepoint-source");
+      res = await fresh();
+    });
+    delete process.env.JOB_CODES_SHARE_URL;
+    expect(res!.ok).toBe(true);
+    if (!res!.ok) return;
+    expect(res!.value.driveId).toBe("drv-share");
+    expect(res!.value.itemId).toBe("itm-share");
+    expect(res!.value.rows[0].code).toBe("VIA-SHARE");
+  });
+
+  it("share-URL 404 maps to source_file_not_found with a configuration hint", async () => {
+    process.env.JOB_CODES_SHARE_URL = "https://example.sharepoint.com/wrong.xlsx";
+    let res: Awaited<ReturnType<typeof fetchJobCodesFromSharePoint>>;
+    await jest.isolateModulesAsync(async () => {
+      jest.doMock("@/lib/microsoft-graph", () => ({
+        getAppOnlyToken: jest.fn().mockResolvedValue("test-token"),
+      }));
+      jest.doMock("@/lib/analytics", () => ({
+        trackEvent: jest.fn().mockResolvedValue(undefined),
+      }));
+      mockFetchSequence([{ ok: false, status: 404, text: "not found" }]);
+      const { fetchJobCodesFromSharePoint: fresh } = await import("@/lib/job-codes/sharepoint-source");
+      res = await fresh();
+    });
+    delete process.env.JOB_CODES_SHARE_URL;
+    expect(res!.ok).toBe(false);
+    if (!res!.ok) {
+      expect(res!.error.code).toBe("source_file_not_found");
+      expect(res!.error.detail).toContain("JOB_CODES_SHARE_URL");
+    }
   });
 
   it("returns no_codes_found when the workbook is empty", async () => {
