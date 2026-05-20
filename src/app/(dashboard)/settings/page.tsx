@@ -58,6 +58,162 @@ interface UsageResponse {
 // Sub-components
 // ---------------------------------------------------------------------------
 
+function ChangePasswordCard() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSuccess(false);
+    if (next.length < 8) {
+      setError("New password must be at least 8 characters.");
+      return;
+    }
+    if (next !== confirm) {
+      setError("New passwords don't match.");
+      return;
+    }
+    if (next === current) {
+      setError("New password must differ from current.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetchWithRefresh("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_password: current, new_password: next }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !body.ok) {
+        setError(body.error || `Could not change password (HTTP ${res.status})`);
+        return;
+      }
+      setSuccess(true);
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+    } catch (err) {
+      setError((err as Error).message || "Network error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-3" data-testid="change-password-form">
+      <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+        Update the password you use to sign in. Forgot it? Sign out and use the "Forgot password" link on the login page instead.
+      </p>
+      <div>
+        <label className="block text-xs mb-1" style={{ color: "var(--wp-text-muted)" }}>
+          Current password
+        </label>
+        <input
+          type="password"
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+          autoComplete="current-password"
+          data-testid="change-password-current"
+          className="w-full px-3 py-2 rounded"
+          style={{
+            background: "var(--wp-dark-surface2)",
+            border: "1px solid var(--wp-dark-border)",
+            color: "var(--wp-text)",
+            fontSize: "16px",
+          }}
+        />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs mb-1" style={{ color: "var(--wp-text-muted)" }}>
+            New password (≥8 chars)
+          </label>
+          <input
+            type="password"
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            autoComplete="new-password"
+            data-testid="change-password-next"
+            className="w-full px-3 py-2 rounded"
+            style={{
+              background: "var(--wp-dark-surface2)",
+              border: "1px solid var(--wp-dark-border)",
+              color: "var(--wp-text)",
+              fontSize: "16px",
+            }}
+          />
+        </div>
+        <div>
+          <label className="block text-xs mb-1" style={{ color: "var(--wp-text-muted)" }}>
+            Confirm new password
+          </label>
+          <input
+            type="password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            autoComplete="new-password"
+            data-testid="change-password-confirm"
+            className="w-full px-3 py-2 rounded"
+            style={{
+              background: "var(--wp-dark-surface2)",
+              border: "1px solid var(--wp-dark-border)",
+              color: "var(--wp-text)",
+              fontSize: "16px",
+            }}
+          />
+        </div>
+      </div>
+      {error && (
+        <div
+          data-testid="change-password-error"
+          className="text-xs rounded px-3 py-2"
+          style={{
+            background: "rgba(239, 68, 68, 0.1)",
+            color: "var(--wp-error, #ef4444)",
+            border: "1px solid var(--wp-error, #ef4444)",
+          }}
+        >
+          {error}
+        </div>
+      )}
+      {success && (
+        <div
+          data-testid="change-password-success"
+          className="text-xs rounded px-3 py-2"
+          style={{
+            background: "rgba(74, 222, 128, 0.1)",
+            color: "#4ade80",
+            border: "1px solid #4ade80",
+          }}
+        >
+          Password updated.
+        </div>
+      )}
+      <div className="flex justify-end">
+        <button
+          type="submit"
+          disabled={busy || !current || !next || !confirm}
+          data-testid="change-password-submit"
+          className="px-3 py-2 rounded text-sm font-medium"
+          style={{
+            background: busy || !current || !next || !confirm ? "var(--wp-dark-surface2)" : "var(--wp-gold)",
+            color: busy || !current || !next || !confirm ? "var(--wp-text-muted)" : "var(--wp-dark)",
+            cursor: busy || !current || !next || !confirm ? "not-allowed" : "pointer",
+          }}
+        >
+          {busy ? "Updating…" : "Update password"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function SectionCard({
   title,
   id,
@@ -1133,6 +1289,11 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+      </SectionCard>
+
+      {/* Change password */}
+      <SectionCard title="Change password" id="change-password">
+        <ChangePasswordCard />
       </SectionCard>
 
       {/* Email signatures */}

@@ -416,6 +416,21 @@ export interface FeedbackWidgetSpec {
   submitUrl: string;
 }
 
+/**
+ * TimeLogWidget — inline form for "log time" / "log hours" /
+ * "track time" intents. Shipped 2026-05-20 for Hoxsie's
+ * time-tracking ask. Submits to /api/time-entries.
+ */
+export interface TimeLogWidgetSpec {
+  kind: "time_log";
+  /** Optional pre-fill seeded from intent parsing. */
+  jobCode?: string;
+  hours?: number;
+  notes?: string;
+  /** Endpoint the widget POSTs to on submit. */
+  submitUrl: string;
+}
+
 /** Discriminated union of every widget kind. Add new entries as the
  *  framework expands. */
 export type WidgetSpec =
@@ -430,4 +445,5 @@ export type WidgetSpec =
   | FxWidgetSpec
   | UploadToBrainWidgetSpec
   | MeetingPrepWidgetSpec
-  | FeedbackWidgetSpec;
+  | FeedbackWidgetSpec
+  | TimeLogWidgetSpec;

@@ -132,7 +132,7 @@ function renderMiss(query: string, crmAvailable: boolean): string {
   if (crmAvailable) {
     return `No one named "${query}" on the team roster or in the CRM. If they're external, try \`find contacts named ${query}\`. If they're internal, check that they've been added at /people.`;
   }
-  return `No one named "${query}" on the team roster. To search beyond the internal team, connect Salesforce or HubSpot at /settings/integrations. Then ask again.`;
+  return `No one named "${query}" on the team roster. To search beyond the internal team, connect Salesforce or HubSpot at /settings. Then ask again.`;
 }
 
 async function searchCrmContacts(

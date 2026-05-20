@@ -555,7 +555,7 @@ export function AssistantStarterPrompts({ onPick }: AssistantStarterPromptsProps
         >
           Unlock {missingConnections.join(", ")} prompts in{" "}
           <a
-            href="/settings/integrations"
+            href="/settings"
             className="underline"
             style={{ color: "var(--wp-gold, #eab308)" }}
           >
