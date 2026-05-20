@@ -137,6 +137,29 @@ describe("POST /api/team/invite (inviteFlow)", () => {
     expect(mockRecordAudit.mock.calls[0][0].action).toBe("team.invite.sent");
   });
 
+  it("normalizes email to lowercase + trimmed before persist (login lookup is LOWER(email))", async () => {
+    mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
+    const mailer = jest.fn().mockResolvedValue({ delivered: true, reason: "ok" });
+    const { inviteFlow } = await import("@/app/api/team/invite/route");
+    const res = await inviteFlow(
+      mkReq({ invites: [{ email: "  NickHomyk@Gmail.com  ", role: "ops" }] }),
+      mailer,
+    );
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.invites[0].email).toBe("nickhomyk@gmail.com");
+
+    // The INSERT params must carry the normalized email so the
+    // team_members row (written later by /api/team/accept) matches
+    // authenticate()'s LOWER(email) lookup.
+    const insertParams = mockSafeQuery.mock.calls[0][1];
+    expect(insertParams[1]).toBe("nickhomyk@gmail.com");
+
+    // Mailer also receives the normalized email so the link goes to
+    // the canonical address.
+    expect(mailer.mock.calls[0][0].to).toBe("nickhomyk@gmail.com");
+  });
+
   it("201 still 201 when mailer reports non-delivery (no_api_key) — invite persists, response says emailDelivered=false", async () => {
     mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
     const mailer = jest.fn().mockResolvedValue({ delivered: false, reason: "no_api_key" });

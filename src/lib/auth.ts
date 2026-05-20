@@ -103,8 +103,18 @@ export function verifyToken(token: string): JwtClaims {
 
 /**
  * Authenticate a user by email + password.
+ *
+ * Email comparison is case-insensitive to match the rest of the codebase
+ * (migration 128 created the unique index on LOWER(email); MS-OAuth,
+ * forgot-password, whoami, principles team, invite-resend all look up
+ * by LOWER(email)). Before 2026-05-20 this route was the lone outlier
+ * — operators whose invite stored an uppercase letter (iOS keyboard
+ * auto-cap, copy-paste from email signature, etc.) bounced on "Invalid
+ * credentials" forever.
  */
 export async function authenticate(email: string, password: string): Promise<AuthResult | null> {
+  const normalizedEmail = email.trim().toLowerCase();
+
   if (!process.env.DATABASE_URL) {
     // Shadow mode: demo users
     const demoUsers: Record<string, TeamMember & { password: string }> = {
@@ -114,7 +124,7 @@ export async function authenticate(email: string, password: string): Promise<Aut
       "sales@wolfpack.dev": { id: "demo-sales", email: "sales@wolfpack.dev", name: "Demo Sales", role: "sales", workspaceId: DEFAULT_WORKSPACE_ID, password: "apex", created_at: new Date().toISOString() },
       "ops@wolfpack.dev": { id: "demo-ops", email: "ops@wolfpack.dev", name: "Demo Ops", role: "ops", workspaceId: DEFAULT_WORKSPACE_ID, password: "apex", created_at: new Date().toISOString() },
     };
-    const user = demoUsers[email];
+    const user = demoUsers[normalizedEmail];
     if (user && password === user.password) {
       const { password: _, ...member } = user;
       const token = createToken(member);
@@ -128,8 +138,8 @@ export async function authenticate(email: string, password: string): Promise<Aut
     const result = await query(
       `SELECT id, email, name, role, password_hash, avatar_url, created_at, workspace_id
        FROM instinct_team_members
-       WHERE email = $1 AND is_active = true`,
-      [email],
+       WHERE LOWER(email) = $1 AND is_active = true`,
+      [normalizedEmail],
     );
 
     if (result.rows.length === 0) return null;

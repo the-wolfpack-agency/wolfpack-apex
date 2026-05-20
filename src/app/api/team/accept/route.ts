@@ -53,6 +53,12 @@ export async function POST(req: NextRequest) {
   }
 
   const inv = invite.rows[0];
+  // Canonical-case the stored email at the team_members boundary in
+  // case an older invite row was written before /api/team/invite
+  // started lowercasing. authenticate() looks up by LOWER(email), so
+  // the row MUST be lowercase or the login bounces with "Invalid
+  // credentials".
+  inv.email = (inv.email || "").trim().toLowerCase();
   if (inv.status !== "pending") {
     return NextResponse.json({ error: "Invite already accepted" }, { status: 409 });
   }

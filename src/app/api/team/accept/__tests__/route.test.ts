@@ -121,6 +121,31 @@ describe("POST /api/team/accept", () => {
     );
   });
 
+  it("normalizes invite email to lowercase before writing the team_members row + before audit/response", async () => {
+    // Legacy invite row stored with an uppercase letter (pre-2026-05-20
+    // — before /api/team/invite started lowercasing). authenticate()
+    // looks up by LOWER(email), so the team_members row MUST be
+    // lowercase or login bounces with "Invalid credentials".
+    mockSafeQuery
+      .mockResolvedValueOnce({
+        rows: [{ ...PENDING_INVITE, email: "  Mixed.Case@Wolfpack.Agency  " }],
+        fromCache: false,
+      })
+      .mockResolvedValueOnce({ rows: [], fromCache: false })
+      .mockResolvedValueOnce({ rows: [], fromCache: false });
+
+    const { POST } = await import("@/app/api/team/accept/route");
+    const res = await POST(mkReq({ token: "abc", password: "supersecret" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.email).toBe("mixed.case@wolfpack.agency");
+
+    // The INSERT into instinct_team_members must carry the normalized
+    // email — that's what login matches against.
+    const insertParams = mockSafeQuery.mock.calls[1][1];
+    expect(insertParams[1]).toBe("mixed.case@wolfpack.agency");
+  });
+
   it("200 shadow mode (DATABASE_URL unset): returns generated id, no INSERT enforced", async () => {
     mockSafeQuery.mockResolvedValueOnce({ rows: [], fromCache: true });
     const { POST } = await import("@/app/api/team/accept/route");

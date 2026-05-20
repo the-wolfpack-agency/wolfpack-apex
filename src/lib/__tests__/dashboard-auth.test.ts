@@ -88,6 +88,52 @@ describe("Auth Library", () => {
         expect(result!.user.role).toBe(role);
       }
     });
+
+    // Regression guard: 2026-05-20. authenticate() was the lone outlier
+    // in a codebase that otherwise looks up users by LOWER(email).
+    // Operators whose invite stored an uppercase letter (iOS keyboard
+    // auto-cap on the invite form, copy-paste from an email signature)
+    // bounced on "Invalid credentials" forever.
+    it("shadow mode is case-insensitive on email", async () => {
+      delete process.env.DATABASE_URL;
+      const upper = await authenticate("CTO@Wolfpack.DEV", "apex");
+      expect(upper).not.toBeNull();
+      expect(upper!.user.role).toBe("cto");
+    });
+
+    it("shadow mode trims whitespace around email", async () => {
+      delete process.env.DATABASE_URL;
+      const padded = await authenticate("  cto@wolfpack.dev  ", "apex");
+      expect(padded).not.toBeNull();
+    });
+
+    it("DB mode looks up by LOWER(email) so case differences match", async () => {
+      process.env.DATABASE_URL = "postgresql://test";
+      mockQuery.mockResolvedValueOnce({
+        rows: [
+          {
+            id: "tm_x",
+            email: "nickhomyk@gmail.com",
+            name: "Nick",
+            role: "ops",
+            password_hash: "hashed_secret",
+            avatar_url: null,
+            created_at: "2026-05-20",
+            workspace_id: "default",
+          },
+        ],
+      });
+      const result = await authenticate("NickHomyk@Gmail.com", "secret");
+      expect(result).not.toBeNull();
+      expect(result!.user.role).toBe("ops");
+      // The SQL passed to query() must compare on LOWER(email) and
+      // receive the lowercased input — otherwise case-mismatched rows
+      // never resolve.
+      const [sql, params] = mockQuery.mock.calls[0];
+      expect(sql).toMatch(/LOWER\(email\)\s*=\s*\$1/);
+      expect(params[0]).toBe("nickhomyk@gmail.com");
+      delete process.env.DATABASE_URL;
+    });
   });
 
   describe("getUserFromRequest", () => {

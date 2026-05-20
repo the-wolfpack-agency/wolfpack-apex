@@ -63,6 +63,11 @@ export async function inviteFlow(
     if (!inv.role || !VALID_ROLES.includes(inv.role)) {
       return NextResponse.json({ error: `Invalid role: ${inv.role}` }, { status: 400 });
     }
+    // Canonical-case the email at the boundary so the team_members row
+    // we eventually write (in /api/team/accept) matches the login
+    // lookup, which is LOWER(email). The dialog client already
+    // lowercases — this is defense for direct API callers.
+    inv.email = inv.email.trim().toLowerCase();
   }
 
   const inviterName =
