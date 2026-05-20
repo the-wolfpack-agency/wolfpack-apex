@@ -35,7 +35,7 @@
  * touch their route in this PR — see the PR body for details.
  */
 
-import { getValidToken } from "@/lib/microsoft-graph";
+import { getValidToken, getAppOnlyToken } from "@/lib/microsoft-graph";
 import { trackEvent } from "@/lib/analytics";
 import {
   searchSharePoint,
@@ -699,6 +699,14 @@ export async function getRelevantContext(
 
   const token = await getValidToken(userId);
 
+  /* SharePoint search via app-only token (2026-05-20). Sites.Read.All
+     is admin-consent-required as a delegated scope, which was blocking
+     non-admin teammates from connecting M365. App-only consent is
+     granted ONCE at the tenant level (same pattern as Mail.Send) and
+     bypasses per-user consent entirely. Requires Sites.Read.All
+     (Application) on the app registration. */
+  const appOnlyToken = await getAppOnlyToken();
+
   /* Parallel surface fan-out. searchMeetingNotes already returns typed
      errors instead of throwing; the Graph helpers do too, but we wrap
      them in Promise.allSettled in case a future change starts throwing. */
@@ -717,7 +725,10 @@ export async function getRelevantContext(
 
   if (token) {
     const [spSettled, projSettled, calSettled, mailSettled] = await Promise.allSettled([
-      searchSharePoint(token.accessToken, { query: question, topN: SHAREPOINT_TOP_N }),
+      /* SharePoint uses app-only token when available (works for any
+         user regardless of consent), falls back to user token (works
+         only for admins under the new scope set). */
+      searchSharePoint(appOnlyToken ?? token.accessToken, { query: question, topN: SHAREPOINT_TOP_N }),
       searchProjectTasks(token.accessToken, { query: question, topN: PROJECT_TOP_N }),
       searchCalendarEvents(token.accessToken, {
         query: question,
@@ -730,6 +741,14 @@ export async function getRelevantContext(
     projRes = projSettled.status === "fulfilled" ? projSettled.value : null;
     calRes = calSettled.status === "fulfilled" ? calSettled.value : null;
     mailRes = mailSettled.status === "fulfilled" ? mailSettled.value : null;
+  } else if (appOnlyToken) {
+    /* Even when the user has no delegated token (hasn't connected
+       M365 yet), SharePoint search still works via app-only. The
+       other three surfaces are own-user-scoped and skipped. */
+    const spSettled = await Promise.allSettled([
+      searchSharePoint(appOnlyToken, { query: question, topN: SHAREPOINT_TOP_N }),
+    ]);
+    spRes = spSettled[0].status === "fulfilled" ? spSettled[0].value : null;
   }
 
   const [meetingRes, porscheRes] = await Promise.all([meetingPromise, porschePromise]);

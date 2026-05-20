@@ -29,8 +29,10 @@ jest.mock("@/lib/analytics", () => ({
   trackEvent: (...args: any[]) => mockTrack(...args),
 }));
 
+const mockGetAppOnlyToken = jest.fn(() => Promise.resolve(null as string | null));
 jest.mock("@/lib/microsoft-graph", () => ({
   getValidToken: (...args: any[]) => mockGetValidToken(...args),
+  getAppOnlyToken: (...args: any[]) => mockGetAppOnlyToken(...args),
 }));
 
 jest.mock("@/lib/integrations/microsoft-sharepoint", () => ({
