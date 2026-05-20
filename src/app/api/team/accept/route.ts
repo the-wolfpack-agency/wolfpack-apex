@@ -41,7 +41,8 @@ export async function POST(req: NextRequest) {
   );
 
   if (invite.fromCache) {
-    // Shadow mode: pretend it worked
+    // Shadow mode: pretend it worked. No email available — caller will
+    // fall back to a clean /login redirect with no email pre-fill.
     const memberId = `tm_${randomUUID().slice(0, 12)}`;
     trackEvent("system.team_invite_accepted", memberId, "dev", { mode: "shadow" });
     return NextResponse.json({ member_id: memberId });
@@ -118,5 +119,9 @@ export async function POST(req: NextRequest) {
     requestId: meta.requestId,
   }).catch((e) => console.warn("[audit]", (e as Error).message));
 
-  return NextResponse.json({ member_id: memberId });
+  // Return the invited email so /accept-invite can hand it to /login
+  // for pre-fill. Operators kept mistyping their own email on the
+  // login form and hitting "Invalid credentials" — the invited email
+  // is the only one that matches the row we just wrote.
+  return NextResponse.json({ member_id: memberId, email: inv.email });
 }

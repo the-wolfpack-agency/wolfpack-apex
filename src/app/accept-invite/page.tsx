@@ -4,8 +4,15 @@
  * /accept-invite — public page where invitees set their password.
  *
  * Reads `?token=...` from the query, posts to /api/team/accept with the
- * token + a password, and redirects to /login on success with a flag so
- * the login page can show "Account ready, sign in to continue".
+ * token + a password, and redirects to /login on success with the
+ * invited email so the login page can pre-fill it and show "Account
+ * ready, sign in to continue".
+ *
+ * No display-name input on purpose: iOS Safari was pulling the value
+ * the user typed there into the email field on /login the next page,
+ * and operators were then mistyping (or substituting) their own email
+ * and getting "Invalid credentials". The API derives the name from
+ * `email.split("@")[0]` when none is provided.
  *
  * No session needed — identity is proven by the single-use signed
  * token on the URL.
@@ -33,7 +40,6 @@ function AcceptInviteForm() {
   const params = useSearchParams();
   const token = params?.get("token") ?? "";
 
-  const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
@@ -67,7 +73,7 @@ function AcceptInviteForm() {
       const res = await fetch("/api/team/accept", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, password, name: name || undefined }),
+        body: JSON.stringify({ token, password }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -75,7 +81,11 @@ function AcceptInviteForm() {
         setSubmitting(false);
         return;
       }
-      router.push("/login?invited=1");
+      const email = typeof data.email === "string" ? data.email : "";
+      const qs = email
+        ? `/login?invited=1&email=${encodeURIComponent(email)}`
+        : "/login?invited=1";
+      router.push(qs);
     } catch {
       setError("Network error. Please try again.");
       setSubmitting(false);
@@ -89,42 +99,25 @@ function AcceptInviteForm() {
       style={{ background: "var(--wp-dark)" }}
     >
       <div
-        className="w-full max-w-md rounded-xl border p-8"
+        className="w-full max-w-md rounded-xl border p-6 sm:p-8"
         style={{
           background: "var(--wp-dark-surface)",
           borderColor: "var(--wp-dark-border)",
         }}
       >
-        <div className="flex flex-col items-center mb-8">
+        <div className="flex flex-col items-center mb-6 sm:mb-8">
           <h1 className="text-3xl font-bold" style={{ color: "var(--wp-gold)" }}>
             Welcome to Instinct
           </h1>
           <p className="text-sm mt-1 text-center" style={{ color: "var(--wp-text-dim)" }}>
             Set your password to finish creating your account.
           </p>
+          <p className="text-xs mt-2 text-center" style={{ color: "var(--wp-text-muted)" }}>
+            You'll sign in with the email this invite was sent to.
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5" data-testid="accept-invite-form">
-          <div>
-            <label htmlFor="name" className="block text-sm font-medium mb-1.5" style={{ color: "var(--wp-text-dim)" }}>
-              Display name (optional)
-            </label>
-            <input
-              id="name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-lg border px-4 py-2.5 text-sm outline-none transition-colors"
-              style={{
-                background: "var(--wp-dark-surface2)",
-                borderColor: "var(--wp-dark-border)",
-                color: "var(--wp-text)",
-              }}
-              placeholder="How your name shows in Instinct"
-              maxLength={120}
-            />
-          </div>
-
           <div>
             <label htmlFor="password" className="block text-sm font-medium mb-1.5" style={{ color: "var(--wp-text-dim)" }}>
               Password
@@ -137,7 +130,7 @@ function AcceptInviteForm() {
               required
               minLength={8}
               autoComplete="new-password"
-              className="w-full rounded-lg border px-4 py-2.5 text-sm outline-none transition-colors"
+              className="w-full rounded-lg border px-3 py-2.5 text-base outline-none transition-colors"
               style={{
                 background: "var(--wp-dark-surface2)",
                 borderColor: "var(--wp-dark-border)",
@@ -160,13 +153,13 @@ function AcceptInviteForm() {
               required
               minLength={8}
               autoComplete="new-password"
-              className="w-full rounded-lg border px-4 py-2.5 text-sm outline-none transition-colors"
+              className="w-full rounded-lg border px-3 py-2.5 text-base outline-none transition-colors"
               style={{
                 background: "var(--wp-dark-surface2)",
                 borderColor: "var(--wp-dark-border)",
                 color: "var(--wp-text)",
               }}
-              placeholder="Re-enter your password"
+              placeholder="Re-enter password"
               data-testid="accept-invite-confirm"
             />
           </div>

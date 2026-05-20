@@ -95,6 +95,10 @@ describe("POST /api/team/accept", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.member_id).toMatch(/^tm_/);
+    // /accept-invite uses this to pre-fill the email on /login so the
+    // operator can't sign in with a wrong (e.g. personal) email and
+    // bounce on "Invalid credentials".
+    expect(body.email).toBe("max@thewolfpack.agency");
 
     expect(mockHashPassword).toHaveBeenCalledWith("supersecret");
 

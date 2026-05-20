@@ -106,11 +106,19 @@ test.describe("team invite + accept critical flow", () => {
     const acceptBody = await acceptResponse.json();
     expect(acceptBody.member_id).toMatch(/^tm_/);
 
-    // Should redirect to /login with the invited flag.
+    // Should redirect to /login with the invited flag + pre-filled email.
     await inviteePage.waitForURL(/\/login(\?.*)?$/, { timeout: 10_000 });
+    const loginUrl = new URL(inviteePage.url());
+    expect(loginUrl.searchParams.get("invited")).toBe("1");
+    expect(loginUrl.searchParams.get("email")).toBe(inviteEmail!);
+
+    // Email field is pre-filled so the operator can't sign in with the
+    // wrong (e.g. personal) email and hit "Invalid credentials".
+    const emailInput = inviteePage.locator('input[type="email"]').first();
+    await expect(emailInput).toHaveValue(inviteEmail!);
 
     // ---- 5. Log in as the new teammate ----
-    await inviteePage.locator('input[type="email"]').first().fill(inviteEmail!);
+    await emailInput.fill(inviteEmail!);
     await inviteePage.locator('input[type="password"]').first().fill(newPassword);
     const loginResponsePromise = inviteePage.waitForResponse(
       (res) => res.url().includes("/api/auth/login") && res.request().method() === "POST",

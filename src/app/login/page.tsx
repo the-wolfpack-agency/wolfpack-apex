@@ -19,7 +19,9 @@ export default function LoginPage() {
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState("");
+  const initialEmail = searchParams?.get("email") ?? "";
+  const justInvited = searchParams?.get("invited") === "1";
+  const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -171,6 +173,20 @@ function LoginContent() {
           or use email + password
         </div>
 
+        {justInvited && !error && (
+          <div
+            data-testid="invited-banner"
+            className="rounded-lg px-4 py-2.5 text-sm mb-4"
+            style={{
+              background: "rgba(245, 199, 70, 0.1)",
+              color: "var(--wp-gold)",
+              border: "1px solid var(--wp-gold)",
+            }}
+          >
+            Account ready. {initialEmail ? `Sign in as ${initialEmail}.` : "Sign in to continue."}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label
@@ -182,11 +198,15 @@ function LoginContent() {
             </label>
             <input
               id="email"
+              name="email"
               type="email"
+              autoComplete="email"
+              inputMode="email"
+              data-testid="login-email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full rounded-lg border px-4 py-2.5 text-sm outline-none transition-colors"
+              className="w-full rounded-lg border px-3 py-2.5 text-base outline-none transition-colors"
               style={{
                 background: "var(--wp-dark-surface2)",
                 borderColor: "var(--wp-dark-border)",
@@ -206,11 +226,14 @@ function LoginContent() {
             </label>
             <input
               id="password"
+              name="password"
               type="password"
+              autoComplete="current-password"
+              data-testid="login-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full rounded-lg border px-4 py-2.5 text-sm outline-none transition-colors"
+              className="w-full rounded-lg border px-3 py-2.5 text-base outline-none transition-colors"
               style={{
                 background: "var(--wp-dark-surface2)",
                 borderColor: "var(--wp-dark-border)",
