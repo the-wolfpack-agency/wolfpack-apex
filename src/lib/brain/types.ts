@@ -140,6 +140,12 @@ export function classifyKind(contentType: string, filename: string): BrainKind {
   if (ct === "text/csv" || fn.endsWith(".csv")) return "csv";
   if (ct === "text/markdown" || fn.endsWith(".md") || fn.endsWith(".markdown")) return "markdown";
   if (ct === "text/html" || fn.endsWith(".html") || fn.endsWith(".htm")) return "html";
+  /* JSON is text — the upload-filter advertises it as supported but
+     pre-fix classifyKind dropped to "other" → ingest set status to
+     "skipped" → row in DB but invisible/unsearchable. Treat as text
+     so the existing text extractor handles it; the raw JSON body
+     is what we want to embed for retrieval anyway. */
+  if (ct === "application/json" || fn.endsWith(".json")) return "text";
   if (ct.startsWith("text/") || fn.endsWith(".txt")) return "text";
   if (ct.startsWith("audio/")) return "audio";
   if (ct.startsWith("video/")) return "video";

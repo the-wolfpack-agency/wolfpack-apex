@@ -193,23 +193,57 @@ export function UploadToBrainWidget({ spec, workflowId }: UploadToBrainWidgetPro
           reasons?: string[];
           warnings?: string[];
           error?: string;
+          /* ingest pipeline status. "indexed" or "queued" = searchable.
+             "skipped" / "failed" = row written but NOT in the
+             searchable index (most common for image/video/unsupported
+             kinds, or scanned PDFs with no extractable text). Surface
+             these honestly so users don't think they're done when the
+             content can't actually be retrieved. */
+          status?: "queued" | "extracting" | "chunking" | "embedding" | "indexed" | "failed" | "skipped";
+          status_detail?: string;
         };
 
         if (res.ok) {
-          setRows((prev) =>
-            prev.map((r) =>
-              r.id === row.id
-                ? {
-                    ...r,
-                    status: "accepted",
-                    documentId: b.document_id,
-                    duplicateOf: b.duplicate_of,
-                    warnings: b.warnings ?? [],
-                  }
-                : r,
-            ),
-          );
-          track("file_accepted", row.mime);
+          /* "skipped" / "failed" from ingest looks like success to the
+             route (it returned 201 with a document_id) but the document
+             isn't actually in the searchable Brain. Show as rejected
+             with a clear reason instead of green-checking it. */
+          const ingestStatus = b.status ?? "indexed";
+          const ingestSucceeded = ingestStatus !== "skipped" && ingestStatus !== "failed";
+          if (ingestSucceeded) {
+            setRows((prev) =>
+              prev.map((r) =>
+                r.id === row.id
+                  ? {
+                      ...r,
+                      status: "accepted",
+                      documentId: b.document_id,
+                      duplicateOf: b.duplicate_of,
+                      warnings: b.warnings ?? [],
+                    }
+                  : r,
+              ),
+            );
+            track("file_accepted", row.mime);
+          } else {
+            const reason =
+              ingestStatus === "skipped"
+                ? `ingest_skipped${b.status_detail ? `:${b.status_detail}` : ""}`
+                : `ingest_failed${b.status_detail ? `:${b.status_detail}` : ""}`;
+            setRows((prev) =>
+              prev.map((r) =>
+                r.id === row.id
+                  ? {
+                      ...r,
+                      status: "rejected",
+                      documentId: b.document_id,
+                      reasons: [reason],
+                    }
+                  : r,
+              ),
+            );
+            track("file_rejected", reason);
+          }
         } else {
           const reasons =
             Array.isArray(b.reasons) && b.reasons.length > 0
