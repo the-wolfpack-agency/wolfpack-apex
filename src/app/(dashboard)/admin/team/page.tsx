@@ -26,6 +26,7 @@ interface Member {
   accepted: boolean;
   recently_active: boolean;
   newly_onboarded: boolean;
+  m365_connected: boolean;
 }
 
 interface PendingInvite {
@@ -45,6 +46,7 @@ interface TeamStatus {
     recently_active: number;
     newly_onboarded: number;
     pending_invites: number;
+    m365_connected: number;
   };
   members: Member[];
   pending_invites: PendingInvite[];
@@ -144,6 +146,7 @@ export default function AdminTeamPage() {
             <Stat label="Total members" value={status.summary.total_members} />
             <Stat label="Accepted" value={status.summary.accepted} />
             <Stat label="Signed in (15m)" value={status.summary.recently_active} highlight />
+            <Stat label="Connected to M365" value={status.summary.m365_connected} />
             <Stat label="New (24h)" value={status.summary.newly_onboarded} />
             <Stat label="Pending invites" value={status.summary.pending_invites} />
           </div>
@@ -193,6 +196,7 @@ export default function AdminTeamPage() {
                       {m.accepted ? `last seen ${relativeTime(m.last_login)}` : "never signed in"}
                       {!m.is_active && " · disabled"}
                       {m.newly_onboarded && " · new today"}
+                      {m.m365_connected ? " · M365 connected" : " · M365 not connected"}
                     </div>
                   </div>
                 </li>

@@ -28,6 +28,7 @@ interface MemberRow {
   created_at: string;
   last_login: string | null;
   has_password: boolean;
+  m365_connected: boolean;
 }
 
 interface InviteRow {
@@ -48,11 +49,21 @@ export async function GET(req: NextRequest) {
   if (!auth.ok) return auth.response;
 
   const memberRes = await safeQuery<MemberRow>(
-    `SELECT id, email, name, role, is_active, created_at::text AS created_at,
-            last_login::text AS last_login,
-            (password_hash IS NOT NULL AND LENGTH(password_hash) > 0) AS has_password
-     FROM instinct_team_members
-     ORDER BY COALESCE(last_login, created_at) DESC`,
+    /* LEFT JOIN instinct_ms_tokens so the row carries an
+       `m365_connected` flag. A teammate is "connected to M365" when
+       they have at least one un-expired token row — proves they
+       completed the Microsoft OAuth flow + the tokens still refresh. */
+    `SELECT m.id, m.email, m.name, m.role, m.is_active,
+            m.created_at::text AS created_at,
+            m.last_login::text AS last_login,
+            (m.password_hash IS NOT NULL AND LENGTH(m.password_hash) > 0) AS has_password,
+            EXISTS (
+              SELECT 1 FROM instinct_ms_tokens t
+              WHERE LOWER(t.user_email) = LOWER(m.email)
+                AND t.expires_at IS NOT NULL
+            ) AS m365_connected
+     FROM instinct_team_members m
+     ORDER BY COALESCE(m.last_login, m.created_at) DESC`,
   );
 
   const inviteRes = await safeQuery<InviteRow>(
@@ -92,6 +103,7 @@ export async function GET(req: NextRequest) {
       recently_active: lastLoginMs > 0 && now - lastLoginMs < RECENT_LOGIN_WINDOW_MS,
       /* "Newly onboarded" = created in the last 24 h. */
       newly_onboarded: now - createdMs < RECENTLY_ONBOARDED_WINDOW_MS,
+      m365_connected: Boolean(m.m365_connected),
     };
   });
 
@@ -117,6 +129,7 @@ export async function GET(req: NextRequest) {
     recently_active: members.filter((m) => m.recently_active).length,
     newly_onboarded: members.filter((m) => m.newly_onboarded).length,
     pending_invites: pendingInvites.length,
+    m365_connected: members.filter((m) => m.m365_connected).length,
   };
 
   return NextResponse.json({

@@ -134,10 +134,10 @@ function buildStarterCategories(): StarterCategory[] {
       title: "Create something",
       emoji: "✏️",
       prompts: [
-        {
-          text: "create email",
-          description: "Draft a new email; you'll be asked for recipient, subject, and body.",
-        },
+        /* create email chip hidden 2026-05-20 — surface isn't ready
+           for the Wolfpack (no send confirmation, no attachments,
+           thin error handling on rate limits). Re-add when the
+           compose path has been hardened end-to-end. */
         {
           text: "create task",
           description: "Add a task to Microsoft To Do with optional due date and reminder.",

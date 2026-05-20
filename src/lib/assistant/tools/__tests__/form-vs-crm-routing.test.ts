@@ -33,7 +33,9 @@ describe("create-<object> routing", () => {
     ["create feature", "create_feature_form"],
     ["new feature request", "create_feature_form"],
     ["create okr", "create_okr_form"],
-    ["create email", "create_email_form"],
+    /* create_email_form disabled 2026-05-20 — compose surface not
+       production-ready. Re-add this row when re-enabling the tool. */
+    // ["create email", "create_email_form"],
     ["create message", "create_message_form"],
     /* "schedule a meeting" is intentionally claimed by
      * get_calendar_availability (free/busy check) — pre-existing

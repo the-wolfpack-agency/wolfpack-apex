@@ -92,7 +92,14 @@ describe("GoodMorningWidget", () => {
   test("renders greeting + summary + Open dashboard link", () => {
     render(<GoodMorningWidget spec={fullSpec} />);
     expect(screen.getByTestId("good-morning-widget")).toBeInTheDocument();
-    expect(screen.getByText("Good morning, Nick")).toBeInTheDocument();
+    /* Greeting is recomputed client-side using the browser's clock
+       (not the server's UTC) to fix the 2026-05-20 "Good evening at
+       1 PM CST" bug. Assert against the local time the test runner
+       is in, preserving the ", Nick" suffix from the spec. */
+    const hour = new Date().getHours();
+    const expected =
+      hour < 12 ? "Good morning, Nick" : hour < 17 ? "Good afternoon, Nick" : "Good evening, Nick";
+    expect(screen.getByText(expected)).toBeInTheDocument();
     expect(screen.getByText("Your calendar is clear today.")).toBeInTheDocument();
     expect(screen.getByText(/Open dashboard/)).toBeInTheDocument();
   });

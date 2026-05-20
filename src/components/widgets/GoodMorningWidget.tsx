@@ -31,6 +31,26 @@ function formatTimeRange(start: string, end: string): string {
   return `${fmt(start)} - ${fmt(end)}`;
 }
 
+/**
+ * Replace the server-computed greeting with one based on the
+ * BROWSER's clock. The server runs in UTC on Vercel, so
+ * `new Date().getHours()` there returns UTC hours — at 1 PM Central
+ * the spec says "Good evening" (UTC 18:00). Recompute locally where
+ * the user's timezone is correct.
+ *
+ * Pulls the personalization suffix off whatever the server sent
+ * ("Good morning, Nick" → ", Nick") so the local greeting keeps the
+ * same name handling without re-implementing it.
+ */
+function localGreeting(serverGreeting: string): string {
+  const suffixMatch = serverGreeting.match(/(,\s.+)$/);
+  const suffix = suffixMatch ? suffixMatch[1] : "";
+  const hour = new Date().getHours();
+  if (hour < 12) return `Good morning${suffix}`;
+  if (hour < 17) return `Good afternoon${suffix}`;
+  return `Good evening${suffix}`;
+}
+
 /* Live status helpers mirrored from MeetingPreBriefPanel so the countdown
  * ticks forward without a server round-trip. Computing minutesUntil and
  * inProgress from the ISO start/end + Date.now() keeps a long-open chat
@@ -164,7 +184,9 @@ export function GoodMorningWidget({ spec, workflowId }: GoodMorningWidgetProps) 
             className="text-sm font-semibold break-words"
             style={{ color: "var(--wp-gold, #eab308)" }}
           >
-            {spec.greeting}
+            {/* Recompute in the browser so we get the user's local
+                time of day instead of UTC from the Vercel function. */}
+            {localGreeting(spec.greeting)}
           </div>
           <Link
             href="/"

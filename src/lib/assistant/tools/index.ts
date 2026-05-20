@@ -62,7 +62,10 @@ import "./create-crm-record-form-tool";
    email so "send message" doesn't match email's verb-noun stem; the
    other tools have disjoint object nouns. */
 import "./create-message-form-tool";
-import "./create-email-form-tool";
+/* create-email-form-tool disabled 2026-05-20 — the compose surface
+   isn't production-ready (no send confirmation, no attachments,
+   thin error handling on rate limits). Re-enable once hardened. */
+// import "./create-email-form-tool";
 import "./create-calendar-event-form-tool";
 import "./create-task-form-tool";
 import "./create-okr-form-tool";
