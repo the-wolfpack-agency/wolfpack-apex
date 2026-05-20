@@ -54,6 +54,8 @@ export interface UploadToBrainWidgetProps {
 const MIME_TO_EXTS: Record<string, string[]> = {
   "application/pdf": [".pdf"],
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+  "application/vnd.ms-excel": [".xls"],
   "application/json": [".json"],
   "text/plain": [".txt"],
   "text/markdown": [".md", ".markdown"],
@@ -328,7 +330,7 @@ export function UploadToBrainWidget({ spec, workflowId }: UploadToBrainWidgetPro
       >
         <div>Drop files here, or click to browse.</div>
         <div className="text-[10px] mt-1" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
-          Up to {(spec.maxFileSize / (1024 * 1024)).toFixed(0)} MB · PDF, DOCX, MD, TXT, HTML, CSV, JSON.
+          Up to {(spec.maxFileSize / (1024 * 1024)).toFixed(0)} MB · PDF, DOCX, XLSX, MD, TXT, HTML, CSV, JSON.
           Filtered for secrets, PII, and duplicates before ingest.
         </div>
         <input

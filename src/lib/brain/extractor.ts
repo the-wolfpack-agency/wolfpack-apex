@@ -42,7 +42,7 @@ export type ExtractResult = ExtractSuccess | ExtractSkipped | ExtractFailed;
  * the document sits in `status = 'skipped'` meanwhile so it's visible
  * in the UI with a clear label instead of silently failing.
  */
-const SYNC_KINDS: ReadonlySet<BrainKind> = new Set(["pdf", "docx", "text", "markdown", "csv", "html"]);
+const SYNC_KINDS: ReadonlySet<BrainKind> = new Set(["pdf", "docx", "xlsx", "text", "markdown", "csv", "html"]);
 
 export function isSyncExtractable(kind: BrainKind): boolean {
   return SYNC_KINDS.has(kind);
@@ -58,6 +58,8 @@ export async function extract(
         return await extractPdf(buffer);
       case "docx":
         return await extractDocx(buffer);
+      case "xlsx":
+        return extractXlsx(buffer);
       case "text":
       case "markdown":
         return extractText(buffer);
@@ -116,6 +118,43 @@ function extractText(buffer: Buffer): ExtractResult {
   const text = buffer.toString("utf-8").trim();
   if (!text) return { ok: false, reason: "empty", detail: "empty file" };
   return { ok: true, text };
+}
+
+// ── XLSX ─────────────────────────────────────────────────────────
+
+/**
+ * xlsx via SheetJS (dependency already in package.json). Renders every
+ * sheet as CSV-shaped plaintext so the same chunker / embeddings path
+ * the rest of the brain uses applies. Each sheet gets a "Sheet: <name>"
+ * header so retrieval can surface "Job Codes" vs "Notes" vs whatever
+ * tabs exist. Empty sheets are dropped.
+ */
+function extractXlsx(buffer: Buffer): ExtractResult {
+  /* Lazy require to keep the module-load cost off the cold path for
+     callers that never touch xlsx. */
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const XLSX = require("xlsx") as typeof import("xlsx");
+  let workbook: import("xlsx").WorkBook;
+  try {
+    workbook = XLSX.read(buffer, { type: "buffer" });
+  } catch (err) {
+    return { ok: false, reason: "failed", detail: `xlsx parse: ${(err as Error).message}` };
+  }
+  if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+    return { ok: false, reason: "empty", detail: "xlsx has no sheets" };
+  }
+  const parts: string[] = [];
+  for (const name of workbook.SheetNames) {
+    const sheet = workbook.Sheets[name];
+    if (!sheet) continue;
+    const csv = XLSX.utils.sheet_to_csv(sheet).trim();
+    if (!csv) continue;
+    parts.push(`Sheet: ${name}\n${csv}`);
+  }
+  if (parts.length === 0) {
+    return { ok: false, reason: "empty", detail: "xlsx has no non-empty sheets" };
+  }
+  return { ok: true, text: parts.join("\n\n---\n\n") };
 }
 
 // ── CSV ──────────────────────────────────────────────────────────

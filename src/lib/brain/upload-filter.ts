@@ -44,6 +44,8 @@ export const UPLOAD_FILTER_ALLOWED_MIME_TYPES: readonly string[] = [
   "text/html",
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
   "application/json",
   "text/csv",
 ];
@@ -126,6 +128,8 @@ const EXTENSION_TO_MIME: Record<string, string> = {
   htm: "text/html",
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xls: "application/vnd.ms-excel",
   json: "application/json",
   csv: "text/csv",
 };

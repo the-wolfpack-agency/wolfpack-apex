@@ -84,6 +84,7 @@ type MagicCheck = { prefix: readonly number[]; label: string };
 const MAGIC: Record<string, MagicCheck> = {
   pdf: { prefix: [0x25, 0x50, 0x44, 0x46], label: "%PDF-" }, // %PDF
   docx: { prefix: [0x50, 0x4b, 0x03, 0x04], label: "PK ZIP" }, // ZIP (DOCX is a zip)
+  xlsx: { prefix: [0x50, 0x4b, 0x03, 0x04], label: "PK ZIP" }, // ZIP (XLSX is also a zip)
 };
 
 export interface MagicResult {
