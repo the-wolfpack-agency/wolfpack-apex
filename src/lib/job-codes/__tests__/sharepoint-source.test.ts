@@ -13,16 +13,18 @@ import {
   parseUsedRange,
   fetchJobCodesFromSharePoint,
   encodeShareUrl,
+  acquireSharePointToken,
 } from "@/lib/job-codes/sharepoint-source";
 
 jest.mock("@/lib/microsoft-graph", () => ({
   getAppOnlyToken: jest.fn(),
+  getValidToken: jest.fn(),
 }));
 jest.mock("@/lib/analytics", () => ({
   trackEvent: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { getAppOnlyToken } from "@/lib/microsoft-graph";
+import { getAppOnlyToken, getValidToken } from "@/lib/microsoft-graph";
 
 describe("parseUsedRange", () => {
   it("returns [] when given fewer than 2 rows", () => {
@@ -116,6 +118,53 @@ describe("parseUsedRange", () => {
     );
     expect(rows.map((r) => r.code)).toEqual(["A-1", "B-2"]);
     expect(rows.every((r) => r.description === "")).toBe(true);
+  });
+});
+
+describe("acquireSharePointToken (token-acquisition strategy)", () => {
+  beforeEach(() => {
+    /* Reset both mocks so each test sets its own resolution exactly —
+       the outer beforeEach() seeds getAppOnlyToken with a default
+       "test-token" for the fetch-flow tests, which would mask
+       null-fallback assertions here. */
+    (getAppOnlyToken as jest.Mock).mockReset();
+    (getValidToken as jest.Mock).mockReset();
+  });
+
+  it("prefers the user's delegated token when preferUserId is supplied", async () => {
+    (getValidToken as jest.Mock).mockResolvedValueOnce("delegated-tok");
+    (getAppOnlyToken as jest.Mock).mockResolvedValueOnce("app-tok");
+    const out = await acquireSharePointToken("u-1");
+    expect(out).toEqual({ token: "delegated-tok", kind: "delegated" });
+    expect(getAppOnlyToken).not.toHaveBeenCalled();
+  });
+
+  it("falls back to app-only when delegated lookup returns null", async () => {
+    (getValidToken as jest.Mock).mockResolvedValueOnce(null);
+    (getAppOnlyToken as jest.Mock).mockResolvedValueOnce("app-tok");
+    const out = await acquireSharePointToken("u-1");
+    expect(out).toEqual({ token: "app-tok", kind: "app_only" });
+  });
+
+  it("falls back to app-only when delegated lookup throws (stale row, etc.)", async () => {
+    (getValidToken as jest.Mock).mockRejectedValueOnce(new Error("DB down"));
+    (getAppOnlyToken as jest.Mock).mockResolvedValueOnce("app-tok");
+    const out = await acquireSharePointToken("u-1");
+    expect(out).toEqual({ token: "app-tok", kind: "app_only" });
+  });
+
+  it("returns null when both paths fail (caller surfaces not_configured)", async () => {
+    (getValidToken as jest.Mock).mockResolvedValueOnce(null);
+    (getAppOnlyToken as jest.Mock).mockResolvedValueOnce(null);
+    const out = await acquireSharePointToken("u-1");
+    expect(out).toBeNull();
+  });
+
+  it("skips delegated entirely when no preferUserId", async () => {
+    (getAppOnlyToken as jest.Mock).mockResolvedValueOnce("app-tok");
+    const out = await acquireSharePointToken(null);
+    expect(out).toEqual({ token: "app-tok", kind: "app_only" });
+    expect(getValidToken).not.toHaveBeenCalled();
   });
 });
 

@@ -19,7 +19,7 @@
  * serve stale" from "the workbook itself is empty" without `try/catch`.
  */
 
-import { getAppOnlyToken } from "@/lib/microsoft-graph";
+import { getAppOnlyToken, getValidToken } from "@/lib/microsoft-graph";
 import { trackEvent } from "@/lib/analytics";
 import type {
   JobCode,
@@ -258,21 +258,57 @@ export function parseUsedRange(
  */
 export interface FetchOptions {
   hint?: { driveId: string; itemId: string };
+  /**
+   * Instinct user id whose delegated MS Graph token should be tried
+   * FIRST. App-only is the fallback. Reason: app-only Sites.Read.All
+   * requires per-tenant admin consent that some tenants haven't
+   * granted (ours returned accessDenied on /shares on 2026-05-20),
+   * while the user's delegated token already has Files.ReadWrite.All
+   * which can read SharePoint files they have access to. The caller
+   * supplies their own user id on user-triggered refreshes.
+   */
+  preferUserId?: string | null;
+}
+
+/**
+ * Token-acquisition strategy: try the supplied user's delegated token
+ * first (works with the existing Files.ReadWrite.All scope the user
+ * granted at sign-in), fall back to the app-only token (works without
+ * a logged-in user but requires app-registration admin consent).
+ *
+ * Exported for diagnostics + tests.
+ */
+export async function acquireSharePointToken(
+  preferUserId?: string | null,
+): Promise<{ token: string; kind: "delegated" | "app_only" } | null> {
+  if (preferUserId) {
+    try {
+      const t = await getValidToken(preferUserId);
+      if (t) return { token: t, kind: "delegated" };
+    } catch {
+      /* fall through to app-only */
+    }
+  }
+  const appOnly = await getAppOnlyToken();
+  if (appOnly) return { token: appOnly, kind: "app_only" };
+  return null;
 }
 
 export async function fetchJobCodesFromSharePoint(
   opts: FetchOptions = {},
 ): Promise<Result<JobCodesFetchValue>> {
-  const token = await getAppOnlyToken();
-  if (!token) {
+  const acquired = await acquireSharePointToken(opts.preferUserId);
+  if (!acquired) {
     return {
       ok: false,
       error: {
         code: "not_configured",
-        detail: "no app-only Graph token (check MS_CLIENT_ID/SECRET/TENANT)",
+        detail:
+          "no Graph token available (delegated lookup failed AND app-only is unconfigured — check MS_CLIENT_ID/SECRET/TENANT)",
       },
     };
   }
+  const token = acquired.token;
 
   // Step 1 — locate the workbook (or trust the hint).
   let driveId: string;
@@ -401,6 +437,7 @@ export async function fetchJobCodesFromSharePoint(
       drive_id: driveId,
       item_id: itemId,
       used_hint: opts.hint ? "true" : "false",
+      token_kind: acquired.kind,
     });
   } catch {
     /* analytics is best-effort; never block the refresh */

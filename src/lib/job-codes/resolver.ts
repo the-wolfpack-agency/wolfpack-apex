@@ -73,7 +73,13 @@ export async function refreshFromSource(
 ): Promise<JobCodesRefreshOutcome> {
   const startedAt = new Date().toISOString();
 
-  const res = await fetchJobCodesFromSharePoint({ hint: opts.hint });
+  /* Pass the triggering user id so the source tries their delegated
+     token first. Falls back to the app-only token if delegated lookup
+     fails (background/scheduled refresh case). */
+  const res = await fetchJobCodesFromSharePoint({
+    hint: opts.hint,
+    preferUserId: opts.triggeredBy,
+  });
   if (!res.ok) {
     const outcome: JobCodesRefreshOutcome = {
       status: "failed",
