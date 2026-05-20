@@ -7,13 +7,33 @@
  *   - 404 token not found
  *   - 409 already-accepted invite
  *   - 200 happy path: writes member with bcrypt hash, marks invite accepted,
- *     fires analytics + audit
+ *     fires analytics + audit. INSERT + UPDATE go through writeQuery so
+ *     a silent pg failure surfaces as 5xx instead of a 200 with no row.
+ *   - 503 when invite SELECT comes back fromCache in prod mode (regression
+ *     guard for the 2026-05-20 gmail-invite silent-write-loss incident)
+ *   - 500 when team_member INSERT throws
+ *   - 409 with duplicate-email hint when writeQuery hits the
+ *     uq_instinct_team_members_email_lower unique-index collision
+ *   - 200 in genuine shadow mode (DATABASE_URL unset): faked success
  */
- 
+
 export {};
 
 const mockSafeQuery = jest.fn();
-jest.mock("@/lib/db", () => ({ safeQuery: (...a: any[]) => mockSafeQuery(...a) }));
+const mockWriteQuery = jest.fn();
+class WriteQueryError extends Error {
+  readonly code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.code = code;
+    this.name = "WriteQueryError";
+  }
+}
+jest.mock("@/lib/db", () => ({
+  safeQuery: (...a: any[]) => mockSafeQuery(...a),
+  writeQuery: (...a: any[]) => mockWriteQuery(...a),
+  WriteQueryError,
+}));
 
 const mockHashPassword: jest.Mock = jest.fn(() => "bcrypt-hash");
 jest.mock("@/lib/auth", () => ({ hashPassword: (...a: any[]) => mockHashPassword(...a) }));
@@ -44,6 +64,12 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockRecordAudit.mockResolvedValue(undefined);
   mockSafeQuery.mockResolvedValue({ rows: [], fromCache: false });
+  mockWriteQuery.mockResolvedValue({ rows: [] });
+  process.env.DATABASE_URL = "postgresql://test";
+});
+
+afterEach(() => {
+  delete process.env.DATABASE_URL;
 });
 
 describe("POST /api/team/accept", () => {
@@ -84,28 +110,23 @@ describe("POST /api/team/accept", () => {
     expect(res.status).toBe(409);
   });
 
-  it("200 happy path persists member, marks invite accepted, fires audit + analytics", async () => {
-    mockSafeQuery
-      .mockResolvedValueOnce({ rows: [PENDING_INVITE], fromCache: false }) // SELECT invite
-      .mockResolvedValueOnce({ rows: [], fromCache: false })               // INSERT member
-      .mockResolvedValueOnce({ rows: [], fromCache: false });              // UPDATE invite
+  it("200 happy path persists member via writeQuery, marks invite accepted, fires audit + analytics", async () => {
+    mockSafeQuery.mockResolvedValueOnce({ rows: [PENDING_INVITE], fromCache: false });
 
     const { POST } = await import("@/app/api/team/accept/route");
     const res = await POST(mkReq({ token: "abc", password: "supersecret" }));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.member_id).toMatch(/^tm_/);
-    // /accept-invite uses this to pre-fill the email on /login so the
-    // operator can't sign in with a wrong (e.g. personal) email and
-    // bounce on "Invalid credentials".
     expect(body.email).toBe("max@thewolfpack.agency");
 
     expect(mockHashPassword).toHaveBeenCalledWith("supersecret");
 
-    // 1: SELECT invite, 2: INSERT member, 3: UPDATE invite to accepted
-    expect(mockSafeQuery).toHaveBeenCalledTimes(3);
-    expect(mockSafeQuery.mock.calls[1][0]).toMatch(/INSERT INTO instinct_team_members/);
-    expect(mockSafeQuery.mock.calls[2][0]).toMatch(/UPDATE instinct_invites SET status = 'accepted'/);
+    // Both writes MUST go through writeQuery so silent pg failures
+    // surface as exceptions, not as 200-with-no-row-written.
+    expect(mockWriteQuery).toHaveBeenCalledTimes(2);
+    expect(mockWriteQuery.mock.calls[0][0]).toMatch(/INSERT INTO instinct_team_members/);
+    expect(mockWriteQuery.mock.calls[1][0]).toMatch(/UPDATE instinct_invites SET status = 'accepted'/);
 
     expect(mockTrackEvent).toHaveBeenCalledWith(
       "system.team_invite_accepted",
@@ -122,17 +143,10 @@ describe("POST /api/team/accept", () => {
   });
 
   it("normalizes invite email to lowercase before writing the team_members row + before audit/response", async () => {
-    // Legacy invite row stored with an uppercase letter (pre-2026-05-20
-    // — before /api/team/invite started lowercasing). authenticate()
-    // looks up by LOWER(email), so the team_members row MUST be
-    // lowercase or login bounces with "Invalid credentials".
-    mockSafeQuery
-      .mockResolvedValueOnce({
-        rows: [{ ...PENDING_INVITE, email: "  Mixed.Case@Wolfpack.Agency  " }],
-        fromCache: false,
-      })
-      .mockResolvedValueOnce({ rows: [], fromCache: false })
-      .mockResolvedValueOnce({ rows: [], fromCache: false });
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [{ ...PENDING_INVITE, email: "  Mixed.Case@Wolfpack.Agency  " }],
+      fromCache: false,
+    });
 
     const { POST } = await import("@/app/api/team/accept/route");
     const res = await POST(mkReq({ token: "abc", password: "supersecret" }));
@@ -140,18 +154,57 @@ describe("POST /api/team/accept", () => {
     const body = await res.json();
     expect(body.email).toBe("mixed.case@wolfpack.agency");
 
-    // The INSERT into instinct_team_members must carry the normalized
-    // email — that's what login matches against.
-    const insertParams = mockSafeQuery.mock.calls[1][1];
+    const insertParams = mockWriteQuery.mock.calls[0][1];
     expect(insertParams[1]).toBe("mixed.case@wolfpack.agency");
   });
 
-  it("200 shadow mode (DATABASE_URL unset): returns generated id, no INSERT enforced", async () => {
+  it("503 when invite SELECT comes back fromCache in prod mode (silent-write-loss regression guard)", async () => {
+    mockSafeQuery.mockResolvedValueOnce({ rows: [], fromCache: true });
+    const { POST } = await import("@/app/api/team/accept/route");
+    const res = await POST(mkReq({ token: "abc", password: "supersecret" }));
+    // The pre-2026-05-20 route returned 200 here even in prod, leaving
+    // the operator unable to log in forever. New behavior: surface a
+    // real failure so the operator knows to retry.
+    expect(res.status).toBe(503);
+    expect(mockWriteQuery).not.toHaveBeenCalled();
+  });
+
+  it("500 when team_member INSERT throws (any non-unique-constraint error)", async () => {
+    mockSafeQuery.mockResolvedValueOnce({ rows: [PENDING_INVITE], fromCache: false });
+    mockWriteQuery.mockRejectedValueOnce(new WriteQueryError("connection terminated", "db_error"));
+
+    const { POST } = await import("@/app/api/team/accept/route");
+    const res = await POST(mkReq({ token: "abc", password: "supersecret" }));
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toMatch(/could not create/i);
+  });
+
+  it("409 with duplicate-email hint when writeQuery hits uq_instinct_team_members_email_lower", async () => {
+    mockSafeQuery.mockResolvedValueOnce({ rows: [PENDING_INVITE], fromCache: false });
+    mockWriteQuery.mockRejectedValueOnce(
+      new WriteQueryError(
+        "writeQuery failed: duplicate key value violates unique constraint \"uq_instinct_team_members_email_lower\"",
+        "db_error",
+      ),
+    );
+
+    const { POST } = await import("@/app/api/team/accept/route");
+    const res = await POST(mkReq({ token: "abc", password: "supersecret" }));
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toMatch(/already exists/i);
+    expect(body.email).toBe("max@thewolfpack.agency");
+  });
+
+  it("200 shadow mode (DATABASE_URL unset): returns generated id, no writes attempted", async () => {
+    delete process.env.DATABASE_URL;
     mockSafeQuery.mockResolvedValueOnce({ rows: [], fromCache: true });
     const { POST } = await import("@/app/api/team/accept/route");
     const res = await POST(mkReq({ token: "abc", password: "supersecret" }));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.member_id).toMatch(/^tm_/);
+    expect(mockWriteQuery).not.toHaveBeenCalled();
   });
 });
