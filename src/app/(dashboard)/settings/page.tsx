@@ -1296,10 +1296,15 @@ export default function SettingsPage() {
         <ChangePasswordCard />
       </SectionCard>
 
-      {/* Email signatures */}
-      <SectionCard title="Email signatures" id="email-signatures">
-        <EmailSignaturesCard />
-      </SectionCard>
+      {/* Email signatures — hidden 2026-05-20 along with the email
+          compose surface. No reason to surface signature management
+          when there's no inline email feature to use them in.
+          Re-enable when /emails ships production-ready. */}
+      {process.env.NEXT_PUBLIC_ENABLE_EMAIL_FEATURES === "1" && (
+        <SectionCard title="Email signatures" id="email-signatures">
+          <EmailSignaturesCard />
+        </SectionCard>
+      )}
 
       {/* Microsoft 365 Integration */}
       <SectionCard title="Microsoft 365">
