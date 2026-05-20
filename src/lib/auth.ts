@@ -159,6 +159,24 @@ export async function authenticate(email: string, password: string): Promise<Aut
 
     const token = createToken(user);
     trackEvent("system.login", user.id, user.role, { method: "password" });
+    /* Stamp last_login so /admin/team can show "who's actually signed
+       in" at a glance. Fire-and-forget; never block the auth path on
+       analytics-shaped writes. Defensive try-wrap because tests
+       sometimes mock `query` with a single-shot mockResolvedValueOnce
+       and we don't want that to break the auth response. */
+    try {
+      const p = query(
+        `UPDATE instinct_team_members SET last_login = NOW() WHERE id = $1`,
+        [user.id],
+      );
+      if (p && typeof p.catch === "function") {
+        p.catch((e: unknown) =>
+          console.warn("[auth] last_login update failed:", (e as Error).message),
+        );
+      }
+    } catch (e) {
+      console.warn("[auth] last_login update threw:", (e as Error).message);
+    }
     return { user, token };
   } catch (err) {
     console.error("[auth] Login error:", (err as Error).message);

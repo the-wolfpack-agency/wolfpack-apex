@@ -89,6 +89,12 @@ async function provisionOrLoadByEmail(
       );
       row.name = displayName;
     }
+    /* Stamp last_login so /admin/team can show who's actually
+       signed in. Fire-and-forget. */
+    query(
+      `UPDATE instinct_team_members SET last_login = NOW() WHERE id = $1`,
+      [row.id],
+    ).catch((e) => console.warn("[ms-callback] last_login update failed:", (e as Error).message));
     return {
       id: row.id,
       email: row.email,
@@ -104,8 +110,8 @@ async function provisionOrLoadByEmail(
     role: string;
     workspace_id: string | null;
   }>(
-    `INSERT INTO instinct_team_members (id, email, name, role, password_hash, is_active, created_at)
-     VALUES (gen_random_uuid(), $1, COALESCE(NULLIF($2, ''), $1), 'ops', NULL, TRUE, NOW())
+    `INSERT INTO instinct_team_members (id, email, name, role, password_hash, is_active, created_at, last_login)
+     VALUES (gen_random_uuid(), $1, COALESCE(NULLIF($2, ''), $1), 'ops', NULL, TRUE, NOW(), NOW())
      RETURNING id, email, name, role, workspace_id`,
     [lowered, displayName ?? ""],
   );
