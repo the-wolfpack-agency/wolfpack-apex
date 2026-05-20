@@ -357,8 +357,13 @@ function buildStarterCategories(): StarterCategory[] {
       emoji: "🗣",
       prompts: [
         {
-          text: "share feedback about Instinct",
-          description: "Open a feedback note. The team sees every reply.",
+          /* Bare "feedback" opens the form widget for the user to
+             type into. The longer chip ("share feedback about
+             Instinct") was being parsed by the intent router as
+             feedback-tool + body="about Instinct", submitting an
+             empty-ish note immediately. Confirmed live 2026-05-20. */
+          text: "feedback",
+          description: "Open a feedback note. The CTO sees every reply.",
         },
         {
           text: "/feedback the calendar widget is broken",
