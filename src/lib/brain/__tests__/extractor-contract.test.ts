@@ -10,11 +10,13 @@
  * regression at CI time before it embarrasses the team.
  */
 
+import * as fs from "node:fs";
+import * as path from "node:path";
 import * as XLSX from "xlsx";
 import {
   UPLOAD_FILTER_ALLOWED_MIME_TYPES,
 } from "@/lib/brain/upload-filter";
-import { classifyKind } from "@/lib/brain/types";
+import { classifyKind, type BrainKind } from "@/lib/brain/types";
 import { extract, isSyncExtractable } from "@/lib/brain/extractor";
 
 /**
@@ -131,5 +133,94 @@ describe("upload-allowlist ↔ extractor contract", () => {
        but can't extract it" bug behind the exempt list. Force a
        conversation in code review. */
     expect(SAMPLE_EXEMPT.size).toBeLessThanOrEqual(2);
+  });
+
+  /**
+   * DB drift guard, shipped 2026-05-20 after the xlsx upload silently
+   * returned "internal" for hours because `kind='xlsx'` violated the
+   * brain_documents.kind CHECK constraint set in migration 028 — which
+   * predated the BrainKind union ever growing 'xlsx'. The TS code, the
+   * extractor, the upload filter, and the magic-byte gate all knew
+   * about xlsx; only the DB constraint didn't. The route caught the
+   * generic Postgres error and returned reasons=["internal"] with no
+   * row in brain_documents and no useful chip in the widget.
+   *
+   * This test reads the actual migration files (not the DB — we want
+   * to fail offline at PR time, not at runtime) and asserts:
+   *   - The full TS BrainKind union appears in the latest CHECK
+   *     constraint definition found in src/db/migrations/*.sql.
+   *   - Adding a new kind to the TS union without a matching migration
+   *     fails this test before deploy.
+   */
+  it("every BrainKind value is covered by the latest brain_documents.kind CHECK constraint migration", () => {
+    /* The full TS union — kept in sync with src/lib/brain/types.ts.
+       If you change the BrainKind type, also update this list AND
+       ship a migration that expands brain_documents_kind_check. */
+    const ALL_BRAIN_KINDS: BrainKind[] = [
+      "pdf",
+      "docx",
+      "xlsx",
+      "text",
+      "markdown",
+      "csv",
+      "html",
+      "audio",
+      "video",
+      "image",
+      "email",
+      "other",
+    ];
+
+    const migrationsDir = path.resolve(__dirname, "../../../db/migrations");
+    const files = fs
+      .readdirSync(migrationsDir)
+      .filter((f) => f.endsWith(".sql") && !f.endsWith(".down.sql"))
+      .sort();
+
+    /* Walk migrations newest-first to find the latest one that touches
+       brain_documents_kind_check. Take the LAST occurrence of the
+       CHECK definition in that file — migrations DROP then re-ADD, so
+       the final definition is what's actually live. */
+    let latestCheckDef: string | null = null;
+    let latestMigration: string | null = null;
+    for (const f of [...files].reverse()) {
+      const body = fs.readFileSync(path.join(migrationsDir, f), "utf8");
+      if (!/brain_documents_kind_check/.test(body)) continue;
+      /* Grab the inner string of the latest CHECK(kind IN (...)) or
+         CHECK(kind = ANY(ARRAY[...])) shape in this file. */
+      const matchIn = [...body.matchAll(/CHECK\s*\(\s*kind\s+IN\s*\(([^)]+)\)/gi)];
+      const matchAny = [...body.matchAll(/CHECK\s*\(\s*kind\s*=\s*ANY\s*\(\s*ARRAY\[([^\]]+)\]/gi)];
+      const inner =
+        matchIn.length > 0
+          ? matchIn[matchIn.length - 1][1]
+          : matchAny.length > 0
+            ? matchAny[matchAny.length - 1][1]
+            : null;
+      if (inner) {
+        latestCheckDef = inner;
+        latestMigration = f;
+        break;
+      }
+    }
+
+    if (latestCheckDef === null) {
+      throw new Error(
+        "no migration defines brain_documents_kind_check — original migration 028 must exist",
+      );
+    }
+
+    const literals = latestCheckDef
+      .split(",")
+      .map((s) => s.trim().replace(/^'/, "").replace(/'(::text)?$/, "").trim())
+      .filter((s) => s.length > 0);
+
+    const missing = ALL_BRAIN_KINDS.filter((k) => !literals.includes(k));
+    if (missing.length > 0) {
+      throw new Error(
+        `BrainKind values missing from latest CHECK constraint (${latestMigration}): ` +
+          `${missing.join(", ")}. Ship a migration that expands brain_documents_kind_check.`,
+      );
+    }
+    expect(missing).toEqual([]);
   });
 });
