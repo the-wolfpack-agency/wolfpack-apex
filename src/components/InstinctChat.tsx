@@ -1384,7 +1384,15 @@ export default function InstinctChat({
                     </div>
                   )}
                   <div
-                    className="text-sm whitespace-pre-wrap leading-relaxed break-words overflow-hidden"
+                    /* `[overflow-wrap:anywhere]` wraps long unbroken
+                       strings — SharePoint URLs, hashes, base64 — at
+                       any character. Plain `break-words` (Tailwind's
+                       overflow-wrap:break-word) only breaks at word
+                       boundaries which lets a long URL push past the
+                       container edge on mobile. min-w-0 lets flex
+                       children shrink below their intrinsic content
+                       width (classic flex-overflow trap). */
+                    className="text-sm whitespace-pre-wrap leading-relaxed [overflow-wrap:anywhere] overflow-hidden min-w-0 max-w-full"
                     data-testid={`assistant-msg-content-${idx}`}
                   >
                     {renderMessageContent(msg.content)}
