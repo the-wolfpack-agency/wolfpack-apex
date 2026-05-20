@@ -145,33 +145,49 @@ function LoginContent() {
           </p>
         </div>
 
-        <button
-          type="button"
-          data-testid="microsoft-signin-button"
-          onClick={() => void handleMicrosoftSignIn()}
-          disabled={msLoading || loading}
-          className="w-full rounded-lg py-2.5 text-sm font-semibold transition-colors disabled:opacity-50 mb-4 flex items-center justify-center gap-2"
-          style={{
-            background: "var(--wp-dark-surface2)",
-            color: "var(--wp-text)",
-            border: "1px solid var(--wp-gold)",
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 23 23" aria-hidden>
-            <rect x="0" y="0" width="11" height="11" fill="#f25022" />
-            <rect x="12" y="0" width="11" height="11" fill="#7fba00" />
-            <rect x="0" y="12" width="11" height="11" fill="#00a4ef" />
-            <rect x="12" y="12" width="11" height="11" fill="#ffb900" />
-          </svg>
-          {msLoading ? "Redirecting…" : "Sign in with Microsoft"}
-        </button>
+        {/* Microsoft sign-in temporarily hidden 2026-05-20 — the tenant
+            consent gate ("Need admin approval" page despite consent
+            being granted on App registrations) blocked every teammate
+            at the kickoff. Auth via email + password works for
+            everyone; users connect M365 from Settings → Integrations
+            after signing in. Re-enable this block once the Enterprise
+            Application consent + user-consent-policy settings are
+            fully cleared.
 
-        <div
-          className="text-xs text-center mb-4"
-          style={{ color: "var(--wp-text-muted)" }}
-        >
-          or use email + password
-        </div>
+            Handler `handleMicrosoftSignIn` is kept intact for the
+            re-enable + for tests that exercise the OAuth callback
+            error banner via the `?ms_signin=` query param. */}
+        {process.env.NEXT_PUBLIC_ENABLE_MICROSOFT_SIGNIN === "1" && (
+          <>
+            <button
+              type="button"
+              data-testid="microsoft-signin-button"
+              onClick={() => void handleMicrosoftSignIn()}
+              disabled={msLoading || loading}
+              className="w-full rounded-lg py-2.5 text-sm font-semibold transition-colors disabled:opacity-50 mb-4 flex items-center justify-center gap-2"
+              style={{
+                background: "var(--wp-dark-surface2)",
+                color: "var(--wp-text)",
+                border: "1px solid var(--wp-gold)",
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 23 23" aria-hidden>
+                <rect x="0" y="0" width="11" height="11" fill="#f25022" />
+                <rect x="12" y="0" width="11" height="11" fill="#7fba00" />
+                <rect x="0" y="12" width="11" height="11" fill="#00a4ef" />
+                <rect x="12" y="12" width="11" height="11" fill="#ffb900" />
+              </svg>
+              {msLoading ? "Redirecting…" : "Sign in with Microsoft"}
+            </button>
+
+            <div
+              className="text-xs text-center mb-4"
+              style={{ color: "var(--wp-text-muted)" }}
+            >
+              or use email + password
+            </div>
+          </>
+        )}
 
         {justInvited && !error && (
           <div
