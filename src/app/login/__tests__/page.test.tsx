@@ -74,4 +74,13 @@ describe("LoginPage", () => {
     expect(emailInput).toHaveAttribute("autocomplete", "email");
     expect(emailInput).toHaveAttribute("type", "email");
   });
+
+  it("demo credentials block is hidden by default (no NEXT_PUBLIC_SHOW_DEMO_CREDS)", () => {
+    /* Confusing in front of the team during onboarding + the seed
+       accounts only work in shadow mode. Regression guard so a
+       future commit doesn't accidentally unhide them. */
+    render(<LoginPage />);
+    expect(screen.queryByTestId("login-demo-credentials")).toBeNull();
+    expect(screen.queryByText(/Demo Credentials/i)).toBeNull();
+  });
 });

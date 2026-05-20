@@ -292,22 +292,29 @@ function LoginContent() {
           </div>
         </form>
 
-        <div
-          className="mt-6 rounded-lg px-4 py-3 text-xs text-center"
-          style={{
-            background: "var(--wp-dark-surface2)",
-            color: "var(--wp-text-muted)",
-          }}
-        >
-          <p className="font-medium mb-1" style={{ color: "var(--wp-text-dim)" }}>
-            Demo Credentials
-          </p>
-          <p>ceo@wolfpack.dev / apex</p>
-          <p>cto@wolfpack.dev / apex</p>
-          <p>dev@wolfpack.dev / apex</p>
-          <p>sales@wolfpack.dev / apex</p>
-          <p>ops@wolfpack.dev / apex</p>
-        </div>
+        {/* Demo credentials hidden 2026-05-20 — confusing in front
+            of the team during onboarding, and the seed accounts
+            only work in shadow mode (no DATABASE_URL) anyway.
+            Gate on NEXT_PUBLIC_SHOW_DEMO_CREDS for local dev. */}
+        {process.env.NEXT_PUBLIC_SHOW_DEMO_CREDS === "1" && (
+          <div
+            data-testid="login-demo-credentials"
+            className="mt-6 rounded-lg px-4 py-3 text-xs text-center"
+            style={{
+              background: "var(--wp-dark-surface2)",
+              color: "var(--wp-text-muted)",
+            }}
+          >
+            <p className="font-medium mb-1" style={{ color: "var(--wp-text-dim)" }}>
+              Demo Credentials
+            </p>
+            <p>ceo@wolfpack.dev / apex</p>
+            <p>cto@wolfpack.dev / apex</p>
+            <p>dev@wolfpack.dev / apex</p>
+            <p>sales@wolfpack.dev / apex</p>
+            <p>ops@wolfpack.dev / apex</p>
+          </div>
+        )}
       </div>
     </div>
   );
