@@ -222,6 +222,12 @@ function buildStarterCategories(): StarterCategory[] {
       requires: { any: ["salesforce", "hubspot"] },
     },
     {
+      /* Chips collapsed to the repo-agnostic pattern 2026-05-20. The
+         "in wolfpack-instinct" variants 404'd because the actual repo
+         is wolfpack-apex (product rename never propagated to the repo
+         slug). Keep chip text generic so the tool defaults to "all
+         repos you have access to" and stays correct as repos are
+         added or renamed. */
       title: "GitHub",
       emoji: "🐙",
       prompts: [
@@ -230,20 +236,16 @@ function buildStarterCategories(): StarterCategory[] {
           description: "Open pull requests across the repos you have access to.",
         },
         {
-          text: "failed CI in wolfpack-instinct",
-          description: "Most recent failing GitHub Actions runs for the chosen repository.",
+          text: "open issues",
+          description: "Currently open issues across your repos, newest first.",
         },
         {
-          text: "open issues in wolfpack-instinct",
-          description: "Currently open issues in the chosen repository, newest first.",
+          text: "recent workflow runs",
+          description: "Latest GitHub Actions runs (pass + fail) across your repos.",
         },
         {
-          text: "what PRs are open in wolfpack-instinct",
-          description: "Open pull requests scoped to a single repo.",
-        },
-        {
-          text: "recent workflow runs in wolfpack-instinct",
-          description: "Latest GitHub Actions runs (pass + fail) for the chosen repository.",
+          text: "failed CI runs",
+          description: "Most recent failing GitHub Actions runs across your repos.",
         },
       ],
       requires: { any: ["github"] },
