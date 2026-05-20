@@ -199,7 +199,11 @@ const DOMAIN_MAP: DomainEntry[] = [
     domain: "directory",
     label: "Directory",
     href: "/directory",
-    keywords: ["directory", "team directory", "org chart"],
+    /* Bare "directory" was too loose — caught Dependabot PR titles
+       like "...across 1 directory with N updates" and surfaced the
+       Team Directory page in responses about CI. Phrase-only matches
+       so it only fires for actual team-directory intent. */
+    keywords: ["team directory", "team roster", "org chart", "employee directory"],
   },
   {
     domain: "tools",
