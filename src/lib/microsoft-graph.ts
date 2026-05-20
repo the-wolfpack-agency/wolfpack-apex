@@ -127,14 +127,14 @@ const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
 const MS_SCOPES: string[] = [
   "User.Read",
   "Mail.Read",
-  // Mail.Read.Shared — required for the porsche-classes automation
-  // poller to read messages from a shared mailbox (e.g.
-  // pcna-automation@thewolfpack.agency) when the operator-managed
-  // env var AUTOMATION_POLL_MAILBOX_UPN is set. The shared-mailbox
-  // path uses /users/{upn}/messages instead of /me/messages, which
-  // requires this delegated scope on top of Mail.Read. Tenant admin
-  // consent typically required.
-  "Mail.Read.Shared",
+  /* Mail.Read.Shared — DISABLED 2026-05-20 for non-admin teammates.
+     Microsoft requires admin consent for this scope. Without it
+     non-admin sign-ins (Max, Jorge, etc.) get "Microsoft 365 access
+     was denied" because they can't self-consent. The porsche-classes
+     shared-mailbox poller using AUTOMATION_POLL_MAILBOX_UPN is the
+     only consumer; if/when that feature reactivates, gate behind a
+     separate admin-only OAuth scope OR move to app-only auth. */
+  // "Mail.Read.Shared",
   // Mail.ReadWrite — required for the inbox-action surface in /emails:
   // mark read/unread (PATCH /me/messages/{id} with isRead),
   // archive (POST /me/messages/{id}/move → archive folder),
@@ -167,13 +167,21 @@ const MS_SCOPES: string[] = [
   "Notes.ReadWrite",
   // Tier 2 · Stream D (Planner + Groups)
   "Tasks.ReadWrite.Shared",
-  "Group.Read.All",
+  /* Group.Read.All — DISABLED 2026-05-20. Admin-consent-required;
+     blocks non-admin sign-ins. Tenant group lookup wasn't a
+     user-facing daily-use feature. Re-add behind admin-only OAuth
+     scope if needed. */
+  // "Group.Read.All",
   // Tier 2 · Stream E (Teams channels + online meetings).
   // NOTE: OnlineMeetings.ReadWrite.All is an APPLICATION-only permission
   // — it cannot be requested in the delegated authorization-code flow
   // we use here (Azure returns AADSTS650053 "scope doesn't exist on the
   // resource"). Use the delegated OnlineMeetings.ReadWrite instead.
-  "ChannelMessage.Read.All",
+  /* ChannelMessage.Read.All — DISABLED 2026-05-20. Admin-consent-
+     required. Without it the /messages page can't read channel
+     conversations, but it CAN still read 1:1 and group chats via
+     Chat.Read / ChatMessage.Read which non-admins can self-consent. */
+  // "ChannelMessage.Read.All",
   // Tier 2 · Stream E (Teams collaboration: list teams + channels).
   // Required for /me/joinedTeams and /teams/{id}/channels — together
   // with ChannelMessage.Read.All they unlock the Teams-and-channels
@@ -182,17 +190,16 @@ const MS_SCOPES: string[] = [
   "Channel.ReadBasic.All",
   "ChannelMessage.Send",
   "OnlineMeetings.ReadWrite",
-  // Tier 2 · Stream F (tenant directory + mailbox settings)
-  "User.Read.All",
-  "MailboxSettings.Read",
-  // Tier 2 · Stream G (assistant context resolver — SharePoint search
-  // + MS Project / Planner / To Do task lookup). Sites.Read.All is the
-  // delegated permission required by Graph's /search/query endpoint
-  // when entityTypes includes "site" / "listItem". Tasks.Read is the
-  // To Do fallback used by microsoft-project.searchProjectTasks. Both
-  // require admin consent on first deploy — see PR
-  // feat/assistant-sharepoint-msproject-context for the deploy note.
-  "Sites.Read.All",
+  /* DISABLED 2026-05-20: the next three (User.Read.All,
+     MailboxSettings.Read, Sites.Read.All) all require admin
+     consent and were blocking non-admin teammates from connecting
+     M365. Trade-off: lose tenant directory lookup, cross-user
+     mailbox settings, and tenant-wide SharePoint search. The
+     SharePoint context resolver gracefully degrades when the
+     scope is absent (returns empty result, doesn't 500). */
+  // "User.Read.All",
+  // "MailboxSettings.Read",
+  // "Sites.Read.All",
   "Tasks.Read",
   "offline_access",
 ];
