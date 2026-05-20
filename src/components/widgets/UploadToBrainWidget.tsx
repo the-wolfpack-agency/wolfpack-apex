@@ -42,9 +42,41 @@ export interface UploadToBrainWidgetProps {
   workflowId?: string;
 }
 
+/**
+ * MIME → preferred file extensions for the file-input `accept`
+ * attribute. Browsers (notably macOS Safari + Finder) won't show
+ * .md / .txt / .json / .html files in the picker unless the
+ * extension itself is listed — the bare MIME types alone aren't
+ * enough. Without this, users could only select .pdf and .csv from
+ * the supported list, even though the server filter accepts every
+ * MIME in UPLOAD_FILTER_ALLOWED_MIME_TYPES.
+ */
+const MIME_TO_EXTS: Record<string, string[]> = {
+  "application/pdf": [".pdf"],
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+  "application/json": [".json"],
+  "text/plain": [".txt"],
+  "text/markdown": [".md", ".markdown"],
+  "text/html": [".html", ".htm"],
+  "text/csv": [".csv"],
+};
+
+function buildAcceptAttr(mimeTypes: readonly string[]): string {
+  const parts: string[] = [];
+  for (const mime of mimeTypes) {
+    parts.push(mime);
+    const exts = MIME_TO_EXTS[mime];
+    if (exts) parts.push(...exts);
+  }
+  return parts.join(",");
+}
+
 export function UploadToBrainWidget({ spec, workflowId }: UploadToBrainWidgetProps) {
   const [rows, setRows] = useState<FileRow[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteTitle, setPasteTitle] = useState("");
+  const [pasteText, setPasteText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   /* Stable analytics helper. Each call fires
@@ -265,7 +297,7 @@ export function UploadToBrainWidget({ spec, workflowId }: UploadToBrainWidgetPro
           ref={inputRef}
           type="file"
           multiple
-          accept={spec.allowedMimeTypes.join(",")}
+          accept={buildAcceptAttr(spec.allowedMimeTypes)}
           onChange={(e) => {
             if (e.target.files?.length) void handleFiles(e.target.files);
             e.target.value = "";
@@ -274,6 +306,111 @@ export function UploadToBrainWidget({ spec, workflowId }: UploadToBrainWidgetPro
           data-testid="upload-file-input"
         />
       </div>
+
+      {/* Paste-text path — for users on iPad / iPhone who can copy a
+          chunk of text (Apple Notes meeting minutes, a Slack thread,
+          a Notion block) and want it in the Brain without exporting
+          to a .txt file first. Stored as `<title>.md` so it goes
+          through the same dedup / secret / PII filter as a real
+          markdown drop. */}
+      <div className="mt-2 flex items-center justify-between text-xs">
+        <button
+          type="button"
+          data-testid="upload-paste-toggle"
+          onClick={(e) => {
+            e.stopPropagation();
+            setPasteOpen((v) => !v);
+          }}
+          className="underline"
+          style={{ color: "var(--wp-text-dim, #aaa)", background: "transparent", border: "none", cursor: "pointer" }}
+        >
+          {pasteOpen ? "Hide paste" : "Or paste text (Apple Notes, Slack, anything)"}
+        </button>
+      </div>
+
+      {pasteOpen && (
+        <div
+          className="mt-2 rounded p-2 space-y-2"
+          style={{
+            background: "var(--wp-dark, #111)",
+            border: "1px solid var(--wp-dark-border, #333)",
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            type="text"
+            value={pasteTitle}
+            onChange={(e) => setPasteTitle(e.target.value)}
+            placeholder="Title (optional — defaults to date)"
+            data-testid="upload-paste-title"
+            className="w-full px-2 py-1.5 text-xs rounded"
+            style={{
+              background: "var(--wp-dark-surface2, #1a1a1a)",
+              border: "1px solid var(--wp-dark-border, #333)",
+              color: "var(--wp-text, #eee)",
+              fontSize: "16px",
+            }}
+          />
+          <textarea
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+            placeholder="Paste meeting notes, an article, a Slack thread, anything..."
+            data-testid="upload-paste-text"
+            rows={6}
+            className="w-full px-2 py-1.5 text-xs rounded resize-y"
+            style={{
+              background: "var(--wp-dark-surface2, #1a1a1a)",
+              border: "1px solid var(--wp-dark-border, #333)",
+              color: "var(--wp-text, #eee)",
+              fontSize: "16px",
+              minHeight: "120px",
+            }}
+          />
+          <div className="flex items-center justify-between text-[10px]" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
+            <span>{pasteText.length.toLocaleString()} chars</span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPasteText("");
+                  setPasteTitle("");
+                  setPasteOpen(false);
+                }}
+                className="px-2 py-1 rounded text-xs"
+                style={{ background: "var(--wp-dark-surface2, #1a1a1a)", color: "var(--wp-text-dim, #aaa)", border: "1px solid var(--wp-dark-border, #333)" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                data-testid="upload-paste-submit"
+                disabled={!pasteText.trim()}
+                onClick={() => {
+                  const body = pasteText.trim();
+                  if (!body) return;
+                  const rawTitle = pasteTitle.trim() || `Note - ${new Date().toLocaleString()}`;
+                  const safeTitle = rawTitle.replace(/[^\w\-. ]+/g, " ").slice(0, 80).trim() || "Note";
+                  const filename = `${safeTitle}.md`;
+                  const blob = new Blob([body], { type: "text/markdown" });
+                  const file = new File([blob], filename, { type: "text/markdown" });
+                  void handleFiles([file]);
+                  setPasteText("");
+                  setPasteTitle("");
+                  setPasteOpen(false);
+                }}
+                className="px-3 py-1 rounded text-xs font-medium"
+                style={{
+                  background: pasteText.trim() ? "var(--wp-gold, #eab308)" : "var(--wp-dark-surface2, #1a1a1a)",
+                  color: pasteText.trim() ? "var(--wp-dark, #111)" : "var(--wp-text-muted, #6b7280)",
+                  cursor: pasteText.trim() ? "pointer" : "not-allowed",
+                }}
+              >
+                Add to Brain
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {rows.length > 0 && (
         <ul className="space-y-1 mt-2">
