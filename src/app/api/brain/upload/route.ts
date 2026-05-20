@@ -73,6 +73,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "file is required" }, { status: 400 });
   }
 
+  /* `source=paste` tells the filter the bytes came from a textarea
+     the user typed/pasted into, not a file picker. We skip the
+     min-content gate in that path because the user has explicitly
+     chosen to add the note (a 2-line meeting reminder is fine). All
+     other gates (secrets, PII, dedup, repetition, MIME) still run. */
+  const source = (form.get("source") || "").toString();
+  const isPaste = source === "paste";
+
   // Filename sanitization (matches legacy route).
   const nameCheck = sanitizeFilename(file.name || "upload");
   if (!nameCheck.ok || !nameCheck.value) {
@@ -157,6 +165,7 @@ export async function POST(req: NextRequest) {
     mimeType,
     buffer,
     extractedText,
+    skipMinContent: isPaste,
   });
 
   if (!filter.ok) {

@@ -82,6 +82,12 @@ export interface UploadFilterInput {
   /** Optional override: when false, the credit-card / contact-card PII
    *  scan is skipped. Defaults to true. */
   scanPII?: boolean;
+  /** Optional override: when true, skip the minimum-content gate
+   *  (≥50 non-whitespace chars + ≥10 tokens). Use for explicit
+   *  user-paste flows where the user typed the text themselves and
+   *  has already opted into "yes, add even this short note." Defaults
+   *  to false so file uploads still get the gate. */
+  skipMinContent?: boolean;
 }
 
 export interface UploadFilterSuccess {
@@ -346,8 +352,9 @@ export async function runUploadFilter(
     : 0;
   const nonWhitespaceCharCount = normalized.replace(/\s/g, "").length;
 
-  // Gate 3: minimum content.
-  if (text.length > 0) {
+  // Gate 3: minimum content. Skipped for explicit paste flows where
+  // the user typed it themselves — they know the note is short.
+  if (text.length > 0 && !input.skipMinContent) {
     if (nonWhitespaceCharCount < 50 || tokenCount < 10) {
       reasons.push("insufficient_content");
     }

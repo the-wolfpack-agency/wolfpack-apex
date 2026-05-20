@@ -132,7 +132,7 @@ export function UploadToBrainWidget({ spec, workflowId }: UploadToBrainWidgetPro
   }, [workflowId]);
 
   const handleFiles = useCallback(
-    async (files: FileList | File[]) => {
+    async (files: FileList | File[], source: "drop" | "paste" = "drop") => {
       const fileArray = Array.from(files);
       if (fileArray.length === 0) return;
 
@@ -159,6 +159,10 @@ export function UploadToBrainWidget({ spec, workflowId }: UploadToBrainWidgetPro
 
         const form = new FormData();
         form.append("file", file, file.name);
+        /* `source=paste` tells the server filter to skip the
+           min-content gate. The user explicitly typed/pasted; a 2-line
+           meeting reminder is valid knowledge for them. */
+        if (source === "paste") form.append("source", "paste");
         let res: Response | null = null;
         try {
           res = await fetchWithRefresh(spec.uploadUrl, {
@@ -393,7 +397,7 @@ export function UploadToBrainWidget({ spec, workflowId }: UploadToBrainWidgetPro
                   const filename = `${safeTitle}.md`;
                   const blob = new Blob([body], { type: "text/markdown" });
                   const file = new File([blob], filename, { type: "text/markdown" });
-                  void handleFiles([file]);
+                  void handleFiles([file], "paste");
                   setPasteText("");
                   setPasteTitle("");
                   setPasteOpen(false);
