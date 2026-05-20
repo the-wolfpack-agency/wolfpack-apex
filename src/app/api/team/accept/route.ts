@@ -97,8 +97,8 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Create the team member
-  const memberId = `tm_${randomUUID().slice(0, 12)}`;
+  // Create or update the team member.
+  const newMemberId = `tm_${randomUUID().slice(0, 12)}`;
   const passwordHash = hashPassword(body.password);
   const name = body.name || inv.email.split("@")[0];
 
@@ -107,18 +107,42 @@ export async function POST(req: NextRequest) {
      to "default" so legacy invite links still work. */
   const joinWorkspace = inv.workspace_id ?? "default";
 
-  /* Both writes go through writeQuery so a silent INSERT/UPDATE
-     failure surfaces as a 5xx instead of a 200 with no row written.
-     If the team_member INSERT fails (RLS, unique-index collision on
-     LOWER(email), workspace FK), the user gets a real error and a
-     retry path — they don't bounce on "Invalid credentials" later
-     wondering why their account doesn't exist. */
+  /* UPSERT-on-accept (2026-05-20): when a row already exists for this
+     email (MS-OAuth auto-provision, seed data, prior aborted accept),
+     UPDATE the role + password + workspace + name so the accept link
+     "just works." Pre-fix the route INSERT'd unconditionally and
+     409'd on the unique-index collision — Jorge hit this live at
+     the kickoff. Now both the seed/OAuth path and the invite path
+     converge on a working credential.
+
+     Returns the resolved row's id (existing or new) so the response
+     stays useful. */
+  let memberId = newMemberId;
   try {
-    await writeQuery(
-      `INSERT INTO instinct_team_members (id, email, name, role, password_hash, is_active, workspace_id)
-       VALUES ($1, $2, $3, $4, $5, true, $6)`,
-      [memberId, inv.email, name, inv.role, passwordHash, joinWorkspace],
+    const upsert = await writeQuery<{ id: string }>(
+      `INSERT INTO instinct_team_members
+         (id, email, name, role, password_hash, is_active, workspace_id)
+       VALUES ($1, $2, $3, $4, $5, true, $6)
+       ON CONFLICT ON CONSTRAINT uq_instinct_team_members_email_lower
+       DO UPDATE SET
+         role = EXCLUDED.role,
+         password_hash = EXCLUDED.password_hash,
+         workspace_id = EXCLUDED.workspace_id,
+         is_active = true,
+         /* Preserve a curated stored name unless the existing one is
+            empty or just the email local-part. */
+         name = CASE
+                  WHEN instinct_team_members.name IS NULL
+                       OR LENGTH(TRIM(instinct_team_members.name)) = 0
+                       OR LOWER(instinct_team_members.name) = LOWER(EXCLUDED.email)
+                  THEN EXCLUDED.name
+                  ELSE instinct_team_members.name
+                END
+       RETURNING id`,
+      [newMemberId, inv.email, name, inv.role, passwordHash, joinWorkspace],
+      { expectRows: 1 },
     );
+    memberId = upsert.rows[0]?.id ?? newMemberId;
 
     await writeQuery(
       "UPDATE instinct_invites SET status = 'accepted', accepted_at = NOW() WHERE id = $1",
@@ -130,11 +154,13 @@ export async function POST(req: NextRequest) {
       "[accept] team-member write failed:",
       wqe ? `${wqe.code}: ${wqe.message}` : (err as Error).message,
     );
-    /* Unique-index collision on LOWER(email) means the row ALREADY
-       exists from a prior accept attempt — the most common case after
-       the 2026-05-20 silent-write incident. Surface a clear hint
-       instead of a generic 500 so the operator knows to try login
-       directly (or forgot-password) instead of re-accepting. */
+    /* Post-upsert (2026-05-20) the unique-index collision branch
+       should be dead — ON CONFLICT handles it. Kept as a defensive
+       fallback in case a future constraint mismatch sneaks in
+       (e.g. someone forgets to add a new role to the role CHECK
+       constraint — that exact bug bit us at Jorge's invite).
+       Different surface: tell the operator to try forgot-password
+       instead of re-accepting. */
     const dupEmail =
       wqe?.code === "db_error" &&
       /uq_instinct_team_members_email_lower|duplicate key|unique constraint/i.test(
