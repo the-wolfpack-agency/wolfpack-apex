@@ -42,7 +42,7 @@ function mkReq(body: unknown): any {
   };
 }
 
-const CTO = { id: "u_cto", email: "homyk@thewolfpack.agency", role: "cto" };
+const CTO = { id: "u_cto", email: "homyk@thewolfpack.agency", name: "Nick Homyk", role: "cto" };
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -125,6 +125,10 @@ describe("POST /api/team/invite (inviteFlow)", () => {
     expect(arg.to).toBe("max@thewolfpack.agency");
     expect(arg.role).toBe("ops");
     expect(arg.inviterEmail).toBe(CTO.email);
+    // Prefer the real display name from team_members over the
+    // email-local-part fallback. Pre-2026-05-20 this was "homyk"
+    // (or worse, "cto" for the demo account).
+    expect(arg.inviterName).toBe("Nick Homyk");
     expect(arg.acceptUrl).toBe(body.invites[0].acceptUrl);
 
     expect(mockTrackEvent).toHaveBeenCalledWith(

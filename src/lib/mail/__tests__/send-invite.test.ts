@@ -43,15 +43,37 @@ describe("buildAcceptUrl", () => {
 });
 
 describe("buildInviteEmailBody", () => {
-  it("includes inviter, role, and accept URL in subject + text + html", () => {
+  it("uses a fixed product-centric subject line (not inviter-name-prefixed)", () => {
+    // Pre-2026-05-20 the subject was "${inviterName} invited you to
+    // Wolfpack Instinct" which produced "cto invited you..." when the
+    // demo account did the invite. Fixed subject avoids that class of
+    // ugly artifact and keeps inbox previews consistent.
     const body = buildInviteEmailBody(ARGS);
-    expect(body.subject).toContain("homyk");
-    expect(body.subject).toContain("Wolfpack Instinct");
+    expect(body.subject).toBe("You're invited to Wolfpack Instinct");
+  });
+
+  it("includes inviter name, inviter email, role label, and accept URL in body", () => {
+    const body = buildInviteEmailBody(ARGS);
+    expect(body.text).toContain("homyk");
     expect(body.text).toContain("homyk@thewolfpack.agency");
-    expect(body.text).toContain("ops");
     expect(body.text).toContain(ARGS.acceptUrl);
     expect(body.html).toContain(ARGS.acceptUrl);
     expect(body.html).toContain("Wolfpack Instinct");
+  });
+
+  it("maps role codes to human-readable display labels", () => {
+    expect(buildInviteEmailBody({ ...ARGS, role: "ops" }).text).toContain("Operations");
+    expect(buildInviteEmailBody({ ...ARGS, role: "cto" }).text).toContain("Chief Technology Officer");
+    expect(buildInviteEmailBody({ ...ARGS, role: "ceo" }).text).toContain("Chief Executive Officer");
+    expect(buildInviteEmailBody({ ...ARGS, role: "dev" }).text).toContain("Developer");
+    expect(buildInviteEmailBody({ ...ARGS, role: "hr" }).text).toContain("HR");
+    expect(buildInviteEmailBody({ ...ARGS, role: "evp" }).text).toContain("Executive Vice President");
+    expect(buildInviteEmailBody({ ...ARGS, role: "sales" }).text).toContain("Sales");
+  });
+
+  it("falls back to the raw role string when not in the display map (defensive)", () => {
+    const body = buildInviteEmailBody({ ...ARGS, role: "custom-role" });
+    expect(body.text).toContain("custom-role");
   });
 
   it("escapes HTML in inviter fields to prevent injection in the email", () => {

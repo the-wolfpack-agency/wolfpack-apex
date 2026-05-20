@@ -70,8 +70,15 @@ export async function inviteFlow(
     inv.email = inv.email.trim().toLowerCase();
   }
 
+  /* Prefer the real display name from instinct_team_members. The
+     email-local-part fallback produced ugly subjects like "cto invited
+     you to Wolfpack Instinct" when the inviter was the demo account or
+     hadn't set a name. */
   const inviterName =
-    typeof user.email === "string" ? user.email.split("@")[0] : user.role;
+    (typeof user.name === "string" && user.name.trim().length > 0
+      ? user.name.trim()
+      : null) ||
+    (typeof user.email === "string" ? user.email.split("@")[0] : user.role);
 
   const results: InviteResult[] = [];
 

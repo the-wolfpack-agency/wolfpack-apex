@@ -52,33 +52,60 @@ export function buildAcceptUrl(token: string): string {
   return `${publicBase()}/accept-invite?token=${encodeURIComponent(token)}`;
 }
 
+/**
+ * Display names for the seven canonical roles. Keeps email copy from
+ * showing "cto" twice when the inviter's name fell back to a role label.
+ */
+const ROLE_DISPLAY: Record<string, string> = {
+  ceo: "Chief Executive Officer",
+  cto: "Chief Technology Officer",
+  evp: "Executive Vice President",
+  hr: "HR",
+  dev: "Developer",
+  sales: "Sales",
+  ops: "Operations",
+};
+
+function roleLabel(role: string): string {
+  return ROLE_DISPLAY[role.toLowerCase()] ?? role;
+}
+
 export function buildInviteEmailBody(args: InviteEmailArgs): {
   subject: string;
   text: string;
   html: string;
 } {
-  const subject = `${args.inviterName} invited you to Wolfpack Instinct`;
+  const role = roleLabel(args.role);
+  const subject = `You're invited to Wolfpack Instinct`;
   const text =
-    `${args.inviterName} (${args.inviterEmail}) added you to Wolfpack Instinct as ${args.role}.\n\n` +
-    `Accept the invite and set your password:\n${args.acceptUrl}\n\n` +
-    `If you didn't expect this email, you can ignore it.`;
+    `Hi,\n\n` +
+    `${args.inviterName} has invited you to join Wolfpack Instinct, our team intelligence platform. ` +
+    `You'll be set up with ${role} access.\n\n` +
+    `Set your password and finish creating your account:\n${args.acceptUrl}\n\n` +
+    `The link expires after first use. If you weren't expecting this, you can ignore the email.\n\n` +
+    `— ${args.inviterName} (${args.inviterEmail})`;
   const html = `
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#212124;color:#fff;padding:32px;max-width:560px;margin:0 auto;border-radius:12px">
-  <h1 style="color:#f1c233;margin:0 0 16px 0;font-size:22px">Welcome to Wolfpack Instinct</h1>
-  <p style="color:#a0a8b4;margin:0 0 12px 0;line-height:1.55">
-    <strong style="color:#fff">${escapeHtml(args.inviterName)}</strong>
-    (${escapeHtml(args.inviterEmail)}) added you to Wolfpack Instinct as
-    <strong style="color:#fff">${escapeHtml(args.role)}</strong>.
+  <h1 style="color:#f1c233;margin:0 0 8px 0;font-size:24px;line-height:1.2">You're invited to Wolfpack Instinct</h1>
+  <p style="color:#a0a8b4;margin:0 0 20px 0;font-size:14px">Our team intelligence platform.</p>
+
+  <p style="color:#e6e6e6;margin:0 0 20px 0;line-height:1.55;font-size:15px">
+    <strong style="color:#fff">${escapeHtml(args.inviterName)}</strong> has added you with
+    <strong style="color:#fff">${escapeHtml(role)}</strong> access.
   </p>
+
   <p style="margin:24px 0">
-    <a href="${args.acceptUrl}" style="display:inline-block;background:#f1c233;color:#212124;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Accept invite &amp; set password</a>
+    <a href="${args.acceptUrl}" style="display:inline-block;background:#f1c233;color:#212124;padding:14px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px">Set your password</a>
   </p>
+
   <p style="color:#5e6e80;font-size:13px;margin:24px 0 0 0">
     Or paste this link into your browser:<br/>
-    <span style="color:#a0a8b4;word-break:break-all">${escapeHtml(args.acceptUrl)}</span>
+    <span style="color:#a0a8b4;word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px">${escapeHtml(args.acceptUrl)}</span>
   </p>
-  <p style="color:#5e6e80;font-size:12px;margin-top:32px;border-top:1px solid #3a3a40;padding-top:16px">
-    If you didn't expect this email, you can ignore it. The link expires after first use.
+
+  <p style="color:#5e6e80;font-size:12px;margin-top:32px;border-top:1px solid #3a3a40;padding-top:16px;line-height:1.55">
+    The link expires after first use. If you weren't expecting this, you can ignore the email.<br/>
+    Invited by ${escapeHtml(args.inviterName)} &lt;${escapeHtml(args.inviterEmail)}&gt;.
   </p>
 </div>
   `.trim();
