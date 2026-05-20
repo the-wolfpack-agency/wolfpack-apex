@@ -1020,6 +1020,8 @@ export type InstinctEventType =
   | "system.time_entry_recorded"
   | "system.password_changed"
   | "system.password_change_failed"
+  | "system.feedback_resolved"
+  | "system.feedback_reopened"
   // Microsoft 365 Mail (Mail.Send + Mail.ReadWrite for inbox surface)
   | "system.ms_mail_sent"
   | "system.ms_mail_reply_sent"

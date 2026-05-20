@@ -31,6 +31,9 @@ interface FeedbackRow {
   user_agent: string | null;
   workflow_id: string | null;
   created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
 }
 
 export async function GET(req: NextRequest) {
@@ -41,6 +44,10 @@ export async function GET(req: NextRequest) {
   const rawLimit = Number(url.searchParams.get("limit") ?? "50");
   const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 50, 1), 200);
   const since = url.searchParams.get("since");
+  /* status filter: "open" (default) | "resolved" | "all". Lets the
+     dashboard render an inbox-style view without re-fetching every
+     entry. */
+  const status = (url.searchParams.get("status") || "all").toLowerCase();
 
   const workspaceId = auth.user.workspaceId ?? "default";
   const args: unknown[] = [workspaceId];
@@ -49,12 +56,19 @@ export async function GET(req: NextRequest) {
     args.push(since);
     sinceClause = ` AND created_at >= $${args.length}::timestamptz`;
   }
+  let statusClause = "";
+  if (status === "open") statusClause = " AND resolved_at IS NULL";
+  else if (status === "resolved") statusClause = " AND resolved_at IS NOT NULL";
 
   const res = await safeQuery<FeedbackRow>(
     `SELECT id, workspace_id, user_id, user_email, user_role, message,
-            surface, user_agent, workflow_id, created_at::text AS created_at
+            surface, user_agent, workflow_id,
+            created_at::text AS created_at,
+            resolved_at::text AS resolved_at,
+            resolved_by,
+            resolution_note
      FROM instinct_user_feedback
-     WHERE workspace_id = $1${sinceClause}
+     WHERE workspace_id = $1${sinceClause}${statusClause}
      ORDER BY created_at DESC
      LIMIT ${limit}`,
     args,
@@ -71,6 +85,7 @@ export async function GET(req: NextRequest) {
     workspace_id: workspaceId,
     count: res.rows.length,
     limit,
+    status,
     feedback: res.rows,
   });
 }

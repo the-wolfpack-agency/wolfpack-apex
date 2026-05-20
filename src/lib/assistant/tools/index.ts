@@ -67,6 +67,7 @@ import "./create-message-form-tool";
    thin error handling on rate limits). Re-enable once hardened. */
 // import "./create-email-form-tool";
 import "./create-calendar-event-form-tool";
+import "./log-time";
 import "./create-task-form-tool";
 import "./create-okr-form-tool";
 import "./create-feature-form-tool";

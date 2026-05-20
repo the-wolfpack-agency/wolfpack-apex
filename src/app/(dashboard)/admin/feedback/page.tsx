@@ -2,14 +2,8 @@
 
 /**
  * /admin/feedback — CTO/CEO view of recent /feedback submissions.
- *
- * The widget tells users "The CTO sees every note." This page is the
- * fulfillment of that promise. CTO-only via the capability gate on the
- * API; the page itself just renders whatever the API returns.
- *
- * Minimal on purpose: list with timestamp + sender + message + surface.
- * Sortable by date (descending only for now). No edit, no delete, no
- * reply — that comes later if/when the use case demands it.
+ * Inbox-style: Open vs Resolved tabs, one-click resolve/reopen,
+ * optional resolution note. Auto-refreshes are user-triggered.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -25,16 +19,23 @@ interface FeedbackRow {
   user_agent: string | null;
   workflow_id: string | null;
   created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
 }
 
 interface FeedbackResponse {
   workspace_id: string;
   count: number;
   limit: number;
+  status: string;
   feedback: FeedbackRow[];
 }
 
-function relativeTime(iso: string): string {
+type StatusFilter = "open" | "resolved" | "all";
+
+function relativeTime(iso: string | null): string {
+  if (!iso) return "";
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return iso;
   const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
@@ -51,18 +52,17 @@ export default function FeedbackPage() {
   const [rows, setRows] = useState<FeedbackRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<StatusFilter>("open");
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchWithRefresh("/api/admin/feedback?limit=200");
+      const res = await fetchWithRefresh(`/api/admin/feedback?limit=200&status=${filter}`);
       if (!res.ok) {
-        if (res.status === 403) {
-          setError("You don't have permission to view team feedback.");
-        } else {
-          setError(`Could not load feedback (HTTP ${res.status}).`);
-        }
+        if (res.status === 403) setError("You don't have permission to view team feedback.");
+        else setError(`Could not load feedback (HTTP ${res.status}).`);
         setRows([]);
         return;
       }
@@ -74,11 +74,31 @@ export default function FeedbackPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filter]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function toggleResolved(row: FeedbackRow) {
+    const action = row.resolved_at ? "reopen" : "resolve";
+    setBusyId(row.id);
+    try {
+      const res = await fetchWithRefresh(`/api/admin/feedback/${row.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (!res.ok) {
+        const b = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(b.error || `Could not ${action} (HTTP ${res.status})`);
+        return;
+      }
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
     <div
@@ -90,7 +110,7 @@ export default function FeedbackPage() {
         color: "var(--wp-text, #eee)",
       }}
     >
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "0.5rem", flexWrap: "wrap", gap: "0.5rem" }}>
         <h1 style={{ margin: 0, fontSize: "1.5rem", color: "var(--wp-gold, #f1c233)" }}>
           Team feedback
         </h1>
@@ -111,9 +131,33 @@ export default function FeedbackPage() {
           {loading ? "Loading…" : "Refresh"}
         </button>
       </div>
-      <p style={{ color: "var(--wp-text-dim, #aaa)", margin: "0 0 1.5rem 0", fontSize: "0.9rem" }}>
-        Every note submitted via the assistant&apos;s <code>/feedback</code> command shows up here. Newest first.
+      <p style={{ color: "var(--wp-text-dim, #aaa)", margin: "0 0 1rem 0", fontSize: "0.9rem" }}>
+        Every note submitted via <code>/feedback</code>. Mark resolved when addressed.
       </p>
+
+      <div data-testid="admin-feedback-filter" style={{ display: "flex", gap: "0.5rem", marginBottom: "1.25rem" }}>
+        {(["open", "resolved", "all"] as StatusFilter[]).map((f) => (
+          <button
+            key={f}
+            type="button"
+            onClick={() => setFilter(f)}
+            data-testid={`admin-feedback-filter-${f}`}
+            style={{
+              padding: "0.35rem 0.9rem",
+              borderRadius: "6px",
+              fontSize: "0.85rem",
+              cursor: "pointer",
+              background: filter === f ? "var(--wp-gold, #f1c233)" : "var(--wp-dark-surface, #1f1f22)",
+              color: filter === f ? "var(--wp-dark, #111)" : "var(--wp-text-dim, #aaa)",
+              border: `1px solid ${filter === f ? "var(--wp-gold, #f1c233)" : "var(--wp-dark-border, #333)"}`,
+              textTransform: "capitalize",
+              fontWeight: filter === f ? 600 : 400,
+            }}
+          >
+            {f}
+          </button>
+        ))}
+      </div>
 
       {error && (
         <div
@@ -143,63 +187,96 @@ export default function FeedbackPage() {
             color: "var(--wp-text-muted, #6b7280)",
           }}
         >
-          No feedback yet. Tell the team to try <code>/feedback &lt;message&gt;</code> in the assistant.
+          {filter === "open"
+            ? "Nothing open. Switch to All to see resolved entries."
+            : filter === "resolved"
+            ? "No resolved feedback yet."
+            : "No feedback yet."}
         </div>
       )}
 
       <ul style={{ listStyle: "none", padding: 0, margin: 0 }} data-testid="admin-feedback-list">
-        {rows.map((r) => (
-          <li
-            key={r.id}
-            data-testid={`admin-feedback-row-${r.id}`}
-            style={{
-              padding: "1rem 1.1rem",
-              marginBottom: "0.5rem",
-              background: "var(--wp-dark-surface, #1f1f22)",
-              border: "1px solid var(--wp-dark-border, #333)",
-              borderRadius: "8px",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
-              <div style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}>
-                <strong style={{ color: "var(--wp-text, #eee)" }}>
-                  {r.user_email ?? r.user_id}
-                </strong>
-                {r.user_role && (
-                  <span style={{ marginLeft: "0.5rem", color: "var(--wp-text-muted, #6b7280)" }}>
-                    · {r.user_role}
-                  </span>
-                )}
-                {r.surface && (
-                  <span style={{ marginLeft: "0.5rem", color: "var(--wp-text-muted, #6b7280)" }}>
-                    · from {r.surface}
-                  </span>
-                )}
-              </div>
-              <div
-                title={r.created_at}
-                style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)" }}
-              >
-                {relativeTime(r.created_at)}
-              </div>
-            </div>
-            <div
+        {rows.map((r) => {
+          const isResolved = Boolean(r.resolved_at);
+          return (
+            <li
+              key={r.id}
+              data-testid={`admin-feedback-row-${r.id}`}
               style={{
-                marginTop: "0.6rem",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                fontSize: "0.95rem",
-                lineHeight: 1.5,
-                color: "var(--wp-text, #eee)",
+                padding: "1rem 1.1rem",
+                marginBottom: "0.5rem",
+                background: "var(--wp-dark-surface, #1f1f22)",
+                border: `1px solid ${isResolved ? "var(--wp-dark-border, #333)" : "var(--wp-gold, #f1c233)"}`,
+                borderRadius: "8px",
+                opacity: isResolved ? 0.7 : 1,
               }}
             >
-              {r.message}
-            </div>
-            <div style={{ marginTop: "0.5rem", fontSize: "0.7rem", color: "var(--wp-text-muted, #6b7280)" }}>
-              #{r.id.slice(0, 8)}
-            </div>
-          </li>
-        ))}
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
+                <div style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}>
+                  <strong style={{ color: "var(--wp-text, #eee)" }}>{r.user_email ?? r.user_id}</strong>
+                  {r.user_role && <span style={{ marginLeft: "0.5rem", color: "var(--wp-text-muted, #6b7280)" }}>· {r.user_role}</span>}
+                  {r.surface && <span style={{ marginLeft: "0.5rem", color: "var(--wp-text-muted, #6b7280)" }}>· from {r.surface}</span>}
+                  <span
+                    data-testid={`admin-feedback-status-${r.id}`}
+                    style={{
+                      marginLeft: "0.5rem",
+                      padding: "0.1rem 0.5rem",
+                      borderRadius: "10px",
+                      fontSize: "0.7rem",
+                      background: isResolved ? "rgba(74,222,128,0.12)" : "rgba(241,194,51,0.12)",
+                      color: isResolved ? "#4ade80" : "var(--wp-gold, #f1c233)",
+                      border: `1px solid ${isResolved ? "#4ade80" : "var(--wp-gold, #f1c233)"}`,
+                    }}
+                  >
+                    {isResolved ? "RESOLVED" : "OPEN"}
+                  </span>
+                </div>
+                <div title={r.created_at} style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)" }}>
+                  {relativeTime(r.created_at)}
+                </div>
+              </div>
+              <div
+                style={{
+                  marginTop: "0.6rem",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  fontSize: "0.95rem",
+                  lineHeight: 1.5,
+                  color: "var(--wp-text, #eee)",
+                }}
+              >
+                {r.message}
+              </div>
+              {isResolved && r.resolved_at && (
+                <div style={{ marginTop: "0.4rem", fontSize: "0.75rem", color: "var(--wp-text-muted, #6b7280)" }}>
+                  Resolved {relativeTime(r.resolved_at)}
+                  {r.resolution_note && ` · ${r.resolution_note}`}
+                </div>
+              )}
+              <div style={{ marginTop: "0.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
+                <div style={{ fontSize: "0.7rem", color: "var(--wp-text-muted, #6b7280)" }}>#{r.id.slice(0, 8)}</div>
+                <button
+                  type="button"
+                  data-testid={`admin-feedback-toggle-${r.id}`}
+                  onClick={() => void toggleResolved(r)}
+                  disabled={busyId === r.id}
+                  style={{
+                    padding: "0.35rem 0.85rem",
+                    borderRadius: "6px",
+                    fontSize: "0.8rem",
+                    cursor: busyId === r.id ? "not-allowed" : "pointer",
+                    background: isResolved ? "var(--wp-dark-surface2, #1a1a1a)" : "var(--wp-gold, #f1c233)",
+                    color: isResolved ? "var(--wp-text-dim, #aaa)" : "var(--wp-dark, #111)",
+                    border: `1px solid ${isResolved ? "var(--wp-dark-border, #333)" : "var(--wp-gold, #f1c233)"}`,
+                    fontWeight: 500,
+                  }}
+                >
+                  {busyId === r.id ? "…" : isResolved ? "Reopen" : "Mark resolved"}
+                </button>
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
