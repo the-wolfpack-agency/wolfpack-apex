@@ -2100,7 +2100,19 @@ export type InstinctEventType =
   | "portal.salesforce_record_viewed"
   | "portal.salesforce_record_updated"
   | "portal.salesforce_record_created"
-  | "portal.salesforce_quick_search";
+  | "portal.salesforce_quick_search"
+  // Job codes — SharePoint-backed catalog (read-only). The view
+  // event fires on every API hit so we can see catalog freshness vs.
+  // usage. Refresh events distinguish auto-stale (TTL expired) vs
+  // manual (admin clicked Refresh) vs the served-stale fallback when
+  // Graph is down.
+  | "jobcodes.viewed"
+  | "jobcodes.searched"
+  | "jobcodes.refresh_requested"
+  | "jobcodes.refresh_succeeded"
+  | "jobcodes.refresh_failed"
+  | "jobcodes.served_stale"
+  | "jobcodes.source_fetched";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

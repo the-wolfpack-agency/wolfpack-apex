@@ -133,6 +133,14 @@ export const CAPABILITIES = {
   "automations.run": "Trigger ingest / poll for an automation",
   "automations.override": "Apply manual corrections (alias, exclude, class match) to an automation",
   "automations.resolve_exceptions": "Resolve or dismiss automation exceptions",
+
+  // Job codes — read-only sync from SharePoint workbook (the team's
+  // single source of truth for billing/time-tracking categories).
+  // `view` is granted to every role because the TimeLogWidget hits the
+  // job-codes API on every render; `refresh` is admin-only since it
+  // costs a Graph round-trip and writes to the cache.
+  "jobcodes.view": "View the job codes list and use them for time logging",
+  "jobcodes.refresh": "Trigger a manual re-sync of the job codes cache from SharePoint",
 } as const;
 
 export type Capability = keyof typeof CAPABILITIES;

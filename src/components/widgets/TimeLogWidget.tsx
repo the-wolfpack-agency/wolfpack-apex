@@ -21,6 +21,11 @@ interface RecentEntry {
   notes: string | null;
 }
 
+interface CatalogCode {
+  code: string;
+  description: string;
+}
+
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -44,6 +49,8 @@ export function TimeLogWidget({ workflowId }: TimeLogWidgetProps) {
   const [submitting, setSubmitting] = useState(false);
   const [successId, setSuccessId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [catalog, setCatalog] = useState<CatalogCode[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const loadRecent = useCallback(async () => {
     try {
@@ -57,8 +64,26 @@ export function TimeLogWidget({ workflowId }: TimeLogWidgetProps) {
     }
   }, []);
 
+  /* Pull the canonical job code catalog from the SharePoint-backed
+     /api/job-codes endpoint. Failure is silent — recent codes + manual
+     typing both still work. This swaps the previous free-text guess for
+     a real autocomplete grounded in the workbook owners control. */
+  const loadCatalog = useCallback(async () => {
+    try {
+      const res = await fetchWithRefresh("/api/job-codes");
+      if (!res.ok) return;
+      const body = (await res.json()) as { codes?: Array<{ code: string; description: string }> };
+      setCatalog(
+        (body.codes ?? []).map((c) => ({ code: c.code, description: c.description })),
+      );
+    } catch {
+      /* silent */
+    }
+  }, []);
+
   useEffect(() => {
     void loadRecent();
+    void loadCatalog();
     fetchWithRefresh("/api/analytics", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -67,7 +92,22 @@ export function TimeLogWidget({ workflowId }: TimeLogWidgetProps) {
         metadata: { widget_kind: "time_log", ...(workflowId ? { workflow_id: workflowId } : {}) },
       }),
     }).catch(() => undefined);
-  }, [workflowId, loadRecent]);
+  }, [workflowId, loadRecent, loadCatalog]);
+
+  /* Autocomplete suggestions — filter the catalog by the current input
+     (case-insensitive match on code OR description). Capped at 8 so the
+     dropdown stays compact under the assistant input. */
+  const suggestions = (() => {
+    const q = jobCode.trim().toLowerCase();
+    if (!q) return [];
+    return catalog
+      .filter(
+        (c) =>
+          c.code.toLowerCase().includes(q) ||
+          c.description.toLowerCase().includes(q),
+      )
+      .slice(0, 8);
+  })();
 
   /* Job-code chips: top 5 most-frequent codes from the user's last
      14 days, so re-logging the same one is a single tap. */
@@ -137,20 +177,68 @@ export function TimeLogWidget({ workflowId }: TimeLogWidgetProps) {
           <label className="block text-xs mb-1" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
             Job code
           </label>
-          <input
-            type="text"
-            value={jobCode}
-            onChange={(e) => setJobCode(e.target.value.toUpperCase())}
-            placeholder="e.g. WOLFPACK-AUTO, CLIENT-ACME"
-            data-testid="time-log-jobcode"
-            className="w-full px-2 py-1.5 rounded"
-            style={{
-              background: "var(--wp-dark, #111)",
-              border: "1px solid var(--wp-dark-border, #333)",
-              color: "var(--wp-text, #eee)",
-              fontSize: "16px",
-            }}
-          />
+          <div className="relative">
+            <input
+              type="text"
+              value={jobCode}
+              onChange={(e) => {
+                setJobCode(e.target.value.toUpperCase());
+                setShowSuggestions(true);
+              }}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => {
+                /* tiny delay so a suggestion click registers before
+                   the input loses focus and the dropdown closes. */
+                window.setTimeout(() => setShowSuggestions(false), 120);
+              }}
+              placeholder="Start typing — codes from the SharePoint workbook"
+              data-testid="time-log-jobcode"
+              autoComplete="off"
+              className="w-full px-2 py-1.5 rounded"
+              style={{
+                background: "var(--wp-dark, #111)",
+                border: "1px solid var(--wp-dark-border, #333)",
+                color: "var(--wp-text, #eee)",
+                fontSize: "16px",
+              }}
+            />
+            {showSuggestions && suggestions.length > 0 && (
+              <ul
+                data-testid="time-log-suggestions"
+                className="absolute z-10 left-0 right-0 mt-1 rounded max-h-56 overflow-y-auto"
+                style={{
+                  background: "var(--wp-dark-surface2, #1a1a1a)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                }}
+              >
+                {suggestions.map((s) => (
+                  <li key={s.code}>
+                    <button
+                      type="button"
+                      data-testid={`time-log-suggestion-${s.code}`}
+                      onMouseDown={(e) => {
+                        /* mousedown fires before blur, so we can set
+                           the value and close the menu without losing
+                           the click. */
+                        e.preventDefault();
+                        setJobCode(s.code);
+                        setShowSuggestions(false);
+                      }}
+                      className="w-full text-left px-2 py-1.5 text-xs"
+                      style={{ color: "var(--wp-text, #eee)", background: "transparent", border: "none", cursor: "pointer" }}
+                    >
+                      <span className="font-mono">{s.code}</span>
+                      {s.description && (
+                        <span className="ml-2" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
+                          — {s.description}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           {recentCodes.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1">
               {recentCodes.map((c) => (

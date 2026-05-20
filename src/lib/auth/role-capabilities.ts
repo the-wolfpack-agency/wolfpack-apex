@@ -99,6 +99,8 @@ const HR: readonly Capability[] = [
   "automations.run",
   "automations.override",
   "automations.resolve_exceptions",
+  // Job codes — everyone logs time, everyone reads the codes list.
+  "jobcodes.view",
 ];
 
 /** Sales: clients + meetings, read-only on docs/reports, no HR/finance. */
@@ -128,6 +130,7 @@ const SALES: readonly Capability[] = [
   "tasks.edit",
   "tools.view",
   "automations.view",        // sales sees the automations dashboard read-only
+  "jobcodes.view",
 ];
 
 /** Ops: internal process + docs. No HR, no finance, no deploys. */
@@ -166,6 +169,7 @@ const OPS: readonly Capability[] = [
   // grants cover feed CRUD and ad-hoc poll. Export remains gated to
   // CEO/CTO so finance/legal-relevant attachment bytes don't fan out.
   "meetings.manage",
+  "jobcodes.view",
 ];
 
 /** Dev: full dev surface + sites. No HR sensitive, no finance. */
@@ -207,6 +211,7 @@ const DEV: readonly Capability[] = [
   // workflow decisions, not engineering decisions.
   "automations.view",
   "automations.run",
+  "jobcodes.view",
 ];
 
 /** Designer: docs + knowledge + assistant; no finance, no HR, no deploys. */
@@ -232,6 +237,7 @@ const DESIGNER: readonly Capability[] = [
   "tasks.edit",
   "tools.view",
   "automations.view",        // designers see the automations dashboard read-only
+  "jobcodes.view",
 ];
 
 const ROLE_MAP: Record<TeamRole, readonly Capability[]> = {
