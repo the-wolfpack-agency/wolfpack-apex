@@ -601,8 +601,17 @@ export default function InstinctChat({
 
           if (!conversationId && result.conversation_id) {
             setConversationId(result.conversation_id);
-            loadConversations();
           }
+          /* Always refresh the conversations sidebar after a successful
+             send so:
+               (a) a brand-new conversation appears in the bar, and
+               (b) an existing conversation moves to the top with its
+                   refreshed updated_at + title preview.
+             Previously this only ran for the first message of a new
+             conversation, so Cmd+Enter sends in an existing convo
+             didn't reflect in the sidebar. Feedback bef8a32d
+             (2026-05-21). */
+          loadConversations();
 
           const assistantMsg: Message = {
             id: result.message_id,
