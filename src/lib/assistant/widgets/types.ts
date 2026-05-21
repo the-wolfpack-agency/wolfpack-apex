@@ -431,6 +431,23 @@ export interface TimeLogWidgetSpec {
   submitUrl: string;
 }
 
+/**
+ * ScanReceiptWidget — drop a receipt (image or PDF) inside the
+ * assistant chat → Azure Document Intelligence extracts merchant,
+ * date, total → pick a job code → commit to SharePoint columns D/E/F
+ * via the existing /api/job-codes/[code]/cell PATCH endpoint.
+ *
+ * The widget never writes B or C (Client/Category and Job Code are
+ * immutable from Instinct per CTO directive 2026-05-21). The server-
+ * side allowlist enforces the same.
+ */
+export interface ScanReceiptWidgetSpec {
+  kind: "scan_receipt";
+  /** Optional pre-pick from intent parsing (e.g. "scan receipt for
+   *  WOLFPACK-AUTO"). The user can change it before applying. */
+  jobCode?: string;
+}
+
 /** Discriminated union of every widget kind. Add new entries as the
  *  framework expands. */
 export type WidgetSpec =
@@ -446,4 +463,5 @@ export type WidgetSpec =
   | UploadToBrainWidgetSpec
   | MeetingPrepWidgetSpec
   | FeedbackWidgetSpec
-  | TimeLogWidgetSpec;
+  | TimeLogWidgetSpec
+  | ScanReceiptWidgetSpec;

@@ -26,6 +26,8 @@ import { FxWidget } from "@/components/widgets/FxWidget";
 import { UploadToBrainWidget } from "@/components/widgets/UploadToBrainWidget";
 import { MeetingPrepWidget } from "@/components/widgets/MeetingPrepWidget";
 import { FeedbackWidget } from "@/components/widgets/FeedbackWidget";
+import { TimeLogWidget } from "@/components/widgets/TimeLogWidget";
+import { ScanReceiptWidget } from "@/components/widgets/ScanReceiptWidget";
 
 export interface ChatWidgetProps {
   spec: WidgetSpec;
@@ -62,6 +64,14 @@ export function ChatWidget({ spec, workflowId }: ChatWidgetProps) {
       return <MeetingPrepWidget spec={spec} workflowId={workflowId} />;
     case "feedback":
       return <FeedbackWidget spec={spec} workflowId={workflowId} />;
+    case "time_log":
+      /* Was missing from the switch since TimeLogWidget shipped on
+         2026-05-20 — the log_time tool emitted the spec but the
+         renderer silently dropped it. Fixed alongside the
+         scan_receipt rollout. */
+      return <TimeLogWidget spec={spec} workflowId={workflowId} />;
+    case "scan_receipt":
+      return <ScanReceiptWidget spec={spec} workflowId={workflowId} />;
     default:
       /* Forward-compat: silently render nothing for unknown kinds.
        * The text answer above the widget still surfaces, so the

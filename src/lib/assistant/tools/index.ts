@@ -68,6 +68,7 @@ import "./create-message-form-tool";
 // import "./create-email-form-tool";
 import "./create-calendar-event-form-tool";
 import "./log-time";
+import "./scan-receipt";
 import "./create-task-form-tool";
 import "./create-okr-form-tool";
 import "./create-feature-form-tool";
