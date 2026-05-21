@@ -25,8 +25,14 @@ interface ScanReceiptData {
   kind: "scan_receipt";
 }
 
+/* Intentionally narrow: "invoice" phrases are routed to scan_invoice
+   (AP queue). This tool handles RECEIPTS only — the result writes to
+   a job code's Program/PO/PO Amount, not the invoice queue.
+   Regression: 2026-05-21 — "scan invoice" matched both tools and
+   scan-receipt won by registration order, surfacing the wrong widget
+   + wrong answer text. */
 const INTENT_RE =
-  /^\s*\/?(?:scan\s+(?:receipt|document|invoice)|upload\s+(?:receipt|invoice)|receipt|invoice|scan)\b\s*(.*)$/i;
+  /^\s*\/?(?:scan\s+receipt|upload\s+receipt|receipt|scan\s+document)\b\s*(.*)$/i;
 
 export function matchScanReceiptIntent(message: string): Params | null {
   const trimmed = (message ?? "").trim();

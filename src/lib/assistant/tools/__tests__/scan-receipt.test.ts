@@ -15,18 +15,24 @@ describe("matchScanReceiptIntent", () => {
   it("matches the documented trigger phrases", () => {
     for (const phrase of [
       "scan receipt",
-      "Scan a receipt",
       "scan document",
-      "scan invoice",
       "upload receipt",
-      "upload invoice",
       "/receipt",
-      "/scan",
       "receipt",
-      "invoice",
     ]) {
       expect(matchScanReceiptIntent(phrase)).not.toBeNull();
     }
+  });
+
+  it("does NOT match invoice phrases (those go to scan_invoice)", () => {
+    /* Regression guard: 2026-05-21 — scan-receipt regex used to
+       include "invoice" too, so "scan invoice" matched both tools
+       and scan-receipt won by registration order. Surfaced the wrong
+       widget + wrong answer text. */
+    expect(matchScanReceiptIntent("scan invoice")).toBeNull();
+    expect(matchScanReceiptIntent("upload invoice")).toBeNull();
+    expect(matchScanReceiptIntent("invoice")).toBeNull();
+    expect(matchScanReceiptIntent("/invoice")).toBeNull();
   });
 
   it("returns null for unrelated phrases", () => {
