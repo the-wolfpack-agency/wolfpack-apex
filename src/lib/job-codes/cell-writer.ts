@@ -58,12 +58,13 @@ function indexToLetter(idx: number): string {
 }
 
 export type CellEditError =
-  | "forbidden_column"     // not in EDITABLE_COLUMNS — never fires Graph
+  | "forbidden_column"     // not in EDITABLE_HEADERS — never fires Graph
   | "code_not_found"       // Job Code doesn't match any row
   | "not_configured"       // no Graph token
   | "graph_forbidden"      // Graph said 403
   | "graph_unavailable"    // network / 5xx / non-2xx
-  | "invalid_input";       // bad value shape
+  | "invalid_input"        // bad value shape
+  | "internal";            // safety-gate refusal: address/rowIndex missing OR verify-cell mismatch
 
 export interface CellEditOk {
   ok: true;
