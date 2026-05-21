@@ -64,6 +64,7 @@ export type CellEditError =
   | "graph_forbidden"      // Graph said 403
   | "graph_unavailable"    // network / 5xx / non-2xx
   | "invalid_input"        // bad value shape
+  | "conflict"             // pre-write verify: cell already holds a *different* non-empty value vs. expectedValue
   | "internal";            // safety-gate refusal: address/rowIndex missing OR verify-cell mismatch
 
 export interface CellEditOk {
@@ -73,11 +74,24 @@ export interface CellEditOk {
   previousValue: string;  // what was in the cell before the PATCH
   newValue: string;       // confirmed echo of what we wrote
   tokenKind: "delegated" | "app_only";
+  /** True when the cell already held `value` and the write was
+   *  skipped (no Graph PATCH emitted). Lets callers distinguish a
+   *  real write from an idempotent re-save (e.g. a UI re-submitting
+   *  on blur when nothing changed). */
+  noop?: boolean;
 }
 export interface CellEditFail {
   ok: false;
   code: CellEditError;
   detail: string;
+  /** Populated only when `code === "conflict"`. Caller forwards this
+   *  to the UI so the user sees "$current vs $expected". */
+  conflict?: {
+    column: EditableHeader;
+    currentValue: string;
+    expectedValue: string;
+    requestedValue: string;
+  };
 }
 export type CellEditResult = CellEditOk | CellEditFail;
 
@@ -100,6 +114,13 @@ export interface CellEditInput {
   column?: string;
   /** The new value. */
   value: string;
+  /** Optimistic-concurrency guard. The client snapshotted this value
+   *  when the user opened the editor; if the cell now holds a
+   *  *different* non-empty value, we refuse to write and return
+   *  `{ ok:false, code:"conflict", conflict: {...} }`. Pass `null`
+   *  to opt out entirely (server-side automations, recovery
+   *  scripts). Empty string is treated as "expected blank". */
+  expectedValue?: string | null;
 }
 
 interface UsedRangeResponse {
@@ -346,6 +367,70 @@ export async function patchJobCodeCell(
     };
   }
 
+  /* SAFETY GATE (concurrency): read back the EDITABLE cell at the
+     resolved address and compare against (a) the value the user
+     intends to write — for idempotency — and (b) the expectedValue
+     the client snapshotted at dialog-open — for conflict detection.
+     Graph workbookRange does NOT support If-Match/ETag on cell PATCH
+     (verified against learn.microsoft.com/graph workbookrange-update
+     spec on 2026-05-21), so an explicit read+compare is the only
+     correct way to enforce optimistic concurrency at this layer. */
+  const currentRes = await graphGet<{ values?: Array<Array<string | number | boolean | null>> }>(
+    `drives/${encodeURIComponent(input.driveId)}/items/${encodeURIComponent(input.itemId)}/workbook/worksheets/${encodeURIComponent(input.sheetName)}/range(address='${cellAddress}')?$select=values`,
+    acquired.token,
+  );
+  if (!currentRes.ok) {
+    return {
+      ok: false,
+      code: currentRes.status === 403 ? "graph_forbidden" : "graph_unavailable",
+      detail: `pre-write current-value read ${cellAddress} HTTP ${currentRes.status} ${currentRes.detail}`,
+    };
+  }
+  const currentRaw = currentRes.value.values?.[0]?.[0];
+  const currentValue = currentRaw === undefined || currentRaw === null ? "" : String(currentRaw);
+
+  /* Idempotent skip — caller is re-saving the same value. No Graph
+     PATCH, no audit row change, no conflict either. Return success
+     with noop=true so the route can fire `cell_edit_noop` instead of
+     `cell_edit_succeeded` (lets the learning loop see the rate of
+     redundant saves). */
+  if (currentValue === input.value) {
+    return {
+      ok: true,
+      rowIndex,
+      cellAddress,
+      previousValue: currentValue,
+      newValue: currentValue,
+      tokenKind: acquired.kind,
+      noop: true,
+    };
+  }
+
+  /* Conflict — only fires when (a) the caller passed expectedValue
+     (opt-in by default for any UI write), and (b) the cell holds a
+     non-empty value that doesn't match what the user thought was
+     there. An empty cell that becomes empty is NOT a conflict, and
+     callers that explicitly pass `expectedValue: null` opt out
+     (server-side recovery scripts). */
+  if (
+    input.expectedValue !== undefined &&
+    input.expectedValue !== null &&
+    currentValue !== "" &&
+    currentValue !== input.expectedValue
+  ) {
+    return {
+      ok: false,
+      code: "conflict",
+      detail: `cell ${cellAddress} (${columnName}) was "${input.expectedValue}" when you opened the dialog but now holds "${currentValue}". Someone else edited it in the meantime.`,
+      conflict: {
+        column: columnName,
+        currentValue,
+        expectedValue: input.expectedValue,
+        requestedValue: input.value,
+      },
+    };
+  }
+
   // ── 2. PATCH the single cell ──
   const patchRes = await graphPatch<RangeResponse>(
     `drives/${encodeURIComponent(input.driveId)}/items/${encodeURIComponent(input.itemId)}/workbook/worksheets/${encodeURIComponent(input.sheetName)}/range(address='${cellAddress}')`,
@@ -363,6 +448,9 @@ export async function patchJobCodeCell(
      surprises (Excel may round, format, or reject the value). */
   const echoed = patchRes.value.values?.[0]?.[0];
   const newValue = echoed === undefined || echoed === null ? input.value : String(echoed);
+  /* Overwrite previousValue with the fresh pre-write read — more
+     accurate than the cached usedRange snapshot. */
+  previousValue = currentValue;
 
   return {
     ok: true,
