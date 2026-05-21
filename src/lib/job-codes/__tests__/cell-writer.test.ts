@@ -120,8 +120,10 @@ describe("patchJobCodeCell — header discovery + Graph happy path", () => {
           ],
         },
       },
-      /* verify-cell read */
+      /* verify-cell (Code) read */
       { ok: true, body: { values: [["WOLFPACK-AUTO"]] } },
+      /* current-value (editable cell) read for concurrency / idempotency gate */
+      { ok: true, body: { values: [["OLD"]] } },
       /* PATCH */
       { ok: true, body: { values: [["Phase 2"]] } },
     ]);
@@ -150,6 +152,7 @@ describe("patchJobCodeCell — header discovery + Graph happy path", () => {
         },
       },
       { ok: true, body: { values: [["WOLFPACK-AUTO"]] } },
+      { ok: true, body: { values: [["OLD"]] } },
       { ok: true, body: { values: [["NEW PROG"]] } },
     ]);
     const res = await patchJobCodeCell({ ...baseInput, columnName: "Program", value: "NEW PROG" });
@@ -210,6 +213,8 @@ describe("patchJobCodeCell — Graph error mapping", () => {
     mockFetchSequence([
       { ok: true, body: { address: "'S'!A1:F2", rowIndex: 0, columnIndex: 0, values: [CANONICAL_HEADERS, ["", "x", "WOLFPACK-AUTO", "OLD", "", ""]] } },
       { ok: true, body: { values: [["WOLFPACK-AUTO"]] } },
+      /* current-value read for concurrency / idempotency gate */
+      { ok: true, body: { values: [["OLD"]] } },
       { ok: false, status: 503, text: "throttled" },
     ]);
     const res = await patchJobCodeCell({ ...baseInput, column: "D" });
@@ -229,6 +234,7 @@ describe("patchJobCodeCell — Graph error mapping", () => {
         },
       },
       { ok: true, body: { values: [["WOLFPACK-AUTO"]] } },
+      { ok: true, body: { values: [["OLD"]] } },
       { ok: true, body: { values: [["Phase 2"]] } },
     ]);
     const res = await patchJobCodeCell({ ...baseInput, column: "D" });
@@ -274,5 +280,124 @@ describe("patchJobCodeCell — Graph error mapping", () => {
     const res = await patchJobCodeCell({ ...baseInput, column: "D" });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.code).toBe("not_configured");
+  });
+});
+
+describe("patchJobCodeCell — optimistic concurrency + idempotency", () => {
+  /* The shared usedRange body: WOLFPACK-AUTO at row 3 with
+     Program="HOXSIE-VALUE" (someone else's write between snapshot
+     and submit). */
+  const usedRangeWithCurrent = (current: string) => ({
+    ok: true,
+    body: {
+      address: "'S'!A1:F3", rowIndex: 0, columnIndex: 0,
+      values: [
+        CANONICAL_HEADERS,
+        ["", "Acme", "OTHER-1", "", "", ""],
+        ["", "Acme", "WOLFPACK-AUTO", current, "PO-1", "100"],
+      ],
+    },
+  });
+
+  it("returns conflict (ok:false) when current value != expectedValue and != requested", async () => {
+    mockFetchSequence([
+      usedRangeWithCurrent("HOXSIE-VALUE"),
+      /* verify Code */
+      { ok: true, body: { values: [["WOLFPACK-AUTO"]] } },
+      /* current-value of editable cell (Program) */
+      { ok: true, body: { values: [["HOXSIE-VALUE"]] } },
+    ]);
+    const res = await patchJobCodeCell({
+      ...baseInput,
+      column: "D",
+      value: "MY-VALUE",
+      expectedValue: "OLD",
+    });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.code).toBe("conflict");
+    expect(res.conflict).toEqual({
+      column: "Program",
+      currentValue: "HOXSIE-VALUE",
+      expectedValue: "OLD",
+      requestedValue: "MY-VALUE",
+    });
+    /* PATCH must NOT have been issued. 3 reads total. */
+    expect((global.fetch as jest.Mock).mock.calls.length).toBe(3);
+  });
+
+  it("no conflict when expectedValue matches current — proceeds to PATCH", async () => {
+    mockFetchSequence([
+      usedRangeWithCurrent("OLD"),
+      { ok: true, body: { values: [["WOLFPACK-AUTO"]] } },
+      { ok: true, body: { values: [["OLD"]] } },
+      { ok: true, body: { values: [["NEW"]] } },
+    ]);
+    const res = await patchJobCodeCell({
+      ...baseInput,
+      column: "D",
+      value: "NEW",
+      expectedValue: "OLD",
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.newValue).toBe("NEW");
+    expect(res.previousValue).toBe("OLD");
+  });
+
+  it("no conflict when current cell is empty (treated as no pre-existing value)", async () => {
+    mockFetchSequence([
+      usedRangeWithCurrent(""),
+      { ok: true, body: { values: [["WOLFPACK-AUTO"]] } },
+      { ok: true, body: { values: [[""]] } },
+      { ok: true, body: { values: [["NEW"]] } },
+    ]);
+    const res = await patchJobCodeCell({
+      ...baseInput,
+      column: "D",
+      value: "NEW",
+      expectedValue: "I-EXPECTED-SOMETHING",
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it("opts out of the conflict gate when expectedValue is null (server scripts)", async () => {
+    mockFetchSequence([
+      usedRangeWithCurrent("HOXSIE-VALUE"),
+      { ok: true, body: { values: [["WOLFPACK-AUTO"]] } },
+      { ok: true, body: { values: [["HOXSIE-VALUE"]] } },
+      { ok: true, body: { values: [["FORCE"]] } },
+    ]);
+    const res = await patchJobCodeCell({
+      ...baseInput,
+      column: "D",
+      value: "FORCE",
+      expectedValue: null,
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.newValue).toBe("FORCE");
+  });
+
+  it("idempotent: when current value equals the requested value, skips PATCH and returns noop=true", async () => {
+    mockFetchSequence([
+      usedRangeWithCurrent("SAME"),
+      { ok: true, body: { values: [["WOLFPACK-AUTO"]] } },
+      /* current cell already holds SAME */
+      { ok: true, body: { values: [["SAME"]] } },
+    ]);
+    const res = await patchJobCodeCell({
+      ...baseInput,
+      column: "D",
+      value: "SAME",
+      expectedValue: "SAME",
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.noop).toBe(true);
+    expect(res.previousValue).toBe("SAME");
+    expect(res.newValue).toBe("SAME");
+    /* Only 3 reads, no PATCH. */
+    expect((global.fetch as jest.Mock).mock.calls.length).toBe(3);
   });
 });

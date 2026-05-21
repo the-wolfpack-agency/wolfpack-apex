@@ -20,6 +20,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { fetchWithRefresh } from "@/lib/client-auth";
+import { ConflictDialog, type ConflictRow, type ConflictResolution } from "@/components/job-codes/ConflictDialog";
 
 interface ReceiptItem {
   description: string;
@@ -74,6 +75,17 @@ export function ReceiptUploadButton({ canEdit, codeOptions, onApplied }: Receipt
   const [poAmount, setPoAmount] = useState<string>("");
   const [applying, setApplying] = useState(false);
   const [applyMessage, setApplyMessage] = useState<string | null>(null);
+  /* Conflicts surfaced from the most recent apply pass. Cleared when
+     the dialog resolves. */
+  const [conflicts, setConflicts] = useState<ConflictRow[]>([]);
+
+  /* The picked-code's CURRENT extra row from the dropdown options.
+     Used to derive expected_value for each cell PATCH so the
+     conflict gate fires correctly. */
+  const currentCodeExtra = useMemo(() => {
+    if (!codeOptions || codeOptions.length === 0) return {} as Record<string, string>;
+    return codeOptions.find((c) => c.code === pickedCode)?.extra ?? {};
+  }, [codeOptions, pickedCode]);
 
   const reset = useCallback(() => {
     setOpen(false);
@@ -126,54 +138,99 @@ export function ReceiptUploadButton({ canEdit, codeOptions, onApplied }: Receipt
     }
   }, []);
 
-  const handleApply = useCallback(async () => {
-    if (!scanId || !pickedCode) return;
-    setApplying(true);
-    setApplyMessage(null);
-    const writes: Array<Promise<{ ok: boolean; col: string; reason?: string }>> = [];
-    const push = (col: "D" | "E" | "F", value: string, label: string) => {
-      if (!value) return;
-      writes.push(
-        fetchWithRefresh(`/api/job-codes/${encodeURIComponent(pickedCode)}/cell`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ column: col, value }),
-        }).then(async (res) => {
-          const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-          return { ok: !!(res.ok && b.ok), col: label, reason: b.error };
+  const runApply = useCallback(
+    async (forceOverwrite: boolean) => {
+      if (!scanId || !pickedCode) return;
+      setApplying(true);
+      setApplyMessage(null);
+      type Write = { ok: boolean; col: string; reason?: string; conflict?: ConflictRow };
+      const writes: Array<Promise<Write>> = [];
+      const push = (col: "D" | "E" | "F", header: string, value: string, label: string) => {
+        if (!value) return;
+        const expected = currentCodeExtra[header] ?? "";
+        const body: Record<string, unknown> = { column: col, value };
+        if (!forceOverwrite) body.expected_value = expected;
+        writes.push(
+          fetchWithRefresh(`/api/job-codes/${encodeURIComponent(pickedCode)}/cell`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }).then(async (res) => {
+            const b = (await res.json().catch(() => ({}))) as {
+              ok?: boolean;
+              error?: string;
+              conflicts?: ConflictRow[];
+            };
+            if (res.status === 409 && b.conflicts?.[0]) {
+              return { ok: false, col: label, reason: "conflict", conflict: b.conflicts[0] };
+            }
+            return { ok: !!(res.ok && b.ok), col: label, reason: b.error };
+          }),
+        );
+      };
+      push("D", "Program", program, "Program");
+      push("E", "PO Number", poNumber, "PO Number");
+      push("F", "PO Amount", poAmount, "PO Amount");
+      const results = await Promise.all(writes);
+
+      /* Surface every 409 in one dialog. Other failure classes still
+         render in the inline message. */
+      const conflictRows = results
+        .filter((r) => r.reason === "conflict" && r.conflict)
+        .map((r) => r.conflict as ConflictRow);
+      if (conflictRows.length > 0) {
+        setApplying(false);
+        setConflicts(conflictRows);
+        return;
+      }
+
+      const failures = results.filter((r) => !r.ok);
+
+      /* Record the commit on the scan so future analytics can see what
+         the user actually wrote (vs what the model returned). */
+      await fetchWithRefresh(`/api/job-codes/scan-receipt/${scanId}/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: pickedCode,
+          program: program || null,
+          po_number: poNumber || null,
+          po_amount: poAmount || null,
         }),
-      );
-    };
-    push("D", program, "Program");
-    push("E", poNumber, "PO Number");
-    push("F", poAmount, "PO Amount");
-    const results = await Promise.all(writes);
-    const failures = results.filter((r) => !r.ok);
+      }).catch(() => undefined);
 
-    /* Record the commit on the scan so future analytics can see what
-       the user actually wrote (vs what the model returned). */
-    await fetchWithRefresh(`/api/job-codes/scan-receipt/${scanId}/apply`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        code: pickedCode,
-        program: program || null,
-        po_number: poNumber || null,
-        po_amount: poAmount || null,
-      }),
-    }).catch(() => undefined);
+      setApplying(false);
+      if (failures.length === 0) {
+        setApplyMessage(`Applied ${results.length} field${results.length === 1 ? "" : "s"} to ${pickedCode}`);
+        onApplied?.();
+        window.setTimeout(reset, 1500);
+      } else {
+        setApplyMessage(
+          `Saved ${results.length - failures.length}/${results.length} — failed: ${failures.map((f) => `${f.col} (${f.reason ?? "unknown"})`).join(", ")}`,
+        );
+      }
+    },
+    [scanId, pickedCode, currentCodeExtra, program, poNumber, poAmount, onApplied, reset],
+  );
 
-    setApplying(false);
-    if (failures.length === 0) {
-      setApplyMessage(`Applied ${results.length} field${results.length === 1 ? "" : "s"} to ${pickedCode}`);
-      onApplied?.();
-      window.setTimeout(reset, 1500);
-    } else {
-      setApplyMessage(
-        `Saved ${results.length - failures.length}/${results.length} — failed: ${failures.map((f) => `${f.col} (${f.reason ?? "unknown"})`).join(", ")}`,
-      );
-    }
-  }, [scanId, pickedCode, program, poNumber, poAmount, onApplied, reset]);
+  const handleApply = useCallback(() => runApply(false), [runApply]);
+
+  const handleConflictResolve = useCallback(
+    (choice: ConflictResolution) => {
+      setConflicts([]);
+      if (choice === "cancel") {
+        setApplyMessage("Apply cancelled — conflicts not resolved.");
+        return;
+      }
+      if (choice === "keep_theirs") {
+        setApplyMessage("Kept the SharePoint values — your changes were not applied.");
+        onApplied?.();
+        return;
+      }
+      void runApply(true);
+    },
+    [runApply, onApplied],
+  );
 
   /* Distinct Client/Category values, alphabetized. Codes without a
      value still surface under "(no category)" so they're reachable. */
@@ -227,6 +284,12 @@ export function ReceiptUploadButton({ canEdit, codeOptions, onApplied }: Receipt
           if (f) void handleFile(f);
           e.target.value = "";
         }}
+      />
+
+      <ConflictDialog
+        code={pickedCode}
+        conflicts={conflicts.length > 0 ? conflicts : null}
+        onResolve={handleConflictResolve}
       />
 
       {open && (

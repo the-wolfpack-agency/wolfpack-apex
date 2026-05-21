@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchWithRefresh } from "@/lib/client-auth";
 import { ReceiptUploadButton } from "@/components/job-codes/ReceiptUploadButton";
+import { ConflictDialog, type ConflictRow, type ConflictResolution } from "@/components/job-codes/ConflictDialog";
 
 interface JobCode {
   code: string;
@@ -96,6 +97,16 @@ export function JobCodesTable() {
   const [cellState, setCellState] = useState<
     Record<string, { saving?: boolean; error?: string | null; savedAt?: number }>
   >({});
+  /* When a save returns 409, stash the conflict here so ConflictDialog
+     renders. Only one conflict is shown at a time — the inline editor
+     is a single cell so this is at most one row. */
+  const [conflict, setConflict] = useState<{
+    code: string;
+    columnHeader: string;
+    column: "D" | "E" | "F";
+    requestedValue: string;
+    row: ConflictRow;
+  } | null>(null);
 
   const track = useCallback((event: string, metadata: Record<string, unknown> = {}) => {
     fetchWithRefresh("/api/analytics", {
@@ -170,7 +181,19 @@ export function JobCodesTable() {
   }, [load, track]);
 
   const saveCell = useCallback(
-    async (code: string, columnHeader: string, column: "D" | "E" | "F", value: string) => {
+    async (
+      code: string,
+      columnHeader: string,
+      column: "D" | "E" | "F",
+      value: string,
+      /* Snapshot at editor-open. Server uses this for optimistic-
+         concurrency conflict detection in cell-writer.ts. */
+      expectedValue: string,
+      /* Set true on the second pass after the user picks Overwrite —
+         we drop the expected_value so the server skips the gate
+         (the user has already seen the conflict and chosen). */
+      forceOverwrite: boolean = false,
+    ) => {
       const key = `${code}__${columnHeader}`;
       setCellState((s) => ({ ...s, [key]: { saving: true, error: null } }));
       track("cell_edit_started", { code, column_header: columnHeader });
@@ -178,14 +201,36 @@ export function JobCodesTable() {
         const res = await fetchWithRefresh(`/api/job-codes/${encodeURIComponent(code)}/cell`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ column, value }),
+          body: JSON.stringify({
+            column,
+            value,
+            ...(forceOverwrite ? {} : { expected_value: expectedValue }),
+          }),
         });
         const body = (await res.json().catch(() => ({}))) as {
           ok?: boolean;
           error?: string;
           detail?: string;
           new_value?: string;
+          conflicts?: ConflictRow[];
         };
+        /* 409 → bubble up to the conflict modal. The cell sticks at
+           "saving=false, error=conflict" so the input doesn't appear
+           "saved" while the user is still deciding. */
+        if (res.status === 409 && body.conflicts?.[0]) {
+          setConflict({
+            code,
+            columnHeader,
+            column,
+            requestedValue: value,
+            row: body.conflicts[0],
+          });
+          setCellState((s) => ({
+            ...s,
+            [key]: { saving: false, error: "conflict" },
+          }));
+          return false;
+        }
         if (!res.ok || !body.ok) {
           setCellState((s) => ({
             ...s,
@@ -215,6 +260,37 @@ export function JobCodesTable() {
       }
     },
     [track],
+  );
+
+  const resolveConflict = useCallback(
+    (choice: ConflictResolution) => {
+      if (!conflict) return;
+      const { code, columnHeader, column, requestedValue, row } = conflict;
+      const key = `${code}__${columnHeader}`;
+      setConflict(null);
+      if (choice === "cancel") {
+        setCellState((s) => ({ ...s, [key]: { saving: false, error: null } }));
+        return;
+      }
+      if (choice === "keep_theirs") {
+        /* Adopt the current server value into the table so the input
+           reflects reality. No PATCH — the cell already holds it. */
+        setCodes((prev) =>
+          prev.map((r) =>
+            r.code === code
+              ? { ...r, extra: { ...r.extra, [columnHeader]: row.currentValue } }
+              : r,
+          ),
+        );
+        setCellState((s) => ({ ...s, [key]: { saving: false, error: null } }));
+        return;
+      }
+      /* Overwrite — re-PATCH with forceOverwrite. The server skips
+         the conflict gate but the column allowlist + safety gates
+         still run. */
+      void saveCell(code, columnHeader, column, requestedValue, row.currentValue, true);
+    },
+    [conflict, saveCell],
   );
 
   const filtered = useMemo(() => {
@@ -337,6 +413,12 @@ export function JobCodesTable() {
         </div>
       )}
 
+      <ConflictDialog
+        code={conflict?.code ?? ""}
+        conflicts={conflict ? [conflict.row] : null}
+        onResolve={resolveConflict}
+      />
+
       {!loading && filtered.length > 0 && (
         <div className="rounded overflow-x-auto" style={{ border: "1px solid var(--wp-dark-border, #333)" }}>
           <table className="w-full text-sm">
@@ -397,7 +479,12 @@ export function JobCodesTable() {
                         initialValue={v}
                         cellState={cellState[`${row.code}__${col}`]}
                         canEdit={canRefresh}
-                        onSave={(value) => saveCell(row.code, col, editableColumn, value)}
+                        /* `expectedValue` = the value when the editor
+                           was last hydrated (mount or after refresh).
+                           Sent to the server for conflict detection. */
+                        onSave={(value, expectedValue) =>
+                          saveCell(row.code, col, editableColumn, value, expectedValue)
+                        }
                       />
                     );
                   })}
@@ -418,23 +505,36 @@ interface EditableCellProps {
   initialValue: string;
   cellState?: { saving?: boolean; error?: string | null; savedAt?: number };
   canEdit: boolean;
-  onSave: (value: string) => Promise<boolean>;
+  onSave: (value: string, expectedValue: string) => Promise<boolean>;
 }
 
 function EditableCell({ row, columnHeader, initialValue, cellState, canEdit, onSave }: EditableCellProps) {
   const [value, setValue] = useState(initialValue);
   const [dirty, setDirty] = useState(false);
+  /* Snapshot of the value when the editor was last in sync with the
+     server. This is the "expected" value we send for conflict
+     detection — it's NOT just initialValue because initialValue is
+     updated by the parent after a successful save, which would
+     defeat the gate on the *next* edit cycle. */
+  const [expectedValue, setExpectedValue] = useState(initialValue);
 
   useEffect(() => {
     /* Reflect upstream value changes (e.g. after a Refresh) only when
-       the cell isn't dirty — don't blow away an in-progress edit. */
-    if (!dirty) setValue(initialValue);
+       the cell isn't dirty — don't blow away an in-progress edit.
+       The expected snapshot rebases at the same time. */
+    if (!dirty) {
+      setValue(initialValue);
+      setExpectedValue(initialValue);
+    }
   }, [initialValue, dirty]);
 
   const handleSave = async () => {
     if (!dirty || value === initialValue) return;
-    const ok = await onSave(value);
-    if (ok) setDirty(false);
+    const ok = await onSave(value, expectedValue);
+    if (ok) {
+      setDirty(false);
+      setExpectedValue(value);
+    }
   };
 
   const saving = !!cellState?.saving;

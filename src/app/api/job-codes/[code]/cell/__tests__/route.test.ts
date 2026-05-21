@@ -161,6 +161,140 @@ describe("PATCH — happy path", () => {
   });
 });
 
+describe("PATCH — optimistic concurrency", () => {
+  const cachedSourceLocal = {
+    code: "WOLFPACK-AUTO",
+    description: "x",
+    sheetName: "Job Codes",
+    active: true,
+    lastSeenAt: "2026-05-21",
+    extra: {},
+    rowIndex: 0,
+    driveId: "drv",
+    itemId: "itm",
+  };
+
+  it("forwards expected_value from the body to the writer", async () => {
+    mockRequireCapability.mockResolvedValue(okAuth());
+    mockFindBySource.mockResolvedValue(cachedSourceLocal);
+    mockPatchCell.mockResolvedValue({
+      ok: true,
+      rowIndex: 3,
+      cellAddress: "D3",
+      previousValue: "OLD",
+      newValue: "NEW",
+      tokenKind: "delegated",
+    });
+
+    await PATCH(
+      makeReq({ column: "D", value: "NEW", expected_value: "OLD" }),
+      { params: Promise.resolve({ code: "WOLFPACK-AUTO" }) },
+    );
+    expect(mockPatchCell).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedValue: "OLD", value: "NEW" }),
+    );
+  });
+
+  it("opts out of the gate when body omits expected_value (forwards null)", async () => {
+    mockRequireCapability.mockResolvedValue(okAuth());
+    mockFindBySource.mockResolvedValue(cachedSourceLocal);
+    mockPatchCell.mockResolvedValue({
+      ok: true, rowIndex: 3, cellAddress: "D3",
+      previousValue: "X", newValue: "Y", tokenKind: "delegated",
+    });
+    await PATCH(
+      makeReq({ column: "D", value: "Y" }),
+      { params: Promise.resolve({ code: "WOLFPACK-AUTO" }) },
+    );
+    expect(mockPatchCell).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedValue: null }),
+    );
+  });
+
+  it("writer returns conflict → route returns 409 with conflicts[] and audits as conflict_detected", async () => {
+    mockRequireCapability.mockResolvedValue(okAuth());
+    mockFindBySource.mockResolvedValue(cachedSourceLocal);
+    mockPatchCell.mockResolvedValue({
+      ok: false,
+      code: "conflict",
+      detail: "cell changed",
+      conflict: {
+        column: "Program",
+        currentValue: "HOXSIE",
+        expectedValue: "OLD",
+        requestedValue: "MINE",
+      },
+    });
+
+    const res = await PATCH(
+      makeReq({ column: "D", value: "MINE", expected_value: "OLD" }),
+      { params: Promise.resolve({ code: "WOLFPACK-AUTO" }) },
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe("conflict");
+    expect(body.conflicts).toEqual([
+      {
+        column: "Program",
+        currentValue: "HOXSIE",
+        expectedValue: "OLD",
+        requestedValue: "MINE",
+      },
+    ]);
+
+    expect(mockRecordEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "failed",
+        oldValue: "HOXSIE",
+        graphError: expect.stringContaining("conflict_detected"),
+      }),
+    );
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "system.job_code_conflict_detected",
+      "u-admin",
+      "cto",
+      expect.objectContaining({
+        code: "WOLFPACK-AUTO",
+        column: "Program",
+        current_value: "HOXSIE",
+        expected_value: "OLD",
+        requested_value: "MINE",
+      }),
+    );
+    /* DB mirror MUST NOT run on conflict. */
+    expect(mockUpdateExtra).not.toHaveBeenCalled();
+  });
+
+  it("writer returns noop:true → route returns 200 noop, fires cell_edit_noop, skips audit + mirror", async () => {
+    mockRequireCapability.mockResolvedValue(okAuth());
+    mockFindBySource.mockResolvedValue(cachedSourceLocal);
+    mockPatchCell.mockResolvedValue({
+      ok: true,
+      rowIndex: 3,
+      cellAddress: "D3",
+      previousValue: "SAME",
+      newValue: "SAME",
+      tokenKind: "delegated",
+      noop: true,
+    });
+    const res = await PATCH(
+      makeReq({ column: "D", value: "SAME", expected_value: "SAME" }),
+      { params: Promise.resolve({ code: "WOLFPACK-AUTO" }) },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.noop).toBe(true);
+    expect(mockUpdateExtra).not.toHaveBeenCalled();
+    expect(mockRecordEdit).not.toHaveBeenCalled();
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "jobcodes.cell_edit_noop",
+      "u-admin",
+      "cto",
+      expect.objectContaining({ code: "WOLFPACK-AUTO", column_header: "Program" }),
+    );
+  });
+});
+
 describe("PATCH — failure paths still audit", () => {
   it("Graph 403 → 502 + records a 'failed' audit row (still preserves attempt history)", async () => {
     mockRequireCapability.mockResolvedValue(okAuth());

@@ -2119,6 +2119,17 @@ export type InstinctEventType =
      (forbidden_column, code_not_found, Graph 403/5xx). */
   | "jobcodes.cell_edit_succeeded"
   | "jobcodes.cell_edit_failed"
+  /* Idempotent skip — the cell already held the value the user was
+     about to write. Different from cell_edit_succeeded so the
+     learning loop can see the "no-op rate" (high noop rate = UI
+     re-saves on every blur, which means we should debounce more). */
+  | "jobcodes.cell_edit_noop"
+  /* Concurrency conflict — pre-write verify found the cell had been
+     changed by someone else between dialog-open and submit. Fires
+     once on detection (when the API returns 409) and once on
+     resolution with {resolved_as: keep_theirs|overwrite|cancel}. */
+  | "system.job_code_conflict_detected"
+  | "system.job_code_conflict_resolved"
   /* Receipt scanning via Azure Document Intelligence — extracted
      fields can be applied to a job code's Program/PO/PO Amount via
      the existing /cell PATCH endpoint. */

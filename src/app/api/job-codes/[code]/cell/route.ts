@@ -45,7 +45,16 @@ export async function PATCH(
   const { code } = await params;
   if (!code) return NextResponse.json({ error: "code required" }, { status: 400 });
 
-  const body = (await req.json().catch(() => null)) as { column?: string; column_name?: string; value?: string } | null;
+  const body = (await req.json().catch(() => null)) as {
+    column?: string;
+    column_name?: string;
+    value?: string;
+    /* Optimistic-concurrency snapshot from the client. Server uses
+       this in cell-writer.ts to detect conflicts. Pass empty string
+       for "I expected the cell to be blank"; omit (or null) to skip
+       the check entirely (server-side recovery scripts only). */
+    expected_value?: string | null;
+  } | null;
   if (!body || typeof body.value !== "string") {
     return NextResponse.json(
       { error: "body must include `value` (string) and either `column_name` or `column`" },
@@ -87,24 +96,57 @@ export async function PATCH(
     jobCode: code,
     columnName: columnHeader,
     value: body.value,
+    /* Forward the snapshotted value; undefined / null → skip the
+       check (server-side scripts that genuinely don't have a
+       baseline). The UI surfaces always pass a value (even empty
+       string) so end-user writes always run the conflict gate. */
+    expectedValue: body.expected_value === undefined ? null : body.expected_value,
   });
 
   if (!writeRes.ok) {
     /* Best-effort audit even on failure — the human attempt is itself
        worth recording so we can see "Hoxsie tried to set PO Amount
-       three times but Graph kept 403ing". */
+       three times but Graph kept 403ing". Conflict path records the
+       same audit row shape with reason='conflict_detected' shoved
+       into the graph_error column so finance can grep for it. */
+    const isConflict = writeRes.code === "conflict";
     await recordCellEdit({
       workspaceId: auth.user.workspaceId,
       code,
       columnName: columnHeader,
-      oldValue: null,
+      oldValue: isConflict ? (writeRes.conflict?.currentValue ?? null) : null,
       newValue: body.value,
       editedBy: auth.user.id,
       editedByEmail: auth.user.email ?? null,
       editedByRole: auth.user.role,
       status: "failed",
-      graphError: writeRes.detail,
+      graphError: isConflict ? `conflict_detected: ${writeRes.detail}` : writeRes.detail,
     }).catch(() => undefined);
+
+    if (isConflict) {
+      await trackEvent("system.job_code_conflict_detected", auth.user.id, auth.user.role, {
+        code,
+        column: writeRes.conflict?.column ?? columnHeader,
+        current_value: (writeRes.conflict?.currentValue ?? "").slice(0, 80),
+        expected_value: (writeRes.conflict?.expectedValue ?? "").slice(0, 80),
+        requested_value: (writeRes.conflict?.requestedValue ?? body.value).slice(0, 80),
+      });
+      return NextResponse.json(
+        {
+          error: "conflict",
+          detail: writeRes.detail,
+          conflicts: writeRes.conflict
+            ? [{
+                column: writeRes.conflict.column,
+                currentValue: writeRes.conflict.currentValue,
+                expectedValue: writeRes.conflict.expectedValue,
+                requestedValue: writeRes.conflict.requestedValue,
+              }]
+            : [],
+        },
+        { status: 409 },
+      );
+    }
 
     await trackEvent("jobcodes.cell_edit_failed", auth.user.id, auth.user.role, {
       code,
@@ -121,6 +163,27 @@ export async function PATCH(
       { error: writeRes.code, detail: writeRes.detail },
       { status },
     );
+  }
+
+  /* Idempotent no-op: cell already held the value. Don't touch the
+     audit log (no real edit happened) and emit `cell_edit_noop` so
+     the learning loop can see how often the UI re-saves nothing. */
+  if (writeRes.noop) {
+    await trackEvent("jobcodes.cell_edit_noop", auth.user.id, auth.user.role, {
+      code,
+      column_header: columnHeader,
+      value: writeRes.newValue.slice(0, 80),
+    });
+    return NextResponse.json({
+      ok: true,
+      noop: true,
+      code,
+      column_header: columnHeader,
+      cell_address: writeRes.cellAddress,
+      row_index: writeRes.rowIndex,
+      previous_value: writeRes.previousValue,
+      new_value: writeRes.newValue,
+    });
   }
 
   /* Success path. Mirror the new value into the cache row so the

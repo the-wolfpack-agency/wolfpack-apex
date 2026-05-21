@@ -204,7 +204,10 @@ describe("<JobCodesTable />", () => {
     );
     expect(patchCall).toBeDefined();
     const body = JSON.parse((patchCall![1] as { body: string }).body);
-    expect(body).toEqual({ column: "D", value: "Phase 2" });
+    /* The body now also carries `expected_value` for the optimistic-
+       concurrency gate added in 2026-05-21 (the cell's mounted value
+       was "OLD"). */
+    expect(body).toEqual({ column: "D", value: "Phase 2", expected_value: "OLD" });
   });
 
   it("renders read-only text (no input) when caller lacks jobcodes.refresh", async () => {
@@ -242,5 +245,124 @@ describe("<JobCodesTable />", () => {
       render(<JobCodesTable />);
     });
     await waitFor(() => expect(screen.getByTestId("job-codes-empty")).toBeInTheDocument());
+  });
+
+  /* Concurrency: 2026-05-21 — a 409 from the cell PATCH surfaces a
+     blocking conflict dialog. Overwrite re-PATCHes WITHOUT
+     expected_value; Keep theirs swaps the table value. */
+  it("409 from cell PATCH opens ConflictDialog; Overwrite re-PATCHes without expected_value", async () => {
+    const codeRow = {
+      code: "WPA-1",
+      description: "Wolfpack Auto",
+      sheetName: "Job Codes",
+      active: true,
+      lastSeenAt: "2026-05-21",
+      extra: { "Client/Category": "Acme", "Program": "OLD", "PO Number": "PO-1", "PO Amount": "100" },
+    };
+    mockFetchWithRefresh
+      .mockResolvedValueOnce(mkRes({ capabilities: ["jobcodes.view", "jobcodes.refresh"] }))
+      .mockResolvedValueOnce(mkRes({
+        codes: [codeRow],
+        columns: ["Code", "Description", "Client/Category", "Program", "PO Number", "PO Amount"],
+        source: freshSource(),
+        served_stale: false,
+      }))
+      .mockResolvedValueOnce(mkRes({})) // analytics page_viewed
+      .mockResolvedValueOnce(mkRes({})) // analytics cell_edit_started (first attempt)
+      /* First PATCH → 409 conflict. */
+      .mockResolvedValueOnce(mkRes(
+        {
+          error: "conflict",
+          conflicts: [{
+            column: "Program",
+            currentValue: "HOXSIE-VALUE",
+            expectedValue: "OLD",
+            requestedValue: "MINE",
+          }],
+        },
+        { ok: false, status: 409 },
+      ))
+      .mockResolvedValueOnce(mkRes({})) // analytics conflict_resolved
+      .mockResolvedValueOnce(mkRes({})) // analytics cell_edit_started (overwrite)
+      .mockResolvedValue(mkRes({ ok: true, new_value: "MINE" })); // overwrite PATCH + trailing analytics
+
+    await act(async () => {
+      render(<JobCodesTable />);
+    });
+    const input = await screen.findByTestId("cell-input-WPA-1-Program");
+    fireEvent.change(input, { target: { value: "MINE" } });
+    await act(async () => {
+      fireEvent.blur(input);
+    });
+    /* Dialog opens. */
+    await waitFor(() => expect(screen.getByTestId("conflict-dialog")).toBeInTheDocument());
+    expect(screen.getByTestId("conflict-current-Program").textContent).toBe("HOXSIE-VALUE");
+
+    /* Overwrite → triggers a second PATCH without expected_value. */
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("conflict-overwrite"));
+    });
+
+    const patchCalls = mockFetchWithRefresh.mock.calls.filter(
+      (c) => typeof c[0] === "string" && c[0].includes("/api/job-codes/WPA-1/cell"),
+    );
+    expect(patchCalls.length).toBe(2);
+    const firstBody = JSON.parse((patchCalls[0][1] as { body: string }).body);
+    expect(firstBody).toMatchObject({ column: "D", value: "MINE", expected_value: "OLD" });
+    const overwriteBody = JSON.parse((patchCalls[1][1] as { body: string }).body);
+    expect(overwriteBody).toEqual({ column: "D", value: "MINE" });
+  });
+
+  it("Keep theirs on conflict adopts the server value into the table, no second PATCH", async () => {
+    const codeRow = {
+      code: "WPA-1",
+      description: "Wolfpack Auto",
+      sheetName: "Job Codes",
+      active: true,
+      lastSeenAt: "2026-05-21",
+      extra: { "Program": "OLD" },
+    };
+    mockFetchWithRefresh
+      .mockResolvedValueOnce(mkRes({ capabilities: ["jobcodes.view", "jobcodes.refresh"] }))
+      .mockResolvedValueOnce(mkRes({
+        codes: [codeRow],
+        columns: ["Code", "Description", "Program"],
+        source: freshSource(),
+        served_stale: false,
+      }))
+      .mockResolvedValueOnce(mkRes({})) // analytics page_viewed
+      .mockResolvedValueOnce(mkRes({})) // analytics cell_edit_started
+      .mockResolvedValueOnce(mkRes(
+        {
+          error: "conflict",
+          conflicts: [{
+            column: "Program",
+            currentValue: "HOXSIE",
+            expectedValue: "OLD",
+            requestedValue: "MINE",
+          }],
+        },
+        { ok: false, status: 409 },
+      ))
+      .mockResolvedValue(mkRes({}));
+
+    await act(async () => {
+      render(<JobCodesTable />);
+    });
+    const input = await screen.findByTestId("cell-input-WPA-1-Program");
+    fireEvent.change(input, { target: { value: "MINE" } });
+    await act(async () => { fireEvent.blur(input); });
+
+    await waitFor(() => expect(screen.getByTestId("conflict-dialog")).toBeInTheDocument());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("conflict-keep-theirs"));
+    });
+    expect(screen.queryByTestId("conflict-dialog")).not.toBeInTheDocument();
+
+    /* Only one PATCH — the second never fires. */
+    const patchCalls = mockFetchWithRefresh.mock.calls.filter(
+      (c) => typeof c[0] === "string" && c[0].includes("/api/job-codes/WPA-1/cell"),
+    );
+    expect(patchCalls.length).toBe(1);
   });
 });
