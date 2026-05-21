@@ -512,7 +512,17 @@ export function getSigninAuthUrl(): string {
     scope: MS_SCOPES_STRING,
     response_mode: "query",
     state: signState(`signin:${nonce}`),
-    prompt: "consent",
+    /* `prompt=select_account` (NOT `prompt=consent`) — 2026-05-21
+       Ashley incident. `prompt=consent` forces Microsoft to bypass
+       cached tenant-wide admin grant and re-evaluate consent per
+       sign-in. For non-admin users, that re-evaluation lands them
+       on "Need admin approval" for scopes like Files.ReadWrite.All
+       even when the tenant grant covers it. select_account preserves
+       account-picker UX without forcing the consent screen. To
+       refresh scopes after a new permission is added, ship an
+       explicit "Reconnect" button that overrides with prompt=consent
+       for THAT specific call. */
+    prompt: "select_account",
   });
   return `${getAuthBaseUrl()}/authorize?${params.toString()}`;
 }
@@ -537,18 +547,20 @@ export function getAuthUrl(userId: string): string {
     scope: MS_SCOPES_STRING,
     response_mode: "query",
     state: signState(userId),
-    // CRITICAL: force Azure to re-show the consent screen on every
-    // /authorize call, even if the user has previously consented to
-    // this app. Without `prompt=consent`, Azure silently reuses the
-    // cached consent set — which means any newly-added scopes (e.g.
-    // Channel.ReadBasic.All added on 2026-04-24) NEVER make it into
-    // the issued token. The user disconnects+reconnects expecting
-    // fresh permissions and gets back into a session whose token
-    // still has only the OLD scope set. Graph then returns 200 with
-    // empty results for the new endpoints (silent scope downgrade).
-    // `prompt=consent` is the explicit cure for this and is what
-    // every Microsoft sample uses when scopes change.
-    prompt: "consent",
+    /* `prompt=select_account` (NOT `prompt=consent`) — 2026-05-21
+       Ashley incident. The prior `prompt=consent` was added on
+       2026-04-24 to force scope refresh after adding new scopes,
+       but it forces Microsoft to bypass cached tenant-wide admin
+       consent on EVERY sign-in. For non-admin users that re-eval
+       lands them on "Need admin approval" for admin-only scopes
+       (Files.ReadWrite.All, Team.ReadBasic.All, etc.) even when
+       tenant admin consent has been granted. select_account keeps
+       account-picker UX without forcing the consent screen, so
+       admin-granted scopes flow through silently. To refresh
+       scopes after future scope-list changes, wire an explicit
+       "Reconnect (refresh permissions)" Settings button that
+       calls getAuthUrl with a forceConsent flag. */
+    prompt: "select_account",
   });
 
   return `${getAuthBaseUrl()}/authorize?${params.toString()}`;
