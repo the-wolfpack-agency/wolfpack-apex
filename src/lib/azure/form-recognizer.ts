@@ -85,6 +85,43 @@ export interface ReceiptScanFailure {
 }
 export type ReceiptScanResult = ReceiptScanSuccess | ReceiptScanFailure;
 
+/* ── Invoice (prebuilt-invoice) ──────────────────────────────── */
+
+export interface InvoiceLineItem {
+  description: string;
+  amount: number | null;
+  quantity: number | null;
+  unitPrice: number | null;
+  productCode: string | null;
+}
+
+export interface InvoiceFields {
+  vendorName: string | null;
+  customerName: string | null;
+  invoiceId: string | null;
+  invoiceDate: string | null;
+  dueDate: string | null;
+  subtotal: number | null;
+  totalTax: number | null;
+  invoiceTotal: number | null;
+  currency: string | null;
+  lineItems: InvoiceLineItem[];
+  documentConfidence: number | null;
+  /** Verbatim OCR content, capped — useful when the model didn't
+   *  promote a field the human needs. */
+  rawText: string;
+  /** The full raw fields payload from Form Recognizer, preserved as-
+   *  is so the UI can surface anything the model returned beyond the
+   *  promoted columns. */
+  rawFields: Record<string, unknown>;
+}
+
+export interface InvoiceScanSuccess {
+  ok: true;
+  fields: InvoiceFields;
+}
+export type InvoiceScanResult = InvoiceScanSuccess | ReceiptScanFailure;
+
 export function isFormRecognizerConfigured(): boolean {
   return resolveAzureCreds("form_recognizer") !== null;
 }
@@ -202,6 +239,91 @@ export async function scanReceipt(
       reason: "no_document_detected",
       detail: "Form Recognizer returned no documents — image may not be a receipt",
     };
+  }
+  return { ok: true, fields };
+}
+
+/**
+ * Map a prebuilt-invoice response into our promoted-column shape.
+ * Pure-fn; testable with canned Azure response fixtures.
+ */
+export function mapInvoiceFields(
+  raw: DocumentIntelligenceResponse,
+): InvoiceFields | null {
+  const doc = raw.analyzeResult?.documents?.[0];
+  if (!doc) return null;
+  const f = doc.fields ?? {};
+  const lineItems: InvoiceLineItem[] = [];
+  const itemsArr = f.Items?.valueArray ?? [];
+  for (const it of itemsArr) {
+    const obj = it.valueObject ?? {};
+    lineItems.push({
+      description: fieldString(obj.Description) ?? "",
+      amount: fieldNumber(obj.Amount),
+      quantity: fieldNumber(obj.Quantity),
+      unitPrice: fieldNumber(obj.UnitPrice),
+      productCode: fieldString(obj.ProductCode),
+    });
+  }
+  return {
+    vendorName: fieldString(f.VendorName),
+    customerName: fieldString(f.CustomerName),
+    invoiceId: fieldString(f.InvoiceId),
+    invoiceDate: fieldDate(f.InvoiceDate),
+    dueDate: fieldDate(f.DueDate),
+    subtotal: fieldNumber(f.SubTotal ?? f.Subtotal),
+    totalTax: fieldNumber(f.TotalTax),
+    invoiceTotal: fieldNumber(f.InvoiceTotal ?? f.AmountDue),
+    currency: fieldCurrency(f.InvoiceTotal ?? f.AmountDue ?? f.SubTotal),
+    lineItems,
+    documentConfidence: typeof doc.confidence === "number" ? doc.confidence : null,
+    rawText: (raw.analyzeResult?.content ?? "").slice(0, 4000),
+    rawFields: f as Record<string, unknown>,
+  };
+}
+
+/**
+ * Scan an invoice via prebuilt-invoice. Same async/poll pattern as
+ * scanReceipt; separate function so the audit operation field is
+ * recorded distinctly (prebuilt-invoice is a different free-tier
+ * meter from prebuilt-receipt).
+ */
+export async function scanInvoice(
+  buffer: Buffer,
+  opts: ScanReceiptOptions,
+): Promise<InvoiceScanResult> {
+  if (buffer.length > RECEIPT_MAX_BYTES) {
+    return { ok: false, reason: "too_large", detail: `invoice ${buffer.length} bytes exceeds cap ${RECEIPT_MAX_BYTES} bytes` };
+  }
+  const creds = resolveAzureCreds("form_recognizer");
+  if (!creds) {
+    return { ok: false, reason: "not_configured", detail: "AZURE_FORM_REC_ENDPOINT/KEY (or AZURE_COGNITIVE_*) not set" };
+  }
+  const ctx: AzureCallContext = {
+    service: "form_recognizer",
+    operation: "prebuilt-invoice",
+    triggeredBy: opts.triggeredBy,
+    triggeredByRole: opts.triggeredByRole,
+    requestBytes: buffer.length,
+  };
+  const post = await postAzure(creds, "formrecognizer/documentModels/prebuilt-invoice:analyze", {
+    body: buffer,
+    contentType: opts.contentType,
+    query: { "api-version": "2023-07-31" },
+  });
+  if (!post.ok) {
+    await recordAzureCall(ctx, post, 0);
+    return mapFailure(post.error.code, post.error.detail);
+  }
+  const poll = await pollAzureOperation<DocumentIntelligenceResponse>(creds, post.value.operationLocation, { intervalMs: 750, maxAttempts: 40 });
+  if (!poll.ok) {
+    await recordAzureCall(ctx, poll, 0);
+    return mapFailure(poll.error.code, poll.error.detail);
+  }
+  const fields = mapInvoiceFields(poll.value);
+  await recordAzureCall(ctx, poll, fields?.rawText.length ?? 0);
+  if (!fields) {
+    return { ok: false, reason: "no_document_detected", detail: "Form Recognizer returned no documents — file may not be an invoice" };
   }
   return { ok: true, fields };
 }

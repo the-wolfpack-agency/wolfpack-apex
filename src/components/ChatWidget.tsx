@@ -28,6 +28,7 @@ import { MeetingPrepWidget } from "@/components/widgets/MeetingPrepWidget";
 import { FeedbackWidget } from "@/components/widgets/FeedbackWidget";
 import { TimeLogWidget } from "@/components/widgets/TimeLogWidget";
 import { ScanReceiptWidget } from "@/components/widgets/ScanReceiptWidget";
+import { ScanInvoiceWidget } from "@/components/widgets/ScanInvoiceWidget";
 
 export interface ChatWidgetProps {
   spec: WidgetSpec;
@@ -72,6 +73,8 @@ export function ChatWidget({ spec, workflowId }: ChatWidgetProps) {
       return <TimeLogWidget spec={spec} workflowId={workflowId} />;
     case "scan_receipt":
       return <ScanReceiptWidget spec={spec} workflowId={workflowId} />;
+    case "scan_invoice":
+      return <ScanInvoiceWidget spec={spec} workflowId={workflowId} />;
     default:
       /* Forward-compat: silently render nothing for unknown kinds.
        * The text answer above the widget still surfaces, so the

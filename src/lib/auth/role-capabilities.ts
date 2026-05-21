@@ -101,6 +101,9 @@ const HR: readonly Capability[] = [
   "automations.resolve_exceptions",
   // Job codes — everyone logs time, everyone reads the codes list.
   "jobcodes.view",
+  // Finance — HR sees + uploads vendor/HR-vendor invoices; approval
+  // gated to CEO/CTO/EVP via ALL_CAPS membership.
+  "finance.invoices.view",
 ];
 
 /** Sales: clients + meetings, read-only on docs/reports, no HR/finance. */

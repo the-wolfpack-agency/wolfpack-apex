@@ -6,7 +6,9 @@
 
 import {
   mapReceiptFields,
+  mapInvoiceFields,
   scanReceipt,
+  scanInvoice,
   RECEIPT_MAX_BYTES,
   isFormRecognizerConfigured,
 } from "@/lib/azure/form-recognizer";
@@ -88,6 +90,72 @@ describe("mapReceiptFields", () => {
       analyzeResult: { content: long, documents: [{ fields: {} }] },
     });
     expect(out!.rawText.length).toBe(2000);
+  });
+});
+
+describe("mapInvoiceFields", () => {
+  it("returns null when no documents", () => {
+    expect(mapInvoiceFields({})).toBeNull();
+    expect(mapInvoiceFields({ analyzeResult: { documents: [] } })).toBeNull();
+  });
+
+  it("pulls vendor / invoice id / dates / totals / currency / line items", () => {
+    const out = mapInvoiceFields({
+      analyzeResult: {
+        content: "Vendor: Acme\nInvoice INV-12345",
+        documents: [{
+          confidence: 0.96,
+          fields: {
+            VendorName: { valueString: "Acme Corp" },
+            CustomerName: { valueString: "Wolfpack Agency" },
+            InvoiceId: { valueString: "INV-12345" },
+            InvoiceDate: { valueDate: "2026-05-15" },
+            DueDate: { valueDate: "2026-06-15" },
+            SubTotal: { valueCurrency: { amount: 1000, currencyCode: "USD" } },
+            TotalTax: { valueCurrency: { amount: 80 } },
+            InvoiceTotal: { valueCurrency: { amount: 1080, currencyCode: "USD" } },
+            Items: {
+              valueArray: [
+                {
+                  valueObject: {
+                    Description: { valueString: "Consulting" },
+                    Amount: { valueCurrency: { amount: 1000 } },
+                    Quantity: { valueNumber: 10 },
+                    UnitPrice: { valueCurrency: { amount: 100 } },
+                  },
+                },
+              ],
+            },
+          },
+        }],
+      },
+    });
+    expect(out).toBeTruthy();
+    expect(out!.vendorName).toBe("Acme Corp");
+    expect(out!.customerName).toBe("Wolfpack Agency");
+    expect(out!.invoiceId).toBe("INV-12345");
+    expect(out!.invoiceDate).toBe("2026-05-15");
+    expect(out!.dueDate).toBe("2026-06-15");
+    expect(out!.subtotal).toBe(1000);
+    expect(out!.totalTax).toBe(80);
+    expect(out!.invoiceTotal).toBe(1080);
+    expect(out!.currency).toBe("USD");
+    expect(out!.lineItems).toEqual([
+      { description: "Consulting", amount: 1000, quantity: 10, unitPrice: 100, productCode: null },
+    ]);
+    expect(out!.documentConfidence).toBe(0.96);
+    expect(out!.rawText).toContain("INV-12345");
+  });
+});
+
+describe("scanInvoice — guard rails", () => {
+  it("refuses too_large without firing fetch", async () => {
+    global.fetch = jest.fn();
+    const big = Buffer.alloc(RECEIPT_MAX_BYTES + 1);
+    const r = await scanInvoice(big, { triggeredBy: "u", triggeredByRole: "cto", contentType: "application/pdf" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("too_large");
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });
 

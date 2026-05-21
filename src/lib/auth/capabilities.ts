@@ -141,6 +141,12 @@ export const CAPABILITIES = {
   // costs a Graph round-trip and writes to the cache.
   "jobcodes.view": "View the job codes list and use them for time logging",
   "jobcodes.refresh": "Trigger a manual re-sync of the job codes cache from SharePoint",
+
+  // Finance — AP invoice queue. `view` = read the queue, see status
+  // and history. `manage` = upload, approve, mark paid, reject,
+  // delete, edit fields. Senior roles only — invoices are financial.
+  "finance.invoices.view": "View the AP invoice queue",
+  "finance.invoices.manage": "Upload invoices and change their approval / payment status",
 } as const;
 
 export type Capability = keyof typeof CAPABILITIES;

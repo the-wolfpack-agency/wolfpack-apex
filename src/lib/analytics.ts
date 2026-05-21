@@ -2131,7 +2131,15 @@ export type InstinctEventType =
   | "azure.vision_ocr_succeeded"
   | "azure.vision_ocr_failed"
   | "azure.form_recognizer_succeeded"
-  | "azure.form_recognizer_failed";
+  | "azure.form_recognizer_failed"
+  /* AP invoice queue — scan + lifecycle events. */
+  | "finance.invoice_scanned"
+  | "finance.invoice_scan_failed"
+  | "finance.invoice_approved"
+  | "finance.invoice_paid"
+  | "finance.invoice_rejected"
+  | "finance.invoice_updated"
+  | "finance.invoice_deleted";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

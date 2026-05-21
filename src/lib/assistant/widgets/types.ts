@@ -448,6 +448,20 @@ export interface ScanReceiptWidgetSpec {
   jobCode?: string;
 }
 
+/**
+ * ScanInvoiceWidget — drop a vendor invoice (PDF or image) inside the
+ * assistant chat → Azure Document Intelligence prebuilt-invoice
+ * extracts vendor, invoice number, dates, totals, line items → row
+ * lands in /finance/invoices with status='pending' for human review.
+ *
+ * No SharePoint writes; this is the AP queue, distinct from the
+ * job-codes scan-receipt flow which writes Program/PO Number/PO
+ * Amount cells. Capability: finance.invoices.manage.
+ */
+export interface ScanInvoiceWidgetSpec {
+  kind: "scan_invoice";
+}
+
 /** Discriminated union of every widget kind. Add new entries as the
  *  framework expands. */
 export type WidgetSpec =
@@ -464,4 +478,5 @@ export type WidgetSpec =
   | MeetingPrepWidgetSpec
   | FeedbackWidgetSpec
   | TimeLogWidgetSpec
-  | ScanReceiptWidgetSpec;
+  | ScanReceiptWidgetSpec
+  | ScanInvoiceWidgetSpec;
