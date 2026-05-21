@@ -108,12 +108,11 @@ describe("patchJobCodeCell — input validation", () => {
 
 describe("patchJobCodeCell — header discovery + Graph happy path", () => {
   it("discovers Program column from headers and PATCHes the matching row", async () => {
-    /* CANONICAL_HEADERS puts Program at index 3 (column D). Row 2 in
-       the values matrix (i=2 → Excel row 3) contains WOLFPACK-AUTO. */
     mockFetchSequence([
       {
         ok: true,
         body: {
+          address: "'S'!A1:F3", rowIndex: 0, columnIndex: 0,
           values: [
             CANONICAL_HEADERS,
             ["", "Acme", "OTHER-1", "", "", ""],
@@ -121,6 +120,9 @@ describe("patchJobCodeCell — header discovery + Graph happy path", () => {
           ],
         },
       },
+      /* verify-cell read */
+      { ok: true, body: { values: [["WOLFPACK-AUTO"]] } },
+      /* PATCH */
       { ok: true, body: { values: [["Phase 2"]] } },
     ]);
     const res = await patchJobCodeCell({ ...baseInput, column: "D" });
@@ -140,12 +142,14 @@ describe("patchJobCodeCell — header discovery + Graph happy path", () => {
       {
         ok: true,
         body: {
+          address: "'S'!A1:E2", rowIndex: 0, columnIndex: 0,
           values: [
             ["Code", "Client/Category", "Program", "PO Number", "PO Amount"],
             ["WOLFPACK-AUTO", "Acme", "OLD", "PO-OLD", "100"],
           ],
         },
       },
+      { ok: true, body: { values: [["WOLFPACK-AUTO"]] } },
       { ok: true, body: { values: [["NEW PROG"]] } },
     ]);
     const res = await patchJobCodeCell({ ...baseInput, columnName: "Program", value: "NEW PROG" });
@@ -161,7 +165,7 @@ describe("patchJobCodeCell — header discovery + Graph happy path", () => {
     mockFetchSequence([
       {
         ok: true,
-        body: { values: [CANONICAL_HEADERS, ["", "x", "OTHER-1", "", "", ""]] },
+        body: { address: "'S'!A1:F4", rowIndex: 0, columnIndex: 0, values: [CANONICAL_HEADERS, ["", "x", "OTHER-1", "", "", ""]] },
       },
     ]);
     const res = await patchJobCodeCell({ ...baseInput, column: "D" });
@@ -171,7 +175,7 @@ describe("patchJobCodeCell — header discovery + Graph happy path", () => {
 
   it("returns code_not_found with a clear hint when the sheet lacks a Code-shaped header", async () => {
     mockFetchSequence([
-      { ok: true, body: { values: [["Foo", "Bar", "Baz"], ["x", "y", "z"]] } },
+      { ok: true, body: { address: "'S'!A1:F4", rowIndex: 0, columnIndex: 0, values: [["Foo", "Bar", "Baz"], ["x", "y", "z"]] } },
     ]);
     const res = await patchJobCodeCell({ ...baseInput, column: "D" });
     expect(res.ok).toBe(false);
@@ -183,7 +187,7 @@ describe("patchJobCodeCell — header discovery + Graph happy path", () => {
 
   it("returns code_not_found when the requested editable header isn't in the sheet", async () => {
     mockFetchSequence([
-      { ok: true, body: { values: [["Client/Category", "Code"], ["x", "WOLFPACK-AUTO"]] } },
+      { ok: true, body: { address: "'S'!A1:F4", rowIndex: 0, columnIndex: 0, values: [["Client/Category", "Code"], ["x", "WOLFPACK-AUTO"]] } },
     ]);
     const res = await patchJobCodeCell({ ...baseInput, columnName: "Program" });
     expect(res.ok).toBe(false);
@@ -204,15 +208,65 @@ describe("patchJobCodeCell — Graph error mapping", () => {
 
   it("maps Graph 5xx on PATCH to graph_unavailable", async () => {
     mockFetchSequence([
-      {
-        ok: true,
-        body: { values: [CANONICAL_HEADERS, ["", "x", "WOLFPACK-AUTO", "OLD", "", ""]] },
-      },
+      { ok: true, body: { address: "'S'!A1:F2", rowIndex: 0, columnIndex: 0, values: [CANONICAL_HEADERS, ["", "x", "WOLFPACK-AUTO", "OLD", "", ""]] } },
+      { ok: true, body: { values: [["WOLFPACK-AUTO"]] } },
       { ok: false, status: 503, text: "throttled" },
     ]);
     const res = await patchJobCodeCell({ ...baseInput, column: "D" });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.code).toBe("graph_unavailable");
+  });
+
+  it("REGRESSION 2026-05-21: respects usedRange origin (rowIndex > 0)", async () => {
+    /* The destructive bug: writer computed Excel row = arrayIndex+1
+       ignoring rowIndex offset. Pinned here. */
+    mockFetchSequence([
+      {
+        ok: true,
+        body: {
+          address: "'2026'!A3:F5", rowIndex: 2, columnIndex: 0,
+          values: [CANONICAL_HEADERS, ["", "Acme", "OTHER-1", "", "", ""], ["", "Acme", "WOLFPACK-AUTO", "OLD", "PO-OLD", "100"]],
+        },
+      },
+      { ok: true, body: { values: [["WOLFPACK-AUTO"]] } },
+      { ok: true, body: { values: [["Phase 2"]] } },
+    ]);
+    const res = await patchJobCodeCell({ ...baseInput, column: "D" });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.rowIndex).toBe(5);
+    expect(res.cellAddress).toBe("D5");
+  });
+
+  it("REFUSES to write when verify-cell-read returns a different Code (safety gate)", async () => {
+    mockFetchSequence([
+      {
+        ok: true,
+        body: {
+          address: "'S'!A1:F3", rowIndex: 0, columnIndex: 0,
+          values: [CANONICAL_HEADERS, ["", "Acme", "OTHER-1", "", "", ""], ["", "Acme", "WOLFPACK-AUTO", "OLD", "PO-OLD", "100"]],
+        },
+      },
+      { ok: true, body: { values: [["WRONG-CODE"]] } },
+    ]);
+    const res = await patchJobCodeCell({ ...baseInput, column: "D" });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.code).toBe("internal");
+      expect(res.detail).toMatch(/address-resolution mismatch/i);
+    }
+  });
+
+  it("returns internal when usedRange response is missing address/rowIndex (won't guess)", async () => {
+    mockFetchSequence([
+      { ok: true, body: { values: [CANONICAL_HEADERS, ["", "x", "WOLFPACK-AUTO", "", "", ""]] } },
+    ]);
+    const res = await patchJobCodeCell({ ...baseInput, column: "D" });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.code).toBe("internal");
+      expect(res.detail).toMatch(/missing address/i);
+    }
   });
 
   it("returns not_configured when no token can be acquired", async () => {

@@ -103,6 +103,34 @@ export interface CellEditInput {
 
 interface UsedRangeResponse {
   values?: Array<Array<string | number | boolean | null>>;
+  /** Excel address of the usedRange, e.g. "'Sheet1'!A1:F47" or
+   *  "Sheet1!B3:G50" — origin can be ANY cell, not just A1. */
+  address?: string;
+  rowIndex?: number;
+  columnIndex?: number;
+}
+
+/** Parse "'Sheet'!A1:F47" → { startRow: 1, startCol: 0 }. Excel rows
+ *  are 1-based; columns are 0-based (A=0). When the address is
+ *  malformed we return null so the caller refuses the write. */
+function parseUsedRangeAddress(
+  address: string | undefined,
+  fallbackRow?: number,
+  fallbackCol?: number,
+): { startRow: number; startCol: number } | null {
+  if (typeof fallbackRow === "number" && typeof fallbackCol === "number") {
+    /* Graph also returns explicit rowIndex/columnIndex on usedRange;
+       trust those over parsing the address string. */
+    return { startRow: fallbackRow + 1, startCol: fallbackCol };
+  }
+  if (!address) return null;
+  const m = address.match(/!?([A-Z]+)(\d+)/);
+  if (!m) return null;
+  const colLetters = m[1];
+  const row = Number(m[2]);
+  let col = 0;
+  for (const ch of colLetters) col = col * 26 + (ch.charCodeAt(0) - 64);
+  return { startRow: row, startCol: col - 1 };
 }
 
 interface RangeResponse {
@@ -198,9 +226,9 @@ export async function patchJobCodeCell(
     };
   }
 
-  // ── 1. Pull usedRange to discover headers + locate the row ──
+  // ── 1. Pull usedRange (with address origin) to discover headers + locate the row ──
   const usedRes = await graphGet<UsedRangeResponse>(
-    `drives/${encodeURIComponent(input.driveId)}/items/${encodeURIComponent(input.itemId)}/workbook/worksheets/${encodeURIComponent(input.sheetName)}/usedRange(valuesOnly=true)?$select=values`,
+    `drives/${encodeURIComponent(input.driveId)}/items/${encodeURIComponent(input.itemId)}/workbook/worksheets/${encodeURIComponent(input.sheetName)}/usedRange(valuesOnly=true)?$select=values,address,rowIndex,columnIndex`,
     acquired.token,
   );
   if (!usedRes.ok) {
@@ -213,6 +241,22 @@ export async function patchJobCodeCell(
   const values = usedRes.value.values ?? [];
   if (values.length === 0) {
     return { ok: false, code: "code_not_found", detail: `sheet "${input.sheetName}" is empty` };
+  }
+
+  /* CRITICAL: usedRange can start at ANY cell, not just A1. If the
+     sheet has frozen panes, a title row above the data, or just
+     blank leading rows, values[0] does NOT correspond to Excel row 1.
+     Reading these from the response is the only correct way to
+     translate values-array indices to Excel addresses. Falling back
+     to A1 without verification was the 2026-05-21 destructive bug
+     that wrote $14.10 to the wrong job code row. */
+  const origin = parseUsedRangeAddress(usedRes.value.address, usedRes.value.rowIndex, usedRes.value.columnIndex);
+  if (!origin) {
+    return {
+      ok: false,
+      code: "internal",
+      detail: "Azure usedRange response missing address/rowIndex — refusing to write without a verified origin",
+    };
   }
 
   /* Discover column indices from the header row by NAME (decouples
@@ -247,18 +291,20 @@ export async function patchJobCodeCell(
   }
 
   const target = input.jobCode.trim().toLowerCase();
-  let rowIndex = -1;
+  let arrayIndex = -1;
   let previousValue = "";
+  let matchedCodeRaw = "";
   for (let i = 1; i < values.length; i++) {
     const row = values[i] ?? [];
     const cellCode = String(row[jobCol] ?? "").trim().toLowerCase();
     if (cellCode === target) {
-      rowIndex = i + 1;
+      arrayIndex = i;
       previousValue = String(row[editCol] ?? "");
+      matchedCodeRaw = String(row[jobCol] ?? "");
       break;
     }
   }
-  if (rowIndex < 0) {
+  if (arrayIndex < 0) {
     return {
       ok: false,
       code: "code_not_found",
@@ -266,8 +312,40 @@ export async function patchJobCodeCell(
     };
   }
 
+  /* Translate values-array index → Excel row using the verified
+     usedRange origin. Similarly for column. */
+  const rowIndex = origin.startRow + arrayIndex;
+  const cellCol = origin.startCol + editCol;
+  const cellAddress = `${indexToLetter(cellCol)}${rowIndex}`;
+
+  /* SAFETY GATE: before writing, read back the Code value at the
+     resolved row using a dedicated range query to confirm we
+     resolved the address correctly. If the value at column
+     ${origin.startCol + jobCol}${rowIndex} doesn't match the target
+     code, REFUSE to write (avoids the corrupting-wrong-row failure
+     mode if origin parsing ever drifts). */
+  const codeCellAddr = `${indexToLetter(origin.startCol + jobCol)}${rowIndex}`;
+  const verifyRes = await graphGet<{ values?: Array<Array<string | number | boolean | null>> }>(
+    `drives/${encodeURIComponent(input.driveId)}/items/${encodeURIComponent(input.itemId)}/workbook/worksheets/${encodeURIComponent(input.sheetName)}/range(address='${codeCellAddr}')?$select=values`,
+    acquired.token,
+  );
+  if (!verifyRes.ok) {
+    return {
+      ok: false,
+      code: verifyRes.status === 403 ? "graph_forbidden" : "graph_unavailable",
+      detail: `pre-write verify ${codeCellAddr} HTTP ${verifyRes.status} ${verifyRes.detail}`,
+    };
+  }
+  const verifiedCode = String(verifyRes.value.values?.[0]?.[0] ?? "").trim().toLowerCase();
+  if (verifiedCode !== target) {
+    return {
+      ok: false,
+      code: "internal",
+      detail: `address-resolution mismatch: target Code "${input.jobCode}" but cell ${codeCellAddr} holds "${verifiedCode || "(empty)"}" (matched raw "${matchedCodeRaw}" at array index ${arrayIndex}). REFUSED to write to avoid corrupting wrong row.`,
+    };
+  }
+
   // ── 2. PATCH the single cell ──
-  const cellAddress = `${indexToLetter(editCol)}${rowIndex}`;
   const patchRes = await graphPatch<RangeResponse>(
     `drives/${encodeURIComponent(input.driveId)}/items/${encodeURIComponent(input.itemId)}/workbook/worksheets/${encodeURIComponent(input.sheetName)}/range(address='${cellAddress}')`,
     acquired.token,
