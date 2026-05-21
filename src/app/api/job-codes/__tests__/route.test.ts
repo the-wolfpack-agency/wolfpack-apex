@@ -48,7 +48,7 @@ const okAuth = (overrides: { id?: string; role?: string } = {}) => ({
 });
 
 const sampleRows = [
-  { code: "A-1", description: "Alpha", sheetName: "Job Codes", active: true, lastSeenAt: "2026-05-20" },
+  { code: "A-1", description: "Alpha", sheetName: "Job Codes", active: true, lastSeenAt: "2026-05-20", extra: { "Program": "P1", "PO Number": "PO-1" } },
 ];
 
 beforeEach(() => {

@@ -19,7 +19,16 @@ export interface JobCode {
   /** ISO timestamp when the refresh process last observed this code
    *  in the source workbook. */
   lastSeenAt: string;
+  /** Every workbook column that ISN'T code/description, keyed by the
+   *  workbook header text. Lets the UI render every column and the
+   *  submit-form preview the full record. */
+  extra: Record<string, string>;
 }
+
+/** Ordered list of column headers from the source workbook — the
+ *  UI uses this to render the table in the same order finance owns
+ *  in SharePoint. Stored alongside the codes payload. */
+export type JobCodeColumns = readonly string[];
 
 /** Provenance + freshness metadata returned alongside any code list. */
 export interface JobCodesSourceInfo {
@@ -69,6 +78,9 @@ export type Result<T> =
 /** What sharepoint-source returns when it successfully pulls codes. */
 export interface JobCodesFetchValue {
   rows: JobCode[];
+  /** Ordered column headers from the workbook, used by the UI to
+   *  render the table in finance's chosen order. */
+  columns: string[];
   driveId: string;
   itemId: string;
   webUrl: string;

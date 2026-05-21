@@ -24,6 +24,11 @@ interface CacheRow {
   source_drive_id: string | null;
   source_item_id: string | null;
   source_web_url: string | null;
+  /* Stored as JSONB in instinct_job_codes_cache.extra — keyed by the
+     workbook header text, holds every column OTHER than code+
+     description. Lets the UI render the full row and the inline-edit
+     UI know what columns exist. */
+  extra: Record<string, string> | null;
   // Index signature satisfies the pg query helper's generic
   // constraint (T extends Record<string, unknown>).
   [key: string]: unknown;
@@ -51,6 +56,7 @@ function rowToCode(r: CacheRow): JobCode {
     sheetName: r.sheet_name ?? "",
     active: !!r.active,
     lastSeenAt: r.last_seen_at,
+    extra: (r.extra ?? {}) as Record<string, string>,
   };
 }
 
@@ -59,7 +65,7 @@ function rowToCode(r: CacheRow): JobCode {
 export async function listActiveJobCodes(): Promise<JobCode[]> {
   const res = await query<CacheRow>(
     `SELECT code, description, sheet_name, active, last_seen_at,
-            source_drive_id, source_item_id, source_web_url
+            source_drive_id, source_item_id, source_web_url, extra
      FROM instinct_job_codes_cache
      WHERE active = TRUE
      ORDER BY code ASC`,
@@ -72,7 +78,7 @@ export async function listActiveJobCodes(): Promise<JobCode[]> {
 export async function listAllJobCodes(): Promise<JobCode[]> {
   const res = await query<CacheRow>(
     `SELECT code, description, sheet_name, active, last_seen_at,
-            source_drive_id, source_item_id, source_web_url
+            source_drive_id, source_item_id, source_web_url, extra
      FROM instinct_job_codes_cache
      ORDER BY active DESC, code ASC`,
   );
@@ -104,19 +110,22 @@ export async function replaceJobCodes(
   const beforeCodes = new Set(beforeRes.rows.map((r) => r.code.toLowerCase()));
 
   // UPSERT each row. We do this in a single query via UNNEST so the
-  // whole refresh is one round-trip + one row-count assertion.
+  // whole refresh is one round-trip + one row-count assertion. `extras`
+  // is a JSON-stringified array; we re-decode on the SQL side via
+  // jsonb_array_elements so each row gets its own JSONB column.
   if (rows.length > 0) {
     const codes = rows.map((r) => r.code);
     const descs = rows.map((r) => r.description ?? "");
     const sheets = rows.map((r) => r.sheetName ?? "");
+    const extras = rows.map((r) => JSON.stringify(r.extra ?? {}));
     await writeQuery(
       `INSERT INTO instinct_job_codes_cache
          (code, description, sheet_name, active, last_seen_at,
-          source_drive_id, source_item_id, source_web_url, updated_at)
+          source_drive_id, source_item_id, source_web_url, extra, updated_at)
        SELECT
          c, d, s, TRUE, NOW(),
-         $4, $5, $6, NOW()
-       FROM unnest($1::text[], $2::text[], $3::text[]) AS x(c, d, s)
+         $5, $6, $7, e::jsonb, NOW()
+       FROM unnest($1::text[], $2::text[], $3::text[], $4::text[]) AS x(c, d, s, e)
        ON CONFLICT (LOWER(code))
        DO UPDATE SET
          description = EXCLUDED.description,
@@ -126,8 +135,9 @@ export async function replaceJobCodes(
          source_drive_id = EXCLUDED.source_drive_id,
          source_item_id = EXCLUDED.source_item_id,
          source_web_url = EXCLUDED.source_web_url,
+         extra = EXCLUDED.extra,
          updated_at = NOW()`,
-      [codes, descs, sheets, source.driveId, source.itemId, source.webUrl],
+      [codes, descs, sheets, extras, source.driveId, source.itemId, source.webUrl],
     );
   }
 
@@ -152,6 +162,107 @@ export async function replaceJobCodes(
     updated,
     deactivated: deact.rows.length,
   };
+}
+
+/**
+ * Look up a single job code by its identifier (case-insensitive) plus
+ * the source-row metadata needed to PATCH that row's cell. Returns null
+ * if not found OR if the cache row has no driveId/itemId (i.e. we
+ * never successfully synced from SharePoint and don't know where to
+ * write).
+ */
+export interface JobCodeWithSource extends JobCode {
+  rowIndex: number; // 1-based excel row of the code in the source sheet
+  driveId: string;
+  itemId: string;
+  sheetName: string;
+}
+
+export async function findJobCodeBySource(
+  code: string,
+): Promise<JobCodeWithSource | null> {
+  /* rowIndex isn't stored in the cache today; we compute it at edit
+     time by re-pulling the sheet (the cell-edit path needs a fresh
+     snapshot anyway so we don't PATCH a stale row position). The
+     resolver-level write path uses this to get a quick yes/no on
+     "do we have a cached source pointer at all." */
+  const res = await query<CacheRow>(
+    `SELECT code, description, sheet_name, active, last_seen_at,
+            source_drive_id, source_item_id, source_web_url, extra
+     FROM instinct_job_codes_cache
+     WHERE LOWER(code) = LOWER($1) LIMIT 1`,
+    [code],
+  );
+  const row = res.rows[0];
+  if (!row || !row.source_drive_id || !row.source_item_id || !row.sheet_name) {
+    return null;
+  }
+  return {
+    ...rowToCode(row),
+    /* rowIndex placeholder — the cell-edit writer resolves the real
+       row position via the workbook find() endpoint at write time. */
+    rowIndex: 0,
+    driveId: row.source_drive_id,
+    itemId: row.source_item_id,
+    sheetName: row.sheet_name,
+  };
+}
+
+/**
+ * Update one cell's value in the cache so the UI reflects the change
+ * immediately, even before the next full refresh. Used by the cell
+ * editor's success path to keep the table consistent.
+ */
+export async function updateExtraCell(
+  code: string,
+  columnName: string,
+  newValue: string,
+): Promise<void> {
+  await writeQuery(
+    `UPDATE instinct_job_codes_cache
+     SET extra = jsonb_set(COALESCE(extra, '{}'::jsonb), $2, to_jsonb($3::text)),
+         updated_at = NOW()
+     WHERE LOWER(code) = LOWER($1)`,
+    [code, `{${columnName}}`, newValue],
+  );
+}
+
+/**
+ * Record one cell edit (succeeded or failed) in the audit log. Called
+ * by the cell-edit API regardless of Graph outcome so every human
+ * attempt has a row.
+ */
+export async function recordCellEdit(input: {
+  workspaceId: string;
+  code: string;
+  columnName: string;
+  oldValue: string | null;
+  newValue: string;
+  editedBy: string;
+  editedByEmail: string | null;
+  editedByRole: string | null;
+  status: "succeeded" | "failed";
+  graphError?: string | null;
+}): Promise<void> {
+  await writeQuery(
+    `INSERT INTO instinct_job_codes_edits
+       (workspace_id, code_lower, code, column_name, old_value, new_value,
+        edited_by, edited_by_email, edited_by_role, status, graph_error)
+     VALUES ($1, LOWER($2), $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      input.workspaceId,
+      input.code,
+      input.columnName,
+      input.oldValue,
+      input.newValue,
+      input.editedBy,
+      input.editedByEmail,
+      input.editedByRole,
+      input.status,
+      input.graphError ?? null,
+    ],
+    { expectRows: 0 },
+  );
 }
 
 /**

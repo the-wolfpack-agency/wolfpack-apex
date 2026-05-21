@@ -27,13 +27,13 @@ jest.mock("@/lib/analytics", () => ({
 import { getAppOnlyToken, getValidToken } from "@/lib/microsoft-graph";
 
 describe("parseUsedRange", () => {
-  it("returns [] when given fewer than 2 rows", () => {
-    expect(parseUsedRange([], "Sheet1")).toEqual([]);
-    expect(parseUsedRange([["Code", "Description"]], "Sheet1")).toEqual([]);
+  it("returns empty rows when given fewer than 2 rows", () => {
+    expect(parseUsedRange([], "Sheet1").rows).toEqual([]);
+    expect(parseUsedRange([["Code", "Description"]], "Sheet1").rows).toEqual([]);
   });
 
   it("parses canonical Code/Description headers", () => {
-    const rows = parseUsedRange(
+    const { rows } = parseUsedRange(
       [
         ["Code", "Description"],
         ["WOLFPACK-AUTO", "Dealer DOS engineering"],
@@ -46,6 +46,7 @@ describe("parseUsedRange", () => {
     expect(rows[0].description).toBe("Dealer DOS engineering");
     expect(rows[0].sheetName).toBe("Job Codes");
     expect(rows[0].active).toBe(true);
+    expect(rows[0].extra).toEqual({});
   });
 
   it("tolerates header variants (Job Code / Job_Code / Name)", () => {
@@ -56,7 +57,7 @@ describe("parseUsedRange", () => {
       ],
       "S",
     );
-    expect(a[0]).toMatchObject({ code: "X-1", description: "Alpha" });
+    expect(a.rows[0]).toMatchObject({ code: "X-1", description: "Alpha" });
 
     const b = parseUsedRange(
       [
@@ -65,11 +66,11 @@ describe("parseUsedRange", () => {
       ],
       "S",
     );
-    expect(b[0]).toMatchObject({ code: "X-2", description: "Beta" });
+    expect(b.rows[0]).toMatchObject({ code: "X-2", description: "Beta" });
   });
 
-  it("returns [] when no code-like column exists", () => {
-    const rows = parseUsedRange(
+  it("returns empty rows when no code-like column exists", () => {
+    const { rows } = parseUsedRange(
       [
         ["Unrelated", "Other"],
         ["foo", "bar"],
@@ -80,7 +81,7 @@ describe("parseUsedRange", () => {
   });
 
   it("dedups by lowercased code (first wins)", () => {
-    const rows = parseUsedRange(
+    const { rows } = parseUsedRange(
       [
         ["Code", "Description"],
         ["A-1", "First"],
@@ -94,7 +95,7 @@ describe("parseUsedRange", () => {
   });
 
   it("skips blank code cells (so trailing empty rows don't pollute)", () => {
-    const rows = parseUsedRange(
+    const { rows } = parseUsedRange(
       [
         ["Code", "Description"],
         ["A-1", "x"],
@@ -108,7 +109,7 @@ describe("parseUsedRange", () => {
   });
 
   it("handles a code-only sheet (description column missing)", () => {
-    const rows = parseUsedRange(
+    const { rows } = parseUsedRange(
       [
         ["Code"],
         ["A-1"],
@@ -118,6 +119,42 @@ describe("parseUsedRange", () => {
     );
     expect(rows.map((r) => r.code)).toEqual(["A-1", "B-2"]);
     expect(rows.every((r) => r.description === "")).toBe(true);
+  });
+
+  /* The "shows a mirrored version of some of the columns" CTO bug,
+     2026-05-21: v1 parser hardcoded only Code+Description and dropped
+     every other workbook column silently. This test pins that the
+     parser preserves ALL columns on `extra` AND returns the column
+     ordering so the UI can render in the same order finance owns. */
+  it("preserves every non-Code/non-Description column on `extra` keyed by header text", () => {
+    const { rows, columns } = parseUsedRange(
+      [
+        ["Client/Category", "Job Code", "Description", "Program", "PO Number", "PO Amount"],
+        ["Acme", "WOLFPACK-AUTO", "Dealer DOS", "Phase 1", "PO-1234", "$15,000"],
+        ["Globex", "CLIENT-GLB", "Retainer", "Annual", "PO-9999", "$60,000"],
+      ],
+      "Sheet1",
+    );
+    expect(columns).toEqual([
+      "Client/Category", "Job Code", "Description", "Program", "PO Number", "PO Amount",
+    ]);
+    expect(rows[0].code).toBe("WOLFPACK-AUTO");
+    expect(rows[0].description).toBe("Dealer DOS");
+    expect(rows[0].extra).toEqual({
+      "Client/Category": "Acme",
+      "Program": "Phase 1",
+      "PO Number": "PO-1234",
+      "PO Amount": "$15,000",
+    });
+    expect(rows[1].extra["Client/Category"]).toBe("Globex");
+  });
+
+  it("returns ordered columns even when no rows match (e.g. blank sheet with headers only)", () => {
+    const { columns } = parseUsedRange(
+      [["Client/Category", "Job Code", "Program"]],
+      "S",
+    );
+    expect(columns).toEqual(["Client/Category", "Job Code", "Program"]);
   });
 });
 

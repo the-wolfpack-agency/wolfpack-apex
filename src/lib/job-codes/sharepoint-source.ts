@@ -200,10 +200,19 @@ async function safeText(res: Response): Promise<string> {
    Workbook parsing
    ─────────────────────────────────────────────────────────────────── */
 
+export interface ParseResult {
+  rows: JobCode[];
+  /** Header text in the original workbook order. Used by the UI to
+   *  render the table in the same column order finance maintains. */
+  columns: string[];
+}
+
 /**
- * Read a usedRange `values` array and yield JobCode rows. Header row
- * is required; we tolerate variant spellings (Code/JobCode/Job Code,
- * Description/Desc/Name).
+ * Read a usedRange `values` array and yield JobCode rows + the ordered
+ * column header list. Header row is required; we tolerate variant
+ * spellings (Code/JobCode/Job Code, Description/Desc/Name) for the
+ * two columns we promote to top-level fields. Every other column is
+ * preserved verbatim on `extra` keyed by the original header.
  *
  * Exported for unit testing so we can assert parser behavior on synthetic
  * inputs without spinning up a Graph mock.
@@ -211,15 +220,28 @@ async function safeText(res: Response): Promise<string> {
 export function parseUsedRange(
   values: Array<Array<string | number | boolean | null>>,
   sheetName: string,
-): JobCode[] {
-  if (!Array.isArray(values) || values.length < 2) return [];
+): ParseResult {
+  if (!Array.isArray(values) || values.length === 0) {
+    return { rows: [], columns: [] };
+  }
 
-  const header = (values[0] ?? []).map((v) => String(v ?? "").trim().toLowerCase());
-  const codeIdx = header.findIndex((h) => h === "code" || h === "jobcode" || h === "job code" || h === "job_code");
-  const descIdx = header.findIndex(
+  /* Preserve the original (un-normalized) header text so the UI can
+     render exactly what finance typed. Lowercase copy used only for
+     code/description detection. */
+  const headerRaw = (values[0] ?? []).map((v) => String(v ?? "").trim());
+  if (values.length < 2) {
+    /* Only a header row — return ordered columns so the UI can still
+       render an empty table with the right shape. */
+    return { rows: [], columns: headerRaw.filter((h) => h.length > 0) };
+  }
+  const headerLower = headerRaw.map((h) => h.toLowerCase());
+  const codeIdx = headerLower.findIndex(
+    (h) => h === "code" || h === "jobcode" || h === "job code" || h === "job_code",
+  );
+  const descIdx = headerLower.findIndex(
     (h) => h === "description" || h === "desc" || h === "name" || h === "title",
   );
-  if (codeIdx < 0) return [];
+  if (codeIdx < 0) return { rows: [], columns: headerRaw.filter((h) => h.length > 0) };
 
   const now = new Date().toISOString();
   const seen = new Set<string>();
@@ -232,15 +254,30 @@ export function parseUsedRange(
     if (seen.has(lower)) continue; // workbook duplicates collapse to first
     seen.add(lower);
     const description = descIdx >= 0 ? String(row[descIdx] ?? "").trim() : "";
+    /* Capture every NON-code/NON-description column verbatim on extra.
+       Empty headers are skipped (Excel sometimes leaves a trailing
+       empty column from a deleted one). */
+    const extra: Record<string, string> = {};
+    for (let c = 0; c < headerRaw.length; c++) {
+      if (c === codeIdx || c === descIdx) continue;
+      const header = headerRaw[c];
+      if (!header) continue;
+      const val = String(row[c] ?? "").trim();
+      extra[header] = val;
+    }
     rows.push({
       code,
       description,
       sheetName,
       active: true,
       lastSeenAt: now,
+      extra,
     });
   }
-  return rows;
+  return {
+    rows,
+    columns: headerRaw.filter((h) => h.length > 0),
+  };
 }
 
 /* ───────────────────────────────────────────────────────────────────
@@ -422,7 +459,8 @@ export async function fetchJobCodesFromSharePoint(
   );
   if (!usedRes.ok) return usedRes;
 
-  const rows = parseUsedRange(usedRes.value.values ?? [], sheetName);
+  const parsed = parseUsedRange(usedRes.value.values ?? [], sheetName);
+  const rows = parsed.rows;
   if (rows.length === 0) {
     return {
       ok: false,
@@ -445,6 +483,7 @@ export async function fetchJobCodesFromSharePoint(
       item_id: itemId,
       used_hint: opts.hint ? "true" : "false",
       token_kind: acquired.kind,
+      column_count: parsed.columns.length,
     });
   } catch {
     /* analytics is best-effort; never block the refresh */
@@ -454,6 +493,7 @@ export async function fetchJobCodesFromSharePoint(
     ok: true,
     value: {
       rows,
+      columns: parsed.columns,
       driveId,
       itemId,
       webUrl,

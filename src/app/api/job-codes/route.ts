@@ -42,8 +42,27 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  /* Compute the union of extra-column names across all rows so the
+     table can render every column finance has. Code + Description
+     are always first (top-level fields). Extra columns follow in the
+     order they first appear in the rows — Postgres JSONB doesn't
+     guarantee key order, so this is the best we can do without an
+     explicit ordered-columns store. */
+  const extraColumns: string[] = [];
+  const seen = new Set<string>();
+  for (const r of result.rows) {
+    for (const k of Object.keys(r.extra ?? {})) {
+      if (!seen.has(k)) {
+        seen.add(k);
+        extraColumns.push(k);
+      }
+    }
+  }
+  const columns = ["Code", "Description", ...extraColumns];
+
   return NextResponse.json({
     codes: result.rows,
+    columns,
     source: result.source,
     served_stale: result.servedStale,
     refreshed_now: result.refreshed,

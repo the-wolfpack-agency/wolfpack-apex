@@ -2112,7 +2112,13 @@ export type InstinctEventType =
   | "jobcodes.refresh_succeeded"
   | "jobcodes.refresh_failed"
   | "jobcodes.served_stale"
-  | "jobcodes.source_fetched";
+  | "jobcodes.source_fetched"
+  /* Cell edits to the SharePoint workbook (D/E/F columns only) —
+     succeeded fires after Graph PATCH echoes the new value AND the
+     cache mirror updates; failed covers every refusal class
+     (forbidden_column, code_not_found, Graph 403/5xx). */
+  | "jobcodes.cell_edit_succeeded"
+  | "jobcodes.cell_edit_failed";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;
