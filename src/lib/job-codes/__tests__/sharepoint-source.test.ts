@@ -149,6 +149,50 @@ describe("parseUsedRange", () => {
     expect(rows[1].extra["Client/Category"]).toBe("Globex");
   });
 
+  /* REGRESSION 2026-05-21: workbook uses section-header pattern —
+     finance puts "Porsche 2026" on the first row of a client group
+     and leaves Client/Category blank on subsequent rows of the same
+     client. Without forward-fill, the cascading picker only surfaced
+     ONE code per client (the row that explicitly carried the value).
+     Forward-fill makes every grouped row inherit the section header. */
+  it("forward-fills Client/Category for blank rows below a section header", () => {
+    const { rows } = parseUsedRange(
+      [
+        ["Client/Category", "Code", "Program"],
+        ["Porsche 2026", "26101", "PBA 101"],
+        ["", "26101B", "PBA 101 Coaching"],
+        ["", "26102", "PBA 102"],
+        ["Nissan", "26200", "Project X"],
+        ["", "26201", "Project X Phase 2"],
+      ],
+      "2026",
+    );
+    expect(rows.map((r) => ({ code: r.code, cc: r.extra["Client/Category"] }))).toEqual([
+      { code: "26101", cc: "Porsche 2026" },
+      { code: "26101B", cc: "Porsche 2026" },
+      { code: "26102", cc: "Porsche 2026" },
+      { code: "26200", cc: "Nissan" },
+      { code: "26201", cc: "Nissan" },
+    ]);
+  });
+
+  it("does NOT forward-fill non-allowlisted columns like Program / PO Number", () => {
+    /* Per-row columns must stay blank when finance leaves them blank.
+       Pinning so a future widening of FORWARD_FILL_HEADERS gets
+       caught in review. */
+    const { rows } = parseUsedRange(
+      [
+        ["Client/Category", "Code", "Program", "PO Number"],
+        ["Acme", "A-1", "P1", "PO-1"],
+        ["", "A-2", "", ""],
+      ],
+      "S",
+    );
+    expect(rows[1].extra["Client/Category"]).toBe("Acme"); // forward-filled
+    expect(rows[1].extra["Program"]).toBe("");            // NOT filled
+    expect(rows[1].extra["PO Number"]).toBe("");          // NOT filled
+  });
+
   it("returns ordered columns even when no rows match (e.g. blank sheet with headers only)", () => {
     const { columns } = parseUsedRange(
       [["Client/Category", "Job Code", "Program"]],

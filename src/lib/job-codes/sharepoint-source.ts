@@ -217,6 +217,19 @@ export interface ParseResult {
  * Exported for unit testing so we can assert parser behavior on synthetic
  * inputs without spinning up a Graph mock.
  */
+/**
+ * Headers whose values are "section headers" in the workbook —
+ * finance fills the value on the FIRST row of a group and leaves
+ * subsequent rows blank. We forward-fill these so every row in a
+ * group inherits the most recent non-empty value above it.
+ *
+ * Pinned to a small allowlist because forward-fill is the WRONG
+ * interpretation for genuinely-per-row columns (Program / PO Number
+ * / PO Amount). Add a header here only when the workbook clearly
+ * uses the section-header pattern for it.
+ */
+export const FORWARD_FILL_HEADERS = ["Client/Category"] as const;
+
 export function parseUsedRange(
   values: Array<Array<string | number | boolean | null>>,
   sheetName: string,
@@ -243,6 +256,17 @@ export function parseUsedRange(
   );
   if (codeIdx < 0) return { rows: [], columns: headerRaw.filter((h) => h.length > 0) };
 
+  /* Pre-compute which column indices need forward-fill so we don't
+     re-scan headers per row. */
+  const forwardFillSet = new Set<string>(FORWARD_FILL_HEADERS as readonly string[]);
+  const forwardFillIndices = new Set<number>();
+  for (let c = 0; c < headerRaw.length; c++) {
+    if (forwardFillSet.has(headerRaw[c])) forwardFillIndices.add(c);
+  }
+  /* lastSeenSectionValue[colIndex] holds the most recent non-empty
+     value seen in that column. Reset between sheets (per call). */
+  const lastSectionValue = new Map<number, string>();
+
   const now = new Date().toISOString();
   const seen = new Set<string>();
   const rows: JobCode[] = [];
@@ -256,13 +280,20 @@ export function parseUsedRange(
     const description = descIdx >= 0 ? String(row[descIdx] ?? "").trim() : "";
     /* Capture every NON-code/NON-description column verbatim on extra.
        Empty headers are skipped (Excel sometimes leaves a trailing
-       empty column from a deleted one). */
+       empty column from a deleted one). FORWARD_FILL_HEADERS columns
+       inherit the last seen non-empty value when blank — handles the
+       section-header pattern finance uses (one Client/Category at the
+       top of a group, blanks below). */
     const extra: Record<string, string> = {};
     for (let c = 0; c < headerRaw.length; c++) {
       if (c === codeIdx || c === descIdx) continue;
       const header = headerRaw[c];
       if (!header) continue;
-      const val = String(row[c] ?? "").trim();
+      let val = String(row[c] ?? "").trim();
+      if (forwardFillIndices.has(c)) {
+        if (val) lastSectionValue.set(c, val);
+        else val = lastSectionValue.get(c) ?? "";
+      }
       extra[header] = val;
     }
     rows.push({
