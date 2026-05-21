@@ -2136,6 +2136,11 @@ export type InstinctEventType =
   | "jobcodes.receipt_scanned"
   | "jobcodes.receipt_scan_failed"
   | "jobcodes.receipt_applied"
+  /* Per-code dossier — cross-source view at /job-codes/[code] joins
+     the cache row, applied receipt scans, and the audit log. Fires
+     on page render so we can see which codes get drilled into most
+     (informs whether to surface dossier links from other surfaces). */
+  | "system.job_code_dossier_viewed"
   /* Azure Cognitive Services call telemetry — fired by lib/azure/
      audit.ts on EVERY call so the learning loop can forecast
      free-tier quota and detect failure spikes. */
