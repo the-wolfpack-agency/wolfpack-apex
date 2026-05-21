@@ -70,6 +70,7 @@ import "./create-calendar-event-form-tool";
 import "./log-time";
 import "./scan-receipt";
 import "./scan-invoice";
+import "./scan-hr-doc";
 import "./create-task-form-tool";
 import "./create-okr-form-tool";
 import "./create-feature-form-tool";

@@ -34,6 +34,9 @@ import {
   isFormRecognizerConfigured,
 } from "@/lib/azure/form-recognizer";
 import type { ReceiptFields } from "@/lib/azure/form-recognizer";
+import { preScanForBlockingPII } from "@/lib/azure/pre-scan";
+
+const MIN_CONFIDENCE = Number(process.env.AZURE_FORM_REC_MIN_CONFIDENCE ?? "0");
 
 const ALLOWED_MIME = new Set([
   "image/jpeg",
@@ -91,6 +94,23 @@ export async function POST(req: NextRequest) {
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
+
+  /* Compliance: refuse before Azure when the bytes contain a Luhn-
+     valid card, an SSN, or a named API key. Defense in depth on top
+     of Microsoft's DPA. */
+  const pre = preScanForBlockingPII(buffer);
+  if (!pre.ok) {
+    await trackEvent("jobcodes.receipt_scan_failed", auth.user.id, auth.user.role, {
+      reason: "pii_blocked",
+      blocked_by: pre.blockedBy.join(","),
+      filename: file.name,
+    });
+    return NextResponse.json(
+      { error: "pii_blocked", blocked_by: pre.blockedBy, detail: "file contains high-confidence PII / secrets; remove or redact before re-uploading" },
+      { status: 422 },
+    );
+  }
+
   const sha = createHash("sha256").update(buffer).digest("hex");
 
   /* Dedup: same receipt uploaded twice → reuse the existing row +
@@ -124,6 +144,24 @@ export async function POST(req: NextRequest) {
     triggeredByRole: auth.user.role,
     contentType,
   });
+
+  if (scan.ok && MIN_CONFIDENCE > 0 && (scan.fields.documentConfidence ?? 1) < MIN_CONFIDENCE) {
+    await trackEvent("jobcodes.receipt_scan_failed", auth.user.id, auth.user.role, {
+      reason: "low_confidence",
+      confidence: scan.fields.documentConfidence ?? 0,
+      floor: MIN_CONFIDENCE,
+      filename: file.name,
+    });
+    return NextResponse.json(
+      {
+        error: "low_confidence",
+        detail: `extraction confidence ${scan.fields.documentConfidence} below floor ${MIN_CONFIDENCE}`,
+        fields: scan.fields,
+        suggestion: "re-scan with a clearer image OR ask an admin to lower AZURE_FORM_REC_MIN_CONFIDENCE",
+      },
+      { status: 422 },
+    );
+  }
 
   if (!scan.ok) {
     await trackEvent("jobcodes.receipt_scan_failed", auth.user.id, auth.user.role, {

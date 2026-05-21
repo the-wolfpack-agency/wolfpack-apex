@@ -25,6 +25,9 @@ import {
   listInvoices,
   type InvoiceStatus,
 } from "@/lib/finance/invoices";
+import { preScanForBlockingPII } from "@/lib/azure/pre-scan";
+
+const MIN_CONFIDENCE = Number(process.env.AZURE_FORM_REC_MIN_CONFIDENCE ?? "0");
 
 const ALLOWED_MIME = new Set([
   "image/jpeg", "image/jpg", "image/png", "image/tiff", "image/bmp", "image/heif",
@@ -86,6 +89,22 @@ export async function POST(req: NextRequest) {
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
+
+  /* Compliance pre-scan: refuse high-confidence PII / secrets
+     before forwarding to Azure (defense in depth on top of DPA). */
+  const pre = preScanForBlockingPII(buffer);
+  if (!pre.ok) {
+    await trackEvent("finance.invoice_scan_failed", auth.user.id, auth.user.role, {
+      reason: "pii_blocked",
+      blocked_by: pre.blockedBy.join(","),
+      filename: file.name,
+    });
+    return NextResponse.json(
+      { error: "pii_blocked", blocked_by: pre.blockedBy, detail: "file contains high-confidence PII / secrets; redact before re-uploading" },
+      { status: 422 },
+    );
+  }
+
   const sha = createHash("sha256").update(buffer).digest("hex");
 
   /* Dedup. */
@@ -104,6 +123,19 @@ export async function POST(req: NextRequest) {
     triggeredByRole: auth.user.role,
     contentType,
   });
+  if (scan.ok && MIN_CONFIDENCE > 0 && (scan.fields.documentConfidence ?? 1) < MIN_CONFIDENCE) {
+    await trackEvent("finance.invoice_scan_failed", auth.user.id, auth.user.role, {
+      reason: "low_confidence",
+      confidence: scan.fields.documentConfidence ?? 0,
+      floor: MIN_CONFIDENCE,
+      filename: file.name,
+    });
+    return NextResponse.json(
+      { error: "low_confidence", confidence: scan.fields.documentConfidence ?? 0, floor: MIN_CONFIDENCE, fields: scan.fields },
+      { status: 422 },
+    );
+  }
+
   if (!scan.ok) {
     await trackEvent("finance.invoice_scan_failed", auth.user.id, auth.user.role, {
       reason: scan.reason, filename: file.name,

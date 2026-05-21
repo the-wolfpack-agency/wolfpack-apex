@@ -122,6 +122,28 @@ export interface InvoiceScanSuccess {
 }
 export type InvoiceScanResult = InvoiceScanSuccess | ReceiptScanFailure;
 
+/* ── ID Document (prebuilt-idDocument) ──────────────────────── */
+
+export interface IdDocumentFields {
+  documentNumber: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  fullName: string | null;
+  dateOfBirth: string | null;
+  dateOfExpiration: string | null;
+  dateOfIssue: string | null;
+  countryRegion: string | null;
+  region: string | null;
+  /** Driver's license / passport / national_identity_card / etc. */
+  documentType: string | null;
+  documentConfidence: number | null;
+  rawText: string;
+  rawFields: Record<string, unknown>;
+}
+
+export interface IdDocScanSuccess { ok: true; fields: IdDocumentFields; }
+export type IdDocScanResult = IdDocScanSuccess | ReceiptScanFailure;
+
 export function isFormRecognizerConfigured(): boolean {
   return resolveAzureCreds("form_recognizer") !== null;
 }
@@ -325,6 +347,51 @@ export async function scanInvoice(
   if (!fields) {
     return { ok: false, reason: "no_document_detected", detail: "Form Recognizer returned no documents — file may not be an invoice" };
   }
+  return { ok: true, fields };
+}
+
+export function mapIdDocumentFields(raw: DocumentIntelligenceResponse): IdDocumentFields | null {
+  const doc = raw.analyzeResult?.documents?.[0];
+  if (!doc) return null;
+  const f = doc.fields ?? {};
+  const first = fieldString(f.FirstName);
+  const last = fieldString(f.LastName);
+  return {
+    documentNumber: fieldString(f.DocumentNumber),
+    firstName: first,
+    lastName: last,
+    fullName: fieldString(f.MachineReadableZone?.valueObject?.Name) ?? ([first, last].filter(Boolean).join(" ") || null),
+    dateOfBirth: fieldDate(f.DateOfBirth),
+    dateOfExpiration: fieldDate(f.DateOfExpiration),
+    dateOfIssue: fieldDate(f.DateOfIssue),
+    countryRegion: fieldString(f.CountryRegion),
+    region: fieldString(f.Region),
+    documentType: doc.docType ?? null,
+    documentConfidence: typeof doc.confidence === "number" ? doc.confidence : null,
+    rawText: (raw.analyzeResult?.content ?? "").slice(0, 4000),
+    rawFields: f as Record<string, unknown>,
+  };
+}
+
+export async function scanIdDocument(buffer: Buffer, opts: ScanReceiptOptions): Promise<IdDocScanResult> {
+  if (buffer.length > RECEIPT_MAX_BYTES) {
+    return { ok: false, reason: "too_large", detail: `${buffer.length} bytes exceeds cap ${RECEIPT_MAX_BYTES}` };
+  }
+  const creds = resolveAzureCreds("form_recognizer");
+  if (!creds) return { ok: false, reason: "not_configured", detail: "AZURE_FORM_REC_ENDPOINT/KEY (or AZURE_COGNITIVE_*) not set" };
+  const ctx: AzureCallContext = {
+    service: "form_recognizer", operation: "prebuilt-idDocument",
+    triggeredBy: opts.triggeredBy, triggeredByRole: opts.triggeredByRole, requestBytes: buffer.length,
+  };
+  const post = await postAzure(creds, "formrecognizer/documentModels/prebuilt-idDocument:analyze", {
+    body: buffer, contentType: opts.contentType, query: { "api-version": "2023-07-31" },
+  });
+  if (!post.ok) { await recordAzureCall(ctx, post, 0); return mapFailure(post.error.code, post.error.detail); }
+  const poll = await pollAzureOperation<DocumentIntelligenceResponse>(creds, post.value.operationLocation, { intervalMs: 750, maxAttempts: 40 });
+  if (!poll.ok) { await recordAzureCall(ctx, poll, 0); return mapFailure(poll.error.code, poll.error.detail); }
+  const fields = mapIdDocumentFields(poll.value);
+  await recordAzureCall(ctx, poll, fields?.rawText.length ?? 0);
+  if (!fields) return { ok: false, reason: "no_document_detected", detail: "no ID document detected (license / passport / national ID)" };
   return { ok: true, fields };
 }
 

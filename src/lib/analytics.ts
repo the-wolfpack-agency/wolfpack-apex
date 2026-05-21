@@ -2139,7 +2139,14 @@ export type InstinctEventType =
   | "finance.invoice_paid"
   | "finance.invoice_rejected"
   | "finance.invoice_updated"
-  | "finance.invoice_deleted";
+  | "finance.invoice_deleted"
+  /* HR scanned-docs intake. */
+  | "hr.document_scanned"
+  | "hr.document_scan_failed"
+  | "hr.document_verified"
+  | "hr.document_rejected"
+  | "hr.document_updated"
+  | "hr.document_deleted";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

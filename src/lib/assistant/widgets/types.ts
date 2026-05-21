@@ -462,6 +462,19 @@ export interface ScanInvoiceWidgetSpec {
   kind: "scan_invoice";
 }
 
+/**
+ * ScanHrDocWidget — upload an HR document for an employee.
+ * ID-shaped types (license/passport/state_id) extract structured
+ * fields via Form Recognizer prebuilt-idDocument; other types
+ * (W-2/W-4/W-9/I-9/voided check/other) get Computer Vision OCR.
+ * Lands in /hr/documents queue for verification.
+ */
+export interface ScanHrDocWidgetSpec {
+  kind: "scan_hr_doc";
+  employeeEmail?: string;
+  docType?: string;
+}
+
 /** Discriminated union of every widget kind. Add new entries as the
  *  framework expands. */
 export type WidgetSpec =
@@ -479,4 +492,5 @@ export type WidgetSpec =
   | FeedbackWidgetSpec
   | TimeLogWidgetSpec
   | ScanReceiptWidgetSpec
-  | ScanInvoiceWidgetSpec;
+  | ScanInvoiceWidgetSpec
+  | ScanHrDocWidgetSpec;
