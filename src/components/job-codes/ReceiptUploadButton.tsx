@@ -18,7 +18,7 @@
  * the inline cell edit (jobcodes.refresh).
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchWithRefresh } from "@/lib/client-auth";
 import { ConflictDialog, type ConflictRow, type ConflictResolution } from "@/components/job-codes/ConflictDialog";
 
@@ -56,9 +56,24 @@ export interface ReceiptUploadButtonProps {
   codeOptions: JobCodeOption[];
   /** Callback after successful apply — refresh the table. */
   onApplied?: () => void;
+  /** Cross-page intake: when set, skip the file picker and rehydrate
+   *  the apply modal from /api/job-codes/scan-receipt/<id>. Used when
+   *  a user drops a receipt on /finance/invoices and is bounced here
+   *  with ?pending_scan=<id>. */
+  prefilledScanId?: string | null;
+  /** Fires after the prefilled scan has been hydrated (or fails) so
+   *  the parent can scrub ?pending_scan from the URL — keeps refresh
+   *  / back-button from re-opening the same modal forever. */
+  onPrefilledHydrated?: (result: { ok: boolean; error?: string }) => void;
 }
 
-export function ReceiptUploadButton({ canEdit, codeOptions, onApplied }: ReceiptUploadButtonProps) {
+export function ReceiptUploadButton({
+  canEdit,
+  codeOptions,
+  onApplied,
+  prefilledScanId,
+  onPrefilledHydrated,
+}: ReceiptUploadButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -231,6 +246,57 @@ export function ReceiptUploadButton({ canEdit, codeOptions, onApplied }: Receipt
     },
     [runApply, onApplied],
   );
+
+  /* Cross-page rehydrate: when InvoicesPanel routes the user here
+     with ?pending_scan=<id>, fetch the persisted fields and open the
+     apply modal as if the user had just scanned. Skips the Azure
+     transaction entirely — the bytes were already extracted on the
+     /finance/invoices drop. */
+  const hydrateFromPrefilled = useCallback(
+    async (id: string) => {
+      setLoading(true);
+      setScanError(null);
+      setApplyMessage(null);
+      setOpen(true);
+      try {
+        const res = await fetchWithRefresh(`/api/job-codes/scan-receipt/${encodeURIComponent(id)}`);
+        const body = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          scan_id?: string;
+          fields?: ReceiptFields;
+          error?: string;
+        };
+        if (!res.ok || !body.ok || !body.fields || !body.scan_id) {
+          const err = body.error ?? `HTTP ${res.status}`;
+          setScanError(err);
+          onPrefilledHydrated?.({ ok: false, error: err });
+          return;
+        }
+        setScanId(body.scan_id);
+        setFields(body.fields);
+        setPoAmount(body.fields.total != null ? String(body.fields.total) : "");
+        setProgram("");
+        setPoNumber("");
+        onPrefilledHydrated?.({ ok: true });
+      } catch (err) {
+        const msg = (err as Error).message;
+        setScanError(msg);
+        onPrefilledHydrated?.({ ok: false, error: msg });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [onPrefilledHydrated],
+  );
+
+  /* Hydrate once per distinct prefilledScanId value. The parent owns
+     the source of truth (URL param) and is responsible for clearing
+     it via onPrefilledHydrated so we don't re-trigger on next render. */
+  useEffect(() => {
+    if (!prefilledScanId || !canEdit) return;
+    void hydrateFromPrefilled(prefilledScanId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefilledScanId, canEdit]);
 
   /* Distinct Client/Category values, alphabetized. Codes without a
      value still surface under "(no category)" so they're reachable. */
