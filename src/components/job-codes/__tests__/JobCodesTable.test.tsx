@@ -143,6 +143,96 @@ describe("<JobCodesTable />", () => {
     await waitFor(() => expect(screen.getByTestId("job-codes-refresh-message")).toHaveTextContent(/Refreshed/));
   });
 
+  /* Inline-edit (D/E/F) behavior — pins the policy that the table
+     surfaces an editable input ONLY for Program / PO Number / PO
+     Amount, and that blur fires a PATCH to /api/job-codes/[code]/cell
+     with the correct column letter. */
+  it("renders an editable input for Program (column D) and PATCHes on blur with the right body", async () => {
+    const codeRow = {
+      code: "WOLFPACK-AUTO",
+      description: "Dealer DOS engineering",
+      sheetName: "Job Codes",
+      active: true,
+      lastSeenAt: "2026-05-21",
+      extra: { "Client/Category": "Acme", "Program": "OLD", "PO Number": "PO-1", "PO Amount": "100" },
+    };
+    mockFetchWithRefresh
+      .mockResolvedValueOnce(mkRes({ capabilities: ["jobcodes.view", "jobcodes.refresh"] }))
+      .mockResolvedValueOnce(mkRes({
+        codes: [codeRow],
+        columns: ["Code", "Description", "Client/Category", "Program", "PO Number", "PO Amount"],
+        source: freshSource(),
+        served_stale: false,
+      }))
+      .mockResolvedValueOnce(mkRes({})) // analytics page_viewed
+      .mockResolvedValueOnce(mkRes({
+        ok: true,
+        code: "WOLFPACK-AUTO",
+        column: "D",
+        column_header: "Program",
+        cell_address: "D7",
+        previous_value: "OLD",
+        new_value: "Phase 2",
+      })) // PATCH response
+      .mockResolvedValue(mkRes({}));
+
+    await act(async () => {
+      render(<JobCodesTable />);
+    });
+
+    /* Read-only header for Code/Description, editable mark on Program. */
+    await waitFor(() => expect(screen.getByTestId("job-codes-header-Program")).toHaveTextContent(/editable/i));
+    expect(screen.queryByTestId("job-codes-header-Code")).not.toHaveTextContent(/editable/i);
+
+    /* Program cell renders as an input (editable column). */
+    const input = await screen.findByTestId("cell-input-WOLFPACK-AUTO-Program");
+    expect(input).toBeInTheDocument();
+    expect((input as HTMLInputElement).value).toBe("OLD");
+
+    /* Client/Category cell renders as plain text (NOT an input). */
+    expect(screen.queryByTestId("cell-input-WOLFPACK-AUTO-Client/Category")).not.toBeInTheDocument();
+    expect(screen.getByTestId("cell-WOLFPACK-AUTO-Client/Category")).toHaveTextContent("Acme");
+
+    /* Edit + blur → PATCH fires with column=D and the new value. */
+    fireEvent.change(input, { target: { value: "Phase 2" } });
+    await act(async () => {
+      fireEvent.blur(input);
+    });
+
+    const patchCall = mockFetchWithRefresh.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("/api/job-codes/WOLFPACK-AUTO/cell"),
+    );
+    expect(patchCall).toBeDefined();
+    const body = JSON.parse((patchCall![1] as { body: string }).body);
+    expect(body).toEqual({ column: "D", value: "Phase 2" });
+  });
+
+  it("renders read-only text (no input) when caller lacks jobcodes.refresh", async () => {
+    const codeRow = {
+      code: "X-1",
+      description: "x",
+      sheetName: "Job Codes",
+      active: true,
+      lastSeenAt: "2026-05-21",
+      extra: { "Program": "P1" },
+    };
+    mockFetchWithRefresh
+      .mockResolvedValueOnce(mkRes({ capabilities: ["jobcodes.view"] })) // no refresh
+      .mockResolvedValueOnce(mkRes({
+        codes: [codeRow],
+        columns: ["Code", "Description", "Program"],
+        source: freshSource(),
+        served_stale: false,
+      }))
+      .mockResolvedValue(mkRes({}));
+    await act(async () => {
+      render(<JobCodesTable />);
+    });
+    await waitFor(() => expect(screen.getByTestId("cell-X-1-Program")).toBeInTheDocument());
+    /* Read-only: no input, just the value as text. */
+    expect(screen.queryByTestId("cell-input-X-1-Program")).not.toBeInTheDocument();
+  });
+
   it("shows the empty state when no codes are returned and no search is active", async () => {
     mockFetchWithRefresh
       .mockResolvedValueOnce(mkRes({ capabilities: ["jobcodes.view"] }))

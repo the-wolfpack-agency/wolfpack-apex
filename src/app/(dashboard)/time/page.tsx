@@ -112,7 +112,7 @@ export default function TimePage() {
         Log hours below. Hoxsie sees the team rollup at <code>/admin/time</code>.
       </p>
 
-      <TimeLogWidget />
+      <TimeLogWidget spec={{ kind: "time_log", submitUrl: "/api/job-codes" }} />
 
       <h2 style={{ fontSize: "1rem", margin: "1.5rem 0 0.5rem 0", color: "var(--wp-text-dim, #aaa)" }}>
         Totals · last {days}d
