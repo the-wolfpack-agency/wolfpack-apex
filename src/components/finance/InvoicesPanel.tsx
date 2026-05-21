@@ -91,6 +91,7 @@ export function InvoicesPanel() {
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [actingId, setActingId] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -123,6 +124,33 @@ export function InvoicesPanel() {
   }, [statusFilter]);
 
   useEffect(() => { void load(); }, [load]);
+
+  /* Window-level drag listener so dragging a file ANYWHERE on the
+     page lights up the drop zone — the modern-SaaS UX cue that says
+     "I'm ready, just drop." Counter-tracked because dragenter/leave
+     fire on every child element; only the (0,0) leave is the real
+     "left the window" signal. */
+  useEffect(() => {
+    if (!canManage) return;
+    const onDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types?.includes("Files")) {
+        e.preventDefault();
+        setIsDragOver(true);
+      }
+    };
+    const onDragLeave = (e: DragEvent) => {
+      if (e.clientX === 0 && e.clientY === 0) setIsDragOver(false);
+    };
+    const onDrop = () => setIsDragOver(false);
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, [canManage]);
 
   const handleFile = useCallback(async (file: File) => {
     setUploading(true);
@@ -180,58 +208,132 @@ export function InvoicesPanel() {
 
 
   return (
-    <div className="space-y-3" data-testid="invoices-panel">
-      <div className="flex flex-wrap items-center gap-2">
-        {canManage && (
-          <>
-            <button
-              type="button"
-              data-testid="invoice-upload-trigger"
-              onClick={() => inputRef.current?.click()}
-              disabled={uploading}
-              className="px-3 py-2 text-xs font-medium rounded"
-              style={{
-                background: uploading ? "var(--wp-dark-surface2, #1a1a1a)" : "var(--wp-gold, #eab308)",
-                color: uploading ? "var(--wp-text-muted, #6b7280)" : "var(--wp-dark, #111)",
-                border: "none",
-                cursor: uploading ? "not-allowed" : "pointer",
-              }}
-            >
-              {uploading ? "Reading invoice…" : "Upload invoice"}
-            </button>
-            <input
-              ref={inputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/tiff,application/pdf,.pdf,.jpg,.jpeg,.png,.tif,.tiff"
-              data-testid="invoice-upload-input"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void handleFile(f);
-                e.target.value = "";
-              }}
-            />
-          </>
-        )}
-        <div className="flex flex-wrap gap-1" data-testid="invoice-status-chips">
-          {STATUS_CHIPS.map((c) => (
-            <button
-              key={c.key}
-              type="button"
-              onClick={() => setStatusFilter(c.key)}
-              data-testid={`invoice-status-chip-${c.key}`}
-              className="px-2 py-1 text-xs rounded"
-              style={{
-                background: statusFilter === c.key ? "var(--wp-gold, #eab308)" : "var(--wp-dark-surface2, #1a1a1a)",
-                color: statusFilter === c.key ? "var(--wp-dark, #111)" : "var(--wp-text-dim, #aaa)",
-                border: "1px solid var(--wp-dark-border, #333)",
-                cursor: "pointer",
-              }}
-            >
-              {c.label}{c.key !== "all" ? ` (${counts[c.key] ?? 0})` : ""}
-            </button>
-          ))}
+    <div className="space-y-4" data-testid="invoices-panel">
+      {canManage ? (
+        /* Hero drop zone — the page's primary action. Replaces the
+           old 12px-text button squeezed next to filter chips. Drop or
+           click to upload; the whole zone is one giant <label> so
+           native file-picker accessibility comes free (keyboard +
+           screen reader treat it as the input's clickable label). */
+        <label
+          data-testid="invoice-upload-trigger"
+          htmlFor="invoice-upload-input-el"
+          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+          onDragEnter={(e) => { e.preventDefault(); setIsDragOver(true); }}
+          onDragLeave={(e) => {
+            /* Only flip OFF when leaving the zone itself, not children. */
+            if (e.currentTarget === e.target) setIsDragOver(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setIsDragOver(false);
+            const f = e.dataTransfer?.files?.[0];
+            if (f && !uploading) void handleFile(f);
+          }}
+          className="block rounded-lg transition-all"
+          style={{
+            background: isDragOver
+              ? "rgba(234,179,8,0.10)"
+              : uploading
+                ? "var(--wp-dark-surface2, #1a1a1a)"
+                : "var(--wp-dark-surface, #151515)",
+            border: `2px dashed ${isDragOver ? "var(--wp-gold, #eab308)" : uploading ? "var(--wp-text-muted, #6b7280)" : "var(--wp-dark-border, #333)"}`,
+            cursor: uploading ? "wait" : "pointer",
+            boxShadow: isDragOver ? "0 0 0 4px rgba(234,179,8,0.15)" : "none",
+          }}
+        >
+          <input
+            ref={inputRef}
+            id="invoice-upload-input-el"
+            type="file"
+            accept="image/jpeg,image/png,image/tiff,application/pdf,.pdf,.jpg,.jpeg,.png,.tif,.tiff"
+            data-testid="invoice-upload-input"
+            style={{ display: "none" }}
+            disabled={uploading}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void handleFile(f);
+              e.target.value = "";
+            }}
+          />
+          <div className="flex flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+            {uploading ? (
+              <>
+                <svg
+                  className="animate-spin"
+                  width="36" height="36" viewBox="0 0 24 24" fill="none"
+                  style={{ color: "var(--wp-gold, #eab308)" }}
+                  aria-hidden
+                >
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+                  <path d="M12 2 a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                </svg>
+                <div className="text-base font-semibold" style={{ color: "var(--wp-text, #eee)" }}>Reading invoice…</div>
+                <div className="text-xs" style={{ color: "var(--wp-text-dim, #aaa)" }}>
+                  Azure Document Intelligence is extracting vendor, amount, dates, and line items.
+                </div>
+              </>
+            ) : (
+              <>
+                <svg
+                  width="44" height="44" viewBox="0 0 24 24" fill="none"
+                  style={{ color: isDragOver ? "var(--wp-gold, #eab308)" : "var(--wp-text-dim, #aaa)" }}
+                  aria-hidden
+                >
+                  <path d="M7 18a5 5 0 0 1-1-9.9V8a6 6 0 0 1 11.7-1.5A4.5 4.5 0 0 1 21 11.5c0 2.5-2 4.5-4.5 4.5H17"
+                        stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M12 12v8m0-8-3 3m3-3 3 3"
+                        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <div className="text-lg font-semibold" style={{ color: "var(--wp-text, #eee)" }}>
+                  {isDragOver ? "Drop to upload" : "Upload an invoice"}
+                </div>
+                <div className="text-xs max-w-md" style={{ color: "var(--wp-text-dim, #aaa)" }}>
+                  Drop a PDF or photo here, or <span style={{ color: "var(--wp-gold, #eab308)", textDecoration: "underline" }}>click to browse</span>.
+                  We&apos;ll extract vendor, amount, dates, and line items automatically.
+                </div>
+                <div className="text-[11px] mt-1" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
+                  PDF · JPG · PNG · TIFF · up to 20 MB
+                </div>
+              </>
+            )}
+          </div>
+        </label>
+      ) : (
+        /* Read-only callers see a clear "view only" hint instead of an
+           invisible no-op so they understand the page's purpose. */
+        <div
+          data-testid="invoice-upload-readonly"
+          className="rounded-lg px-4 py-3 text-xs"
+          style={{
+            background: "var(--wp-dark-surface, #151515)",
+            border: "1px solid var(--wp-dark-border, #333)",
+            color: "var(--wp-text-dim, #aaa)",
+          }}
+        >
+          View only — upload requires the <strong>finance.invoices.manage</strong> capability.
+          Ask an admin to grant it if you need to queue invoices.
         </div>
+      )}
+
+      <div className="flex flex-wrap gap-1" data-testid="invoice-status-chips">
+        {STATUS_CHIPS.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => setStatusFilter(c.key)}
+            data-testid={`invoice-status-chip-${c.key}`}
+            className="px-2 py-1 text-xs rounded"
+            style={{
+              background: statusFilter === c.key ? "var(--wp-gold, #eab308)" : "var(--wp-dark-surface2, #1a1a1a)",
+              color: statusFilter === c.key ? "var(--wp-dark, #111)" : "var(--wp-text-dim, #aaa)",
+              border: "1px solid var(--wp-dark-border, #333)",
+              cursor: "pointer",
+            }}
+          >
+            {c.label}{c.key !== "all" ? ` (${counts[c.key] ?? 0})` : ""}
+          </button>
+        ))}
       </div>
 
       {uploadMsg && (
