@@ -41,11 +41,17 @@ interface ReceiptFields {
 interface JobCodeOption {
   code: string;
   description: string;
+  /** Extra workbook columns keyed by header text. Used here to derive
+   *  the Client/Category cascading filter. */
+  extra: Record<string, string>;
 }
+
+const CATEGORY_HEADER = "Client/Category";
 
 export interface ReceiptUploadButtonProps {
   canEdit: boolean;
-  /** All codes the user can pick from (Code + Description). */
+  /** Full code records — needed for the Client/Category → Code
+   *  cascading picker. */
   codeOptions: JobCodeOption[];
   /** Callback after successful apply — refresh the table. */
   onApplied?: () => void;
@@ -58,6 +64,8 @@ export function ReceiptUploadButton({ canEdit, codeOptions, onApplied }: Receipt
   const [scanError, setScanError] = useState<string | null>(null);
   const [scanId, setScanId] = useState<string | null>(null);
   const [fields, setFields] = useState<ReceiptFields | null>(null);
+  /* Two-step picker: Client/Category narrows the Code list. */
+  const [pickedCategory, setPickedCategory] = useState<string>("");
   const [pickedCode, setPickedCode] = useState<string>("");
   /* The user gets to override per-field before commit. Defaults
      pulled from the extraction — they can clear any of the three. */
@@ -73,6 +81,7 @@ export function ReceiptUploadButton({ canEdit, codeOptions, onApplied }: Receipt
     setScanError(null);
     setScanId(null);
     setFields(null);
+    setPickedCategory("");
     setPickedCode("");
     setProgram("");
     setPoNumber("");
@@ -166,7 +175,28 @@ export function ReceiptUploadButton({ canEdit, codeOptions, onApplied }: Receipt
     }
   }, [scanId, pickedCode, program, poNumber, poAmount, onApplied, reset]);
 
-  const codeChoices = useMemo(() => codeOptions, [codeOptions]);
+  /* Distinct Client/Category values, alphabetized. Codes without a
+     value still surface under "(no category)" so they're reachable. */
+  const categoryChoices = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of codeOptions) {
+      const v = (c.extra?.[CATEGORY_HEADER] ?? "").trim();
+      set.add(v || "(no category)");
+    }
+    return [...set].sort();
+  }, [codeOptions]);
+
+  /* Codes filtered by the chosen category. */
+  const codeChoices = useMemo(() => {
+    if (!pickedCategory) return [];
+    return codeOptions
+      .filter((c) => {
+        const v = (c.extra?.[CATEGORY_HEADER] ?? "").trim();
+        if (pickedCategory === "(no category)") return !v;
+        return v === pickedCategory;
+      })
+      .sort((a, b) => a.code.localeCompare(b.code));
+  }, [codeOptions, pickedCategory]);
 
   if (!canEdit) return null;
 
@@ -255,12 +285,15 @@ export function ReceiptUploadButton({ canEdit, codeOptions, onApplied }: Receipt
 
                 <div>
                   <label className="block text-xs mb-1" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
-                    Apply to job code
+                    Client / Category
                   </label>
                   <select
-                    value={pickedCode}
-                    onChange={(e) => setPickedCode(e.target.value)}
-                    data-testid="receipt-code-picker"
+                    value={pickedCategory}
+                    onChange={(e) => {
+                      setPickedCategory(e.target.value);
+                      setPickedCode("");
+                    }}
+                    data-testid="receipt-category-picker"
                     className="w-full px-2 py-1.5 rounded"
                     style={{
                       background: "var(--wp-dark, #111)",
@@ -269,14 +302,39 @@ export function ReceiptUploadButton({ canEdit, codeOptions, onApplied }: Receipt
                       fontSize: "16px",
                     }}
                   >
-                    <option value="" disabled>Choose a code…</option>
-                    {codeChoices.map((c) => (
-                      <option key={c.code} value={c.code}>
-                        {c.code}{c.description ? ` — ${c.description}` : ""}
-                      </option>
+                    <option value="" disabled>Choose a client / category…</option>
+                    {categoryChoices.map((c) => (
+                      <option key={c} value={c}>{c}</option>
                     ))}
                   </select>
                 </div>
+
+                {pickedCategory && (
+                  <div>
+                    <label className="block text-xs mb-1" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
+                      Job Code ({codeChoices.length})
+                    </label>
+                    <select
+                      value={pickedCode}
+                      onChange={(e) => setPickedCode(e.target.value)}
+                      data-testid="receipt-code-picker"
+                      className="w-full px-2 py-1.5 rounded"
+                      style={{
+                        background: "var(--wp-dark, #111)",
+                        border: "1px solid var(--wp-dark-border, #333)",
+                        color: "var(--wp-text, #eee)",
+                        fontSize: "16px",
+                      }}
+                    >
+                      <option value="" disabled>Choose a code…</option>
+                      {codeChoices.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.code}{c.description ? ` — ${c.description}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 gap-2">
                   {[

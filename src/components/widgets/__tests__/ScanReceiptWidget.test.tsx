@@ -54,8 +54,8 @@ describe("<ScanReceiptWidget />", () => {
     mockFetchWithRefresh.mockImplementation(async (url: string) => {
       if (url === "/api/me/capabilities") return mkRes({ capabilities: ["jobcodes.refresh"] });
       if (url === "/api/job-codes") return mkRes({ codes: [
-        { code: "WPA-1", description: "Acme dealer" },
-        { code: "GLB-1", description: "Globex" },
+        { code: "WPA-1", description: "Acme dealer", extra: { "Client/Category": "Acme" } },
+        { code: "GLB-1", description: "Globex", extra: { "Client/Category": "Globex" } },
       ] });
       if (url === "/api/job-codes/scan-receipt") return mkRes({
         ok: true,
@@ -94,8 +94,9 @@ describe("<ScanReceiptWidget />", () => {
     await waitFor(() => expect(screen.getByTestId("scan-receipt-summary")).toBeInTheDocument());
     expect(screen.getByTestId("scan-receipt-summary")).toHaveTextContent("Acme Hardware");
 
-    /* Pick code + set PO Number; leave Program empty (skipped); PO
-       Amount auto-filled from total. */
+    /* Cascading: pick Acme category first, then the code dropdown
+       surfaces filtered to that category. */
+    fireEvent.change(screen.getByTestId("scan-receipt-category"), { target: { value: "Acme" } });
     fireEvent.change(screen.getByTestId("scan-receipt-code"), { target: { value: "WPA-1" } });
     fireEvent.change(screen.getByTestId("scan-receipt-field-E"), { target: { value: "PO-12" } });
     expect((screen.getByTestId("scan-receipt-field-F") as HTMLInputElement).value).toBe("124.5");

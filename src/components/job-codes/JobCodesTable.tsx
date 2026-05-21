@@ -289,7 +289,7 @@ export function JobCodesTable() {
         )}
         <ReceiptUploadButton
           canEdit={canRefresh}
-          codeOptions={codes.map((c) => ({ code: c.code, description: c.description }))}
+          codeOptions={codes.map((c) => ({ code: c.code, description: c.description, extra: c.extra ?? {} }))}
           onApplied={() => void load()}
         />
       </div>

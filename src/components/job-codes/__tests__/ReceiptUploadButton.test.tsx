@@ -25,8 +25,9 @@ function mkRes(body: unknown, opts: { ok?: boolean; status?: number } = {}): any
 }
 
 const codes = [
-  { code: "WPA-1", description: "Acme dealer DOS" },
-  { code: "GLB-1", description: "Globex retainer" },
+  { code: "WPA-1", description: "Acme dealer DOS", extra: { "Client/Category": "Acme" } },
+  { code: "WPA-2", description: "Acme retainer", extra: { "Client/Category": "Acme" } },
+  { code: "GLB-1", description: "Globex retainer", extra: { "Client/Category": "Globex" } },
 ];
 
 beforeEach(() => mockFetchWithRefresh.mockReset());
@@ -74,7 +75,9 @@ describe("<ReceiptUploadButton />", () => {
     await waitFor(() => expect(screen.getByTestId("receipt-extracted-summary")).toBeInTheDocument());
     expect(screen.getByTestId("receipt-extracted-summary")).toHaveTextContent("Acme Hardware");
 
-    /* Pick a code + set PO Number + click Apply. */
+    /* Cascading picker: pick category first (filters to Acme codes),
+       then the code dropdown appears. */
+    fireEvent.change(screen.getByTestId("receipt-category-picker"), { target: { value: "Acme" } });
     fireEvent.change(screen.getByTestId("receipt-code-picker"), { target: { value: "WPA-1" } });
     fireEvent.change(screen.getByTestId("receipt-field-po-number"), { target: { value: "PO-12" } });
     /* PO Amount was pre-filled from total (124.5). */
@@ -104,6 +107,44 @@ describe("<ReceiptUploadButton />", () => {
       po_number: "PO-12",
       po_amount: "124.5",
     });
+  });
+
+  it("Job Code dropdown is filtered by chosen Client/Category", async () => {
+    /* Pins the 2026-05-21 UX request: scan-receipt picker must
+       narrow Code options by Client/Category, not show all 37 codes
+       in one flat list. */
+    mockFetchWithRefresh
+      .mockResolvedValueOnce(mkRes({
+        ok: true,
+        scan_id: "scan-1",
+        fields: {
+          merchantName: "Acme", transactionDate: "2026-05-21", total: 124.5,
+          subtotal: null, tax: null, currency: "USD", items: [],
+          documentConfidence: 0.92, rawText: "",
+        },
+      }))
+      .mockResolvedValue(mkRes({}));
+
+    await act(async () => {
+      render(<ReceiptUploadButton canEdit={true} codeOptions={codes} />);
+    });
+    const input = screen.getByTestId("receipt-upload-input") as HTMLInputElement;
+    const file = new File([new Uint8Array([1])], "r.png", { type: "image/png" });
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } });
+    });
+    await waitFor(() => expect(screen.getByTestId("receipt-category-picker")).toBeInTheDocument());
+
+    /* Before category pick, code dropdown is not visible. */
+    expect(screen.queryByTestId("receipt-code-picker")).not.toBeInTheDocument();
+
+    /* Picking Acme shows the code dropdown with only Acme codes
+       (WPA-1, WPA-2 — not GLB-1). */
+    fireEvent.change(screen.getByTestId("receipt-category-picker"), { target: { value: "Acme" } });
+    const codePicker = await screen.findByTestId("receipt-code-picker");
+    const opts = Array.from(codePicker.querySelectorAll("option")).map((o) => o.getAttribute("value"));
+    expect(opts).toEqual(expect.arrayContaining(["WPA-1", "WPA-2"]));
+    expect(opts).not.toContain("GLB-1");
   });
 
   it("surfaces a scan error WITHOUT closing the modal", async () => {

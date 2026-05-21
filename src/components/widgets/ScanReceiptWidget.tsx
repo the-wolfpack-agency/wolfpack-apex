@@ -41,7 +41,10 @@ interface ReceiptFields {
 interface JobCodeRow {
   code: string;
   description: string;
+  extra: Record<string, string>;
 }
+
+const CATEGORY_HEADER = "Client/Category";
 
 export interface ScanReceiptWidgetProps {
   spec: ScanReceiptWidgetSpec;
@@ -56,6 +59,7 @@ export function ScanReceiptWidget({ spec, workflowId }: ScanReceiptWidgetProps) 
   const [scanError, setScanError] = useState<string | null>(null);
   const [scanId, setScanId] = useState<string | null>(null);
   const [fields, setFields] = useState<ReceiptFields | null>(null);
+  const [pickedCategory, setPickedCategory] = useState<string>("");
   const [pickedCode, setPickedCode] = useState<string>(spec.jobCode ?? "");
   const [program, setProgram] = useState<string>("");
   const [poNumber, setPoNumber] = useState<string>("");
@@ -108,7 +112,7 @@ export function ScanReceiptWidget({ spec, workflowId }: ScanReceiptWidgetProps) 
       .then((r) => (r.ok ? r.json() : null))
       .then((body: { codes?: JobCodeRow[] } | null) => {
         if (body?.codes) {
-          setCodes(body.codes.map((c) => ({ code: c.code, description: c.description })));
+          setCodes(body.codes.map((c) => ({ code: c.code, description: c.description, extra: c.extra ?? {} })));
         }
       })
       .catch(() => undefined);
@@ -202,7 +206,28 @@ export function ScanReceiptWidget({ spec, workflowId }: ScanReceiptWidgetProps) 
     }
   }, [scanId, pickedCode, program, poNumber, poAmount, track]);
 
-  const codeOptions = useMemo(() => codes, [codes]);
+  /* B → C cascading picker: derive distinct categories, then filter
+     codes when one is chosen. Mirrors TimeLogWidget + the page
+     ReceiptUploadButton. */
+  const categoryChoices = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of codes) {
+      const v = (c.extra?.[CATEGORY_HEADER] ?? "").trim();
+      set.add(v || "(no category)");
+    }
+    return [...set].sort();
+  }, [codes]);
+
+  const codeOptions = useMemo(() => {
+    if (!pickedCategory) return [];
+    return codes
+      .filter((c) => {
+        const v = (c.extra?.[CATEGORY_HEADER] ?? "").trim();
+        if (pickedCategory === "(no category)") return !v;
+        return v === pickedCategory;
+      })
+      .sort((a, b) => a.code.localeCompare(b.code));
+  }, [codes, pickedCategory]);
 
   if (!canEdit) {
     return (
@@ -290,12 +315,15 @@ export function ScanReceiptWidget({ spec, workflowId }: ScanReceiptWidgetProps) 
 
           <div>
             <label className="block text-xs mb-1" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
-              Apply to job code
+              Client / Category
             </label>
             <select
-              value={pickedCode}
-              onChange={(e) => setPickedCode(e.target.value)}
-              data-testid="scan-receipt-code"
+              value={pickedCategory}
+              onChange={(e) => {
+                setPickedCategory(e.target.value);
+                setPickedCode("");
+              }}
+              data-testid="scan-receipt-category"
               className="w-full px-2 py-1.5 rounded"
               style={{
                 background: "var(--wp-dark, #111)",
@@ -304,14 +332,39 @@ export function ScanReceiptWidget({ spec, workflowId }: ScanReceiptWidgetProps) 
                 fontSize: "16px",
               }}
             >
-              <option value="" disabled>Choose a code…</option>
-              {codeOptions.map((c) => (
-                <option key={c.code} value={c.code}>
-                  {c.code}{c.description ? ` — ${c.description}` : ""}
-                </option>
+              <option value="" disabled>Choose a client / category…</option>
+              {categoryChoices.map((c) => (
+                <option key={c} value={c}>{c}</option>
               ))}
             </select>
           </div>
+
+          {pickedCategory && (
+            <div>
+              <label className="block text-xs mb-1" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
+                Job Code ({codeOptions.length})
+              </label>
+              <select
+                value={pickedCode}
+                onChange={(e) => setPickedCode(e.target.value)}
+                data-testid="scan-receipt-code"
+                className="w-full px-2 py-1.5 rounded"
+                style={{
+                  background: "var(--wp-dark, #111)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  color: "var(--wp-text, #eee)",
+                  fontSize: "16px",
+                }}
+              >
+                <option value="" disabled>Choose a code…</option>
+                {codeOptions.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.code}{c.description ? ` — ${c.description}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {[
             { label: "Program (D)", value: program, set: setProgram, testid: "scan-receipt-field-D" },
