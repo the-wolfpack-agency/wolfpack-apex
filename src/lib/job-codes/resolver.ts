@@ -122,7 +122,7 @@ export async function refreshFromSource(
     startedAt,
     finishedAt: new Date().toISOString(),
   };
-  await recordRefreshOutcome(outcome, opts.triggeredBy).catch(() => null);
+  await recordRefreshOutcome(outcome, opts.triggeredBy, res.value.columns).catch(() => null);
   try {
     await trackEvent("jobcodes.refresh_succeeded", opts.triggeredBy ?? "system", "system", {
       rows_seen: res.value.rows.length,
@@ -131,6 +131,7 @@ export async function refreshFromSource(
       rows_deactivated: diff.deactivated,
       source: opts.source,
       sheet_name: res.value.sheetName,
+      column_count: res.value.columns.length,
     });
   } catch { /* analytics best-effort */ }
   return outcome;

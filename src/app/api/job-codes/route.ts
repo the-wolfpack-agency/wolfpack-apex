@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
 import { resolveJobCodes } from "@/lib/job-codes/resolver";
+import { getLatestOrderedColumns } from "@/lib/job-codes/repo";
 
 export async function GET(req: NextRequest) {
   const auth = await requireCapability(req, "jobcodes.view");
@@ -42,23 +43,26 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  /* Compute the union of extra-column names across all rows so the
-     table can render every column finance has. Code + Description
-     are always first (top-level fields). Extra columns follow in the
-     order they first appear in the rows — Postgres JSONB doesn't
-     guarantee key order, so this is the best we can do without an
-     explicit ordered-columns store. */
-  const extraColumns: string[] = [];
-  const seen = new Set<string>();
-  for (const r of result.rows) {
-    for (const k of Object.keys(r.extra ?? {})) {
-      if (!seen.has(k)) {
-        seen.add(k);
-        extraColumns.push(k);
+  /* Workbook column order, persisted on each successful refresh.
+     Falls back to a JSONB-derived order when no refresh has stored
+     an ordered list yet (older deploys). */
+  const persistedOrder = await getLatestOrderedColumns();
+  let columns: string[];
+  if (persistedOrder && persistedOrder.length > 0) {
+    columns = persistedOrder;
+  } else {
+    const extraColumns: string[] = [];
+    const seen = new Set<string>();
+    for (const r of result.rows) {
+      for (const k of Object.keys(r.extra ?? {})) {
+        if (!seen.has(k)) {
+          seen.add(k);
+          extraColumns.push(k);
+        }
       }
     }
+    columns = ["Code", "Description", ...extraColumns];
   }
-  const columns = ["Code", "Description", ...extraColumns];
 
   return NextResponse.json({
     codes: result.rows,

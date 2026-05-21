@@ -322,13 +322,14 @@ export async function getSourceInfo(): Promise<JobCodesSourceInfo> {
 export async function recordRefreshOutcome(
   outcome: JobCodesRefreshOutcome,
   triggeredBy: string | null,
+  orderedColumns?: string[],
 ): Promise<RefreshRow> {
   const res = await writeQuery<RefreshRow>(
     `INSERT INTO instinct_job_codes_refresh
        (started_at, finished_at, status, source, triggered_by,
         rows_seen, rows_added, rows_updated, rows_deactivated,
-        error_code, error_detail)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        error_code, error_detail, ordered_columns)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
      RETURNING *`,
     [
       outcome.startedAt,
@@ -342,8 +343,22 @@ export async function recordRefreshOutcome(
       outcome.rowsDeactivated,
       outcome.error?.code ?? null,
       outcome.error?.detail ?? null,
+      orderedColumns ? JSON.stringify(orderedColumns) : null,
     ],
     { expectRows: 1 },
   );
   return res.rows[0];
+}
+
+/**
+ * Latest workbook-order column list from the most recent succeeded
+ * refresh. Returns null when no refresh has succeeded yet.
+ */
+export async function getLatestOrderedColumns(): Promise<string[] | null> {
+  const res = await query<{ ordered_columns: string[] | null }>(
+    `SELECT ordered_columns FROM instinct_job_codes_refresh
+     WHERE status = 'succeeded' AND ordered_columns IS NOT NULL
+     ORDER BY started_at DESC LIMIT 1`,
+  );
+  return res.rows[0]?.ordered_columns ?? null;
 }

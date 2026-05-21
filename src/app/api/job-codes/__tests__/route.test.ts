@@ -18,6 +18,7 @@ const mockRequireCapability = jest.fn();
 const mockResolveJobCodes = jest.fn();
 const mockForceRefresh = jest.fn();
 const mockTrackEvent = jest.fn();
+const mockGetOrderedCols = jest.fn();
 
 jest.mock("@/lib/auth/require-capability", () => ({
   requireCapability: (...a: unknown[]) => mockRequireCapability(...a),
@@ -25,6 +26,9 @@ jest.mock("@/lib/auth/require-capability", () => ({
 jest.mock("@/lib/job-codes/resolver", () => ({
   resolveJobCodes: (...a: unknown[]) => mockResolveJobCodes(...a),
   forceRefresh: (...a: unknown[]) => mockForceRefresh(...a),
+}));
+jest.mock("@/lib/job-codes/repo", () => ({
+  getLatestOrderedColumns: (...a: unknown[]) => mockGetOrderedCols(...a),
 }));
 jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: unknown[]) => mockTrackEvent(...a),
@@ -54,6 +58,7 @@ const sampleRows = [
 beforeEach(() => {
   jest.resetAllMocks();
   mockTrackEvent.mockResolvedValue(undefined);
+  mockGetOrderedCols.mockResolvedValue(null);
 });
 
 describe("GET /api/job-codes", () => {
