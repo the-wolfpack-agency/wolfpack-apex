@@ -283,8 +283,15 @@ export async function acquireSharePointToken(
 ): Promise<{ token: string; kind: "delegated" | "app_only" } | null> {
   if (preferUserId) {
     try {
+      /* getValidToken returns { accessToken, userEmail } | null.
+         Treating the whole object as a Bearer string here was the
+         2026-05-21 production bug — produced Bearer "[object Object]"
+         which Graph rejected as accessDenied. Always extract
+         .accessToken. */
       const t = await getValidToken(preferUserId);
-      if (t) return { token: t, kind: "delegated" };
+      if (t && typeof t === "object" && typeof t.accessToken === "string" && t.accessToken.length > 0) {
+        return { token: t.accessToken, kind: "delegated" };
+      }
     } catch {
       /* fall through to app-only */
     }

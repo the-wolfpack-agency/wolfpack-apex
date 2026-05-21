@@ -132,7 +132,7 @@ describe("acquireSharePointToken (token-acquisition strategy)", () => {
   });
 
   it("prefers the user's delegated token when preferUserId is supplied", async () => {
-    (getValidToken as jest.Mock).mockResolvedValueOnce("delegated-tok");
+    (getValidToken as jest.Mock).mockResolvedValueOnce({ accessToken: "delegated-tok", userEmail: "u@x.com" });
     (getAppOnlyToken as jest.Mock).mockResolvedValueOnce("app-tok");
     const out = await acquireSharePointToken("u-1");
     expect(out).toEqual({ token: "delegated-tok", kind: "delegated" });
@@ -158,6 +158,18 @@ describe("acquireSharePointToken (token-acquisition strategy)", () => {
     (getAppOnlyToken as jest.Mock).mockResolvedValueOnce(null);
     const out = await acquireSharePointToken("u-1");
     expect(out).toBeNull();
+  });
+
+  it("falls back to app-only when getValidToken returns a malformed shape (defensive)", async () => {
+    /* Pins the 2026-05-21 prod bug: getValidToken returns
+       { accessToken, userEmail }. If something hands us a string-only
+       fake or an empty-accessToken object, we MUST fall back to
+       app-only rather than ship "[object Object]" as the Bearer
+       value (Graph rejects → accessDenied → user-facing graph_forbidden). */
+    (getValidToken as jest.Mock).mockResolvedValueOnce({ accessToken: "", userEmail: "x" });
+    (getAppOnlyToken as jest.Mock).mockResolvedValueOnce("app-tok");
+    const out = await acquireSharePointToken("u-1");
+    expect(out).toEqual({ token: "app-tok", kind: "app_only" });
   });
 
   it("skips delegated entirely when no preferUserId", async () => {
