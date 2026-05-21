@@ -23,6 +23,7 @@ import {
   findInvoiceBySha,
   insertInvoice,
   listInvoices,
+  countInvoicesByStatus,
   type InvoiceStatus,
 } from "@/lib/finance/invoices";
 import { preScanForBlockingPII } from "@/lib/azure/pre-scan";
@@ -42,12 +43,11 @@ export async function GET(req: NextRequest) {
   const status = (url.searchParams.get("status") ?? "all") as InvoiceStatus | "all";
   const limit = Number(url.searchParams.get("limit") ?? "200");
 
-  const rows = await listInvoices({
-    workspaceId: auth.user.workspaceId,
-    status,
-    limit,
-  });
-  return NextResponse.json({ invoices: rows, count: rows.length, status });
+  const [rows, counts] = await Promise.all([
+    listInvoices({ workspaceId: auth.user.workspaceId, status, limit }),
+    countInvoicesByStatus(auth.user.workspaceId),
+  ]);
+  return NextResponse.json({ invoices: rows, count: rows.length, status, counts });
 }
 
 export async function POST(req: NextRequest) {

@@ -40,6 +40,7 @@ interface ListResponse {
   invoices: InvoiceRow[];
   count: number;
   status: string;
+  counts: Record<InvoiceStatus, number>;
 }
 
 const STATUS_CHIPS: Array<{ key: InvoiceStatus | "all"; label: string }> = [
@@ -81,6 +82,7 @@ const STATUS_COLORS: Record<InvoiceStatus, { bg: string; fg: string; border: str
 
 export function InvoicesPanel() {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [counts, setCounts] = useState<Record<InvoiceStatus, number>>({ pending: 0, approved: 0, paid: 0, rejected: 0 });
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "all">("pending");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -112,6 +114,7 @@ export function InvoicesPanel() {
       }
       const body = (await res.json()) as ListResponse;
       setInvoices(body.invoices ?? []);
+      if (body.counts) setCounts(body.counts);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -128,12 +131,22 @@ export function InvoicesPanel() {
       const form = new FormData();
       form.append("file", file, file.name);
       const res = await fetchWithRefresh("/api/finance/invoices", { method: "POST", body: form });
-      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; cached?: boolean; invoice_id?: string; error?: string };
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; cached?: boolean; invoice_id?: string; status?: InvoiceStatus; error?: string };
       if (!res.ok || !body.ok) {
         setUploadMsg(`Upload failed: ${body.error ?? `HTTP ${res.status}`}`);
         return;
       }
-      setUploadMsg(body.cached ? "Already in queue — opened existing entry" : "Invoice queued — review below");
+      /* Dedup hit: jump the filter chip to the existing row's status
+         so the user actually SEES the row instead of being told it
+         exists in some other tab they're not looking at. */
+      if (body.cached && body.status && body.status !== statusFilter) {
+        setStatusFilter(body.status);
+        setUploadMsg(`Already in queue (status: ${body.status}) — re-opened. ${body.status === "rejected" ? "Use 'Re-open' to move it back to pending." : ""}`);
+      } else if (body.cached) {
+        setUploadMsg("Already in queue — opened existing entry");
+      } else {
+        setUploadMsg("Invoice queued — review below");
+      }
       await load();
       if (body.invoice_id) setExpandedId(body.invoice_id);
     } catch (err) {
@@ -162,11 +175,9 @@ export function InvoicesPanel() {
     }
   }, [load]);
 
-  const counts = useMemo(() => {
-    const c: Record<string, number> = { pending: 0, approved: 0, paid: 0, rejected: 0 };
-    for (const r of invoices) c[r.status]++;
-    return c;
-  }, [invoices]);
+  /* counts now sourced from the API (workspace-wide totals across
+     ALL statuses, not just the currently-loaded filter). */
+
 
   return (
     <div className="space-y-3" data-testid="invoices-panel">
@@ -342,6 +353,18 @@ export function InvoicesPanel() {
                                   style={{ background: "#4ade80", color: "#0b1220", border: "none", cursor: "pointer" }}
                                 >
                                   Mark paid
+                                </button>
+                              )}
+                              {(r.status === "rejected" || r.status === "paid") && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); void setStatus(r.id, "pending"); }}
+                                  disabled={actingId === r.id}
+                                  data-testid={`invoice-reopen-${r.id}`}
+                                  className="px-3 py-1.5 text-xs rounded"
+                                  style={{ background: "transparent", color: "var(--wp-gold, #eab308)", border: "1px solid var(--wp-gold, #eab308)", cursor: "pointer" }}
+                                >
+                                  Re-open
                                 </button>
                               )}
                             </div>

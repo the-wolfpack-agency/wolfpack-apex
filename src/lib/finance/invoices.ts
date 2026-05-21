@@ -110,6 +110,19 @@ export interface ListInvoicesOptions {
   limit?: number;
 }
 
+/** Workspace-wide counts per status — separate from the filtered
+ *  list so chip labels stay accurate regardless of what's loaded. */
+export async function countInvoicesByStatus(workspaceId: string): Promise<Record<InvoiceStatus, number>> {
+  const res = await query<{ status: InvoiceStatus; n: number }>(
+    `SELECT status, COUNT(*)::int AS n FROM instinct_invoices
+     WHERE workspace_id = $1 GROUP BY status`,
+    [workspaceId],
+  );
+  const counts: Record<InvoiceStatus, number> = { pending: 0, approved: 0, paid: 0, rejected: 0 };
+  for (const r of res.rows) counts[r.status] = r.n;
+  return counts;
+}
+
 export async function listInvoices(opts: ListInvoicesOptions): Promise<InvoiceRow[]> {
   const args: unknown[] = [opts.workspaceId];
   const where: string[] = [`workspace_id = $1`];

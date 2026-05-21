@@ -15,6 +15,7 @@ const mockList = jest.fn();
 const mockGet = jest.fn();
 const mockPatch = jest.fn();
 const mockDelete = jest.fn();
+const mockCountByStatus = jest.fn();
 const mockTrack = jest.fn();
 
 jest.mock("@/lib/auth/require-capability", () => ({
@@ -29,6 +30,7 @@ jest.mock("@/lib/finance/invoices", () => ({
   findInvoiceBySha: (...a: unknown[]) => mockFindBySha(...a),
   insertInvoice: (...a: unknown[]) => mockInsert(...a),
   listInvoices: (...a: unknown[]) => mockList(...a),
+  countInvoicesByStatus: (...a: unknown[]) => mockCountByStatus(...a),
   getInvoice: (...a: unknown[]) => mockGet(...a),
   patchInvoice: (...a: unknown[]) => mockPatch(...a),
   deleteInvoice: (...a: unknown[]) => mockDelete(...a),
@@ -74,6 +76,7 @@ beforeEach(() => {
   jest.resetAllMocks();
   mockTrack.mockResolvedValue(undefined);
   mockIsConfigured.mockReturnValue(true);
+  mockCountByStatus.mockResolvedValue({ pending: 0, approved: 0, paid: 0, rejected: 0 });
 });
 
 describe("GET /api/finance/invoices", () => {
@@ -91,6 +94,20 @@ describe("GET /api/finance/invoices", () => {
     const body = await res.json();
     expect(body.count).toBe(1);
     expect(mockList).toHaveBeenCalledWith(expect.objectContaining({ status: "pending" }));
+  });
+
+  /* Regression for the 2026-05-21 chip-count bug: counts MUST come
+     from the workspace-wide aggregate, not just the loaded slice.
+     Otherwise "Rejected (0)" lies when the filter is "Pending" but
+     a rejected row exists. */
+  it("returns workspace-wide counts independent of the filter", async () => {
+    mockRequireCapability.mockResolvedValue(okAuth());
+    mockList.mockResolvedValue([{ id: "inv-1", status: "pending" }]);
+    mockCountByStatus.mockResolvedValueOnce({ pending: 1, approved: 0, paid: 0, rejected: 4 });
+    const res = await GET(new NextRequest("https://x.test/api/finance/invoices?status=pending"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.counts).toEqual({ pending: 1, approved: 0, paid: 0, rejected: 4 });
   });
 });
 
