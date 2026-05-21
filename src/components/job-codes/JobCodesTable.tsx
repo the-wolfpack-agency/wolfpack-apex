@@ -63,9 +63,20 @@ function ago(iso: string | null): string {
   return `${Math.round(ms / 86_400_000)} d ago`;
 }
 
+/* Aliases the parser uses to detect the Code / Description columns,
+   mirrored here so we resolve cellValue to row.code / row.description
+   regardless of which header text the workbook actually carries
+   (e.g. "Job Code" with a space). Without this mirror, a workbook
+   header of "Job Code" caused every Code cell to render "—" — the
+   column lookup fell through to row.extra["Job Code"] which is
+   undefined because the parser promoted that value to row.code. */
+const CODE_HEADER_ALIASES = new Set(["code", "jobcode", "job code", "job_code"]);
+const DESC_HEADER_ALIASES = new Set(["description", "desc", "name", "title"]);
+
 function cellValue(row: JobCode, column: string): string {
-  if (column === "Code") return row.code;
-  if (column === "Description") return row.description;
+  const lower = column.toLowerCase();
+  if (CODE_HEADER_ALIASES.has(lower)) return row.code;
+  if (DESC_HEADER_ALIASES.has(lower)) return row.description;
   return row.extra?.[column] ?? "";
 }
 
