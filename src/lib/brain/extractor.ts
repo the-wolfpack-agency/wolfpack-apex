@@ -16,6 +16,7 @@
 
 import { classifyKind, type BrainKind } from "./types";
 import { htmlToText } from "@/lib/html-sanitize";
+import { ocrImage, isVisionConfigured } from "@/lib/azure/vision-ocr";
 
 export type ExtractSuccess = {
   ok: true;
@@ -45,7 +46,13 @@ export type ExtractResult = ExtractSuccess | ExtractSkipped | ExtractFailed;
 const SYNC_KINDS: ReadonlySet<BrainKind> = new Set(["pdf", "docx", "xlsx", "text", "markdown", "csv", "html"]);
 
 export function isSyncExtractable(kind: BrainKind): boolean {
-  return SYNC_KINDS.has(kind);
+  if (SYNC_KINDS.has(kind)) return true;
+  /* image extraction is sync-extractable iff Azure Computer Vision is
+     configured. When credentials aren't set, fall through to the
+     legacy 'deferred' path so behavior is unchanged from before the
+     Vision integration. */
+  if (kind === "image" && isVisionConfigured()) return true;
+  return false;
 }
 
 export async function extract(
@@ -67,9 +74,14 @@ export async function extract(
         return extractCsv(buffer);
       case "html":
         return extractHtml(buffer);
+      case "image":
+        /* Sync image OCR via Azure Computer Vision when configured.
+           Falls back to the deferred-worker label otherwise so the
+           document still indexes its metadata. */
+        if (isVisionConfigured()) return await extractImage(buffer);
+        return { ok: false, reason: "deferred", detail: "image extraction queued for worker" };
       case "audio":
       case "video":
-      case "image":
       case "email":
         return { ok: false, reason: "deferred", detail: `${kind} extraction queued for worker` };
       default:
@@ -82,6 +94,39 @@ export async function extract(
       detail: (err as Error).message ?? "extract threw",
     };
   }
+}
+
+// ── Image (Azure Computer Vision READ) ───────────────────────────
+
+/**
+ * OCR an image buffer via Azure Computer Vision. Triggered for any
+ * brain ingest where classifyKind returns "image" AND Vision is
+ * configured. The audit trail (instinct_azure_calls) is written
+ * inside ocrImage so this branch stays focused on mapping the result
+ * to the ExtractResult union.
+ *
+ * NOTE: `triggeredBy` is unavailable here because the extractor is
+ * called from a generic pipeline; we pass null so the audit row marks
+ * it as a system call. To attribute calls to specific users, plumb
+ * the user id through ingest() → extract() as a follow-up.
+ */
+async function extractImage(buffer: Buffer): Promise<ExtractResult> {
+  const res = await ocrImage(buffer, {
+    triggeredBy: null,
+    triggeredByRole: null,
+    contentType: "application/octet-stream",
+  });
+  if (!res.ok) {
+    return {
+      ok: false,
+      reason: res.reason === "rate_limited" || res.reason === "polling_timeout" || res.reason === "unavailable" ? "deferred" : "failed",
+      detail: `vision: ${res.reason} — ${res.detail}`,
+    };
+  }
+  if (res.emptyImage || !res.text.trim()) {
+    return { ok: false, reason: "empty", detail: "image contained no recognizable text" };
+  }
+  return { ok: true, text: res.text, pages: res.pages };
 }
 
 // ── PDF ──────────────────────────────────────────────────────────

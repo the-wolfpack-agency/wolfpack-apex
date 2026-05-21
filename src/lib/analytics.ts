@@ -2118,7 +2118,20 @@ export type InstinctEventType =
      cache mirror updates; failed covers every refusal class
      (forbidden_column, code_not_found, Graph 403/5xx). */
   | "jobcodes.cell_edit_succeeded"
-  | "jobcodes.cell_edit_failed";
+  | "jobcodes.cell_edit_failed"
+  /* Receipt scanning via Azure Document Intelligence — extracted
+     fields can be applied to a job code's Program/PO/PO Amount via
+     the existing /cell PATCH endpoint. */
+  | "jobcodes.receipt_scanned"
+  | "jobcodes.receipt_scan_failed"
+  | "jobcodes.receipt_applied"
+  /* Azure Cognitive Services call telemetry — fired by lib/azure/
+     audit.ts on EVERY call so the learning loop can forecast
+     free-tier quota and detect failure spikes. */
+  | "azure.vision_ocr_succeeded"
+  | "azure.vision_ocr_failed"
+  | "azure.form_recognizer_succeeded"
+  | "azure.form_recognizer_failed";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchWithRefresh } from "@/lib/client-auth";
+import { ReceiptUploadButton } from "@/components/job-codes/ReceiptUploadButton";
 
 interface JobCode {
   code: string;
@@ -286,6 +287,11 @@ export function JobCodesTable() {
             Open source workbook
           </a>
         )}
+        <ReceiptUploadButton
+          canEdit={canRefresh}
+          codeOptions={codes.map((c) => ({ code: c.code, description: c.description }))}
+          onApplied={() => void load()}
+        />
       </div>
 
       {refreshMessage && (
