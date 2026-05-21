@@ -367,6 +367,12 @@ export type InstinctEventType =
   // message } — no PII, error text only.
   | "system.search_provider_failed"
   | "system.analytics_queried"
+  /* Unified "Scan a document" router on /finance/invoices — emitted
+     when a user drops a file in either Invoice or Receipt mode so the
+     learning loop can see WHICH intake surface the user chose and
+     WHICH downstream resource (scan_id) was created. Payload:
+     { type: "invoice" | "receipt", scan_id }. */
+  | "system.scan_document_routed"
   // Dashboard — personalized Quick Actions tile.
   //
   //   dashboard.quick_actions_rendered

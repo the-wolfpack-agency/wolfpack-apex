@@ -11,9 +11,16 @@ import "@testing-library/jest-dom";
  */
 
 const mockFetchWithRefresh = jest.fn();
+const mockRouterReplace = jest.fn();
+const mockGetParam = jest.fn<string | null, [string]>();
+
 jest.mock("@/lib/client-auth", () => ({
   fetchWithRefresh: (...a: unknown[]) =>
     (mockFetchWithRefresh as unknown as (...args: unknown[]) => unknown)(...a),
+}));
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: mockRouterReplace, push: jest.fn() }),
+  useSearchParams: () => ({ get: (k: string) => mockGetParam(k) }),
 }));
 
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
@@ -50,6 +57,11 @@ function freshSource() {
 
 beforeEach(() => {
   mockFetchWithRefresh.mockReset();
+  mockRouterReplace.mockReset();
+  /* Default to no pending_scan param — individual tests opt in by
+     overriding mockGetParam. */
+  mockGetParam.mockReset();
+  mockGetParam.mockReturnValue(null);
 });
 
 describe("<JobCodesTable />", () => {
@@ -234,6 +246,74 @@ describe("<JobCodesTable />", () => {
     await waitFor(() => expect(screen.getByTestId("cell-X-1-Program")).toBeInTheDocument());
     /* Read-only: no input, just the value as text. */
     expect(screen.queryByTestId("cell-input-X-1-Program")).not.toBeInTheDocument();
+  });
+
+  /* Cross-page intake router: a receipt scanned on /finance/invoices
+     bounces here with ?pending_scan=<id>. JobCodesTable forwards the
+     param to ReceiptUploadButton which GETs the rehydrated fields
+     and opens the apply modal — no second Azure transaction. */
+  it("auto-opens the apply modal pre-loaded when ?pending_scan=<id> is in the URL", async () => {
+    mockGetParam.mockImplementation((k: string) => (k === "pending_scan" ? "scan-from-invoices" : null));
+    const fields = {
+      merchantName: "Acme Hardware",
+      transactionDate: "2026-05-21",
+      total: 124.5,
+      subtotal: null,
+      tax: null,
+      currency: "USD",
+      items: [],
+      documentConfidence: 0.92,
+      rawText: "",
+    };
+    /* URL-routed mock — analytics fire-and-forget interleaves with
+       the rehydrate GET, so we can't use a strict in-order queue here. */
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      if (url === "/api/me/capabilities") {
+        return Promise.resolve(mkRes({ capabilities: ["jobcodes.view", "jobcodes.refresh"] }));
+      }
+      if (url === "/api/job-codes") {
+        return Promise.resolve(mkRes({ codes: sampleCodes(), source: freshSource(), served_stale: false }));
+      }
+      if (url.includes("/api/job-codes/scan-receipt/scan-from-invoices")) {
+        return Promise.resolve(mkRes({ ok: true, scan_id: "scan-from-invoices", fields }));
+      }
+      return Promise.resolve(mkRes({}));
+    });
+
+    await act(async () => {
+      render(<JobCodesTable />);
+    });
+
+    /* Apply modal opens with the rehydrated merchant visible. */
+    await waitFor(() => expect(screen.getByTestId("receipt-extracted-summary")).toBeInTheDocument());
+    expect(screen.getByTestId("receipt-extracted-summary")).toHaveTextContent("Acme Hardware");
+
+    /* Rehydrate endpoint was hit with the URL-supplied id. */
+    const rehydrate = mockFetchWithRefresh.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("/api/job-codes/scan-receipt/scan-from-invoices"),
+    );
+    expect(rehydrate).toBeDefined();
+
+    /* URL param scrubbed via router.replace so refresh doesn't
+       re-open the modal forever. */
+    await waitFor(() => expect(mockRouterReplace).toHaveBeenCalled());
+  });
+
+  it("does NOT auto-open the apply modal when ?pending_scan is absent", async () => {
+    mockFetchWithRefresh
+      .mockResolvedValueOnce(mkRes({ capabilities: ["jobcodes.view", "jobcodes.refresh"] }))
+      .mockResolvedValueOnce(mkRes({ codes: sampleCodes(), source: freshSource(), served_stale: false }))
+      .mockResolvedValue(mkRes({}));
+    await act(async () => {
+      render(<JobCodesTable />);
+    });
+    await waitFor(() => expect(screen.getByTestId("job-code-row-WOLFPACK-AUTO")).toBeInTheDocument());
+    expect(screen.queryByTestId("receipt-extracted-summary")).not.toBeInTheDocument();
+    /* And we didn't fire a rehydrate GET. */
+    const rehydrate = mockFetchWithRefresh.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("/api/job-codes/scan-receipt/"),
+    );
+    expect(rehydrate).toBeUndefined();
   });
 
   it("shows the empty state when no codes are returned and no search is active", async () => {

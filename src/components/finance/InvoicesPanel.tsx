@@ -9,10 +9,27 @@
  * lines.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { fetchWithRefresh } from "@/lib/client-auth";
 
 type InvoiceStatus = "pending" | "approved" | "paid" | "rejected";
+
+/* Unified "Scan a document" router. The Invoice tab keeps PR #98's
+   hero drop zone unchanged (same testids, same POST contract). The
+   Receipt tab swaps to a parallel drop zone that POSTs to
+   /api/job-codes/scan-receipt then bounces to /job-codes with a
+   pending_scan param.
+
+   Capability gate decision: both tabs sit behind
+   finance.invoices.manage. Rationale — this surface lives at
+   /finance/invoices, so "scan a document" reads as finance work to
+   the user. The actual security boundary is the downstream POST
+   (/api/job-codes/scan-receipt enforces jobcodes.refresh server-
+   side); this client gate is for UX coherence. Splitting the tab
+   gates would let a non-finance job-codes admin initiate scans on
+   the finance page, which contradicts the surface's branding. */
+type ScanMode = "invoice" | "receipt";
 
 interface InvoiceRow {
   id: string;
@@ -81,6 +98,7 @@ const STATUS_COLORS: Record<InvoiceStatus, { bg: string; fg: string; border: str
 };
 
 export function InvoicesPanel() {
+  const router = useRouter();
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [counts, setCounts] = useState<Record<InvoiceStatus, number>>({ pending: 0, approved: 0, paid: 0, rejected: 0 });
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "all">("pending");
@@ -92,6 +110,7 @@ export function InvoicesPanel() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [actingId, setActingId] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [scanMode, setScanMode] = useState<ScanMode>("invoice");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -152,7 +171,22 @@ export function InvoicesPanel() {
     };
   }, [canManage]);
 
-  const handleFile = useCallback(async (file: File) => {
+  /* Fire-and-forget analytics ping — never blocks the upload, never
+     throws. Routed type + scan_id let the learning loop see WHICH
+     intake surface the user chose and WHICH downstream resource the
+     route produced. */
+  const trackRoute = useCallback((type: ScanMode, scan_id: string) => {
+    fetchWithRefresh("/api/analytics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event: "system.scan_document_routed",
+        metadata: { type, scan_id },
+      }),
+    }).catch(() => undefined);
+  }, []);
+
+  const handleInvoiceFile = useCallback(async (file: File) => {
     setUploading(true);
     setUploadMsg(null);
     try {
@@ -176,13 +210,55 @@ export function InvoicesPanel() {
         setUploadMsg("Invoice queued — review below");
       }
       await load();
-      if (body.invoice_id) setExpandedId(body.invoice_id);
+      if (body.invoice_id) {
+        setExpandedId(body.invoice_id);
+        trackRoute("invoice", body.invoice_id);
+      }
     } catch (err) {
       setUploadMsg(`Upload failed: ${(err as Error).message}`);
     } finally {
       setUploading(false);
     }
-  }, [load]);
+  }, [load, statusFilter, trackRoute]);
+
+  const handleReceiptFile = useCallback(async (file: File) => {
+    setUploading(true);
+    setUploadMsg(null);
+    try {
+      const form = new FormData();
+      form.append("file", file, file.name);
+      const res = await fetchWithRefresh("/api/job-codes/scan-receipt", { method: "POST", body: form });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        scan_id?: string;
+        error?: string;
+        detail?: string;
+      };
+      if (!res.ok || !body.ok || !body.scan_id) {
+        const msg = body.detail ? `${body.error ?? `HTTP ${res.status}`}: ${body.detail}` : body.error ?? `HTTP ${res.status}`;
+        setUploadMsg(`Receipt scan failed: ${msg}`);
+        return;
+      }
+      trackRoute("receipt", body.scan_id);
+      /* Bounce to /job-codes with the scan id so the existing apply
+         modal (cascading picker + D/E/F writes + learning loop) takes
+         over. The next page rehydrates from /api/job-codes/scan-
+         receipt/<id> — no second Azure transaction. */
+      router.push(`/job-codes?pending_scan=${encodeURIComponent(body.scan_id)}`);
+    } catch (err) {
+      setUploadMsg(`Receipt scan failed: ${(err as Error).message}`);
+    } finally {
+      setUploading(false);
+    }
+  }, [router, trackRoute]);
+
+  const handleFile = useCallback(
+    (file: File) => {
+      if (scanMode === "receipt") return handleReceiptFile(file);
+      return handleInvoiceFile(file);
+    },
+    [scanMode, handleInvoiceFile, handleReceiptFile],
+  );
 
   const setStatus = useCallback(async (id: string, status: InvoiceStatus, extra: Record<string, string> = {}) => {
     setActingId(id);
@@ -210,95 +286,222 @@ export function InvoicesPanel() {
   return (
     <div className="space-y-4" data-testid="invoices-panel">
       {canManage ? (
-        /* Hero drop zone — the page's primary action. Replaces the
-           old 12px-text button squeezed next to filter chips. Drop or
-           click to upload; the whole zone is one giant <label> so
-           native file-picker accessibility comes free (keyboard +
-           screen reader treat it as the input's clickable label). */
-        <label
-          data-testid="invoice-upload-trigger"
-          htmlFor="invoice-upload-input-el"
-          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-          onDragEnter={(e) => { e.preventDefault(); setIsDragOver(true); }}
-          onDragLeave={(e) => {
-            /* Only flip OFF when leaving the zone itself, not children. */
-            if (e.currentTarget === e.target) setIsDragOver(false);
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            setIsDragOver(false);
-            const f = e.dataTransfer?.files?.[0];
-            if (f && !uploading) void handleFile(f);
-          }}
-          className="block rounded-lg transition-all"
-          style={{
-            background: isDragOver
-              ? "rgba(234,179,8,0.10)"
-              : uploading
-                ? "var(--wp-dark-surface2, #1a1a1a)"
-                : "var(--wp-dark-surface, #151515)",
-            border: `2px dashed ${isDragOver ? "var(--wp-gold, #eab308)" : uploading ? "var(--wp-text-muted, #6b7280)" : "var(--wp-dark-border, #333)"}`,
-            cursor: uploading ? "wait" : "pointer",
-            boxShadow: isDragOver ? "0 0 0 4px rgba(234,179,8,0.15)" : "none",
-          }}
-        >
-          <input
-            ref={inputRef}
-            id="invoice-upload-input-el"
-            type="file"
-            accept="image/jpeg,image/png,image/tiff,application/pdf,.pdf,.jpg,.jpeg,.png,.tif,.tiff"
-            data-testid="invoice-upload-input"
-            style={{ display: "none" }}
-            disabled={uploading}
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void handleFile(f);
-              e.target.value = "";
-            }}
-          />
-          <div className="flex flex-col items-center justify-center gap-2 px-6 py-10 text-center">
-            {uploading ? (
-              <>
-                <svg
-                  className="animate-spin"
-                  width="36" height="36" viewBox="0 0 24 24" fill="none"
-                  style={{ color: "var(--wp-gold, #eab308)" }}
-                  aria-hidden
+        <div className="space-y-2" data-testid="scan-document-router">
+          {/* Invoice / Receipt segmented toggle — same chip visual
+              language as the status chips below so the controls read
+              as one coherent set. Default: Invoice (preserves prior
+              behavior for users who land here with muscle memory). */}
+          <div className="flex gap-1" role="tablist" aria-label="Scan document type" data-testid="scan-mode-toggle">
+            {(["invoice", "receipt"] as ScanMode[]).map((mode) => {
+              const active = scanMode === mode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  data-testid={`scan-mode-${mode}`}
+                  onClick={() => {
+                    setScanMode(mode);
+                    setUploadMsg(null);
+                  }}
+                  disabled={uploading}
+                  className="px-3 py-1.5 text-xs rounded"
+                  style={{
+                    background: active ? "var(--wp-gold, #eab308)" : "var(--wp-dark-surface2, #1a1a1a)",
+                    color: active ? "var(--wp-dark, #111)" : "var(--wp-text-dim, #aaa)",
+                    border: "1px solid var(--wp-dark-border, #333)",
+                    cursor: uploading ? "not-allowed" : "pointer",
+                    fontWeight: active ? 600 : 400,
+                  }}
                 >
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.25" />
-                  <path d="M12 2 a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                </svg>
-                <div className="text-base font-semibold" style={{ color: "var(--wp-text, #eee)" }}>Reading invoice…</div>
-                <div className="text-xs" style={{ color: "var(--wp-text-dim, #aaa)" }}>
-                  Azure Document Intelligence is extracting vendor, amount, dates, and line items.
-                </div>
-              </>
-            ) : (
-              <>
-                <svg
-                  width="44" height="44" viewBox="0 0 24 24" fill="none"
-                  style={{ color: isDragOver ? "var(--wp-gold, #eab308)" : "var(--wp-text-dim, #aaa)" }}
-                  aria-hidden
-                >
-                  <path d="M7 18a5 5 0 0 1-1-9.9V8a6 6 0 0 1 11.7-1.5A4.5 4.5 0 0 1 21 11.5c0 2.5-2 4.5-4.5 4.5H17"
-                        stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M12 12v8m0-8-3 3m3-3 3 3"
-                        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                <div className="text-lg font-semibold" style={{ color: "var(--wp-text, #eee)" }}>
-                  {isDragOver ? "Drop to upload" : "Upload an invoice"}
-                </div>
-                <div className="text-xs max-w-md" style={{ color: "var(--wp-text-dim, #aaa)" }}>
-                  Drop a PDF or photo here, or <span style={{ color: "var(--wp-gold, #eab308)", textDecoration: "underline" }}>click to browse</span>.
-                  We&apos;ll extract vendor, amount, dates, and line items automatically.
-                </div>
-                <div className="text-[11px] mt-1" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
-                  PDF · JPG · PNG · TIFF · up to 20 MB
-                </div>
-              </>
-            )}
+                  {mode === "invoice" ? "Invoice" : "Receipt"}
+                </button>
+              );
+            })}
           </div>
-        </label>
+
+          {scanMode === "invoice" ? (
+            /* Hero drop zone — Invoice variant. Unchanged from PR #98
+               other than the file-handler dispatch (handleFile routes
+               to handleInvoiceFile when scanMode === "invoice"). The
+               whole zone is one giant <label> so native file-picker
+               accessibility comes free (keyboard + screen reader
+               treat it as the input's clickable label). */
+            <label
+              data-testid="invoice-upload-trigger"
+              htmlFor="invoice-upload-input-el"
+              onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+              onDragEnter={(e) => { e.preventDefault(); setIsDragOver(true); }}
+              onDragLeave={(e) => {
+                if (e.currentTarget === e.target) setIsDragOver(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragOver(false);
+                const f = e.dataTransfer?.files?.[0];
+                if (f && !uploading) void handleFile(f);
+              }}
+              className="block rounded-lg transition-all"
+              style={{
+                background: isDragOver
+                  ? "rgba(234,179,8,0.10)"
+                  : uploading
+                    ? "var(--wp-dark-surface2, #1a1a1a)"
+                    : "var(--wp-dark-surface, #151515)",
+                border: `2px dashed ${isDragOver ? "var(--wp-gold, #eab308)" : uploading ? "var(--wp-text-muted, #6b7280)" : "var(--wp-dark-border, #333)"}`,
+                cursor: uploading ? "wait" : "pointer",
+                boxShadow: isDragOver ? "0 0 0 4px rgba(234,179,8,0.15)" : "none",
+              }}
+            >
+              <input
+                ref={inputRef}
+                id="invoice-upload-input-el"
+                type="file"
+                accept="image/jpeg,image/png,image/tiff,application/pdf,.pdf,.jpg,.jpeg,.png,.tif,.tiff"
+                data-testid="invoice-upload-input"
+                style={{ display: "none" }}
+                disabled={uploading}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void handleFile(f);
+                  e.target.value = "";
+                }}
+              />
+              <div className="flex flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+                {uploading ? (
+                  <>
+                    <svg
+                      className="animate-spin"
+                      width="36" height="36" viewBox="0 0 24 24" fill="none"
+                      style={{ color: "var(--wp-gold, #eab308)" }}
+                      aria-hidden
+                    >
+                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+                      <path d="M12 2 a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                    </svg>
+                    <div data-testid="scan-drop-headline" className="text-base font-semibold" style={{ color: "var(--wp-text, #eee)" }}>Reading invoice…</div>
+                    <div data-testid="scan-drop-microcopy" className="text-xs" style={{ color: "var(--wp-text-dim, #aaa)" }}>
+                      Azure Document Intelligence is extracting vendor, amount, dates, and line items.
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      width="44" height="44" viewBox="0 0 24 24" fill="none"
+                      style={{ color: isDragOver ? "var(--wp-gold, #eab308)" : "var(--wp-text-dim, #aaa)" }}
+                      aria-hidden
+                    >
+                      <path d="M7 18a5 5 0 0 1-1-9.9V8a6 6 0 0 1 11.7-1.5A4.5 4.5 0 0 1 21 11.5c0 2.5-2 4.5-4.5 4.5H17"
+                            stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M12 12v8m0-8-3 3m3-3 3 3"
+                            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <div data-testid="scan-drop-headline" className="text-lg font-semibold" style={{ color: "var(--wp-text, #eee)" }}>
+                      {isDragOver ? "Drop to upload" : "Upload an invoice"}
+                    </div>
+                    <div data-testid="scan-drop-microcopy" className="text-xs max-w-md" style={{ color: "var(--wp-text-dim, #aaa)" }}>
+                      Drop a PDF or photo here, or <span style={{ color: "var(--wp-gold, #eab308)", textDecoration: "underline" }}>click to browse</span>.
+                      We&apos;ll extract vendor, amount, dates, and line items automatically.
+                    </div>
+                    <div className="text-[11px] mt-1" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
+                      PDF · JPG · PNG · TIFF · up to 20 MB
+                    </div>
+                  </>
+                )}
+              </div>
+            </label>
+          ) : (
+            /* Hero drop zone — Receipt variant. Parallel structure so
+               every cue (drag-over, uploading spinner, native click-
+               to-browse via <label>) carries over. Drop fires the
+               receipt handler which POSTs to scan-receipt then
+               router.pushes to /job-codes?pending_scan=<id>. */
+            <label
+              data-testid="receipt-upload-trigger"
+              htmlFor="receipt-upload-input-el"
+              onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+              onDragEnter={(e) => { e.preventDefault(); setIsDragOver(true); }}
+              onDragLeave={(e) => {
+                if (e.currentTarget === e.target) setIsDragOver(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragOver(false);
+                const f = e.dataTransfer?.files?.[0];
+                if (f && !uploading) void handleFile(f);
+              }}
+              className="block rounded-lg transition-all"
+              style={{
+                background: isDragOver
+                  ? "rgba(234,179,8,0.10)"
+                  : uploading
+                    ? "var(--wp-dark-surface2, #1a1a1a)"
+                    : "var(--wp-dark-surface, #151515)",
+                border: `2px dashed ${isDragOver ? "var(--wp-gold, #eab308)" : uploading ? "var(--wp-text-muted, #6b7280)" : "var(--wp-dark-border, #333)"}`,
+                cursor: uploading ? "wait" : "pointer",
+                boxShadow: isDragOver ? "0 0 0 4px rgba(234,179,8,0.15)" : "none",
+              }}
+            >
+              <input
+                id="receipt-upload-input-el"
+                type="file"
+                accept="image/jpeg,image/png,image/tiff,image/bmp,application/pdf,.pdf,.jpg,.jpeg,.png,.tif,.tiff,.bmp"
+                data-testid="receipt-upload-input"
+                style={{ display: "none" }}
+                disabled={uploading}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void handleFile(f);
+                  e.target.value = "";
+                }}
+              />
+              <div className="flex flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+                {uploading ? (
+                  <>
+                    <svg
+                      className="animate-spin"
+                      width="36" height="36" viewBox="0 0 24 24" fill="none"
+                      style={{ color: "var(--wp-gold, #eab308)" }}
+                      aria-hidden
+                    >
+                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+                      <path d="M12 2 a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                    </svg>
+                    <div data-testid="scan-drop-headline" className="text-base font-semibold" style={{ color: "var(--wp-text, #eee)" }}>Reading receipt…</div>
+                    <div data-testid="scan-drop-microcopy" className="text-xs" style={{ color: "var(--wp-text-dim, #aaa)" }}>
+                      Azure Document Intelligence is extracting merchant, amount, and date.
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      width="44" height="44" viewBox="0 0 24 24" fill="none"
+                      style={{ color: isDragOver ? "var(--wp-gold, #eab308)" : "var(--wp-text-dim, #aaa)" }}
+                      aria-hidden
+                    >
+                      <path d="M4 2v20l3-2 3 2 3-2 3 2 3-2 3 2V2z"
+                            stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      <line x1="8" y1="7" x2="16" y2="7" stroke="currentColor" strokeWidth="1.8" />
+                      <line x1="8" y1="11" x2="16" y2="11" stroke="currentColor" strokeWidth="1.8" />
+                      <line x1="8" y1="15" x2="13" y2="15" stroke="currentColor" strokeWidth="1.8" />
+                    </svg>
+                    <div data-testid="scan-drop-headline" className="text-lg font-semibold" style={{ color: "var(--wp-text, #eee)" }}>
+                      {isDragOver ? "Drop to upload" : "Upload a receipt"}
+                    </div>
+                    <div data-testid="scan-drop-microcopy" className="text-xs max-w-md" style={{ color: "var(--wp-text-dim, #aaa)" }}>
+                      Drop a photo or PDF, or <span style={{ color: "var(--wp-gold, #eab308)", textDecoration: "underline" }}>click to browse</span>.
+                      We&apos;ll extract merchant, amount, date — then you allocate to a job code.
+                    </div>
+                    <div className="text-[11px] mt-1" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
+                      PDF · JPG · PNG · TIFF · BMP · up to 3.5 MB
+                    </div>
+                  </>
+                )}
+              </div>
+            </label>
+          )}
+        </div>
       ) : (
         /* Read-only callers see a clear "view only" hint instead of an
            invisible no-op so they understand the page's purpose. */

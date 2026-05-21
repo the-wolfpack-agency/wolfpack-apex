@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { fetchWithRefresh } from "@/lib/client-auth";
 import { ReceiptUploadButton } from "@/components/job-codes/ReceiptUploadButton";
 import { ConflictDialog, type ConflictRow, type ConflictResolution } from "@/components/job-codes/ConflictDialog";
@@ -82,6 +83,16 @@ function cellValue(row: JobCode, column: string): string {
 }
 
 export function JobCodesTable() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  /* Cross-page intake hand-off. A receipt scanned on /finance/invoices
+     redirects here with ?pending_scan=<scan_id>; ReceiptUploadButton
+     re-opens the apply modal pre-loaded with the persisted fields.
+     Mirror the URL into local state so the param can be cleared
+     immediately after the modal hydrates without yanking the prop
+     under the child. */
+  const initialPendingScan = searchParams?.get("pending_scan") ?? null;
+  const [pendingScan, setPendingScan] = useState<string | null>(initialPendingScan);
   const [codes, setCodes] = useState<JobCode[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
   const [source, setSource] = useState<SourceInfo | null>(null);
@@ -378,6 +389,19 @@ export function JobCodesTable() {
           canEdit={canRefresh}
           codeOptions={codes.map((c) => ({ code: c.code, description: c.description, extra: c.extra ?? {} }))}
           onApplied={() => void load()}
+          prefilledScanId={pendingScan}
+          onPrefilledHydrated={(result) => {
+            /* Scrub the URL so a page refresh / back nav doesn't
+               re-open the apply modal forever. Local state stays set
+               so the modal contents survive the URL change. */
+            setPendingScan(null);
+            if (typeof window !== "undefined") {
+              const url = new URL(window.location.href);
+              url.searchParams.delete("pending_scan");
+              router.replace(`${url.pathname}${url.search}${url.hash}`);
+            }
+            track("scan_router_landed", { ok: result.ok ? 1 : 0, error: result.error ?? "" });
+          }}
         />
       </div>
 
