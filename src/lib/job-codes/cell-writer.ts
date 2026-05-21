@@ -24,20 +24,37 @@ import { acquireSharePointToken } from "./sharepoint-source";
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
-/** Excel column letters we permit Instinct to PATCH. */
-export const EDITABLE_COLUMNS = ["D", "E", "F"] as const;
-export type EditableColumn = (typeof EDITABLE_COLUMNS)[number];
+/**
+ * Editable column HEADERS — finance owns these. The writer discovers
+ * the actual column LETTER for each header at write time by scanning
+ * the worksheet's header row. This decouples the writer from a
+ * specific workbook layout — if finance ever inserts a column or
+ * renames the sheet, the writer keeps working as long as these
+ * header texts still exist.
+ */
+export const EDITABLE_HEADERS = ["Program", "PO Number", "PO Amount"] as const;
+export type EditableHeader = (typeof EDITABLE_HEADERS)[number];
 
-/** The Job Code identifier lives in column C. The writer uses this to
- *  locate the row that matches the caller's `code` argument. If
- *  finance moves it, this MUST be updated AND the editable list
- *  re-validated against the new positions. */
-export const JOB_CODE_COLUMN = "C" as const;
+/* Header texts considered to identify the Job Code column. Same
+   tolerance set as the parser in sharepoint-source.ts. */
+const JOB_CODE_HEADER_ALIASES = new Set(["code", "jobcode", "job code", "job_code"]);
 
-/** Excel column letter → 0-based index. Capital ASCII only. */
-function columnToIndex(letter: string): number {
-  if (!/^[A-Z]$/.test(letter)) return -1;
-  return letter.charCodeAt(0) - "A".charCodeAt(0);
+/* Headers we will NEVER write to, regardless of position. The job
+   code identifier and the client/category column are immutable from
+   Instinct per CTO directive 2026-05-21. */
+const FORBIDDEN_HEADER_LOWER = new Set(["client/category", "client", "category", ...JOB_CODE_HEADER_ALIASES]);
+
+/* Backward-compat shim: the old API contract spoke in column letters
+   D/E/F. Callers still doing that get mapped to the canonical header
+   names before discovery. */
+export const LETTER_TO_HEADER: Readonly<Record<string, EditableHeader>> = {
+  D: "Program", E: "PO Number", F: "PO Amount",
+};
+
+/** 0-based column letter, for `${LETTER}${rowIndex}` cell addressing. */
+function indexToLetter(idx: number): string {
+  if (idx < 0 || idx > 25) return "";
+  return String.fromCharCode("A".charCodeAt(0) + idx);
 }
 
 export type CellEditError =
@@ -71,12 +88,16 @@ export interface CellEditInput {
   driveId: string;
   itemId: string;
   sheetName: string;
-  /** The Job Code identifier (matches column C). Case-insensitive. */
+  /** The Job Code identifier. Looked up case-insensitively against
+   *  the workbook's Job Code column (discovered by header). */
   jobCode: string;
-  /** The Excel column letter to PATCH. MUST be in EDITABLE_COLUMNS. */
-  column: string;
-  /** The new value. Cast to string for SharePoint; Excel does its own
-   *  type coercion on number-shaped strings ("123" → number). */
+  /** The HEADER NAME of the column to PATCH — MUST be in
+   *  EDITABLE_HEADERS. Accepts the deprecated column-letter form
+   *  via LETTER_TO_HEADER for callers that haven't migrated. */
+  columnName?: EditableHeader;
+  /** Deprecated alias. Pass `columnName` instead. */
+  column?: string;
+  /** The new value. */
   value: string;
 }
 
@@ -143,23 +164,19 @@ async function graphPatch<T>(
 export async function patchJobCodeCell(
   input: CellEditInput,
 ): Promise<CellEditResult> {
-  // ── Defense in depth: validate column first, no Graph call yet ──
-  const colUpper = String(input.column ?? "").toUpperCase();
-  if (!(EDITABLE_COLUMNS as readonly string[]).includes(colUpper)) {
-    return {
-      ok: false,
-      code: "forbidden_column",
-      detail: `column "${input.column}" is not in EDITABLE_COLUMNS (${EDITABLE_COLUMNS.join(", ")})`,
-    };
+  // ── Resolve target header name (accept letter alias for back-compat) ──
+  let columnName: EditableHeader | null = null;
+  if (input.columnName && (EDITABLE_HEADERS as readonly string[]).includes(input.columnName)) {
+    columnName = input.columnName;
+  } else if (input.column) {
+    const mapped = LETTER_TO_HEADER[String(input.column).toUpperCase()];
+    if (mapped) columnName = mapped;
   }
-  if (colUpper === JOB_CODE_COLUMN) {
-    /* Belt-and-suspenders: if someone ever appends "C" to
-       EDITABLE_COLUMNS, this still refuses because column C is the
-       Job Code identifier and must never be mutated. */
+  if (!columnName) {
     return {
       ok: false,
       code: "forbidden_column",
-      detail: "column C holds the Job Code identifier and is immutable",
+      detail: `column must be one of EDITABLE_HEADERS (${EDITABLE_HEADERS.join(", ")}) or letter ${Object.keys(LETTER_TO_HEADER).join("/")}`,
     };
   }
   if (typeof input.value !== "string") {
@@ -181,7 +198,7 @@ export async function patchJobCodeCell(
     };
   }
 
-  // ── 1. Pull usedRange to locate the row matching jobCode ──
+  // ── 1. Pull usedRange to discover headers + locate the row ──
   const usedRes = await graphGet<UsedRangeResponse>(
     `drives/${encodeURIComponent(input.driveId)}/items/${encodeURIComponent(input.itemId)}/workbook/worksheets/${encodeURIComponent(input.sheetName)}/usedRange(valuesOnly=true)?$select=values`,
     acquired.token,
@@ -194,14 +211,44 @@ export async function patchJobCodeCell(
     };
   }
   const values = usedRes.value.values ?? [];
-  const jobCol = columnToIndex(JOB_CODE_COLUMN);
+  if (values.length === 0) {
+    return { ok: false, code: "code_not_found", detail: `sheet "${input.sheetName}" is empty` };
+  }
+
+  /* Discover column indices from the header row by NAME (decouples
+     us from any specific letter layout finance uses). */
+  const headerRaw = (values[0] ?? []).map((v) => String(v ?? "").trim());
+  const headerLower = headerRaw.map((h) => h.toLowerCase());
+  const jobCol = headerLower.findIndex((h) => JOB_CODE_HEADER_ALIASES.has(h));
+  if (jobCol < 0) {
+    return {
+      ok: false,
+      code: "code_not_found",
+      detail: `sheet "${input.sheetName}" has no Job Code column (tried headers: ${Array.from(JOB_CODE_HEADER_ALIASES).join(", ")})`,
+    };
+  }
+  const editCol = headerRaw.findIndex((h) => h === columnName);
+  if (editCol < 0) {
+    return {
+      ok: false,
+      code: "code_not_found",
+      detail: `sheet "${input.sheetName}" has no column with header "${columnName}"`,
+    };
+  }
+  /* Final guard: even if a header named "Code" / "Client/Category"
+     ever crept into EDITABLE_HEADERS, refuse to write a column whose
+     header lower-cases into the forbidden set. */
+  if (FORBIDDEN_HEADER_LOWER.has(headerLower[editCol])) {
+    return {
+      ok: false,
+      code: "forbidden_column",
+      detail: `header "${headerRaw[editCol]}" is immutable from Instinct`,
+    };
+  }
+
   const target = input.jobCode.trim().toLowerCase();
-  /* Row 1 is the header → start at i=1. The Excel row index for the
-     matching record is (i + 1) because Excel rows are 1-based AND the
-     header lives on row 1. */
   let rowIndex = -1;
   let previousValue = "";
-  const editCol = columnToIndex(colUpper);
   for (let i = 1; i < values.length; i++) {
     const row = values[i] ?? [];
     const cellCode = String(row[jobCol] ?? "").trim().toLowerCase();
@@ -215,12 +262,12 @@ export async function patchJobCodeCell(
     return {
       ok: false,
       code: "code_not_found",
-      detail: `no row in sheet "${input.sheetName}" has Job Code = "${input.jobCode}"`,
+      detail: `no row in sheet "${input.sheetName}" has Job Code = "${input.jobCode}" (matched against column ${indexToLetter(jobCol)} which holds header "${headerRaw[jobCol]}")`,
     };
   }
 
   // ── 2. PATCH the single cell ──
-  const cellAddress = `${colUpper}${rowIndex}`;
+  const cellAddress = `${indexToLetter(editCol)}${rowIndex}`;
   const patchRes = await graphPatch<RangeResponse>(
     `drives/${encodeURIComponent(input.driveId)}/items/${encodeURIComponent(input.itemId)}/workbook/worksheets/${encodeURIComponent(input.sheetName)}/range(address='${cellAddress}')`,
     acquired.token,

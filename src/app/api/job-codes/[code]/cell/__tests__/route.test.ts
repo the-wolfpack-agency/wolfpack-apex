@@ -20,7 +20,8 @@ jest.mock("@/lib/auth/require-capability", () => ({
 }));
 jest.mock("@/lib/job-codes/cell-writer", () => ({
   patchJobCodeCell: (...a: unknown[]) => mockPatchCell(...a),
-  EDITABLE_COLUMNS: ["D", "E", "F"] as const,
+  EDITABLE_HEADERS: ["Program", "PO Number", "PO Amount"] as const,
+  LETTER_TO_HEADER: { D: "Program", E: "PO Number", F: "PO Amount" },
 }));
 jest.mock("@/lib/job-codes/repo", () => ({
   findJobCodeBySource: (...a: unknown[]) => mockFindBySource(...a),
@@ -132,7 +133,6 @@ describe("PATCH — happy path", () => {
     expect(body).toMatchObject({
       ok: true,
       code: "WOLFPACK-AUTO",
-      column: "D",
       column_header: "Program",
       cell_address: "D7",
       previous_value: "old prog",
@@ -156,7 +156,7 @@ describe("PATCH — happy path", () => {
       "jobcodes.cell_edit_succeeded",
       "u-admin",
       "cto",
-      expect.objectContaining({ code: "WOLFPACK-AUTO", column: "D", column_header: "Program" }),
+      expect.objectContaining({ code: "WOLFPACK-AUTO", column_header: "Program" }),
     );
   });
 });

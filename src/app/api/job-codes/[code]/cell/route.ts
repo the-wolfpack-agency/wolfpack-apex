@@ -25,19 +25,15 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
 import {
   patchJobCodeCell,
-  EDITABLE_COLUMNS,
+  EDITABLE_HEADERS,
+  LETTER_TO_HEADER,
+  type EditableHeader,
 } from "@/lib/job-codes/cell-writer";
 import {
   findJobCodeBySource,
   recordCellEdit,
   updateExtraCell,
 } from "@/lib/job-codes/repo";
-
-const COLUMN_HEADER: Record<string, string> = {
-  D: "Program",
-  E: "PO Number",
-  F: "PO Amount",
-};
 
 export async function PATCH(
   req: NextRequest,
@@ -49,17 +45,25 @@ export async function PATCH(
   const { code } = await params;
   if (!code) return NextResponse.json({ error: "code required" }, { status: 400 });
 
-  const body = (await req.json().catch(() => null)) as { column?: string; value?: string } | null;
-  if (!body || typeof body.column !== "string" || typeof body.value !== "string") {
+  const body = (await req.json().catch(() => null)) as { column?: string; column_name?: string; value?: string } | null;
+  if (!body || typeof body.value !== "string") {
     return NextResponse.json(
-      { error: "body must be { column: string, value: string }" },
+      { error: "body must include `value` (string) and either `column_name` or `column`" },
       { status: 400 },
     );
   }
-  const column = body.column.toUpperCase();
-  if (!(EDITABLE_COLUMNS as readonly string[]).includes(column)) {
+  /* Resolve to a canonical column header. Accept either column_name
+     (preferred) or column letter (backward-compat). */
+  let columnHeader: EditableHeader | null = null;
+  if (typeof body.column_name === "string" && (EDITABLE_HEADERS as readonly string[]).includes(body.column_name)) {
+    columnHeader = body.column_name as EditableHeader;
+  } else if (typeof body.column === "string") {
+    const mapped = LETTER_TO_HEADER[body.column.toUpperCase()];
+    if (mapped) columnHeader = mapped;
+  }
+  if (!columnHeader) {
     return NextResponse.json(
-      { error: "forbidden_column", detail: `column "${body.column}" is not editable` },
+      { error: "forbidden_column", detail: `column_name must be one of ${EDITABLE_HEADERS.join(", ")}` },
       { status: 400 },
     );
   }
@@ -81,11 +85,9 @@ export async function PATCH(
     itemId: cached.itemId,
     sheetName: cached.sheetName,
     jobCode: code,
-    column,
+    columnName: columnHeader,
     value: body.value,
   });
-
-  const columnHeader = COLUMN_HEADER[column] ?? column;
 
   if (!writeRes.ok) {
     /* Best-effort audit even on failure — the human attempt is itself
@@ -106,7 +108,6 @@ export async function PATCH(
 
     await trackEvent("jobcodes.cell_edit_failed", auth.user.id, auth.user.role, {
       code,
-      column,
       column_header: columnHeader,
       reason: writeRes.code,
     });
@@ -139,7 +140,6 @@ export async function PATCH(
 
   await trackEvent("jobcodes.cell_edit_succeeded", auth.user.id, auth.user.role, {
     code,
-    column,
     column_header: columnHeader,
     previous_value: writeRes.previousValue.slice(0, 80),
     new_value: writeRes.newValue.slice(0, 80),
@@ -150,7 +150,6 @@ export async function PATCH(
   return NextResponse.json({
     ok: true,
     code,
-    column,
     column_header: columnHeader,
     cell_address: writeRes.cellAddress,
     row_index: writeRes.rowIndex,

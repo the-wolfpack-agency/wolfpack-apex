@@ -1,12 +1,11 @@
 /**
- * Cell-writer contract tests — the guardrail safety net for
- * "Instinct must never overwrite the catalog columns" (CTO 2026-05-21).
+ * Cell-writer contract tests. After 2026-05-21 refactor: column
+ * positions are DISCOVERED from the worksheet header row at write
+ * time. Tests use `columnName: "Program" | "PO Number" | "PO Amount"`
+ * (the API also accepts legacy column-letter D/E/F).
  *
- * The hard rule: B (Client/Category) and C (Job Code) are immutable.
- * D/E/F (Program, PO Number, PO Amount) are the ONLY columns the
- * writer ever touches. The forbidden_column tests below MUST keep
- * passing — if someone widens EDITABLE_COLUMNS without a CTO sign-off,
- * they're breaking a written client commitment.
+ * Guardrail: writer MUST never PATCH a column whose header is the
+ * Job Code or Client/Category, regardless of position in the sheet.
  */
 
 const mockAcquireToken = jest.fn();
@@ -16,8 +15,8 @@ jest.mock("@/lib/job-codes/sharepoint-source", () => ({
 
 import {
   patchJobCodeCell,
-  EDITABLE_COLUMNS,
-  JOB_CODE_COLUMN,
+  EDITABLE_HEADERS,
+  LETTER_TO_HEADER,
 } from "@/lib/job-codes/cell-writer";
 
 function mockFetchSequence(
@@ -44,32 +43,48 @@ const baseInput = {
   value: "Phase 2",
 };
 
+/* Canonical Wolfpack workbook layout: B=Client/Category, C=Code,
+   D=Program, E=PO Number, F=PO Amount. Used in every happy-path
+   test below. */
+const CANONICAL_HEADERS = ["A-blank", "Client/Category", "Code", "Program", "PO Number", "PO Amount"];
+
 beforeEach(() => {
   jest.resetAllMocks();
   mockAcquireToken.mockResolvedValue({ token: "tok", kind: "delegated" });
 });
 
-describe("patchJobCodeCell — guardrail (refuses non-editable columns)", () => {
-  /* PINNED: the writer MUST refuse every column not in EDITABLE_COLUMNS
-     BEFORE any Graph call. acquireToken should not even fire. */
-  for (const forbidden of ["A", "B", "C", "G", "Z", "AA", "abc", "", "1"]) {
-    it(`refuses column "${forbidden}" without firing Graph`, async () => {
+describe("patchJobCodeCell — column resolution guardrail", () => {
+  /* PINNED: writer MUST refuse a request that doesn't resolve to one
+     of EDITABLE_HEADERS BEFORE any Graph call. */
+  for (const bad of ["A", "B", "C", "G", "Z", "abc", "", "1"]) {
+    it(`refuses column letter "${bad}" without firing Graph`, async () => {
       global.fetch = jest.fn();
-      const res = await patchJobCodeCell({ ...baseInput, column: forbidden });
+      const res = await patchJobCodeCell({ ...baseInput, column: bad });
       expect(res.ok).toBe(false);
       if (!res.ok) expect(res.code).toBe("forbidden_column");
       expect(global.fetch).not.toHaveBeenCalled();
-      /* And the token acquisition path must not have run either —
-         no side-effect Graph traffic for a forbidden column. */
       expect(mockAcquireToken).not.toHaveBeenCalled();
     });
   }
 
-  it("JOB_CODE_COLUMN is C and is NOT in EDITABLE_COLUMNS", () => {
-    expect(JOB_CODE_COLUMN).toBe("C");
-    expect(EDITABLE_COLUMNS).not.toContain("C");
-    expect(EDITABLE_COLUMNS).not.toContain("B");
-    expect([...EDITABLE_COLUMNS].sort()).toEqual(["D", "E", "F"]);
+  for (const bad of ["Code", "Client/Category", "anything else"]) {
+    it(`refuses columnName "${bad}" without firing Graph`, async () => {
+      global.fetch = jest.fn();
+      const res = await patchJobCodeCell({ ...baseInput, columnName: bad as any });
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.code).toBe("forbidden_column");
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+  }
+
+  it("EDITABLE_HEADERS contains exactly Program / PO Number / PO Amount", () => {
+    expect([...EDITABLE_HEADERS].sort()).toEqual(["PO Amount", "PO Number", "Program"]);
+  });
+
+  it("LETTER_TO_HEADER maps D/E/F to canonical names", () => {
+    expect(LETTER_TO_HEADER.D).toBe("Program");
+    expect(LETTER_TO_HEADER.E).toBe("PO Number");
+    expect(LETTER_TO_HEADER.F).toBe("PO Amount");
   });
 });
 
@@ -84,62 +99,98 @@ describe("patchJobCodeCell — input validation", () => {
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.code).toBe("invalid_input");
   });
-  it("requires value to be a string (no object/number/etc.)", async () => {
-    const res = await patchJobCodeCell({
-      ...baseInput,
-      column: "D",
-      value: 12345 as unknown as string,
-    });
+  it("requires value to be a string", async () => {
+    const res = await patchJobCodeCell({ ...baseInput, column: "D", value: 12345 as unknown as string });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.code).toBe("invalid_input");
   });
 });
 
-describe("patchJobCodeCell — Graph happy path", () => {
-  it("locates the row by Job Code in column C and PATCHes the requested cell", async () => {
+describe("patchJobCodeCell — header discovery + Graph happy path", () => {
+  it("discovers Program column from headers and PATCHes the matching row", async () => {
+    /* CANONICAL_HEADERS puts Program at index 3 (column D). Row 2 in
+       the values matrix (i=2 → Excel row 3) contains WOLFPACK-AUTO. */
     mockFetchSequence([
-      /* usedRange — row 3 (rowIndex 4 = index 3 + 1) matches WOLFPACK-AUTO */
       {
         ok: true,
         body: {
           values: [
-            ["Client/Category", "Other", "Job Code", "Program", "PO Number", "PO Amount"],
-            ["Acme", "x", "OTHER-1", "", "", ""],
-            ["Acme", "x", "WOLFPACK-AUTO", "OLD", "PO-OLD", "100"],
-            ["Globex", "x", "CLIENT-GLB", "", "", ""],
+            CANONICAL_HEADERS,
+            ["", "Acme", "OTHER-1", "", "", ""],
+            ["", "Acme", "WOLFPACK-AUTO", "OLD", "PO-OLD", "100"],
           ],
         },
       },
-      /* PATCH response — Graph echoes back what was written */
       { ok: true, body: { values: [["Phase 2"]] } },
     ]);
     const res = await patchJobCodeCell({ ...baseInput, column: "D" });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.cellAddress).toBe("D3");
-    /* Row 3 in the values array = Excel row 3 (header is row 1,
-       rows[1] is excel row 2, rows[2] is excel row 3). */
     expect(res.rowIndex).toBe(3);
     expect(res.previousValue).toBe("OLD");
     expect(res.newValue).toBe("Phase 2");
-    expect(res.tokenKind).toBe("delegated");
   });
 
-  it("returns code_not_found when no row matches the Job Code", async () => {
+  it("works when the Code column is at a DIFFERENT letter than C", async () => {
+    /* Real-world finding (2026-05-21): Wolfpack workbook has Code at
+       column B, not C. The hardcoded-C writer 404'd on every lookup.
+       Header-discovery writer must handle this. */
     mockFetchSequence([
       {
         ok: true,
         body: {
           values: [
-            ["a", "b", "Job Code", "d", "e", "f"],
-            ["x", "x", "OTHER-1", "", "", ""],
+            ["Code", "Client/Category", "Program", "PO Number", "PO Amount"],
+            ["WOLFPACK-AUTO", "Acme", "OLD", "PO-OLD", "100"],
           ],
         },
+      },
+      { ok: true, body: { values: [["NEW PROG"]] } },
+    ]);
+    const res = await patchJobCodeCell({ ...baseInput, columnName: "Program", value: "NEW PROG" });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    /* Program is at index 2 here → column C; row matched at i=1 →
+       Excel row 2. */
+    expect(res.cellAddress).toBe("C2");
+    expect(res.previousValue).toBe("OLD");
+  });
+
+  it("returns code_not_found when the Job Code value isn't anywhere in the sheet", async () => {
+    mockFetchSequence([
+      {
+        ok: true,
+        body: { values: [CANONICAL_HEADERS, ["", "x", "OTHER-1", "", "", ""]] },
       },
     ]);
     const res = await patchJobCodeCell({ ...baseInput, column: "D" });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.code).toBe("code_not_found");
+  });
+
+  it("returns code_not_found with a clear hint when the sheet lacks a Code-shaped header", async () => {
+    mockFetchSequence([
+      { ok: true, body: { values: [["Foo", "Bar", "Baz"], ["x", "y", "z"]] } },
+    ]);
+    const res = await patchJobCodeCell({ ...baseInput, column: "D" });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.code).toBe("code_not_found");
+      expect(res.detail).toMatch(/no Job Code column/i);
+    }
+  });
+
+  it("returns code_not_found when the requested editable header isn't in the sheet", async () => {
+    mockFetchSequence([
+      { ok: true, body: { values: [["Client/Category", "Code"], ["x", "WOLFPACK-AUTO"]] } },
+    ]);
+    const res = await patchJobCodeCell({ ...baseInput, columnName: "Program" });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.code).toBe("code_not_found");
+      expect(res.detail).toMatch(/no column with header "Program"/);
+    }
   });
 });
 
@@ -155,12 +206,7 @@ describe("patchJobCodeCell — Graph error mapping", () => {
     mockFetchSequence([
       {
         ok: true,
-        body: {
-          values: [
-            ["a", "b", "Job Code", "d", "e", "f"],
-            ["x", "x", "WOLFPACK-AUTO", "OLD", "", ""],
-          ],
-        },
+        body: { values: [CANONICAL_HEADERS, ["", "x", "WOLFPACK-AUTO", "OLD", "", ""]] },
       },
       { ok: false, status: 503, text: "throttled" },
     ]);
