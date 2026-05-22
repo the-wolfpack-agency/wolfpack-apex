@@ -17,7 +17,7 @@ const mockHashPassword = jest.fn((pw: string) => `hashed_${pw}`);
 const mockVerifyPassword = jest.fn();
 jest.mock("@/lib/auth", () => ({
   getUserFromRequest: (...a: any[]) => mockGetUserFromRequest(...a),
-  hashPassword: (...a: any[]) => mockHashPassword(...a),
+  hashPassword: (...a: any[]) => (mockHashPassword as (...args: any[]) => any)(...a),
   verifyPassword: (...a: any[]) => mockVerifyPassword(...a),
 }));
 

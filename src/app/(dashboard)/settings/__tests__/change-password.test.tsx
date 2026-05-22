@@ -46,7 +46,7 @@ afterAll(() => {
    page module so the React component tree resolves the same way. */
 import * as SettingsPage from "@/app/(dashboard)/settings/page";
 type SettingsModule = typeof SettingsPage & {
-  ChangePasswordCard?: () => JSX.Element;
+  ChangePasswordCard?: () => React.ReactElement;
 };
 
 describe("ChangePasswordCard", () => {
