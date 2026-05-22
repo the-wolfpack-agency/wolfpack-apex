@@ -18,9 +18,21 @@
  *     workspaceId into the INSERT (no implicit "default" guess).
  */
 
-import { writeQuery } from "@/lib/db";
+import { query, writeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { MAX_FEEDBACK_LENGTH } from "@/lib/feedback/limits";
+
+/**
+ * How recent a prior row counts as a duplicate of the current submission.
+ *
+ * Long enough to absorb network retries, fast-double-click, and the
+ * keyboard-shortcut race (Cmd+Enter fired twice before React re-renders
+ * the button as disabled). Short enough that an intentional repeat
+ * submission of the same text minutes later still creates a new row,
+ * because the team genuinely sometimes wants to escalate the same
+ * feedback they filed earlier.
+ */
+export const FEEDBACK_DEDUP_WINDOW_SECONDS = 15;
 
 /* Re-export so existing imports (the assistant tool, the API route,
  * the FeedbackWidget pre-refactor) can keep `import { MAX_FEEDBACK_LENGTH }
@@ -47,6 +59,10 @@ export interface RecordUserFeedbackResult {
   id: string;
   /** ISO timestamp of the inserted row. */
   recordedAt: string;
+  /** True when this call resolved an existing row inside the dedup
+   *  window instead of inserting a new one. Lets the caller suppress a
+   *  second analytics fire so the dashboard count matches actual rows. */
+  deduplicated?: boolean;
 }
 
 export async function recordUserFeedback(
@@ -66,6 +82,43 @@ export async function recordUserFeedback(
   }
   if (!input.userId) {
     throw new Error("recordUserFeedback: userId is required");
+  }
+
+  /* Dedup: if the same (workspace, user, message) was already
+   * captured inside the last FEEDBACK_DEDUP_WINDOW_SECONDS, return
+   * that row's id instead of inserting a second copy. This protects
+   * against fast-double-click, keyboard-race, and client retry on
+   * a slow network. The (workspace_id, created_at DESC) index from
+   * migration 143/147 keeps the lookup cheap. */
+  try {
+    const existing = await query<{ id: string; created_at: string }>(
+      `SELECT id, created_at::text AS created_at
+         FROM instinct_user_feedback
+        WHERE workspace_id = $1
+          AND user_id = $2
+          AND message = $3
+          AND created_at > NOW() - ($4 || ' seconds')::interval
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [
+        input.workspaceId,
+        input.userId,
+        message,
+        String(FEEDBACK_DEDUP_WINDOW_SECONDS),
+      ],
+    );
+    const prior = existing.rows[0];
+    if (prior?.id) {
+      return {
+        id: prior.id,
+        recordedAt: prior.created_at,
+        deduplicated: true,
+      };
+    }
+  } catch {
+    /* Dedup lookup is a best-effort guardrail; if the SELECT fails we
+     * still fall through to the INSERT so a transient read error never
+     * blocks a legitimate write. */
   }
 
   const { rows } = await writeQuery<{ id: string; created_at: string }>(

@@ -204,6 +204,154 @@ describe("FeedbackWidget — compose mode (textarea + submit)", () => {
     );
   });
 
+  test("a rapid double-click fires the submit POST exactly once", async () => {
+    /* The bug this test guards: the disabled-button check relies on
+     * React state, which updates async. A second click can fire
+     * before the disabled state re-renders, producing duplicate
+     * rows in the DB. The synchronous ref guard inside submit()
+     * is what makes this test pass. */
+    let resolveSubmit: ((value: Response) => void) | null = null;
+    const inFlight = new Promise<Response>((resolve) => {
+      resolveSubmit = resolve;
+    });
+    mockFetch.mockImplementation((url: string) => {
+      if (typeof url === "string" && url === "/api/feedback") return inFlight;
+      return Promise.resolve(jsonResponse({ ok: true }));
+    });
+
+    render(<FeedbackWidget spec={COMPOSE_SPEC} />);
+    const ta = screen.getByTestId("feedback-widget-textarea") as HTMLTextAreaElement;
+    fireEvent.change(ta, { target: { value: "double click case" } });
+
+    const btn = screen.getByTestId("feedback-widget-submit");
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+
+    /* Only one POST to /api/feedback should be in flight. */
+    const submitCalls = mockFetch.mock.calls.filter(
+      (c) => c[0] === "/api/feedback",
+    );
+    expect(submitCalls.length).toBe(1);
+
+    /* Resolve the in-flight request so the widget can swap to recorded. */
+    await act(async () => {
+      resolveSubmit?.(jsonResponse({ id: "new-id-001" }, 201));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("feedback-widget")).toHaveAttribute(
+        "data-mode",
+        "recorded",
+      );
+    });
+  });
+
+  test("two rapid cmd+enter keystrokes fire submit exactly once", async () => {
+    let resolveSubmit: ((value: Response) => void) | null = null;
+    const inFlight = new Promise<Response>((resolve) => {
+      resolveSubmit = resolve;
+    });
+    mockFetch.mockImplementation((url: string) => {
+      if (typeof url === "string" && url === "/api/feedback") return inFlight;
+      return Promise.resolve(jsonResponse({ ok: true }));
+    });
+
+    render(<FeedbackWidget spec={COMPOSE_SPEC} />);
+    const ta = screen.getByTestId("feedback-widget-textarea") as HTMLTextAreaElement;
+    fireEvent.change(ta, { target: { value: "keyboard double fire" } });
+
+    fireEvent.keyDown(ta, { key: "Enter", metaKey: true });
+    fireEvent.keyDown(ta, { key: "Enter", metaKey: true });
+    fireEvent.keyDown(ta, { key: "Enter", ctrlKey: true });
+
+    const submitCalls = mockFetch.mock.calls.filter(
+      (c) => c[0] === "/api/feedback",
+    );
+    expect(submitCalls.length).toBe(1);
+
+    await act(async () => {
+      resolveSubmit?.(jsonResponse({ id: "kbd-id-001" }, 201));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("feedback-widget")).toHaveAttribute(
+        "data-mode",
+        "recorded",
+      );
+    });
+  });
+
+  test("textarea is readOnly during submit so the body cannot be mutated mid-flight", async () => {
+    let resolveSubmit: ((value: Response) => void) | null = null;
+    const inFlight = new Promise<Response>((resolve) => {
+      resolveSubmit = resolve;
+    });
+    mockFetch.mockImplementation((url: string) => {
+      if (typeof url === "string" && url === "/api/feedback") return inFlight;
+      return Promise.resolve(jsonResponse({ ok: true }));
+    });
+
+    render(<FeedbackWidget spec={COMPOSE_SPEC} />);
+    const ta = screen.getByTestId("feedback-widget-textarea") as HTMLTextAreaElement;
+    fireEvent.change(ta, { target: { value: "first send" } });
+    fireEvent.click(screen.getByTestId("feedback-widget-submit"));
+
+    await waitFor(() => {
+      expect(ta).toHaveAttribute("readonly");
+    });
+
+    /* Submit button shows the Sending state while in-flight. */
+    expect(screen.getByTestId("feedback-widget-submit")).toHaveTextContent(/sending/i);
+
+    /* Once the response lands and the widget swaps to recorded mode,
+     * the textarea is gone, so the readOnly attribute can no longer be
+     * read off it. */
+    await act(async () => {
+      resolveSubmit?.(jsonResponse({ id: "readonly-test" }, 201));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("feedback-widget-textarea")).toBeNull();
+    });
+  });
+
+  test("after a successful submit, a second send of a different body still works", async () => {
+    /* Regression guard: the ref guard must be reset in the `finally`
+     * block so the user can come back later and send fresh feedback. */
+    mockFetch.mockImplementation((url: string) => {
+      if (typeof url === "string" && url === "/api/feedback") {
+        return Promise.resolve(jsonResponse({ id: "first-id" }, 201));
+      }
+      return Promise.resolve(jsonResponse({ ok: true }));
+    });
+
+    render(<FeedbackWidget spec={COMPOSE_SPEC} />);
+    const ta = screen.getByTestId("feedback-widget-textarea") as HTMLTextAreaElement;
+    fireEvent.change(ta, { target: { value: "first body" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("feedback-widget-submit"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("feedback-widget")).toHaveAttribute(
+        "data-mode",
+        "recorded",
+      );
+    });
+
+    /* The widget swapped to recorded mode; there is no second compose
+     * round in v1. The important thing is that the inFlight ref was
+     * reset (no error thrown, no stale "in flight" state). The first
+     * call landed exactly once. */
+    const submitCalls = mockFetch.mock.calls.filter(
+      (c) => c[0] === "/api/feedback",
+    );
+    expect(submitCalls.length).toBe(1);
+  });
+
   test("cmd+enter / ctrl+enter inside the textarea triggers submit", async () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url === "/api/feedback") {

@@ -53,6 +53,12 @@ export function FeedbackWidget({ spec, workflowId }: FeedbackWidgetProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /* Synchronous in-flight guard. React state (`submitting`) updates
+   * asynchronously, so a fast double-click or two quick Cmd+Enter
+   * keystrokes can both enter `submit()` before the disabled state
+   * re-renders, producing duplicate rows. The ref is mutated and read
+   * synchronously so the second call exits immediately. */
+  const inFlightRef = useRef(false);
 
   /* One-shot mount analytics — the widget being rendered tells the
    * learning loop the user is in feedback mode, regardless of whether
@@ -86,11 +92,16 @@ export function FeedbackWidget({ spec, workflowId }: FeedbackWidgetProps) {
   }, [spec.mode, workflowId]);
 
   const submit = useCallback(async () => {
+    /* Synchronous re-entry guard. Must come BEFORE any async work or
+     * any React state mutation, because both are deferred relative to
+     * the next click / keystroke. */
+    if (inFlightRef.current) return;
     const trimmed = draft.trim();
     if (!trimmed) {
       setError("Please write a short note before sending.");
       return;
     }
+    inFlightRef.current = true;
     setSubmitting(true);
     setError(null);
     try {
@@ -132,12 +143,17 @@ export function FeedbackWidget({ spec, workflowId }: FeedbackWidgetProps) {
       setError("Couldn't reach the server. Please try again.");
     } finally {
       setSubmitting(false);
+      inFlightRef.current = false;
     }
   }, [draft, spec.submitUrl, spec.surface, workflowId]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault();
+      /* Defense in depth — submit() also re-checks the ref, but
+       * short-circuiting here avoids even firing the keyboard event
+       * handler when a submit is already in flight. */
+      if (inFlightRef.current) return;
       void submit();
     }
   };
@@ -205,12 +221,17 @@ export function FeedbackWidget({ spec, workflowId }: FeedbackWidgetProps) {
         onKeyDown={onKeyDown}
         placeholder="What would make Instinct better for you?"
         rows={4}
+        /* readOnly during submit so the user can't edit + retry mid-
+         * flight, which would otherwise change the body and bypass the
+         * server-side dedup window. */
+        readOnly={submitting}
         className="w-full rounded p-2 text-xs"
         style={{
           background: "var(--wp-dark, #111)",
           border: "1px solid var(--wp-dark-border, #333)",
           color: "var(--wp-text, #eee)",
           resize: "vertical",
+          opacity: submitting ? 0.7 : 1,
         }}
       />
       <div
