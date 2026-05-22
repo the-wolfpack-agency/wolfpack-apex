@@ -10,6 +10,7 @@
  */
 
 import { fetchCalendarEvents, type CalendarEvent } from "@/lib/microsoft-graph";
+import { isOutOfOffice } from "@/lib/meetings/ooo-detector";
 
 export interface UpcomingMeeting {
   id: string;
@@ -23,6 +24,11 @@ export interface UpcomingMeeting {
   minutesUntil: number | null;
   /** True if the meeting is happening right now (start <= now < end). */
   inProgress: boolean;
+  /** True when this entry represents the user being out of office
+   *  (showAs="oof" or subject matches OOO/PTO/Vacation/etc.). The API
+   *  splits these into a separate `outOfOffice` array so the dashboard
+   *  meeting dropdown only contains real meetings. */
+  isOutOfOffice: boolean;
 }
 
 export interface ListUpcomingOptions {
@@ -91,6 +97,7 @@ export async function listUpcomingMeetings(
       isOnlineMeeting: e.isOnlineMeeting,
       minutesUntil,
       inProgress,
+      isOutOfOffice: isOutOfOffice({ showAs: e.showAs, subject: e.subject }),
     });
   }
 

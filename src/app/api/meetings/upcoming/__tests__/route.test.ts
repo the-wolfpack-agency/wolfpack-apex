@@ -107,8 +107,8 @@ describe("GET /api/meetings/upcoming", () => {
   test("fires meeting.upcoming_fetched analytics with count + in_progress_count", async () => {
     mockRequireCapability.mockResolvedValue({ ok: true, user: USER, capabilities: new Set() });
     mockList.mockResolvedValue([
-      { id: "a", subject: "A", start: "", end: "", location: "", attendees: [], isOnlineMeeting: false, minutesUntil: 10, inProgress: false },
-      { id: "b", subject: "B", start: "", end: "", location: "", attendees: [], isOnlineMeeting: false, minutesUntil: -2, inProgress: true },
+      { id: "a", subject: "A", start: "", end: "", location: "", attendees: [], isOnlineMeeting: false, minutesUntil: 10, inProgress: false, isOutOfOffice: false },
+      { id: "b", subject: "B", start: "", end: "", location: "", attendees: [], isOnlineMeeting: false, minutesUntil: -2, inProgress: true, isOutOfOffice: false },
     ]);
     await GET(req("https://x.test/api/meetings/upcoming?hours=24"));
     expect(mockTrackEvent).toHaveBeenCalledTimes(1);
@@ -120,5 +120,42 @@ describe("GET /api/meetings/upcoming", () => {
     expect(meta.in_progress_count).toBe(1);
     expect(meta.lookahead_hours).toBe(24);
     expect(meta.lookback_minutes).toBe(30);
+  });
+
+  test("splits OOO entries into outOfOffice envelope, leaving meetings free of noise", async () => {
+    mockRequireCapability.mockResolvedValue({ ok: true, user: USER, capabilities: new Set() });
+    mockList.mockResolvedValue([
+      { id: "m1", subject: "Q2 Review", start: "", end: "", location: "", attendees: [], isOnlineMeeting: false, minutesUntil: 60, inProgress: false, isOutOfOffice: false },
+      { id: "o1", subject: "Ashley OOO", start: "", end: "", location: "", attendees: [], isOnlineMeeting: false, minutesUntil: 0, inProgress: true, isOutOfOffice: true },
+      { id: "o2", subject: "Hoxsie OoO", start: "", end: "", location: "", attendees: [], isOnlineMeeting: false, minutesUntil: 0, inProgress: true, isOutOfOffice: true },
+    ]);
+    const res = await GET(req());
+    const body = await res.json();
+    expect(body.meetings.map((m: { id: string }) => m.id)).toEqual(["m1"]);
+    expect(body.outOfOffice.map((m: { id: string }) => m.id)).toEqual(["o1", "o2"]);
+  });
+
+  test("analytics includes out_of_office_count", async () => {
+    mockRequireCapability.mockResolvedValue({ ok: true, user: USER, capabilities: new Set() });
+    mockList.mockResolvedValue([
+      { id: "m1", subject: "Real meeting", start: "", end: "", location: "", attendees: [], isOnlineMeeting: false, minutesUntil: 60, inProgress: false, isOutOfOffice: false },
+      { id: "o1", subject: "Ashley PTO", start: "", end: "", location: "", attendees: [], isOnlineMeeting: false, minutesUntil: 0, inProgress: false, isOutOfOffice: true },
+    ]);
+    await GET(req());
+    const [, , , meta] = mockTrackEvent.mock.calls[0];
+    expect(meta.count).toBe(1);
+    expect(meta.out_of_office_count).toBe(1);
+  });
+
+  test("when every entry is OOO, meetings is empty and outOfOffice carries them all", async () => {
+    mockRequireCapability.mockResolvedValue({ ok: true, user: USER, capabilities: new Set() });
+    mockList.mockResolvedValue([
+      { id: "o1", subject: "Ashley OOO", start: "", end: "", location: "", attendees: [], isOnlineMeeting: false, minutesUntil: 0, inProgress: true, isOutOfOffice: true },
+      { id: "o2", subject: "Hoxsie Vacation", start: "", end: "", location: "", attendees: [], isOnlineMeeting: false, minutesUntil: 0, inProgress: true, isOutOfOffice: true },
+    ]);
+    const res = await GET(req());
+    const body = await res.json();
+    expect(body.meetings).toEqual([]);
+    expect(body.outOfOffice).toHaveLength(2);
   });
 });

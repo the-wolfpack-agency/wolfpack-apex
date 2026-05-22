@@ -73,6 +73,13 @@ export interface CalendarEvent {
    *  in-person events and when Graph elides the field. Distinct from
    *  webLink — clicking joinUrl jumps straight into the call. */
   joinUrl?: string | null;
+  /** Microsoft Graph showAs status. "oof" is Microsoft's official
+   *  out-of-office marker and is the gospel signal for the OOO
+   *  filter; we still fall back to subject-pattern matching for users
+   *  who mark themselves "busy" but type "OOO" in the subject. Optional
+   *  for backward-compat with synthetic fixtures — treat `undefined`
+   *  as "unknown". */
+  showAs?: "free" | "tentative" | "busy" | "oof" | "workingElsewhere" | "unknown" | null;
 }
 
 export interface Email {
@@ -945,9 +952,10 @@ async function fetchLiveCalendarEvents(userId: string, startDate: string, endDat
       isOnlineMeeting?: boolean;
       webLink?: string | null;
       onlineMeeting?: { joinUrl?: string | null } | null;
+      showAs?: string | null;
     }[];
   }>(
-    `me/calendarview?startDateTime=${encodeURIComponent(start)}&endDateTime=${encodeURIComponent(end)}&$orderby=start/dateTime&$top=50&$select=id,subject,start,end,location,attendees,isOnlineMeeting,webLink,onlineMeeting`,
+    `me/calendarview?startDateTime=${encodeURIComponent(start)}&endDateTime=${encodeURIComponent(end)}&$orderby=start/dateTime&$top=50&$select=id,subject,start,end,location,attendees,isOnlineMeeting,webLink,onlineMeeting,showAs`,
     token.accessToken,
     userId,
   );
@@ -972,8 +980,19 @@ async function fetchLiveCalendarEvents(userId: string, startDate: string, endDat
         ev.onlineMeeting && typeof ev.onlineMeeting.joinUrl === "string" && ev.onlineMeeting.joinUrl.length > 0
           ? ev.onlineMeeting.joinUrl
           : null,
+      showAs: normalizeShowAs(ev.showAs),
     };
   });
+}
+
+function normalizeShowAs(raw: string | null | undefined): CalendarEvent["showAs"] {
+  if (raw === null || raw === undefined) return null;
+  const v = String(raw).toLowerCase().trim();
+  if (v === "free" || v === "tentative" || v === "busy" || v === "oof" || v === "workingelsewhere") {
+    return v === "workingelsewhere" ? "workingElsewhere" : (v as CalendarEvent["showAs"]);
+  }
+  if (v === "unknown" || v === "") return "unknown";
+  return null;
 }
 
 async function fetchLiveRecentEmails(userId: string, count: number, folderId?: string): Promise<Email[]> {

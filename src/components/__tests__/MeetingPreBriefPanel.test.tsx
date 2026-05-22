@@ -220,4 +220,86 @@ describe("MeetingPreBriefPanel", () => {
     );
     expect(mockFetchWithRefresh.mock.calls[0][0]).toContain("hours=24");
   });
+
+  describe("out-of-office handling", () => {
+    function mockUpcomingWithOoo(meetings: unknown[], outOfOffice: unknown[]): void {
+      mockFetchWithRefresh.mockImplementation((url: string) => {
+        if (typeof url === "string" && url.startsWith("/api/meetings/upcoming")) {
+          return Promise.resolve({
+            status: 200,
+            ok: true,
+            json: async () => ({ meetings, outOfOffice }),
+          });
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+      });
+    }
+
+    test("renders 'Out today' line above the dropdown when outOfOffice entries are returned", async () => {
+      mockUpcomingWithOoo(
+        [meeting({ id: "real", subject: "Q2 Review" })],
+        [
+          meeting({ id: "o1", subject: "Ashley OOO", isOutOfOffice: true } as never),
+          meeting({ id: "o2", subject: "Hoxsie OoO", isOutOfOffice: true } as never),
+        ],
+      );
+      render(<MeetingPreBriefPanel />);
+      const ooo = await screen.findByTestId("prebrief-out-of-office");
+      expect(ooo).toHaveTextContent(/Out today/);
+      expect(ooo).toHaveTextContent(/Ashley/);
+      expect(ooo).toHaveTextContent(/Hoxsie/);
+    });
+
+    test("does NOT include OOO entries in the meeting dropdown", async () => {
+      mockUpcomingWithOoo(
+        [meeting({ id: "real", subject: "Q2 Review" })],
+        [meeting({ id: "o1", subject: "Ashley OOO", isOutOfOffice: true } as never)],
+      );
+      render(<MeetingPreBriefPanel />);
+      const picker = await screen.findByTestId("prebrief-meeting-picker");
+      const optionTexts = Array.from(picker.querySelectorAll("option")).map((o) => o.textContent);
+      expect(optionTexts.join(" ")).toContain("Q2 Review");
+      expect(optionTexts.join(" ")).not.toContain("Ashley OOO");
+    });
+
+    test("hides the OOO line entirely when no OOO entries are returned", async () => {
+      mockUpcomingWithOoo([meeting({ id: "real", subject: "Q2 Review" })], []);
+      render(<MeetingPreBriefPanel />);
+      await screen.findByTestId("prebrief-meeting-picker");
+      expect(screen.queryByTestId("prebrief-out-of-office")).toBeNull();
+    });
+
+    test("renders OOO line in the empty-meetings state when only OOO entries exist", async () => {
+      mockUpcomingWithOoo(
+        [],
+        [
+          meeting({ id: "o1", subject: "Ashley OOO", isOutOfOffice: true } as never),
+          meeting({ id: "o2", subject: "Hoxsie Vacation", isOutOfOffice: true } as never),
+        ],
+      );
+      render(<MeetingPreBriefPanel />);
+      await screen.findByTestId("meeting-prebrief-panel-empty");
+      const ooo = screen.getByTestId("prebrief-out-of-office");
+      expect(ooo).toHaveTextContent(/Out today/);
+      expect(ooo).toHaveTextContent(/Ashley/);
+      expect(ooo).toHaveTextContent(/Hoxsie/);
+    });
+
+    test("strips OOO tokens from the display label", async () => {
+      mockUpcomingWithOoo(
+        [meeting({ id: "real", subject: "Q2 Review" })],
+        [
+          meeting({ id: "o1", subject: "Ashley OOO", isOutOfOffice: true } as never),
+          meeting({ id: "o2", subject: "Hoxsie - Out of office", isOutOfOffice: true } as never),
+        ],
+      );
+      render(<MeetingPreBriefPanel />);
+      const ooo = await screen.findByTestId("prebrief-out-of-office");
+      // Stripped labels, not the raw "Ashley OOO" / "Hoxsie - Out of office".
+      expect(ooo).toHaveTextContent(/Ashley/);
+      expect(ooo).toHaveTextContent(/Hoxsie/);
+      expect(ooo.textContent).not.toMatch(/OOO/);
+      expect(ooo.textContent).not.toMatch(/Out of office/i);
+    });
+  });
 });

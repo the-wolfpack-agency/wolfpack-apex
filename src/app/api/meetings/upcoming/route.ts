@@ -43,20 +43,27 @@ export async function GET(req: NextRequest) {
   );
   const limit = clamp(Number.isFinite(limitRaw) ? limitRaw : 20, 1, 50);
 
-  const meetings = await listUpcomingMeetings(user.id, {
+  const all = await listUpcomingMeetings(user.id, {
     lookaheadHours,
     lookbackMinutes,
     limit,
   });
 
+  // Split OOO entries out of the meeting list so the dashboard dropdown
+  // only contains real meetings. The `outOfOffice` array is rendered
+  // separately as a passive "Out today" line above the dropdown.
+  const meetings = all.filter((m) => !m.isOutOfOffice);
+  const outOfOffice = all.filter((m) => m.isOutOfOffice);
+
   trackEvent("meeting.upcoming_fetched", user.id, user.role, {
     count: meetings.length,
+    out_of_office_count: outOfOffice.length,
     lookahead_hours: lookaheadHours,
     lookback_minutes: lookbackMinutes,
     in_progress_count: meetings.filter((m) => m.inProgress).length,
   });
 
-  return NextResponse.json({ meetings });
+  return NextResponse.json({ meetings, outOfOffice });
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -162,3 +162,47 @@ describe("pickDefaultMeeting", () => {
     expect(picked?.id).toBe("recent");
   });
 });
+
+describe("listUpcomingMeetings — OOO tagging", () => {
+  test("tags events with showAs=oof as isOutOfOffice=true", async () => {
+    mockFetchCalendarEvents.mockResolvedValue([
+      { ...ev("a", 30), showAs: "oof" },
+      { ...ev("b", 60), showAs: "busy" },
+    ]);
+    const out = await listUpcomingMeetings("u1", { nowMs: NOW });
+    expect(out.find((m) => m.id === "a")?.isOutOfOffice).toBe(true);
+    expect(out.find((m) => m.id === "b")?.isOutOfOffice).toBe(false);
+  });
+
+  test("tags events whose subject matches OOO patterns even when showAs is busy", async () => {
+    mockFetchCalendarEvents.mockResolvedValue([
+      { ...ev("a", 30, 30, { subject: "Ashley OOO" }), showAs: "busy" },
+      { ...ev("b", 60, 30, { subject: "Hoxsie OoO" }), showAs: "busy" },
+      { ...ev("c", 90, 30, { subject: "Nick PTO" }), showAs: "busy" },
+      { ...ev("d", 120, 30, { subject: "Q2 review" }), showAs: "busy" },
+    ]);
+    const out = await listUpcomingMeetings("u1", { nowMs: NOW });
+    expect(out.find((m) => m.id === "a")?.isOutOfOffice).toBe(true);
+    expect(out.find((m) => m.id === "b")?.isOutOfOffice).toBe(true);
+    expect(out.find((m) => m.id === "c")?.isOutOfOffice).toBe(true);
+    expect(out.find((m) => m.id === "d")?.isOutOfOffice).toBe(false);
+  });
+
+  test("does NOT tag events with showAs=workingElsewhere or WFH subjects", async () => {
+    mockFetchCalendarEvents.mockResolvedValue([
+      { ...ev("a", 30, 30, { subject: "WFH today" }), showAs: "workingElsewhere" },
+      { ...ev("b", 60, 30, { subject: "Working from home" }), showAs: "busy" },
+    ]);
+    const out = await listUpcomingMeetings("u1", { nowMs: NOW });
+    expect(out.find((m) => m.id === "a")?.isOutOfOffice).toBe(false);
+    expect(out.find((m) => m.id === "b")?.isOutOfOffice).toBe(false);
+  });
+
+  test("defaults isOutOfOffice=false when neither showAs nor subject signal OOO", async () => {
+    mockFetchCalendarEvents.mockResolvedValue([
+      ev("a", 30, 30, { subject: "1:1 with Hoxsie" }),
+    ]);
+    const out = await listUpcomingMeetings("u1", { nowMs: NOW });
+    expect(out[0].isOutOfOffice).toBe(false);
+  });
+});

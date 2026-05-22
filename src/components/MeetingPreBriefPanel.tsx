@@ -32,10 +32,15 @@ interface UpcomingMeeting {
   isOnlineMeeting: boolean;
   minutesUntil: number | null;
   inProgress: boolean;
+  isOutOfOffice: boolean;
 }
 
 interface UpcomingResponse {
   meetings: UpcomingMeeting[];
+  /** Events flagged as out-of-office (PTO, vacation, OOO subject, or
+   *  Microsoft Graph showAs="oof"). Rendered as a passive "Out today"
+   *  line above the dropdown, not in the dropdown itself. */
+  outOfOffice?: UpcomingMeeting[];
 }
 
 interface Props {
@@ -101,6 +106,24 @@ function formatCountdown(m: UpcomingMeeting, nowMs: number): string {
   return `in ${h}h${r > 0 ? ` ${r}m` : ""}`;
 }
 
+/**
+ * Pull a clean display label off an OOO event subject. The team's
+ * convention is "<Name> OOO" or "<Name> - Out of office" so stripping
+ * the OOO tokens leaves the person's name. Falls back to the raw
+ * subject if stripping yields nothing useful.
+ */
+function ooEntryLabel(subject: string): string {
+  if (!subject) return "";
+  const stripped = subject
+    .replace(
+      /\b(out of the office|out of office|out of pocket|on vacation|on leave|out sick|sick day|sick leave|personal day|personal leave|vacation day|off today|off tomorrow|vacationing|vacation|OOTO|OOO|OoO|OOF|PTO)\b/gi,
+      "",
+    )
+    .replace(/[-:,\s]+/g, " ")
+    .trim();
+  return stripped.length > 0 ? stripped : subject;
+}
+
 function formatWhen(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleString([], {
@@ -131,6 +154,7 @@ function pickDefault(meetings: UpcomingMeeting[]): UpcomingMeeting | null {
 
 export default function MeetingPreBriefPanel({ lookaheadHours = 48 }: Props) {
   const [meetings, setMeetings] = useState<UpcomingMeeting[] | null>(null);
+  const [outOfOffice, setOutOfOffice] = useState<UpcomingMeeting[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -163,7 +187,9 @@ export default function MeetingPreBriefPanel({ lookaheadHours = 48 }: Props) {
         }
         const body = (await res.json()) as UpcomingResponse;
         const list = Array.isArray(body.meetings) ? body.meetings : [];
+        const ooo = Array.isArray(body.outOfOffice) ? body.outOfOffice : [];
         setMeetings(list);
+        setOutOfOffice(ooo);
         const picked = pickDefault(list);
         setSelectedId(picked?.id ?? null);
         setLoading(false);
@@ -236,6 +262,16 @@ export default function MeetingPreBriefPanel({ lookaheadHours = 48 }: Props) {
         <h2 className="text-lg font-semibold mb-1" style={{ color: "var(--wp-gold)" }}>
           Meeting Pre-Brief
         </h2>
+        {outOfOffice.length > 0 && (
+          <p
+            className="text-xs mb-2"
+            data-testid="prebrief-out-of-office"
+            style={{ color: "var(--wp-text-dim)" }}
+          >
+            <span style={{ color: "var(--wp-text)" }}>Out today: </span>
+            {outOfOffice.map((m) => ooEntryLabel(m.subject)).join(", ")}
+          </p>
+        )}
         <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>
           No meetings in the next {lookaheadHours} hours. Connect your calendar or come
           back when something's on the books.
@@ -257,6 +293,16 @@ export default function MeetingPreBriefPanel({ lookaheadHours = 48 }: Props) {
         >
           Meeting Pre-Brief
         </h2>
+        {outOfOffice.length > 0 && (
+          <p
+            className="text-xs"
+            data-testid="prebrief-out-of-office"
+            style={{ color: "var(--wp-text-dim)" }}
+          >
+            <span style={{ color: "var(--wp-text)" }}>Out today: </span>
+            {outOfOffice.map((m) => ooEntryLabel(m.subject)).join(", ")}
+          </p>
+        )}
         <div className="flex items-center gap-2 w-full">
           <label
             htmlFor="prebrief-meeting-picker"
