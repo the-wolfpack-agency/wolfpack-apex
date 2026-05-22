@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, KeyboardEvent, DragEvent, ChangeEvent } from "react";
 import { getInstinctToken, getInstinctUser, clearInstinctSession, jsonHeaders as canonicalJsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import { useChatLiveUpdates } from "@/lib/hooks/useChatLiveUpdates";
 import {
   queryAssistantWithCache,
   RagOfflineMissError,
@@ -435,6 +436,123 @@ export default function InstinctChat({
     loadConversations();
   }, [loadConversations]);
 
+  /* Silent re-fetch of the open conversation's messages. Used by the
+   * live-update hook on poll and BroadcastChannel paths. Only mutates
+   * state when the server has messages the local view does not, so a
+   * no-op refresh is genuinely a no-op (no React re-render, no scroll
+   * jump). Always non-fatal — a failed refresh keeps the stale view. */
+  const messagesRef = useRef<Message[]>([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+  const silentRefreshMessages = useCallback(
+    async (convId: string, reason: "poll" | "broadcast" | "manual"): Promise<void> => {
+      if (!convId) return;
+      try {
+        const res = await fetchWithRefresh(
+          `/api/assistant?conversationId=${convId}`,
+          { headers: authHeaders() },
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const remoteRaw = Array.isArray(data.messages) ? data.messages : [];
+        const remote: Message[] = remoteRaw.map(
+          (m: Message & { metadata?: Record<string, unknown> }) => {
+            if (m.role !== "assistant") return m;
+            const next: Message = { ...m };
+            if (
+              !next.connectorSource &&
+              typeof m.metadata?.connector_source === "string"
+            ) {
+              next.connectorSource = m.metadata.connector_source as string;
+            }
+            if (
+              !next.form &&
+              m.metadata?.form &&
+              typeof m.metadata.form === "object"
+            ) {
+              next.form = m.metadata.form as FormSpec;
+            }
+            if (
+              !next.widget &&
+              m.metadata?.widget &&
+              typeof m.metadata.widget === "object"
+            ) {
+              next.widget = m.metadata.widget as WidgetSpec;
+            }
+            if (
+              !next.workflowId &&
+              typeof m.metadata?.workflow_id === "string"
+            ) {
+              next.workflowId = m.metadata.workflow_id;
+            }
+            return next;
+          },
+        );
+        const localIds = new Set(
+          messagesRef.current.map((m) => m.id).filter(Boolean),
+        );
+        const newOnes = remote.filter((m) => m.id && !localIds.has(m.id));
+        if (newOnes.length === 0) return;
+        setMessages(remote);
+        void fetchWithRefresh("/api/analytics", {
+          method: "POST",
+          headers: canonicalJsonHeaders(),
+          body: JSON.stringify({
+            event: "assistant.chat_messages_updated",
+            metadata: {
+              conversation_id: convId,
+              delta: newOnes.length,
+              reason,
+            },
+          }),
+        }).catch(() => undefined);
+      } catch {
+        /* Refresh is best-effort. Keep the stale view rather than
+         * surface an error. */
+      }
+    },
+    [],
+  );
+
+  /* Live-update orchestrator. Polls on the adaptive cadence + listens
+   * on a per-conversation BroadcastChannel for instant cross-tab
+   * sync. `broadcastSent` is invoked from the send paths below after
+   * a successful POST so other tabs of the same user pick up the new
+   * assistant message without waiting for the poll. */
+  const { broadcastSent } = useChatLiveUpdates({
+    conversationId,
+    latestLocalMessageId:
+      messages.length > 0
+        ? messages[messages.length - 1].id ?? null
+        : null,
+    onRefresh: (reason) => {
+      if (conversationId) void silentRefreshMessages(conversationId, reason);
+    },
+    onBroadcastReceived: (lagMs) => {
+      if (!conversationId) return;
+      void fetchWithRefresh("/api/analytics", {
+        method: "POST",
+        headers: canonicalJsonHeaders(),
+        body: JSON.stringify({
+          event: "assistant.chat_synced_via_broadcast",
+          metadata: { conversation_id: conversationId, lag_ms: lagMs },
+        }),
+      }).catch(() => undefined);
+    },
+    onPollFired: () => {
+      if (!conversationId) return;
+      void fetchWithRefresh("/api/analytics", {
+        method: "POST",
+        headers: canonicalJsonHeaders(),
+        body: JSON.stringify({
+          event: "assistant.chat_synced_via_poll",
+          metadata: { conversation_id: conversationId },
+        }),
+      }).catch(() => undefined);
+    },
+  });
+
   // Auto-scroll on new messages — but NOT on empty mount. With zero
   // messages the sentinel sits below the welcome card, so scrolling it
   // into view pushes the welcome text off-screen. `block: "nearest"`
@@ -640,6 +758,7 @@ export default function InstinctChat({
             similarity: result.similarity,
           };
           setMessages((prev) => [...prev, assistantMsg]);
+          if (assistantMsg.id) broadcastSent(assistantMsg.id);
           return;
         } catch (wrapErr) {
           if (wrapErr instanceof RagOfflineMissError) {
@@ -835,6 +954,7 @@ export default function InstinctChat({
       };
 
       setMessages((prev) => [...prev, assistantMsg]);
+      if (assistantMsg.id) broadcastSent(assistantMsg.id);
     } catch {
       /* Don't surface a generic error toast when the user just
        * clicked Stop — the bail-out is intentional, not a failure. */

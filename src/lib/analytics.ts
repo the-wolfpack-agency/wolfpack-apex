@@ -384,6 +384,16 @@ export type InstinctEventType =
      signal — the classifier got it wrong (or the extractor confused them).
      Payload: { recognition_id, original_type, corrected_type }. */
   | "system.document_recognition_corrected"
+  /* Assistant chat live-update sync. Three events feed the learning
+     loop so we can see which mechanism delivers updates in practice.
+     If BroadcastChannel covers ~95% of catches we can relax the poll;
+     if polling carries the load the poll cadence stays put.
+       chat_synced_via_broadcast { conversation_id, lag_ms }
+       chat_synced_via_poll       { conversation_id }
+       chat_messages_updated      { conversation_id, delta, reason } */
+  | "assistant.chat_synced_via_broadcast"
+  | "assistant.chat_synced_via_poll"
+  | "assistant.chat_messages_updated"
   // Dashboard — personalized Quick Actions tile.
   //
   //   dashboard.quick_actions_rendered
