@@ -373,6 +373,17 @@ export type InstinctEventType =
      WHICH downstream resource (scan_id) was created. Payload:
      { type: "invoice" | "receipt", scan_id }. */
   | "system.scan_document_routed"
+  /* Document recognition pipeline (migration 158, /api/documents/recognize).
+     One event per pipeline run, regardless of success. The learning loop
+     uses these to track classifier accuracy and extractor outcomes.
+     Payload: { recognition_id, classified_type, classification_confidence,
+     extractor_key, success, pii_blocked, classifier_latency_ms,
+     extractor_latency_ms, total_cost_cents, error_kind? }. */
+  | "system.document_recognized"
+  /* Fired when a user reclassifies a recognized document. Strong learning
+     signal — the classifier got it wrong (or the extractor confused them).
+     Payload: { recognition_id, original_type, corrected_type }. */
+  | "system.document_recognition_corrected"
   // Dashboard — personalized Quick Actions tile.
   //
   //   dashboard.quick_actions_rendered
