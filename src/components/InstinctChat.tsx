@@ -1536,9 +1536,21 @@ export default function InstinctChat({
                     <ChatActionForm spec={msg.form} workflowId={msg.workflowId} />
                   )}
 
-                  {msg.role === "assistant" && msg.widget && (
-                    <ChatWidget spec={msg.widget} workflowId={msg.workflowId} />
-                  )}
+                  {(() => {
+                    /* Defensive: prefer top-level widget; fall back to
+                     * server-persisted metadata.widget so a poll-refresh
+                     * that drops the top-level field still renders. */
+                    if (msg.role !== "assistant") return null;
+                    const widgetSpec =
+                      msg.widget ??
+                      (msg.metadata && typeof msg.metadata.widget === "object"
+                        ? (msg.metadata.widget as WidgetSpec)
+                        : undefined);
+                    if (!widgetSpec) return null;
+                    return (
+                      <ChatWidget spec={widgetSpec} workflowId={msg.workflowId} />
+                    );
+                  })()}
 
                   {msg.role === "assistant" &&
                     msg.relatedPages &&
