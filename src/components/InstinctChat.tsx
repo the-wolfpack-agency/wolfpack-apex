@@ -1156,9 +1156,15 @@ export default function InstinctChat({
             <aside
               data-testid="conversations-sidebar"
               data-collapsed={sidebarCollapsed ? "true" : "false"}
-              className={`${
-                position === "floating" ? "hidden" : ""
-              } fixed lg:static inset-y-0 left-0 z-30 ${
+              /* Sidebar hidden 2026-05-23: surface area for a stale-
+               * conversation-switch bug (clicking a widget link caused
+               * a focus-driven refresh that flipped the user to a
+               * different chat). Hiding eliminates the failure mode
+               * and removes a UI nobody on a 7-person team needs. The
+               * "New" button in the header still starts a fresh chat;
+               * old conversations remain queryable via the API but no
+               * longer render as a switcher. */
+              className={`hidden fixed lg:static inset-y-0 left-0 z-30 ${
                 sidebarCollapsed ? "lg:w-12" : "lg:w-64"
               } w-64 border-r flex flex-col transition-all lg:translate-x-0 ${
                 sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
@@ -1319,17 +1325,9 @@ export default function InstinctChat({
             className="flex items-center gap-3 px-4 border-b shrink-0"
             style={{ borderColor: "var(--wp-dark-border, #333)", height: 53 }}
           >
-            {showHistory && position !== "floating" && (
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className="lg:hidden p-1"
-                style={{ color: "var(--wp-text-dim, #aaa)" }}
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </button>
-            )}
+            {/* Sidebar open-button removed alongside the hidden
+                conversations sidebar (2026-05-23). Reintroduce both
+                when the conversation-switch bug is fully diagnosed. */}
 
             {/* Brain icon — pulse-glow gives the AI surface a subtle
                 "alive" feel; honors prefers-reduced-motion via globals.
