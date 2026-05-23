@@ -185,11 +185,11 @@ describe("useAdaptivePoll", () => {
     expect(cb).toHaveBeenCalledTimes(11); // mount + 10 ticks
   });
 
-  it("default visibleMs is 30s (was 5s before optimization)", () => {
+  it("default visibleMs is 60s (bumped 2026-05-23 from 30s to halve dashboard polling load)", () => {
     const cb = jest.fn();
     renderHook(() => useAdaptivePoll(cb)); // no opts
     cb.mockClear();
-    act(() => jest.advanceTimersByTime(29_999));
+    act(() => jest.advanceTimersByTime(59_999));
     expect(cb).toHaveBeenCalledTimes(0);
     act(() => jest.advanceTimersByTime(1));
     expect(cb).toHaveBeenCalledTimes(1);

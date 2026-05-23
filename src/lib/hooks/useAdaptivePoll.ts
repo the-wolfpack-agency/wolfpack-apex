@@ -57,10 +57,17 @@ export function useAdaptivePoll(
   callback: () => void,
   opts: AdaptivePollOptions = {},
 ): void {
+  /* 2026-05-23: defaults bumped 2x (30→60 visible, 120→300 hidden,
+   * 180→600 idle) after Nick reported 139 requests on an idle assistant
+   * page. With ~7 active pollers across the dashboard (4 nav badges +
+   * chat live-updates + notifications + presence), 30s visible meant
+   * ~14 reqs/min baseline. 60s halves that to ~7/min. The latency cost
+   * is at most an extra 30s delay on a notification dot updating;
+   * worth it for the bandwidth and server-load savings. */
   const {
-    visibleMs = 30_000,
-    hiddenMs = 120_000,
-    idleMs = 180_000,
+    visibleMs = 60_000,
+    hiddenMs = 300_000,
+    idleMs = 600_000,
     idleAfterStablePolls = 5,
     isStable,
   } = opts;
