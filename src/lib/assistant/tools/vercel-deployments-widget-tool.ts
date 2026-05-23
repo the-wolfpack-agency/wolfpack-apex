@@ -51,7 +51,13 @@ const PROJECT_NAME_BLOCKLIST = new Set([
 
 function matchVercelIntent(message: string): Params | null {
   const trimmed = message.trim();
+  /* 2026-05-23 instrumentation: prove whether this function actually
+   * runs in production. After 6+ failed widget-disappearing fixes,
+   * the ground-truth question is "does the dispatcher ever call this
+   * matchIntent?" These logs surface in Vercel function logs. */
+  console.log(`[vercel-tool-debug] matchVercelIntent invoked: msg="${trimmed.slice(0, 80)}"`);
   if (!DEPLOY_KEYWORD_RE.test(trimmed)) return null;
+  console.log(`[vercel-tool-debug] DEPLOY_KEYWORD_RE matched, returning params`);
   const explicit = PROJECT_AFTER_PHRASE_RE.exec(trimmed);
   let projectName: string | undefined;
   if (explicit) {
@@ -71,6 +77,7 @@ export const vercelDeploymentsWidgetTool: ToolDef<Params, VercelToolData> = {
   capability: "*",
   matchIntent: matchVercelIntent,
   async handler(params, ctx): Promise<ToolResult<VercelToolData>> {
+    console.log(`[vercel-tool-debug] handler invoked, projectName=${params.projectName ?? "<none>"} configured=${vercelIsConfigured()}`);
     const started = Date.now();
     if (!vercelIsConfigured()) {
       return {
