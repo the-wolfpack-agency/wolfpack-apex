@@ -29,7 +29,7 @@ interface BellNotification {
   read_at: string | null;
 }
 
-const POLL_INTERVAL_MS = 30_000;
+const POLL_INTERVAL_MS = 60_000; // 2026-05-23: 30→60 to halve dashboard idle traffic
 
 function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();

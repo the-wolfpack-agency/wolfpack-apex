@@ -15,7 +15,7 @@ interface Presence {
   fetchedAt: string;
 }
 
-const POLL_MS = 30_000;
+const POLL_MS = 60_000; // 2026-05-23: 30→60 to halve dashboard idle traffic
 
 function dotColor(availability: string): string {
   switch (availability) {
