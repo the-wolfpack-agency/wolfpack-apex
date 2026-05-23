@@ -47,6 +47,7 @@ const TYPE_LABELS: Record<SourceType, string> = {
   knowledge: "Knowledge",
   crm: "CRM",
   dms: "Inventory",
+  vercel: "Vercel",
 };
 
 const TYPE_ORDER: SourceType[] = [
@@ -57,6 +58,7 @@ const TYPE_ORDER: SourceType[] = [
   "knowledge",
   "crm",
   "dms",
+  "vercel",
 ];
 
 /** Map a SourceType onto the `counts` key the SearchResponse uses. */
@@ -68,6 +70,7 @@ const COUNT_KEY: Record<SourceType, string> = {
   knowledge: "knowledge",
   crm: "crm",
   dms: "dms",
+  vercel: "vercel",
 };
 
 function formatRelative(iso: string): string {

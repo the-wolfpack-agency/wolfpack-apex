@@ -564,12 +564,6 @@ export function AssistantStarterPrompts({ onPick }: AssistantStarterPromptsProps
           .
         </div>
       )}
-      <div
-        className="text-xs mt-2 sm:mt-3 text-center px-3"
-        style={{ color: "var(--wp-text-muted, #6b7280)" }}
-      >
-        Full prompt catalogue: <code>docs/explainers/assistant-prompts.md</code>
-      </div>
     </div>
   );
 }

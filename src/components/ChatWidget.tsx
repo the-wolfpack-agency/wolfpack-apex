@@ -19,6 +19,7 @@ import { EmailThreadWidget } from "@/components/widgets/EmailThreadWidget";
 import { TaskListWidget } from "@/components/widgets/TaskListWidget";
 import { GoodMorningWidget } from "@/components/widgets/GoodMorningWidget";
 import { DmsInventoryWidget } from "@/components/widgets/DmsInventoryWidget";
+import { VercelDeploymentsWidget } from "@/components/widgets/VercelDeploymentsWidget";
 import { SearchResultsWidget } from "@/components/widgets/SearchResultsWidget";
 import { WeatherWidget } from "@/components/widgets/WeatherWidget";
 import { HeadlinesWidget } from "@/components/widgets/HeadlinesWidget";
@@ -52,6 +53,8 @@ export function ChatWidget({ spec, workflowId }: ChatWidgetProps) {
       return <GoodMorningWidget spec={spec} workflowId={workflowId} />;
     case "dms_inventory":
       return <DmsInventoryWidget spec={spec} workflowId={workflowId} />;
+    case "vercel_deployments":
+      return <VercelDeploymentsWidget spec={spec} workflowId={workflowId} />;
     case "search_results":
       return <SearchResultsWidget spec={spec} workflowId={workflowId} />;
     case "weather":

@@ -18,6 +18,7 @@ import { calendarProvider } from "./calendar";
 import { knowledgeProvider } from "./knowledge";
 import { crmProvider } from "./crm";
 import { dmsProvider } from "./dms";
+import { vercelProvider } from "./vercel";
 import type { SearchProvider } from "./types";
 
 export const SEARCH_PROVIDERS: SearchProvider[] = [
@@ -28,6 +29,7 @@ export const SEARCH_PROVIDERS: SearchProvider[] = [
   knowledgeProvider,
   crmProvider,
   dmsProvider,
+  vercelProvider,
 ];
 
 export type { SearchProvider, RunSearchContext } from "./types";

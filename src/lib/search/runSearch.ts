@@ -43,7 +43,8 @@ export type SearchType =
   | "calendar"
   | "knowledge"
   | "crm"
-  | "dms";
+  | "dms"
+  | "vercel";
 
 export interface SearchResult {
   type: SearchType;
@@ -98,6 +99,7 @@ export const ALL_SEARCH_TYPES: ReadonlyArray<SearchType> = [
   "knowledge",
   "crm",
   "dms",
+  "vercel",
 ];
 export const DEFAULT_LIMIT = 20;
 export const MAX_LIMIT = 50;

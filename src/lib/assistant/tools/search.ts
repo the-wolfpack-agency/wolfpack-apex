@@ -41,6 +41,7 @@ const SEARCH_TYPE_VALUES = [
   "knowledge",
   "crm",
   "dms",
+  "vercel",
 ] as const;
 
 const ParamSchema = z.object({
@@ -203,6 +204,7 @@ function buildSources(body: SearchResponse): AssistantSourceRef[] {
     knowledge: "knowledge",
     crm: "crm",
     dms: "dms",
+    vercel: "vercel",
   };
   const out: AssistantSourceRef[] = [];
   const seen = new Set<string>();

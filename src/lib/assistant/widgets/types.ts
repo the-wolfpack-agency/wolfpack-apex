@@ -203,6 +203,28 @@ export interface DmsInventoryWidgetSpec {
   items: DmsInventoryItem[];
 }
 
+export interface VercelDeploymentItem {
+  id: string;
+  projectName: string;
+  state: "READY" | "ERROR" | "BUILDING" | "INITIALIZING" | "QUEUED" | "CANCELED";
+  target: "production" | "preview" | "staging";
+  url: string;
+  commitMessage: string | null;
+  branch: string | null;
+  commitSha: string | null;
+  createdAt: string;
+  readyAt: string | null;
+  creator: string | null;
+}
+
+export interface VercelDeploymentsWidgetSpec {
+  kind: "vercel_deployments";
+  projectName: string | null;
+  title: string;
+  subtitle?: string;
+  items: VercelDeploymentItem[];
+}
+
 /** Universal-search results rendered inline in the chat surface.
  *  Mirrors the /search page's source-filter UX (one checkbox per
  *  source that has non-zero results; toggling hides rows of that
@@ -217,7 +239,7 @@ export interface DmsInventoryWidgetSpec {
  *  follows. The fields are kept structurally identical and the
  *  guardrail test asserts that. */
 export interface SearchResultsWidgetResult {
-  type: "chat" | "channel" | "email" | "calendar" | "knowledge" | "crm" | "dms";
+  type: "chat" | "channel" | "email" | "calendar" | "knowledge" | "crm" | "dms" | "vercel";
   id: string;
   title: string;
   snippet: string;
@@ -483,6 +505,7 @@ export type WidgetSpec =
   | TaskListWidgetSpec
   | GoodMorningWidgetSpec
   | DmsInventoryWidgetSpec
+  | VercelDeploymentsWidgetSpec
   | SearchResultsWidgetSpec
   | WeatherWidgetSpec
   | HeadlinesWidgetSpec
