@@ -494,7 +494,48 @@ export default function InstinctChat({
         );
         const newOnes = remote.filter((m) => m.id && !localIds.has(m.id));
         if (newOnes.length === 0) return;
-        setMessages(remote);
+        /* Race-safe merge (2026-05-23): a silent refresh that fires
+         * between the server's user-message save and assistant-message
+         * save returns a snapshot missing the in-flight assistant turn.
+         * Replacing the local array with that snapshot drops the
+         * pending assistant message + its widget. Instead, APPEND the
+         * server-side rows we don't have locally and PRESERVE any
+         * local-only (no id) optimistic messages. */
+        setMessages((prev) => {
+          const remoteById = new Map(
+            remote.filter((m) => m.id).map((m) => [m.id as string, m]),
+          );
+          const localOnly = prev.filter((m) => !m.id);
+          const remoteRows = remote;
+          // Order: server rows first (chronological from server), then
+          // any local-only optimistic message still in flight.
+          const merged = [...remoteRows];
+          for (const localMsg of localOnly) {
+            // Skip optimistic local message if the server now has a
+            // matching one (best-effort match on role + content).
+            const matched = remoteRows.find(
+              (r) =>
+                r.role === localMsg.role &&
+                r.content === localMsg.content,
+            );
+            if (!matched) merged.push(localMsg);
+          }
+          // Preserve any locally-set widget on identified rows when
+          // the server snapshot would otherwise drop it.
+          return merged.map((m) => {
+            if (m.role !== "assistant" || !m.id) return m;
+            const local = prev.find((p) => p.id === m.id);
+            if (local?.widget && !m.widget) {
+              return { ...m, widget: local.widget };
+            }
+            // Keep the local widget if remote message lacks it AND
+            // remote metadata lacks it (shouldn't happen but defensive).
+            return m;
+          });
+          // remoteById intentionally retained for potential future use
+          // (e.g. preferring server fields on a known id).
+          void remoteById;
+        });
         void fetchWithRefresh("/api/analytics", {
           method: "POST",
           headers: canonicalJsonHeaders(),

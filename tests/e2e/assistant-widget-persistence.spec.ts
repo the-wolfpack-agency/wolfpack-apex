@@ -192,6 +192,76 @@ test.describe("Assistant widget persistence", () => {
     ).toBeVisible();
   });
 
+  test("silent refresh that arrives mid-send (server has user msg but not assistant) does not drop the widget", async ({
+    page,
+  }) => {
+    /* This reproduces the original production bug: the silent refresh
+     * fired between the server's user-msg save and assistant-msg save.
+     * The GET returned only the user message. The merge replaced the
+     * local array, dropping the in-flight assistant message + widget. */
+    await page.goto(`${target.baseUrl}/assistant`, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+    const welcomeClose = page.getByRole("button", { name: /close/i });
+    if (await welcomeClose.isVisible().catch(() => false)) {
+      await welcomeClose.click();
+    }
+
+    /* Override the conversationId-load endpoint to return ONLY the user
+     * message (simulating the server mid-save state). */
+    await page.unroute("**/api/assistant?conversationId=*");
+    await page.route("**/api/assistant?conversationId=*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          conversationId: "c-vercel-test",
+          messages: [
+            {
+              id: "u-msg-1",
+              role: "user",
+              content: "show vercel deploys for wolfpack-auto",
+              tokensUsed: 0,
+              timestamp: new Date(Date.now() - 60_000).toISOString(),
+            },
+            /* Critically: no assistant message yet. */
+          ],
+        }),
+      });
+    });
+
+    const composer = page.getByTestId("assistant-composer-input");
+    await composer.fill("show vercel deploys for wolfpack-auto");
+    await composer.press("Enter");
+
+    /* Widget renders from the POST response. */
+    const widget = page.getByTestId("vercel-deployments-widget");
+    await expect(widget).toBeVisible({ timeout: 10_000 });
+
+    /* Trigger a silent refresh that will return the (incomplete)
+     * snapshot. */
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => "hidden",
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => "visible",
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    await page.waitForTimeout(800);
+
+    /* Widget MUST still be visible. The race-safe merge in
+     * silentRefreshMessages preserves the in-flight assistant
+     * message + widget rather than replacing the array. */
+    await expect(widget).toBeVisible();
+  });
+
   test("clicking a widget link does not switch conversation or remove the widget", async ({
     page,
     context,
