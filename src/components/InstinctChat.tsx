@@ -1434,7 +1434,12 @@ export default function InstinctChat({
 
             {messages.map((msg, idx) => (
               <div
-                key={idx}
+                /* Stable key: prefer server id, fall back to role+timestamp
+                 * for local-only messages that haven't been persisted yet.
+                 * Index-based keys caused React to mis-match components
+                 * across setMessages(remote) replacement, which dropped the
+                 * widget prop on the assistant bubble between renders. */
+                key={msg.id ?? `${msg.role}-${msg.timestamp}-${idx}`}
                 className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div
