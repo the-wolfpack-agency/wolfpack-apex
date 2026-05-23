@@ -114,6 +114,10 @@ import "./meeting-prep";
  * vendor is wolfpack-auto (we own it). CDK / Tekion / Reynolds
  * plug in server-side without changing this tool. */
 import "./dms-inventory-widget-tool";
+/* Vercel deployments widget — single-token Wolfpack-wide read-only
+ * integration. Search provider sibling lives at lib/search/providers/
+ * vercel.ts. Both auto-disable cleanly when VERCEL_API_TOKEN is unset. */
+import "./vercel-deployments-widget-tool";
 
 /* Empty-state demo tools — weather / headlines / fx. Backed by free
  * public APIs (Open-Meteo, BBC RSS, exchangerate.host) so a brand-new
