@@ -147,6 +147,9 @@ export const searchGithubPullRequestsTool: ToolDef<Params, SearchGithubPRsData> 
       repo: params.repo ?? "",
       state: params.state ?? "open",
     });
+    const stateLabel = params.state ?? "open";
+    const scope = params.repo ? ` in ${params.repo}` : "";
+    const authorScope = params.author ? ` by @${params.author}` : "";
     return {
       ok: true,
       data: {
@@ -155,6 +158,27 @@ export const searchGithubPullRequestsTool: ToolDef<Params, SearchGithubPRsData> 
         pullRequests: result.data,
       },
       answer: withSourceFooter(renderAnswer(params, result.data), "github"),
+      widget: {
+        kind: "github_items",
+        itemKind: "pull_request",
+        title:
+          result.data.length === 0
+            ? `No ${stateLabel} pull requests${scope}${authorScope}`
+            : `${result.data.length} ${stateLabel} pull request${result.data.length === 1 ? "" : "s"}${scope}${authorScope}`,
+        items: result.data.map((pr) => ({
+          id: `${pr.repo}#${pr.number}`,
+          kind: "pull_request",
+          number: pr.number,
+          title: pr.title,
+          state: pr.state,
+          draft: pr.draft,
+          user: pr.user,
+          repo: pr.repo,
+          url: pr.html_url,
+          createdAt: pr.created_at,
+          updatedAt: pr.updated_at,
+        })),
+      },
     };
   },
 };

@@ -1,31 +1,33 @@
 /**
- * VercelDeploymentsWidget — renders a list of Vercel deployment rows
- * inline in chat. Each row shows project, environment, state with
- * color, optional commit message + branch, and click-through to the
- * Vercel dashboard (or the deployed *.vercel.app URL as fallback).
+ * GithubItemsWidget — renders a list of GitHub Pull Requests OR Issues
+ * inline in chat. Same visual template as VercelDeploymentsWidget for
+ * consistency. State-color dot (open=green, closed=red, draft=gray),
+ * repo + author + age + labels (issues only). Click-through to the
+ * GitHub PR/issue page with analytics on render + interaction.
  */
 
 "use client";
 
 import { useEffect } from "react";
 import { fetchWithRefresh } from "@/lib/client-auth";
-import type { VercelDeploymentsWidgetSpec } from "@/lib/assistant/widgets/types";
+import type {
+  GithubItemsWidgetSpec,
+  GithubItem,
+} from "@/lib/assistant/widgets/types";
 import { StaggeredItem, useStaggeredReveal } from "./StaggeredItem";
 
-function stateColor(state: string): string {
-  switch (state) {
-    case "READY":
-      return "var(--wp-success, #16a34a)";
-    case "ERROR":
-    case "CANCELED":
-      return "var(--wp-error, #dc2626)";
-    case "BUILDING":
-    case "INITIALIZING":
-    case "QUEUED":
-      return "var(--wp-warning, #eab308)";
-    default:
-      return "var(--wp-text-muted, #6b7280)";
+function stateColor(item: GithubItem): string {
+  if (item.kind === "pull_request" && item.draft) {
+    return "var(--wp-text-muted, #6b7280)";
   }
+  return item.state === "open"
+    ? "var(--wp-success, #16a34a)"
+    : "var(--wp-error, #dc2626)";
+}
+
+function stateLabel(item: GithubItem): string {
+  if (item.kind === "pull_request" && item.draft) return "draft";
+  return item.state;
 }
 
 function ageLabel(iso: string): string {
@@ -39,15 +41,12 @@ function ageLabel(iso: string): string {
   return `${d}d ago`;
 }
 
-export interface VercelDeploymentsWidgetProps {
-  spec: VercelDeploymentsWidgetSpec;
+export interface GithubItemsWidgetProps {
+  spec: GithubItemsWidgetSpec;
   workflowId?: string;
 }
 
-export function VercelDeploymentsWidget({
-  spec,
-  workflowId,
-}: VercelDeploymentsWidgetProps) {
+export function GithubItemsWidget({ spec, workflowId }: GithubItemsWidgetProps) {
   useEffect(() => {
     fetchWithRefresh("/api/analytics", {
       method: "POST",
@@ -55,29 +54,26 @@ export function VercelDeploymentsWidget({
       body: JSON.stringify({
         event: "assistant.widget_rendered",
         metadata: {
-          widget_kind: "vercel_deployments",
-          project_name: spec.projectName,
+          widget_kind: "github_items",
+          item_kind: spec.itemKind,
           item_count: spec.items.length,
           ...(workflowId ? { workflow_id: workflowId } : {}),
         },
       }),
     }).catch(() => undefined);
-  }, [spec.projectName, spec.items.length, workflowId]);
+  }, [spec.itemKind, spec.items.length, workflowId]);
 
   useStaggeredReveal({
-    widgetKind: "vercel_deployments",
+    widgetKind: "github_items",
     itemCount: spec.items.length,
     workflowId,
   });
 
   function trackInteraction(
     action: string,
-    deployId: string | undefined,
+    itemId: string | undefined,
     e?: React.MouseEvent,
   ) {
-    // Prevent the click from bubbling to chat-container handlers that
-    // may scroll/reset the active conversation. The anchor still opens
-    // in a new tab via target="_blank"; we just block bubbling.
     e?.stopPropagation();
     fetchWithRefresh("/api/analytics", {
       method: "POST",
@@ -85,19 +81,22 @@ export function VercelDeploymentsWidget({
       body: JSON.stringify({
         event: "assistant.widget_interaction",
         metadata: {
-          widget_kind: "vercel_deployments",
+          widget_kind: "github_items",
+          item_kind: spec.itemKind,
           action,
-          project_name: spec.projectName,
-          deploy_id: deployId,
+          item_id: itemId,
           ...(workflowId ? { workflow_id: workflowId } : {}),
         },
       }),
     }).catch(() => undefined);
   }
 
+  const noun = spec.itemKind === "pull_request" ? "pull requests" : "issues";
+
   return (
     <div
-      data-testid="vercel-deployments-widget"
+      data-testid="github-items-widget"
+      data-item-kind={spec.itemKind}
       className="mt-2 rounded-md p-3 min-w-0 max-w-full overflow-hidden"
       style={{
         background: "var(--wp-dark-surface2, #1a1a1a)",
@@ -116,7 +115,7 @@ export function VercelDeploymentsWidget({
             className="text-[10px] uppercase tracking-wider whitespace-nowrap"
             style={{ color: "var(--wp-text-muted, #6b7280)" }}
           >
-            via Vercel
+            via GitHub
           </span>
         </div>
         {spec.subtitle && (
@@ -131,11 +130,11 @@ export function VercelDeploymentsWidget({
 
       {spec.items.length === 0 ? (
         <div
-          data-testid="vercel-deployments-empty"
+          data-testid="github-items-empty"
           className="text-xs py-3 text-center"
           style={{ color: "var(--wp-text-muted, #6b7280)" }}
         >
-          No deployments to show.
+          No {noun} to show.
         </div>
       ) : (
         <ul className="space-y-1.5">
@@ -143,7 +142,7 @@ export function VercelDeploymentsWidget({
             <StaggeredItem
               key={item.id}
               index={i}
-              data-testid={`vercel-deploy-item-${item.id}`}
+              data-testid={`github-item-${item.id}`}
               className="text-xs rounded p-2"
               style={{
                 background: "var(--wp-dark, #111)",
@@ -154,7 +153,7 @@ export function VercelDeploymentsWidget({
                 href={item.url}
                 target="_blank"
                 rel="noreferrer noopener"
-                onClick={(e) => trackInteraction("open_deploy", item.id, e)}
+                onClick={(e) => trackInteraction("open_github_item", item.id, e)}
                 className="block hover:underline"
                 style={{ color: "var(--wp-text, #eee)" }}
               >
@@ -162,50 +161,58 @@ export function VercelDeploymentsWidget({
                   <div className="flex items-center gap-2 min-w-0">
                     <span
                       className="inline-block w-2 h-2 rounded-full shrink-0"
-                      style={{ background: stateColor(item.state) }}
-                      aria-label={`state ${item.state}`}
+                      style={{ background: stateColor(item) }}
+                      aria-label={`state ${stateLabel(item)}`}
                     />
                     <span className="font-semibold truncate">
-                      {item.projectName}
+                      {item.repo}#{item.number}
                     </span>
                     <span
                       className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0"
                       style={{
                         background: "var(--wp-dark-surface2, #1a1a1a)",
-                        color:
-                          item.target === "production"
-                            ? "var(--wp-gold, #eab308)"
-                            : "var(--wp-text-muted, #6b7280)",
+                        color: "var(--wp-text-muted, #6b7280)",
                         border: "1px solid var(--wp-dark-border, #333)",
                       }}
                     >
-                      {item.target}
+                      {stateLabel(item)}
                     </span>
                   </div>
                   <span
                     className="whitespace-nowrap text-[10px]"
                     style={{ color: "var(--wp-text-muted, #6b7280)" }}
                   >
-                    {ageLabel(item.readyAt ?? item.createdAt)}
+                    {ageLabel(item.updatedAt)}
                   </span>
                 </div>
-                {(item.commitMessage || item.branch) && (
-                  <div
-                    className="text-[11px] mt-1 truncate"
-                    style={{ color: "var(--wp-text-dim, #aaa)" }}
-                  >
-                    {item.branch && (
-                      <span
-                        className="font-mono mr-1.5"
-                        style={{ color: "var(--wp-text-muted, #6b7280)" }}
-                      >
-                        {item.branch}
-                        {item.commitSha ? ` ${item.commitSha}` : ""}
-                      </span>
-                    )}
-                    {item.commitMessage}
-                  </div>
-                )}
+                <div
+                  className="text-[11px] mt-1 truncate"
+                  style={{ color: "var(--wp-text-dim, #aaa)" }}
+                >
+                  {item.title}
+                </div>
+                <div
+                  className="text-[10px] mt-0.5 flex items-center gap-2 flex-wrap"
+                  style={{ color: "var(--wp-text-muted, #6b7280)" }}
+                >
+                  <span className="font-mono">@{item.user}</span>
+                  {item.labels && item.labels.length > 0 && (
+                    <span className="flex gap-1 flex-wrap">
+                      {item.labels.slice(0, 4).map((l) => (
+                        <span
+                          key={l}
+                          className="px-1.5 py-0.5 rounded"
+                          style={{
+                            background: "var(--wp-dark-surface2, #1a1a1a)",
+                            border: "1px solid var(--wp-dark-border, #333)",
+                          }}
+                        >
+                          {l}
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                </div>
               </a>
             </StaggeredItem>
           ))}

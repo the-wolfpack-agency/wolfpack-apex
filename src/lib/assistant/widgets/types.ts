@@ -225,6 +225,29 @@ export interface VercelDeploymentsWidgetSpec {
   items: VercelDeploymentItem[];
 }
 
+export interface GithubItem {
+  id: string;
+  kind: "pull_request" | "issue";
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  draft?: boolean;
+  user: string;
+  repo: string;
+  url: string;
+  labels?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GithubItemsWidgetSpec {
+  kind: "github_items";
+  itemKind: "pull_request" | "issue";
+  title: string;
+  subtitle?: string;
+  items: GithubItem[];
+}
+
 /** Universal-search results rendered inline in the chat surface.
  *  Mirrors the /search page's source-filter UX (one checkbox per
  *  source that has non-zero results; toggling hides rows of that
@@ -506,6 +529,7 @@ export type WidgetSpec =
   | GoodMorningWidgetSpec
   | DmsInventoryWidgetSpec
   | VercelDeploymentsWidgetSpec
+  | GithubItemsWidgetSpec
   | SearchResultsWidgetSpec
   | WeatherWidgetSpec
   | HeadlinesWidgetSpec

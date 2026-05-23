@@ -159,6 +159,8 @@ export const searchGithubIssuesTool: ToolDef<Params, SearchGithubIssuesData> = {
       repo: params.repo ?? "",
       state: params.state ?? "open",
     });
+    const stateLabel = params.state ?? "open";
+    const scope = params.repo ? ` in ${params.repo}` : "";
     return {
       ok: true,
       data: {
@@ -167,6 +169,27 @@ export const searchGithubIssuesTool: ToolDef<Params, SearchGithubIssuesData> = {
         issues: result.data,
       },
       answer: withSourceFooter(renderAnswer(params, result.data), "github"),
+      widget: {
+        kind: "github_items",
+        itemKind: "issue",
+        title:
+          result.data.length === 0
+            ? `No ${stateLabel} issues${scope}`
+            : `${result.data.length} ${stateLabel} issue${result.data.length === 1 ? "" : "s"}${scope}`,
+        items: result.data.map((iss) => ({
+          id: `${iss.repo}#${iss.number}`,
+          kind: "issue",
+          number: iss.number,
+          title: iss.title,
+          state: iss.state,
+          user: iss.user,
+          repo: iss.repo,
+          url: iss.html_url,
+          labels: iss.labels,
+          createdAt: iss.created_at,
+          updatedAt: iss.updated_at,
+        })),
+      },
     };
   },
 };
