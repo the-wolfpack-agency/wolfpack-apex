@@ -349,12 +349,7 @@ export default function HrPage() {
       </div>
 
       {tab === "overview" && <OverviewTab />}
-      {tab === "employees" && (
-        <>
-          <EmployeesTab />
-          <EmployeeEditor />
-        </>
-      )}
+      {tab === "employees" && <EmployeesTab />}
       {tab === "onboarding" && <OnboardingTab />}
       {tab === "benefits" && <BenefitsTab />}
       {tab === "documents" && <DocumentsTab />}
