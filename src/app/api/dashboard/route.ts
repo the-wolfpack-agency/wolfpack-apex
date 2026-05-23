@@ -7,11 +7,10 @@ export async function GET(req: NextRequest) {
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const [knowledge, discussions, features, team, efficiency] = await Promise.all([
+  const [knowledge, discussions, features, efficiency] = await Promise.all([
     safeQuery<{ count: number }>("SELECT COUNT(*)::int AS count FROM instinct_knowledge"),
     safeQuery<{ count: number }>("SELECT COUNT(*)::int AS count FROM instinct_discussions WHERE status = 'open'"),
     safeQuery<{ count: number }>("SELECT COUNT(*)::int AS count FROM instinct_feature_requests"),
-    safeQuery<{ count: number }>("SELECT COUNT(*)::int AS count FROM instinct_team_members WHERE is_active = true"),
     safeQuery<{ zero_token_pct: number; zero_token_answers: number; ai_calls: number }>(
       "SELECT * FROM v_ai_efficiency LIMIT 1"
     ),
@@ -37,7 +36,7 @@ export async function GET(req: NextRequest) {
     knowledge_count: knowledge.rows[0]?.count ?? 0,
     discussion_count: discussions.rows[0]?.count ?? 0,
     feature_count: features.rows[0]?.count ?? 0,
-    team_count: team.rows[0]?.count ?? 0,
+    team_count: 7,
     ai_efficiency: efficiency.rows[0] || null,
   });
 }
