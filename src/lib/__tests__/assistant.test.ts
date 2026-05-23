@@ -301,13 +301,20 @@ describe("persistent conversations", () => {
     expect(createCalls.length).toBe(0);
   });
 
-  test("auto-resumes recent active conversation", async () => {
+  /* 2026-05-23: server-side auto-resume of the most-recent active
+   * conversation was removed because it caused the chat UI to jump
+   * to an unrelated old conversation when a user sent a fresh message
+   * from a new chat (the server silently attached the new message to
+   * the user's most-recent existing conversation). The two tests
+   * below now verify the new contract: no conversationId always =>
+   * a brand-new conversation, regardless of how recent the user's
+   * last chat was. */
+  test("creates a NEW conversation when no conversationId is provided, even if a recent one exists", async () => {
     const recentConv = {
       id: "existing-conv-123",
       last_message_at: new Date().toISOString(), // Fresh
     };
 
-    // When looking for recent conversation, return one
     queryResponses.set("SELECT id, last_message_at FROM instinct_conversations", {
       rows: [recentConv],
       fromCache: false,
@@ -315,14 +322,15 @@ describe("persistent conversations", () => {
 
     const result = await chat("Hello", "u1", "dev");
 
-    // Should reuse the existing conversation, not create a new one
-    expect(result.conversationId).toBe("existing-conv-123");
+    // Server must NOT auto-attach to the recent conversation. A new
+    // chat means a new conversation, period.
+    expect(result.conversationId).not.toBe("existing-conv-123");
   });
 
-  test("creates new conversation when last message is stale (>2 hours)", async () => {
+  test("creates a new conversation when the last message is stale (still true under the new contract)", async () => {
     const staleConv = {
       id: "stale-conv-123",
-      last_message_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(), // 3 hours ago
+      last_message_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
     };
 
     queryResponses.set("SELECT id, last_message_at FROM instinct_conversations", {
@@ -332,7 +340,6 @@ describe("persistent conversations", () => {
 
     const result = await chat("Hello", "u1", "dev");
 
-    // Should create a NEW conversation since the old one is stale
     expect(result.conversationId).not.toBe("stale-conv-123");
   });
 

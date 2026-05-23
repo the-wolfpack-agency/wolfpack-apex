@@ -630,19 +630,14 @@ export async function chat(
   const workflowId = generateId();
 
   // --- Resolve or create conversation ---
+  // 2026-05-23: auto-resume of the most-recent active conversation was
+  // removed. When the client posts without a conversationId, the server
+  // used to silently attach the message to the user's most-recent
+  // conversation, which caused the chat UI to jump to that old chat
+  // after a Send. If a caller wants to continue an existing chat, it
+  // must pass the conversationId explicitly. No conversationId = brand
+  // new conversation, period.
   let convId = conversationId || null;
-
-  if (!convId) {
-    // Check for recent active conversation to auto-resume
-    const recent = await dbGetRecentActiveConversation(userId);
-    if (recent && recent.last_message_at) {
-      const age = Date.now() - new Date(recent.last_message_at).getTime();
-      if (age < STALE_CONVERSATION_MS) {
-        convId = recent.id;
-      }
-    }
-  }
-
   if (!convId) {
     convId = await dbCreateConversation(userId);
   }
@@ -1333,14 +1328,10 @@ export async function persistToolAnswer(opts: {
   metadata?: Record<string, unknown>;
 }): Promise<{ conversationId: string; messageId: string } | null> {
   try {
+    // 2026-05-23: removed dbGetRecentActiveConversation auto-resume here
+    // for parity with the main chat() path. Callers that want to append
+    // to an existing conversation must pass conversationId explicitly.
     let convId = opts.conversationId || null;
-    if (!convId) {
-      const recent = await dbGetRecentActiveConversation(opts.userId);
-      if (recent && recent.last_message_at) {
-        const age = Date.now() - new Date(recent.last_message_at).getTime();
-        if (age < STALE_CONVERSATION_MS) convId = recent.id;
-      }
-    }
     if (!convId) {
       convId = await dbCreateConversation(opts.userId);
     }
