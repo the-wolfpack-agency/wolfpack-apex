@@ -248,6 +248,41 @@ export interface GithubItemsWidgetSpec {
   items: GithubItem[];
 }
 
+export interface CrossToolInsightItem {
+  id: string;
+  generator: string;
+  severity: "high" | "medium" | "low";
+  signalStrength: number;
+  title: string;
+  detail: string | null;
+  action: { label: string; href?: string; chip?: string } | null;
+  sources: string[];
+}
+
+export interface CrossToolInsightsWidgetSpec {
+  kind: "cross_tool_insights";
+  title: string;
+  subtitle?: string;
+  lookbackDays: number;
+  items: CrossToolInsightItem[];
+  generatorOutcomes: Array<{ name: string; count: number; ok: boolean }>;
+}
+
+export interface IntegrationListItem {
+  id: string;
+  name: string;
+  category: string;
+  surface: "search+widget" | "widget" | "search";
+  sampleQuery: string;
+}
+
+export interface IntegrationsListWidgetSpec {
+  kind: "integrations_list";
+  title: string;
+  subtitle?: string;
+  items: IntegrationListItem[];
+}
+
 /** Universal-search results rendered inline in the chat surface.
  *  Mirrors the /search page's source-filter UX (one checkbox per
  *  source that has non-zero results; toggling hides rows of that
@@ -530,6 +565,8 @@ export type WidgetSpec =
   | DmsInventoryWidgetSpec
   | VercelDeploymentsWidgetSpec
   | GithubItemsWidgetSpec
+  | CrossToolInsightsWidgetSpec
+  | IntegrationsListWidgetSpec
   | SearchResultsWidgetSpec
   | WeatherWidgetSpec
   | HeadlinesWidgetSpec

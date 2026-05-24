@@ -118,6 +118,13 @@ import "./dms-inventory-widget-tool";
  * integration. Search provider sibling lives at lib/search/providers/
  * vercel.ts. Both auto-disable cleanly when VERCEL_API_TOKEN is unset. */
 import "./vercel-deployments-widget-tool";
+/* Cross-tool insights — fans across every connected integration and
+ * surfaces signals no single tool can see. Rule-based detection;
+ * zero AI tokens for the patterns themselves. */
+import "./cross-tool-insights-widget-tool";
+/* Integrations list — discoverability surface auto-discovered from
+ * the search-provider + tool registries. */
+import "./integrations-list-widget-tool";
 
 /* Empty-state demo tools — weather / headlines / fx. Backed by free
  * public APIs (Open-Meteo, BBC RSS, exchangerate.host) so a brand-new
