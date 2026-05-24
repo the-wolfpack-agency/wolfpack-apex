@@ -3,18 +3,19 @@
  * fan across multiple integrations and surface signals no single tool
  * can see.
  *
- * Approach choice: pure rule-based (zero LLM tokens for the patterns
+ * DESIGN PRINCIPLE: insights are HELPFUL, not punishing. We never
+ * surface "you didn't read X" or "you missed Y". Instead we surface
+ * the kind of context that helps the user *do* their next thing —
+ * "PR ready to discuss in your meeting", "momentum this week",
+ * "heads-up that this deploy author is on your calendar".
+ *
+ * Approach: pure rule-based (zero LLM tokens for the patterns
  * themselves). Three reasons:
  *   1. feedback_zero_tokens_first invariant: codify scanning patterns
  *      in tooling first, AI only for review.
- *   2. Insights must be auditable. "5 customers with overdue invoices
- *      you're meeting this week" is a verifiable JOIN; LLM hallucinations
- *      would erode trust on the first wrong call.
+ *   2. Insights must be auditable. "Team merged 12 PRs this week" is
+ *      a verifiable count; LLM hallucinations would erode trust.
  *   3. Cheap to add new patterns: append to INSIGHT_GENERATORS, ship.
- *
- * The meeting-prep precedent uses a single LLM synthesis call per use.
- * That works for one meeting at a time; running it as a cross-tool
- * scan across the org would be cost-prohibitive. Rule-based scales.
  *
  * Each generator returns 0+ CrossToolInsight rows. The aggregator
  * sorts by severity (high → low) then by signal_strength (numeric
@@ -31,7 +32,7 @@ export interface CrossToolInsight {
   severity: InsightSeverity;
   /** 0-100; used as tie-break inside a severity bucket. */
   signalStrength: number;
-  /** One-line summary (50-90 chars). */
+  /** One-line summary (50-90 chars). HELPFUL framing, not accusatory. */
   title: string;
   /** Optional plain-English detail (1-2 sentences, ~200 chars). */
   detail?: string;
@@ -44,9 +45,6 @@ export interface CrossToolInsight {
 export interface InsightContext {
   userId: string;
   userRole: string;
-  /** Resolved Microsoft Graph token context (null if not connected).
-   *  Typed as unknown to avoid coupling to a specific token shape;
-   *  generators that need MS Graph cast and use it directly. */
   msToken?: unknown;
   /** Time horizon for "recent" comparisons. Default 14 days. */
   lookbackDays?: number;
@@ -64,8 +62,6 @@ export interface InsightGenerator {
 
 /* ── Helpers ──────────────────────────────────────────────────────── */
 
-/** Bot authors create review noise (dependabot bumps, renovate, etc).
- *  Their PRs don't reflect human stagnation — exclude from signal. */
 function isBotAuthor(login: string): boolean {
   const l = login.toLowerCase();
   return (
@@ -77,16 +73,12 @@ function isBotAuthor(login: string): boolean {
   );
 }
 
-/** Email local-part = the bit before `@`, lowercased. Used as a
- *  loose join key between calendar attendees (email) and GitHub PR
- *  authors (login). Not perfect — but covers the common case where
- *  someone's GitHub handle matches their work-email prefix. */
 function emailLocalPart(email: string): string {
   const at = email.indexOf("@");
   return (at > 0 ? email.slice(0, at) : email).toLowerCase().trim();
 }
 
-/* ── Generator 1: GitHub PR stagnation (single-source, bot-filtered) ── */
+/* ── Generator 1: GitHub PR awaiting review ───────────────────────── */
 
 async function generateGithubPrStagnation(
   ctx: InsightContext,
@@ -110,9 +102,9 @@ async function generateGithubPrStagnation(
       return {
         id: `github_pr_stagnation:${pr.repo}#${pr.number}`,
         generator: "github_pr_stagnation",
-        severity: ageDays >= 14 ? "high" : "medium",
+        severity: ageDays >= 14 ? "medium" : "low",
         signalStrength: Math.min(100, ageDays * 5),
-        title: `${pr.repo}#${pr.number}: open ${ageDays} days, no activity`,
+        title: `${pr.repo}#${pr.number} awaiting review for ${ageDays} days`,
         detail: pr.title.slice(0, 160),
         action: { label: "Open PR", href: pr.html_url },
         sources: ["github"],
@@ -123,11 +115,7 @@ async function generateGithubPrStagnation(
   }
 }
 
-/* ── Generator 2: Vercel × GitHub — failed deploys with no follow-up ─
- *
- * Upgrade over v1: now actually verifies that no later READY deploy
- * exists on the same `meta.githubCommitRef`. v1 listed every ERROR
- * even if the team already redeployed successfully — pure noise. */
+/* ── Generator 2: Vercel × GitHub — failed deploys still needing follow-up ─ */
 
 async function generateVercelFailedNoFollowup(
   ctx: InsightContext,
@@ -146,7 +134,6 @@ async function generateVercelFailedNoFollowup(
     const insights: CrossToolInsight[] = [];
     for (const f of failures) {
       const ref = f.meta?.githubCommitRef;
-      // Has a later READY deploy on the same branch already shipped? Skip.
       const followedUp = deployments.some(
         (d) =>
           d.state === "READY" &&
@@ -160,7 +147,7 @@ async function generateVercelFailedNoFollowup(
         generator: "vercel_failed_no_followup",
         severity: f.target === "production" ? "high" : "medium",
         signalStrength: f.target === "production" ? 90 : 50,
-        title: `${f.name}: failed ${f.target} deploy${ref ? ` on ${ref}` : ""}, no follow-up`,
+        title: `${f.name}: ${f.target} deploy needs a follow-up${ref ? ` on ${ref}` : ""}`,
         detail: f.meta?.githubCommitMessage?.split("\n")[0]?.slice(0, 160),
         action: { label: "Open Vercel", href: `https://${f.url}` },
         sources: ["vercel", "github"],
@@ -173,106 +160,10 @@ async function generateVercelFailedNoFollowup(
   }
 }
 
-/* ── Generator 3: Email × Calendar — unread email from upcoming attendee ─
+/* ── Generator 3: Calendar × GitHub — PR ready to discuss in upcoming meeting ─
  *
- * Strictly cross-tool. Finds unread emails from someone you have a
- * meeting with in the next 7 days. Severity = how soon the meeting is.
- *
- * No other tool sees this — Outlook surfaces unread, Calendar surfaces
- * upcoming, but the join (this unread is from someone you're about to
- * meet) is unique to Instinct. */
-
-async function generateUnreadEmailFromMeetingAttendee(
-  ctx: InsightContext,
-): Promise<CrossToolInsight[]> {
-  try {
-    const { fetchCalendarEvents, fetchRecentEmails, fetchUserProfile } =
-      await import("@/lib/microsoft-graph");
-    const now = new Date();
-    const horizon = new Date(now);
-    horizon.setDate(horizon.getDate() + 7);
-
-    const [events, emails, me] = await Promise.all([
-      fetchCalendarEvents(ctx.userId, now.toISOString(), horizon.toISOString()),
-      fetchRecentEmails(ctx.userId, 25),
-      fetchUserProfile(ctx.userId),
-    ]);
-    if (!events || events.length === 0) return [];
-    if (!emails || emails.length === 0) return [];
-
-    const myEmail = (me?.email ?? "").toLowerCase();
-
-    // Map attendee email → soonest upcoming meeting with that person.
-    const attendeeToMeeting = new Map<
-      string,
-      { event: (typeof events)[number]; startMs: number }
-    >();
-    for (const ev of events) {
-      const startMs = new Date(ev.start).getTime();
-      if (startMs < now.getTime()) continue; // past meetings don't count
-      if (ev.showAs === "free") continue;
-      for (const addr of ev.attendeeEmails ?? []) {
-        const a = addr.toLowerCase();
-        if (!a || a === myEmail) continue;
-        const existing = attendeeToMeeting.get(a);
-        if (!existing || startMs < existing.startMs) {
-          attendeeToMeeting.set(a, { event: ev, startMs });
-        }
-      }
-    }
-    if (attendeeToMeeting.size === 0) return [];
-
-    const insights: CrossToolInsight[] = [];
-    const seenIds = new Set<string>();
-    for (const em of emails) {
-      if (em.isRead) continue;
-      const from = (em.fromEmail ?? "").toLowerCase();
-      const hit = attendeeToMeeting.get(from);
-      if (!hit) continue;
-      const hoursUntil =
-        (hit.startMs - now.getTime()) / (60 * 60 * 1000);
-      const severity: InsightSeverity =
-        hoursUntil < 24 ? "high" : hoursUntil < 72 ? "medium" : "low";
-      const signalStrength =
-        em.importance === "high" ? 95 : Math.max(40, 100 - Math.round(hoursUntil));
-      const id = `email_unread_meeting_attendee:${em.id}`;
-      if (seenIds.has(id)) continue;
-      seenIds.add(id);
-      const whenLabel =
-        hoursUntil < 24
-          ? "today"
-          : hoursUntil < 48
-            ? "tomorrow"
-            : `in ${Math.round(hoursUntil / 24)} days`;
-      insights.push({
-        id,
-        generator: "email_unread_from_meeting_attendee",
-        severity,
-        signalStrength,
-        title: `Unread email from ${em.from} — you meet ${whenLabel}`,
-        detail: `"${em.subject}". Meeting: ${hit.event.subject || "(no subject)"}.`,
-        action: em.webLink
-          ? { label: "Open email", href: em.webLink }
-          : { label: "Open email" },
-        sources: ["email", "calendar"],
-      });
-      if (insights.length >= 4) break;
-    }
-    return insights;
-  } catch {
-    return [];
-  }
-}
-
-/* ── Generator 4: Calendar × GitHub — open PR from upcoming meeting attendee ─
- *
- * If you're meeting someone this week AND they have an open PR awaiting
- * your review, that's the kind of "right context before the conversation"
- * insight only the cross-tool view can produce.
- *
- * Match: GitHub PR author login (e.g. `hoxsie`) against attendee email
- * local-part (e.g. `hoxsie@thewolfpack.agency`). Fuzzy but reliable in
- * practice for org members. */
+ * Helpful framing: "Heads-up — @alice has an open PR ready to discuss
+ * in your meeting tomorrow." Not "you haven't reviewed it." */
 
 async function generateMeetingAttendeeOpenPr(
   ctx: InsightContext,
@@ -296,7 +187,6 @@ async function generateMeetingAttendeeOpenPr(
     const myEmail = (me?.email ?? "").toLowerCase();
     const myLocal = emailLocalPart(myEmail);
 
-    // local-part → soonest meeting where they are an attendee.
     const localToMeeting = new Map<
       string,
       { event: (typeof events)[number]; startMs: number }
@@ -328,7 +218,7 @@ async function generateMeetingAttendeeOpenPr(
       const hoursUntil =
         (hit.startMs - now.getTime()) / (60 * 60 * 1000);
       const severity: InsightSeverity =
-        hoursUntil < 24 ? "high" : hoursUntil < 72 ? "medium" : "low";
+        hoursUntil < 24 ? "medium" : "low";
       const whenLabel =
         hoursUntil < 24
           ? "today"
@@ -339,9 +229,8 @@ async function generateMeetingAttendeeOpenPr(
         id: `meeting_attendee_open_pr:${pr.repo}#${pr.number}`,
         generator: "meeting_attendee_open_pr",
         severity,
-        signalStrength:
-          severity === "high" ? 95 : severity === "medium" ? 70 : 45,
-        title: `${pr.user}'s ${pr.repo}#${pr.number} open — you meet ${whenLabel}`,
+        signalStrength: severity === "medium" ? 80 : 55,
+        title: `Heads-up: @${pr.user}'s ${pr.repo}#${pr.number} could be discussed ${whenLabel}`,
         detail: pr.title.slice(0, 160),
         action: { label: "Open PR", href: pr.html_url },
         sources: ["github", "calendar"],
@@ -354,10 +243,180 @@ async function generateMeetingAttendeeOpenPr(
   }
 }
 
+/* ── Generator 4: Vercel × Calendar — recent deploy by upcoming attendee ─
+ *
+ * Vercel exposes `creator.username` on each deployment (the person
+ * who triggered it). If that username matches the local-part of a
+ * calendar attendee for an upcoming meeting, surface as helpful
+ * coordination context. "Recent deploy by @alice — she's on your
+ * 2pm." Not blame, just useful situational awareness. */
+
+async function generateRecentDeployByMeetingAttendee(
+  ctx: InsightContext,
+): Promise<CrossToolInsight[]> {
+  try {
+    const [{ fetchCalendarEvents, fetchUserProfile }, vercel] =
+      await Promise.all([
+        import("@/lib/microsoft-graph"),
+        import("@/lib/integrations/vercel"),
+      ]);
+    if (!vercel.vercelIsConfigured()) return [];
+
+    const now = new Date();
+    const horizon = new Date(now);
+    horizon.setDate(horizon.getDate() + 2); // next 48h only
+    const [events, me, deployRes] = await Promise.all([
+      fetchCalendarEvents(ctx.userId, now.toISOString(), horizon.toISOString()),
+      fetchUserProfile(ctx.userId),
+      vercel.listDeployments({ limit: 25 }),
+    ]);
+    if (!events || events.length === 0) return [];
+    if (!deployRes.ok || !deployRes.data) return [];
+
+    const myLocal = emailLocalPart((me?.email ?? "").toLowerCase());
+    const localToMeeting = new Map<
+      string,
+      { event: (typeof events)[number]; startMs: number }
+    >();
+    for (const ev of events) {
+      const startMs = new Date(ev.start).getTime();
+      if (startMs < now.getTime()) continue;
+      if (ev.showAs === "free") continue;
+      for (const addr of ev.attendeeEmails ?? []) {
+        const local = emailLocalPart(addr);
+        if (!local || local === myLocal) continue;
+        const existing = localToMeeting.get(local);
+        if (!existing || startMs < existing.startMs) {
+          localToMeeting.set(local, { event: ev, startMs });
+        }
+      }
+    }
+    if (localToMeeting.size === 0) return [];
+
+    const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+    const recentDeploys = deployRes.data.deployments.filter(
+      (d) => Date.now() - d.createdAt < SIX_HOURS_MS,
+    );
+    if (recentDeploys.length === 0) return [];
+
+    const insights: CrossToolInsight[] = [];
+    const seen = new Set<string>();
+    for (const d of recentDeploys) {
+      const username = d.creator?.username?.toLowerCase();
+      if (!username) continue;
+      const hit = localToMeeting.get(username);
+      if (!hit) continue;
+      if (seen.has(username)) continue;
+      seen.add(username);
+      const hoursUntil = (hit.startMs - Date.now()) / (60 * 60 * 1000);
+      const whenLabel =
+        hoursUntil < 24
+          ? "today"
+          : hoursUntil < 48
+            ? "tomorrow"
+            : `in ${Math.round(hoursUntil / 24)} days`;
+      insights.push({
+        id: `recent_deploy_by_meeting_attendee:${d.uid}`,
+        generator: "recent_deploy_by_meeting_attendee",
+        severity: "low",
+        signalStrength: d.state === "ERROR" ? 70 : 50,
+        title: `Heads-up: @${username} just ${d.state === "ERROR" ? "had a failed" : "shipped a"} ${d.target ?? "preview"} deploy — you meet ${whenLabel}`,
+        detail: d.meta?.githubCommitMessage?.split("\n")[0]?.slice(0, 160),
+        action: { label: "Open Vercel", href: `https://${d.url}` },
+        sources: ["vercel", "calendar"],
+      });
+      if (insights.length >= 3) break;
+    }
+    return insights;
+  } catch {
+    return [];
+  }
+}
+
+/* ── Generator 5: GitHub × Vercel — weekly team momentum ──────────────
+ *
+ * Positive cross-tool signal: this week the team merged N PRs across
+ * M repos and shipped K successful prod deploys. No single tool gives
+ * the combined view. Always low severity — informational. */
+
+async function generateTeamMomentumBrief(
+  ctx: InsightContext,
+): Promise<CrossToolInsight[]> {
+  try {
+    const [{ searchPullRequests }, vercel] = await Promise.all([
+      import("@/lib/assistant/tools/github-query-client"),
+      import("@/lib/integrations/vercel"),
+    ]);
+
+    const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+    const cutoff = Date.now() - WEEK_MS;
+
+    const [prRes, deployRes] = await Promise.all([
+      searchPullRequests({ state: "closed", perPage: 25 }),
+      vercel.vercelIsConfigured()
+        ? vercel.listDeployments({ limit: 50 })
+        : Promise.resolve({ ok: false } as const),
+    ]);
+
+    const mergedPrs = prRes.ok
+      ? prRes.data.filter(
+          (pr) =>
+            !isBotAuthor(pr.user) &&
+            new Date(pr.updated_at).getTime() >= cutoff,
+        )
+      : [];
+    const repos = new Set(mergedPrs.map((pr) => pr.repo));
+
+    const prodSuccessDeploys =
+      deployRes.ok && deployRes.data
+        ? deployRes.data.deployments.filter(
+            (d) =>
+              d.state === "READY" &&
+              d.target === "production" &&
+              d.createdAt >= cutoff,
+          )
+        : [];
+
+    // Only emit if we have non-zero combined signal — otherwise it's noise.
+    if (mergedPrs.length === 0 && prodSuccessDeploys.length === 0) return [];
+
+    const sources: string[] = [];
+    if (mergedPrs.length > 0) sources.push("github");
+    if (prodSuccessDeploys.length > 0) sources.push("vercel");
+
+    const parts: string[] = [];
+    if (mergedPrs.length > 0) {
+      parts.push(
+        `${mergedPrs.length} PR${mergedPrs.length === 1 ? "" : "s"} merged across ${repos.size} repo${repos.size === 1 ? "" : "s"}`,
+      );
+    }
+    if (prodSuccessDeploys.length > 0) {
+      const projects = new Set(prodSuccessDeploys.map((d) => d.name));
+      parts.push(
+        `${prodSuccessDeploys.length} prod deploy${prodSuccessDeploys.length === 1 ? "" : "s"} shipped across ${projects.size} project${projects.size === 1 ? "" : "s"}`,
+      );
+    }
+
+    return [
+      {
+        id: `team_momentum_brief:${new Date().toISOString().slice(0, 10)}`,
+        generator: "team_momentum_brief",
+        severity: "low",
+        signalStrength: 30, // informational, lives below action-required items
+        title: `This week: ${parts.join("; ")}`,
+        detail: "Combined view across GitHub and Vercel for the last 7 days.",
+        sources,
+      },
+    ];
+  } catch {
+    return [];
+  }
+}
+
 export const INSIGHT_GENERATORS: InsightGenerator[] = [
   {
     name: "github_pr_stagnation",
-    label: "Open PRs with no activity for 7+ days (humans only)",
+    label: "Open PRs awaiting review for 7+ days (humans only)",
     requires: ["github"],
     run: generateGithubPrStagnation,
   },
@@ -368,16 +427,22 @@ export const INSIGHT_GENERATORS: InsightGenerator[] = [
     run: generateVercelFailedNoFollowup,
   },
   {
-    name: "email_unread_from_meeting_attendee",
-    label: "Unread email from someone you have an upcoming meeting with",
-    requires: ["email", "calendar"],
-    run: generateUnreadEmailFromMeetingAttendee,
-  },
-  {
     name: "meeting_attendee_open_pr",
-    label: "Open PR by someone you have an upcoming meeting with",
+    label: "Open PR by someone on your upcoming meeting calendar",
     requires: ["github", "calendar"],
     run: generateMeetingAttendeeOpenPr,
+  },
+  {
+    name: "recent_deploy_by_meeting_attendee",
+    label: "Recent Vercel deploy by an upcoming-meeting attendee (coordination heads-up)",
+    requires: ["vercel", "calendar"],
+    run: generateRecentDeployByMeetingAttendee,
+  },
+  {
+    name: "team_momentum_brief",
+    label: "This week's team momentum (merged PRs + successful prod deploys)",
+    requires: ["github", "vercel"],
+    run: generateTeamMomentumBrief,
   },
   /* Append additional generators here. */
 ];
