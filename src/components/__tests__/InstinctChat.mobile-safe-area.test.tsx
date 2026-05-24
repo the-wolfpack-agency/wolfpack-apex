@@ -82,6 +82,26 @@ test("composer wrapper applies safe-area-inset bottom padding (iOS Safari chrome
   expect(safeAreaEls.length).toBeGreaterThan(0);
 });
 
+test("composer helper text ('Cmd+Enter to send…') is desktop-only via Tailwind `hidden sm:block`", async () => {
+  /* On mobile the Cmd+Enter / drag-drop hints don't apply (no Cmd
+   * key, no drag/drop) — the hint should be hidden so it doesn't
+   * mislead. We assert the class string contains `hidden` + the
+   * `sm:block` companion. */
+  const InstinctChat = await importComponent();
+  let container: HTMLElement | null = null;
+  await act(async () => {
+    const result = render(<InstinctChat />);
+    container = result.container;
+  });
+  const hint = (container as unknown as HTMLElement).querySelector(
+    "[data-testid='assistant-composer-hint']",
+  );
+  expect(hint).not.toBeNull();
+  const cls = hint!.className;
+  expect(cls).toContain("hidden");
+  expect(cls).toContain("sm:block");
+});
+
 test("inline container uses 100dvh not 100vh so iOS chrome doesn't push the composer offscreen", async () => {
   const InstinctChat = await importComponent();
   let container: HTMLElement | null = null;

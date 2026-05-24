@@ -2092,7 +2092,15 @@ export default function InstinctChat({
                 </button>
               )}
             </div>
-            <p className="text-center text-xs mt-2" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
+            {/* Desktop-only helper text. On mobile there's no Cmd key and
+                no drag/drop — the on-screen send button is the obvious
+                target, and Enter inserts a newline (intentional, so
+                users can type multi-line prompts on touch keyboards). */}
+            <p
+              className="hidden sm:block text-center text-xs mt-2"
+              data-testid="assistant-composer-hint"
+              style={{ color: "var(--wp-text-muted, #6b7280)" }}
+            >
               Cmd+Enter to send | Drop files for context
             </p>
           </div>
