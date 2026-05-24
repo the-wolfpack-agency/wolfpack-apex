@@ -156,9 +156,7 @@ describe("<TeamsUnreadBadge />", () => {
     expect(container.querySelector("[data-testid='teams-unread-badge']")).toBeNull();
   });
 
-  test("polling interval re-fires the fetch every 30s when tab is visible", async () => {
-    // Adaptive polling: 30s while visible, 120s when hidden. Was 5s
-    // visible before the May 2026 polling-efficiency pass.
+  test("polling interval re-fires the fetch every 60s when tab is visible", async () => {
     mockFetchWithRefresh.mockResolvedValue(
       mkJsonResponse({ count: 0, total_chats: 0, since: null }),
     );
@@ -167,17 +165,17 @@ describe("<TeamsUnreadBadge />", () => {
     await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalledTimes(1));
 
     await act(async () => {
-      jest.advanceTimersByTime(30_000);
+      jest.advanceTimersByTime(60_000);
     });
     await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalledTimes(2));
 
     await act(async () => {
-      jest.advanceTimersByTime(30_000);
+      jest.advanceTimersByTime(60_000);
     });
     await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalledTimes(3));
   });
 
-  test("window focus triggers an off-schedule fetch", async () => {
+  test("window focus triggers an off-schedule fetch once the refocus debounce has elapsed", async () => {
     mockFetchWithRefresh.mockResolvedValue(
       mkJsonResponse({ count: 0, total_chats: 0, since: null }),
     );
@@ -185,10 +183,17 @@ describe("<TeamsUnreadBadge />", () => {
     render(<TeamsUnreadBadge />);
     await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalledTimes(1));
 
+    // Focus inside the 15s debounce — no re-fire.
     await act(async () => {
       window.dispatchEvent(new Event("focus"));
     });
+    expect(mockFetchWithRefresh).toHaveBeenCalledTimes(1);
 
+    // Past the debounce → fires.
+    await act(async () => {
+      jest.advanceTimersByTime(16_000);
+      window.dispatchEvent(new Event("focus"));
+    });
     await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalledTimes(2));
   });
 
@@ -231,7 +236,7 @@ describe("<TeamsUnreadBadge />", () => {
     // Drop the count to zero on next poll → title restores.
     response = mkJsonResponse({ count: 0, total_chats: 5 });
     await act(async () => {
-      jest.advanceTimersByTime(30_000);
+      jest.advanceTimersByTime(60_000);
       await Promise.resolve();
     });
     await waitFor(() => expect(document.title).toBe("Instinct"));

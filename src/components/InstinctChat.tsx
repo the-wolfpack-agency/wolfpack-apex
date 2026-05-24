@@ -581,17 +581,12 @@ export default function InstinctChat({
         }),
       }).catch(() => undefined);
     },
-    onPollFired: () => {
-      if (!conversationId) return;
-      void fetchWithRefresh("/api/analytics", {
-        method: "POST",
-        headers: canonicalJsonHeaders(),
-        body: JSON.stringify({
-          event: "assistant.chat_synced_via_poll",
-          metadata: { conversation_id: conversationId },
-        }),
-      }).catch(() => undefined);
-    },
+    /* onPollFired previously emitted assistant.chat_synced_via_poll on
+     * every poll tick. That doubled chat-loop request volume (GET +
+     * analytics POST per tick) for telemetry we no longer need —
+     * silent-refresh is proven. The cross-tab broadcast path still
+     * emits assistant.chat_synced_via_broadcast so the rare real-sync
+     * event is still visible. */
   });
 
   // Auto-scroll on new messages — but NOT on empty mount. With zero

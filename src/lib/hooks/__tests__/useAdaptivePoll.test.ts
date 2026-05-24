@@ -63,24 +63,48 @@ describe("useAdaptivePoll", () => {
     expect(cb).toHaveBeenCalledTimes(1);
   });
 
-  it("fires immediately when the tab returns to visible", () => {
+  it("fires when the tab returns to visible AFTER the refocus debounce window", () => {
     const cb = jest.fn();
     renderHook(() =>
-      useAdaptivePoll(cb, { visibleMs: 1000, hiddenMs: 5000 }),
+      useAdaptivePoll(cb, { visibleMs: 1000, hiddenMs: 60_000 }),
     );
     act(() => setVisibility("hidden"));
     cb.mockClear();
+    // Advance past the 15s refocus debounce.
+    act(() => jest.advanceTimersByTime(16_000));
     act(() => setVisibility("visible"));
-    // Coming back: immediate fire so users see fresh data on tab return.
     expect(cb).toHaveBeenCalledTimes(1);
   });
 
-  it("fires on window focus", () => {
+  it("SKIPS the visibility/focus re-fire when last poll was within 15s (refocus debounce)", () => {
     const cb = jest.fn();
     renderHook(() =>
-      useAdaptivePoll(cb, { visibleMs: 9999, hiddenMs: 9999 }),
+      useAdaptivePoll(cb, { visibleMs: 60_000, hiddenMs: 60_000 }),
+    );
+    // Mount fired once at t=0 → lastFireAt = 0
+    cb.mockClear();
+    // Visibility flip 2s later — within debounce window → no re-fire
+    act(() => jest.advanceTimersByTime(2000));
+    act(() => setVisibility("hidden"));
+    act(() => setVisibility("visible"));
+    expect(cb).toHaveBeenCalledTimes(0);
+    // Focus event at t=10s — still within 15s window → no re-fire
+    act(() => jest.advanceTimersByTime(8000));
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(cb).toHaveBeenCalledTimes(0);
+    // Focus event at t=20s — past debounce → re-fires
+    act(() => jest.advanceTimersByTime(10_000));
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires on window focus when no recent poll has happened", () => {
+    const cb = jest.fn();
+    renderHook(() =>
+      useAdaptivePoll(cb, { visibleMs: 60_000, hiddenMs: 60_000 }),
     );
     cb.mockClear();
+    act(() => jest.advanceTimersByTime(16_000));
     act(() => {
       window.dispatchEvent(new Event("focus"));
     });

@@ -81,8 +81,10 @@ export function useAdaptivePoll(
   }, [isStable]);
 
   const stableCountRef = useRef(0);
+  const lastFireAtRef = useRef(0);
 
   const fire = useCallback(() => {
+    lastFireAtRef.current = Date.now();
     try {
       cbRef.current();
     } catch {
@@ -101,6 +103,18 @@ export function useAdaptivePoll(
       }
     }
   }, []);
+
+  /* If a poll fired in the last REFOCUS_DEBOUNCE_MS, skip the
+   * visibility/focus immediate re-fire. Dev work with frequent
+   * tab-switching used to fire all N pollers on every alt-tab,
+   * inflating idle traffic ~5x. The debounce caps that. */
+  const REFOCUS_DEBOUNCE_MS = 15_000;
+  const maybeRefireOnRefocus = useCallback(() => {
+    if (Date.now() - lastFireAtRef.current >= REFOCUS_DEBOUNCE_MS) {
+      stableCountRef.current = 0;
+      fire();
+    }
+  }, [fire]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -137,17 +151,16 @@ export function useAdaptivePoll(
 
     const onVisibility = (): void => {
       if (document.visibilityState === "visible") {
-        // Tab regained focus — reset stability so the user gets a
-        // fresh, fast poll on the next paint.
-        stableCountRef.current = 0;
-        fire();
+        // Tab regained focus — re-fire only if it's been a while
+        // (REFOCUS_DEBOUNCE_MS) since the last poll. Without this
+        // every alt-tab fires all N pollers immediately.
+        maybeRefireOnRefocus();
       }
       cancel();
       schedule();
     };
     const onFocus = (): void => {
-      stableCountRef.current = 0;
-      fire();
+      maybeRefireOnRefocus();
     };
 
     // Kick off: fire once + schedule the next tick.
@@ -161,5 +174,5 @@ export function useAdaptivePoll(
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", onFocus);
     };
-  }, [fire, visibleMs, hiddenMs, idleMs, idleAfterStablePolls]);
+  }, [fire, maybeRefireOnRefocus, visibleMs, hiddenMs, idleMs, idleAfterStablePolls]);
 }

@@ -94,24 +94,28 @@ describe("<EmailNavBadge />", () => {
     expect(container.querySelector('[data-testid="email-nav-badge"]')).toBeNull();
   });
 
-  it("re-polls on the visible interval", async () => {
+  it("re-polls on the visible interval (60s default)", async () => {
     mockFetchWithRefresh.mockResolvedValue(mkRes({ count: 1 }));
     render(<EmailNavBadge />);
     await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalledTimes(1));
-    // Visible cadence is 30s after the May 2026 polling-efficiency
-    // pass (was 5s — see useAdaptivePoll defaults).
     await act(async () => {
-      jest.advanceTimersByTime(30_000);
+      jest.advanceTimersByTime(60_000);
       await Promise.resolve();
     });
     expect(mockFetchWithRefresh).toHaveBeenCalledTimes(2);
   });
 
-  it("re-polls on window focus", async () => {
+  it("re-polls on window focus once the 15s refocus-debounce has elapsed", async () => {
     mockFetchWithRefresh.mockResolvedValue(mkRes({ count: 1 }));
     render(<EmailNavBadge />);
     await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalledTimes(1));
     await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(mockFetchWithRefresh).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      jest.advanceTimersByTime(16_000);
       window.dispatchEvent(new Event("focus"));
       await Promise.resolve();
     });
