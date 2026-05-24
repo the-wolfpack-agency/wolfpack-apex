@@ -29,11 +29,29 @@ interface CrossToolInsightsData {
   durationMs: number;
 }
 
+/* Trigger surface for "insights".
+ * - SPECIFIC: cross-tool / efficiency / across-my-tools framings
+ * - SHORT-FORM: bare "insights", "give me insights", "any insights",
+ *   "show insights", "show me insights", "what's interesting" — the
+ *   way a real user actually asks. The cross-tool widget is the right
+ *   surface for any of these because it fans across every integration.
+ *
+ * Guard: a NEGATIVE lookahead skips queries that scope insights to
+ * something specific (e.g. "marketing insights", "sales insights",
+ * "customer insights") — those should go to RAG, not the widget. */
 const INTENT_RE =
   /\b(cross[- ]?tool|cross[- ]?source|cross[- ]?cutting|efficiency)\s+insights?\b|\binsights?\s+across\s+(my\s+)?(tools?|integrations?)\b|\bwhat\s+should\s+i\s+know\b|\bwhat\s+insights?\s+(do\s+i\s+have|are\s+there)\b/i;
 
+const SHORT_INTENT_RE =
+  /^(insights?|give\s+me\s+insights?|any\s+insights?|show\s+(me\s+)?insights?|what\s+insights?|i\s+want\s+insights?)\s*[!.?]*$/i;
+
+const SCOPED_INSIGHTS_RE =
+  /\b(marketing|sales|customer|product|user|growth|financial|revenue|conversion|engagement|traffic|campaign|seo|client|deal)\s+insights?\b/i;
+
 function matchIntent(message: string): Params | null {
-  if (!INTENT_RE.test(message.trim())) return null;
+  const m = message.trim();
+  if (SCOPED_INSIGHTS_RE.test(m)) return null; // scoped → RAG, not widget
+  if (!INTENT_RE.test(m) && !SHORT_INTENT_RE.test(m)) return null;
   return { lookbackDays: 30 };
 }
 

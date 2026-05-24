@@ -237,6 +237,31 @@ describe("saveAnswer", () => {
     expect(result).not.toBeNull();
     expect(mockQuery).toHaveBeenCalled();
   });
+
+  /* Regression for 2026-05-24: a typo "insighta" generated a clarifying
+   * AI response ("It seems you might be referring to 'Insighta.' Could
+   * you clarify your question?"). That low-confidence answer got
+   * cached, then served via pg_trgm fuzzy match to subsequent
+   * "insights" queries as if it were knowledge. The cache must veto
+   * any answer that's itself asking for clarification. */
+  test.each([
+    "Did you mean Insighta?",
+    "It seems you might be referring to 'Foo.' Could you clarify your question or provide more context?",
+    "Could you please specify what you mean by foo?",
+    "Can you provide more context about what you're asking?",
+    "_Note: this answer may need a second look. answer mentions 2 unfamiliar names: Insighta, Could._",
+  ])("refuses to cache low-confidence clarifying answer: %s", async (ans) => {
+    setDatabaseUrl("postgres://localhost/test");
+    const result = await saveAnswer("any question", ans, "llm", "u1");
+    expect(result).toBeNull();
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(trackEvent).toHaveBeenCalledWith(
+      "knowledge.answer_rejected",
+      "u1",
+      "dev",
+      expect.objectContaining({ reason: "low_confidence_clarifying_answer" }),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -290,6 +315,25 @@ describe("searchKnowledge", () => {
     const results = await searchKnowledge("auth");
     expect(results.length).toBeGreaterThan(0);
     expect(results[0].question.toLowerCase()).toContain("auth");
+  });
+
+  test.each(["", "  ", "x", "ai", "hi!"])(
+    "short query (<4 chars) returns [] without hitting DB: %p",
+    async (q) => {
+      setDatabaseUrl("postgres://localhost/test");
+      const results = await searchKnowledge(q);
+      expect(results).toEqual([]);
+      expect(mockSafeQuery).not.toHaveBeenCalled();
+    },
+  );
+
+  test("similarity threshold is at least 0.55 (was 0.1; pinned 2026-05-24 after insighta/insights cache poisoning)", async () => {
+    setDatabaseUrl("postgres://localhost/test");
+    mockSafeQuery.mockResolvedValueOnce({ rows: [], fromCache: false });
+    await searchKnowledge("insights");
+    const calledSql = mockSafeQuery.mock.calls[0][0] as string;
+    expect(calledSql).toMatch(/similarity\(question,\s*\$1\)\s*>\s*0\.55/);
+    expect(calledSql).not.toMatch(/similarity\(question,\s*\$1\)\s*>\s*0\.1\b/);
   });
 });
 

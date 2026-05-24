@@ -32,6 +32,19 @@ describe("intent matching", () => {
     "cross tool insights",
     "insights across my tools",
     "what insights are there",
+    /* SHORT-FORM phrasings real users actually type. Added
+     * 2026-05-24 after a user typed "give me insights!" and the
+     * regex missed it, routing to RAG cache which served a
+     * stale typo-poisoned answer. */
+    "insights",
+    "insights!",
+    "give me insights",
+    "give me insights!",
+    "any insights",
+    "show insights",
+    "show me insights",
+    "what insights",
+    "I want insights",
   ])("'%s' matches", (q) => {
     expect(match(q)).not.toBeNull();
   });
@@ -42,6 +55,14 @@ describe("intent matching", () => {
     "show vercel deploys for wolfpack-auto",
     "calendar",
     "what is on my calendar today",
+    /* Scoped "<topic> insights" phrasings stay on RAG, not the
+     * cross-tool widget. */
+    "marketing insights",
+    "sales insights for Q3",
+    "customer insights",
+    "product insights",
+    "growth insights",
+    "what marketing insights do I have",
   ])("'%s' does NOT match", (q) => {
     expect(match(q)).toBeNull();
   });

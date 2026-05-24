@@ -185,6 +185,28 @@ function answerImpliesFuturePastEvent(answer: string, now = new Date()): boolean
   return false;
 }
 
+/* Low-confidence answers — "did you mean", "could you clarify", or
+ * the AI's own self-warning that an answer "may need a second look /
+ * mentions unfamiliar names". Caching these is actively harmful:
+ * a 2026-05-24 incident saw a typo "insighta" produce a clarifying
+ * AI response which then got served (via pg_trgm fuzzy match) to
+ * every subsequent "insights" query as a zero-token "knowledge base"
+ * hit. Reject upfront. */
+const LOW_CONFIDENCE_PATTERNS = [
+  /\bdid you mean\b/i,
+  /\bcould you (please )?(clarify|provide more context|specify|elaborate)\b/i,
+  /\bcan you (please )?(clarify|provide more context|specify|elaborate)\b/i,
+  /\bmay need a second look\b/i,
+  /\bunfamiliar names?\b/i,
+  /\bnot sure (what|who|which) you('|')?re (referring to|asking about)\b/i,
+  /\bi don('|')?t (have|see) (enough|any) (context|information) to/i,
+];
+
+function isLowConfidenceAnswer(answer: string): boolean {
+  if (!answer) return false;
+  return LOW_CONFIDENCE_PATTERNS.some((re) => re.test(answer));
+}
+
 // ---------------------------------------------------------------------------
 // saveAnswer
 // ---------------------------------------------------------------------------
@@ -202,6 +224,15 @@ export async function saveAnswer(
   if (answerImpliesFuturePastEvent(answer)) {
     trackEvent("knowledge.answer_rejected", userId, "dev", {
       reason: "past_event_future_date",
+      source,
+      tokens_used: tokensUsed ?? 0,
+    });
+    return null;
+  }
+  // Reject low-confidence clarifying answers — see LOW_CONFIDENCE_PATTERNS.
+  if (isLowConfidenceAnswer(answer)) {
+    trackEvent("knowledge.answer_rejected", userId, "dev", {
+      reason: "low_confidence_clarifying_answer",
       source,
       tokens_used: tokensUsed ?? 0,
     });
@@ -447,10 +478,25 @@ export async function searchKnowledge(
     );
   }
 
+  /* Similarity threshold raised 2026-05-24 from 0.1 → 0.55.
+   * pg_trgm at 0.1 was matching almost any pair of short queries
+   * sharing a few letters — e.g. typo "insighta" + later real query
+   * "insights" matched and served a cached "did you mean" answer
+   * as if it were knowledge. 0.55 keeps near-duplicates (paraphrases,
+   * plural/singular) while filtering out single-character typos and
+   * unrelated short strings. The substring ILIKE branches are kept
+   * because exact-substring matches are intentional ("vercel" finds
+   * cached entries about Vercel) but bounded by 4+ chars to avoid
+   * matching any random short token. */
+  if (searchQuery.trim().length < 4) {
+    /* Bare 1-3 char queries can't be searched usefully without
+     * generating noise. Return empty; the LLM path will run. */
+    return [];
+  }
   const { rows } = await safeQuery<Record<string, unknown>>(
     `SELECT *, similarity(question, $1) AS sim
      FROM instinct_knowledge
-     WHERE similarity(question, $1) > 0.1
+     WHERE similarity(question, $1) > 0.55
         OR question ILIKE '%' || $1 || '%'
         OR answer ILIKE '%' || $1 || '%'
      ORDER BY sim DESC, view_count DESC
