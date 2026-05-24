@@ -82,6 +82,29 @@ test("Suggestions header button is in the DOM", async () => {
   ).toBeInTheDocument();
 });
 
+test("on mobile the Suggestions + New buttons collapse to icon-only so the brand name doesn't truncate", async () => {
+  /* Regression for 2026-05-24: on iPhone the header read "Wol…
+   * Suggestions  + New" — the brand name was cropped to "Wol" because
+   * the two text-bearing buttons consumed the row. Fix: text labels
+   * wrapped in `hidden sm:inline`, icons always shown, aria-label
+   * preserves screen-reader access. Pin both behaviors so a future
+   * refactor doesn't quietly drop the responsive collapse. */
+  const InstinctChat = await importComponent();
+  await act(async () => {
+    render(<InstinctChat />);
+  });
+  const suggestionsBtn = screen.getByTestId("assistant-suggestions-button");
+  // The visible "Suggestions" / "New" labels must each be inside a
+  // `hidden sm:inline` span — present in the DOM but hidden < 640px.
+  const suggestionsLabel = suggestionsBtn.querySelector("span");
+  expect(suggestionsLabel).not.toBeNull();
+  expect(suggestionsLabel!.className).toContain("hidden");
+  expect(suggestionsLabel!.className).toContain("sm:inline");
+  // aria-label keeps the action discoverable to screen readers when
+  // the visible label is hidden.
+  expect(suggestionsBtn).toHaveAttribute("aria-label", "Show suggestions");
+});
+
 test("clicking the Suggestions button opens the overlay", async () => {
   const InstinctChat = await importComponent();
   await act(async () => {
