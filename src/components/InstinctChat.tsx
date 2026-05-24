@@ -21,6 +21,7 @@ import { ChatWidget } from "@/components/ChatWidget";
 import type { FormSpec } from "@/lib/assistant/forms/types";
 import type { WidgetSpec } from "@/lib/assistant/widgets/types";
 import { AssistantStarterPrompts } from "@/components/AssistantStarterPrompts";
+import { AssistantSuggestionsOverlay } from "@/components/AssistantSuggestionsOverlay";
 import { AssistantWelcomeModal } from "@/components/AssistantWelcomeModal";
 
 // ---------------------------------------------------------------------------
@@ -164,6 +165,14 @@ export default function InstinctChat({
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  /* Suggestions overlay — persistent re-entry point for the starter
+   * prompts after the first message has been sent. Wired to the
+   * header "Suggestions" button AND to the `/help` / `/suggestions`
+   * slash commands so power users can trigger from the keyboard. */
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [suggestionsSource, setSuggestionsSource] = useState<
+    "header_button" | "slash_command"
+  >("header_button");
   /* Desktop-only collapse — independent of `sidebarOpen` (mobile drawer).
    * Persisted to localStorage so a user who prefers the wider chat area
    * keeps it across sessions. */
@@ -715,6 +724,18 @@ export default function InstinctChat({
     const trimmed = (overrideText ?? input).trim();
     if (!trimmed || loading) return;
 
+    /* Client-side slash commands. `/help` and `/suggestions` open the
+     * suggestions overlay without ever hitting /api/assistant — keeps
+     * the discoverability re-entry point keyboard-fast for power
+     * users and zero-token. The composer is cleared so the user can
+     * type their actual question after picking a chip. */
+    if (/^\/(help|suggestions)\s*$/i.test(trimmed)) {
+      setInput("");
+      setSuggestionsSource("slash_command");
+      setSuggestionsOpen(true);
+      return;
+    }
+
     const currentAttachments = [...attachedFiles];
 
     const userMsg: Message = {
@@ -1219,6 +1240,16 @@ export default function InstinctChat({
           setTimeout(() => inputRef.current?.focus(), 0);
         }}
       />
+      <AssistantSuggestionsOverlay
+        open={suggestionsOpen}
+        source={suggestionsSource}
+        onPickPrompt={(prompt) => {
+          setInput(prompt);
+          setSuggestionsOpen(false);
+          setTimeout(() => inputRef.current?.focus(), 0);
+        }}
+        onClose={() => setSuggestionsOpen(false)}
+      />
       <div className="flex h-full">
         {/* Conversation sidebar */}
         {showHistory && (
@@ -1433,6 +1464,26 @@ export default function InstinctChat({
             </h1>
 
             <div className="flex-1" />
+
+            <button
+              onClick={() => {
+                setSuggestionsSource("header_button");
+                setSuggestionsOpen(true);
+              }}
+              data-testid="assistant-suggestions-button"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+              style={{
+                background: "var(--wp-dark-surface2, #222)",
+                color: "var(--wp-text-dim, #aaa)",
+              }}
+              aria-label="Show suggestions"
+              title="Suggestions (or type /help)"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
+              </svg>
+              Suggestions
+            </button>
 
             <button
               onClick={handleNewConversation}
