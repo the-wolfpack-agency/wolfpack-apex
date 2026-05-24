@@ -147,7 +147,13 @@ export default function InstinctChat({
   pageContext,
   contextData,
   position = "inline",
-  height = "calc(100vh - 120px)",
+  /* 100dvh (not 100vh): iOS Safari reports `vh` against the LARGE
+   *  viewport (no browser chrome), which pushes the bottom of the
+   *  container behind the URL/toolbar. `dvh` is the dynamic viewport
+   *  that shrinks as chrome appears. Combined with the composer's
+   *  safe-area-inset padding below, the input clears Safari's
+   *  bottom toolbar on every iOS state. */
+  height = "calc(100dvh - 120px)",
   showHistory = false,
   showSource = true,
   showRating = true,
@@ -1913,9 +1919,13 @@ export default function InstinctChat({
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input area */}
+          {/* Input area — pb uses env(safe-area-inset-bottom) so the
+              composer clears the iOS Safari bottom chrome (collapsed
+              URL bar + toolbar) instead of being half-covered by it.
+              max() keeps the existing 0.75rem baseline on
+              browsers/devices that report 0 for the inset. */}
           <div
-            className="shrink-0 border-t px-4 py-3"
+            className="shrink-0 border-t px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
             style={{ borderColor: "var(--wp-dark-border, #333)" }}
           >
             {/* File error message */}
