@@ -110,7 +110,13 @@ export interface InstinctChatProps {
   position?: "inline" | "floating";
   /** CSS height for inline mode */
   height?: string;
-  /** Show conversation sidebar */
+  /** Show conversation sidebar. Default changed to `false` 2026-05-24:
+   *  auto-derived titles ("what?", "upload", "feedback") were useless,
+   *  and clicking an entry was the entry point for the "new message
+   *  attached to old conversation" confusion. Underlying state +
+   *  loadConversations + click handlers are still wired so any caller
+   *  that explicitly passes `showHistory={true}` (e.g. an admin debug
+   *  view) gets the full panel back with no other changes. */
   showHistory?: boolean;
   /** Show source badges on assistant messages */
   showSource?: boolean;
@@ -142,7 +148,7 @@ export default function InstinctChat({
   contextData,
   position = "inline",
   height = "calc(100vh - 120px)",
-  showHistory = true,
+  showHistory = false,
   showSource = true,
   showRating = true,
 }: InstinctChatProps) {
