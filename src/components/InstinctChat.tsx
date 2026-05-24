@@ -701,8 +701,12 @@ export default function InstinctChat({
     }).catch(() => undefined);
   }
 
-  async function handleSend() {
-    const trimmed = input.trim();
+  async function handleSend(overrideText?: string) {
+    /* overrideText path: a widget (e.g. ClarifyWidget) dispatched
+     * instinct:autosubmit with a corrected query. We send it directly
+     * without waiting for setInput to flush through React state, which
+     * would otherwise be one render late. */
+    const trimmed = (overrideText ?? input).trim();
     if (!trimmed || loading) return;
 
     const currentAttachments = [...attachedFiles];
@@ -1024,6 +1028,30 @@ export default function InstinctChat({
       handleSend();
     }
   }
+
+  /* Listen for ClarifyWidget chip clicks (and any future widget that
+   * wants to auto-fire a corrected prompt). The widget dispatches a
+   * window-level CustomEvent so widgets stay decoupled from the chat
+   * composer. We route through a ref so the listener always sees the
+   * latest handleSend closure (which itself reads loading/messages
+   * state — stale closures would be a real bug here). */
+  const handleSendRef = useRef(handleSend);
+  useEffect(() => {
+    handleSendRef.current = handleSend;
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    function onAutoSubmit(ev: Event) {
+      const detail = (ev as CustomEvent<{ prompt?: string }>).detail;
+      const prompt = detail?.prompt?.trim();
+      if (!prompt) return;
+      setInput(prompt);
+      void handleSendRef.current(prompt);
+    }
+    window.addEventListener("instinct:autosubmit", onAutoSubmit);
+    return () =>
+      window.removeEventListener("instinct:autosubmit", onAutoSubmit);
+  }, []);
 
   async function handleRate(msgId: string | undefined, rating: number) {
     if (!msgId) return;
@@ -2038,7 +2066,7 @@ export default function InstinctChat({
                 </button>
               ) : (
                 <button
-                  onClick={handleSend}
+                  onClick={() => handleSend()}
                   disabled={!input.trim()}
                   data-testid="assistant-send-btn"
                   className="wp-send-btn shrink-0 rounded-xl px-4 py-3 text-sm font-medium disabled:opacity-40 transition-transform active:scale-95"

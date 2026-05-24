@@ -555,6 +555,35 @@ export interface ScanHrDocWidgetSpec {
   docType?: string;
 }
 
+/** ClarifyWidget — shown when the assistant detects the user query is
+ *  likely a typo or ambiguous short phrase. Instead of generating a
+ *  long "did you mean X?" prose answer (which wastes tokens AND used
+ *  to poison the cache), we surface 1-tap suggestion chips. Clicking
+ *  a chip sets the chat input to the corrected query and auto-submits.
+ *
+ *  Build-time UX: zero tokens (no LLM call), <100ms response. */
+export interface ClarifySuggestion {
+  /** What the chip displays — e.g. "insights". */
+  label: string;
+  /** The actual query string sent on click. Usually equals label but
+   *  can differ (e.g. label "Show me cross-tool insights",
+   *  query "show me cross-tool insights"). */
+  query: string;
+  /** Optional one-line hint shown below the chip
+   *  ("Fans across calendar, email, GitHub, Vercel"). */
+  hint?: string;
+}
+
+export interface ClarifyWidgetSpec {
+  kind: "clarify";
+  /** Header text ("Did you mean…?"). */
+  title: string;
+  /** The original user query, echoed so they can confirm what they typed. */
+  originalQuery: string;
+  /** Ordered list of suggestions (most-likely first). */
+  suggestions: ClarifySuggestion[];
+}
+
 /** Discriminated union of every widget kind. Add new entries as the
  *  framework expands. */
 export type WidgetSpec =
@@ -577,4 +606,5 @@ export type WidgetSpec =
   | TimeLogWidgetSpec
   | ScanReceiptWidgetSpec
   | ScanInvoiceWidgetSpec
-  | ScanHrDocWidgetSpec;
+  | ScanHrDocWidgetSpec
+  | ClarifyWidgetSpec;

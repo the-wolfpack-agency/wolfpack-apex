@@ -125,6 +125,10 @@ import "./cross-tool-insights-widget-tool";
 /* Integrations list — discoverability surface auto-discovered from
  * the search-provider + tool registries. */
 import "./integrations-list-widget-tool";
+/* Clarify — 1-tap "did you mean…?" chips for short typo'd queries.
+ * Zero AI tokens; runs before the LLM path so a typo like "insighta"
+ * gets chip suggestions instead of a cache-poisoning prose answer. */
+import "./clarify-widget-tool";
 
 /* Empty-state demo tools — weather / headlines / fx. Backed by free
  * public APIs (Open-Meteo, BBC RSS, exchangerate.host) so a brand-new
