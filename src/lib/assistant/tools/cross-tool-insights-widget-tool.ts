@@ -46,9 +46,6 @@ export const crossToolInsightsWidgetTool: ToolDef<Params, CrossToolInsightsData>
   matchIntent,
   async handler(params, ctx): Promise<ToolResult<CrossToolInsightsData>> {
     const started = Date.now();
-    /* MS-Graph-backed generators are deferred to v2 (see cross-tool-
-     * generators.ts). v1 ships GitHub + Vercel patterns which don't
-     * need a token here. */
     const { insights, generatorOutcomes } = await runAllInsightGenerators({
       userId: ctx.userId,
       userRole: ctx.userRole,
@@ -56,9 +53,24 @@ export const crossToolInsightsWidgetTool: ToolDef<Params, CrossToolInsightsData>
     });
     const durationMs = Date.now() - started;
 
+    /* Sort the cross-tool items (≥2 sources) ahead of single-source
+     * items so the widget leads with the "only Instinct can see this"
+     * material. Within each band the aggregator already sorted by
+     * severity then signalStrength. */
+    const sorted = [...insights].sort((a, b) => {
+      const aCross = a.sources.length >= 2 ? 0 : 1;
+      const bCross = b.sources.length >= 2 ? 0 : 1;
+      return aCross - bCross;
+    });
+    const crossToolCount = sorted.filter((i) => i.sources.length >= 2).length;
+    const highCount = sorted.filter((i) => i.severity === "high").length;
+    const integrationCount = new Set(sorted.flatMap((i) => i.sources)).size;
+
     trackEvent("assistant.widget_offered", ctx.userId, ctx.userRole, {
       widget_kind: "cross_tool_insights",
-      insight_count: insights.length,
+      insight_count: sorted.length,
+      cross_tool_count: crossToolCount,
+      high_signal_count: highCount,
       generator_count: generatorOutcomes.length,
       duration_ms: durationMs,
       ok: true,
@@ -67,17 +79,17 @@ export const crossToolInsightsWidgetTool: ToolDef<Params, CrossToolInsightsData>
     const spec: WidgetSpec = {
       kind: "cross_tool_insights",
       title:
-        insights.length === 0
+        sorted.length === 0
           ? "No cross-tool insights right now"
-          : `${insights.length} cross-tool insight${insights.length === 1 ? "" : "s"}`,
+          : crossToolCount > 0
+            ? `${crossToolCount} cross-tool insight${crossToolCount === 1 ? "" : "s"}${sorted.length > crossToolCount ? ` (+ ${sorted.length - crossToolCount} single-tool)` : ""}`
+            : `${sorted.length} single-tool insight${sorted.length === 1 ? "" : "s"}`,
       subtitle:
-        insights.length === 0
-          ? `Ran ${generatorOutcomes.filter((g) => g.ok).length} generators across ${generatorOutcomes.length} patterns. All clean.`
-          : `Across ${new Set(insights.flatMap((i) => i.sources)).size} integration${
-              new Set(insights.flatMap((i) => i.sources)).size === 1 ? "" : "s"
-            }, ${generatorOutcomes.filter((g) => g.ok).length} of ${generatorOutcomes.length} patterns checked.`,
+        sorted.length === 0
+          ? `Ran ${generatorOutcomes.filter((g) => g.ok).length} of ${generatorOutcomes.length} patterns. All clean — connect more tools (calendar, email) for richer cross-tool signal.`
+          : `Across ${integrationCount} integration${integrationCount === 1 ? "" : "s"}, ${generatorOutcomes.filter((g) => g.ok).length} of ${generatorOutcomes.length} patterns checked.`,
       lookbackDays: params.lookbackDays,
-      items: insights.map((i) => ({
+      items: sorted.map((i) => ({
         id: i.id,
         generator: i.generator,
         severity: i.severity,
@@ -91,11 +103,11 @@ export const crossToolInsightsWidgetTool: ToolDef<Params, CrossToolInsightsData>
     };
 
     const answer =
-      insights.length === 0
+      sorted.length === 0
         ? "No cross-tool insights to flag right now. I ran all generators across your connected integrations and nothing crossed the signal threshold."
-        : `Found ${insights.length} cross-tool insight${insights.length === 1 ? "" : "s"} (${
-            insights.filter((i) => i.severity === "high").length
-          } high-signal). Each one combines data from at least two of your tools.`;
+        : crossToolCount > 0
+          ? `Found ${crossToolCount} cross-tool insight${crossToolCount === 1 ? "" : "s"} (${highCount} high-signal). Cross-tool means combining data from 2+ of your integrations — patterns no single tool can see.`
+          : `Found ${sorted.length} insight${sorted.length === 1 ? "" : "s"} (${highCount} high-signal). All from a single tool — connect calendar/email for cross-tool patterns (e.g. PRs from people you're meeting this week).`;
 
     return {
       ok: true,
