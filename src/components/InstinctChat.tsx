@@ -22,6 +22,7 @@ import type { FormSpec } from "@/lib/assistant/forms/types";
 import type { WidgetSpec } from "@/lib/assistant/widgets/types";
 import { AssistantStarterPrompts } from "@/components/AssistantStarterPrompts";
 import { AssistantSuggestionsOverlay } from "@/components/AssistantSuggestionsOverlay";
+import { AssistantHistoryOverlay } from "@/components/AssistantHistoryOverlay";
 import { AssistantWelcomeModal } from "@/components/AssistantWelcomeModal";
 
 // ---------------------------------------------------------------------------
@@ -171,6 +172,14 @@ export default function InstinctChat({
    * slash commands so power users can trigger from the keyboard. */
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [suggestionsSource, setSuggestionsSource] = useState<
+    "header_button" | "slash_command"
+  >("header_button");
+  /* History overlay — surfaces the user's recent submitted prompts.
+   * Entry points: header "History" button (next to Suggestions) +
+   * `/history` slash command. Click a row → composer is populated;
+   * never auto-sent (the user can edit first). */
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historySource, setHistorySource] = useState<
     "header_button" | "slash_command"
   >("header_button");
   /* Desktop-only collapse — independent of `sidebarOpen` (mobile drawer).
@@ -736,6 +745,16 @@ export default function InstinctChat({
       return;
     }
 
+    /* `/history` opens the prompt-history overlay — same keyboard
+     * affordance as `/help`. Composer cleared so the user can either
+     * pick a recent prompt or type fresh after dismissing. */
+    if (/^\/history\s*$/i.test(trimmed)) {
+      setInput("");
+      setHistorySource("slash_command");
+      setHistoryOpen(true);
+      return;
+    }
+
     const currentAttachments = [...attachedFiles];
 
     const userMsg: Message = {
@@ -1250,6 +1269,18 @@ export default function InstinctChat({
         }}
         onClose={() => setSuggestionsOpen(false)}
       />
+      <AssistantHistoryOverlay
+        open={historyOpen}
+        source={historySource}
+        onPickPrompt={(prompt) => {
+          /* Fill the composer but DO NOT auto-send. Lets the user
+           * edit before re-running. */
+          setInput(prompt);
+          setHistoryOpen(false);
+          setTimeout(() => inputRef.current?.focus(), 0);
+        }}
+        onClose={() => setHistoryOpen(false)}
+      />
       <div className="flex h-full">
         {/* Conversation sidebar */}
         {showHistory && (
@@ -1469,6 +1500,28 @@ export default function InstinctChat({
                 (sm:inline label) so "Wolfpack Assistant" doesn't truncate
                 to "Wol…". Touch targets stay ≥ 32px via px-2 + py-1.5 on
                 the icon-only form. aria-label is set on both forms. */}
+            <button
+              onClick={() => {
+                setHistorySource("header_button");
+                setHistoryOpen(true);
+              }}
+              data-testid="assistant-history-button"
+              className="shrink-0 flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+              style={{
+                background: "var(--wp-dark-surface2, #222)",
+                color: "var(--wp-text-dim, #aaa)",
+              }}
+              aria-label="Show prompt history"
+              title="Your recent prompts (or type /history)"
+            >
+              {/* Clock-rewind glyph — "look back" without overloading
+                  the up-arrow used by other apps' send-recall affordance. */}
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a5 5 0 015 5v0a5 5 0 01-5 5H9" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 6L3 10l4 4" />
+              </svg>
+              <span className="hidden sm:inline">History</span>
+            </button>
             <button
               onClick={() => {
                 setSuggestionsSource("header_button");
