@@ -209,6 +209,12 @@ export interface ChatMessage {
   /** Populated for `systemEventMessage`. */
   eventDetail?: ChatMessageEventDetail;
   /**
+   * Set by Graph when the sender deleted the message. Renderers must
+   * skip these so the thread doesn't show a blank bubble where the
+   * deleted content used to be. 2026-06-01 fix.
+   */
+  deletedDateTime?: string;
+  /**
    * Set to "me" on optimistic messages appended by the composer before
    * the server round-trip resolves. Allows the UI to distinguish
    * pending local writes from server-confirmed ones.

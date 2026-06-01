@@ -239,6 +239,83 @@ describe("isNoiseMessage — filters truly blank Teams rows from the inbox", () 
     };
     expect(isNoiseMessage(m)).toBe(false);
   });
+
+  /* Regression 2026-06-01: a Homyk-OOO chat showed 4 blank bubbles
+     dated 5/11/2026. Teams emits messages with custom tags like
+     <emoji>, <at>, <attachment>, <systemcontent>, <itemmention>
+     whose body.content is non-empty but whose parser-extracted text
+     is empty. The previous narrow regex (div|p|br|span only) didn't
+     strip those tags, so isNoiseMessage returned false and the
+     bubble rendered empty. */
+  test("Teams <emoji></emoji>-only wrapper → noise", () => {
+    const m: RenderableMessage = {
+      id: "n8",
+      messageType: "message",
+      body: { content: "<emoji></emoji>", contentType: "html" },
+      bodyText: "",
+      attachments: [],
+    };
+    expect(isNoiseMessage(m)).toBe(true);
+  });
+
+  test("Teams <attachment id='1'></attachment>-only wrapper → noise", () => {
+    const m: RenderableMessage = {
+      id: "n9",
+      messageType: "message",
+      body: {
+        content: '<attachment id="1"></attachment>',
+        contentType: "html",
+      },
+      bodyText: "",
+      attachments: [],
+    };
+    expect(isNoiseMessage(m)).toBe(true);
+  });
+
+  test("Teams <itemmention></itemmention>-only wrapper → noise", () => {
+    const m: RenderableMessage = {
+      id: "n10",
+      messageType: "message",
+      body: { content: "<itemmention></itemmention>", contentType: "html" },
+      bodyText: "",
+      attachments: [],
+    };
+    expect(isNoiseMessage(m)).toBe(true);
+  });
+
+  test("<at>-only mention WITH text → NOT noise (parser pulls the name)", () => {
+    const m: RenderableMessage = {
+      id: "n11",
+      messageType: "message",
+      body: { content: '<at id="0">Nick</at>', contentType: "html" },
+      bodyText: "Nick",
+      attachments: [],
+    };
+    expect(isNoiseMessage(m)).toBe(false);
+  });
+
+  test("deletedDateTime set → noise regardless of body content", () => {
+    const m: RenderableMessage = {
+      id: "n12",
+      messageType: "message",
+      body: { content: "<div>This was here</div>", contentType: "html" },
+      bodyText: "This was here",
+      deletedDateTime: "2026-05-11T12:34:56Z",
+      attachments: [],
+    };
+    expect(isNoiseMessage(m)).toBe(true);
+  });
+
+  test("zero-width space &zwj; / &#8203; → noise", () => {
+    const m: RenderableMessage = {
+      id: "n13",
+      messageType: "message",
+      body: { content: "<p>&zwj;&#8203;</p>", contentType: "html" },
+      bodyText: "",
+      attachments: [],
+    };
+    expect(isNoiseMessage(m)).toBe(true);
+  });
 });
 
 describe("SystemEventPill rendering", () => {

@@ -44,6 +44,16 @@ export interface ChatLastMessagePreview {
   bodyText: string;
   from: ChatMessageFrom;
   createdDateTime: string;
+  /**
+   * `message`, `systemEventMessage`, etc. Used by the unread-count
+   * endpoint to skip system events (call ended, member added, meeting
+   * notes) — those aren't actionable "new messages" from the user's
+   * perspective and would otherwise flash the badge with no real
+   * content to read.
+   */
+  messageType?: string;
+  /** Set by Graph when the last preview message was deleted. */
+  deletedDateTime?: string;
 }
 
 export interface Chat {
@@ -113,6 +123,12 @@ export interface ChatMessage {
   attachments?: ChatMessageAttachment[];
   /** Populated for systemEventMessage. */
   eventDetail?: ChatMessageEventDetail;
+  /**
+   * Set by Graph when the sender deletes the message. Body is usually
+   * blanked to `<div></div>`. Renderers must filter these so the thread
+   * never shows an empty bubble for a tombstoned row.
+   */
+  deletedDateTime?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +159,8 @@ interface RawLastMessagePreview {
   body?: RawBody;
   from?: RawIdentitySet;
   createdDateTime?: string;
+  messageType?: unknown;
+  deletedDateTime?: unknown;
 }
 
 interface RawChat {
@@ -176,6 +194,7 @@ interface RawChatMessage {
   messageType?: unknown;
   attachments?: RawAttachment[] | unknown;
   eventDetail?: RawEventDetail | unknown;
+  deletedDateTime?: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,7 +254,7 @@ function normalizeChat(raw: RawChat): Chat {
   };
   if (raw.lastMessagePreview) {
     const { body, bodyText } = normalizeBody(raw.lastMessagePreview.body);
-    chat.lastMessagePreview = {
+    const preview: ChatLastMessagePreview = {
       body,
       bodyText,
       from: normalizeFrom(raw.lastMessagePreview.from),
@@ -244,6 +263,19 @@ function normalizeChat(raw: RawChat): Chat {
           ? raw.lastMessagePreview.createdDateTime
           : "",
     };
+    if (
+      typeof raw.lastMessagePreview.messageType === "string" &&
+      raw.lastMessagePreview.messageType.length > 0
+    ) {
+      preview.messageType = raw.lastMessagePreview.messageType;
+    }
+    if (
+      typeof raw.lastMessagePreview.deletedDateTime === "string" &&
+      raw.lastMessagePreview.deletedDateTime.length > 0
+    ) {
+      preview.deletedDateTime = raw.lastMessagePreview.deletedDateTime;
+    }
+    chat.lastMessagePreview = preview;
   }
   return chat;
 }
@@ -318,6 +350,10 @@ function normalizeMessage(raw: RawChatMessage): ChatMessage {
       : undefined;
   const attachments = normalizeAttachments(raw.attachments);
   const eventDetail = normalizeEventDetail(raw.eventDetail);
+  const deletedDateTime =
+    typeof raw.deletedDateTime === "string" && raw.deletedDateTime.length > 0
+      ? raw.deletedDateTime
+      : undefined;
   const out: ChatMessage = {
     id: raw.id,
     from: normalizeFrom(raw.from),
@@ -328,6 +364,7 @@ function normalizeMessage(raw: RawChatMessage): ChatMessage {
   if (messageType) out.messageType = messageType;
   if (attachments) out.attachments = attachments;
   if (eventDetail) out.eventDetail = eventDetail;
+  if (deletedDateTime) out.deletedDateTime = deletedDateTime;
   return out;
 }
 

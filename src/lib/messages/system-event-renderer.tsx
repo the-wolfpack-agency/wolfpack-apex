@@ -49,6 +49,8 @@ export interface RenderableMessage {
   messageType?: string;
   attachments?: ChatMessageAttachment[];
   eventDetail?: ChatMessageEventDetail;
+  /** ISO timestamp set by Graph when the user deletes the message. */
+  deletedDateTime?: string | null;
 }
 
 /**
@@ -182,8 +184,10 @@ export function shouldRenderAsPill(message: RenderableMessage): boolean {
 /**
  * True when the message carries no useful payload at all — empty body
  * text, no attachments, not a system event. Teams emits these for
- * reactions, deleted messages, and various edge cases. Rendering them
- * as a normal bubble produces a noise row with only a timestamp ("21h")
+ * reactions, deleted messages, OOO auto-replies that resolve to empty
+ * bodies, and various Graph chatEvent subtypes whose `messageType` is
+ * `message` (not `systemEventMessage`). Rendering them as a normal
+ * bubble produces a noise row with only a timestamp ("21h" / "5/11/2026")
  * and no content — every dealer who looked at the inbox flagged this
  * as broken. Filter them out at the page level.
  *
@@ -196,18 +200,32 @@ export function isNoiseMessage(message: RenderableMessage): boolean {
   if (Array.isArray(message.attachments) && message.attachments.length > 0) {
     return false;
   }
+  /* Graph sets `deletedDateTime` when the sender deletes the message.
+     The body usually becomes `<div></div>` but the deletion itself is
+     the canonical signal. Treat as noise regardless of body content. */
+  if (message.deletedDateTime) return true;
+
+  /* `bodyText` is parser-extracted plain text — set in
+     normalizeBody via htmlToText. If it has content, the user sees
+     something readable; not noise. */
   const bodyText = (message.bodyText || "").trim();
-  const bodyContent = (message.body?.content || "").trim();
-  /* Strip the common Teams empty-wrapper HTML before checking length.
-     "<div></div>", "<p>&nbsp;</p>", "<p><br></p>" all read as empty
-     to a human. We don't import a full HTML stripper here — page-level
-     stripHtmlToText would create a circular dependency — but the
-     common wrappers are well-known and worth catching. */
-  const visible = (bodyText.length > 0 ? bodyText : bodyContent)
-    .replace(/<\s*\/?\s*(?:div|p|br|span)[^>]*>/gi, "")
-    .replace(/&nbsp;|&#160;|\s+/g, "")
+  if (bodyText.length > 0) return false;
+
+  /* Fallback for callers that don't pre-populate bodyText (older
+     fixtures, hand-built RenderableMessages). Strip ALL HTML tags +
+     entities + whitespace; if nothing remains, the bubble would be
+     blank. We use a broad `<[^>]+>` strip rather than the narrow
+     div/p/br/span pattern so Teams custom tags (`<emoji>`, `<at>`,
+     `<attachment>`, `<systemcontent>`, `<itemmention>`) are also
+     handled — those caused the 2026-06-01 blank-bubble screenshot. */
+  const rawContent = (message.body?.content || "").trim();
+  if (rawContent.length === 0) return true;
+  const stripped = rawContent
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;|&#160;|&zwj;|&#8203;/gi, "")
+    .replace(/\s+/g, "")
     .trim();
-  return visible.length === 0;
+  return stripped.length === 0;
 }
 
 /**

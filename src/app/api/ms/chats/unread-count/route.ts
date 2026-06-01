@@ -87,8 +87,9 @@ export async function GET(req: NextRequest) {
     // when there's no human message — those previously caused the badge
     // to flash on an empty chat (see the screenshot: Messages(1) with
     // an open chat showing only timestamp pills, no message body).
-    // Filtering by `bodyText.length > 0` lines the badge up with the
-    // user's intuition: "I have a new message I haven't read."
+    // Filtering by `bodyText.length > 0`, explicit messageType, and
+    // deletedDateTime lines the badge up with the user's intuition:
+    // "I have a new message I haven't read." Bug fix 2026-06-01.
     let count = 0;
     if (since !== null) {
       for (const chat of result.chats) {
@@ -96,7 +97,11 @@ export async function GET(req: NextRequest) {
           ? Date.parse(chat.lastUpdatedDateTime)
           : NaN;
         if (Number.isNaN(ts) || ts <= since) continue;
-        const bodyText = chat.lastMessagePreview?.bodyText?.trim() ?? "";
+        const preview = chat.lastMessagePreview;
+        if (!preview) continue;
+        if (preview.messageType === "systemEventMessage") continue;
+        if (preview.deletedDateTime) continue;
+        const bodyText = preview.bodyText?.trim() ?? "";
         if (bodyText.length === 0) continue;
         count += 1;
       }

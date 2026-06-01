@@ -191,6 +191,97 @@ describe("GET /api/ms/chats/unread-count", () => {
     expect(body.total_chats).toBe(3);
   });
 
+  it("does NOT count chats whose lastMessagePreview is a systemEventMessage (call ended, members added, meeting started)", async () => {
+    /* Regression 2026-06-01: Homyk-OOO chat surfaced an unread badge
+       whose preview body contained Teams custom tags (`<emoji></emoji>`,
+       `<at id="0"></at>`) that resolve to empty bodyText after the
+       parser. We now also exclude any preview whose messageType is
+       explicitly `systemEventMessage` even if bodyText looks present
+       (Graph occasionally puts inline metadata there). */
+    mockGetUser.mockReturnValue(USER);
+    mockGetValidToken.mockResolvedValue({ accessToken: "T", userEmail: "a@x.com" });
+    mockListChatsResult.mockResolvedValue({
+      ok: true,
+      chats: [
+        {
+          id: "sysevent",
+          topic: "Coaching call",
+          chatType: "meeting",
+          lastUpdatedDateTime: "2026-04-23T11:00:00Z",
+          members: [],
+          lastMessagePreview: {
+            body: { content: "Call ended", contentType: "text" as const },
+            bodyText: "Call ended",
+            from: { displayName: "system", email: "" },
+            createdDateTime: "2026-04-23T11:00:00Z",
+            messageType: "systemEventMessage",
+          },
+        },
+        {
+          id: "real",
+          topic: "team chat",
+          chatType: "group",
+          lastUpdatedDateTime: "2026-04-23T11:30:00Z",
+          members: [],
+          lastMessagePreview: {
+            body: { content: "hey", contentType: "text" as const },
+            bodyText: "hey",
+            from: { displayName: "Nick", email: "n@x" },
+            createdDateTime: "2026-04-23T11:30:00Z",
+          },
+        },
+      ],
+    });
+
+    const since = "2026-04-22T00:00:00Z";
+    const { GET } = await import("@/app/api/ms/chats/unread-count/route");
+    const res = await GET(
+      mkReq(`/api/ms/chats/unread-count?since=${encodeURIComponent(since)}`, "Bearer t"),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.count).toBe(1);
+    expect(body.total_chats).toBe(2);
+  });
+
+  it("does NOT count chats whose lastMessagePreview was deleted", async () => {
+    /* Graph sets `deletedDateTime` when the sender tombstones the
+       message. body is usually blanked too, but the explicit signal
+       wins — a deleted-then-restored message still has the timestamp
+       and would otherwise flash the badge. */
+    mockGetUser.mockReturnValue(USER);
+    mockGetValidToken.mockResolvedValue({ accessToken: "T", userEmail: "a@x.com" });
+    mockListChatsResult.mockResolvedValue({
+      ok: true,
+      chats: [
+        {
+          id: "tombstoned",
+          topic: "Direct chat",
+          chatType: "oneOnOne",
+          lastUpdatedDateTime: "2026-04-23T11:00:00Z",
+          members: [],
+          lastMessagePreview: {
+            body: { content: "<div>this was a message</div>", contentType: "html" as const },
+            bodyText: "this was a message",
+            from: { displayName: "Sam", email: "s@x" },
+            createdDateTime: "2026-04-23T11:00:00Z",
+            deletedDateTime: "2026-04-23T11:05:00Z",
+          },
+        },
+      ],
+    });
+
+    const since = "2026-04-22T00:00:00Z";
+    const { GET } = await import("@/app/api/ms/chats/unread-count/route");
+    const res = await GET(
+      mkReq(`/api/ms/chats/unread-count?since=${encodeURIComponent(since)}`, "Bearer t"),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.count).toBe(0);
+    expect(body.total_chats).toBe(1);
+  });
+
   it("malformed ?since= is treated as first poll (count 0)", async () => {
     mockGetUser.mockReturnValue(USER);
     mockGetValidToken.mockResolvedValue({ accessToken: "T", userEmail: "a@x.com" });

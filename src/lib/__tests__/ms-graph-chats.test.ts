@@ -467,4 +467,79 @@ describe("normalizeMessage extensions (Bug 1)", () => {
     expect(byId["m-text"].messageType).toBe("message");
     expect(byId["m-text"].attachments).toBeUndefined();
   });
+
+  it("surfaces deletedDateTime so renderers can hide tombstoned bubbles (2026-06-01)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJson({
+        value: [
+          {
+            id: "m-deleted",
+            createdDateTime: "2026-05-11T10:00:00Z",
+            deletedDateTime: "2026-05-11T10:01:00Z",
+            messageType: "message",
+            from: null,
+            body: { content: "<div></div>", contentType: "html" },
+          },
+          {
+            id: "m-live",
+            createdDateTime: "2026-05-11T10:05:00Z",
+            messageType: "message",
+            from: null,
+            body: { content: "still here", contentType: "text" },
+          },
+        ],
+      }),
+    );
+    const res = await getChatMessagesResult("T", "c1", 30, "u");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const byId = Object.fromEntries(res.messages.map((m) => [m.id, m]));
+    expect(byId["m-deleted"].deletedDateTime).toBe("2026-05-11T10:01:00Z");
+    expect(byId["m-live"].deletedDateTime).toBeUndefined();
+  });
+
+  it("surfaces lastMessagePreview.messageType + deletedDateTime on Chat (2026-06-01)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJson({
+        value: [
+          {
+            id: "c-sysevent",
+            topic: "Coaching",
+            chatType: "meeting",
+            lastUpdatedDateTime: "2026-05-11T11:00:00Z",
+            members: [],
+            lastMessagePreview: {
+              body: { content: "Call ended", contentType: "text" },
+              from: { user: { displayName: "system", email: "" } },
+              createdDateTime: "2026-05-11T11:00:00Z",
+              messageType: "systemEventMessage",
+            },
+          },
+          {
+            id: "c-deleted",
+            topic: "Direct",
+            chatType: "oneOnOne",
+            lastUpdatedDateTime: "2026-05-11T12:00:00Z",
+            members: [],
+            lastMessagePreview: {
+              body: { content: "<div></div>", contentType: "html" },
+              from: { user: { displayName: "Sam", email: "s@x" } },
+              createdDateTime: "2026-05-11T12:00:00Z",
+              deletedDateTime: "2026-05-11T12:01:00Z",
+            },
+          },
+        ],
+      }),
+    );
+    const res = await listChatsResult("T", 25, "u");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const byId = Object.fromEntries(res.chats.map((c) => [c.id, c]));
+    expect(byId["c-sysevent"].lastMessagePreview?.messageType).toBe(
+      "systemEventMessage",
+    );
+    expect(byId["c-deleted"].lastMessagePreview?.deletedDateTime).toBe(
+      "2026-05-11T12:01:00Z",
+    );
+  });
 });
