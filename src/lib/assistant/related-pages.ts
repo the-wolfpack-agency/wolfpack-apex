@@ -232,6 +232,30 @@ const DOMAIN_MAP: DomainEntry[] = [
       "direct message",
     ],
   },
+  {
+    domain: "job-codes",
+    label: "Job Codes",
+    href: "/job-codes",
+    keywords: ["job code", "job codes", "billing code", "project code"],
+  },
+  {
+    domain: "time",
+    label: "My Time",
+    href: "/time",
+    keywords: ["time entry", "time entries", "log time", "log hours", "my time", "timesheet"],
+  },
+  {
+    domain: "finance-invoices",
+    label: "Invoices",
+    href: "/finance/invoices",
+    keywords: ["invoice", "invoices", "ap invoice", "accounts payable", "bill", "bills"],
+  },
+  {
+    domain: "portal-salesforce",
+    label: "Salesforce Portal",
+    href: "/portal/salesforce",
+    keywords: ["salesforce portal", "sfdc portal", "salesforce account", "salesforce contact", "salesforce opportunity"],
+  },
 ];
 
 /**

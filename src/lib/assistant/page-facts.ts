@@ -696,6 +696,75 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["messages", "notifications", "people"],
   },
+  "job-codes": {
+    domain: "job-codes",
+    route: "/job-codes",
+    title: "Job Codes",
+    purpose: "Read-only view of the Wolfpack job codes synced live from SharePoint.",
+    what_you_can_do: [
+      "Look up the canonical job code for any active project or program.",
+      "Click into a code to see its description and the team that owns it.",
+      "Confirm a code is still active before billing or logging time against it.",
+    ],
+    how_to: [
+      "Open Job Codes from the left nav.",
+      "Search or scroll to the code you need.",
+      "Click the row for the full description and ownership.",
+    ],
+    related_pages: ["time", "financials", "clients"],
+  },
+  time: {
+    domain: "time",
+    route: "/time",
+    title: "My Time",
+    purpose: "Personal time tracking — log hours against the Wolfpack job codes you're working on.",
+    what_you_can_do: [
+      "Add a time entry for any job code with hours, date, and a short note.",
+      "Review your recent entries and edit or delete any that need adjustment.",
+      "See running totals so you know where your time went this week.",
+    ],
+    how_to: [
+      "Open My Time from the left nav.",
+      "Pick a job code, enter hours and date, click Add.",
+      "Check the Entries list to confirm the entry landed.",
+    ],
+    related_pages: ["job-codes", "reports", "tasks"],
+  },
+  "finance-invoices": {
+    domain: "finance-invoices",
+    route: "/finance/invoices",
+    title: "Invoices",
+    purpose: "AP invoice queue — upload incoming invoices, review the extracted fields, approve, and mark paid.",
+    what_you_can_do: [
+      "Upload an invoice PDF and let the extractor pull vendor, amount, and due date.",
+      "Review the extracted fields and correct anything the extractor got wrong.",
+      "Route the invoice for approval, then mark it paid once payment is sent.",
+      "Filter the queue by status to focus on what needs attention.",
+    ],
+    how_to: [
+      "Open Finance → Invoices from the left nav.",
+      "Drop a PDF onto the upload area or click Upload.",
+      "Review the extracted fields, approve, and mark paid when settled.",
+    ],
+    related_pages: ["financials", "clients", "reports"],
+  },
+  "portal-salesforce": {
+    domain: "portal-salesforce",
+    route: "/portal/salesforce",
+    title: "Salesforce Portal",
+    purpose: "Read your Salesforce accounts, contacts, and opportunities inside Instinct — no tab-switching to Salesforce.",
+    what_you_can_do: [
+      "Browse Accounts, Contacts, and Opportunities pulled live from Salesforce.",
+      "Open any record to see the full detail page Salesforce would show.",
+      "Search across object types from one entry point.",
+    ],
+    how_to: [
+      "Open Portal → Salesforce from the left nav.",
+      "Pick an object type (accounts / contacts / opportunities) from the pills.",
+      "Search or click a row to drill in.",
+    ],
+    related_pages: ["clients", "people", "settings"],
+  },
 };
 
 /** Alphabetical list of every known domain key. Stable across runs. */

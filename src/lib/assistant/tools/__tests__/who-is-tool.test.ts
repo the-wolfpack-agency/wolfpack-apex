@@ -184,7 +184,10 @@ describe("who_is handler — CRM fallback", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.answer).toMatch(/connect Salesforce or HubSpot/i);
-    expect(r.answer).toMatch(/\/settings\/integrations/);
+    /* The CRM connectors live on /settings (single page in this app).
+       Previously asserted /settings/integrations from a sibling-product
+       URL shape that never landed here. */
+    expect(r.answer).toMatch(/\/settings\b/);
   });
 
   test("CRM throwing does not 500 the tool — still returns clean miss", async () => {

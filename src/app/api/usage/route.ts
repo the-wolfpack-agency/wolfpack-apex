@@ -3,12 +3,25 @@
  *
  * Sources:
  *   * instinct_messages.tokens_used  — Wolfpack Assistant chat path.
+ *     The assistant's `source` column tells us whether each answer
+ *     came from AI generation, a cache, or a tool. We count:
+ *       - source='ai'                                 → ai_calls
+ *       - source IN ('page_facts','knowledge_cache',
+ *                    'user_qa_cache')                 → cache_hits
  *   * instinct_events.metadata.prompt_tokens / completion_tokens
  *     emitted from `knowledge.qa_ai_generated` — Support self-serve.
+ *     Same path's `knowledge.qa_lookup` rows are counted for
+ *     cache_hits when `was_cache_hit` is set.
  *
  * Settings page consumes this to surface the "Token usage" card so
  * users can see what their AI activity is costing in tokens. Cache
  * hits (zero tokens) are counted separately as `cache_hits`.
+ *
+ * Bug fix 2026-06-01: previously this route counted ai_calls + cache_hits
+ * only from `instinct_events`. The Wolfpack Assistant writes to
+ * `instinct_messages` (NOT `instinct_events`) so the counters stayed
+ * stuck at 0 while tokens_used accumulated — the Settings card read
+ * "10,605 tokens • 0 AI calls". Now both stores feed both counters.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
@@ -53,9 +66,20 @@ async function readWindow(
       : "";
 
   let chatTokens = 0;
+  let chatAiCalls = 0;
+  let chatCacheHits = 0;
   try {
-    const r = await query<{ total: string | null }>(
-      `SELECT COALESCE(SUM(m.tokens_used), 0)::bigint AS total
+    const r = await query<{
+      total: string | null;
+      ai_calls: string | null;
+      cache_hits: string | null;
+    }>(
+      `SELECT
+         COALESCE(SUM(m.tokens_used), 0)::bigint AS total,
+         COUNT(*) FILTER (WHERE m.source = 'ai')::bigint AS ai_calls,
+         COUNT(*) FILTER (
+           WHERE m.source IN ('page_facts', 'knowledge_cache', 'user_qa_cache')
+         )::bigint AS cache_hits
          FROM instinct_messages m
          JOIN instinct_conversations c ON c.id = m.conversation_id
         WHERE c.user_id = $1
@@ -64,6 +88,8 @@ async function readWindow(
       [userId],
     );
     chatTokens = Number(r.rows[0]?.total ?? 0);
+    chatAiCalls = Number(r.rows[0]?.ai_calls ?? 0);
+    chatCacheHits = Number(r.rows[0]?.cache_hits ?? 0);
   } catch {
     /* table may be missing in shadow mode — fall through to zero */
   }
@@ -105,8 +131,8 @@ async function readWindow(
     prompt_tokens: qaPrompt,
     completion_tokens: qaCompletion,
     total_tokens: chatTokens + qaPrompt + qaCompletion,
-    ai_calls: qaCalls,
-    cache_hits: cacheHits,
+    ai_calls: qaCalls + chatAiCalls,
+    cache_hits: cacheHits + chatCacheHits,
   };
 }
 

@@ -108,7 +108,17 @@ describe("every non-dynamic (dashboard)/<route> folder has a PAGE_FACTS entry", 
     // even though we have a meetings PAGE_FACTS entry.
     // `programs/` has no top-level page; the actual page lives at
     // /programs/budgets and PAGE_FACTS points there.
-    const allowlist = new Set(["admin", "meetings", "programs"]);
+    // `finance/` and `portal/` are containers with no top-level
+    // page.tsx — the real landing pages are /finance/invoices and
+    // /portal/salesforce, which have their own PAGE_FACTS entries
+    // (`finance-invoices` + `portal-salesforce`).
+    const allowlist = new Set([
+      "admin",
+      "meetings",
+      "programs",
+      "finance",
+      "portal",
+    ]);
     for (const name of entries) {
       // Skip layout/page/metadata files, dynamic routes, parallel
       // routes, and co-located test folders.

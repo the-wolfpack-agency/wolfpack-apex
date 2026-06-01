@@ -76,10 +76,20 @@ function scoreAllDomains(lower: string): PageFactsMatch[] {
 
   for (const domain of Object.keys(PAGE_FACTS)) {
     const fact = PAGE_FACTS[domain];
-    // Prefer the canonical keyword set from related-pages.ts when the
-    // domain has an entry there; fall back to the domain key itself
-    // for aliases like `mailbox` that point at /emails.
-    const kws = keywords[domain] || [domain];
+    /* Page-facts matching is broader than related-pages chip matching.
+       Chips need strict phrasing (related-pages intentionally drops
+       bare "directory" so a Dependabot PR title doesn't surface a
+       Team Directory chip). The page-facts matcher should still
+       resolve bare "Directory" / "what is the directory" to the
+       Team Directory page-fact — intent disambiguates here.
+       So: start with the related-pages keywords, then ADD the bare
+       domain key as an alias. We intentionally do NOT add the
+       page-fact title's first word — generic English first words
+       like "My" (from "My Time") would over-fire on "my tax return"
+       and similar. */
+    const baseKws = keywords[domain] || [];
+    const aliasSet = new Set<string>([...baseKws, domain]);
+    const kws = Array.from(aliasSet);
 
     let hits = 0;
     for (const kw of kws) {
