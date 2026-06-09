@@ -435,12 +435,19 @@ function DownloadMenu({
     background: "var(--wp-dark-surface2)",
     color: "var(--wp-text)",
     fontSize: 12,
+    /* The widest option ("PDF (printable Letter page)") is long in the
+       brand font; cap each control at the container width so it wraps to
+       its own line and truncates, never pushing the row past the
+       viewport. */
     minWidth: 0,
+    maxWidth: "100%",
+    flex: "1 1 auto",
+    boxSizing: "border-box",
   };
 
   return (
-    <div data-testid={testId} style={{ display: "grid", gap: 6 }}>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+    <div data-testid={testId} style={{ display: "grid", gap: 6, maxWidth: "100%", minWidth: 0 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxWidth: "100%", minWidth: 0 }}>
         <select
           data-testid={`${testId}-format`}
           value={format}
@@ -1237,6 +1244,12 @@ export default function QrPage() {
                         gap: 6,
                         flexWrap: "wrap",
                         alignItems: "center",
+                        /* Allow this button cluster to shrink to the
+                           available width so the buttons wrap instead of
+                           running off the right edge in the wide brand
+                           font. */
+                        minWidth: 0,
+                        maxWidth: "100%",
                       }}
                     >
                       {row.scanCount !== null ? (
@@ -1318,10 +1331,17 @@ export default function QrPage() {
                         background: "var(--wp-dark-surface2)",
                         display: "flex",
                         gap: 16,
-                        alignItems: "center",
+                        /* flex-start (not center): with the wide brand font
+                           the controls can make this panel taller/wider, and
+                           centering pushed the QR off the right edge on
+                           mobile. Left-align so the full QR is always visible
+                           from the left. */
+                        alignItems: "flex-start",
                         flexWrap: "wrap",
+                        width: "100%",
                         maxWidth: "100%",
                         minWidth: 0,
+                        boxSizing: "border-box",
                       }}
                     >
                       {row.loadingQr ? (
@@ -1354,7 +1374,20 @@ export default function QrPage() {
                               ),
                             }}
                           />
-                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 8,
+                              /* Let the download controls shrink/wrap within
+                                 the panel instead of forcing it wider than
+                                 the viewport (the wide brand font makes the
+                                 format/size <select>s long). */
+                              flex: "1 1 auto",
+                              minWidth: 0,
+                              maxWidth: "100%",
+                            }}
+                          >
                             {row.qrSvg ? (
                               <DownloadMenu
                                 testId={`qr-row-svg-download-${c.slug}`}

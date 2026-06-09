@@ -67,3 +67,45 @@ for (const deviceName of ["iPhone SE", "iPhone 14"]) {
     await ctx.close();
   });
 }
+
+// The actual production bug: on mobile the panel becomes a COLUMN, and the
+// wide brand font makes the download controls push the panel wider than the
+// viewport. With align-items:center the QR was horizontally centered and ran
+// off the right edge. align-items:flex-start keeps the full QR visible from
+// the left regardless of how wide the controls are.
+const COLUMN_PANEL = (align: "center" | "flex-start") => `<!doctype html>
+<meta name="viewport" content="width=device-width, initial-scale=1"><body style="margin:0">
+<div style="padding:16px;overflow-x:hidden"><div style="padding:0 12px">
+  <div style="display:flex;flex-direction:column;align-items:${align};flex-wrap:wrap;gap:16px;max-width:100%;min-width:0;padding:12px;border:1px solid #333">
+    <div data-testid="qr-wrap" style="width:192px;max-width:100%;aspect-ratio:1 / 1;background:#fff;box-sizing:border-box">
+      <svg viewBox="0 0 192 192" style="width:100%;height:100%"><rect width="192" height="192" fill="#fff"/></svg>
+    </div>
+    <div style="width:600px;background:#444;height:30px">wide control</div>
+  </div>
+</div></div></body>`;
+
+test("column Show-QR panel keeps the QR fully visible even when controls overflow (iPhone 14)", async ({
+  browser,
+}) => {
+  const ctx = await browser.newContext({ ...devices["iPhone 14"] });
+  const page = await ctx.newPage();
+  const vw = page.viewportSize()!.width;
+
+  // Sanity: the OLD behavior (center) would clip — confirms this test
+  // exercises the real failure mode.
+  await page.setContent(COLUMN_PANEL("center"), { waitUntil: "load" });
+  const centered = await page.evaluate(
+    () => document.querySelector('[data-testid="qr-wrap"]')!.getBoundingClientRect().right,
+  );
+  expect(centered).toBeGreaterThan(vw); // centered QR runs off the edge
+
+  // The fix: flex-start keeps the full QR within the viewport.
+  await page.setContent(COLUMN_PANEL("flex-start"), { waitUntil: "load" });
+  const r = await page.evaluate(() => {
+    const b = document.querySelector('[data-testid="qr-wrap"]')!.getBoundingClientRect();
+    return { left: b.left, right: b.right };
+  });
+  expect(r.left).toBeGreaterThanOrEqual(0);
+  expect(r.right).toBeLessThanOrEqual(vw + 1);
+  await ctx.close();
+});
