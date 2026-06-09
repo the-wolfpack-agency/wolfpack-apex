@@ -1370,7 +1370,6 @@ export default function QrPage() {
                               // can never sit top-aligned with an asymmetric gap.
                               // Matches the just-created panel above; robust even
                               // if height:100% can't resolve (aspect-ratio fallback).
-                              boxSizing: "border-box",
                               display: "flex",
                               alignItems: "center",
                               justifyContent: "center",
