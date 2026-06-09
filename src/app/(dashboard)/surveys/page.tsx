@@ -1455,15 +1455,19 @@ export default function SurveysPage() {
                         }}
                       >
                         Public link:{" "}
-                        <span
+                        <Link
                           data-testid={`survey-row-link-${s.id}`}
+                          href={`/s/${s.slug}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           style={{
                             color: "var(--wp-gold)",
                             fontFamily: "monospace",
+                            textDecoration: "underline",
                           }}
                         >
                           /s/{s.slug}
-                        </span>
+                        </Link>
                       </div>
                     </div>
 
@@ -1620,7 +1624,7 @@ export default function SurveysPage() {
                         </span>
                         <Link
                           data-testid={`survey-qr-manage-${s.id}`}
-                          href="/qr"
+                          href={`/qr?code=${s.qrCodeId ?? ""}`}
                           style={{
                             fontSize: 13,
                             color: "var(--wp-gold)",

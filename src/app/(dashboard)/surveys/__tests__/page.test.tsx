@@ -511,10 +511,17 @@ describe("/surveys page", () => {
     );
     expect(mintCall).toBeFalsy();
 
-    // And it links out to the QR management page.
+    // And it deep-links to THIS code on the QR page (so the user sees which
+    // code is associated), not just the QR list top.
     expect(screen.getByTestId("survey-qr-manage-survey-2")).toHaveAttribute(
       "href",
-      "/qr",
+      "/qr?code=qr-2",
+    );
+
+    // The public link is clickable straight to the responder.
+    expect(screen.getByTestId("survey-row-link-survey-2")).toHaveAttribute(
+      "href",
+      "/s/xyz9876",
     );
   });
 

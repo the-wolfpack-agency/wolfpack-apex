@@ -26,7 +26,7 @@
  * recognisable. Sortable columns + group-by-visitor toggle.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchWithRefresh,
   jsonHeaders,
@@ -564,6 +564,11 @@ export default function QrPage() {
   const [rowStates, setRowStates] = useState<Record<string, RowState>>({});
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
+  /* Deep-link: /qr?code=<id> (e.g. from a survey's "Manage in QR Codes")
+     scrolls to + highlights + opens that code so the user immediately sees
+     which one is associated. Handled once after the list loads. */
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const deepLinkDoneRef = useRef(false);
 
   /* Form state */
   const [label, setLabel] = useState("");
@@ -612,6 +617,31 @@ export default function QrPage() {
     if (!authChecked) return;
     void loadList();
   }, [authChecked, loadList]);
+
+  /* ── deep-link to a specific code (?code=<id>) ───────────────────── */
+  useEffect(() => {
+    if (deepLinkDoneRef.current || codes.length === 0) return;
+    const wanted =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("code")
+        : null;
+    if (!wanted) {
+      deepLinkDoneRef.current = true;
+      return;
+    }
+    const target = codes.find((c) => c.id === wanted);
+    if (!target) return; // list may still be arriving — retry on next codes update
+    deepLinkDoneRef.current = true;
+    setHighlightId(target.id);
+    void toggleQr(target); // open its QR so the association is obvious
+    setTimeout(() => {
+      document
+        .getElementById(`qr-code-${target.id}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 60);
+    // toggleQr is a stable component fn; deps intentionally just `codes`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [codes]);
 
   /* ── create ───────────────────────────────────────────────────── */
   async function handleCreate(e: React.FormEvent) {
@@ -1202,12 +1232,19 @@ export default function QrPage() {
               return (
                 <div
                   key={c.id}
+                  id={`qr-code-${c.id}`}
                   data-testid={`qr-row-${c.slug}`}
                   style={{
-                    border: "1px solid var(--wp-dark-border)",
+                    border:
+                      c.id === highlightId
+                        ? "1px solid var(--wp-gold)"
+                        : "1px solid var(--wp-dark-border)",
                     borderRadius: 8,
                     padding: "0.85rem 1rem",
                     background: "var(--wp-dark-surface)",
+                    boxShadow:
+                      c.id === highlightId ? "0 0 0 2px var(--wp-gold)" : undefined,
+                    transition: "box-shadow 0.2s, border-color 0.2s",
                   }}
                 >
                   <div

@@ -144,6 +144,41 @@ beforeEach(() => {
 /* ------------------------------ tests ------------------------------- */
 
 describe("/qr page", () => {
+  test("deep-link ?code=<id> opens + scrolls to + highlights that code", async () => {
+    // jsdom lacks scrollIntoView; stub it so the deep-link effect can call it.
+    const scrollSpy = jest.fn();
+    (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView =
+      scrollSpy;
+    window.history.replaceState({}, "", "/qr?code=code-1");
+
+    mockListResponse([sampleCode]); // sampleCode.id === "code-1"
+    // The deep-link auto-opens the QR → toggleQr fetches the SVG.
+    mockFetchWithRefresh.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () =>
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192"><rect width="192" height="192" fill="#fff"/></svg>',
+      }),
+    );
+
+    render(<QrPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("qr-row-abc1234")).toBeInTheDocument(),
+    );
+
+    // It fetched the SVG for code-1 (auto-opened) and scrolled to the row.
+    await waitFor(() => {
+      const svgCall = mockFetchWithRefresh.mock.calls.find(
+        (c) => String(c[0]).includes("/api/qr/code-1/svg"),
+      );
+      expect(svgCall).toBeTruthy();
+    });
+    await waitFor(() => expect(scrollSpy).toHaveBeenCalled());
+
+    window.history.replaceState({}, "", "/qr"); // reset for other tests
+  });
+
   test("does not render the main UI and consults getInstinctToken when no token is present (redirect path)", async () => {
     mockGetInstinctToken.mockReturnValue(null);
 
