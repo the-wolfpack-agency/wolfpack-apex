@@ -175,6 +175,37 @@ describe("PATCH /api/surveys/[id]", () => {
       expect.objectContaining({ status: "closed" }),
     );
   });
+
+  test("a valid custom slug is included in the updateSurvey patch", async () => {
+    mockGetSurveyById.mockResolvedValueOnce(survey());
+    mockUpdateSurvey.mockResolvedValueOnce(survey({ slug: "weekend-porsche" }));
+    const res = await PATCH(patchReq({ slug: "weekend-porsche" }), ctx);
+    expect(res.status).toBe(200);
+    expect(mockUpdateSurvey).toHaveBeenCalledWith(
+      SURVEY_ID,
+      expect.objectContaining({ slug: "weekend-porsche" }),
+    );
+  });
+
+  test("409 slug_taken when the custom slug collides", async () => {
+    mockGetSurveyById.mockResolvedValueOnce(survey());
+    mockUpdateSurvey.mockRejectedValueOnce(new Error("slug_taken"));
+    const res = await PATCH(patchReq({ slug: "weekend-porsche" }), ctx);
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe("slug_taken");
+  });
+
+  test("400 when the custom slug is invalid", async () => {
+    mockGetSurveyById.mockResolvedValueOnce(survey());
+    mockUpdateSurvey.mockRejectedValueOnce(
+      new Error("Use lowercase letters, numbers and hyphens (3–50 chars)."),
+    );
+    const res = await PATCH(patchReq({ slug: "NOPE!" }), ctx);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/lowercase letters/);
+  });
 });
 
 describe("DELETE /api/surveys/[id]", () => {

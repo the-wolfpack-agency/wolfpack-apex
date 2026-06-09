@@ -13,6 +13,7 @@ import {
   validateAnswers,
   aggregateResponses,
   generateSurveySlug,
+  validateSlug,
 } from "../validate";
 import type { SurveySchema } from "../types";
 
@@ -332,6 +333,52 @@ describe("aggregateResponses", () => {
     expect(byId.score.average).toBe(0);
     expect(byId.name.textSamples).toEqual([]);
     rows.forEach((r) => expect(r.answered).toBe(0));
+  });
+});
+
+describe("validateSlug", () => {
+  test("accepts lowercase letters, digits, and hyphenated segments", () => {
+    expect(validateSlug("weekend-porsche")).toEqual({ ok: true });
+    expect(validateSlug("abc")).toEqual({ ok: true });
+    expect(validateSlug("a1b2")).toEqual({ ok: true });
+    expect(validateSlug("a-b-c-2026")).toEqual({ ok: true });
+    expect(validateSlug("a".repeat(50)).ok).toBe(true);
+  });
+
+  test("rejects too-short (under 3 chars) and empty", () => {
+    expect(validateSlug("a1").ok).toBe(false); // 2 chars
+    expect(validateSlug("ab").ok).toBe(false);
+    expect(validateSlug("").ok).toBe(false);
+  });
+
+  test("rejects too-long (over 50 chars)", () => {
+    expect(validateSlug("a".repeat(51)).ok).toBe(false);
+  });
+
+  test("rejects uppercase and spaces", () => {
+    expect(validateSlug("Weekend-Porsche").ok).toBe(false);
+    expect(validateSlug("weekend porsche").ok).toBe(false);
+  });
+
+  test("rejects leading, trailing, and consecutive hyphens", () => {
+    expect(validateSlug("-weekend").ok).toBe(false);
+    expect(validateSlug("weekend-").ok).toBe(false);
+    expect(validateSlug("weekend--porsche").ok).toBe(false);
+  });
+
+  test("rejects other punctuation and underscores", () => {
+    expect(validateSlug("weekend_porsche").ok).toBe(false);
+    expect(validateSlug("weekend.porsche").ok).toBe(false);
+    expect(validateSlug("weekend/porsche").ok).toBe(false);
+  });
+
+  test("the rejection message is the friendly guidance", () => {
+    const r = validateSlug("NOPE!");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toMatch(/lowercase letters, numbers and hyphens/);
+      expect(r.error).toMatch(/3.50 chars/);
+    }
   });
 });
 

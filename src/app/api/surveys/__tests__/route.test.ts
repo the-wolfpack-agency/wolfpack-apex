@@ -143,4 +143,45 @@ describe("POST /api/surveys", () => {
     expect(body.error).toMatch(/at least one question/);
     expect(mockTrackEvent).not.toHaveBeenCalled();
   });
+
+  test("a valid custom slug is passed through to createSurvey", async () => {
+    mockCreateSurvey.mockResolvedValueOnce(
+      { ...sampleSurvey, slug: "weekend-porsche" },
+    );
+    const res = await POST(
+      postBody({
+        title: "NPS",
+        schema: sampleSurvey.schema,
+        slug: "weekend-porsche",
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(mockCreateSurvey).toHaveBeenCalledWith(
+      expect.objectContaining({ slug: "weekend-porsche" }),
+    );
+  });
+
+  test("409 slug_taken when the custom slug collides", async () => {
+    mockCreateSurvey.mockRejectedValueOnce(new Error("slug_taken"));
+    const res = await POST(
+      postBody({ title: "NPS", schema: sampleSurvey.schema, slug: "weekend-porsche" }),
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe("slug_taken");
+    expect(mockTrackEvent).not.toHaveBeenCalled();
+  });
+
+  test("400 when the custom slug is invalid", async () => {
+    mockCreateSurvey.mockRejectedValueOnce(
+      new Error("Use lowercase letters, numbers and hyphens (3–50 chars)."),
+    );
+    const res = await POST(
+      postBody({ title: "NPS", schema: sampleSurvey.schema, slug: "NOPE!" }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/lowercase letters/);
+    expect(mockTrackEvent).not.toHaveBeenCalled();
+  });
 });

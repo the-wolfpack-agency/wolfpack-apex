@@ -7,7 +7,7 @@
  */
 
 import { writeQuery, safeQuery } from "@/lib/db";
-import { generateSurveySlug, validateSchema } from "./validate";
+import { generateSurveySlug, validateSchema, validateSlug } from "./validate";
 import type {
   AnswerMap,
   Survey,
@@ -87,10 +87,44 @@ export async function createSurvey(args: {
   clientId?: string | null;
   userId: string;
   userRole: string;
+  slug?: string;
 }): Promise<Survey> {
   if (!args.title || !args.title.trim()) throw new Error("title is required");
   const schemaCheck = validateSchema(args.schema);
   if (!schemaCheck.ok) throw new Error(schemaCheck.error);
+
+  // A user-chosen vanity slug must validate, must INSERT with that exact slug,
+  // and a uniqueness collision is a hard error ("slug_taken") — we never fall
+  // back to a random slug, because the user deliberately chose this one.
+  if (args.slug !== undefined) {
+    const slugCheck = validateSlug(args.slug);
+    if (!slugCheck.ok) throw new Error(slugCheck.error);
+    try {
+      const result = await writeQuery<SurveyRow>(
+        `INSERT INTO instinct_surveys
+           (slug, title, description, schema, status, client_id,
+            created_by_user_id, created_by_user_role)
+         VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7)
+         RETURNING ${SURVEY_COLS}`,
+        [
+          args.slug,
+          args.title.trim(),
+          args.description ?? null,
+          JSON.stringify(args.schema),
+          args.clientId ?? null,
+          args.userId,
+          args.userRole,
+        ],
+        { expectRows: 1 },
+      );
+      return rowToSurvey(result.rows[0]);
+    } catch (err) {
+      if (/duplicate|unique|23505/i.test((err as Error).message ?? "")) {
+        throw new Error("slug_taken");
+      }
+      throw err;
+    }
+  }
 
   let lastErr: unknown;
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -172,6 +206,7 @@ export async function updateSurvey(
     schema?: SurveySchema;
     status?: SurveyStatus;
     qrCodeId?: string | null;
+    slug?: string;
   },
 ): Promise<Survey> {
   const sets: string[] = [];
@@ -180,6 +215,12 @@ export async function updateSurvey(
     if (!patch.title.trim()) throw new Error("title is required");
     params.push(patch.title.trim());
     sets.push(`title = $${params.length}`);
+  }
+  if (patch.slug !== undefined) {
+    const slugCheck = validateSlug(patch.slug);
+    if (!slugCheck.ok) throw new Error(slugCheck.error);
+    params.push(patch.slug);
+    sets.push(`slug = $${params.length}`);
   }
   if (patch.description !== undefined) {
     params.push(patch.description);
@@ -202,12 +243,21 @@ export async function updateSurvey(
   if (sets.length === 0) throw new Error("updateSurvey: patch is empty");
   sets.push("updated_at = NOW()");
   params.push(id);
-  const result = await writeQuery<SurveyRow>(
-    `UPDATE instinct_surveys SET ${sets.join(", ")}
-      WHERE id = $${params.length} RETURNING ${SURVEY_COLS}`,
-    params,
-    { expectRows: 1 },
-  );
+  let result;
+  try {
+    result = await writeQuery<SurveyRow>(
+      `UPDATE instinct_surveys SET ${sets.join(", ")}
+        WHERE id = $${params.length} RETURNING ${SURVEY_COLS}`,
+      params,
+      { expectRows: 1 },
+    );
+  } catch (err) {
+    // A vanity-slug rename can collide with another survey's slug.
+    if (/duplicate|unique|23505/i.test((err as Error).message ?? "")) {
+      throw new Error("slug_taken");
+    }
+    throw err;
+  }
   return rowToSurvey(result.rows[0]);
 }
 

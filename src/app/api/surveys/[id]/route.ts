@@ -47,6 +47,7 @@ export async function PATCH(
     description?: string | null;
     schema?: unknown;
     status?: SurveyStatus;
+    slug?: string;
   };
   try {
     body = await req.json();
@@ -64,6 +65,7 @@ export async function PATCH(
   if (body.description !== undefined) patch.description = body.description;
   if (body.schema !== undefined) patch.schema = body.schema as never;
   if (body.status !== undefined) patch.status = body.status;
+  if (body.slug !== undefined) patch.slug = body.slug;
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: "patch is empty" }, { status: 400 });
@@ -73,10 +75,12 @@ export async function PATCH(
   try {
     survey = await updateSurvey(id, patch);
   } catch (err) {
-    return NextResponse.json(
-      { error: (err as Error).message },
-      { status: 400 },
-    );
+    const msg = (err as Error).message;
+    // A taken vanity slug is a conflict, not a malformed request.
+    if (msg === "slug_taken") {
+      return NextResponse.json({ error: "slug_taken" }, { status: 409 });
+    }
+    return NextResponse.json({ error: msg }, { status: 400 });
   }
 
   /* Status transitions get their own event; everything else is an update. */

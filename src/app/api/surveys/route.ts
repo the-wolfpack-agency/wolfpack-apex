@@ -41,6 +41,7 @@ export async function POST(req: NextRequest) {
     description?: string | null;
     schema?: unknown;
     clientId?: string | null;
+    slug?: string;
   };
   try {
     body = await req.json();
@@ -62,13 +63,18 @@ export async function POST(req: NextRequest) {
       clientId: body.clientId ?? null,
       userId: user.id,
       userRole: user.role,
+      // Optional vanity slug; createSurvey validates it and throws
+      // "slug_taken" on a uniqueness collision.
+      ...(typeof body.slug === "string" ? { slug: body.slug } : {}),
     });
   } catch (err) {
-    // Validation failures throw the human-readable message; surface as 400.
-    return NextResponse.json(
-      { error: (err as Error).message },
-      { status: 400 },
-    );
+    const msg = (err as Error).message;
+    // A taken vanity slug is a conflict, not a malformed request.
+    if (msg === "slug_taken") {
+      return NextResponse.json({ error: "slug_taken" }, { status: 409 });
+    }
+    // Other validation failures throw the human-readable message; surface as 400.
+    return NextResponse.json({ error: msg }, { status: 400 });
   }
 
   trackEvent("survey.created", user.id, user.role, {

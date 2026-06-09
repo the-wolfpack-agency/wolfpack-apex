@@ -518,6 +518,95 @@ describe("/surveys page", () => {
     );
   });
 
+  test("Edit loads the survey into the builder and PATCHes the changes", async () => {
+    mockListResponse([sampleSurvey]);
+    mockFetchWithRefresh.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ survey: { ...sampleSurvey, title: "Updated title" } }),
+      }),
+    );
+
+    render(<SurveysPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("survey-row-survey-1")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByTestId("survey-edit-survey-1"));
+
+    // Form hydrates from the existing survey (title, slug, edit-mode submit).
+    expect((screen.getByTestId("survey-create-title") as HTMLInputElement).value).toBe(
+      "Post-event feedback",
+    );
+    expect((screen.getByTestId("survey-create-slug") as HTMLInputElement).value).toBe(
+      "abc1234",
+    );
+    expect(screen.getByTestId("survey-create-submit")).toHaveTextContent("Save changes");
+    // Its questions were hydrated into the builder rows.
+    expect((screen.getByTestId("survey-q-label-0") as HTMLInputElement).value).toBe(
+      "Rate us",
+    );
+
+    fireEvent.change(screen.getByTestId("survey-create-title"), {
+      target: { value: "Updated title" },
+    });
+    fireEvent.click(screen.getByTestId("survey-create-submit"));
+
+    await waitFor(() => {
+      const patch = mockFetchWithRefresh.mock.calls.find(
+        (c) => c[1]?.method === "PATCH" && String(c[0]).includes("/api/surveys/survey-1"),
+      );
+      expect(patch).toBeTruthy();
+      expect(JSON.parse(patch![1].body).title).toBe("Updated title");
+    });
+
+    // Back to create mode after a successful save.
+    await waitFor(() =>
+      expect(screen.getByTestId("survey-create-submit")).toHaveTextContent(
+        "Create survey",
+      ),
+    );
+  });
+
+  test("create sends a custom slug when one is provided", async () => {
+    mockListResponse([]);
+    mockFetchWithRefresh.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: true,
+        status: 201,
+        json: async () => ({
+          survey: { ...sampleSurvey, id: "new", slug: "weekend-porsche" },
+        }),
+      }),
+    );
+
+    render(<SurveysPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("survey-create-form")).toBeInTheDocument(),
+    );
+
+    fireEvent.change(screen.getByTestId("survey-create-title"), {
+      target: { value: "My survey" },
+    });
+    fireEvent.change(screen.getByTestId("survey-create-slug"), {
+      target: { value: "weekend-porsche" },
+    });
+    fireEvent.click(screen.getByTestId("survey-add-question"));
+    fireEvent.change(screen.getByTestId("survey-q-label-0"), {
+      target: { value: "How was it?" },
+    });
+    fireEvent.click(screen.getByTestId("survey-create-submit"));
+
+    await waitFor(() => {
+      const post = mockFetchWithRefresh.mock.calls.find(
+        (c) => c[1]?.method === "POST" && String(c[0]) === "/api/surveys",
+      );
+      expect(post).toBeTruthy();
+      expect(JSON.parse(post![1].body).slug).toBe("weekend-porsche");
+    });
+  });
+
   test("delete confirms then DELETEs and removes the row", async () => {
     mockListResponse([sampleSurvey, sampleSurvey2]);
     mockFetchWithRefresh.mockImplementationOnce(() =>

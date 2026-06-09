@@ -8,6 +8,7 @@
 const mockGetSurveyById = jest.fn();
 const mockUpdateSurvey = jest.fn();
 const mockCreateCode = jest.fn();
+const mockGetCodeById = jest.fn();
 const mockTrackEvent = jest.fn();
 const mockRecordAudit = jest.fn().mockResolvedValue({ id: "a", seq: 1, entryHash: "h" });
 let authUser: { id: string; role: string; name: string; email: string } | null = {
@@ -23,6 +24,7 @@ jest.mock("@/lib/surveys/store", () => ({
 }));
 jest.mock("@/lib/qr/codes", () => ({
   createCode: (...a: any[]) => mockCreateCode(...a),
+  getCodeById: (...a: any[]) => mockGetCodeById(...a),
 }));
 jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: any[]) => mockTrackEvent(...a),
@@ -76,6 +78,7 @@ beforeEach(() => {
   mockGetSurveyById.mockReset();
   mockUpdateSurvey.mockReset();
   mockCreateCode.mockReset();
+  mockGetCodeById.mockReset();
   mockTrackEvent.mockReset();
   mockRecordAudit.mockClear();
   authUser = { id: "u1", role: "ceo", name: "Nick", email: "n@x.co" };
@@ -132,5 +135,49 @@ describe("POST /api/surveys/[id]/qr", () => {
     const res = await POST(postReq(), ctx);
     expect(res.status).toBe(500);
     expect(mockUpdateSurvey).not.toHaveBeenCalled();
+  });
+
+  test("idempotent: a live existing QR code is reused, NOT re-minted", async () => {
+    // Survey already linked to a code; the code lookup returns a live one.
+    mockGetSurveyById.mockResolvedValueOnce(survey({ qrCodeId: "code-1" }));
+    mockGetCodeById.mockResolvedValueOnce({ ...sampleCode, archivedAt: null });
+
+    const res = await POST(postReq(), ctx);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.reused).toBe(true);
+    expect(body.code.id).toBe("code-1");
+    // The whole point: no new code, no new link write, no re-link event.
+    expect(mockCreateCode).not.toHaveBeenCalled();
+    expect(mockUpdateSurvey).not.toHaveBeenCalled();
+    expect(mockTrackEvent).not.toHaveBeenCalled();
+  });
+
+  test("re-mints when the linked code is archived", async () => {
+    mockGetSurveyById.mockResolvedValueOnce(survey({ qrCodeId: "code-1" }));
+    mockGetCodeById.mockResolvedValueOnce({
+      ...sampleCode,
+      archivedAt: "2026-06-01T00:00:00.000Z",
+    });
+    mockCreateCode.mockResolvedValueOnce({ ...sampleCode, id: "code-2" });
+    mockUpdateSurvey.mockResolvedValueOnce(survey({ qrCodeId: "code-2" }));
+
+    const res = await POST(postReq(), ctx);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.reused).toBeUndefined();
+    expect(mockCreateCode).toHaveBeenCalledTimes(1);
+    expect(mockUpdateSurvey).toHaveBeenCalledWith(SURVEY_ID, { qrCodeId: "code-2" });
+  });
+
+  test("re-mints when the linked code id no longer resolves", async () => {
+    mockGetSurveyById.mockResolvedValueOnce(survey({ qrCodeId: "code-gone" }));
+    mockGetCodeById.mockResolvedValueOnce(null);
+    mockCreateCode.mockResolvedValueOnce(sampleCode);
+    mockUpdateSurvey.mockResolvedValueOnce(survey({ qrCodeId: "code-1" }));
+
+    const res = await POST(postReq(), ctx);
+    expect(res.status).toBe(200);
+    expect(mockCreateCode).toHaveBeenCalledTimes(1);
   });
 });

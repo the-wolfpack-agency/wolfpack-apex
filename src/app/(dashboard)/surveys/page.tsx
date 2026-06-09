@@ -258,6 +258,12 @@ export default function SurveysPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [questions, setQuestions] = useState<DraftQuestion[]>([]);
+  /* When set, the builder form is EDITING this survey (PATCH) rather than
+     creating a new one (POST). */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  /* Optional custom public link (vanity slug). Blank = auto-generate on
+     create / keep current on edit. */
+  const [slug, setSlug] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -312,8 +318,39 @@ export default function SurveysPage() {
   function resetForm() {
     setTitle("");
     setDescription("");
+    setSlug("");
     setQuestions([]);
+    setEditingId(null);
     setCreateError(null);
+  }
+
+  /* Inverse of buildSchema: hydrate the builder rows from a stored survey
+     so it can be edited. Positional ids (q1, q2 …) are preserved by order,
+     so visibleIf references stay valid. */
+  function schemaToDrafts(qs: SurveyQuestion[]): DraftQuestion[] {
+    return qs.map((q) => ({
+      label: q.label,
+      type: q.type,
+      required: q.required,
+      optionsText: (q.options ?? []).join(", "),
+      helpText: q.helpText ?? "",
+      allowOther: q.allowOther ?? false,
+      maxSelectionsText: q.maxSelections != null ? String(q.maxSelections) : "",
+      body: q.body ?? "",
+      visibleIfQuestionId: q.visibleIf?.questionId ?? "",
+      visibleIfValue: q.visibleIf?.equals != null ? String(q.visibleIf.equals) : "",
+    }));
+  }
+
+  /* Load an existing survey into the builder form for editing. */
+  function startEdit(survey: Survey) {
+    setEditingId(survey.id);
+    setTitle(survey.title);
+    setDescription(survey.description ?? "");
+    setSlug(survey.slug);
+    setQuestions(schemaToDrafts(survey.schema.questions));
+    setCreateError(null);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   /* Assemble the draft rows into a SurveySchema. Question ids are stable
@@ -404,29 +441,46 @@ export default function SurveysPage() {
         title: string;
         description?: string;
         schema: { questions: SurveyQuestion[] };
+        slug?: string;
       } = {
         title: title.trim(),
         schema: buildSchema(),
       };
       if (description.trim()) body.description = description.trim();
-      const res = await fetchWithRefresh("/api/surveys", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify(body),
-      });
+
+      const editing = editingId !== null;
+      const current = editing ? surveys.find((s) => s.id === editingId) : null;
+      const trimmedSlug = slug.trim();
+      // Send slug on create when the user typed one; on edit only when it
+      // actually changed (avoids a needless slug_taken against itself).
+      if (trimmedSlug && (!editing || trimmedSlug !== current?.slug)) {
+        body.slug = trimmedSlug;
+      }
+
+      const res = await fetchWithRefresh(
+        editing ? `/api/surveys/${encodeURIComponent(editingId!)}` : "/api/surveys",
+        {
+          method: editing ? "PATCH" : "POST",
+          headers: jsonHeaders(),
+          body: JSON.stringify(body),
+        },
+      );
       if (!res.ok) {
-        const errBody = (await res.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        setCreateError(errBody.error ?? "Failed to create survey.");
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+        setCreateError(
+          errBody.error === "slug_taken"
+            ? "That custom link is already taken — try another."
+            : errBody.error ?? `Failed to ${editing ? "save" : "create"} survey.`,
+        );
         return;
       }
       const data = (await res.json()) as { survey: Survey };
-      setSurveys((prev) => [data.survey, ...prev]);
-      setRowStates((prev) => ({
-        ...prev,
-        [data.survey.id]: defaultRowState(),
-      }));
+      if (editing) {
+        setSurveys((prev) => prev.map((s) => (s.id === data.survey.id ? data.survey : s)));
+      } else {
+        setSurveys((prev) => [data.survey, ...prev]);
+        setRowStates((prev) => ({ ...prev, [data.survey.id]: defaultRowState() }));
+      }
       resetForm();
     } catch (err) {
       setCreateError(`Network error: ${(err as Error).message}`);
@@ -706,7 +760,10 @@ export default function SurveysPage() {
       </header>
 
       {/* ── Create form ─────────────────────────────────────────── */}
-      <SectionCard title="Build a new survey" testId="survey-create-section">
+      <SectionCard
+        title={editingId ? "Edit survey" : "Build a new survey"}
+        testId="survey-create-section"
+      >
         <form
           data-testid="survey-create-form"
           onSubmit={handleCreate}
@@ -738,6 +795,38 @@ export default function SurveysPage() {
               rows={2}
               style={{ ...inputStyle, resize: "vertical" }}
             />
+          </label>
+
+          <label style={{ display: "grid", gap: 4, minWidth: 0 }}>
+            <span style={{ fontSize: "0.75rem", color: "var(--wp-text-dim)" }}>
+              Custom link (optional)
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+              <span
+                style={{
+                  fontSize: "0.85rem",
+                  color: "var(--wp-text-dim)",
+                  fontFamily: "monospace",
+                  flexShrink: 0,
+                }}
+              >
+                /s/
+              </span>
+              <input
+                data-testid="survey-create-slug"
+                type="text"
+                value={slug}
+                onChange={(e) => setSlug(e.target.value)}
+                placeholder="weekend-porsche"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                style={{ ...inputStyle, minWidth: 0, flex: 1 }}
+              />
+            </div>
+            <span style={{ fontSize: "0.7rem", color: "var(--wp-text-muted)" }}>
+              Lowercase letters, numbers and hyphens. Leave blank to auto-generate.
+            </span>
           </label>
 
           {/* Question builder */}
@@ -1093,7 +1182,7 @@ export default function SurveysPage() {
             </div>
           ) : null}
 
-          <div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               data-testid="survey-create-submit"
               type="submit"
@@ -1109,8 +1198,25 @@ export default function SurveysPage() {
                 opacity: submitting ? 0.6 : 1,
               }}
             >
-              {submitting ? "Creating…" : "Create survey"}
+              {submitting
+                ? editingId
+                  ? "Saving…"
+                  : "Creating…"
+                : editingId
+                  ? "Save changes"
+                  : "Create survey"}
             </button>
+            {editingId ? (
+              <button
+                data-testid="survey-cancel-edit"
+                type="button"
+                onClick={resetForm}
+                disabled={submitting}
+                style={btnSecondary}
+              >
+                Cancel
+              </button>
+            ) : null}
           </div>
         </form>
       </SectionCard>
@@ -1276,6 +1382,16 @@ export default function SurveysPage() {
                         style={btnSecondary}
                       >
                         {linked ? (row.qrOpen ? "Hide QR" : "Show QR") : "Generate QR"}
+                      </button>
+                      <button
+                        data-testid={`survey-edit-${s.id}`}
+                        type="button"
+                        disabled={row.busy}
+                        onClick={() => startEdit(s)}
+                        title="Edit this survey's title, questions, and link"
+                        style={btnSecondary}
+                      >
+                        Edit
                       </button>
                       <button
                         data-testid={`survey-results-${s.id}`}

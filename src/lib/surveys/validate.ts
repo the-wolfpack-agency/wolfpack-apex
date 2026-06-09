@@ -36,6 +36,21 @@ export function generateSurveySlug(): string {
   return out;
 }
 
+// Vanity slugs (e.g. /s/weekend-porsche): lowercase a–z, 0–9, single hyphens
+// between segments, no leading/trailing/consecutive hyphens. The generated
+// fallback (generateSurveySlug) stays the default when none is supplied.
+const CUSTOM_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** Validate a user-chosen vanity slug. Pure, no I/O (uniqueness is the DB's job). */
+export function validateSlug(slug: string): ValidationResult {
+  const friendly = "Use lowercase letters, numbers and hyphens (3–50 chars).";
+  if (typeof slug !== "string" || slug.length < 3 || slug.length > 50) {
+    return { ok: false, error: friendly };
+  }
+  if (!CUSTOM_SLUG_RE.test(slug)) return { ok: false, error: friendly };
+  return { ok: true };
+}
+
 const CHOICE_TYPES = new Set(["single_choice", "multiple_choice"]);
 // Basic, deliberately-permissive email shape. Real deliverability is
 // confirmed downstream; this just blocks obvious garbage at the gate.

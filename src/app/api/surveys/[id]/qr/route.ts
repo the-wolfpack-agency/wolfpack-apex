@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import { recordAudit } from "@/lib/audit-log";
-import { createCode } from "@/lib/qr/codes";
+import { createCode, getCodeById } from "@/lib/qr/codes";
 import { getSurveyById, updateSurvey } from "@/lib/surveys/store";
 
 export async function POST(
@@ -25,6 +25,17 @@ export async function POST(
 
   const survey = await getSurveyById(id);
   if (!survey) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  // Idempotent: a survey links to exactly ONE QR code. If it already has a
+  // live (non-archived) one, return it instead of minting another. This is
+  // what prevents duplicate codes from a double-click, a retry, or a direct
+  // API call — the server is the guarantee, not just the UI.
+  if (survey.qrCodeId) {
+    const existing = await getCodeById(survey.qrCodeId);
+    if (existing && !existing.archivedAt) {
+      return NextResponse.json({ code: existing, survey, reused: true });
+    }
+  }
 
   const origin = new URL(req.url).origin;
   const targetUrl = `${origin}/s/${survey.slug}`;
