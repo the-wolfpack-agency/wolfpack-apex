@@ -43,6 +43,15 @@ run_stage "lint"       npm run lint
 run_stage "typecheck"  npx tsc --noEmit
 run_stage "unit-tests" npx jest --silent
 
+# Real-browser guard for the QR download rasterizer (no dev server/DB).
+# Catches the "svg image decode failed" duplicate-attribute regression
+# that jsdom cannot — SVG <img> decode + canvas.toBlob need a real engine.
+if [ "${VERIFY_SKIP_E2E:-0}" = "1" ]; then
+  skip_stage "qr-download-decode" "VERIFY_SKIP_E2E=1"
+else
+  run_stage "qr-download-decode" npm run test:qr-download
+fi
+
 if [ "${VERIFY_SKIP_BUILD:-0}" = "1" ]; then
   skip_stage "next-build" "VERIFY_SKIP_BUILD=1"
 else
