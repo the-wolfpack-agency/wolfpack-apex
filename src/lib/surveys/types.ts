@@ -1,0 +1,66 @@
+/**
+ * Survey builder — shared types.
+ *
+ * Surveys are owned in-house (no third-party SaaS): a survey is a JSON
+ * schema of questions rendered at the public responder /s/<slug>. The
+ * schema is intentionally small — the five question types below cover
+ * the ~80% the agency actually runs — and versionable: new types append
+ * to QUESTION_TYPES without breaking stored schemas.
+ */
+
+export const QUESTION_TYPES = [
+  "short_text",
+  "long_text",
+  "single_choice",
+  "multiple_choice",
+  "rating",
+] as const;
+
+export type QuestionType = (typeof QUESTION_TYPES)[number];
+
+export const SURVEY_STATUSES = ["draft", "published", "closed"] as const;
+export type SurveyStatus = (typeof SURVEY_STATUSES)[number];
+
+export interface SurveyQuestion {
+  /** Stable id used as the key in a response's `answers` map. */
+  id: string;
+  type: QuestionType;
+  label: string;
+  required: boolean;
+  /** Required for single_choice / multiple_choice. */
+  options?: string[];
+  /** Top of the scale for `rating` (default 5). */
+  max?: number;
+}
+
+export interface SurveySchema {
+  questions: SurveyQuestion[];
+}
+
+export interface Survey {
+  id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  schema: SurveySchema;
+  status: SurveyStatus;
+  qrCodeId: string | null;
+  clientId: string | null;
+  createdByUserId: string | null;
+  createdByUserRole: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A single answer value, keyed by question id. */
+export type AnswerValue = string | string[] | number;
+export type AnswerMap = Record<string, AnswerValue>;
+
+export interface SurveyResponse {
+  id: string;
+  surveyId: string;
+  answers: AnswerMap;
+  respondentFingerprint: string | null;
+  qrScanId: string | null;
+  submittedAt: string;
+}

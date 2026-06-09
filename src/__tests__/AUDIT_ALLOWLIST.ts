@@ -518,6 +518,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/automations/[automationId]/exceptions/[exceptionId]/resolve/route.ts",
     reason: "resolveException flips status with resolved_by + resolved_at on apex_automation_porsche_exceptions (row records the resolver) and fires automations.exception_resolved analytics — row + event ARE the audit trail",
   },
+  {
+    route: "src/app/api/s/[slug]/route.ts",
+    reason: "public anonymous survey submission — high-volume observability sink (rate-limited, no authenticated actor); tracked via survey.response_submitted/rejected analytics, not a security-relevant admin mutation",
+  },
 ];
 
 export const AUDIT_ALLOWLIST_ROUTES: ReadonlySet<string> = new Set(

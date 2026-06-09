@@ -2046,6 +2046,19 @@ export type InstinctEventType =
   | "qr.code_locked"
   | "qr.code_unlocked"
   | "qr.archive_blocked"
+  /* survey builder (migration 161). created/updated/published/closed/
+     deleted track the lifecycle an operator drives; response_submitted /
+     response_rejected fire from the public responder so the learning loop
+     sees completion + abuse/validation pressure. response_submitted is
+     the durable signal joined to client + QR-scan attribution. */
+  | "survey.created"
+  | "survey.updated"
+  | "survey.published"
+  | "survey.closed"
+  | "survey.deleted"
+  | "survey.qr_linked"
+  | "survey.response_submitted"
+  | "survey.response_rejected"
   /* qr_scan_recorded: a public scan hit /q/[slug] and was either
      redirected (blocked=false) or short-circuited because the code
      was missing/archived/expired (blocked=true). The redirect handler
