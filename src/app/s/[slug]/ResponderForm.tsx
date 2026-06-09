@@ -9,9 +9,25 @@
  * fetchWithRefresh wrapper doesn't apply). The April 16 blank-dashboard
  * guardrail is about AUTHENTICATED client fetches; this page has no auth.
  *
+ * Question types:
+ *   - short_text / long_text — text inputs.
+ *   - single_choice / multiple_choice — radios / checkboxes, with optional
+ *     "Other ___" free-text (allowOther) submitted as `${OTHER_VALUE_PREFIX}<text>`.
+ *   - rating — 1..max button scale.
+ *   - email — validated email input.
+ *   - section — NON-input content block: heading + optional body paragraph.
+ *
+ * Capabilities:
+ *   - helpText renders as a sub-prompt under the label.
+ *   - multiple_choice maxSelections caps how many boxes can be checked
+ *     (the rest disable once the cap is reached).
+ *   - visibleIf gates a question on a controlling answer. Visibility is
+ *     recomputed LIVE via isQuestionActive (shared with the server so
+ *     client + server agree). Hidden questions don't render and aren't
+ *     submitted; required-checks skip them.
+ *
  * Flow:
- *   - Client-side required check first (so common omissions don't burn a
- *     server round-trip), then POST.
+ *   - Client-side required check first (active questions only), then POST.
  *   - 200 → success state (data-testid="survey-submitted"), form removed.
  *   - 400 → server validation error inline (data-testid="survey-error"),
  *           form kept so the respondent can fix and resubmit.
@@ -22,12 +38,14 @@
  */
 
 import { useState } from "react";
-import type {
-  AnswerMap,
-  AnswerValue,
-  SurveyQuestion,
-  SurveySchema,
+import {
+  OTHER_VALUE_PREFIX,
+  type AnswerMap,
+  type AnswerValue,
+  type SurveyQuestion,
+  type SurveySchema,
 } from "@/lib/surveys/types";
+import { isOtherValue, isQuestionActive, otherText } from "@/lib/surveys/validate";
 
 interface Props {
   slug: string;
@@ -67,6 +85,27 @@ const labelStyle: React.CSSProperties = {
   marginBottom: "0.5rem",
 };
 
+const helpStyle: React.CSSProperties = {
+  display: "block",
+  fontSize: "0.825rem",
+  fontWeight: 400,
+  lineHeight: 1.4,
+  color: "var(--wp-text-dim, #a1a1aa)",
+  marginTop: "-0.25rem",
+  marginBottom: "0.5rem",
+};
+
+const choiceRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.5rem",
+  color: "var(--wp-text, #f4f4f5)",
+  fontSize: "0.95rem",
+  cursor: "pointer",
+};
+
+const OTHER_LABEL = "Other";
+
 function isAnswered(q: SurveyQuestion, v: AnswerValue | undefined): boolean {
   if (v === undefined || v === null) return false;
   if (typeof v === "string") return v.trim() !== "";
@@ -82,8 +121,16 @@ export default function ResponderForm({
   schema,
 }: Props) {
   const [answers, setAnswers] = useState<AnswerMap>({});
+  // Free text typed into an "Other" field, keyed by question id. Held
+  // separately from `answers` so the box keeps its text while toggling.
+  const [otherDrafts, setOtherDrafts] = useState<Record<string, string>>({});
   const [state, setState] = useState<SubmitState>("idle");
   const [error, setError] = useState<string | null>(null);
+
+  // LIVE visibility — recomputed every render against the current answers
+  // so conditional questions appear/disappear as the controlling answer
+  // changes. Shared isQuestionActive keeps client + server in lockstep.
+  const visible = schema.questions.filter((q) => isQuestionActive(q, answers));
 
   function setAnswer(id: string, value: AnswerValue | undefined) {
     setAnswers((prev) => {
@@ -94,6 +141,21 @@ export default function ResponderForm({
     });
   }
 
+  function setOtherDraft(id: string, text: string) {
+    setOtherDrafts((prev) => ({ ...prev, [id]: text }));
+  }
+
+  // ----- single_choice helpers -----
+  function selectOther(id: string) {
+    const text = otherDrafts[id] ?? "";
+    setAnswer(id, `${OTHER_VALUE_PREFIX}${text}`);
+  }
+  function setSingleOtherText(id: string, text: string) {
+    setOtherDraft(id, text);
+    setAnswer(id, `${OTHER_VALUE_PREFIX}${text}`);
+  }
+
+  // ----- multiple_choice helpers -----
   function toggleMulti(id: string, option: string, checked: boolean) {
     setAnswers((prev) => {
       const current = Array.isArray(prev[id]) ? (prev[id] as string[]) : [];
@@ -106,14 +168,49 @@ export default function ResponderForm({
       return out;
     });
   }
+  function toggleMultiOther(id: string, checked: boolean) {
+    setAnswers((prev) => {
+      const current = Array.isArray(prev[id]) ? (prev[id] as string[]) : [];
+      const withoutOther = current.filter((o) => !isOtherValue(o));
+      const next = checked
+        ? [...withoutOther, `${OTHER_VALUE_PREFIX}${otherDrafts[id] ?? ""}`]
+        : withoutOther;
+      const out = { ...prev };
+      if (next.length === 0) delete out[id];
+      else out[id] = next;
+      return out;
+    });
+  }
+  function setMultiOtherText(id: string, text: string) {
+    setOtherDraft(id, text);
+    setAnswers((prev) => {
+      const current = Array.isArray(prev[id]) ? (prev[id] as string[]) : [];
+      const next = [
+        ...current.filter((o) => !isOtherValue(o)),
+        `${OTHER_VALUE_PREFIX}${text}`,
+      ];
+      return { ...prev, [id]: next };
+    });
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
-    // Client-side required check (UX only — server re-validates).
-    const firstMissing = schema.questions.find(
-      (q) => q.required && !isAnswered(q, answers[q.id]),
+    // Only submit answers for currently-visible questions. A question
+    // that was answered then hidden (controlling answer changed) must
+    // NOT be sent — server agrees via the same isQuestionActive gate.
+    const visibleIds = new Set(visible.map((q) => q.id));
+    const payload: AnswerMap = {};
+    for (const id of Object.keys(answers)) {
+      if (visibleIds.has(id)) payload[id] = answers[id];
+    }
+
+    // Client-side required check (UX only — server re-validates). Skip
+    // hidden (inactive) questions and content blocks.
+    const firstMissing = visible.find(
+      (q) =>
+        q.type !== "section" && q.required && !isAnswered(q, payload[q.id]),
     );
     if (firstMissing) {
       setError(`"${firstMissing.label}" is required.`);
@@ -125,7 +222,7 @@ export default function ResponderForm({
       const res = await fetch(`/api/s/${encodeURIComponent(slug)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ answers }),
+        body: JSON.stringify({ answers: payload }),
       });
       if (res.status === 200) {
         setState("submitted");
@@ -207,17 +304,57 @@ export default function ResponderForm({
       </header>
 
       <div style={{ display: "grid", gap: "1.5rem" }}>
-        {schema.questions.map((q) => (
-          <div key={q.id} data-testid={`survey-q-${q.id}`}>
-            <span style={labelStyle}>
-              {q.label}
-              {q.required ? (
-                <span style={{ color: "var(--wp-error, #f87171)" }}> *</span>
+        {visible.map((q) =>
+          q.type === "section" ? (
+            <section key={q.id} data-testid={`survey-q-${q.id}`}>
+              <h2
+                style={{
+                  fontSize: "1.15rem",
+                  fontWeight: 700,
+                  margin: 0,
+                  color: "var(--wp-gold, #d4a857)",
+                }}
+              >
+                {q.label}
+              </h2>
+              {q.body ? (
+                <p
+                  style={{
+                    fontSize: "0.9rem",
+                    lineHeight: 1.55,
+                    color: "var(--wp-text-dim, #a1a1aa)",
+                    marginTop: "0.5rem",
+                    marginBottom: 0,
+                  }}
+                >
+                  {q.body}
+                </p>
               ) : null}
-            </span>
-            {renderQuestion(q, answers, setAnswer, toggleMulti)}
-          </div>
-        ))}
+            </section>
+          ) : (
+            <div key={q.id} data-testid={`survey-q-${q.id}`}>
+              <span style={labelStyle}>
+                {q.label}
+                {q.required ? (
+                  <span style={{ color: "var(--wp-error, #f87171)" }}> *</span>
+                ) : null}
+              </span>
+              {q.helpText ? (
+                <span data-testid={`survey-help-${q.id}`} style={helpStyle}>
+                  {q.helpText}
+                </span>
+              ) : null}
+              {renderQuestion(q, answers, otherDrafts, {
+                setAnswer,
+                toggleMulti,
+                selectOther,
+                setSingleOtherText,
+                toggleMultiOther,
+                setMultiOtherText,
+              })}
+            </div>
+          ),
+        )}
       </div>
 
       {error ? (
@@ -262,11 +399,20 @@ export default function ResponderForm({
 /* Per-type question renderers                                         */
 /* ------------------------------------------------------------------ */
 
+interface RenderHandlers {
+  setAnswer: (id: string, value: AnswerValue | undefined) => void;
+  toggleMulti: (id: string, option: string, checked: boolean) => void;
+  selectOther: (id: string) => void;
+  setSingleOtherText: (id: string, text: string) => void;
+  toggleMultiOther: (id: string, checked: boolean) => void;
+  setMultiOtherText: (id: string, text: string) => void;
+}
+
 function renderQuestion(
   q: SurveyQuestion,
   answers: AnswerMap,
-  setAnswer: (id: string, value: AnswerValue | undefined) => void,
-  toggleMulti: (id: string, option: string, checked: boolean) => void,
+  otherDrafts: Record<string, string>,
+  h: RenderHandlers,
 ): React.ReactNode {
   const value = answers[q.id];
 
@@ -277,7 +423,20 @@ function renderQuestion(
           type="text"
           data-testid={`survey-input-${q.id}`}
           value={typeof value === "string" ? value : ""}
-          onChange={(e) => setAnswer(q.id, e.target.value || undefined)}
+          onChange={(e) => h.setAnswer(q.id, e.target.value || undefined)}
+          style={inputStyle}
+        />
+      );
+
+    case "email":
+      return (
+        <input
+          type="email"
+          inputMode="email"
+          autoComplete="email"
+          data-testid={`survey-input-${q.id}`}
+          value={typeof value === "string" ? value : ""}
+          onChange={(e) => h.setAnswer(q.id, e.target.value || undefined)}
           style={inputStyle}
         />
       );
@@ -287,67 +446,131 @@ function renderQuestion(
         <textarea
           data-testid={`survey-input-${q.id}`}
           value={typeof value === "string" ? value : ""}
-          onChange={(e) => setAnswer(q.id, e.target.value || undefined)}
+          onChange={(e) => h.setAnswer(q.id, e.target.value || undefined)}
           rows={4}
           style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
         />
       );
 
-    case "single_choice":
+    case "single_choice": {
+      const otherChecked = isOtherValue(value);
       return (
         <div style={{ display: "grid", gap: "0.5rem" }}>
           {(q.options ?? []).map((opt) => (
-            <label
-              key={opt}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                color: "var(--wp-text, #f4f4f5)",
-                fontSize: "0.95rem",
-                cursor: "pointer",
-              }}
-            >
+            <label key={opt} style={choiceRowStyle}>
               <input
                 type="radio"
                 name={q.id}
                 data-testid={`survey-radio-${q.id}-${opt}`}
                 value={opt}
                 checked={value === opt}
-                onChange={() => setAnswer(q.id, opt)}
+                onChange={() => h.setAnswer(q.id, opt)}
               />
               {opt}
             </label>
           ))}
+          {q.allowOther ? (
+            <>
+              <label style={choiceRowStyle}>
+                <input
+                  type="radio"
+                  name={q.id}
+                  data-testid={`survey-radio-${q.id}-__other__`}
+                  checked={otherChecked}
+                  onChange={() => h.selectOther(q.id)}
+                />
+                {OTHER_LABEL}
+              </label>
+              {otherChecked ? (
+                <input
+                  type="text"
+                  data-testid={`survey-other-input-${q.id}`}
+                  placeholder="Please specify"
+                  value={
+                    isOtherValue(value)
+                      ? otherText(value)
+                      : otherDrafts[q.id] ?? ""
+                  }
+                  onChange={(e) => h.setSingleOtherText(q.id, e.target.value)}
+                  style={inputStyle}
+                />
+              ) : null}
+            </>
+          ) : null}
         </div>
       );
+    }
 
     case "multiple_choice": {
       const selected = Array.isArray(value) ? value : [];
+      const cap = q.maxSelections;
+      const atCap = cap !== undefined && selected.length >= cap;
+      const otherChecked = selected.some((v) => isOtherValue(v));
       return (
         <div style={{ display: "grid", gap: "0.5rem" }}>
-          {(q.options ?? []).map((opt) => (
-            <label
-              key={opt}
+          {(q.options ?? []).map((opt) => {
+            const checked = selected.includes(opt);
+            // At the cap, lock the remaining (unchecked) boxes.
+            const disabled = atCap && !checked;
+            return (
+              <label
+                key={opt}
+                style={{ ...choiceRowStyle, opacity: disabled ? 0.5 : 1 }}
+              >
+                <input
+                  type="checkbox"
+                  data-testid={`survey-checkbox-${q.id}-${opt}`}
+                  value={opt}
+                  checked={checked}
+                  disabled={disabled}
+                  onChange={(e) => h.toggleMulti(q.id, opt, e.target.checked)}
+                />
+                {opt}
+              </label>
+            );
+          })}
+          {q.allowOther ? (
+            <>
+              <label
+                style={{
+                  ...choiceRowStyle,
+                  opacity: atCap && !otherChecked ? 0.5 : 1,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  data-testid={`survey-checkbox-${q.id}-__other__`}
+                  checked={otherChecked}
+                  disabled={atCap && !otherChecked}
+                  onChange={(e) => h.toggleMultiOther(q.id, e.target.checked)}
+                />
+                {OTHER_LABEL}
+              </label>
+              {otherChecked ? (
+                <input
+                  type="text"
+                  data-testid={`survey-other-input-${q.id}`}
+                  placeholder="Please specify"
+                  value={otherDrafts[q.id] ?? ""}
+                  onChange={(e) => h.setMultiOtherText(q.id, e.target.value)}
+                  style={inputStyle}
+                />
+              ) : null}
+            </>
+          ) : null}
+          {cap !== undefined ? (
+            <span
+              data-testid={`survey-maxhint-${q.id}`}
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                color: "var(--wp-text, #f4f4f5)",
-                fontSize: "0.95rem",
-                cursor: "pointer",
+                fontSize: "0.8rem",
+                color: atCap
+                  ? "var(--wp-gold, #d4a857)"
+                  : "var(--wp-text-dim, #a1a1aa)",
               }}
             >
-              <input
-                type="checkbox"
-                data-testid={`survey-checkbox-${q.id}-${opt}`}
-                value={opt}
-                checked={selected.includes(opt)}
-                onChange={(e) => toggleMulti(q.id, opt, e.target.checked)}
-              />
-              {opt}
-            </label>
-          ))}
+              {`Select up to ${cap}`}
+            </span>
+          ) : null}
         </div>
       );
     }
@@ -365,7 +588,7 @@ function renderQuestion(
                 type="button"
                 data-testid={`survey-rating-${q.id}-${n}`}
                 aria-pressed={value === n}
-                onClick={() => setAnswer(q.id, n)}
+                onClick={() => h.setAnswer(q.id, n)}
                 style={{
                   minWidth: "2.5rem",
                   padding: "0.45rem 0",

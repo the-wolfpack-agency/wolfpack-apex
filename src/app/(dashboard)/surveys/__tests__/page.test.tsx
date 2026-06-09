@@ -245,6 +245,162 @@ describe("/surveys page", () => {
     expect(screen.getByTestId("survey-row-survey-2")).toBeInTheDocument();
   });
 
+  test("builds a 'Weekend with Porsche'-shaped survey exercising section/allowOther/maxSelections/email/visibleIf and POSTs the right schema", async () => {
+    mockListResponse([]);
+
+    const newSurvey = {
+      ...sampleSurvey,
+      id: "survey-9",
+      slug: "porsch1",
+      title: "A Weekend with Porsche",
+      status: "draft",
+    };
+    /* Second call: the POST → 201. */
+    mockFetchWithRefresh.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: true,
+        status: 201,
+        json: async () => ({ survey: newSurvey }),
+      }),
+    );
+
+    render(<SurveysPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("survey-create-form")).toBeInTheDocument(),
+    );
+
+    fireEvent.change(screen.getByTestId("survey-create-title"), {
+      target: { value: "A Weekend with Porsche" },
+    });
+
+    /* Five questions:
+       q1 = section (intro), q2 = single_choice + allowOther,
+       q3 = multiple_choice + maxSelections 3, q4 = email,
+       q5 = conditional (visibleIf q2 equals "Yes"). */
+    for (let i = 0; i < 5; i += 1) {
+      fireEvent.click(screen.getByTestId("survey-add-question"));
+    }
+
+    /* q1: section. */
+    fireEvent.change(screen.getByTestId("survey-q-type-0"), {
+      target: { value: "section" },
+    });
+    fireEvent.change(screen.getByTestId("survey-q-label-0"), {
+      target: { value: "Shape the Cayenne Experience" },
+    });
+    fireEvent.change(screen.getByTestId("survey-q-body-0"), {
+      target: { value: "Your feedback shapes the final experience." },
+    });
+    /* Sections expose no required checkbox. */
+    expect(screen.queryByTestId("survey-q-required-0")).toBeNull();
+
+    /* q2: single_choice with allowOther. */
+    fireEvent.change(screen.getByTestId("survey-q-type-1"), {
+      target: { value: "single_choice" },
+    });
+    fireEvent.change(screen.getByTestId("survey-q-label-1"), {
+      target: { value: "Are you interested in the pilot?" },
+    });
+    fireEvent.change(screen.getByTestId("survey-q-help-1"), {
+      target: { value: "Select one" },
+    });
+    fireEvent.change(screen.getByTestId("survey-q-options-1"), {
+      target: { value: "Yes, More info, No" },
+    });
+    fireEvent.click(screen.getByTestId("survey-q-allowother-1"));
+    fireEvent.click(screen.getByTestId("survey-q-required-1"));
+
+    /* q3: multiple_choice with maxSelections=3. */
+    fireEvent.change(screen.getByTestId("survey-q-type-2"), {
+      target: { value: "multiple_choice" },
+    });
+    fireEvent.change(screen.getByTestId("survey-q-label-2"), {
+      target: { value: "Which resources help most?" },
+    });
+    fireEvent.change(screen.getByTestId("survey-q-options-2"), {
+      target: { value: "Templates, Guides, Playbook, Tools" },
+    });
+    fireEvent.change(screen.getByTestId("survey-q-maxselections-2"), {
+      target: { value: "3" },
+    });
+
+    /* q4: email. */
+    fireEvent.change(screen.getByTestId("survey-q-type-3"), {
+      target: { value: "email" },
+    });
+    fireEvent.change(screen.getByTestId("survey-q-label-3"), {
+      target: { value: "Email" },
+    });
+
+    /* q5: short_text shown only when q2 === "Yes". */
+    fireEvent.change(screen.getByTestId("survey-q-label-4"), {
+      target: { value: "Porsche Center" },
+    });
+    fireEvent.change(screen.getByTestId("survey-q-visibleif-q-4"), {
+      target: { value: "q2" },
+    });
+    fireEvent.change(screen.getByTestId("survey-q-visibleif-val-4"), {
+      target: { value: "Yes" },
+    });
+
+    fireEvent.click(screen.getByTestId("survey-create-submit"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("survey-row-survey-9")).toBeInTheDocument(),
+    );
+
+    const postCall = mockFetchWithRefresh.mock.calls.find(
+      (c) => c[1]?.method === "POST",
+    );
+    expect(postCall).toBeTruthy();
+    expect(findUrlArg(postCall!)).toBe("/api/surveys");
+    const body = JSON.parse(postCall![1].body);
+    expect(body.title).toBe("A Weekend with Porsche");
+
+    const qs = body.schema.questions;
+    expect(qs).toHaveLength(5);
+
+    /* q1 — section: no answer, never required, carries body, no options. */
+    expect(qs[0]).toEqual({
+      id: "q1",
+      type: "section",
+      label: "Shape the Cayenne Experience",
+      required: false,
+      body: "Your feedback shapes the final experience.",
+    });
+
+    /* q2 — single_choice + allowOther + helpText. */
+    expect(qs[1].id).toBe("q2");
+    expect(qs[1].type).toBe("single_choice");
+    expect(qs[1].required).toBe(true);
+    expect(qs[1].allowOther).toBe(true);
+    expect(qs[1].helpText).toBe("Select one");
+    expect(qs[1].options).toEqual(["Yes", "More info", "No"]);
+    expect(qs[1].visibleIf).toBeUndefined();
+
+    /* q3 — multiple_choice + maxSelections=3 (a number). */
+    expect(qs[2].id).toBe("q3");
+    expect(qs[2].type).toBe("multiple_choice");
+    expect(qs[2].maxSelections).toBe(3);
+    expect(qs[2].options).toEqual([
+      "Templates",
+      "Guides",
+      "Playbook",
+      "Tools",
+    ]);
+    /* No allowOther toggled here. */
+    expect(qs[2].allowOther).toBeUndefined();
+
+    /* q4 — email. */
+    expect(qs[3].id).toBe("q4");
+    expect(qs[3].type).toBe("email");
+    expect(qs[3].options).toBeUndefined();
+
+    /* q5 — conditional on an earlier single_choice via `equals`. */
+    expect(qs[4].id).toBe("q5");
+    expect(qs[4].visibleIf).toEqual({ questionId: "q2", equals: "Yes" });
+  });
+
   test("publish toggles status via PATCH and updates the row in place", async () => {
     mockListResponse([sampleSurvey]); // status: draft
     mockFetchWithRefresh.mockImplementationOnce(() =>

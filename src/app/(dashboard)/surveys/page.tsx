@@ -33,8 +33,9 @@ import type {
   Survey,
   SurveyQuestion,
   QuestionType,
+  VisibleIf,
 } from "@/lib/surveys/types";
-import { QUESTION_TYPES } from "@/lib/surveys/types";
+import { QUESTION_TYPES, CONTENT_QUESTION_TYPES } from "@/lib/surveys/types";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -42,12 +43,26 @@ import { QUESTION_TYPES } from "@/lib/surveys/types";
 
 /* One question row in the create-form builder, before it's assembled
    into a SurveyQuestion. The comma-separated `optionsText` is parsed at
-   submit time into the `options` array. */
+   submit time into the `options` array. Optional capabilities are held as
+   strings/flags here and only emitted onto the built question when set, so
+   blank inputs never produce undefined/empty fields in the schema. */
 interface DraftQuestion {
   label: string;
   type: QuestionType;
   required: boolean;
   optionsText: string;
+  /** Sub-prompt shown under the label (e.g. "Select one"). */
+  helpText: string;
+  /** single_choice / multiple_choice: offer an "Other ___" capture. */
+  allowOther: boolean;
+  /** multiple_choice: cap selections; blank string = no cap. */
+  maxSelectionsText: string;
+  /** section content paragraph. */
+  body: string;
+  /** "visible only if": the controlling earlier question id (blank = none). */
+  visibleIfQuestionId: string;
+  /** the value the controlling question must equal to show this one. */
+  visibleIfValue: string;
 }
 
 /* Per-question aggregate from GET /api/surveys/:id/responses. The exact
@@ -96,6 +111,12 @@ const CHOICE_TYPES: ReadonlySet<QuestionType> = new Set<QuestionType>([
   "multiple_choice",
 ]);
 
+/* Content blocks (sections) collect no answer — they can't be required and
+   are valid controllers for "visible only if". */
+const CONTENT_TYPES: ReadonlySet<QuestionType> = new Set<QuestionType>(
+  CONTENT_QUESTION_TYPES,
+);
+
 /* Human label for a question type — the team isn't technical, so the
    <select> shows plain language rather than the snake_case enum. */
 const TYPE_LABELS: Record<QuestionType, string> = {
@@ -104,6 +125,8 @@ const TYPE_LABELS: Record<QuestionType, string> = {
   single_choice: "Single choice",
   multiple_choice: "Multiple choice",
   rating: "Rating (1–5)",
+  email: "Email",
+  section: "Section heading (no answer)",
 };
 
 function parseOptions(text: string): string[] {
@@ -114,7 +137,25 @@ function parseOptions(text: string): string[] {
 }
 
 function newDraftQuestion(): DraftQuestion {
-  return { label: "", type: "short_text", required: false, optionsText: "" };
+  return {
+    label: "",
+    type: "short_text",
+    required: false,
+    optionsText: "",
+    helpText: "",
+    allowOther: false,
+    maxSelectionsText: "",
+    body: "",
+    visibleIfQuestionId: "",
+    visibleIfValue: "",
+  };
+}
+
+/* Positional, stable id for the question at index `i` (q1, q2 …). The
+   responder + aggregate key on these, and "visible only if" references an
+   EARLIER question by this same id. */
+function questionId(i: number): string {
+  return `q${i + 1}`;
 }
 
 function defaultRowState(): RowState {
@@ -236,17 +277,64 @@ export default function SurveysPage() {
      and positional (q1, q2 …) so the responder + aggregate can key on
      them; choice options come from the comma-separated input. */
   function buildSchema(): { questions: SurveyQuestion[] } {
+    /* Ids of questions that appear EARLIER than index i — the only valid
+       targets for a "visible only if" reference (validateSchema enforces
+       earlier-only). */
     return {
       questions: questions.map((q, i) => {
+        const isContent = CONTENT_TYPES.has(q.type);
         const built: SurveyQuestion = {
-          id: `q${i + 1}`,
+          id: questionId(i),
           type: q.type,
           label: q.label.trim(),
-          required: q.required,
+          // Sections can never be required and carry no answer.
+          required: isContent ? false : q.required,
         };
+
+        const help = q.helpText.trim();
+        if (help) built.helpText = help;
+
+        if (isContent) {
+          const body = q.body.trim();
+          if (body) built.body = body;
+          // Sections take no options / conditions / answer fields.
+          return built;
+        }
+
         if (CHOICE_TYPES.has(q.type)) {
           built.options = parseOptions(q.optionsText);
+          if (q.allowOther) built.allowOther = true;
         }
+
+        if (q.type === "multiple_choice") {
+          const cap = Number(q.maxSelectionsText.trim());
+          if (
+            q.maxSelectionsText.trim() !== "" &&
+            Number.isInteger(cap) &&
+            cap >= 1
+          ) {
+            built.maxSelections = cap;
+          }
+        }
+
+        // "Visible only if" — only emit when the referenced question is an
+        // EARLIER one and a value is supplied. Controllers are single-value
+        // here, so we always use `equals`.
+        const controllerId = q.visibleIfQuestionId.trim();
+        const controllerVal = q.visibleIfValue.trim();
+        if (controllerId && controllerVal) {
+          const controllerIdx = questions.findIndex(
+            (_, j) => questionId(j) === controllerId,
+          );
+          if (controllerIdx >= 0 && controllerIdx < i) {
+            const visibleIf: VisibleIf = {
+              questionId: controllerId,
+              equals: controllerVal,
+            };
+            built.visibleIf = visibleIf;
+          }
+        }
+
         return built;
       }),
     };
@@ -670,7 +758,33 @@ export default function SurveysPage() {
                       </label>
                     </div>
 
-                    {CHOICE_TYPES.has(q.type) ? (
+                    {/* Help text / sub-prompt — useful for every type
+                        ("Select one", "Select up to three", intro copy). */}
+                    <label style={{ display: "grid", gap: 4, minWidth: 0 }}>
+                      <span
+                        style={{
+                          fontSize: "0.7rem",
+                          color: "var(--wp-text-dim)",
+                        }}
+                      >
+                        {CONTENT_TYPES.has(q.type)
+                          ? "Sub-heading (optional)"
+                          : "Helper text (optional)"}
+                      </span>
+                      <input
+                        data-testid={`survey-q-help-${i}`}
+                        type="text"
+                        value={q.helpText}
+                        onChange={(e) =>
+                          patchQuestion(i, { helpText: e.target.value })
+                        }
+                        placeholder="Select one"
+                        style={inputStyle}
+                      />
+                    </label>
+
+                    {/* Section content paragraph. */}
+                    {CONTENT_TYPES.has(q.type) ? (
                       <label style={{ display: "grid", gap: 4, minWidth: 0 }}>
                         <span
                           style={{
@@ -678,19 +792,159 @@ export default function SurveysPage() {
                             color: "var(--wp-text-dim)",
                           }}
                         >
-                          Choices (comma-separated)
+                          Section text (optional)
+                        </span>
+                        <textarea
+                          data-testid={`survey-q-body-${i}`}
+                          value={q.body}
+                          onChange={(e) =>
+                            patchQuestion(i, { body: e.target.value })
+                          }
+                          placeholder="A short paragraph shown under the heading."
+                          rows={2}
+                          style={{ ...inputStyle, resize: "vertical" }}
+                        />
+                      </label>
+                    ) : null}
+
+                    {/* Choice options + "allow Other". */}
+                    {CHOICE_TYPES.has(q.type) ? (
+                      <>
+                        <label
+                          style={{ display: "grid", gap: 4, minWidth: 0 }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "0.7rem",
+                              color: "var(--wp-text-dim)",
+                            }}
+                          >
+                            Choices (comma-separated)
+                          </span>
+                          <input
+                            data-testid={`survey-q-options-${i}`}
+                            type="text"
+                            value={q.optionsText}
+                            onChange={(e) =>
+                              patchQuestion(i, { optionsText: e.target.value })
+                            }
+                            placeholder="Yes, No, Maybe"
+                            style={inputStyle}
+                          />
+                        </label>
+                        <label
+                          style={{
+                            display: "flex",
+                            gap: 6,
+                            alignItems: "center",
+                            fontSize: "0.75rem",
+                            color: "var(--wp-text-dim)",
+                          }}
+                        >
+                          <input
+                            data-testid={`survey-q-allowother-${i}`}
+                            type="checkbox"
+                            checked={q.allowOther}
+                            onChange={(e) =>
+                              patchQuestion(i, { allowOther: e.target.checked })
+                            }
+                          />
+                          Add an &ldquo;Other&rdquo; write-in choice
+                        </label>
+                      </>
+                    ) : null}
+
+                    {/* multiple_choice: cap on how many can be picked. */}
+                    {q.type === "multiple_choice" ? (
+                      <label style={{ display: "grid", gap: 4, minWidth: 0 }}>
+                        <span
+                          style={{
+                            fontSize: "0.7rem",
+                            color: "var(--wp-text-dim)",
+                          }}
+                        >
+                          Max selections (optional — blank = no limit)
                         </span>
                         <input
-                          data-testid={`survey-q-options-${i}`}
-                          type="text"
-                          value={q.optionsText}
+                          data-testid={`survey-q-maxselections-${i}`}
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={q.maxSelectionsText}
                           onChange={(e) =>
-                            patchQuestion(i, { optionsText: e.target.value })
+                            patchQuestion(i, {
+                              maxSelectionsText: e.target.value,
+                            })
                           }
-                          placeholder="Yes, No, Maybe"
+                          placeholder="e.g. 3"
                           style={inputStyle}
                         />
                       </label>
+                    ) : null}
+
+                    {/* "Visible only if" — controlled by an EARLIER question.
+                        Sections take no condition (they always show). */}
+                    {!CONTENT_TYPES.has(q.type) && i > 0 ? (
+                      <div className="survey-q-grid">
+                        <label
+                          style={{ display: "grid", gap: 4, minWidth: 0 }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "0.7rem",
+                              color: "var(--wp-text-dim)",
+                            }}
+                          >
+                            Show only if (optional)
+                          </span>
+                          <select
+                            data-testid={`survey-q-visibleif-q-${i}`}
+                            value={q.visibleIfQuestionId}
+                            onChange={(e) =>
+                              patchQuestion(i, {
+                                visibleIfQuestionId: e.target.value,
+                              })
+                            }
+                            style={inputStyle}
+                            aria-label={`Question ${i + 1} shows only if`}
+                          >
+                            <option value="">Always show</option>
+                            {questions.slice(0, i).map((earlier, j) =>
+                              CONTENT_TYPES.has(earlier.type) ? null : (
+                                <option key={j} value={questionId(j)}>
+                                  {earlier.label.trim() ||
+                                    `Question ${j + 1}`}
+                                </option>
+                              ),
+                            )}
+                          </select>
+                        </label>
+                        <label
+                          style={{ display: "grid", gap: 4, minWidth: 0 }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "0.7rem",
+                              color: "var(--wp-text-dim)",
+                            }}
+                          >
+                            …equals this answer
+                          </span>
+                          <input
+                            data-testid={`survey-q-visibleif-val-${i}`}
+                            type="text"
+                            value={q.visibleIfValue}
+                            onChange={(e) =>
+                              patchQuestion(i, {
+                                visibleIfValue: e.target.value,
+                              })
+                            }
+                            placeholder="Yes"
+                            style={inputStyle}
+                            disabled={!q.visibleIfQuestionId}
+                          />
+                        </label>
+                      </div>
                     ) : null}
 
                     <div
@@ -701,25 +955,28 @@ export default function SurveysPage() {
                         flexWrap: "wrap",
                       }}
                     >
-                      <label
-                        style={{
-                          display: "flex",
-                          gap: 6,
-                          alignItems: "center",
-                          fontSize: "0.75rem",
-                          color: "var(--wp-text-dim)",
-                        }}
-                      >
-                        <input
-                          data-testid={`survey-q-required-${i}`}
-                          type="checkbox"
-                          checked={q.required}
-                          onChange={(e) =>
-                            patchQuestion(i, { required: e.target.checked })
-                          }
-                        />
-                        Required
-                      </label>
+                      {/* Sections collect no answer, so "required" is hidden. */}
+                      {CONTENT_TYPES.has(q.type) ? null : (
+                        <label
+                          style={{
+                            display: "flex",
+                            gap: 6,
+                            alignItems: "center",
+                            fontSize: "0.75rem",
+                            color: "var(--wp-text-dim)",
+                          }}
+                        >
+                          <input
+                            data-testid={`survey-q-required-${i}`}
+                            type="checkbox"
+                            checked={q.required}
+                            onChange={(e) =>
+                              patchQuestion(i, { required: e.target.checked })
+                            }
+                          />
+                          Required
+                        </label>
+                      )}
                       <button
                         data-testid={`survey-q-remove-${i}`}
                         type="button"
