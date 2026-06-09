@@ -102,7 +102,9 @@ test("shows the Porsche wordmark only on porsche themes", () => {
   const { unmount } = render(
     <ResponderForm slug="abc1234" title="T" description={null} schema={SCHEMA} theme="porsche" />,
   );
-  expect(screen.getByTestId("survey-brand-wordmark")).toHaveTextContent("Porsche");
+  const mark = screen.getByTestId("survey-brand-wordmark");
+  expect(mark).toBeInTheDocument();
+  expect(mark).toHaveAttribute("aria-label", "Porsche"); // the official wordmark SVG
   unmount();
 
   render(

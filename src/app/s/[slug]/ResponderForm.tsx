@@ -57,27 +57,33 @@ interface Props {
   theme?: string | null;
 }
 
-/** The Porsche wordmark, rendered in the brand typeface (no image asset). */
+/**
+ * The official Porsche wordmark (public/brand/porsche-wordmark.svg, the real
+ * logotype). Rendered via CSS mask so it paints in the theme's text color —
+ * black on the white v1, white on the dark v2 — staying crisp at any size.
+ */
 function PorscheWordmark() {
+  const src = "/brand/porsche-wordmark.svg";
   return (
     <div
       data-testid="survey-brand-wordmark"
+      role="img"
       aria-label="Porsche"
       style={{
-        fontFamily: '"Porsche Next", "Arial Narrow", Arial, sans-serif',
-        fontWeight: 600,
-        fontSize: "1.05rem",
-        letterSpacing: "0.42em",
-        textTransform: "uppercase",
-        color: "var(--wp-text, #f4f4f5)",
-        marginBottom: "1rem",
-        // The wordmark's tracking pushes it right; pull the box back so it
-        // stays flush-left with the rest of the form.
-        paddingRight: "0.42em",
+        width: "172px", // wordmark aspect ratio is ~9.56:1
+        height: "18px",
+        marginBottom: "1.25rem",
+        backgroundColor: "var(--wp-text, #f4f4f5)",
+        WebkitMaskImage: `url(${src})`,
+        maskImage: `url(${src})`,
+        WebkitMaskRepeat: "no-repeat",
+        maskRepeat: "no-repeat",
+        WebkitMaskSize: "contain",
+        maskSize: "contain",
+        WebkitMaskPosition: "left center",
+        maskPosition: "left center",
       }}
-    >
-      Porsche
-    </div>
+    />
   );
 }
 
