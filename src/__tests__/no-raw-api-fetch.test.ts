@@ -25,11 +25,28 @@ const EXCEPTIONS = [
                              //   anonymous, no JWT; the /api/s/* routes are
                              //   unauthenticated by design (view beacon +
                              //   submit). No refresh flow applies.
+  "src/app/accept-invite",   // pre-auth: invitee has no session yet
+  "src/app/forgot-password", // pre-auth: no session by definition
+  "src/app/reset-password",  // pre-auth: token-in-URL flow, no session
   "src/lib/__tests__/",      // test files
   "src/__tests__/",
   "node_modules/",
   ".next/",
 ];
+
+/**
+ * Endpoints that are SAFE to call with a raw fetch from client code,
+ * because the "401 → blank page" failure mode this guard exists for does
+ * not apply to them:
+ *   - /api/analytics is a fire-and-forget observability beacon (often
+ *     keepalive); a 401 is silently ignored and never blanks the UI, and
+ *     fetchWithRefresh's retry/redirect semantics are wrong for a beacon.
+ *   - /api/auth/whoami is the session BOOTSTRAP (re-mints the JWT via the
+ *     refresh cookie). Routing it through fetchWithRefresh would be
+ *     circular — it's the very call that establishes the token.
+ * Anything not listed here still must use fetchWithRefresh.
+ */
+const ENDPOINT_EXCEPTIONS = ["/api/analytics", "/api/auth/whoami"];
 
 function walk(dir: string): string[] {
   const out: string[] = [];
@@ -60,6 +77,9 @@ describe("no raw fetch to authenticated API endpoints from client code", () => {
         while ((m = pattern.exec(line)) !== null) {
           // Skip if the same line already uses fetchWithRefresh
           if (line.includes("fetchWithRefresh") || line.includes("fetchJsonWithRefresh")) continue;
+          // Skip fire-and-forget / bootstrap endpoints (see ENDPOINT_EXCEPTIONS).
+          const endpoint = m[1].split("?")[0];
+          if (ENDPOINT_EXCEPTIONS.includes(endpoint)) continue;
           offenders.push({ file: path.relative(root, file), line: i + 1, match: m[1] });
         }
       });

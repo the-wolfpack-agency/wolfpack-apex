@@ -23,9 +23,50 @@ async function getAppliedMigrations(): Promise<Set<string>> {
   return new Set(result.rows.map((r: Record<string, unknown>) => r.name as string));
 }
 
-function discoverMigrations(): string[] {
+/**
+ * A FORWARD migration is a `.sql` file that is NOT a `.down.sql` rollback.
+ * Down files are rollback scripts run deliberately via `rollback()` — they
+ * must never be picked up as forward migrations (doing so executed every
+ * table's DROP as an apply, and only escaped breakage by sort-order luck +
+ * `IF EXISTS`). Exported for the guard test.
+ */
+export function isForwardMigration(name: string): boolean {
+  return name.endsWith(".sql") && !name.endsWith(".down.sql");
+}
+
+export function discoverMigrations(): string[] {
   if (!fs.existsSync(MIGRATIONS_DIR)) return [];
-  return fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql")).sort();
+  return fs.readdirSync(MIGRATIONS_DIR).filter(isForwardMigration).sort();
+}
+
+/**
+ * Deliberately roll back a single migration: apply its paired
+ * `<name>.down.sql` and remove its `_migrations` row. This is the ONLY
+ * path that executes a down file — never the forward `migrate()` loop.
+ */
+export async function rollback(name: string): Promise<void> {
+  if (!isForwardMigration(name)) {
+    throw new Error(`[migrate] rollback expects a forward migration name, got: ${name}`);
+  }
+  const downName = name.replace(/\.sql$/, ".down.sql");
+  const downPath = path.join(MIGRATIONS_DIR, downName);
+  if (!fs.existsSync(downPath)) {
+    throw new Error(`[migrate] No rollback file for ${name} (expected ${downName})`);
+  }
+  const sql = fs.readFileSync(downPath, "utf-8");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(sql);
+    await client.query("DELETE FROM _migrations WHERE name = $1", [name]);
+    await client.query("COMMIT");
+    console.log(`[migrate] Rolled back: ${name}`);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw new Error(`[migrate] Rollback failed ${name}: ${(err as Error).message}`);
+  } finally {
+    client.release();
+  }
 }
 
 async function applyMigration(name: string): Promise<void> {
@@ -60,5 +101,14 @@ export async function migrate(): Promise<void> {
 }
 
 if (require.main === module) {
-  migrate().then(() => process.exit(0)).catch((err) => { console.error(err); process.exit(1); });
+  // `tsx src/db/migrate.ts`            → apply pending forward migrations
+  // `tsx src/db/migrate.ts down <name>`→ roll back one migration deliberately
+  const [cmd, name] = process.argv.slice(2);
+  const run =
+    cmd === "down"
+      ? name
+        ? rollback(name)
+        : Promise.reject(new Error("[migrate] usage: down <migration-name.sql>"))
+      : migrate();
+  run.then(() => process.exit(0)).catch((err) => { console.error(err); process.exit(1); });
 }
