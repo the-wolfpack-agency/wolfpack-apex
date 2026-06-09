@@ -930,17 +930,12 @@ export default function QrPage() {
             grid-template-columns: 1fr;
           }
           /* Show-QR panel: stack the SVG above the Download button on
-             narrow screens so the 192px QR + adjacent button block
-             never exceeds viewport width. */
+             narrow screens. The wrapper sizing (192px capped at 100% of
+             its container) is set inline on the element itself so it can
+             never exceed the viewport — no rule needed here. */
           [data-testid="qr-page"] .qr-row-svg-panel {
             flex-direction: column;
             align-items: flex-start;
-          }
-          [data-testid="qr-page"] .qr-row-svg-wrapper {
-            width: 100% !important;
-            max-width: 280px;
-            height: auto !important;
-            aspect-ratio: 1 / 1;
           }
           /* Force long slugs / URLs in row headers + edit form to wrap
              instead of pushing the row past viewport. */
@@ -1339,12 +1334,17 @@ export default function QrPage() {
                             data-testid={`qr-row-svg-render-${c.slug}`}
                             className="qr-row-svg-wrapper"
                             style={{
+                              /* 192px at most, but never wider than the
+                                 container — so the full QR always fits on
+                                 mobile. maxWidth is inline so no stylesheet
+                                 rule can blow it past the viewport. */
                               width: 192,
-                              height: 192,
+                              maxWidth: "100%",
+                              aspectRatio: "1 / 1",
                               background: "#fff",
                               padding: 8,
                               borderRadius: 4,
-                              flexShrink: 0,
+                              boxSizing: "border-box",
                               overflow: "hidden",
                             }}
                             dangerouslySetInnerHTML={{
