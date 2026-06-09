@@ -46,12 +46,39 @@ import {
   type SurveySchema,
 } from "@/lib/surveys/types";
 import { isOtherValue, isQuestionActive, otherText } from "@/lib/surveys/validate";
+import { isPorscheTheme } from "./theme";
 
 interface Props {
   slug: string;
   title: string;
   description: string | null;
   schema: SurveySchema;
+  /** Client brand theme (drives the --wp-* vars set on the page + the wordmark). */
+  theme?: string | null;
+}
+
+/** The Porsche wordmark, rendered in the brand typeface (no image asset). */
+function PorscheWordmark() {
+  return (
+    <div
+      data-testid="survey-brand-wordmark"
+      aria-label="Porsche"
+      style={{
+        fontFamily: '"Porsche Next", "Arial Narrow", Arial, sans-serif',
+        fontWeight: 600,
+        fontSize: "1.05rem",
+        letterSpacing: "0.42em",
+        textTransform: "uppercase",
+        color: "var(--wp-text, #f4f4f5)",
+        marginBottom: "1rem",
+        // The wordmark's tracking pushes it right; pull the box back so it
+        // stays flush-left with the rest of the form.
+        paddingRight: "0.42em",
+      }}
+    >
+      Porsche
+    </div>
+  );
 }
 
 type SubmitState = "idle" | "submitting" | "submitted";
@@ -119,7 +146,9 @@ export default function ResponderForm({
   title,
   description,
   schema,
+  theme,
 }: Props) {
+  const showWordmark = isPorscheTheme(theme);
   const [answers, setAnswers] = useState<AnswerMap>({});
   // Free text typed into an "Other" field, keyed by question id. Held
   // separately from `answers` so the box keeps its text while toggling.
@@ -270,6 +299,7 @@ export default function ResponderForm({
   if (state === "submitted") {
     return (
       <div data-testid="survey-submitted" style={{ ...cardStyle, textAlign: "center" }}>
+        {showWordmark ? <PorscheWordmark /> : null}
         <h1
           style={{
             fontSize: "1.5rem",
@@ -301,6 +331,7 @@ export default function ResponderForm({
       style={cardStyle}
       noValidate
     >
+      {showWordmark ? <PorscheWordmark /> : null}
       <header style={{ marginBottom: "1.5rem" }}>
         <h1
           style={{

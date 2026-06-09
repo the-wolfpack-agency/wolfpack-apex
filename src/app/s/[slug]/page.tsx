@@ -112,6 +112,7 @@ export default async function SurveyResponderPage({
         title={survey.title}
         description={survey.description}
         schema={survey.schema}
+        theme={survey.theme ?? null}
       />
     </div>
   );

@@ -912,7 +912,11 @@ export default function SurveysPage() {
             >
               {SURVEY_THEMES.map((t) => (
                 <option key={t} value={t}>
-                  {t === "default" ? "Default (Instinct)" : "Porsche"}
+                  {t === "default"
+                    ? "Default (Instinct)"
+                    : t === "porsche"
+                      ? "Porsche (porsche.com — white / Guards Red)"
+                      : "Porsche (pitch deck — sage green)"}
                 </option>
               ))}
             </select>

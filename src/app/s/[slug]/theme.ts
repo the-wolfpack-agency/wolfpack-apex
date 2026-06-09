@@ -22,9 +22,10 @@ export const PORSCHE_FONT_FACE = `
  * the responder's page-shell wrapper; the form re-skins automatically.
  */
 export function surveyThemeVars(theme: string | null | undefined): CSSProperties {
+  const PORSCHE_FONT = '"Porsche Next", "Arial Narrow", Arial, sans-serif';
   if (theme === "porsche") {
     return {
-      // Guards Red accent, white canvas, near-black ink (#010205), tight feel.
+      // porsche.com: Guards Red accent, white canvas, near-black ink.
       "--wp-dark": "#f4f4f6",
       "--wp-dark-surface": "#ffffff",
       "--wp-dark-border": "rgba(1,2,5,0.14)",
@@ -34,7 +35,24 @@ export function surveyThemeVars(theme: string | null | undefined): CSSProperties
       "--wp-gold": "#d5001c",
       "--wp-error": "#d5001c",
       "--wp-accent-fg": "#ffffff",
-      fontFamily: '"Porsche Next", "Arial Narrow", Arial, sans-serif',
+      fontFamily: PORSCHE_FONT,
+      letterSpacing: "-0.01em",
+    } as CSSProperties;
+  }
+  if (theme === "porsche-sage") {
+    return {
+      // "A Weekend with Porsche" pitch deck: near-black green-tinted canvas,
+      // sage-green accent panels, white text, Porsche Next.
+      "--wp-dark": "#0e1413",
+      "--wp-dark-surface": "#19211f",
+      "--wp-dark-border": "rgba(255,255,255,0.12)",
+      "--wp-text": "#f2f4f3",
+      "--wp-text-dim": "#b6c1bd",
+      "--wp-text-muted": "#8c9893",
+      "--wp-gold": "#7d958d", // deck sage accent (headings, buttons, rating)
+      "--wp-error": "#e0746a",
+      "--wp-accent-fg": "#0e1413", // dark ink on the light sage buttons
+      fontFamily: PORSCHE_FONT,
       letterSpacing: "-0.01em",
     } as CSSProperties;
   }
@@ -42,7 +60,12 @@ export function surveyThemeVars(theme: string | null | undefined): CSSProperties
   return {};
 }
 
+/** Themes that use the Porsche brand typeface + wordmark. */
+export function isPorscheTheme(theme: string | null | undefined): boolean {
+  return typeof theme === "string" && theme.startsWith("porsche");
+}
+
 /** Whether a theme needs its web font injected. */
 export function themeFontFace(theme: string | null | undefined): string | null {
-  return theme === "porsche" ? PORSCHE_FONT_FACE : null;
+  return isPorscheTheme(theme) ? PORSCHE_FONT_FACE : null;
 }

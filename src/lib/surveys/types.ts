@@ -99,7 +99,7 @@ export interface Survey {
 }
 
 /** Supported responder themes (client brand skins). */
-export const SURVEY_THEMES = ["default", "porsche"] as const;
+export const SURVEY_THEMES = ["default", "porsche", "porsche-sage"] as const;
 export type SurveyTheme = (typeof SURVEY_THEMES)[number];
 
 /** A single answer value, keyed by question id. */

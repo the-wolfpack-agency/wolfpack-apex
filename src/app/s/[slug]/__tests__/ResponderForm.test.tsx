@@ -98,6 +98,24 @@ test("renders the form with one block per question", () => {
   expect(screen.getByTestId("survey-q-score")).toBeInTheDocument();
 });
 
+test("shows the Porsche wordmark only on porsche themes", () => {
+  const { unmount } = render(
+    <ResponderForm slug="abc1234" title="T" description={null} schema={SCHEMA} theme="porsche" />,
+  );
+  expect(screen.getByTestId("survey-brand-wordmark")).toHaveTextContent("Porsche");
+  unmount();
+
+  render(
+    <ResponderForm slug="abc1234" title="T" description={null} schema={SCHEMA} theme="porsche-sage" />,
+  );
+  expect(screen.getByTestId("survey-brand-wordmark")).toBeInTheDocument();
+});
+
+test("default theme renders no Porsche wordmark", () => {
+  renderForm(); // no theme
+  expect(screen.queryByTestId("survey-brand-wordmark")).toBeNull();
+});
+
 test("required validation blocks submit and fires no SUBMIT fetch", async () => {
   renderForm();
   // The mount view beacon may have fired; assert no SUBMIT fetch went out.
