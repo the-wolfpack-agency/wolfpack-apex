@@ -26,7 +26,8 @@
  * recognisable. Sortable columns + group-by-visitor toggle.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   fetchWithRefresh,
   jsonHeaders,
@@ -558,7 +559,9 @@ function defaultRowState(): RowState {
   };
 }
 
-export default function QrPage() {
+function QrPageInner() {
+  const searchParams = useSearchParams();
+  const wantedCode = searchParams.get("code");
   const [authChecked, setAuthChecked] = useState(false);
   const [codes, setCodes] = useState<QrCode[]>([]);
   const [rowStates, setRowStates] = useState<Record<string, RowState>>({});
@@ -568,7 +571,7 @@ export default function QrPage() {
      scrolls to + highlights + opens that code so the user immediately sees
      which one is associated. Handled once after the list loads. */
   const [highlightId, setHighlightId] = useState<string | null>(null);
-  const deepLinkDoneRef = useRef(false);
+  const handledDeepLinkRef = useRef<string | null>(null);
 
   /* Form state */
   const [label, setLabel] = useState("");
@@ -619,29 +622,25 @@ export default function QrPage() {
   }, [authChecked, loadList]);
 
   /* ── deep-link to a specific code (?code=<id>) ───────────────────── */
+  // Reactive on the query param (useSearchParams) so it fires even when the
+  // /qr page is served from the App Router cache, and re-fires if the param
+  // changes. Guarded per-param so it runs once per distinct ?code.
   useEffect(() => {
-    if (deepLinkDoneRef.current || codes.length === 0) return;
-    const wanted =
-      typeof window !== "undefined"
-        ? new URLSearchParams(window.location.search).get("code")
-        : null;
-    if (!wanted) {
-      deepLinkDoneRef.current = true;
-      return;
-    }
-    const target = codes.find((c) => c.id === wanted);
-    if (!target) return; // list may still be arriving — retry on next codes update
-    deepLinkDoneRef.current = true;
+    if (!wantedCode || codes.length === 0) return;
+    if (handledDeepLinkRef.current === wantedCode) return;
+    const target = codes.find((c) => c.id === wantedCode);
+    if (!target) return; // the linked code may be archived (excluded from the list)
+    handledDeepLinkRef.current = wantedCode;
     setHighlightId(target.id);
-    void toggleQr(target); // open its QR so the association is obvious
+    if (!getRow(target.id).showingQr) void toggleQr(target); // open its QR
     setTimeout(() => {
       document
         .getElementById(`qr-code-${target.id}`)
         ?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 60);
-    // toggleQr is a stable component fn; deps intentionally just `codes`.
+    // toggleQr/getRow are stable component fns; deps are the param + list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [codes]);
+  }, [wantedCode, codes]);
 
   /* ── create ───────────────────────────────────────────────────── */
   async function handleCreate(e: React.FormEvent) {
@@ -2326,3 +2325,13 @@ const tdStyle: React.CSSProperties = {
   borderBottom: "1px dashed var(--wp-dark-border)",
   padding: "4px 6px",
 };
+
+// useSearchParams must be under a Suspense boundary (Next App Router) so the
+// page never breaks server render; matches the /search page pattern.
+export default function QrPage() {
+  return (
+    <Suspense fallback={null}>
+      <QrPageInner />
+    </Suspense>
+  );
+}

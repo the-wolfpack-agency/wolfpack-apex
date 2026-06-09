@@ -17,7 +17,11 @@ import "@testing-library/jest-dom";
 
 const mockFetchWithRefresh = jest.fn();
 const mockGetInstinctToken = jest.fn();
+let mockSearch = ""; // querystring for useSearchParams, e.g. "code=code-1"
 
+jest.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(mockSearch),
+}));
 jest.mock("@/lib/client-auth", () => ({
   fetchWithRefresh: (...a: any[]) => mockFetchWithRefresh(...a),
   jsonHeaders: () => ({
@@ -126,6 +130,7 @@ beforeEach(() => {
   mockFetchWithRefresh.mockReset();
   mockGetInstinctToken.mockReset();
   mockGetInstinctToken.mockReturnValue("tok");
+  mockSearch = "";
   /* jsdom URL.createObjectURL stub for the Download SVG path. */
   if (typeof URL.createObjectURL === "undefined") {
     Object.defineProperty(URL, "createObjectURL", {
@@ -149,7 +154,7 @@ describe("/qr page", () => {
     const scrollSpy = jest.fn();
     (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView =
       scrollSpy;
-    window.history.replaceState({}, "", "/qr?code=code-1");
+    mockSearch = "code=code-1";
 
     mockListResponse([sampleCode]); // sampleCode.id === "code-1"
     // The deep-link auto-opens the QR → toggleQr fetches the SVG.
@@ -175,8 +180,6 @@ describe("/qr page", () => {
       expect(svgCall).toBeTruthy();
     });
     await waitFor(() => expect(scrollSpy).toHaveBeenCalled());
-
-    window.history.replaceState({}, "", "/qr"); // reset for other tests
   });
 
   test("does not render the main UI and consults getInstinctToken when no token is present (redirect path)", async () => {
