@@ -385,6 +385,46 @@ describe("/qr page", () => {
     confirmSpy.mockRestore();
   });
 
+  test("Show QR renders the SVG in a centered white box (no off-center gap)", async () => {
+    mockListResponse([sampleCode]);
+    /* The svg endpoint returns a complete square QR SVG as text. */
+    const QR_SVG =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192"><rect width="192" height="192" fill="#fff"/><rect x="0" y="0" width="10" height="10" fill="#000"/></svg>';
+    mockFetchWithRefresh.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () => QR_SVG,
+      }),
+    );
+
+    render(<QrPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("qr-row-abc1234")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByTestId("qr-row-show-qr-abc1234"));
+
+    /* Once the SVG resolves, the white wrapper must center its contents.
+       This guards the 2026-06-09 off-center regression: a top-only gap
+       appeared whenever the square QR was not centered in its box. We
+       assert the centering contract (flex + center + border-box) rather
+       than pixel geometry, which jsdom cannot lay out. */
+    const wrapper = await screen.findByTestId("qr-row-svg-render-abc1234");
+    expect(wrapper).toHaveStyle({
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      boxSizing: "border-box",
+    });
+    /* The injected SVG must fit-and-center (max-*:100%), never force a
+       height that can fail to resolve and top-align the code. */
+    const svg = wrapper.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(svg!.getAttribute("style")).toMatch(/max-width:\s*100%/);
+    expect(svg!.getAttribute("style")).toMatch(/max-height:\s*100%/);
+  });
+
   test("renders empty state when GET /api/qr returns []", async () => {
     mockListResponse([]);
 

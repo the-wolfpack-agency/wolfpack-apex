@@ -1366,11 +1366,19 @@ export default function QrPage() {
                               borderRadius: 4,
                               boxSizing: "border-box",
                               overflow: "hidden",
+                              // Center the (square) QR inside the white box so it
+                              // can never sit top-aligned with an asymmetric gap.
+                              // Matches the just-created panel above; robust even
+                              // if height:100% can't resolve (aspect-ratio fallback).
+                              boxSizing: "border-box",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
                             }}
                             dangerouslySetInnerHTML={{
                               __html: row.qrSvg.replace(
                                 /<svg([^>]*)>/,
-                                '<svg$1 style="width:100%;height:100%;display:block">',
+                                '<svg$1 style="max-width:100%;max-height:100%;height:auto;display:block">',
                               ),
                             }}
                           />
