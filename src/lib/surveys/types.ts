@@ -83,6 +83,13 @@ export interface Survey {
   createdByUserRole: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Whether the linked QR code is still live (not archived). Only set on
+   * list reads; undefined when unknown. A survey can keep a `qrCodeId`
+   * whose code was later archived — the builder uses this to offer
+   * "Generate QR" (re-link) instead of showing a dead code.
+   */
+  qrActive?: boolean;
 }
 
 /** A single answer value, keyed by question id. */

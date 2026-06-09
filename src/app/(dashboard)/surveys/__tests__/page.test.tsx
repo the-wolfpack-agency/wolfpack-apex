@@ -607,6 +607,72 @@ describe("/surveys page", () => {
     });
   });
 
+  test("Upload survey: pasting a JSON definition POSTs and adds the survey", async () => {
+    mockListResponse([]);
+    mockFetchWithRefresh.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: true,
+        status: 201,
+        json: async () => ({ survey: { ...sampleSurvey, id: "up", title: "Imported" } }),
+      }),
+    );
+
+    render(<SurveysPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("survey-upload-section")).toBeInTheDocument(),
+    );
+
+    const json = JSON.stringify({
+      title: "Imported",
+      schema: { questions: [{ id: "q1", type: "short_text", label: "Name", required: true }] },
+    });
+    fireEvent.change(screen.getByTestId("survey-upload-text"), { target: { value: json } });
+    fireEvent.click(screen.getByTestId("survey-upload-submit"));
+
+    await waitFor(() => {
+      const post = mockFetchWithRefresh.mock.calls.find(
+        (c) => c[1]?.method === "POST" && String(c[0]) === "/api/surveys",
+      );
+      expect(post).toBeTruthy();
+      const body = JSON.parse(post![1].body);
+      expect(body.title).toBe("Imported");
+      expect(body.schema.questions).toHaveLength(1);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("survey-row-up")).toBeInTheDocument(),
+    );
+  });
+
+  test("Upload survey: invalid JSON shows an error and does not POST", async () => {
+    mockListResponse([]);
+    render(<SurveysPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("survey-upload-text")).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByTestId("survey-upload-text"), {
+      target: { value: "{ not valid json" },
+    });
+    fireEvent.click(screen.getByTestId("survey-upload-submit"));
+    expect(screen.getByTestId("survey-upload-error")).toBeInTheDocument();
+    expect(
+      mockFetchWithRefresh.mock.calls.some(
+        (c) => c[1]?.method === "POST" && String(c[0]) === "/api/surveys",
+      ),
+    ).toBe(false);
+  });
+
+  test("a retired (archived) QR shows 'Regenerate QR', not a dead 'Show QR'", async () => {
+    // qrCodeId set but qrActive:false → the linked code was archived.
+    mockListResponse([{ ...sampleSurvey2, qrActive: false }]);
+    render(<SurveysPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("survey-row-survey-2")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("survey-qr-survey-2")).toHaveTextContent("Regenerate QR");
+    // Not treated as linked → no "QR linked" badge.
+    expect(screen.queryByTestId("survey-row-qr-linked-survey-2")).toBeNull();
+  });
+
   test("delete confirms then DELETEs and removes the row", async () => {
     mockListResponse([sampleSurvey, sampleSurvey2]);
     mockFetchWithRefresh.mockImplementationOnce(() =>

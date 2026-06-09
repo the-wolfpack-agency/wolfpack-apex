@@ -14,8 +14,36 @@ import {
   aggregateResponses,
   generateSurveySlug,
   validateSlug,
+  parseSurveyUpload,
 } from "../validate";
 import type { SurveySchema } from "../types";
+
+describe("parseSurveyUpload", () => {
+  const validQ = '{"id":"q1","type":"short_text","label":"Name","required":true}';
+  test("accepts a full survey object with title + schema", () => {
+    const r = parseSurveyUpload(`{"title":"T","schema":{"questions":[${validQ}]}}`);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.title).toBe("T");
+  });
+  test("carries optional description + slug", () => {
+    const r = parseSurveyUpload(
+      `{"title":"T","description":"d","slug":"weekend-porsche","schema":{"questions":[${validQ}]}}`,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.slug).toBe("weekend-porsche");
+      expect(r.value.description).toBe("d");
+    }
+  });
+  test("rejects invalid JSON, missing title, empty schema, bad slug", () => {
+    expect(parseSurveyUpload("{not json").ok).toBe(false);
+    expect(parseSurveyUpload(`{"schema":{"questions":[${validQ}]}}`).ok).toBe(false);
+    expect(parseSurveyUpload(`{"title":"T","schema":{"questions":[]}}`).ok).toBe(false);
+    expect(
+      parseSurveyUpload(`{"title":"T","slug":"Bad Slug","schema":{"questions":[${validQ}]}}`).ok,
+    ).toBe(false);
+  });
+});
 
 /** A schema that exercises every question type. */
 function fullSchema(): SurveySchema {

@@ -29,6 +29,8 @@ interface SurveyRow {
   created_by_user_role: string | null;
   created_at: string;
   updated_at: string;
+  /** Only present on list reads (LEFT JOIN to instinct_qr_codes). */
+  qr_active?: boolean;
 }
 
 interface ResponseRow {
@@ -62,6 +64,8 @@ function rowToSurvey(r: SurveyRow): Survey {
     createdByUserRole: r.created_by_user_role,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    // Only set on list reads; undefined elsewhere (caller treats as "unknown").
+    ...(r.qr_active !== undefined ? { qrActive: r.qr_active } : {}),
   };
 }
 
@@ -167,12 +171,21 @@ export async function listSurveys(opts?: {
   let where = "";
   if (opts?.userId) {
     params.push(opts.userId);
-    where = `WHERE created_by_user_id = $${params.length}`;
+    where = `WHERE s.created_by_user_id = $${params.length}`;
   }
   params.push(limit);
+  // LEFT JOIN the linked QR code so the UI knows whether it is still live
+  // (a survey can keep a qr_code_id whose code was later archived). Columns
+  // are qualified because instinct_qr_codes shares id/created_at/etc.
   const result = await safeQuery<SurveyRow>(
-    `SELECT ${SURVEY_COLS} FROM instinct_surveys ${where}
-      ORDER BY created_at DESC LIMIT $${params.length}`,
+    `SELECT s.id, s.slug, s.title, s.description, s.schema, s.status,
+            s.qr_code_id, s.client_id, s.created_by_user_id,
+            s.created_by_user_role, s.created_at, s.updated_at,
+            (c.id IS NOT NULL AND c.archived_at IS NULL) AS qr_active
+       FROM instinct_surveys s
+       LEFT JOIN instinct_qr_codes c ON c.id = s.qr_code_id
+       ${where}
+      ORDER BY s.created_at DESC LIMIT $${params.length}`,
     params,
   );
   return result.rows.map(rowToSurvey);

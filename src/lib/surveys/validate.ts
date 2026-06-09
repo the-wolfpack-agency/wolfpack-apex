@@ -51,6 +51,62 @@ export function validateSlug(slug: string): ValidationResult {
   return { ok: true };
 }
 
+/** A complete survey definition that can be uploaded/imported in one shot. */
+export interface SurveyUpload {
+  title: string;
+  description?: string;
+  slug?: string;
+  schema: SurveySchema;
+}
+
+export type ParseUploadResult =
+  | { ok: true; value: SurveyUpload }
+  | { ok: false; error: string };
+
+/**
+ * Parse + validate an uploaded survey definition (raw JSON text). Pure, so
+ * the upload UI and any future import endpoint share one source of truth.
+ * Accepts either a full `{title, schema, ...}` object, or a bare schema
+ * `{questions: [...]}` (title then required separately by the caller).
+ * Enforces title, a valid schema (validateSchema), and a valid optional slug.
+ */
+export function parseSurveyUpload(text: string): ParseUploadResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, error: "That isn't valid JSON." };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, error: "Expected a survey object." };
+  }
+  const obj = parsed as Record<string, unknown>;
+  // Allow a bare schema ({questions:[...]}) by wrapping it.
+  const schema = ("questions" in obj ? obj : obj.schema) as unknown;
+  const schemaCheck = validateSchema(schema);
+  if (!schemaCheck.ok) return schemaCheck;
+
+  if (typeof obj.title !== "string" || obj.title.trim() === "") {
+    return { ok: false, error: "The survey needs a non-empty \"title\"." };
+  }
+  const out: SurveyUpload = {
+    title: obj.title.trim(),
+    schema: schema as SurveySchema,
+  };
+  if (typeof obj.description === "string" && obj.description.trim()) {
+    out.description = obj.description.trim();
+  }
+  if (obj.slug !== undefined && obj.slug !== null && obj.slug !== "") {
+    if (typeof obj.slug !== "string") {
+      return { ok: false, error: "\"slug\" must be a string." };
+    }
+    const slugCheck = validateSlug(obj.slug);
+    if (!slugCheck.ok) return slugCheck;
+    out.slug = obj.slug;
+  }
+  return { ok: true, value: out };
+}
+
 const CHOICE_TYPES = new Set(["single_choice", "multiple_choice"]);
 // Basic, deliberately-permissive email shape. Real deliverability is
 // confirmed downstream; this just blocks obvious garbage at the gate.

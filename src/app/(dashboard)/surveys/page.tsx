@@ -37,6 +37,7 @@ import type {
   VisibleIf,
 } from "@/lib/surveys/types";
 import { QUESTION_TYPES, CONTENT_QUESTION_TYPES } from "@/lib/surveys/types";
+import { parseSurveyUpload } from "@/lib/surveys/validate";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -264,6 +265,11 @@ export default function SurveysPage() {
   /* Optional custom public link (vanity slug). Blank = auto-generate on
      create / keep current on edit. */
   const [slug, setSlug] = useState("");
+  /* "Upload survey" — paste/drop a complete survey JSON and create it in
+     one shot (the way the seeded Weekend-with-Porsche survey is defined). */
+  const [uploadText, setUploadText] = useState("");
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -418,6 +424,60 @@ export default function SurveysPage() {
         return built;
       }),
     };
+  }
+
+  /* Read a dropped/selected .json file into the upload textarea. */
+  function onUploadFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setUploadText(String(reader.result ?? ""));
+    reader.onerror = () => setUploadError("Couldn't read that file.");
+    reader.readAsText(file);
+  }
+
+  /* Create a survey from an uploaded JSON definition (no question-by-question
+     configuration). Validation is shared with the server via parseSurveyUpload. */
+  async function handleUpload() {
+    const parsed = parseSurveyUpload(uploadText);
+    if (!parsed.ok) {
+      setUploadError(parsed.error);
+      return;
+    }
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const body: {
+        title: string;
+        schema: { questions: SurveyQuestion[] };
+        description?: string;
+        slug?: string;
+      } = { title: parsed.value.title, schema: parsed.value.schema };
+      if (parsed.value.description) body.description = parsed.value.description;
+      if (parsed.value.slug) body.slug = parsed.value.slug;
+      const res = await fetchWithRefresh("/api/surveys", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+        setUploadError(
+          errBody.error === "slug_taken"
+            ? "That custom link is already taken — change the slug in the JSON."
+            : errBody.error ?? "Failed to upload survey.",
+        );
+        return;
+      }
+      const data = (await res.json()) as { survey: Survey };
+      setSurveys((prev) => [data.survey, ...prev]);
+      setRowStates((prev) => ({ ...prev, [data.survey.id]: defaultRowState() }));
+      setUploadText("");
+    } catch (err) {
+      setUploadError(`Network error: ${(err as Error).message}`);
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function handleCreate(e: React.FormEvent) {
@@ -1221,6 +1281,66 @@ export default function SurveysPage() {
         </form>
       </SectionCard>
 
+      {/* ── Upload / import ─────────────────────────────────────── */}
+      <SectionCard title="Upload a survey" testId="survey-upload-section">
+        <div style={{ display: "grid", gap: "0.6rem", minWidth: 0 }}>
+          <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>
+            Paste a survey definition (or choose a .json file) to create it in
+            one step — no question-by-question setup. Use{" "}
+            <code style={{ color: "var(--wp-gold)" }}>
+              {'{ "title": "…", "schema": { "questions": [ … ] } }'}
+            </code>
+            ; an optional <code style={{ color: "var(--wp-gold)" }}>slug</code>{" "}
+            sets the custom link.
+          </span>
+          <input
+            data-testid="survey-upload-file"
+            type="file"
+            accept=".json,application/json"
+            onChange={onUploadFile}
+            style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}
+          />
+          <textarea
+            data-testid="survey-upload-text"
+            value={uploadText}
+            onChange={(e) => setUploadText(e.target.value)}
+            placeholder='{"title":"A Weekend with Porsche","schema":{"questions":[…]}}'
+            rows={6}
+            style={{
+              ...inputStyle,
+              resize: "vertical",
+              fontFamily: "monospace",
+              fontSize: "0.8rem",
+              minWidth: 0,
+              boxSizing: "border-box",
+            }}
+          />
+          {uploadError ? (
+            <div
+              data-testid="survey-upload-error"
+              style={{ color: "var(--wp-error)", fontSize: "0.85rem" }}
+            >
+              {uploadError}
+            </div>
+          ) : null}
+          <div>
+            <button
+              data-testid="survey-upload-submit"
+              type="button"
+              disabled={uploading || !uploadText.trim()}
+              onClick={handleUpload}
+              style={{
+                ...btnSecondary,
+                opacity: uploading || !uploadText.trim() ? 0.6 : 1,
+                cursor: uploading || !uploadText.trim() ? "not-allowed" : "pointer",
+              }}
+            >
+              {uploading ? "Uploading…" : "Upload survey"}
+            </button>
+          </div>
+        </div>
+      </SectionCard>
+
       {/* ── List ────────────────────────────────────────────────── */}
       <SectionCard title="Your surveys" testId="survey-list-section">
         {loadingList ? (
@@ -1251,7 +1371,13 @@ export default function SurveysPage() {
           >
             {surveys.map((s) => {
               const row = getRow(s.id);
-              const linked = Boolean(s.qrCodeId);
+              // "linked" means a LIVE QR. A survey can keep a qrCodeId whose
+              // code was archived (qrActive === false) — treat that as not
+              // linked so we offer "Generate QR" (re-link) rather than show a
+              // dead code. qrActive is undefined right after a re-mint (the
+              // PATCH/qr response omits it) — treat undefined as live.
+              const linked = Boolean(s.qrCodeId) && s.qrActive !== false;
+              const qrRetired = Boolean(s.qrCodeId) && s.qrActive === false;
               return (
                 <div
                   key={s.id}
@@ -1377,11 +1503,19 @@ export default function SurveysPage() {
                         title={
                           linked
                             ? "Show the QR code that points at this survey"
-                            : "Create a QR code that opens this survey when scanned"
+                            : qrRetired
+                              ? "The previous QR was retired — generate a fresh, live one"
+                              : "Create a QR code that opens this survey when scanned"
                         }
                         style={btnSecondary}
                       >
-                        {linked ? (row.qrOpen ? "Hide QR" : "Show QR") : "Generate QR"}
+                        {linked
+                          ? row.qrOpen
+                            ? "Hide QR"
+                            : "Show QR"
+                          : qrRetired
+                            ? "Regenerate QR"
+                            : "Generate QR"}
                       </button>
                       <button
                         data-testid={`survey-edit-${s.id}`}
