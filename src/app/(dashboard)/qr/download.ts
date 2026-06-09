@@ -68,17 +68,32 @@ export async function downloadQr(args: DownloadArgs): Promise<void> {
 /* SVG → raster                                                        */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Force a fixed pixel size onto an SVG's root `<svg>` tag so a canvas
+ * rasterization is always `size x size`, regardless of how the SVG was
+ * authored.
+ *
+ * The source SVG already carries width/height attributes (renderQrSvg
+ * emits `width="N" height="N"`), so we must STRIP any existing
+ * width/height before adding ours — otherwise the tag ends up with
+ * DUPLICATE width/height attributes. An `<img>` decodes SVG as strict
+ * XML, and duplicate attributes make the document invalid, so the
+ * decode fails ("svg image decode failed") in every browser. This is
+ * exported so the contract is unit-testable without a DOM.
+ */
+export function normalizeSvgSize(svg: string, size: number): string {
+  return svg.replace(/<svg([^>]*)>/, (_match, attrs: string) => {
+    const cleaned = attrs.replace(/\s(?:width|height)="[^"]*"/g, "");
+    return `<svg${cleaned} width="${size}" height="${size}">`;
+  });
+}
+
 async function rasterize(
   svg: string,
   size: number,
   mime: "image/png" | "image/jpeg",
 ): Promise<Blob> {
-  /* Force a fixed render size onto the SVG so the canvas is always
-     `size x size`, regardless of how the SVG was authored. */
-  const sized = svg.replace(
-    /<svg([^>]*)>/,
-    `<svg$1 width="${size}" height="${size}">`,
-  );
+  const sized = normalizeSvgSize(svg, size);
   const blobUrl = URL.createObjectURL(
     new Blob([sized], { type: "image/svg+xml" }),
   );
