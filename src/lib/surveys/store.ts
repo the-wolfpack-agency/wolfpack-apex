@@ -37,6 +37,10 @@ interface ResponseRow {
   answers: AnswerMap;
   respondent_fingerprint: string | null;
   qr_scan_id: string | null;
+  duration_ms: number | null;
+  device: string | null;
+  country: string | null;
+  referrer: string | null;
   submitted_at: string;
 }
 
@@ -68,6 +72,10 @@ function rowToResponse(r: ResponseRow): SurveyResponse {
     answers: r.answers ?? {},
     respondentFingerprint: r.respondent_fingerprint,
     qrScanId: r.qr_scan_id,
+    durationMs: r.duration_ms ?? null,
+    device: r.device ?? null,
+    country: r.country ?? null,
+    referrer: r.referrer ?? null,
     submittedAt: r.submitted_at,
   };
 }
@@ -212,21 +220,64 @@ export async function submitResponse(args: {
   answers: AnswerMap;
   respondentFingerprint?: string | null;
   qrScanId?: string | null;
+  durationMs?: number | null;
+  device?: string | null;
+  country?: string | null;
+  referrer?: string | null;
 }): Promise<SurveyResponse> {
   const result = await writeQuery<ResponseRow>(
     `INSERT INTO instinct_survey_responses
-       (survey_id, answers, respondent_fingerprint, qr_scan_id)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id, survey_id, answers, respondent_fingerprint, qr_scan_id, submitted_at`,
+       (survey_id, answers, respondent_fingerprint, qr_scan_id,
+        duration_ms, device, country, referrer)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING id, survey_id, answers, respondent_fingerprint, qr_scan_id,
+               duration_ms, device, country, referrer, submitted_at`,
     [
       args.surveyId,
       JSON.stringify(args.answers),
       args.respondentFingerprint ?? null,
       args.qrScanId ?? null,
+      args.durationMs ?? null,
+      args.device ?? null,
+      args.country ?? null,
+      args.referrer ?? null,
     ],
     { expectRows: 1 },
   );
   return rowToResponse(result.rows[0]);
+}
+
+/** Record a public responder view (the top of the completion funnel). */
+export async function recordSurveyView(args: {
+  surveyId: string;
+  respondentFingerprint?: string | null;
+  device?: string | null;
+  country?: string | null;
+  referrer?: string | null;
+  qrScanId?: string | null;
+}): Promise<void> {
+  await writeQuery(
+    `INSERT INTO instinct_survey_views
+       (survey_id, respondent_fingerprint, device, country, referrer, qr_scan_id)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      args.surveyId,
+      args.respondentFingerprint ?? null,
+      args.device ?? null,
+      args.country ?? null,
+      args.referrer ?? null,
+      args.qrScanId ?? null,
+    ],
+  );
+}
+
+/** Count views for a survey (the funnel numerator's denominator). */
+export async function countSurveyViews(surveyId: string): Promise<number> {
+  const result = await safeQuery<{ n: string }>(
+    `SELECT COUNT(*)::text AS n FROM instinct_survey_views WHERE survey_id = $1`,
+    [surveyId],
+  );
+  return parseInt(result.rows[0]?.n ?? "0", 10);
 }
 
 export async function listResponses(
@@ -234,7 +285,8 @@ export async function listResponses(
   limit = 1000,
 ): Promise<SurveyResponse[]> {
   const result = await safeQuery<ResponseRow>(
-    `SELECT id, survey_id, answers, respondent_fingerprint, qr_scan_id, submitted_at
+    `SELECT id, survey_id, answers, respondent_fingerprint, qr_scan_id,
+            duration_ms, device, country, referrer, submitted_at
        FROM instinct_survey_responses
       WHERE survey_id = $1
       ORDER BY submitted_at DESC

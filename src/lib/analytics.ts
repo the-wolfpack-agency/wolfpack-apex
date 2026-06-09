@@ -2057,6 +2057,10 @@ export type InstinctEventType =
   | "survey.closed"
   | "survey.deleted"
   | "survey.qr_linked"
+  /* survey.viewed: a public responder load (migration 162). Paired with
+     response_submitted it yields the view→completion funnel + drop-off
+     that a form SaaS can't surface; carries device/geo/referrer/qr_scan. */
+  | "survey.viewed"
   | "survey.response_submitted"
   | "survey.response_rejected"
   /* qr_scan_recorded: a public scan hit /q/[slug] and was either

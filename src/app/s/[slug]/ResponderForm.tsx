@@ -37,7 +37,7 @@
  * UX only. Dark/gold Instinct theme via var(--wp-*) tokens. Mobile-first.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   OTHER_VALUE_PREFIX,
   type AnswerMap,
@@ -126,6 +126,27 @@ export default function ResponderForm({
   const [otherDrafts, setOtherDrafts] = useState<Record<string, string>>({});
   const [state, setState] = useState<SubmitState>("idle");
   const [error, setError] = useState<string | null>(null);
+
+  // Funnel instrumentation. `startRef` is the mount timestamp — submit
+  // sends Date.now() - start as durationMs so the server can correlate
+  // engagement time with completion. `beaconFiredRef` guards the one-time
+  // view beacon against React strict-mode's double-invoked effect so a
+  // single page open records exactly one view.
+  const startRef = useRef<number>(Date.now());
+  const beaconFiredRef = useRef(false);
+
+  useEffect(() => {
+    if (beaconFiredRef.current) return;
+    beaconFiredRef.current = true;
+    // Fire-and-forget VIEW beacon (top of the completion funnel). Public,
+    // unauthenticated surface — raw fetch is correct here (no JWT). The
+    // route always 200s; we ignore the result either way.
+    void fetch(`/api/s/${encodeURIComponent(slug)}/view`, {
+      method: "POST",
+    }).catch(() => {
+      /* A failed beacon must never affect the responder UX. */
+    });
+  }, [slug]);
 
   // LIVE visibility — recomputed every render against the current answers
   // so conditional questions appear/disappear as the controlling answer
@@ -222,7 +243,10 @@ export default function ResponderForm({
       const res = await fetch(`/api/s/${encodeURIComponent(slug)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ answers: payload }),
+        body: JSON.stringify({
+          answers: payload,
+          durationMs: Date.now() - startRef.current,
+        }),
       });
       if (res.status === 200) {
         setState("submitted");

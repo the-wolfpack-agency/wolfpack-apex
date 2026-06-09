@@ -16,7 +16,8 @@ import "@testing-library/jest-dom";
  *   - Publish toggles status via PATCH and updates the row in place
  *   - Delete confirms, DELETEs, and removes the row
  *   - Generate QR POSTs to :id/qr and shows the linked indicator
- *   - View results GETs :id/responses and renders count + aggregate
+ *   - View results GETs :id/insights and renders the funnel (views,
+ *     responses, completion %, avg time) + per-question breakdown
  */
 
 const mockFetchWithRefresh = jest.fn();
@@ -142,6 +143,25 @@ describe("/surveys page", () => {
     expect(screen.getByTestId("survey-row-status-survey-2")).toHaveTextContent(
       "published",
     );
+  });
+
+  test("'Add section' adds a section row (labeled Section, type=section)", async () => {
+    mockListResponse([]);
+    render(<SurveysPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("survey-create-form")).toBeInTheDocument(),
+    );
+
+    expect(screen.getByTestId("survey-add-section")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("survey-add-section"));
+
+    // The new row is pre-set to the section type and labeled "Section".
+    const typeSelect = screen.getByTestId("survey-q-type-0") as HTMLSelectElement;
+    expect(typeSelect.value).toBe("section");
+    const row = screen.getByTestId("survey-question-row-0");
+    expect(within(row).getByText(/^Section 1$/)).toBeInTheDocument();
+    // Sections expose a body field, not a required toggle.
+    expect(screen.getByTestId("survey-q-body-0")).toBeInTheDocument();
   });
 
   test("renders empty state when GET /api/surveys returns []", async () => {
@@ -550,25 +570,42 @@ describe("/surveys page", () => {
     );
   });
 
-  test("view results GETs :id/responses and renders count + per-question aggregate", async () => {
+  test("view results GETs :id/insights and renders the funnel + per-question breakdown", async () => {
     mockListResponse([sampleSurvey]);
     mockFetchWithRefresh.mockImplementationOnce(() =>
       Promise.resolve({
         ok: true,
         status: 200,
         json: async () => ({
-          count: 7,
-          aggregate: [
-            { questionId: "q1", label: "Rate us", type: "rating", average: 4.2, total: 7 },
-            {
-              questionId: "q2",
-              label: "Come again?",
-              type: "single_choice",
-              counts: { Yes: 5, No: 2 },
-              total: 7,
-            },
-          ],
-          responses: [],
+          insights: {
+            views: 28,
+            responses: 7,
+            completionRate: 0.25, // 7 / 28
+            avgDurationMs: 42000, // → "42s"
+            firstResponseAt: "2026-06-09T01:00:00.000Z",
+            lastResponseAt: "2026-06-09T05:00:00.000Z",
+            byDevice: { mobile: 5, desktop: 2 },
+            byCountry: { US: 7 },
+            byReferrer: { qr: 4, unknown: 3 },
+            perQuestion: [
+              {
+                questionId: "q1",
+                label: "Rate us",
+                type: "rating",
+                answered: 7,
+                average: 4.2,
+              },
+              {
+                questionId: "q2",
+                label: "Come again?",
+                type: "single_choice",
+                answered: 7,
+                optionCounts: { Yes: 5, No: 2 },
+                otherCount: 1,
+                otherSamples: ["Only on weekends"],
+              },
+            ],
+          },
         }),
       }),
     );
@@ -580,13 +617,14 @@ describe("/surveys page", () => {
 
     fireEvent.click(screen.getByTestId("survey-results-survey-1"));
 
+    /* The panel now reads the insights endpoint, not /responses. */
     await waitFor(() => {
-      const respCall = mockFetchWithRefresh.mock.calls.find((c) =>
+      const insCall = mockFetchWithRefresh.mock.calls.find((c) =>
         findUrlArg(c).includes(
-          `/api/surveys/${encodeURIComponent("survey-1")}/responses`,
+          `/api/surveys/${encodeURIComponent("survey-1")}/insights`,
         ),
       );
-      expect(respCall).toBeTruthy();
+      expect(insCall).toBeTruthy();
     });
 
     await waitFor(() =>
@@ -594,20 +632,37 @@ describe("/surveys page", () => {
         screen.getByTestId("survey-results-panel-survey-1"),
       ).toBeInTheDocument(),
     );
-    expect(screen.getByTestId("survey-results-count-survey-1")).toHaveTextContent(
-      "7 responses",
-    );
-    /* Both per-question aggregate blocks rendered. */
+
+    /* Funnel headline metrics. */
+    expect(
+      screen.getByTestId("survey-insights-views-survey-1"),
+    ).toHaveTextContent("28");
+    expect(
+      screen.getByTestId("survey-insights-responses-survey-1"),
+    ).toHaveTextContent("7");
+    /* completionRate 0.25 → "25%". */
+    expect(
+      screen.getByTestId("survey-insights-completion-survey-1"),
+    ).toHaveTextContent("25%");
+    /* avgDurationMs 42000 → "42s". */
+    expect(
+      screen.getByTestId("survey-insights-avgtime-survey-1"),
+    ).toHaveTextContent("42s");
+
+    /* Both per-question blocks rendered from insights.perQuestion. */
     expect(
       screen.getByTestId("survey-results-q-survey-1-0"),
     ).toHaveTextContent("Rate us");
     expect(
       screen.getByTestId("survey-results-q-survey-1-1"),
     ).toHaveTextContent("Come again?");
-    /* Choice counts surfaced. */
+    /* Choice counts + an "Other" write-in surfaced. */
     expect(
       screen.getByTestId("survey-results-q-survey-1-1"),
     ).toHaveTextContent("Yes");
+    expect(
+      screen.getByTestId("survey-results-q-survey-1-1-other"),
+    ).toHaveTextContent("Only on weekends");
 
     /* Toggle again hides the panel. */
     fireEvent.click(screen.getByTestId("survey-results-survey-1"));
@@ -616,5 +671,57 @@ describe("/surveys page", () => {
         screen.queryByTestId("survey-results-panel-survey-1"),
       ).toBeNull(),
     );
+  });
+
+  test("view results renders the empty funnel + 'No responses yet' before any data", async () => {
+    mockListResponse([sampleSurvey]);
+    mockFetchWithRefresh.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          insights: {
+            views: 0,
+            responses: 0,
+            completionRate: 0,
+            avgDurationMs: null,
+            firstResponseAt: null,
+            lastResponseAt: null,
+            byDevice: {},
+            byCountry: {},
+            byReferrer: {},
+            perQuestion: [],
+          },
+        }),
+      }),
+    );
+
+    render(<SurveysPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("survey-row-survey-1")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByTestId("survey-results-survey-1"));
+
+    /* Wait for the funnel to render (loading state cleared). */
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("survey-insights-views-survey-1"),
+      ).toBeInTheDocument(),
+    );
+    /* Zero-state funnel: 0 views, 0% completion, N/A time. */
+    expect(
+      screen.getByTestId("survey-insights-views-survey-1"),
+    ).toHaveTextContent("0");
+    expect(
+      screen.getByTestId("survey-insights-completion-survey-1"),
+    ).toHaveTextContent("0%");
+    expect(
+      screen.getByTestId("survey-insights-avgtime-survey-1"),
+    ).toHaveTextContent("N/A");
+    /* Per-question area shows the explicit empty state. */
+    expect(
+      screen.getByTestId("survey-results-empty-survey-1"),
+    ).toBeInTheDocument();
   });
 });

@@ -65,29 +65,51 @@ interface DraftQuestion {
   visibleIfValue: string;
 }
 
-/* Per-question aggregate from GET /api/surveys/:id/responses. The exact
-   shape is owned by the API agent; we render defensively so any of the
-   common shapes (counts map, average, list of answers) surfaces without
-   the panel blowing up. */
-interface QuestionAggregate {
+/* Per-question insight from GET /api/surveys/:id/insights → insights.perQuestion.
+   The shape is owned by @/lib/surveys/insights (computeInsights →
+   aggregateResponses); we render defensively so a question with only some of
+   the fields (option counts, a rating average, free-text + Other samples)
+   surfaces without the panel blowing up. */
+interface QuestionInsight {
   questionId?: string;
   label?: string;
   type?: string;
+  /** total answers to this question. */
+  answered?: number;
   /** choice questions → { option: count }. */
-  counts?: Record<string, number>;
+  optionCounts?: Record<string, number>;
+  /** choice questions with allowOther → count of write-in answers. */
+  otherCount?: number;
+  /** choice questions with allowOther → sample write-in answers. */
+  otherSamples?: string[];
   /** rating questions → numeric average. */
   average?: number;
-  /** total answers to this question. */
-  total?: number;
-  /** free-text questions → sample answers. */
-  answers?: string[];
+  /** free-text / email questions → sample answers. */
+  textSamples?: string[];
+}
+
+/* The funnel + completion metrics a form SaaS doesn't surface, from
+   GET /api/surveys/:id/insights → insights. We read defensively (every
+   field optional) so a partial payload never blanks the panel. */
+interface SurveyInsights {
+  views?: number;
+  responses?: number;
+  /** responses / views, 0..1. */
+  completionRate?: number;
+  /** mean time-on-form in ms, or null when nobody reported a duration. */
+  avgDurationMs?: number | null;
+  firstResponseAt?: string | null;
+  lastResponseAt?: string | null;
+  byDevice?: Record<string, number>;
+  byCountry?: Record<string, number>;
+  byReferrer?: Record<string, number>;
+  perQuestion?: QuestionInsight[];
 }
 
 interface ResultsState {
   loading: boolean;
   error: string | null;
-  count: number | null;
-  aggregate: QuestionAggregate[] | null;
+  insights: SurveyInsights | null;
 }
 
 interface RowState {
@@ -136,10 +158,10 @@ function parseOptions(text: string): string[] {
     .filter((o) => o.length > 0);
 }
 
-function newDraftQuestion(): DraftQuestion {
+function newDraftQuestion(type: QuestionType = "short_text"): DraftQuestion {
   return {
     label: "",
-    type: "short_text",
+    type,
     required: false,
     optionsText: "",
     helpText: "",
@@ -163,8 +185,22 @@ function defaultRowState(): RowState {
     busy: false,
     error: null,
     resultsOpen: false,
-    results: { loading: false, error: null, count: null, aggregate: null },
+    results: { loading: false, error: null, insights: null },
   };
+}
+
+/* Format a duration in ms as a friendly "Ns" for non-technical staff; an
+   absent duration (nobody timed) reads "N/A". */
+function formatDuration(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return "N/A";
+  const secs = Math.round(ms / 1000);
+  return `${secs}s`;
+}
+
+/* completionRate (0..1) → a whole-percent string for the UI. */
+function formatPercent(rate: number | null | undefined): string {
+  if (rate === null || rate === undefined || !Number.isFinite(rate)) return "0%";
+  return `${Math.round(rate * 100)}%`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -252,8 +288,8 @@ export default function SurveysPage() {
   }, [authChecked, loadList]);
 
   /* ── create-form question builder ─────────────────────────────── */
-  function addQuestion() {
-    setQuestions((prev) => [...prev, newDraftQuestion()]);
+  function addQuestion(type: QuestionType = "short_text") {
+    setQuestions((prev) => [...prev, newDraftQuestion(type)]);
   }
 
   function patchQuestion(idx: number, patch: Partial<DraftQuestion>) {
@@ -492,7 +528,7 @@ export default function SurveysPage() {
     patchResults(survey.id, { loading: true, error: null });
     try {
       const res = await fetchWithRefresh(
-        `/api/surveys/${encodeURIComponent(survey.id)}/responses`,
+        `/api/surveys/${encodeURIComponent(survey.id)}/insights`,
       );
       if (!res.ok) {
         patchResults(survey.id, {
@@ -501,15 +537,10 @@ export default function SurveysPage() {
         });
         return;
       }
-      const data = (await res.json()) as {
-        count: number;
-        aggregate: QuestionAggregate[];
-        responses: unknown[];
-      };
+      const data = (await res.json()) as { insights?: SurveyInsights };
       patchResults(survey.id, {
         loading: false,
-        count: typeof data.count === "number" ? data.count : 0,
-        aggregate: Array.isArray(data.aggregate) ? data.aggregate : [],
+        insights: data.insights ?? {},
       });
     } catch (err) {
       patchResults(survey.id, {
@@ -523,7 +554,7 @@ export default function SurveysPage() {
     const row = getRow(survey.id);
     const next = !row.resultsOpen;
     patchRow(survey.id, { resultsOpen: next });
-    if (next && row.results.aggregate === null && !row.results.loading) {
+    if (next && row.results.insights === null && !row.results.loading) {
       void loadResults(survey);
     }
   }
@@ -716,7 +747,7 @@ export default function SurveysPage() {
                             color: "var(--wp-text-dim)",
                           }}
                         >
-                          Question {i + 1}
+                          {q.type === "section" ? "Section" : "Question"} {i + 1}
                         </span>
                         <input
                           data-testid={`survey-q-label-${i}`}
@@ -995,14 +1026,23 @@ export default function SurveysPage() {
               </div>
             )}
 
-            <div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button
                 data-testid="survey-add-question"
                 type="button"
-                onClick={addQuestion}
+                onClick={() => addQuestion()}
                 style={btnSecondary}
               >
                 + Add question
+              </button>
+              <button
+                data-testid="survey-add-section"
+                type="button"
+                onClick={() => addQuestion("section")}
+                style={btnSecondary}
+                title="Add a heading + intro text between questions (no answer collected)"
+              >
+                + Add section
               </button>
             </div>
           </div>
@@ -1251,21 +1291,14 @@ export default function SurveysPage() {
                         </div>
                       ) : (
                         <>
-                          <div
-                            data-testid={`survey-results-count-${s.id}`}
-                            style={{
-                              color: "var(--wp-text)",
-                              fontSize: "0.9rem",
-                              fontWeight: 600,
-                            }}
-                          >
-                            {row.results.count ?? 0} response
-                            {row.results.count === 1 ? "" : "s"}
-                          </div>
+                          <FunnelMetrics
+                            surveyId={s.id}
+                            insights={row.results.insights ?? {}}
+                          />
                           <ResultsAggregate
                             surveyId={s.id}
                             schema={s.schema?.questions ?? []}
-                            aggregate={row.results.aggregate ?? []}
+                            perQuestion={row.results.insights?.perQuestion ?? []}
                           />
                         </>
                       )}
@@ -1282,19 +1315,157 @@ export default function SurveysPage() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Funnel metrics — the view→completion story a form SaaS hides.        */
+/* ------------------------------------------------------------------ */
+
+/* One headline number in the funnel strip. */
+function Metric({
+  label,
+  value,
+  testId,
+}: {
+  label: string;
+  value: string;
+  testId: string;
+}) {
+  return (
+    <div
+      style={{
+        border: "1px solid var(--wp-dark-border)",
+        borderRadius: 6,
+        padding: "0.5rem 0.65rem",
+        display: "grid",
+        gap: 2,
+        minWidth: 0,
+      }}
+    >
+      <div
+        data-testid={testId}
+        style={{
+          color: "var(--wp-text)",
+          fontWeight: 700,
+          fontSize: "1.05rem",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {value}
+      </div>
+      <div
+        style={{
+          color: "var(--wp-text-dim)",
+          fontSize: "0.7rem",
+        }}
+      >
+        {label}
+      </div>
+    </div>
+  );
+}
+
+/* A small attribution breakdown (device / source / country) shown as a
+   compact "label: count" list. Skipped when there's nothing to show. */
+function Breakdown({ title, data }: { title: string; data?: Record<string, number> }) {
+  const entries = Object.entries(data ?? {}).sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) return null;
+  return (
+    <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
+      <div style={{ color: "var(--wp-text-dim)", fontSize: "0.7rem", fontWeight: 600 }}>
+        {title}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 6,
+          fontSize: "0.7rem",
+          color: "var(--wp-text-dim)",
+        }}
+      >
+        {entries.map(([k, v]) => (
+          <span
+            key={k}
+            style={{
+              border: "1px solid var(--wp-dark-border)",
+              borderRadius: 999,
+              padding: "1px 8px",
+            }}
+          >
+            {k}: <strong style={{ color: "var(--wp-text)" }}>{v}</strong>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FunnelMetrics({
+  surveyId,
+  insights,
+}: {
+  surveyId: string;
+  insights: SurveyInsights;
+}) {
+  const views = insights.views ?? 0;
+  const responses = insights.responses ?? 0;
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(7rem, 1fr))",
+          gap: 8,
+        }}
+      >
+        <Metric
+          label="People who opened it"
+          value={String(views)}
+          testId={`survey-insights-views-${surveyId}`}
+        />
+        <Metric
+          label={`Response${responses === 1 ? "" : "s"} received`}
+          value={String(responses)}
+          testId={`survey-insights-responses-${surveyId}`}
+        />
+        <Metric
+          label="Completion rate"
+          value={formatPercent(insights.completionRate)}
+          testId={`survey-insights-completion-${surveyId}`}
+        />
+        <Metric
+          label="Avg. time to finish"
+          value={formatDuration(insights.avgDurationMs)}
+          testId={`survey-insights-avgtime-${surveyId}`}
+        />
+      </div>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 16,
+        }}
+      >
+        <Breakdown title="By device" data={insights.byDevice} />
+        <Breakdown title="By source" data={insights.byReferrer} />
+        <Breakdown title="By country" data={insights.byCountry} />
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Results aggregate — renders the per-question summary defensively.    */
 /* ------------------------------------------------------------------ */
 
 function ResultsAggregate({
   surveyId,
   schema,
-  aggregate,
+  perQuestion,
 }: {
   surveyId: string;
   schema: SurveyQuestion[];
-  aggregate: QuestionAggregate[];
+  perQuestion: QuestionInsight[];
 }) {
-  if (aggregate.length === 0) {
+  if (perQuestion.length === 0) {
     return (
       <div
         data-testid={`survey-results-empty-${surveyId}`}
@@ -1305,16 +1476,18 @@ function ResultsAggregate({
     );
   }
   /* Index the schema so we can fall back to the question's own label /
-     type when the aggregate row doesn't echo them. */
+     type when the per-question row doesn't echo them. */
   const byId = new Map(schema.map((q) => [q.id, q]));
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      {aggregate.map((agg, i) => {
+      {perQuestion.map((agg, i) => {
         const q = agg.questionId ? byId.get(agg.questionId) : undefined;
         const label = agg.label ?? q?.label ?? `Question ${i + 1}`;
-        const counts = agg.counts ?? {};
+        const counts = agg.optionCounts ?? {};
         const countEntries = Object.entries(counts);
         const max = Math.max(1, ...countEntries.map(([, c]) => c));
+        const otherSamples = agg.otherSamples ?? [];
+        const textSamples = agg.textSamples ?? [];
         return (
           <div
             key={agg.questionId ?? i}
@@ -1329,7 +1502,7 @@ function ResultsAggregate({
               }}
             >
               {label}
-              {typeof agg.total === "number" ? (
+              {typeof agg.answered === "number" ? (
                 <span
                   style={{
                     marginLeft: 6,
@@ -1338,7 +1511,7 @@ function ResultsAggregate({
                     fontSize: "0.7rem",
                   }}
                 >
-                  ({agg.total} answered)
+                  ({agg.answered} answered)
                 </span>
               ) : null}
             </div>
@@ -1405,7 +1578,50 @@ function ResultsAggregate({
               </div>
             ) : null}
 
-            {Array.isArray(agg.answers) && agg.answers.length > 0 ? (
+            {/* "Other" write-ins on a choice question. */}
+            {otherSamples.length > 0 ? (
+              <div style={{ display: "grid", gap: 4 }}>
+                <div
+                  style={{
+                    color: "var(--wp-text-dim)",
+                    fontSize: "0.7rem",
+                    fontWeight: 600,
+                  }}
+                >
+                  Other
+                  {typeof agg.otherCount === "number"
+                    ? ` (${agg.otherCount})`
+                    : ""}
+                </div>
+                <ul
+                  data-testid={`survey-results-q-${surveyId}-${i}-other`}
+                  style={{
+                    listStyle: "none",
+                    margin: 0,
+                    padding: 0,
+                    display: "grid",
+                    gap: 4,
+                    fontSize: "0.75rem",
+                    color: "var(--wp-text-dim)",
+                  }}
+                >
+                  {otherSamples.slice(0, 20).map((ans, j) => (
+                    <li
+                      key={j}
+                      style={{
+                        borderBottom: "1px dashed var(--wp-dark-border)",
+                        padding: "2px 0",
+                      }}
+                    >
+                      {ans}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {/* Free-text / email sample answers. */}
+            {textSamples.length > 0 ? (
               <ul
                 style={{
                   listStyle: "none",
@@ -1417,7 +1633,7 @@ function ResultsAggregate({
                   color: "var(--wp-text-dim)",
                 }}
               >
-                {agg.answers.slice(0, 20).map((ans, j) => (
+                {textSamples.slice(0, 20).map((ans, j) => (
                   <li
                     key={j}
                     style={{
@@ -1433,7 +1649,8 @@ function ResultsAggregate({
 
             {countEntries.length === 0 &&
             typeof agg.average !== "number" &&
-            !(Array.isArray(agg.answers) && agg.answers.length > 0) ? (
+            otherSamples.length === 0 &&
+            textSamples.length === 0 ? (
               <div
                 style={{ color: "var(--wp-text-muted)", fontSize: "0.75rem" }}
               >

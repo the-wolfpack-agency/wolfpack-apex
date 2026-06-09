@@ -21,6 +21,10 @@ const EXCEPTIONS = [
                              //   the signed share token IS the credential; no
                              //   JWT refresh flow applies. See
                              //   src/app/share/[token]/ShareApprovalPanel.tsx.
+  "src/app/s/",              // public survey responder (migration 161/162) —
+                             //   anonymous, no JWT; the /api/s/* routes are
+                             //   unauthenticated by design (view beacon +
+                             //   submit). No refresh flow applies.
   "src/lib/__tests__/",      // test files
   "src/__tests__/",
   "node_modules/",

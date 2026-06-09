@@ -95,5 +95,20 @@ export interface SurveyResponse {
   answers: AnswerMap;
   respondentFingerprint: string | null;
   qrScanId: string | null;
+  /** Time-on-form in ms (migration 162) — powers avg time-to-complete. */
+  durationMs: number | null;
+  device: string | null;
+  country: string | null;
+  referrer: string | null;
   submittedAt: string;
+}
+
+/** A public responder load — the top of the completion funnel (migration 162). */
+export interface SurveyView {
+  surveyId: string;
+  device: string | null;
+  country: string | null;
+  referrer: string | null;
+  qrScanId: string | null;
+  viewedAt: string;
 }

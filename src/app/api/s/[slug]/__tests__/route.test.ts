@@ -62,13 +62,18 @@ function getReq(): NextRequest {
   return new NextRequest("https://x.test/api/s/abc1234");
 }
 
-function postReq(body: unknown, ip = "1.2.3.4"): NextRequest {
+function postReq(
+  body: unknown,
+  ip = "1.2.3.4",
+  extraHeaders: Record<string, string> = {},
+): NextRequest {
   return new NextRequest("https://x.test/api/s/abc1234", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-forwarded-for": ip,
       "user-agent": "jest",
+      ...extraHeaders,
     },
     body: JSON.stringify(body),
   });
@@ -153,6 +158,55 @@ describe("POST /api/s/[slug]", () => {
       "public",
       "public",
       expect.objectContaining({ survey_id: "survey-1", slug: "abc1234" }),
+    );
+  });
+
+  test("submit passes durationMs + server-derived device/country/referrer into submitResponse", async () => {
+    mockGetPublished.mockResolvedValue(PUBLISHED_SURVEY);
+    mockSubmitResponse.mockResolvedValue({ id: "resp-d" });
+
+    const res = await POST(
+      postReq({ answers: { q1: "Nick" }, durationMs: 4321 }, "2.2.2.2", {
+        // iPhone UA → device "mobile"; edge country header → "US".
+        "user-agent":
+          "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Mobile/15E148",
+        "x-vercel-ip-country": "US",
+        referer: "https://t.co/x",
+      }),
+      ctx("abc1234"),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockSubmitResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surveyId: "survey-1",
+        answers: { q1: "Nick" },
+        durationMs: 4321,
+        device: "mobile",
+        country: "US",
+        referrer: "https://t.co/x",
+      }),
+    );
+  });
+
+  test("a non-numeric / negative durationMs is sanitised to null", async () => {
+    mockGetPublished.mockResolvedValue(PUBLISHED_SURVEY);
+    mockSubmitResponse.mockResolvedValue({ id: "resp-n" });
+
+    await POST(
+      postReq({ answers: { q1: "x" }, durationMs: -5 }, "3.3.3.3"),
+      ctx("abc1234"),
+    );
+    expect(mockSubmitResponse).toHaveBeenLastCalledWith(
+      expect.objectContaining({ durationMs: null }),
+    );
+
+    await POST(
+      postReq({ answers: { q1: "x" }, durationMs: "nope" }, "3.3.3.4"),
+      ctx("abc1234"),
+    );
+    expect(mockSubmitResponse).toHaveBeenLastCalledWith(
+      expect.objectContaining({ durationMs: null }),
     );
   });
 

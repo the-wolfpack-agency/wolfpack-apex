@@ -30,6 +30,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { getPublishedSurveyBySlug, submitResponse } from "@/lib/surveys/store";
 import { validateAnswers } from "@/lib/surveys/validate";
+import { parseUserAgent } from "@/lib/qr/scans";
 import { trackEvent } from "@/lib/analytics";
 import type { AnswerMap } from "@/lib/surveys/types";
 
@@ -89,6 +90,21 @@ function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
+/** ISO country from Vercel's edge header, normalised. Null when absent. */
+function edgeCountry(headers: Headers): string | null {
+  const c = headers.get("x-vercel-ip-country");
+  if (!c) return null;
+  const trimmed = c.trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(trimmed) ? trimmed : null;
+}
+
+/** Coerce a client-supplied durationMs to a sane non-negative integer. */
+function sanitizeDurationMs(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) return null;
+  /* Cap at 24h so a clock-skewed / hostile client can't store nonsense. */
+  return Math.min(Math.round(raw), 24 * 60 * 60 * 1000);
+}
+
 /* ------------------------------- GET ---------------------------------- */
 
 export async function GET(
@@ -145,7 +161,10 @@ export async function POST(
     }
 
     // 3. Parse body + validate untrusted answers.
-    const body = (await req.json().catch(() => ({}))) as { answers?: unknown };
+    const body = (await req.json().catch(() => ({}))) as {
+      answers?: unknown;
+      durationMs?: unknown;
+    };
     const answers = body?.answers;
     const result = validateAnswers(survey.schema, answers);
     if (!result.ok) {
@@ -158,12 +177,24 @@ export async function POST(
     }
 
     // 4. Persist + analytics. Fingerprint is a truncated sha256(ip+ua) —
-    //    enough to recognise repeat submitters, never raw PII.
+    //    enough to recognise repeat submitters, never raw PII. Attribution
+    //    (device/country/referrer) is derived SERVER-SIDE from headers —
+    //    same vocabulary as the view beacon + QR scans — so the funnel
+    //    joins cleanly; durationMs is the one client-supplied signal and is
+    //    sanitised before persistence.
     const fingerprint = sha256Hex(`${ip}|${ua}`).slice(0, 32);
+    const durationMs = sanitizeDurationMs(body?.durationMs);
+    const device = parseUserAgent(ua).device;
+    const country = edgeCountry(req.headers);
+    const referrer = req.headers.get("referer") ?? null;
     const response = await submitResponse({
       surveyId: survey.id,
       answers: answers as AnswerMap,
       respondentFingerprint: fingerprint,
+      durationMs,
+      device,
+      country,
+      referrer,
     });
 
     trackEvent("survey.response_submitted", "public", "public", {

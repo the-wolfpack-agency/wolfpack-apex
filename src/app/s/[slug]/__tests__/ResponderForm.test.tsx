@@ -46,7 +46,11 @@ const SCHEMA: SurveySchema = {
 const realFetch = global.fetch;
 beforeEach(() => {
   jest.clearAllMocks();
-  global.fetch = jest.fn() as unknown as typeof fetch;
+  // Default: every fetch (view beacon + submit) resolves 200. Individual
+  // tests override for the submit path; the mount beacon always resolves.
+  global.fetch = jest
+    .fn()
+    .mockResolvedValue(jsonResponse(200, { ok: true })) as unknown as typeof fetch;
 });
 afterAll(() => {
   global.fetch = realFetch;
@@ -58,6 +62,21 @@ function jsonResponse(status: number, body: unknown): Response {
     status,
     json: () => Promise.resolve(body),
   } as Response;
+}
+
+/** Calls global.fetch made to the view beacon (POST /api/s/<slug>/view). */
+function viewBeaconCalls(): unknown[][] {
+  return (global.fetch as jest.Mock).mock.calls.filter(([url]) =>
+    String(url).endsWith("/view"),
+  );
+}
+
+/** The first non-beacon (submit) fetch call: [url, opts]. */
+function submitCall(): [string, { method: string; body: string }] {
+  const call = (global.fetch as jest.Mock).mock.calls.find(
+    ([url]) => !String(url).endsWith("/view"),
+  );
+  return call as [string, { method: string; body: string }];
 }
 
 function renderForm() {
@@ -79,19 +98,33 @@ test("renders the form with one block per question", () => {
   expect(screen.getByTestId("survey-q-score")).toBeInTheDocument();
 });
 
-test("required validation blocks submit and fires no fetch", async () => {
+test("required validation blocks submit and fires no SUBMIT fetch", async () => {
   renderForm();
+  // The mount view beacon may have fired; assert no SUBMIT fetch went out.
   fireEvent.click(screen.getByTestId("survey-submit"));
   await waitFor(() => {
     expect(screen.getByTestId("survey-error")).toBeInTheDocument();
   });
   expect(screen.getByTestId("survey-error")).toHaveTextContent(/required/i);
-  expect(global.fetch).not.toHaveBeenCalled();
+  expect(submitCall()).toBeUndefined();
   // Form is still present.
   expect(screen.getByTestId("survey-responder")).toBeInTheDocument();
 });
 
-test("filling + submit POSTs the assembled answers", async () => {
+test("fires the view beacon exactly once on mount", async () => {
+  renderForm();
+  await waitFor(() => {
+    expect(viewBeaconCalls().length).toBe(1);
+  });
+  const [url, opts] = viewBeaconCalls()[0] as [
+    string,
+    { method: string },
+  ];
+  expect(url).toBe("/api/s/abc1234/view");
+  expect(opts.method).toBe("POST");
+});
+
+test("filling + submit POSTs the assembled answers with a numeric durationMs", async () => {
   (global.fetch as jest.Mock).mockResolvedValue(
     jsonResponse(200, { ok: true, id: "resp-1" }),
   );
@@ -105,14 +138,16 @@ test("filling + submit POSTs the assembled answers", async () => {
   fireEvent.click(screen.getByTestId("survey-submit"));
 
   await waitFor(() => {
-    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(submitCall()).toBeDefined();
   });
-  const [url, opts] = (global.fetch as jest.Mock).mock.calls[0];
+  const [url, opts] = submitCall();
   expect(url).toBe("/api/s/abc1234");
   expect(opts.method).toBe("POST");
-  expect(JSON.parse(opts.body)).toEqual({
-    answers: { name: "Nick", plan: "Pro", score: 4 },
-  });
+  const sent = JSON.parse(opts.body);
+  expect(sent.answers).toEqual({ name: "Nick", plan: "Pro", score: 4 });
+  // durationMs rides alongside the answers as a non-negative number.
+  expect(typeof sent.durationMs).toBe("number");
+  expect(sent.durationMs).toBeGreaterThanOrEqual(0);
 });
 
 test("a 200 response shows the success state", async () => {
@@ -291,9 +326,9 @@ test('choosing "Other" on Q2 reveals a text box; submitted answer is other:<text
   fireEvent.click(screen.getByTestId("survey-submit"));
 
   await waitFor(() => {
-    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(submitCall()).toBeDefined();
   });
-  const [, opts] = (global.fetch as jest.Mock).mock.calls[0];
+  const [, opts] = submitCall();
   const sent = JSON.parse(opts.body).answers;
   expect(sent.q2_eliminate).toBe(`${OTHER_VALUE_PREFIX}Vendor onboarding`);
 });
@@ -369,7 +404,7 @@ test("a complete valid submission POSTs the right shape and shows survey-submitt
   });
   expect(screen.queryByTestId("survey-responder")).not.toBeInTheDocument();
 
-  const [url, opts] = (global.fetch as jest.Mock).mock.calls[0];
+  const [url, opts] = submitCall();
   expect(url).toBe("/api/s/porsche1");
   expect(opts.method).toBe("POST");
   const sent = JSON.parse(opts.body).answers;
@@ -412,9 +447,9 @@ test("hidden (inactive) required questions never block submit, and a 400 surface
   fireEvent.click(screen.getByTestId("survey-submit"));
 
   // Client check must NOT block on the hidden required contact fields —
-  // the request actually fires (then we assert the server-error path).
+  // the SUBMIT request actually fires (then we assert the server-error path).
   await waitFor(() => {
-    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(submitCall()).toBeDefined();
   });
   await waitFor(() => {
     expect(screen.getByTestId("survey-error")).toBeInTheDocument();
@@ -425,7 +460,7 @@ test("hidden (inactive) required questions never block submit, and a 400 surface
   expect(screen.getByTestId("survey-responder")).toBeInTheDocument();
 
   // Hidden contact fields were not sent.
-  const [, opts] = (global.fetch as jest.Mock).mock.calls[0];
+  const [, opts] = submitCall();
   const sent = JSON.parse(opts.body).answers;
   expect(sent.c_first).toBeUndefined();
   expect(sent.c_email).toBeUndefined();
