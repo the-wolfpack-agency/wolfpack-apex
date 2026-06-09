@@ -23,6 +23,7 @@
  * loading / empty states.
  */
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
   fetchWithRefresh,
@@ -117,6 +118,9 @@ interface RowState {
   error: string | null;
   resultsOpen: boolean;
   results: ResultsState;
+  qrOpen: boolean;
+  qrLoading: boolean;
+  qrSvg: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -186,6 +190,9 @@ function defaultRowState(): RowState {
     error: null,
     resultsOpen: false,
     results: { loading: false, error: null, insights: null },
+    qrOpen: false,
+    qrLoading: false,
+    qrSvg: null,
   };
 }
 
@@ -521,6 +528,36 @@ export default function SurveysPage() {
         busy: false,
         error: `Network error: ${(err as Error).message}`,
       });
+    }
+  }
+
+  /* Show/hide the linked QR inline. The QR image is rendered on demand
+     from the QR module's SVG endpoint (survey.qrCodeId), so the operator
+     can see + scan it here without leaving for /qr. */
+  async function toggleSurveyQr(survey: Survey) {
+    const row = getRow(survey.id);
+    if (row.qrOpen) {
+      patchRow(survey.id, { qrOpen: false });
+      return;
+    }
+    if (!survey.qrCodeId) return;
+    if (row.qrSvg) {
+      patchRow(survey.id, { qrOpen: true });
+      return;
+    }
+    patchRow(survey.id, { qrOpen: true, qrLoading: true });
+    try {
+      const res = await fetchWithRefresh(
+        `/api/qr/${encodeURIComponent(survey.qrCodeId)}/svg?size=180`,
+      );
+      if (!res.ok) {
+        patchRow(survey.id, { qrLoading: false, qrSvg: "" });
+        return;
+      }
+      const svg = await res.text();
+      patchRow(survey.id, { qrLoading: false, qrSvg: svg });
+    } catch {
+      patchRow(survey.id, { qrLoading: false, qrSvg: "" });
     }
   }
 
@@ -1213,18 +1250,32 @@ export default function SurveysPage() {
                         type="button"
                         disabled={row.busy}
                         onClick={() => toggleStatus(s)}
+                        title={
+                          s.status === "published"
+                            ? "Stop accepting new responses. The /s link goes to a “closed” page. Nothing is deleted — you can re-publish anytime."
+                            : "Make the survey live at its public /s link so people can respond."
+                        }
                         style={btnSecondary}
                       >
-                        {s.status === "published" ? "Close" : "Publish"}
+                        {s.status === "published"
+                          ? "Unpublish"
+                          : s.status === "closed"
+                            ? "Re-publish"
+                            : "Publish"}
                       </button>
                       <button
                         data-testid={`survey-qr-${s.id}`}
                         type="button"
                         disabled={row.busy}
-                        onClick={() => generateQr(s)}
+                        onClick={() => (linked ? toggleSurveyQr(s) : generateQr(s))}
+                        title={
+                          linked
+                            ? "Show the QR code that points at this survey"
+                            : "Create a QR code that opens this survey when scanned"
+                        }
                         style={btnSecondary}
                       >
-                        {linked ? "QR linked" : "Generate QR"}
+                        {linked ? (row.qrOpen ? "Hide QR" : "Show QR") : "Generate QR"}
                       </button>
                       <button
                         data-testid={`survey-results-${s.id}`}
@@ -1263,6 +1314,75 @@ export default function SurveysPage() {
                     </div>
                   ) : null}
 
+                  {linked && row.qrOpen ? (
+                    <div
+                      data-testid={`survey-qr-panel-${s.id}`}
+                      style={{
+                        marginTop: 12,
+                        padding: 12,
+                        border: "1px solid var(--wp-dark-border)",
+                        borderRadius: 6,
+                        display: "flex",
+                        gap: 16,
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        boxSizing: "border-box",
+                        minWidth: 0,
+                        maxWidth: "100%",
+                        overflowX: "hidden",
+                      }}
+                    >
+                      {row.qrSvg ? (
+                        <div
+                          data-testid={`survey-qr-svg-${s.id}`}
+                          style={{
+                            width: 160,
+                            maxWidth: "100%",
+                            aspectRatio: "1 / 1",
+                            background: "#fff",
+                            padding: 8,
+                            borderRadius: 4,
+                            boxSizing: "border-box",
+                            flexShrink: 0,
+                            overflow: "hidden",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                          dangerouslySetInnerHTML={{
+                            __html: row.qrSvg.replace(
+                              /<svg([^>]*)>/,
+                              '<svg$1 style="max-width:100%;max-height:100%;height:auto;display:block">',
+                            ),
+                          }}
+                        />
+                      ) : (
+                        <div style={{ color: "var(--wp-text-dim)", fontSize: 13 }}>
+                          {row.qrLoading ? "Loading QR…" : "Couldn’t load the QR image."}
+                        </div>
+                      )}
+                      <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
+                        <span style={{ fontSize: 12, color: "var(--wp-text-dim)" }}>
+                          Scans open{" "}
+                          <span style={{ color: "var(--wp-gold)", fontFamily: "monospace" }}>
+                            /s/{s.slug}
+                          </span>
+                        </span>
+                        <Link
+                          data-testid={`survey-qr-manage-${s.id}`}
+                          href="/qr"
+                          style={{
+                            fontSize: 13,
+                            color: "var(--wp-gold)",
+                            textDecoration: "underline",
+                          }}
+                        >
+                          Manage in QR Codes →
+                        </Link>
+                      </div>
+                    </div>
+                  ) : null}
+
                   {row.resultsOpen ? (
                     <div
                       data-testid={`survey-results-panel-${s.id}`}
@@ -1273,6 +1393,11 @@ export default function SurveysPage() {
                         borderRadius: 6,
                         display: "grid",
                         gap: 12,
+                        // Keep the panel + its grids inside the card on mobile.
+                        boxSizing: "border-box",
+                        minWidth: 0,
+                        maxWidth: "100%",
+                        overflowX: "hidden",
                       }}
                     >
                       {row.results.loading ? (
@@ -1337,6 +1462,11 @@ function Metric({
         display: "grid",
         gap: 2,
         minWidth: 0,
+        // border-box so the padding doesn't push the card past its grid
+        // track (apex has no global box-sizing reset) — the same overflow
+        // class we fixed on the QR "Show QR" box.
+        boxSizing: "border-box",
+        overflowWrap: "anywhere",
       }}
     >
       <div
@@ -1408,12 +1538,13 @@ function FunnelMetrics({
   const views = insights.views ?? 0;
   const responses = insights.responses ?? 0;
   return (
-    <div style={{ display: "grid", gap: 10 }}>
+    <div style={{ display: "grid", gap: 10, minWidth: 0 }}>
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(7rem, 1fr))",
           gap: 8,
+          minWidth: 0,
         }}
       >
         <Metric

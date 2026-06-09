@@ -70,6 +70,7 @@ const sampleSurvey2 = {
   slug: "xyz9876",
   title: "NPS pulse",
   status: "published",
+  qrCodeId: "qr-2", // linked → exercises the inline "Show QR" panel
 };
 
 /* ----------------------------- helpers ------------------------------ */
@@ -458,14 +459,62 @@ describe("/surveys page", () => {
       expect(JSON.parse(patchCall![1].body)).toEqual({ status: "published" });
     });
 
-    /* Row reflects the published status + button flips to Close. */
+    /* Row reflects the published status + button flips to Unpublish
+       (publishing is reversible; Unpublish stops responses without
+       deleting anything). */
     await waitFor(() =>
       expect(
         screen.getByTestId("survey-row-status-survey-1"),
       ).toHaveTextContent("published"),
     );
     expect(screen.getByTestId("survey-publish-survey-1")).toHaveTextContent(
-      "Close",
+      "Unpublish",
+    );
+  });
+
+  test("a linked survey shows (not re-mints) its QR inline, with a /qr link", async () => {
+    // sampleSurvey2 is the linked one (qrCodeId set in the fixture).
+    mockListResponse([sampleSurvey2]);
+    // The QR SVG fetch (text, not json).
+    mockFetchWithRefresh.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () =>
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" width="180" height="180"><rect width="180" height="180" fill="#fff"/></svg>',
+      }),
+    );
+
+    render(<SurveysPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("survey-row-survey-2")).toBeInTheDocument(),
+    );
+
+    // Linked → the button reads "Show QR", not "Generate QR".
+    const qrBtn = screen.getByTestId("survey-qr-survey-2");
+    expect(qrBtn).toHaveTextContent("Show QR");
+    fireEvent.click(qrBtn);
+
+    // It fetched the QR SVG by the survey's qrCodeId and rendered it.
+    await waitFor(() =>
+      expect(screen.getByTestId("survey-qr-svg-survey-2")).toBeInTheDocument(),
+    );
+    const svgCall = mockFetchWithRefresh.mock.calls.find((c) =>
+      String(c[0]).includes("/api/qr/") && String(c[0]).includes("/svg"),
+    );
+    expect(svgCall).toBeTruthy();
+
+    // Crucially: clicking a linked survey's QR button must NOT re-mint
+    // (no POST to :id/qr).
+    const mintCall = mockFetchWithRefresh.mock.calls.find(
+      (c) => c[1]?.method === "POST" && String(c[0]).endsWith("/qr"),
+    );
+    expect(mintCall).toBeFalsy();
+
+    // And it links out to the QR management page.
+    expect(screen.getByTestId("survey-qr-manage-survey-2")).toHaveAttribute(
+      "href",
+      "/qr",
     );
   });
 
