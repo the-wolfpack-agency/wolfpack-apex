@@ -18,9 +18,9 @@ describe("survey responder theme", () => {
 
   test("porsche-sage is the pitch-deck look: sage accent on a dark canvas", () => {
     const v = surveyThemeVars("porsche-sage") as Record<string, string>;
-    expect(v["--wp-gold"]).toBe("#7d958d"); // sage accent
-    expect(v["--wp-dark"]).toBe("#0e1413"); // near-black canvas
-    expect(v["--wp-text"]).toBe("#f2f4f3"); // light text
+    expect(v["--wp-gold"]).toBe("#b9d0c6"); // light, readable sage accent
+    expect(v["--wp-dark"]).toBe("#101716"); // near-black canvas
+    expect(v["--wp-text"]).toBe("#f4f6f5"); // light text
     expect(String(v.fontFamily)).toMatch(/Porsche Next/);
   });
 

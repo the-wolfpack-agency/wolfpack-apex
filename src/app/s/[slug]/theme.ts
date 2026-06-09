@@ -42,16 +42,17 @@ export function surveyThemeVars(theme: string | null | undefined): CSSProperties
   if (theme === "porsche-sage") {
     return {
       // "A Weekend with Porsche" pitch deck: near-black green-tinted canvas,
-      // sage-green accent panels, white text, Porsche Next.
-      "--wp-dark": "#0e1413",
-      "--wp-dark-surface": "#19211f",
-      "--wp-dark-border": "rgba(255,255,255,0.12)",
-      "--wp-text": "#f2f4f3",
-      "--wp-text-dim": "#b6c1bd",
-      "--wp-text-muted": "#8c9893",
-      "--wp-gold": "#7d958d", // deck sage accent (headings, buttons, rating)
-      "--wp-error": "#e0746a",
-      "--wp-accent-fg": "#0e1413", // dark ink on the light sage buttons
+      // sage accent, Porsche Next. Headings + secondary text are deliberately
+      // light (high contrast) so the dark theme stays readable.
+      "--wp-dark": "#101716",
+      "--wp-dark-surface": "#1c2523",
+      "--wp-dark-border": "rgba(255,255,255,0.14)",
+      "--wp-text": "#f4f6f5",
+      "--wp-text-dim": "#cdd6d2", // brightened for legibility on the dark bg
+      "--wp-text-muted": "#a7b2ad",
+      "--wp-gold": "#b9d0c6", // light, readable sage (headings, buttons, rating)
+      "--wp-error": "#f0867b",
+      "--wp-accent-fg": "#10201c", // dark ink on the light-sage buttons
       fontFamily: PORSCHE_FONT,
       letterSpacing: "-0.01em",
     } as CSSProperties;
