@@ -17,7 +17,17 @@ import {
   getCodeById,
   updateCode,
   archiveCode,
+  canArchive,
 } from "@/lib/qr/codes";
+
+describe("canArchive — deletion-lock guard", () => {
+  test("an unlocked campaign can be archived", () => {
+    expect(canArchive({ locked: false })).toBe(true);
+  });
+  test("a locked campaign cannot be archived", () => {
+    expect(canArchive({ locked: true })).toBe(false);
+  });
+});
 
 const ORIGINAL_DB_URL = process.env.DATABASE_URL;
 beforeEach(() => {

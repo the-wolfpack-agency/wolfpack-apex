@@ -2039,6 +2039,13 @@ export type InstinctEventType =
      UTM campaign / expiry was attached + the target hostname so the
      learning loop can spot which campaigns drive scans. */
   | "assistant.qr_code_created"
+  /* qr campaign deletion-lock (migration 160). locked/unlocked track
+     which campaigns operators protect; archive_blocked fires when an
+     Archive is refused because the campaign is locked — a signal of
+     accidental-delete pressure the learning loop can surface. */
+  | "qr.code_locked"
+  | "qr.code_unlocked"
+  | "qr.archive_blocked"
   /* qr_scan_recorded: a public scan hit /q/[slug] and was either
      redirected (blocked=false) or short-circuited because the code
      was missing/archived/expired (blocked=true). The redirect handler

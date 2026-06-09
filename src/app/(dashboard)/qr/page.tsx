@@ -46,6 +46,7 @@ interface QrCode {
   utmCampaign: string | null;
   expiresAt: string | null;
   archivedAt: string | null;
+  locked: boolean;
   createdAt: string;
   createdByUserId: string | null;
   createdByUserRole: string | null;
@@ -867,7 +868,35 @@ export default function QrPage() {
     }
   }
 
+  /* Toggle the deletion-lock. Locking protects an active campaign from
+     an accidental Archive; the server also enforces this (DELETE on a
+     locked code returns 409), so this is the friendly front of a real
+     server guard, not a client-only nicety. */
+  async function toggleLock(code: QrCode) {
+    const next = !code.locked;
+    try {
+      const res = await fetchWithRefresh(
+        `/api/qr/${encodeURIComponent(code.id)}`,
+        {
+          method: "PATCH",
+          headers: jsonHeaders(),
+          body: JSON.stringify({ locked: next }),
+        },
+      );
+      if (!res.ok) return;
+      setCodes((prev) =>
+        prev.map((c) => (c.id === code.id ? { ...c, locked: next } : c)),
+      );
+    } catch {
+      /* swallow — UI stays as-is on failure. */
+    }
+  }
+
   async function archiveCode(code: QrCode) {
+    /* A locked campaign is protected: the operator must unlock it first.
+       The server enforces this too (409), but we never even send the
+       request while locked. */
+    if (code.locked) return;
     if (typeof window !== "undefined") {
       const ok = window.confirm(
         `Archive "${code.label || code.slug}"? Scanners hitting this QR will be redirected to the "no longer active" page. This can't be undone from the UI.`,
@@ -1305,13 +1334,44 @@ export default function QrPage() {
                         {row.expanded ? "Hide analytics" : "View analytics"}
                       </button>
                       <button
+                        data-testid={`qr-row-lock-${c.slug}`}
+                        type="button"
+                        onClick={() => toggleLock(c)}
+                        title={
+                          c.locked
+                            ? "Unlock to allow archiving this campaign"
+                            : "Lock to protect this campaign from accidental archiving"
+                        }
+                        style={
+                          c.locked
+                            ? {
+                                ...btnSecondary,
+                                color: "var(--wp-gold)",
+                                borderColor: "var(--wp-gold)",
+                              }
+                            : btnSecondary
+                        }
+                      >
+                        {c.locked ? "🔒 Locked" : "Lock"}
+                      </button>
+                      <button
                         data-testid={`qr-row-archive-${c.slug}`}
                         type="button"
                         onClick={() => archiveCode(c)}
+                        disabled={c.locked}
+                        title={
+                          c.locked
+                            ? "This campaign is locked — unlock it first to archive"
+                            : undefined
+                        }
                         style={{
                           ...btnSecondary,
-                          color: "var(--wp-error)",
-                          borderColor: "var(--wp-error)",
+                          color: c.locked ? "var(--wp-text-muted)" : "var(--wp-error)",
+                          borderColor: c.locked
+                            ? "var(--wp-dark-border)"
+                            : "var(--wp-error)",
+                          cursor: c.locked ? "not-allowed" : "pointer",
+                          opacity: c.locked ? 0.6 : 1,
                         }}
                       >
                         Archive

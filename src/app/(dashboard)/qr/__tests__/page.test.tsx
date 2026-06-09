@@ -47,6 +47,7 @@ const sampleCode = {
   utmCampaign: "spring-brochure",
   expiresAt: null,
   archivedAt: null,
+  locked: false,
   createdAt: "2026-04-29T10:00:00.000Z",
   createdByUserId: "u1",
   createdByUserRole: "ceo",
@@ -60,6 +61,7 @@ const sampleCode2 = {
   utmCampaign: null,
   expiresAt: null,
   archivedAt: null,
+  locked: false,
   createdAt: "2026-04-28T10:00:00.000Z",
   createdByUserId: "u1",
   createdByUserRole: "ceo",
@@ -423,6 +425,66 @@ describe("/qr page", () => {
     expect(svg).not.toBeNull();
     expect(svg!.getAttribute("style")).toMatch(/max-width:\s*100%/);
     expect(svg!.getAttribute("style")).toMatch(/max-height:\s*100%/);
+  });
+
+  test("locking a campaign PATCHes locked:true and disables Archive", async () => {
+    mockListResponse([sampleCode]);
+    mockFetchWithRefresh.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ code: { ...sampleCode, locked: true } }),
+      }),
+    );
+
+    render(<QrPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("qr-row-abc1234")).toBeInTheDocument(),
+    );
+
+    expect(screen.getByTestId("qr-row-archive-abc1234")).toBeEnabled();
+
+    fireEvent.click(screen.getByTestId("qr-row-lock-abc1234"));
+
+    await waitFor(() => {
+      const lockCall = mockFetchWithRefresh.mock.calls.find(
+        (c) => c[1]?.method === "PATCH" && /"locked":true/.test(String(c[1]?.body)),
+      );
+      expect(lockCall).toBeTruthy();
+      expect(findUrlArg(lockCall!)).toContain(
+        `/api/qr/${encodeURIComponent("code-1")}`,
+      );
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("qr-row-archive-abc1234")).toBeDisabled(),
+    );
+    expect(screen.getByTestId("qr-row-lock-abc1234").textContent).toMatch(/Locked/);
+  });
+
+  test("a locked campaign never sends an archive request", async () => {
+    mockListResponse([{ ...sampleCode, locked: true }]);
+
+    const confirmSpy = jest
+      .spyOn(window, "confirm")
+      .mockImplementation(() => true);
+
+    render(<QrPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("qr-row-abc1234")).toBeInTheDocument(),
+    );
+
+    const archiveBtn = screen.getByTestId("qr-row-archive-abc1234");
+    expect(archiveBtn).toBeDisabled();
+    fireEvent.click(archiveBtn);
+
+    const deleteCalls = mockFetchWithRefresh.mock.calls.filter(
+      (c) => c[1]?.method === "DELETE",
+    );
+    expect(deleteCalls).toHaveLength(0);
+    expect(screen.getByTestId("qr-row-abc1234")).toBeInTheDocument();
+
+    confirmSpy.mockRestore();
   });
 
   test("renders empty state when GET /api/qr returns []", async () => {

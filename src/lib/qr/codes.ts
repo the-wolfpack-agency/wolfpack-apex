@@ -27,6 +27,12 @@ export interface QrCode {
   utmCampaign: string | null;
   expiresAt: string | null;
   archivedAt: string | null;
+  /**
+   * Deletion-lock (migration 160). When true, the admin API refuses to
+   * Archive this campaign until it is explicitly unlocked. Orthogonal to
+   * archivedAt: a locked code still redirects; lock only guards Archive.
+   */
+  locked: boolean;
   createdAt: string;
   createdByUserId: string | null;
   createdByUserRole: string | null;
@@ -40,6 +46,7 @@ interface QrCodeRow {
   utm_campaign: string | null;
   expires_at: string | null;
   archived_at: string | null;
+  locked: boolean;
   created_at: string;
   created_by_user_id: string | null;
   created_by_user_role: string | null;
@@ -54,10 +61,21 @@ function rowToCode(row: QrCodeRow): QrCode {
     utmCampaign: row.utm_campaign,
     expiresAt: row.expires_at,
     archivedAt: row.archived_at,
+    locked: row.locked ?? false,
     createdAt: row.created_at,
     createdByUserId: row.created_by_user_id,
     createdByUserRole: row.created_by_user_role,
   };
+}
+
+/**
+ * Whether a campaign may be Archived. Pure: a locked campaign is
+ * protected; the operator must unlock it first (the deliberate
+ * "are you sure?" step). Shared by the route + tests so the rule can't
+ * drift between server enforcement and what the UI believes.
+ */
+export function canArchive(code: Pick<QrCode, "locked">): boolean {
+  return !code.locked;
 }
 
 /* ------------------------------------------------------------------ */
@@ -145,7 +163,7 @@ export function appendUtm(targetUrl: string, campaign: string | null | undefined
 
 const SELECT_COLS =
   "id, slug, target_url, label, utm_campaign, expires_at, archived_at, " +
-  "created_at, created_by_user_id, created_by_user_role";
+  "locked, created_at, created_by_user_id, created_by_user_role";
 
 export async function createCode(args: {
   targetUrl: string;
@@ -291,6 +309,23 @@ export async function updateCode(
       WHERE id = $${params.length}
       RETURNING ${SELECT_COLS}`,
     params,
+    { expectRows: 1 },
+  );
+  return rowToCode(result.rows[0]);
+}
+
+/**
+ * Set the deletion-lock on a campaign (migration 160). Locking protects
+ * an active campaign from an accidental Archive; unlocking is the
+ * deliberate step an operator takes before retiring it.
+ */
+export async function setLocked(id: string, locked: boolean): Promise<QrCode> {
+  const result = await writeQuery<QrCodeRow>(
+    `UPDATE instinct_qr_codes
+        SET locked = $1, updated_at = NOW()
+      WHERE id = $2
+      RETURNING ${SELECT_COLS}`,
+    [locked, id],
     { expectRows: 1 },
   );
   return rowToCode(result.rows[0]);

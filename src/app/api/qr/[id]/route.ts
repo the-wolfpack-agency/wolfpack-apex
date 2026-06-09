@@ -4,6 +4,12 @@
  * DELETE is a soft-archive (sets archived_at). The redirect endpoint
  * treats archived codes the same as missing — so a printed billboard
  * can be retired without invalidating the keyspace.
+ *
+ * Deletion-lock (migration 160): a campaign can be `locked` to protect
+ * it from an accidental Archive. PATCH { locked } toggles the lock;
+ * DELETE refuses with 409 while a campaign is locked — the operator
+ * must unlock it first (the deliberate "are you sure?" step). Lock is
+ * orthogonal to archived_at: a locked code still redirects.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -12,7 +18,11 @@ import {
   getCodeById,
   updateCode,
   archiveCode,
+  setLocked,
+  canArchive,
 } from "@/lib/qr/codes";
+import { trackEvent } from "@/lib/analytics";
+import { recordAudit } from "@/lib/audit-log";
 
 export async function GET(
   req: NextRequest,
@@ -39,6 +49,7 @@ export async function PATCH(
     label?: string | null;
     utmCampaign?: string | null;
     expiresAt?: string | null;
+    locked?: boolean;
   };
   try {
     body = await req.json();
@@ -46,8 +57,36 @@ export async function PATCH(
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
 
-  /* Build patch only with fields the caller actually provided so we
-     don't accidentally null-out unmodified columns. */
+  /* The lock toggle is its own column (not part of updateCode's content
+     patch) so flipping protection never touches the destination URL. */
+  if (typeof body.locked === "boolean") {
+    try {
+      const code = await setLocked(id, body.locked);
+      trackEvent(
+        body.locked ? "qr.code_locked" : "qr.code_unlocked",
+        user.id,
+        user.role,
+        { code_id: id, slug: code.slug },
+      );
+      void recordAudit({
+        actor: { user_id: user.id, role: user.role },
+        action: body.locked ? "qr.code.locked" : "qr.code.unlocked",
+        resourceType: "qr_code",
+        resourceId: id,
+        afterState: { slug: code.slug, locked: code.locked },
+      });
+      return NextResponse.json({ code });
+    } catch (err) {
+      console.error("[api/qr/id] lock toggle failed:", (err as Error).message);
+      return NextResponse.json(
+        { error: "Failed to update QR code" },
+        { status: 500 },
+      );
+    }
+  }
+
+  /* Build content patch only with fields the caller actually provided so
+     we don't accidentally null-out unmodified columns. */
   const patch: Parameters<typeof updateCode>[1] = {};
   if (body.targetUrl !== undefined) patch.targetUrl = body.targetUrl;
   if (body.label !== undefined) patch.label = body.label;
@@ -78,8 +117,47 @@ export async function DELETE(
   const user = getUserFromRequest(req.headers.get("authorization"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await context.params;
+
+  /* Deletion-lock gate. Refuse to Archive a locked campaign — the
+     operator must unlock it first. Enforced on the server so a direct
+     API call can't bypass the UI guard. */
+  const existing = await getCodeById(id);
+  if (!existing) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  if (!canArchive(existing)) {
+    trackEvent("qr.archive_blocked", user.id, user.role, {
+      code_id: id,
+      slug: existing.slug,
+      reason: "locked",
+    });
+    void recordAudit({
+      actor: { user_id: user.id, role: user.role },
+      action: "qr.code.archive_blocked",
+      resourceType: "qr_code",
+      resourceId: id,
+      afterState: { slug: existing.slug, reason: "locked" },
+    });
+    return NextResponse.json(
+      {
+        error: "locked",
+        detail:
+          "This campaign is locked. Unlock it first to archive — this protects an active code from accidental removal.",
+      },
+      { status: 409 },
+    );
+  }
+
   try {
     const code = await archiveCode(id);
+    void recordAudit({
+      actor: { user_id: user.id, role: user.role },
+      action: "qr.code.archived",
+      resourceType: "qr_code",
+      resourceId: id,
+      beforeState: { slug: existing.slug, archivedAt: existing.archivedAt },
+      afterState: { slug: code.slug, archivedAt: code.archivedAt },
+    });
     return NextResponse.json({ ok: true, code });
   } catch (err) {
     console.error("[api/qr/id] archive failed:", (err as Error).message);
