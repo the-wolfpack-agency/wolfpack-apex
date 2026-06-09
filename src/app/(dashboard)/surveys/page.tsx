@@ -273,6 +273,7 @@ export default function SurveysPage() {
   const [uploadText, setUploadText] = useState("");
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadFileName, setUploadFileName] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -435,6 +436,7 @@ export default function SurveysPage() {
   function onUploadFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    setUploadFileName(file.name);
     const reader = new FileReader();
     reader.onload = () => setUploadText(String(reader.result ?? ""));
     reader.onerror = () => setUploadError("Couldn't read that file.");
@@ -1329,13 +1331,36 @@ export default function SurveysPage() {
             ; an optional <code style={{ color: "var(--wp-gold)" }}>slug</code>{" "}
             sets the custom link.
           </span>
-          <input
-            data-testid="survey-upload-file"
-            type="file"
-            accept=".json,application/json"
-            onChange={onUploadFile}
-            style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}
-          />
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <label
+              htmlFor="survey-upload-file-input"
+              data-testid="survey-upload-file-label"
+              style={{ ...btnSecondary, display: "inline-block", cursor: "pointer" }}
+            >
+              Upload file
+            </label>
+            <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>
+              {uploadFileName ?? "No file chosen"}
+            </span>
+            <input
+              id="survey-upload-file-input"
+              data-testid="survey-upload-file"
+              type="file"
+              accept=".json,application/json"
+              onChange={onUploadFile}
+              style={{
+                position: "absolute",
+                width: 1,
+                height: 1,
+                padding: 0,
+                margin: -1,
+                overflow: "hidden",
+                clip: "rect(0 0 0 0)",
+                whiteSpace: "nowrap",
+                border: 0,
+              }}
+            />
+          </div>
           <textarea
             data-testid="survey-upload-text"
             value={uploadText}
