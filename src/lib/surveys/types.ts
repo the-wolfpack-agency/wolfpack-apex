@@ -90,7 +90,17 @@ export interface Survey {
    * "Generate QR" (re-link) instead of showing a dead code.
    */
   qrActive?: boolean;
+  /**
+   * Visual theme for the public responder (client branding). null/"default"
+   * = Instinct dark/gold; "porsche" = white canvas + Guards Red + Porsche
+   * Next (matches the Porsche site). Drives a palette in ResponderForm.
+   */
+  theme?: string | null;
 }
+
+/** Supported responder themes (client brand skins). */
+export const SURVEY_THEMES = ["default", "porsche"] as const;
+export type SurveyTheme = (typeof SURVEY_THEMES)[number];
 
 /** A single answer value, keyed by question id. */
 export type AnswerValue = string | string[] | number;

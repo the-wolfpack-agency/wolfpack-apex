@@ -48,6 +48,7 @@ export async function PATCH(
     schema?: unknown;
     status?: SurveyStatus;
     slug?: string;
+    theme?: string | null;
   };
   try {
     body = await req.json();
@@ -66,6 +67,7 @@ export async function PATCH(
   if (body.schema !== undefined) patch.schema = body.schema as never;
   if (body.status !== undefined) patch.status = body.status;
   if (body.slug !== undefined) patch.slug = body.slug;
+  if (body.theme !== undefined) patch.theme = body.theme;
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: "patch is empty" }, { status: 400 });

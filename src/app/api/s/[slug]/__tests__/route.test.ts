@@ -47,6 +47,7 @@ const PUBLISHED_SURVEY = {
   schema: SCHEMA,
   status: "published",
   qrCodeId: null,
+  theme: "porsche",
   clientId: "client-secret",
   createdByUserId: "owner-secret",
   createdByUserRole: "admin",
@@ -104,6 +105,7 @@ describe("GET /api/s/[slug]", () => {
       title: "Test survey",
       description: "How are we doing?",
       schema: SCHEMA,
+      theme: "porsche", // client-brand theme is exposed to the responder
     });
     // Must NOT leak internals.
     expect(body.survey.id).toBeUndefined();

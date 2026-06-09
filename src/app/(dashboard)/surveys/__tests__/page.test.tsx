@@ -680,6 +680,41 @@ describe("/surveys page", () => {
     expect(screen.queryByTestId("survey-row-qr-linked-survey-2")).toBeNull();
   });
 
+  test("selecting a brand theme sends it on create", async () => {
+    mockListResponse([]);
+    mockFetchWithRefresh.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: true,
+        status: 201,
+        json: async () => ({ survey: { ...sampleSurvey, id: "th", theme: "porsche" } }),
+      }),
+    );
+    render(<SurveysPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("survey-create-form")).toBeInTheDocument(),
+    );
+
+    fireEvent.change(screen.getByTestId("survey-create-title"), {
+      target: { value: "Porsche survey" },
+    });
+    fireEvent.change(screen.getByTestId("survey-create-theme"), {
+      target: { value: "porsche" },
+    });
+    fireEvent.click(screen.getByTestId("survey-add-question"));
+    fireEvent.change(screen.getByTestId("survey-q-label-0"), {
+      target: { value: "How was it?" },
+    });
+    fireEvent.click(screen.getByTestId("survey-create-submit"));
+
+    await waitFor(() => {
+      const post = mockFetchWithRefresh.mock.calls.find(
+        (c) => c[1]?.method === "POST" && String(c[0]) === "/api/surveys",
+      );
+      expect(post).toBeTruthy();
+      expect(JSON.parse(post![1].body).theme).toBe("porsche");
+    });
+  });
+
   test("delete confirms then DELETEs and removes the row", async () => {
     mockListResponse([sampleSurvey, sampleSurvey2]);
     mockFetchWithRefresh.mockImplementationOnce(() =>

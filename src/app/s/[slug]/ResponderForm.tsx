@@ -402,7 +402,7 @@ export default function ResponderForm({
           disabled={state === "submitting"}
           style={{
             background: "var(--wp-gold, #d4a857)",
-            color: "#000",
+            color: "var(--wp-accent-fg, #000)",
             border: "none",
             padding: "0.65rem 1.4rem",
             borderRadius: 8,
@@ -623,7 +623,9 @@ function renderQuestion(
                   background: active
                     ? "var(--wp-gold, #d4a857)"
                     : "var(--wp-dark, #0b0b10)",
-                  color: active ? "#000" : "var(--wp-text, #f4f4f5)",
+                  color: active
+                    ? "var(--wp-accent-fg, #000)"
+                    : "var(--wp-text, #f4f4f5)",
                   fontWeight: 600,
                   cursor: "pointer",
                 }}

@@ -15,6 +15,7 @@
 import type { Metadata } from "next";
 import { getPublishedSurveyBySlug } from "@/lib/surveys/store";
 import ResponderForm from "./ResponderForm";
+import { surveyThemeVars, themeFontFace } from "./theme";
 
 export const dynamic = "force-dynamic";
 
@@ -95,8 +96,17 @@ export default async function SurveyResponderPage({
     );
   }
 
+  // Apply the survey's client-brand theme (white/Guards Red/Porsche Next for
+  // "porsche"). The --wp-* vars cascade into the responder; the font-face is
+  // injected only when the theme needs it.
+  const fontFace = themeFontFace(survey.theme);
   return (
-    <div data-testid="survey-page" style={pageShell}>
+    <div
+      data-testid="survey-page"
+      data-theme={survey.theme ?? "default"}
+      style={{ ...pageShell, ...surveyThemeVars(survey.theme) }}
+    >
+      {fontFace ? <style dangerouslySetInnerHTML={{ __html: fontFace }} /> : null}
       <ResponderForm
         slug={survey.slug}
         title={survey.title}

@@ -27,6 +27,7 @@ interface SurveyRow {
   client_id: string | null;
   created_by_user_id: string | null;
   created_by_user_role: string | null;
+  theme: string | null;
   created_at: string;
   updated_at: string;
   /** Only present on list reads (LEFT JOIN to instinct_qr_codes). */
@@ -48,7 +49,7 @@ interface ResponseRow {
 
 const SURVEY_COLS =
   "id, slug, title, description, schema, status, qr_code_id, client_id, " +
-  "created_by_user_id, created_by_user_role, created_at, updated_at";
+  "created_by_user_id, created_by_user_role, theme, created_at, updated_at";
 
 function rowToSurvey(r: SurveyRow): Survey {
   return {
@@ -62,6 +63,7 @@ function rowToSurvey(r: SurveyRow): Survey {
     clientId: r.client_id,
     createdByUserId: r.created_by_user_id,
     createdByUserRole: r.created_by_user_role,
+    theme: r.theme ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     // Only set on list reads; undefined elsewhere (caller treats as "unknown").
@@ -89,6 +91,7 @@ export async function createSurvey(args: {
   description?: string | null;
   schema: SurveySchema;
   clientId?: string | null;
+  theme?: string | null;
   userId: string;
   userRole: string;
   slug?: string;
@@ -107,8 +110,8 @@ export async function createSurvey(args: {
       const result = await writeQuery<SurveyRow>(
         `INSERT INTO instinct_surveys
            (slug, title, description, schema, status, client_id,
-            created_by_user_id, created_by_user_role)
-         VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7)
+            created_by_user_id, created_by_user_role, theme)
+         VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8)
          RETURNING ${SURVEY_COLS}`,
         [
           args.slug,
@@ -118,6 +121,7 @@ export async function createSurvey(args: {
           args.clientId ?? null,
           args.userId,
           args.userRole,
+          args.theme ?? null,
         ],
         { expectRows: 1 },
       );
@@ -137,8 +141,8 @@ export async function createSurvey(args: {
       const result = await writeQuery<SurveyRow>(
         `INSERT INTO instinct_surveys
            (slug, title, description, schema, status, client_id,
-            created_by_user_id, created_by_user_role)
-         VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7)
+            created_by_user_id, created_by_user_role, theme)
+         VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8)
          RETURNING ${SURVEY_COLS}`,
         [
           slug,
@@ -148,6 +152,7 @@ export async function createSurvey(args: {
           args.clientId ?? null,
           args.userId,
           args.userRole,
+          args.theme ?? null,
         ],
         { expectRows: 1 },
       );
@@ -180,7 +185,7 @@ export async function listSurveys(opts?: {
   const result = await safeQuery<SurveyRow>(
     `SELECT s.id, s.slug, s.title, s.description, s.schema, s.status,
             s.qr_code_id, s.client_id, s.created_by_user_id,
-            s.created_by_user_role, s.created_at, s.updated_at,
+            s.created_by_user_role, s.theme, s.created_at, s.updated_at,
             (c.id IS NOT NULL AND c.archived_at IS NULL) AS qr_active
        FROM instinct_surveys s
        LEFT JOIN instinct_qr_codes c ON c.id = s.qr_code_id
@@ -220,6 +225,7 @@ export async function updateSurvey(
     status?: SurveyStatus;
     qrCodeId?: string | null;
     slug?: string;
+    theme?: string | null;
   },
 ): Promise<Survey> {
   const sets: string[] = [];
@@ -252,6 +258,10 @@ export async function updateSurvey(
   if (patch.qrCodeId !== undefined) {
     params.push(patch.qrCodeId);
     sets.push(`qr_code_id = $${params.length}`);
+  }
+  if (patch.theme !== undefined) {
+    params.push(patch.theme);
+    sets.push(`theme = $${params.length}`);
   }
   if (sets.length === 0) throw new Error("updateSurvey: patch is empty");
   sets.push("updated_at = NOW()");

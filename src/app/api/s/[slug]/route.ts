@@ -124,6 +124,7 @@ export async function GET(
         title: survey.title,
         description: survey.description,
         schema: survey.schema,
+        theme: survey.theme ?? null,
       },
     });
   } catch (err) {

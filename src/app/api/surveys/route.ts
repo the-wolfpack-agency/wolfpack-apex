@@ -42,6 +42,7 @@ export async function POST(req: NextRequest) {
     schema?: unknown;
     clientId?: string | null;
     slug?: string;
+    theme?: string | null;
   };
   try {
     body = await req.json();
@@ -66,6 +67,7 @@ export async function POST(req: NextRequest) {
       // Optional vanity slug; createSurvey validates it and throws
       // "slug_taken" on a uniqueness collision.
       ...(typeof body.slug === "string" ? { slug: body.slug } : {}),
+      ...(typeof body.theme === "string" ? { theme: body.theme } : {}),
     });
   } catch (err) {
     const msg = (err as Error).message;

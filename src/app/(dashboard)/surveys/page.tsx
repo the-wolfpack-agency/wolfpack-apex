@@ -36,7 +36,7 @@ import type {
   QuestionType,
   VisibleIf,
 } from "@/lib/surveys/types";
-import { QUESTION_TYPES, CONTENT_QUESTION_TYPES } from "@/lib/surveys/types";
+import { QUESTION_TYPES, CONTENT_QUESTION_TYPES, SURVEY_THEMES } from "@/lib/surveys/types";
 import { parseSurveyUpload } from "@/lib/surveys/validate";
 
 /* ------------------------------------------------------------------ */
@@ -265,6 +265,9 @@ export default function SurveysPage() {
   /* Optional custom public link (vanity slug). Blank = auto-generate on
      create / keep current on edit. */
   const [slug, setSlug] = useState("");
+  /* Responder theme (client brand skin). "default" = Instinct; "porsche"
+     = the Porsche white/Guards Red look. */
+  const [theme, setTheme] = useState<string>("default");
   /* "Upload survey" — paste/drop a complete survey JSON and create it in
      one shot (the way the seeded Weekend-with-Porsche survey is defined). */
   const [uploadText, setUploadText] = useState("");
@@ -325,6 +328,7 @@ export default function SurveysPage() {
     setTitle("");
     setDescription("");
     setSlug("");
+    setTheme("default");
     setQuestions([]);
     setEditingId(null);
     setCreateError(null);
@@ -354,6 +358,7 @@ export default function SurveysPage() {
     setTitle(survey.title);
     setDescription(survey.description ?? "");
     setSlug(survey.slug);
+    setTheme(survey.theme ?? "default");
     setQuestions(schemaToDrafts(survey.schema.questions));
     setCreateError(null);
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
@@ -502,6 +507,7 @@ export default function SurveysPage() {
         description?: string;
         schema: { questions: SurveyQuestion[] };
         slug?: string;
+        theme?: string | null;
       } = {
         title: title.trim(),
         schema: buildSchema(),
@@ -515,6 +521,11 @@ export default function SurveysPage() {
       // actually changed (avoids a needless slug_taken against itself).
       if (trimmedSlug && (!editing || trimmedSlug !== current?.slug)) {
         body.slug = trimmedSlug;
+      }
+      // Theme: send when set on create, or when it changed on edit
+      // ("default" → null so the responder uses the standard look).
+      if (!editing ? theme !== "default" : theme !== (current?.theme ?? "default")) {
+        body.theme = theme === "default" ? null : theme;
       }
 
       const res = await fetchWithRefresh(
@@ -886,6 +897,27 @@ export default function SurveysPage() {
             </div>
             <span style={{ fontSize: "0.7rem", color: "var(--wp-text-muted)" }}>
               Lowercase letters, numbers and hyphens. Leave blank to auto-generate.
+            </span>
+          </label>
+
+          <label style={{ display: "grid", gap: 4, minWidth: 0 }}>
+            <span style={{ fontSize: "0.75rem", color: "var(--wp-text-dim)" }}>
+              Brand theme
+            </span>
+            <select
+              data-testid="survey-create-theme"
+              value={theme}
+              onChange={(e) => setTheme(e.target.value)}
+              style={inputStyle}
+            >
+              {SURVEY_THEMES.map((t) => (
+                <option key={t} value={t}>
+                  {t === "default" ? "Default (Instinct)" : "Porsche"}
+                </option>
+              ))}
+            </select>
+            <span style={{ fontSize: "0.7rem", color: "var(--wp-text-muted)" }}>
+              Skins the public responder for the client&apos;s brand.
             </span>
           </label>
 
