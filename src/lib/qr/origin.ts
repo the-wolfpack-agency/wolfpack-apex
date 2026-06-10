@@ -41,3 +41,40 @@ export function resolvePublicOrigin(req: Request): string {
     );
   }
 }
+
+/**
+ * Resolve the origin for SERVER-SIDE self-calls (one API route calling
+ * another so it inherits that route's auth + capability checks).
+ *
+ * Unlike {@link resolvePublicOrigin}, this MUST NOT derive the origin
+ * from the incoming request. The request's Host header is attacker-
+ * controlled, and these self-calls forward the caller's `Authorization`
+ * bearer — trusting the request origin lets an attacker set
+ * `Host: evil.example` and exfiltrate the bearer token (SSRF /
+ * request-forgery, CWE-918). We only trust server-configured env, and
+ * fall back to a fixed localhost default for dev. Throws if a non-local
+ * runtime has no trusted origin configured rather than calling out to
+ * an untrusted host.
+ */
+export function resolveInternalOrigin(): string {
+  const fromEnv = process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/+$/, "");
+  if (fromEnv && /^https?:\/\//i.test(fromEnv)) return fromEnv;
+
+  const candidates = [
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    process.env.VERCEL_BRANCH_URL,
+    process.env.VERCEL_URL,
+  ];
+  for (const raw of candidates) {
+    const v = raw?.replace(/\/+$/, "");
+    if (!v) continue;
+    return v.startsWith("http") ? v : `https://${v}`;
+  }
+
+  // Dev / test only: no deployment env present.
+  if (process.env.NODE_ENV !== "production") return "http://localhost:3000";
+
+  throw new Error(
+    "Cannot derive internal origin for server self-call — set NEXT_PUBLIC_BASE_URL",
+  );
+}

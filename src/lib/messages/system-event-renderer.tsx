@@ -220,8 +220,16 @@ export function isNoiseMessage(message: RenderableMessage): boolean {
      handled — those caused the 2026-06-01 blank-bubble screenshot. */
   const rawContent = (message.body?.content || "").trim();
   if (rawContent.length === 0) return true;
-  const stripped = rawContent
-    .replace(/<[^>]+>/g, "")
+  /* Strip tags repeatedly until stable: a single pass over `<[^>]+>`
+     leaves a residual `<tag` when tags are nested or overlapping
+     (e.g. `<a<b>>`), so loop to a fixed point. */
+  let stripped = rawContent;
+  let prev: string;
+  do {
+    prev = stripped;
+    stripped = stripped.replace(/<[^>]+>/g, "");
+  } while (stripped !== prev);
+  stripped = stripped
     .replace(/&nbsp;|&#160;|&zwj;|&#8203;/gi, "")
     .replace(/\s+/g, "")
     .trim();

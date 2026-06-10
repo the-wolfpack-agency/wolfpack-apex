@@ -1,10 +1,11 @@
-import { resolvePublicOrigin } from "@/lib/qr/origin";
+import { resolvePublicOrigin, resolveInternalOrigin } from "@/lib/qr/origin";
 
 const SAVED = {
   NEXT_PUBLIC_BASE_URL: process.env.NEXT_PUBLIC_BASE_URL,
   VERCEL_PROJECT_PRODUCTION_URL: process.env.VERCEL_PROJECT_PRODUCTION_URL,
   VERCEL_BRANCH_URL: process.env.VERCEL_BRANCH_URL,
   VERCEL_URL: process.env.VERCEL_URL,
+  NODE_ENV: process.env.NODE_ENV,
 };
 
 beforeEach(() => {
@@ -74,5 +75,28 @@ describe("resolvePublicOrigin", () => {
       fakeReq("https://wolfpack-instinct.vercel.app/api/qr"),
     );
     expect(out.startsWith("http")).toBe(true);
+  });
+});
+
+describe("resolveInternalOrigin (server self-calls — never trusts the request)", () => {
+  test("uses NEXT_PUBLIC_BASE_URL when set", () => {
+    process.env.NEXT_PUBLIC_BASE_URL = "https://example.com/";
+    expect(resolveInternalOrigin()).toBe("https://example.com");
+  });
+
+  test("prefers the production alias over the per-deployment VERCEL_URL", () => {
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = "wolfpack-instinct.vercel.app";
+    process.env.VERCEL_URL = "wolfpack-instinct-deadbeef.vercel.app";
+    expect(resolveInternalOrigin()).toBe("https://wolfpack-instinct.vercel.app");
+  });
+
+  test("falls back to localhost in dev when no env is configured", () => {
+    process.env.NODE_ENV = "development";
+    expect(resolveInternalOrigin()).toBe("http://localhost:3000");
+  });
+
+  test("throws in production when no trusted origin is configured (refuses to call an untrusted host)", () => {
+    process.env.NODE_ENV = "production";
+    expect(() => resolveInternalOrigin()).toThrow(/internal origin/i);
   });
 });

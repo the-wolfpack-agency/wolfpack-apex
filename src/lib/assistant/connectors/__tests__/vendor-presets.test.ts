@@ -51,10 +51,17 @@ describe("Salesforce preset — search.build", () => {
     expect(singleQuotes % 2).toBe(0);
   });
 
-  test("backslash gets stripped (defense in depth — SOQL doesn't allow them in literals)", () => {
+  test("backslash gets escaped, not dropped (complete SOQL escaping)", () => {
+    /* A literal backslash must be doubled inside a SOQL string literal.
+       Stripping it (the old behavior) silently lost input and tripped
+       CodeQL's incomplete-sanitization rule; escaping is the correct,
+       lossless form. back\slash → back\\slash. */
     const r = search.build("contact", "back\\slash", 5);
     const soql = new URL("http://x" + r.path).searchParams.get("q") ?? "";
-    expect(soql).not.toContain("\\\\");
+    expect(soql).toContain("back\\\\slash");
+    /* And the escaping backslash must not leave a dangling odd count
+       that could break out of the literal. */
+    expect((soql.match(/\\/g) || []).length % 2).toBe(0);
   });
 
   test("extract pulls records from {records:[...]} SF response shape", () => {

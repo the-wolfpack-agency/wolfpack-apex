@@ -95,14 +95,16 @@ function extractTag(block: string, tag: string): string {
   /* Unwrap <![CDATA[ … ]]>. */
   const cdata = /^<!\[CDATA\[([\s\S]*?)\]\]>$/.exec(raw);
   if (cdata) raw = cdata[1].trim();
-  /* Decode the handful of HTML entities the BBC feed uses. */
+  /* Decode the handful of HTML entities the BBC feed uses. `&amp;`
+     MUST be decoded LAST: decoding it first would turn the literal
+     text `&amp;lt;` into `<` (double-unescaping) instead of `&lt;`. */
   return raw
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'");
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
 }
 
 export const headlinesTool: ToolDef<Params, HeadlinesToolData> = {

@@ -62,7 +62,13 @@ export interface PendingActionRow {
 export type ConfirmIntent = "confirm" | "cancel" | "none";
 
 export function detectConfirmationIntent(message: string): ConfirmIntent {
-  const m = message.trim().toLowerCase().replace(/[.!?,]+$/g, "");
+  /* Strip trailing punctuation with a linear scan rather than a
+     `/[.!?,]+$/` regex — the anchored quantifier backtracks
+     polynomially on inputs like "!!!!!!x" (ReDoS, CWE-1333). */
+  const lowered = message.trim().toLowerCase();
+  let end = lowered.length;
+  while (end > 0 && ".!?,".includes(lowered[end - 1])) end--;
+  const m = lowered.slice(0, end);
   if (CONFIRMATION_PHRASES.includes(m)) return "confirm";
   if (CANCELLATION_PHRASES.includes(m)) return "cancel";
   return "none";

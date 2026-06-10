@@ -150,10 +150,12 @@ export interface FilterSpec {
 }
 
 /** Salesforce SOQL string-literal escape. Single quotes wrap the value,
- *  so any embedded single quote must be doubled. We also strip backslashes
- *  because they're not legal inside a SOQL string. */
+ *  so the two characters with special meaning inside a SOQL string —
+ *  backslash and single quote — are backslash-escaped. Backslash MUST
+ *  be escaped first so the backslash we add for quotes isn't itself
+ *  re-escaped. */
 function sfSoqlEscape(s: string): string {
-  return s.replace(/\\/g, "").replace(/'/g, "\\'");
+  return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
 /** URL-encoder for SOQL/SOSL query strings — the SF REST `q` parameter

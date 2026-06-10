@@ -21,6 +21,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
+import { resolveInternalOrigin } from "@/lib/qr/origin";
 import { trackEvent } from "@/lib/analytics";
 import type { InstinctEventType } from "@/lib/analytics";
 import type {
@@ -135,7 +136,11 @@ export async function POST(req: NextRequest) {
   const workflowId = typeof body.workflowId === "string" ? body.workflowId : undefined;
 
   const started = Date.now();
-  const origin = req.nextUrl.origin;
+  /* Trusted server-configured origin — NOT req.nextUrl.origin. These
+   * helpers re-call our own API routes forwarding the caller's bearer;
+   * trusting the (attacker-controllable) Host header would let a spoofed
+   * Host exfiltrate the token (CWE-918 request-forgery). */
+  const origin = resolveInternalOrigin();
   const authHeader = req.headers.get("authorization");
 
   try {
