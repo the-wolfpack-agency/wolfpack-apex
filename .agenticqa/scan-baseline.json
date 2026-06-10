@@ -7,5 +7,5 @@
   ],
   "total": 4,
   "generated_at": "2026-06-10T00:00:00",
-  "note": "Regenerated after .claude exclusion + auth-delegation + multitenant-IDOR precision fixes. Reflects current clean scan."
+  "note": "Authoritative: regenerated via run_client_scan.py over Instinct only (tool vendored+skipped), CI hash logic. Post .claude/delegation/multitenant precision fixes + PUBLIC markers."
 }
