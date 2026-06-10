@@ -96,6 +96,8 @@ function edgeCountry(headers: Headers): string | null {
 
 /* ------------------------------- POST --------------------------------- */
 
+// PUBLIC: anonymous survey view beacon. Records an aggregate view for a
+// published survey; no auth by design, no PII, rate-limit guarded.
 export async function POST(
   req: NextRequest,
   context: { params: Promise<{ slug: string }> },

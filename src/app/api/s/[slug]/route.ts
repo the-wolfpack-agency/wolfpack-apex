@@ -107,6 +107,8 @@ function sanitizeDurationMs(raw: unknown): number | null {
 
 /* ------------------------------- GET ---------------------------------- */
 
+// PUBLIC: anonymous survey responder. Returns only published surveys and
+// only public-safe fields (no owner/status/ids/client). No PII read.
 export async function GET(
   _req: NextRequest,
   context: { params: Promise<{ slug: string }> },
@@ -135,6 +137,9 @@ export async function GET(
 
 /* ------------------------------- POST --------------------------------- */
 
+// PUBLIC: anonymous survey submission. Intentionally unauthenticated;
+// guarded by per-IP rate limiting, published-survey check, and
+// server-side answer validation below.
 export async function POST(
   req: NextRequest,
   context: { params: Promise<{ slug: string }> },

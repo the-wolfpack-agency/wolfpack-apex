@@ -42,6 +42,9 @@ function extractGeo(headers: Headers): {
   return { country, region, city };
 }
 
+// PUBLIC: QR redirect endpoint — anyone scanning a printed code hits
+// this with no Instinct session. Gated on slug presence, archived, and
+// expiry; only resolves active codes to a 302 redirect.
 export async function GET(
   req: NextRequest,
   context: { params: Promise<{ slug: string }> },
