@@ -226,13 +226,22 @@ export default function DashboardPage() {
       })
       .catch(() => {});
 
+    // Safety net: never let one slow/failing endpoint blank the WHOLE
+    // dashboard. `loading` gates the entire page, but the shell and the
+    // independent widgets (Quick Actions, Journal) don't depend on
+    // /api/dashboard — so a cold-start or hung query there must not hide
+    // them. Clear loading after a bounded wait regardless of outcome.
+    const loadingSafetyNet = setTimeout(() => setLoading(false), 3500);
     fetchWithRefresh("/api/dashboard", { headers: authHeaders() })
       .then((r) => r.json())
       .then((data) => {
         setStats(data);
-        setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => {})
+      .finally(() => {
+        clearTimeout(loadingSafetyNet);
+        setLoading(false);
+      });
 
     // Fetch recent events from journal
     fetchWithRefresh("/api/journal", {
@@ -281,6 +290,8 @@ export default function DashboardPage() {
       .catch(() => {
         fireRendered(FALLBACK_QUICK_ACTIONS);
       });
+
+    return () => clearTimeout(loadingSafetyNet);
   }, []);
 
   function handleQuickActionClick(action: QuickAction, position: number) {

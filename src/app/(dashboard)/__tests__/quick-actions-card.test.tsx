@@ -229,6 +229,51 @@ describe("Quick Actions card — render + click", () => {
     });
   });
 
+  it("renders the card even when /api/dashboard hangs forever (loading safety net)", async () => {
+    // Regression for the prod symptom where a slow/hung /api/dashboard
+    // left the whole page in the skeleton — blanking the independent
+    // Quick Actions card. The 3.5s safety net must clear `loading`.
+    jest.useFakeTimers();
+    try {
+      fetchMock.mockImplementation((url: string) => {
+        if (url.startsWith("/api/dashboard")) {
+          // Never resolves — simulates a cold-start / hung query.
+          return new Promise(() => {});
+        }
+        if (url.startsWith("/api/insights/quick-actions")) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ actions: [] }), // -> fallback
+          });
+        }
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+      });
+
+      await act(async () => {
+        render(<DashboardPage />);
+      });
+      // Before the safety net fires, the page is still in the skeleton.
+      expect(screen.queryByTestId("quick-actions-card")).toBeNull();
+      expect(screen.getByTestId("dashboard-skeleton")).toBeInTheDocument();
+
+      // Advance past the 3.5s safety net.
+      await act(async () => {
+        jest.advanceTimersByTime(3500);
+      });
+
+      // The card (and its four fallback tiles) now render despite the
+      // hung /api/dashboard.
+      const card = screen.getByTestId("quick-actions-card");
+      expect(card).toBeInTheDocument();
+      expect(screen.getByTestId("quick-action-0")).toBeInTheDocument();
+      expect(screen.getByTestId("quick-action-3")).toBeInTheDocument();
+    } finally {
+      jest.runOnlyPendingTimers();
+      jest.useRealTimers();
+    }
+  });
+
   it("falls back to static four tiles when the personalized endpoint errors", async () => {
     fetchMock.mockImplementation((url: string) => {
       if (url.startsWith("/api/insights/quick-actions")) {
