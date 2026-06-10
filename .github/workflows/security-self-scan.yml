@@ -136,7 +136,6 @@ jobs:
           # ── Baseline comparison: only fail on NEW findings ──────────
           # Load baseline (committed to repo). If it doesn't exist, this
           # is the first run — save current as baseline and pass.
-          import hashlib
           baseline_path = ".agenticqa/scan-baseline.json"
           baseline_hashes = set()
           try:
@@ -146,16 +145,17 @@ jobs:
           except (FileNotFoundError, json.JSONDecodeError):
               pass
 
-          # Hash each finding by file+line+cwe for stable identity
+          # Line-independent identity (file|cwe|rule|normalized-snippet).
+          # Codified + unit-tested in the package so routine edits that
+          # shift line numbers don't turn an old finding into a "new" one.
+          from agenticqa.security.finding_fingerprint import fingerprint
           current_hashes = set()
           all_findings_list = []
           for name in CRITICAL_SCANNERS:
               scanner = scanners.get(name, {})
               if scanner.get("status") == "ok":
                   for f in scanner["result"].get("findings", []):
-                      h = hashlib.sha256(
-                          f"{f.get('file','')}:{f.get('line',0)}:{f.get('cwe','')}".encode()
-                      ).hexdigest()[:16]
+                      h = fingerprint(f)
                       current_hashes.add(h)
                       all_findings_list.append({**f, "_hash": h})
 

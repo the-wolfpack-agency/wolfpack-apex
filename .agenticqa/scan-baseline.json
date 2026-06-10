@@ -1,11 +1,11 @@
 {
   "finding_hashes": [
-    "11911a5b728221e6",
-    "436a1f71d5f72c72",
-    "86e2d8f8737af19d",
-    "8fac6679bf419662"
+    "2b49ac86fb78010c",
+    "2e8ed64462b13d4e",
+    "8cf2d9d4ae713a8f",
+    "c8d06122092aad61"
   ],
   "total": 4,
   "generated_at": "2026-06-10T00:00:00",
-  "note": "Authoritative: regenerated via run_client_scan.py over Instinct only (tool vendored+skipped), CI hash logic. Post .claude/delegation/multitenant precision fixes + PUBLIC markers."
+  "note": "Identity via agenticqa.security.finding_fingerprint (file|cwe|rule|snippet, line-independent). Instinct only; tool vendored+skipped."
 }
