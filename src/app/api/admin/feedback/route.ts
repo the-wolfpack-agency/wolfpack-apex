@@ -60,6 +60,14 @@ export async function GET(req: NextRequest) {
   if (status === "open") statusClause = " AND resolved_at IS NULL";
   else if (status === "resolved") statusClause = " AND resolved_at IS NOT NULL";
 
+  /* De-duplicate the inbox view: a feedback widget double-submit (or a user
+     resending the same note) creates several identical rows that flood the list.
+     We collapse them to one row per unique submission (same workspace, same
+     user, same trimmed message), keeping the EARLIEST occurrence so the original
+     timestamp and any resolution on it are preserved. This is a read-side
+     collapse only; no rows are deleted. The DISTINCT ON runs before the limit, so
+     the page returns up to `limit` UNIQUE entries rather than `limit` rows that
+     turn out to be repeats. */
   const res = await safeQuery<FeedbackRow>(
     `SELECT id, workspace_id, user_id, user_email, user_role, message,
             surface, user_agent, workflow_id,
@@ -67,8 +75,15 @@ export async function GET(req: NextRequest) {
             resolved_at::text AS resolved_at,
             resolved_by,
             resolution_note
-     FROM instinct_user_feedback
-     WHERE workspace_id = $1${sinceClause}${statusClause}
+     FROM (
+       SELECT DISTINCT ON (workspace_id, user_id, btrim(message))
+              id, workspace_id, user_id, user_email, user_role, message,
+              surface, user_agent, workflow_id, created_at,
+              resolved_at, resolved_by, resolution_note
+       FROM instinct_user_feedback
+       WHERE workspace_id = $1${sinceClause}${statusClause}
+       ORDER BY workspace_id, user_id, btrim(message), created_at ASC
+     ) deduped
      ORDER BY created_at DESC
      LIMIT ${limit}`,
     args,
