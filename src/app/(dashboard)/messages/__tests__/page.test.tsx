@@ -897,10 +897,12 @@ describe("MessagesPage — open thread live-update", () => {
       expect(screen.getByText("first message")).toBeInTheDocument();
       expect(screen.queryByText("live update arrived")).toBeNull();
 
-      // Advance past the visible poll cadence so the ambient poll fires and
-      // refreshThread(chat-1) merges the newly-arrived message IN PLACE.
+      // Advance past the open-thread cadence (~13s visible) so the dedicated
+      // fast poll fires and refreshThread(chat-1) merges the newly-arrived
+      // message IN PLACE. This is faster than the chat-list cadence (~60s) on
+      // purpose: the user is actively reading the open thread.
       await act(async () => {
-        jest.advanceTimersByTime(61_000);
+        jest.advanceTimersByTime(14_000);
       });
       await act(flush);
 

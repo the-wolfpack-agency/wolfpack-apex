@@ -1306,15 +1306,26 @@ export default function MessagesPage() {
     }
   }, []);
 
-  // Adaptive ambient refresh — the chat list AND the open thread on a single
-  // tick. ~5s while the user is on this tab, ~45s when blurred; fires
-  // immediately on tab return so users never sit on a stale conversation.
+  // The chat LIST rides the default adaptive cadence (~60s visible, ~300s
+  // blurred). A new conversation appearing in the rail is not time-critical,
+  // and the list shares the same coalesced badge traffic as the rest of the
+  // dashboard.
+  useAdaptivePoll(useCallback(() => void loadChatList(), [loadChatList]));
+
+  // The OPEN thread polls faster (~13s visible) because the user is actively
+  // reading it and expects near-live messages. It is capped at ~13s rather
+  // than instant to bound request load; true push would need Microsoft Graph
+  // change notifications. The callback no-ops when no chat is open, so the
+  // fast timer costs nothing on the empty state. Backs off to ~60s when the
+  // tab is hidden, and idle backoff is intentionally omitted (no isStable
+  // hint) so the thread stays responsive the whole time it is open. Both
+  // hooks re-fire on tab refocus, so returning to the tab is always fresh.
   useAdaptivePoll(
     useCallback(() => {
-      void loadChatList();
       const openChatId = selectedIdRef.current;
       if (openChatId) void refreshThread(openChatId);
-    }, [loadChatList, refreshThread]),
+    }, [refreshThread]),
+    { visibleMs: 13_000, hiddenMs: 60_000 },
   );
 
   const selectedChat = useMemo(
