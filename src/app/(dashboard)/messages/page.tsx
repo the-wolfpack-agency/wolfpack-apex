@@ -227,6 +227,27 @@ export interface ChatMessage {
   pending?: boolean;
 }
 
+/**
+ * Merge a freshly-fetched server thread into the currently-displayed one for
+ * the in-place ambient refresh (the open-thread poll). Server messages win by
+ * id; any still-`pending` optimistic local message not yet echoed by the
+ * server is kept at the end so a just-sent bubble does not vanish mid-send.
+ * Returns the SAME `prev` array reference when nothing changed, so React skips
+ * the re-render and the auto-scroll effect on a no-op poll.
+ */
+export function mergeThreadMessages(
+  prev: ChatMessage[],
+  server: ChatMessage[],
+): ChatMessage[] {
+  const serverIds = new Set(server.map((m) => m.id));
+  const stillPending = prev.filter((m) => m.pending && !serverIds.has(m.id));
+  const merged = stillPending.length ? [...server, ...stillPending] : server;
+  if (merged.length === prev.length && merged.every((m, i) => m.id === prev[i]?.id)) {
+    return prev;
+  }
+  return merged;
+}
+
 interface DeepLinkPayload {
   url: string;
 }
@@ -774,9 +795,25 @@ export default function MessagesPage() {
   // message and an effect scrolls it into view whenever `messages`
   // changes.
   const threadEndRef = useRef<HTMLDivElement>(null);
+  // The scrollable thread container + whether the user is near its bottom.
+  // The ambient open-thread poll merges new messages in the background; we
+  // must NOT yank a user who has scrolled up to read older messages. So we
+  // only auto-scroll when they are already near the bottom, OR when WE
+  // initiated the change (opening a chat, sending a message) via forceScroll.
+  const threadBodyRef = useRef<HTMLDivElement>(null);
+  const nearBottomRef = useRef(true);
+  const forceScrollRef = useRef(false);
+  const handleThreadScroll = useCallback(() => {
+    const el = threadBodyRef.current;
+    if (!el) return;
+    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  }, []);
   useEffect(() => {
     if (!messages || messages.length === 0) return;
-    threadEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+    if (forceScrollRef.current || nearBottomRef.current) {
+      threadEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+    }
+    forceScrollRef.current = false;
   }, [messages]);
 
   // Belt-and-suspenders: re-read identity after mount in case the
@@ -1213,10 +1250,66 @@ export default function MessagesPage() {
     }
   }
 
-  // Adaptive ambient refresh — 5s while the user is on this tab,
-  // 45s when blurred. Hook handles visibilitychange + focus, fires
-  // immediately on tab return so users never sit on stale rows.
-  useAdaptivePoll(useCallback(() => void loadChatList(), [loadChatList]));
+  // Refs the ambient poll reads without re-subscribing: the open chat id
+  // and whether a send is currently inflight.
+  const selectedIdRef = useRef<string | null>(selectedId);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+  const sendingRef = useRef(sending);
+  useEffect(() => {
+    sendingRef.current = sending;
+  }, [sending]);
+
+  /* Live-update the OPEN thread. loadThread() is the heavy selection load
+     (spinner, clears the draft + deep links, sets messages=null). This is
+     the LIGHT ambient refresh: it re-fetches the open chat and merges any
+     newly-arrived messages in place, so a conversation the user is reading
+     updates without a manual page refresh. It never shows a spinner, never
+     touches the draft, and a no-op merge returns the same array (no
+     re-render, no scroll). Skipped while a send is inflight so it cannot
+     race the optimistic swap, and bailed if the user switched chats while
+     the fetch was in flight. */
+  const refreshThread = useCallback(async (chatId: string) => {
+    if (sendingRef.current) return;
+    try {
+      const res = await fetchWithRefresh(
+        `/api/ms/chats/${encodeURIComponent(chatId)}`,
+        { method: "GET" },
+      );
+      if (!res.ok) return;
+      const data = (await res.json().catch(() => ({}))) as {
+        messages?: ChatMessage[];
+        scope_missing?: boolean;
+      };
+      if (data?.scope_missing) return;
+      if (selectedIdRef.current !== chatId) return; // user switched chats
+      const server = (data.messages ?? [])
+        .slice()
+        .sort(
+          (a, b) =>
+            new Date(a.createdDateTime ?? 0).getTime() -
+            new Date(b.createdDateTime ?? 0).getTime(),
+        )
+        .slice(-30);
+      setMessages((prev) =>
+        prev === null ? prev : mergeThreadMessages(prev, server),
+      );
+    } catch {
+      /* silent ambient refresh — never disrupt the open thread */
+    }
+  }, []);
+
+  // Adaptive ambient refresh — the chat list AND the open thread on a single
+  // tick. ~5s while the user is on this tab, ~45s when blurred; fires
+  // immediately on tab return so users never sit on a stale conversation.
+  useAdaptivePoll(
+    useCallback(() => {
+      void loadChatList();
+      const openChatId = selectedIdRef.current;
+      if (openChatId) void refreshThread(openChatId);
+    }, [loadChatList, refreshThread]),
+  );
 
   const selectedChat = useMemo(
     () => (chats ?? []).find((c) => c.id === selectedId) ?? null,
@@ -1264,6 +1357,9 @@ export default function MessagesPage() {
   // Load thread + deep links when selection changes.
   const loadThread = useCallback(
     async (chat: ChatSummary) => {
+      // A fresh selection always snaps to the newest message.
+      forceScrollRef.current = true;
+      nearBottomRef.current = true;
       setLoadingThread(true);
       setThreadScopeMissing(false);
       setMessages(null);
@@ -1610,6 +1706,7 @@ export default function MessagesPage() {
 
     setSending(true);
     setComposeHint(null);
+    forceScrollRef.current = true; // snap to the message we just sent
     setMessages((prev) => [...(prev ?? []), optimistic]);
     setDraft("");
 
@@ -2543,6 +2640,8 @@ export default function MessagesPage() {
               </div>
 
               <div
+                ref={threadBodyRef}
+                onScroll={handleThreadScroll}
                 data-testid="messages-thread-body"
                 style={{
                   flex: 1,

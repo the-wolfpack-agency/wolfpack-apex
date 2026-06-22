@@ -52,6 +52,8 @@ import MessagesPage, {
   BASIC_EMOJIS,
   isChatUnread,
   cssEscape,
+  mergeThreadMessages,
+  type ChatMessage,
 } from "@/app/(dashboard)/messages/page";
 
 interface MockResponse {
@@ -421,6 +423,43 @@ describe("BASIC_EMOJIS palette", () => {
 });
 
 // ---------------------------------------------------------------- page
+
+describe("mergeThreadMessages", () => {
+  const msg = (id: string, extra: Partial<ChatMessage> = {}): ChatMessage => ({
+    id,
+    createdDateTime: "2026-04-23T10:00:00Z",
+    body: { contentType: "text", content: id },
+    ...extra,
+  });
+
+  it("appends a newly-arrived server message", () => {
+    const prev = [msg("a"), msg("b")];
+    const out = mergeThreadMessages(prev, [msg("a"), msg("b"), msg("c")]);
+    expect(out.map((m) => m.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("returns the SAME reference when nothing changed (no re-render / no scroll yank)", () => {
+    const prev = [msg("a"), msg("b")];
+    expect(mergeThreadMessages(prev, [msg("a"), msg("b")])).toBe(prev);
+  });
+
+  it("preserves a still-pending optimistic message not yet echoed by the server", () => {
+    const prev = [msg("a"), msg("optimistic-1", { pending: true, role: "me" })];
+    const out = mergeThreadMessages(prev, [msg("a")]);
+    expect(out.map((m) => m.id)).toEqual(["a", "optimistic-1"]);
+  });
+
+  it("does not duplicate a message once the server confirms it (same id)", () => {
+    const prev = [msg("real-1", { role: "me" })];
+    const out = mergeThreadMessages(prev, [msg("real-1")]);
+    expect(out.map((m) => m.id)).toEqual(["real-1"]);
+    expect(out).toBe(prev);
+  });
+
+  it("adopts the server thread when the previous one was empty", () => {
+    expect(mergeThreadMessages([], [msg("a")]).map((m) => m.id)).toEqual(["a"]);
+  });
+});
 
 describe("MessagesPage", () => {
   test("renders list sorted by lastUpdatedDateTime desc", async () => {
@@ -802,6 +841,76 @@ describe("MessagesPage", () => {
 });
 
 // ---------------------------------------------------------------- compose
+
+describe("MessagesPage — open thread live-update", () => {
+  // Regression: an open conversation only updated after a manual page
+  // refresh because only the chat LIST was polled, never the open thread.
+  it("merges newly-arrived messages into the open thread on an ambient poll tick", async () => {
+    jest.useFakeTimers();
+    try {
+      let threadCalls = 0;
+      wireApiRouter((url: string) => {
+        if (url === "/api/ms/chats")
+          return ok({
+            chats: SAMPLE_CHATS,
+            self_email: "me@wolfpack.test",
+            self_id: "user-self",
+          });
+        if (url.startsWith("/api/ms/chats/chat-1")) {
+          threadCalls += 1;
+          const msgs: any[] = [
+            {
+              id: "m1",
+              from: { displayName: "Jane Doe" },
+              createdDateTime: "2026-04-23T10:00:00Z",
+              body: { contentType: "text", content: "first message" },
+            },
+          ];
+          if (threadCalls >= 2) {
+            msgs.push({
+              id: "m2",
+              from: { displayName: "Jane Doe" },
+              createdDateTime: "2026-04-23T10:05:00Z",
+              body: { contentType: "text", content: "live update arrived" },
+            });
+          }
+          return ok({ messages: msgs });
+        }
+        if (url === "/api/messages/read-state") return ok({ state: {} });
+        return ok({});
+      });
+
+      const flush = async () => {
+        for (let i = 0; i < 6; i++) await Promise.resolve();
+      };
+
+      await act(async () => {
+        render(<MessagesPage />);
+      });
+      await act(flush);
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("chat-row-chat-1"));
+      });
+      await act(flush);
+
+      expect(screen.getByText("first message")).toBeInTheDocument();
+      expect(screen.queryByText("live update arrived")).toBeNull();
+
+      // Advance past the visible poll cadence so the ambient poll fires and
+      // refreshThread(chat-1) merges the newly-arrived message IN PLACE.
+      await act(async () => {
+        jest.advanceTimersByTime(61_000);
+      });
+      await act(flush);
+
+      expect(screen.getByText("live update arrived")).toBeInTheDocument();
+      expect(threadCalls).toBeGreaterThanOrEqual(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
 
 describe("MessagesPage — inline compose", () => {
   /**
