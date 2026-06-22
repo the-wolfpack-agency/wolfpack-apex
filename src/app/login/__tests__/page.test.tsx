@@ -14,7 +14,7 @@
  */
 
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 jest.mock("@/lib/client-auth", () => ({
@@ -30,6 +30,7 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => ({ get: (k: string) => params.get(k) ?? null }),
 }));
 
+import { setInstinctSession, fetchWithRefresh } from "@/lib/client-auth";
 import LoginPage from "@/app/login/page";
 
 beforeEach(() => {
@@ -73,6 +74,36 @@ describe("LoginPage", () => {
     const emailInput = screen.getByTestId("login-email");
     expect(emailInput).toHaveAttribute("autocomplete", "email");
     expect(emailInput).toHaveAttribute("type", "email");
+  });
+
+  it("signs in via raw fetch, not fetchWithRefresh, so an expired session never blocks login", async () => {
+    /* Regression guard for the stuck-grey-button bug: fetchWithRefresh
+       pre-refreshes a stale token and, on failure, redirects back to /login,
+       so sign-in never completes (only a private window worked). The login
+       request must be a raw fetch. */
+    const mockFetch = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "tok", user: { id: "u1" } }) })
+      .mockResolvedValue({ ok: true, json: async () => ({}) });
+    (global as unknown as { fetch: jest.Mock }).fetch = mockFetch;
+
+    render(<LoginPage />);
+    fireEvent.change(screen.getByTestId("login-email"), { target: { value: "Cto@Wolfpack.dev" } });
+    fireEvent.change(screen.getByTestId("login-password"), { target: { value: "pw" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(setInstinctSession as jest.Mock).toHaveBeenCalledWith("tok", { id: "u1" }));
+    // Raw fetch to the login endpoint, with the email normalized to lowercase.
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/auth/login",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ email: "cto@wolfpack.dev", password: "pw" }),
+      }),
+    );
+    // It must NOT route through the token-refreshing wrapper.
+    expect(fetchWithRefresh as jest.Mock).not.toHaveBeenCalled();
+    await waitFor(() => expect(mockPush).toHaveBeenCalled());
   });
 
   it("demo credentials block is hidden by default (no NEXT_PUBLIC_SHOW_DEMO_CREDS)", () => {

@@ -2,7 +2,7 @@
 
 import { useState, FormEvent, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { setInstinctSession, authHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import { setInstinctSession, authHeaders } from "@/lib/client-auth";
 
 /* useSearchParams must live inside a <Suspense> boundary so Next.js
    can prerender /login at build time without bailing out to client-
@@ -76,10 +76,18 @@ function LoginContent() {
     setLoading(true);
 
     try {
-      const res = await fetchWithRefresh("/api/auth/login", {
+      /* Raw fetch, NOT fetchWithRefresh: the login page is pre-auth by
+         definition (see .ai/conventions.md). fetchWithRefresh attaches the
+         stale access token from localStorage and pre-refreshes it; when that
+         refresh fails, which is exactly the state an expired session lands a
+         user in, it redirects back to /login. That is the bug where the button
+         greys and sign-in never completes, while a private window (no stale
+         token) works. Raw fetch sends credentials and logs in cleanly. */
+      const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+        credentials: "include",
       });
 
       const data = await res.json();
@@ -93,10 +101,11 @@ function LoginContent() {
       setInstinctSession(data.token, data.user);
 
       // Track page view
-      fetchWithRefresh("/api/analytics", {
+      fetch("/api/analytics", {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ event: "system.login", metadata: { page: "login" } }),
+        credentials: "include",
       }).catch(() => {});
 
       /* Post-login landing page is /assistant — that's the surface
