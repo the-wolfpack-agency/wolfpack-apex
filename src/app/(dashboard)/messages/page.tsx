@@ -337,7 +337,13 @@ export function stripHtmlToText(html: string | undefined | null): string {
   // earlier regex-based strip for double-escaping +
   // incomplete-multi-character-sanitization (the `<scr<script>ipt>`
   // mutation class).
-  return htmlToText(html);
+  //
+  // Teams bodies are full of &nbsp;, which the parser faithfully decodes
+  // to U+00A0. In a plain-text bubble a literal non-breaking space is
+  // wrong: it suppresses word-wrap (a long run never breaks) and reads as
+  // a stray gap. Collapse it to a regular space so wrapping and copy/paste
+  // behave. Narrow to U+00A0 on purpose; other whitespace is left intact.
+  return htmlToText(html).replace(/\u00a0/g, " ");
 }
 
 export function formatRelativeTime(iso: string, now: number = Date.now()): string {
