@@ -1520,7 +1520,10 @@ export default function InstinctChat({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a5 5 0 015 5v0a5 5 0 01-5 5H9" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="M7 6L3 10l4 4" />
               </svg>
-              <span className="hidden sm:inline">History</span>
+              {/* Icon-only in the narrow floating panel so the row never
+                  overflows and clips the close (X) button off the right
+                  edge. Labels still show in the wide inline assistant. */}
+              <span className={position === "floating" ? "hidden" : "hidden sm:inline"}>History</span>
             </button>
             <button
               onClick={() => {
@@ -1539,7 +1542,7 @@ export default function InstinctChat({
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
               </svg>
-              <span className="hidden sm:inline">Suggestions</span>
+              <span className={position === "floating" ? "hidden" : "hidden sm:inline"}>Suggestions</span>
             </button>
 
             <button
@@ -1555,14 +1558,17 @@ export default function InstinctChat({
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
               </svg>
-              <span className="hidden sm:inline">New</span>
+              <span className={position === "floating" ? "hidden" : "hidden sm:inline"}>New</span>
             </button>
 
             {position === "floating" && (
               <button
                 onClick={() => setFloatingOpen(false)}
-                className="p-1"
+                className="shrink-0 p-1"
                 style={{ color: "var(--wp-text-muted, #6b7280)" }}
+                aria-label="Collapse assistant"
+                title="Collapse assistant"
+                data-testid="floating-assistant-collapse"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />

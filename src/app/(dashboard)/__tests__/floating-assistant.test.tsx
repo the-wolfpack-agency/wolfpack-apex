@@ -29,6 +29,10 @@ const fetchMock = jest.fn();
 
 jest.mock("@/lib/client-auth", () => ({
   getInstinctToken: () => "test-token",
+  // InstinctChat reads the signed-in user when the panel opens (welcome
+  // greeting + role-based prompts). Without this the panel throws
+  // "getInstinctUser is not a function" on every open-state test.
+  getInstinctUser: () => ({ name: "Tester", role: "member" }),
   clearInstinctSession: jest.fn(),
   jsonHeaders: () => ({ "content-type": "application/json" }),
   fetchWithRefresh: (...args: unknown[]) => fetchMock(...args),
@@ -179,6 +183,58 @@ describe("floating FAB — closed state is unobtrusive, open works, analytics fi
     } finally {
       (window as unknown as { matchMedia: typeof window.matchMedia }).matchMedia =
         origMatchMedia;
+    }
+  });
+
+  it("open panel exposes a reachable collapse (X) button that returns to the bubble", async () => {
+    // Regression (2026-06-22): in the narrow floating panel the header
+    // action buttons rendered their full text labels (History /
+    // Suggestions / New), overflowing the ~384px width. The wrapper is
+    // overflow-hidden, so the rightmost child — the close (X) button —
+    // was clipped off the right edge and the panel could not be
+    // collapsed. The collapse button must always be present and, when
+    // clicked, return to the unobtrusive bubble.
+    render(<InstinctChat position="floating" />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("floating-assistant-fab"));
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Wolfpack Assistant/i)).toBeInTheDocument();
+    });
+    const collapse = screen.getByTestId("floating-assistant-collapse");
+    expect(collapse).toBeInTheDocument();
+    expect(collapse).toHaveAttribute("aria-label", "Collapse assistant");
+    await act(async () => {
+      fireEvent.click(collapse);
+    });
+    // Back to the bubble: panel header gone, FAB visible again.
+    await waitFor(() => {
+      expect(screen.queryByText(/Wolfpack Assistant/i)).toBeNull();
+    });
+    expect(screen.getByTestId("floating-assistant-fab")).toBeInTheDocument();
+  });
+
+  it("header action labels are icon-only in the floating panel so the row never overflows", async () => {
+    // The fix that keeps the collapse button on-screen: the History /
+    // Suggestions / New text labels are hidden in floating mode (they
+    // still show in the wide inline assistant). Assert the label span is
+    // unconditionally hidden, not the inline-only `hidden sm:inline`.
+    render(<InstinctChat position="floating" />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("floating-assistant-fab"));
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Wolfpack Assistant/i)).toBeInTheDocument();
+    });
+    for (const testId of [
+      "assistant-history-button",
+      "assistant-suggestions-button",
+    ]) {
+      const labelSpan = screen.getByTestId(testId).querySelector("span");
+      expect(labelSpan).not.toBeNull();
+      expect(labelSpan!.className).toContain("hidden");
+      // Must NOT reveal at the sm breakpoint — that is the overflow bug.
+      expect(labelSpan!.className).not.toContain("sm:inline");
     }
   });
 
