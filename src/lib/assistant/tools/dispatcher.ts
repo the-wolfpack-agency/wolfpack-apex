@@ -18,6 +18,7 @@
  */
 
 import { trackEvent } from "@/lib/analytics";
+import { authorize } from "@/lib/ogiam/authorize";
 import { getTools } from "./registry";
 import type {
   ToolContext,
@@ -115,6 +116,34 @@ async function runOneTool<P, R>(
         .map((i) => `${i.path.join(".")}: ${i.message}`)
         .join("; ")}`,
     );
+  }
+
+  /* 1b. OGIAM Phase 0 (shadow). Record the deterministic authorization
+         decision for this well-formed action, BEFORE the legacy capability and
+         confirmation gates, so even a mutation the dispatcher is about to bounce
+         is captured in the evidence stream. Monitor mode: the decision is
+         enforced=false, so nothing is blocked here and dispatch proceeds exactly
+         as before. authorize() never throws (best effort), but we guard anyway
+         so the shadow gate can never break the assistant. */
+  try {
+    await authorize({
+      principal: {
+        kind: "ai_agent",
+        agent: "instinct.assistant",
+        onBehalfOfUserId: ctx.userId,
+        onBehalfOfRole: ctx.userRole,
+        workspaceId: ctx.workspaceId ?? "default",
+      },
+      tool: tool.name,
+      capability: tool.capability,
+      isMutation: Boolean(tool.requiresConfirmation),
+      surface: "/assistant",
+      workflowId: ctx.workflowId,
+      params: parsed.data,
+      mode: "monitor",
+    });
+  } catch {
+    /* shadow gate is non-blocking and must never break dispatch */
   }
 
   /* 2. Capability gate. "*" = any authenticated user (just need a

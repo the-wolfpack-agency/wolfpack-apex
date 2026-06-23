@@ -423,6 +423,15 @@ export type InstinctEventType =
   // Tool failed (validation, capability, no_match, needs_confirmation, internal).
   // Metadata: { tool, code, message }.
   | "assistant.tool_failed"
+  // OGIAM (deterministic AI authorization) decisions, Phase 0 shadow mode.
+  // ogiam.action_authorized  { decision_id, tool, capability, risk_tier,
+  //                            intended_outcome, enforced, rule_id, policy_version }
+  //   fired when the gate would ALLOW or TRANSFORM the action.
+  // ogiam.action_flagged     same metadata, fired when the intended outcome
+  //   would BLOCK (deny or escalate). The headline shadow-mode signal: what
+  //   enforcement would have stopped, so we can tune before enforcing.
+  | "ogiam.action_authorized"
+  | "ogiam.action_flagged"
   // Universal-search assistant tool (`search`). Fired by the tool's
   // handler after runSearch returns successfully so the learning loop
   // sees parity with the /search page route's `insight.search.queried`
