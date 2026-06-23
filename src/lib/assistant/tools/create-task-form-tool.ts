@@ -10,9 +10,9 @@
 
 import { z } from "zod";
 import { trackEvent } from "@/lib/analytics";
-import { listCachedTaskLists } from "@/lib/integrations/microsoft-tasks";
+import { listCachedTaskLists, createTask } from "@/lib/integrations/microsoft-tasks";
 import { registerTool } from "./registry";
-import type { ToolDef, ToolResult } from "./types";
+import type { ToolContext, ToolDef, ToolResult } from "./types";
 import { taskFormSpec, type TaskListOption } from "@/lib/assistant/forms/specs";
 
 /* MS To-Do lists named like "Flagged Emails" are read-only and would
@@ -49,6 +49,56 @@ function matchTaskFormIntent(message: string): Params | null {
   return params;
 }
 
+/* On-behalf-of-owner task creation for an agent principal. Returns a normal
+ * ToolResult (NO form), so a successful create counts as a real "ran" step in
+ * the governed executor. Never throws: a missing title, a disconnected owner
+ * mailbox, or a Graph error all degrade to a clear ok:false the executor records
+ * as a failed step (not a false "succeeded"). */
+async function createTaskAsAgent(
+  params: Params,
+  principal: NonNullable<ToolContext["agentPrincipal"]>,
+): Promise<ToolResult<CreateTaskFormData>> {
+  const title = params.title?.trim();
+  if (!title) {
+    return {
+      ok: false,
+      code: "validation",
+      message: 'A task needs a title. Try: add a task titled "Doctors Appointment".',
+    };
+  }
+  const ownerUserId = principal.ownerUserId;
+  try {
+    const lists = await listCachedTaskLists(ownerUserId);
+    const target = lists.find((l) => !READ_ONLY_LIST_NAMES.has(l.displayName));
+    if (!target) {
+      return {
+        ok: false,
+        code: "internal",
+        message:
+          "The agent owner has no writable Microsoft To-Do list connected. Connect Microsoft To-Do so the agent can create tasks on the owner's behalf.",
+      };
+    }
+    await createTask(ownerUserId, target.msListId, { title });
+    trackEvent("assistant.form_offered", ownerUserId, principal.role, {
+      form_kind: "create_task",
+      autocompleted_by_agent: true,
+      agent_id: principal.agentId,
+    });
+    return {
+      ok: true,
+      data: { formKind: "create_task" },
+      answer: `Created task "${title}" in Microsoft To-Do (list: ${target.displayName}) on behalf of the owner.`,
+      sources: [],
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      code: "internal",
+      message: `Could not create the task on behalf of the owner: ${(err as Error).message}`,
+    };
+  }
+}
+
 export const createTaskFormTool: ToolDef<Params, CreateTaskFormData> = {
   name: "create_task_form",
   description:
@@ -57,6 +107,16 @@ export const createTaskFormTool: ToolDef<Params, CreateTaskFormData> = {
   capability: "*",
   matchIntent: matchTaskFormIntent,
   async handler(params, ctx): Promise<ToolResult<CreateTaskFormData>> {
+    /* Agent path: an autonomous agent cannot fill and submit a UI form, so it
+     * EXECUTES the create directly, on behalf of its owner (writing to the
+     * owner's Microsoft To-Do). The OGIAM gate already authorized this mutation
+     * before the handler ran; the create is attributed to the agent acting for
+     * the owner. This is what makes "Agent1, add a task titled X" actually
+     * create the task instead of returning a form nobody fills. */
+    if (ctx.agentPrincipal) {
+      return createTaskAsAgent(params, ctx.agentPrincipal);
+    }
+
     /* Pull the user's writable To-Do lists so the form can offer a
      * real dropdown instead of falling back to the literal "default"
      * string (Graph rejects that with ErrorInvalidIdMalformed). */

@@ -122,6 +122,29 @@ describe("runAgentTask", () => {
     expect(out.status).toBe("failed");
   });
 
+  it("FAILS a step that only returned a form (an agent cannot fill a form)", async () => {
+    /* Regression: a form-trigger tool (create_task_form) returns ok:true with a
+       form and no side effect. The agent used to record that as "ran", so the
+       task showed "Succeeded" while nothing was created. */
+    const formResult = {
+      tool: "create_task_form",
+      result: { ok: true as const, data: {}, answer: "Fill in the task below.", form: { kind: "create_task", fields: [] }, sources: [] },
+      durationMs: 1,
+    };
+    const dispatch = jest.fn().mockResolvedValueOnce(formResult);
+    const out = await runAgentTask(
+      { ...task, goal: "add a task titled Doctors Appointment" },
+      {
+        dispatch: dispatch as never, notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+      },
+    );
+    expect(out.status).toBe("failed");
+    expect(out.steps[0].outcome).toBe("error");
+    expect(out.steps[0].detail).toMatch(/form/i);
+  });
+
   it("fails safe when a dispatch throws", async () => {
     const dispatch = jest.fn().mockRejectedValue(new Error("boom"));
     const out = await runAgentTask(task, {

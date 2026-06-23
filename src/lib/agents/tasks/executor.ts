@@ -244,6 +244,15 @@ export async function runAgentTask(
     }
 
     if (r.ok) {
+      // A successful result that only surfaces a FORM did no real work: a form
+      // exists to collect human input, and an agent cannot fill or submit one.
+      // Treat it as a needs-human failure, never a silent "ran" (the bug where
+      // "add a task" returned a form to nobody and the task was never created).
+      if ((r as { form?: unknown }).form) {
+        steps.push({ index: i, instruction, tool: res.tool, outcome: "error", detail: "this step needs a human to complete a form; an agent cannot submit it" });
+        errored = true;
+        break;
+      }
       steps.push({ index: i, instruction, tool: res.tool, outcome: "ran", detail: truncate((r as { answer: string }).answer) });
     } else {
       // A tool-level failure (not a gate block) is a real error: record it and
