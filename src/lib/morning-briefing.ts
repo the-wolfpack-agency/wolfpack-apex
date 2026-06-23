@@ -10,6 +10,7 @@
 
 import { trackEvent } from "@/lib/analytics";
 import { safeQuery } from "@/lib/db";
+import { dayWindowInTimeZone } from "@/lib/calendar/timezone";
 import {
   fetchProfitAndLoss,
   fetchBalanceSheet,
@@ -109,6 +110,14 @@ export interface MorningBriefing {
 
 const CACHE_TTL_MS = 30 * 60 * 1000;
 
+/**
+ * Repo-wide default IANA zone (matches notification preferences). A logged-in
+ * user whose browser did not send a tz still gets Eastern rather than a UTC
+ * day window, which is what produced the "yesterday's meetings shown as today's"
+ * combining-days bug the CEO reported for US users.
+ */
+const DEFAULT_TIME_ZONE = "America/New_York";
+
 interface CacheEntry {
   data: MorningBriefing;
   expiresAt: number;
@@ -151,7 +160,7 @@ function getGreeting(name: string): string {
 // Microsoft Graph — graceful import
 // ---------------------------------------------------------------------------
 
-async function fetchMsGraphData(userId: string): Promise<{
+async function fetchMsGraphData(userId: string, timeZone: string): Promise<{
   calendar: CalendarEvent[];
   emails: {
     id?: string;
@@ -170,10 +179,14 @@ async function fetchMsGraphData(userId: string): Promise<{
     const msStatus = await msGraph.getConnectionStatus(userId);
     if (!msStatus.connected) return null;
 
-    const today = new Date().toISOString().split("T")[0];
-    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    // Build the calendar window from the user's LOCAL day, not a UTC calendar
+    // date. A 24h UTC slice spans roughly [yesterday 7pm, today 7pm] local for a
+    // US user, dropping two local days into one bucket. dayWindowInTimeZone
+    // returns the UTC instants bounding the user's local day; fetchCalendarEvents
+    // accepts ISO instants and normalizes returned event times to UTC.
+    const win = dayWindowInTimeZone(timeZone, Date.now());
     const [calendarEvents, emails, unreadCount] = await Promise.all([
-      msGraph.fetchCalendarEvents(userId, today, tomorrow),
+      msGraph.fetchCalendarEvents(userId, win.startUtcIso, win.endUtcIso),
       msGraph.fetchRecentEmails(userId, 10),
       msGraph.fetchUnreadCount(userId),
     ]);
@@ -620,7 +633,7 @@ function getDemoBriefing(userName: string): MorningBriefing {
 export async function generateBriefing(
   userId: string,
   userRole: string,
-  options: { force?: boolean; userName?: string } = {},
+  options: { force?: boolean; userName?: string; timeZone?: string } = {},
 ): Promise<MorningBriefing> {
   // Check cache unless forced
   if (!options.force) {
@@ -629,6 +642,10 @@ export async function generateBriefing(
   }
 
   const userName = options.userName || "there";
+  // Default to Eastern (the repo's notification-default zone) so a logged-in
+  // user whose browser did not send a tz still gets a correct local-day window
+  // instead of a UTC slice that combines two local days.
+  const timeZone = options.timeZone || DEFAULT_TIME_ZONE;
 
   // Determine if we can reach any live data
   const hasDb = !!process.env.DATABASE_URL;
@@ -637,7 +654,7 @@ export async function generateBriefing(
   const isCeo = userRole === "ceo";
   const [financialData, msGraphData, teamActivity, clientAttention] = await Promise.all([
     isCeo ? fetchFinancialData().catch(() => null) : Promise.resolve(null),
-    fetchMsGraphData(userId).catch(() => null),
+    fetchMsGraphData(userId, timeZone).catch(() => null),
     hasDb ? fetchTeamActivity().catch(() => ({ activeMembers: 0, recentHighlights: [] })) : Promise.resolve(null),
     hasDb ? fetchClientAttention().catch(() => []) : Promise.resolve([]),
   ]);

@@ -209,6 +209,93 @@ describe("Financial Data in Briefing", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Calendar window timezone (combining-days bug)
+// ---------------------------------------------------------------------------
+
+describe("Calendar window respects the user's timezone", () => {
+  let briefing: typeof import("@/lib/morning-briefing");
+  let timezone: typeof import("@/lib/calendar/timezone");
+  let msGraph: typeof import("@/lib/microsoft-graph");
+
+  beforeEach(async () => {
+    jest.resetModules();
+    // Re-acquire the mocked module AFTER resetModules so we hold the same
+    // instance that morning-briefing's dynamic import will resolve.
+    briefing = await import("@/lib/morning-briefing");
+    timezone = await import("@/lib/calendar/timezone");
+    msGraph = await import("@/lib/microsoft-graph");
+    (msGraph.fetchCalendarEvents as jest.Mock).mockClear();
+  });
+
+  test("passes the LOCAL-day UTC instants for an explicit timezone", async () => {
+    // Mid-afternoon Eastern, which is the evening UTC: the naive UTC-date
+    // window would already roll into the next day.
+    const fixedNow = Date.parse("2026-06-23T20:30:00Z");
+    jest.useFakeTimers().setSystemTime(fixedNow);
+    try {
+      await briefing.generateBriefing("tz-ceo", "member", {
+        force: true,
+        timeZone: "America/New_York",
+      });
+
+      const expected = timezone.dayWindowInTimeZone("America/New_York", fixedNow);
+      expect(msGraph.fetchCalendarEvents).toHaveBeenCalledWith(
+        "tz-ceo",
+        expected.startUtcIso,
+        expected.endUtcIso,
+      );
+
+      const [, start, end] = (msGraph.fetchCalendarEvents as jest.Mock).mock.calls[0];
+      // Window is exactly 24h, anchored at the local midnight instant.
+      expect(Date.parse(end) - Date.parse(start)).toBe(24 * 60 * 60 * 1000);
+      // For 2026-06-23 EDT (UTC-4) the local day starts at 04:00Z.
+      expect(start).toBe("2026-06-23T04:00:00.000Z");
+      expect(end).toBe("2026-06-24T04:00:00.000Z");
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("defaults to Eastern when no timezone is supplied", async () => {
+    const fixedNow = Date.parse("2026-06-23T20:30:00Z");
+    jest.useFakeTimers().setSystemTime(fixedNow);
+    try {
+      await briefing.generateBriefing("tz-ceo-2", "member", { force: true });
+
+      const expected = timezone.dayWindowInTimeZone("America/New_York", fixedNow);
+      expect(msGraph.fetchCalendarEvents).toHaveBeenCalledWith(
+        "tz-ceo-2",
+        expected.startUtcIso,
+        expected.endUtcIso,
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("does NOT use the raw UTC calendar date as the window", async () => {
+    // Late evening Eastern = next-day UTC. The buggy code used the UTC date,
+    // which here would be 2026-06-24, mislabeling the window.
+    const fixedNow = Date.parse("2026-06-24T02:30:00Z"); // 22:30 EDT on the 23rd
+    jest.useFakeTimers().setSystemTime(fixedNow);
+    try {
+      await briefing.generateBriefing("tz-ceo-3", "member", {
+        force: true,
+        timeZone: "America/New_York",
+      });
+
+      const [, start] = (msGraph.fetchCalendarEvents as jest.Mock).mock.calls[0];
+      // Correct local day is still the 23rd, so the window starts 2026-06-23.
+      expect(start).toBe("2026-06-23T04:00:00.000Z");
+      // The buggy UTC-date string ("2026-06-24") must NOT be the start.
+      expect(start.startsWith("2026-06-24")).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Analytics
 // ---------------------------------------------------------------------------
 

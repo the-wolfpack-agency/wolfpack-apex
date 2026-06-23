@@ -177,7 +177,14 @@ export default function MorningBriefing() {
   const fetchBriefing = useCallback(async (refresh = false) => {
     try {
       if (refresh) setRefreshing(true);
-      const url = refresh ? "/api/briefing?refresh=true" : "/api/briefing";
+      // Pass the browser's IANA timezone so the server computes the calendar
+      // window for the user's LOCAL day, not a UTC slice that combines two
+      // local days (the "yesterday's meetings shown as today's" bug).
+      const params = new URLSearchParams();
+      if (refresh) params.set("refresh", "true");
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (tz) params.set("tz", tz);
+      const url = `/api/briefing?${params.toString()}`;
       const res = await fetch(url, {
         headers: authHeaders(),
       });
