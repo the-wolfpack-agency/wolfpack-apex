@@ -459,12 +459,19 @@ describe("API Route -- File Attachment Analytics", () => {
   test("passes message to chat function", async () => {
     const req = makeRequest({ message: "Test message" });
     await POST(req as any);
+    // The route calls chat(message, user.id, user.role, conversationId,
+    // pageContext, user.workspaceId, geo). conversationId and pageContext
+    // are absent in this request, the mocked user has no workspaceId, and
+    // the test request carries no x-vercel-ip-* headers so readVercelGeo
+    // returns an empty object.
     expect(mockChat).toHaveBeenCalledWith(
       "Test message",
       "test-user",
       "cto",
       undefined,
       undefined,
+      undefined,
+      {},
     );
   });
 });
@@ -588,7 +595,11 @@ describe("API Route -- Quality Gate Integration", () => {
     const res = await POST(req as any);
     const data = await res.json();
 
-    expect(data.response).toBe("test response");
+    // The route appends a "Go to: [Page](/route)" navigation line when
+    // the exchange touches an in-app domain (here "report" -> /reports),
+    // so the response is "test response" plus the appended link. Assert
+    // the chat text is present rather than exact-equal.
+    expect(data.response).toContain("test response");
     expect(data.gateResults).toBeDefined();
     expect(data.gateResults[0].verdict).toBe("pass");
     expect(mockChat).toHaveBeenCalled();
@@ -605,7 +616,9 @@ describe("API Route -- Quality Gate Integration", () => {
     const res = await POST(req as any);
     const data = await res.json();
 
-    expect(data.response).toBe("test response");
+    // Same appended navigation line as above ("contacts" -> /people), so
+    // assert the chat text is contained rather than exact-equal.
+    expect(data.response).toContain("test response");
     expect(data.gateResults[0].verdict).toBe("warn");
     expect(mockChat).toHaveBeenCalled();
   });
