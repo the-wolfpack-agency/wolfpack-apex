@@ -15,6 +15,10 @@
 import { tryDispatchTool } from "@/lib/assistant/tools/dispatcher";
 import { notify } from "@/lib/notifications/in-app";
 import { trackEvent } from "@/lib/analytics";
+import {
+  findPromotedProcedure,
+  recordLearnedProcedure,
+} from "@/lib/agents/memory/store";
 import { getPlanner } from "./planner";
 import type { TaskStatus, TaskStep } from "./types";
 
@@ -29,16 +33,24 @@ export interface ExecutableTask {
 
 type DispatchFn = typeof tryDispatchTool;
 type NotifyFn = typeof notify;
+type LookupFn = typeof findPromotedProcedure;
+type RecordFn = typeof recordLearnedProcedure;
 
 export interface ExecutorDeps {
   dispatch?: DispatchFn;
   notifyOwner?: NotifyFn;
+  /** Inheritance: find a promoted procedure for this goal. */
+  lookupProcedure?: LookupFn;
+  /** Learning: record the plan a succeeded task ran. */
+  recordProcedure?: RecordFn;
 }
 
 export interface RunResult {
   status: TaskStatus;
   steps: TaskStep[];
   resultSummary: string;
+  /** True when the plan was inherited from shared memory (no re-exploration). */
+  inherited: boolean;
 }
 
 function truncate(s: string, n = 240): string {
@@ -61,8 +73,25 @@ export async function runAgentTask(
 ): Promise<RunResult> {
   const dispatch = deps.dispatch ?? tryDispatchTool;
   const notifyOwner = deps.notifyOwner ?? notify;
+  const lookupProcedure = deps.lookupProcedure ?? findPromotedProcedure;
+  const recordProcedure = deps.recordProcedure ?? recordLearnedProcedure;
 
-  const instructions = getPlanner().plan(task.goal);
+  // Inheritance: reuse a promoted procedure for this goal instead of
+  // re-exploring. Best effort: a memory miss or failure falls back to planning.
+  let inherited = false;
+  let instructions: string[];
+  try {
+    const prior = await lookupProcedure(task.workspaceId, task.goal, task.agentId);
+    if (prior && prior.plan.length > 0) {
+      instructions = prior.plan.map((p) => p.instruction);
+      inherited = true;
+    } else {
+      instructions = getPlanner().plan(task.goal);
+    }
+  } catch {
+    instructions = getPlanner().plan(task.goal);
+  }
+
   const steps: TaskStep[] = [];
   let status: TaskStatus = "running";
   let blocked = false;
@@ -129,6 +158,24 @@ export async function runAgentTask(
 
   if (status !== "failed") status = blocked ? "blocked" : "succeeded";
 
+  // Learning: a freshly-explored, fully-successful plan becomes a candidate
+  // procedure (the safety check inside recordProcedure decides if it is shareable
+  // and never lets an unsafe plan be inherited). We do not re-record an inherited
+  // plan. Best effort: learning never breaks the task.
+  if (status === "succeeded" && !inherited) {
+    try {
+      await recordProcedure({
+        workspaceId: task.workspaceId,
+        goal: task.goal,
+        plan: steps.map((s) => ({ instruction: s.instruction, tool: s.tool })),
+        learnedByAgent: task.agentId,
+        sourceTaskId: task.id,
+      });
+    } catch {
+      /* learning is best effort; the task already ran */
+    }
+  }
+
   const ran = steps.filter((s) => s.outcome === "ran").length;
   const resultSummary = blocked
     ? `Stopped for approval after ${ran} step(s).`
@@ -145,5 +192,5 @@ export async function runAgentTask(
     blocked,
   });
 
-  return { status, steps, resultSummary };
+  return { status, steps, resultSummary, inherited };
 }

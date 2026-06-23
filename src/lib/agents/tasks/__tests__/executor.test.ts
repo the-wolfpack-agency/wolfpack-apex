@@ -76,8 +76,62 @@ describe("runAgentTask", () => {
 
   it("fails safe when a dispatch throws", async () => {
     const dispatch = jest.fn().mockRejectedValue(new Error("boom"));
-    const out = await runAgentTask(task, { dispatch: dispatch as never, notifyOwner: jest.fn() as never });
+    const out = await runAgentTask(task, {
+      dispatch: dispatch as never, notifyOwner: jest.fn() as never,
+      lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+      recordProcedure: jest.fn() as never,
+    });
     expect(out.status).toBe("failed");
     expect(out.steps[0].outcome).toBe("error");
+  });
+});
+
+describe("cumulative memory inheritance", () => {
+  it("reuses a promoted procedure and does NOT relearn it", async () => {
+    const dispatch = jest.fn().mockResolvedValue(ran("read_status", "ok"));
+    const lookupProcedure = jest.fn().mockResolvedValue({
+      plan: [{ instruction: "inherited step", tool: "read_status" }],
+    });
+    const recordProcedure = jest.fn();
+    const out = await runAgentTask(
+      { ...task, goal: "do the known thing" },
+      { dispatch: dispatch as never, notifyOwner: jest.fn() as never, lookupProcedure: lookupProcedure as never, recordProcedure: recordProcedure as never },
+    );
+    expect(out.inherited).toBe(true);
+    // The inherited plan was run (one step), not the planner's split of the goal.
+    expect(dispatch).toHaveBeenCalledWith("inherited step", expect.anything());
+    // An inherited plan is not re-recorded.
+    expect(recordProcedure).not.toHaveBeenCalled();
+  });
+
+  it("records a freshly explored successful plan for future agents to inherit", async () => {
+    const dispatch = jest.fn()
+      .mockResolvedValueOnce(ran("read_status", "ok"))
+      .mockResolvedValueOnce(ran("read_more", "ok"));
+    const lookupProcedure = jest.fn().mockResolvedValue(null);
+    const recordProcedure = jest.fn().mockResolvedValue({ status: "promoted" });
+    const out = await runAgentTask(
+      { ...task, goal: "read status\nread more" },
+      { dispatch: dispatch as never, notifyOwner: jest.fn() as never, lookupProcedure: lookupProcedure as never, recordProcedure: recordProcedure as never },
+    );
+    expect(out.inherited).toBe(false);
+    expect(out.status).toBe("succeeded");
+    expect(recordProcedure).toHaveBeenCalledTimes(1);
+    const arg = recordProcedure.mock.calls[0][0];
+    expect(arg.goal).toBe("read status\nread more");
+    expect(arg.plan).toHaveLength(2);
+  });
+
+  it("does NOT record a blocked task (only fully successful plans are learned)", async () => {
+    const dispatch = jest.fn()
+      .mockResolvedValueOnce(ran("read_status", "ok"))
+      .mockResolvedValueOnce(gateBlock("delete_everything"));
+    const recordProcedure = jest.fn();
+    const out = await runAgentTask(task, {
+      dispatch: dispatch as never, notifyOwner: jest.fn().mockResolvedValue({}) as never,
+      lookupProcedure: jest.fn().mockResolvedValue(null) as never, recordProcedure: recordProcedure as never,
+    });
+    expect(out.status).toBe("blocked");
+    expect(recordProcedure).not.toHaveBeenCalled();
   });
 });

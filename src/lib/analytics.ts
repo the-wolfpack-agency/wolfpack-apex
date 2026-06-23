@@ -471,6 +471,20 @@ export type InstinctEventType =
   //   approval, or failed), every step governed under its identity.
   | "agent.task_assigned"
   | "agent.task_completed"
+  // Cumulative agent memory (one agent's learning benefits the next).
+  // agent.procedure_learned  { workspace_id, goal_key, status, step_count }
+  //   a succeeded task became a candidate procedure.
+  // agent.procedure_promoted { workspace_id, goal_key, manual? }
+  //   the procedure passed the adversarial safety check and is now inheritable.
+  // agent.procedure_rejected { workspace_id, goal_key, reason, manual? }
+  //   a step would now be blocked, so the procedure is not shared.
+  // agent.procedure_inherited { workspace_id, goal_key, learned_by_agent }
+  //   a later agent reused a promoted procedure instead of re-exploring (the
+  //   cost-plateau signal).
+  | "agent.procedure_learned"
+  | "agent.procedure_promoted"
+  | "agent.procedure_rejected"
+  | "agent.procedure_inherited"
   // Universal-search assistant tool (`search`). Fired by the tool's
   // handler after runSearch returns successfully so the learning loop
   // sees parity with the /search page route's `insight.search.queried`
