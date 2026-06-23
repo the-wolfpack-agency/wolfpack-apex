@@ -2298,7 +2298,23 @@ export type InstinctEventType =
   | "hr.document_verified"
   | "hr.document_rejected"
   | "hr.document_updated"
-  | "hr.document_deleted";
+  | "hr.document_deleted"
+  // Cost-aware model registry + router (src/lib/ai/models/). Emitted by
+  // logModelSelection() so no routing decision is ever lost. The router
+  // itself stays pure (no analytics inside selectModel); callers record
+  // the choice.
+  //   ai.model_selected  { model_id, provider, tier, reason,
+  //                        estimated_cost_usd?, fallback_from? }
+  //     fires for every selectModel() result a caller decides to spend
+  //     tokens on, so the learning loop can grade price/capability
+  //     trade-offs and per-client/agent pins over time.
+  //   ai.model_fallback  { model_id, provider, tier, reason, fallback_from }
+  //     convenience event a caller may fire when a pin was unavailable
+  //     or the required tier was unavailable and the router degraded.
+  //     Lets dashboards count graceful degradations independently of
+  //     the headline selection event.
+  | "ai.model_selected"
+  | "ai.model_fallback";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;
