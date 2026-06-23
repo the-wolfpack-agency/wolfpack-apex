@@ -79,6 +79,49 @@ interface ScanResponse {
   scan: ScanRecord;
 }
 
+/* Assigned work: a human assigns a goal to the agent; the agent runtime (not
+   this UI) executes it as governed steps. A numbered list in the goal becomes
+   multiple steps. Each step records the tool it tried and a gate outcome, so a
+   "blocked" step is the OGIAM gate stopping the agent and asking the owner to
+   approve, which is the governance working as intended. */
+type TaskStatus = "queued" | "running" | "succeeded" | "blocked" | "failed";
+type StepOutcome = "ran" | "blocked" | "no_match" | "error";
+
+interface AgentTaskStep {
+  index: number;
+  instruction: string;
+  tool: string | null;
+  outcome: StepOutcome;
+  detail: string | null;
+}
+
+interface AgentTask {
+  id: string;
+  agentId: string;
+  workspaceId: string;
+  assignedBy: string | null;
+  goal: string;
+  status: TaskStatus;
+  steps: AgentTaskStep[];
+  resultSummary: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+interface TasksResponse {
+  tasks: AgentTask[];
+}
+
+interface TaskResponse {
+  task: AgentTask;
+}
+
+type TasksState =
+  | { kind: "loading" }
+  | { kind: "error" }
+  | { kind: "present"; tasks: AgentTask[] };
+
 /* Scan load is independent of the agent load: a missing scan (404 no_scan) is
    the expected steady state for a freshly onboarded agent, not an error. */
 type ScanState =
@@ -116,6 +159,34 @@ function stateColor(state: AgentState): { fg: string; bg: string } {
   }
 }
 
+function taskStatusColor(status: TaskStatus): { fg: string; bg: string } {
+  switch (status) {
+    case "running":
+      return { fg: "var(--wp-info, #3b82f6)", bg: "rgba(59,130,246,0.12)" };
+    case "succeeded":
+      return { fg: "var(--wp-success, #22c55e)", bg: "rgba(34,197,94,0.12)" };
+    case "blocked":
+      return { fg: "var(--wp-gold, #f1c233)", bg: "rgba(241,194,51,0.12)" };
+    case "failed":
+      return { fg: "var(--wp-error, #ef4444)", bg: "rgba(239,68,68,0.12)" };
+    default:
+      return { fg: "var(--wp-text-dim, #aaa)", bg: "rgba(160,160,160,0.12)" };
+  }
+}
+
+function stepOutcomeColor(outcome: StepOutcome): { fg: string; bg: string } {
+  switch (outcome) {
+    case "ran":
+      return { fg: "var(--wp-success, #22c55e)", bg: "rgba(34,197,94,0.12)" };
+    case "blocked":
+      return { fg: "var(--wp-gold, #f1c233)", bg: "rgba(241,194,51,0.12)" };
+    case "error":
+      return { fg: "var(--wp-error, #ef4444)", bg: "rgba(239,68,68,0.12)" };
+    default:
+      return { fg: "var(--wp-text-dim, #aaa)", bg: "rgba(160,160,160,0.12)" };
+  }
+}
+
 function Field({ label, value, testid }: { label: string; value: string; testid?: string }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
@@ -129,6 +200,150 @@ function Field({ label, value, testid }: { label: string; value: string; testid?
         {value}
       </span>
     </div>
+  );
+}
+
+function TaskRow({ task }: { task: AgentTask }) {
+  const [expanded, setExpanded] = useState(false);
+  const c = taskStatusColor(task.status);
+  return (
+    <li
+      data-testid={`agent-task-${task.id}`}
+      style={{
+        listStyle: "none",
+        padding: "0.7rem 0.8rem",
+        marginBottom: "0.5rem",
+        background: "var(--wp-dark-surface2, #1a1a1a)",
+        border: "1px solid var(--wp-dark-border, #333)",
+        borderRadius: "8px",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+        <span
+          data-testid={`agent-task-status-${task.id}`}
+          style={{
+            flexShrink: 0,
+            padding: "0.1rem 0.5rem",
+            borderRadius: "10px",
+            fontSize: "0.68rem",
+            fontWeight: 600,
+            textTransform: "capitalize",
+            background: c.bg,
+            color: c.fg,
+            border: `1px solid ${c.fg}`,
+          }}
+        >
+          {task.status}
+        </span>
+        <span
+          style={{
+            flex: "1 1 auto",
+            minWidth: 0,
+            fontSize: "0.88rem",
+            color: "var(--wp-text, #eee)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+          title={task.goal}
+        >
+          {task.goal}
+        </span>
+        <span style={{ flexShrink: 0, fontSize: "0.72rem", color: "var(--wp-text-muted, #6b7280)" }}>
+          {relativeTime(task.createdAt)}
+        </span>
+      </div>
+
+      {task.resultSummary && (
+        <div
+          data-testid={`agent-task-result-${task.id}`}
+          style={{ marginTop: "0.35rem", fontSize: "0.8rem", color: "var(--wp-text-dim, #aaa)", lineHeight: 1.4 }}
+        >
+          {task.resultSummary}
+        </div>
+      )}
+
+      {task.steps.length > 0 && (
+        <button
+          type="button"
+          data-testid={`agent-task-toggle-${task.id}`}
+          onClick={() => setExpanded((v) => !v)}
+          style={{
+            marginTop: "0.45rem",
+            padding: 0,
+            background: "transparent",
+            color: "var(--wp-gold, #f1c233)",
+            border: "none",
+            fontSize: "0.74rem",
+            cursor: "pointer",
+          }}
+        >
+          {expanded ? "Hide" : "Show"} {task.steps.length} governed step
+          {task.steps.length === 1 ? "" : "s"}
+        </button>
+      )}
+
+      {expanded && task.steps.length > 0 && (
+        <ul
+          data-testid={`agent-task-steps-${task.id}`}
+          style={{
+            listStyle: "none",
+            padding: 0,
+            margin: "0.5rem 0 0 0",
+            maxHeight: "200px",
+            overflowY: "auto",
+          }}
+        >
+          {task.steps.map((step) => {
+            const oc = stepOutcomeColor(step.outcome);
+            return (
+              <li
+                key={step.index}
+                data-testid={`agent-task-${task.id}-step-${step.index}`}
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: "0.5rem",
+                  padding: "0.4rem 0.5rem",
+                  marginBottom: "0.3rem",
+                  background: "var(--wp-dark-surface, #1f1f22)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  borderRadius: "6px",
+                }}
+              >
+                <span style={{ flex: "1 1 auto", minWidth: 0, fontSize: "0.8rem", color: "var(--wp-text, #eee)", lineHeight: 1.4 }}>
+                  <span style={{ display: "block" }}>{step.instruction}</span>
+                  <span
+                    style={{
+                      fontSize: "0.7rem",
+                      color: "var(--wp-text-muted, #6b7280)",
+                      fontFamily: "var(--wp-mono, monospace)",
+                    }}
+                  >
+                    {step.tool ?? "no tool"}
+                  </span>
+                </span>
+                <span
+                  data-testid={`agent-task-${task.id}-step-${step.index}-outcome`}
+                  style={{
+                    flexShrink: 0,
+                    padding: "0.05rem 0.4rem",
+                    borderRadius: "8px",
+                    fontSize: "0.65rem",
+                    fontWeight: 600,
+                    background: oc.bg,
+                    color: oc.fg,
+                    border: `1px solid ${oc.fg}`,
+                  }}
+                >
+                  {step.outcome}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </li>
   );
 }
 
@@ -147,6 +362,14 @@ export default function AgentProfilePage({
   /* Set when revoke is armed: revoke is irreversible, so the first click arms
      an inline confirm and the second click performs the PATCH. */
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
+
+  /* Assigned work. Tasks load independently of the agent so a tasks failure
+     never blanks the profile. The assign form POSTs a goal and prepends the
+     returned task; revoked agents (409) and validation (400) surface inline. */
+  const [tasks, setTasks] = useState<TasksState>({ kind: "loading" });
+  const [goal, setGoal] = useState("");
+  const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -205,6 +428,24 @@ export default function AgentProfilePage({
     }
   }, [id]);
 
+  /* Loads the agent's assigned work. A failure collapses to a quiet error state
+     so the section never blanks the page; an empty array is a first-class
+     "no work yet" state, not an error. */
+  const loadTasks = useCallback(async () => {
+    setTasks({ kind: "loading" });
+    try {
+      const res = await fetchWithRefresh(`/api/admin/agents/${id}/tasks`);
+      if (!res.ok) {
+        setTasks({ kind: "error" });
+        return;
+      }
+      const body = (await res.json()) as TasksResponse;
+      setTasks({ kind: "present", tasks: body.tasks ?? [] });
+    } catch {
+      setTasks({ kind: "error" });
+    }
+  }, [id]);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -212,6 +453,10 @@ export default function AgentProfilePage({
   useEffect(() => {
     void loadScan();
   }, [loadScan]);
+
+  useEffect(() => {
+    void loadTasks();
+  }, [loadTasks]);
 
   async function runAction(action: LifecycleAction) {
     setBusy(true);
@@ -234,6 +479,48 @@ export default function AgentProfilePage({
       setError((e as Error).message || "Network error");
     } finally {
       setBusy(false);
+    }
+  }
+
+  /* Assigns a goal. The agent runtime (not this UI) executes the task; here we
+     just hand it the goal and observe. On 201 we prepend the returned task and
+     clear the textarea; 400/404/409 surface inline (409 = revoked agent). */
+  async function assignTask() {
+    const trimmed = goal.trim();
+    if (!trimmed || assigning) return;
+    setAssigning(true);
+    setAssignError(null);
+    try {
+      const res = await fetchWithRefresh(`/api/admin/agents/${id}/tasks`, {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ goal: trimmed }),
+      });
+      if (res.status === 201 || res.ok) {
+        const body = (await res.json()) as TaskResponse;
+        if (body.task) {
+          setTasks((prev) => {
+            const existing = prev.kind === "present" ? prev.tasks : [];
+            return { kind: "present", tasks: [body.task, ...existing] };
+          });
+        }
+        setGoal("");
+        return;
+      }
+      if (res.status === 409) {
+        setAssignError("This agent is revoked and can no longer be assigned work.");
+      } else if (res.status === 404) {
+        setAssignError("This agent no longer exists.");
+      } else if (res.status === 400) {
+        const b = (await res.json().catch(() => ({}))) as { error?: string };
+        setAssignError(b.error || "That goal is not valid. Add an instruction and try again.");
+      } else {
+        setAssignError(`Could not assign work (HTTP ${res.status}).`);
+      }
+    } catch (e) {
+      setAssignError((e as Error).message || "Network error");
+    } finally {
+      setAssigning(false);
     }
   }
 
@@ -701,6 +988,144 @@ export default function AgentProfilePage({
             </>
           );
         })()}
+      </div>
+
+      {/* Assigned work. A human assigns a goal; the agent runtime executes it as
+          governed steps. This UI assigns and observes only: it never auto-runs a
+          task. A blocked task means the OGIAM gate stopped the agent and asked
+          the owner to approve, which is the governance working as intended. */}
+      <div
+        data-testid="agent-tasks-section"
+        style={{
+          marginBottom: "1.5rem",
+          padding: "1.1rem 1.2rem",
+          background: "var(--wp-dark-surface, #1f1f22)",
+          border: "1px solid var(--wp-dark-border, #333)",
+          borderRadius: "8px",
+        }}
+      >
+        <div
+          style={{
+            fontSize: "0.72rem",
+            color: "var(--wp-text-muted, #6b7280)",
+            textTransform: "uppercase",
+            letterSpacing: "0.03em",
+            marginBottom: "0.6rem",
+          }}
+        >
+          Assigned work
+        </div>
+
+        <form
+          data-testid="agent-task-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void assignTask();
+          }}
+          style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "1rem" }}
+        >
+          <textarea
+            data-testid="agent-task-goal"
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            disabled={isRevoked || assigning}
+            rows={3}
+            placeholder={"Describe the work. A numbered list becomes multiple governed steps, e.g.\n1. Find the latest invoice for ACME\n2. Draft a follow-up email"}
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              padding: "0.6rem 0.7rem",
+              background: "var(--wp-dark-surface2, #1a1a1a)",
+              color: "var(--wp-text, #eee)",
+              border: "1px solid var(--wp-dark-border, #333)",
+              borderRadius: "6px",
+              fontSize: "0.85rem",
+              fontFamily: "inherit",
+              resize: "vertical",
+            }}
+          />
+          {assignError && (
+            <div
+              data-testid="agent-task-error"
+              style={{
+                padding: "0.5rem 0.75rem",
+                background: "rgba(239,68,68,0.08)",
+                color: "var(--wp-error, #ef4444)",
+                border: "1px solid var(--wp-error, #ef4444)",
+                borderRadius: "6px",
+                fontSize: "0.8rem",
+              }}
+            >
+              {assignError}
+            </div>
+          )}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "0.72rem", color: "var(--wp-text-muted, #6b7280)" }}>
+              A blocked task means the gate stopped the agent and asked the owner to approve: governance working as intended.
+            </span>
+            <button
+              type="submit"
+              data-testid="agent-task-submit"
+              disabled={isRevoked || assigning || goal.trim().length === 0}
+              style={{
+                flexShrink: 0,
+                padding: "0.5rem 1rem",
+                borderRadius: "6px",
+                fontSize: "0.85rem",
+                fontWeight: 600,
+                background: "var(--wp-dark-surface2, #1a1a1a)",
+                color: "var(--wp-gold, #f1c233)",
+                border: "1px solid var(--wp-gold, #f1c233)",
+                cursor: isRevoked || assigning || goal.trim().length === 0 ? "not-allowed" : "pointer",
+                opacity: isRevoked || assigning || goal.trim().length === 0 ? 0.6 : 1,
+              }}
+            >
+              {assigning ? "Assigning..." : "Assign"}
+            </button>
+          </div>
+        </form>
+
+        {tasks.kind === "loading" && (
+          <div
+            data-testid="agent-tasks-loading"
+            style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}
+          >
+            Loading...
+          </div>
+        )}
+
+        {tasks.kind === "error" && (
+          <div
+            data-testid="agent-tasks-error"
+            style={{ fontSize: "0.85rem", color: "var(--wp-text-muted, #6b7280)" }}
+          >
+            Could not load this agent&apos;s assigned work right now.
+          </div>
+        )}
+
+        {tasks.kind === "present" && tasks.tasks.length === 0 && (
+          <div
+            data-testid="agent-tasks-empty"
+            style={{
+              padding: "1rem",
+              background: "var(--wp-dark-surface2, #1a1a1a)",
+              border: "1px dashed var(--wp-dark-border, #333)",
+              borderRadius: "8px",
+              fontSize: "0.85rem",
+              color: "var(--wp-text-muted, #6b7280)",
+            }}
+          >
+            No work assigned yet.
+          </div>
+        )}
+
+        {tasks.kind === "present" && tasks.tasks.length > 0 && (
+          <ul data-testid="agent-tasks-list" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {tasks.tasks.map((t) => (
+              <TaskRow key={t.id} task={t} />
+            ))}
+          </ul>
+        )}
       </div>
 
       {/* Bridge to the agent's governed activity. The OGIAM explorer, filtered

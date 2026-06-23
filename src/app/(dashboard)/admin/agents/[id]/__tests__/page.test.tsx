@@ -12,10 +12,11 @@ import "@testing-library/jest-dom";
  * is present (pointing at the agent-filtered OGIAM explorer) so an operator can
  * jump to the agent's gated actions.
  *
- * The page fires TWO GETs on mount: the agent fetch (/api/admin/agents/{id})
- * and the self-onboarding scan fetch (/api/admin/agents/{id}/scan). The mock is
- * routed by URL so the scan can be present, absent (404 no_scan), or errored
- * independently of the agent load.
+ * The page fires THREE GETs on mount: the agent fetch (/api/admin/agents/{id}),
+ * the self-onboarding scan fetch (/api/admin/agents/{id}/scan), and the assigned
+ * work fetch (/api/admin/agents/{id}/tasks). It also POSTs to the tasks endpoint
+ * when a human assigns a goal. The mock is routed by URL + method so each can be
+ * present, absent, or errored independently of the others.
  */
 
 const mockFetchWithRefresh = jest.fn();
@@ -89,21 +90,50 @@ function makeScan(over: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+function makeTask(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "task-1",
+    agentId: "ag-1",
+    workspaceId: "default",
+    assignedBy: "u-cto",
+    goal: "Find the latest invoice for ACME",
+    status: "succeeded",
+    steps: [
+      { index: 0, instruction: "Search invoices for ACME", tool: "search_mail", outcome: "ran", detail: null },
+    ],
+    resultSummary: "Found 1 invoice.",
+    createdAt: new Date().toISOString(),
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+    ...over,
+  };
+}
+
 const SCAN_PATH = "/scan";
+const TASKS_PATH = "/tasks";
 
 /**
- * Routes the mock by URL: the page fires the agent GET and the scan GET on
- * mount. `agent` is the response for /api/admin/agents/{id} (and any PATCH),
- * `scan` is the response for /api/admin/agents/{id}/scan.
+ * Routes the mock by URL + method: the page fires the agent GET, the scan GET,
+ * and the tasks GET on mount, plus a tasks POST when a goal is assigned.
+ * `agent` is the response for /api/admin/agents/{id} (and any PATCH), `scan` is
+ * for .../scan, `tasks` is the tasks GET, `onAssign` is the tasks POST.
  */
 function routeByUrl(opts: {
   agent: () => any;
   scan: () => any;
+  tasks?: () => any;
   onPatch?: () => any;
+  onAssign?: () => any;
 }) {
   return (url: unknown, init?: { method?: string }) => {
     const u = String(url);
     if (init?.method === "PATCH" && opts.onPatch) return Promise.resolve(opts.onPatch());
+    if (u.endsWith(TASKS_PATH) && init?.method === "POST") {
+      return Promise.resolve((opts.onAssign ?? (() => mkRes({ task: makeTask() }, { status: 201 })))());
+    }
+    if (u.endsWith(TASKS_PATH)) {
+      return Promise.resolve((opts.tasks ?? (() => mkRes({ tasks: [] })))());
+    }
     if (u.endsWith(SCAN_PATH)) return Promise.resolve(opts.scan());
     return Promise.resolve(opts.agent());
   };
@@ -287,5 +317,149 @@ describe("/admin/agents/[id]: system model (self-onboarding scan)", () => {
       "href",
       "/admin/ogiam?agent=ag-1",
     );
+  });
+});
+
+describe("/admin/agents/[id]: assigned work (tasks)", () => {
+  it("renders the task list with status chips and, when expanded, step outcomes", async () => {
+    const succeeded = makeTask({
+      id: "task-ok",
+      goal: "Find the latest invoice",
+      status: "succeeded",
+      steps: [
+        { index: 0, instruction: "Search invoices", tool: "search_mail", outcome: "ran", detail: null },
+      ],
+      resultSummary: "Found it.",
+    });
+    const blocked = makeTask({
+      id: "task-blk",
+      goal: "Send a follow-up email",
+      status: "blocked",
+      resultSummary: null,
+      steps: [
+        { index: 0, instruction: "Draft email", tool: "draft_mail", outcome: "ran", detail: null },
+        { index: 1, instruction: "Send email", tool: "send_mail", outcome: "blocked", detail: "owner approval required" },
+      ],
+    });
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        tasks: () => mkRes({ tasks: [succeeded, blocked] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-tasks-list")).toBeInTheDocument());
+
+    // Both tasks render with the right status chips.
+    expect(screen.getByTestId("agent-task-task-ok")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-task-task-blk")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-task-status-task-ok")).toHaveTextContent(/succeeded/i);
+    expect(screen.getByTestId("agent-task-status-task-blk")).toHaveTextContent(/blocked/i);
+    expect(screen.queryByTestId("agent-tasks-empty")).not.toBeInTheDocument();
+
+    // Expanding the blocked task reveals a "blocked" step outcome chip.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-task-toggle-task-blk"));
+    });
+    expect(screen.getByTestId("agent-task-steps-task-blk")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-task-task-blk-step-1-outcome")).toHaveTextContent("blocked");
+    expect(screen.getByTestId("agent-task-task-blk-step-0-outcome")).toHaveTextContent("ran");
+  });
+
+  it("shows the empty state when the agent has no assigned work", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        tasks: () => mkRes({ tasks: [] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-tasks-empty")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-tasks-empty")).toHaveTextContent(/no work assigned yet/i);
+    expect(screen.queryByTestId("agent-tasks-list")).not.toBeInTheDocument();
+  });
+
+  it("assigns a goal: POSTs to the tasks endpoint and prepends the returned task", async () => {
+    const created = makeTask({ id: "task-new", goal: "Summarise Q2 numbers", status: "queued", steps: [] });
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        tasks: () => mkRes({ tasks: [] }),
+        onAssign: () => mkRes({ task: created }, { status: 201 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("agent-task-form")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("agent-task-goal"), {
+        target: { value: "Summarise Q2 numbers" },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-task-submit"));
+    });
+
+    // The returned task is prepended to the list.
+    await waitFor(() => expect(screen.getByTestId("agent-task-task-new")).toBeInTheDocument());
+
+    // A POST went to the tasks endpoint with the goal in the body.
+    const post = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).endsWith("/tasks"),
+    );
+    expect(post).toBeTruthy();
+    expect(String(post?.[0])).toContain("/api/admin/agents/ag-1/tasks");
+    const body = JSON.parse((post?.[1] as { body: string }).body);
+    expect(body.goal).toBe("Summarise Q2 numbers");
+
+    // The textarea is cleared after a successful assign.
+    expect(screen.getByTestId("agent-task-goal")).toHaveValue("");
+  });
+
+  it("shows an inline error when assigning to a revoked agent (409)", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        tasks: () => mkRes({ tasks: [] }),
+        onAssign: () => mkRes({ error: "agent_revoked" }, { ok: false, status: 409 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("agent-task-form")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("agent-task-goal"), {
+        target: { value: "Do something" },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-task-submit"));
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-task-error")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-task-error")).toHaveTextContent(/revoked/i);
+    // No task row was added on the failed assign.
+    expect(screen.queryByTestId("agent-tasks-list")).not.toBeInTheDocument();
+    expect(screen.getByTestId("agent-tasks-empty")).toBeInTheDocument();
   });
 });
