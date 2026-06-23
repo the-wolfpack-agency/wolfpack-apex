@@ -7,6 +7,7 @@
 import { runSelfOnboardingScan, AGENT_SCAN_VERSION } from "@/lib/agents/scan";
 import { canInvokeTool } from "@/lib/assistant/tools/gate";
 import { getTools, registerTool, __resetRegistryForTests } from "@/lib/assistant/tools/registry";
+import { AGENT_OPERATIONS } from "@/lib/agents/operations/registry";
 import { z } from "zod";
 
 function tool(name: string, capability: string, mutation = false) {
@@ -58,6 +59,21 @@ describe("runSelfOnboardingScan", () => {
     expect(model.summary.mutationCount).toBe(1);
     expect(model.summary.capabilityCount).toBe(model.capabilities.length);
     expect(Array.isArray(model.capabilities)).toBe(true);
+  });
+
+  it("reports the declarative operations the agent KNOWS, with gate-consistent allowed flags", () => {
+    // create_qr_code is capability "*", so any role is allowed it.
+    const opsModel = runSelfOnboardingScan({ agentId: "a1", role: "ops", workspaceId: "ws" });
+    expect(opsModel.operations).toHaveLength(AGENT_OPERATIONS.length);
+    expect(opsModel.summary.operationCount).toBe(AGENT_OPERATIONS.length);
+    const qr = opsModel.operations.find((o) => o.id === "create_qr_code");
+    expect(qr).toBeDefined();
+    expect(qr?.summary).toMatch(/QR code/i);
+    // Allowed flag matches the SAME gate the dispatcher + executor use.
+    for (const op of opsModel.operations) {
+      expect(op.allowed).toBe(canInvokeTool("ops", op.capability));
+    }
+    expect(qr?.allowed).toBe(true);
   });
 
   it("is deterministic: two scans of the same principal are identical", () => {

@@ -67,6 +67,8 @@ type MintTokenFn = typeof mintOnBehalfToken;
 type ExecuteFormFn = typeof executeFormAction;
 type AutofillFn = typeof autofillForm;
 type OriginFn = typeof resolveInternalOrigin;
+/** Injectable fetch so the on-behalf operation call is stubbable in tests. */
+type FetchFn = typeof fetch;
 
 /**
  * Default owner-role resolver. Reads the OWNER's role + workspace from the
@@ -123,6 +125,13 @@ export interface ExecutorDeps {
   autofill?: AutofillFn;
   /** Resolve the trusted internal origin for server self-calls. */
   origin?: OriginFn;
+  /**
+   * Fetch implementation used for an on-behalf OPERATION call (the declarative
+   * operation registry path). Defaults to the global fetch; tests stub it. The
+   * minted on-behalf token is forwarded as the Authorization header and is
+   * NEVER logged.
+   */
+  fetchImpl?: FetchFn;
 }
 
 export interface RunResult {
@@ -240,6 +249,129 @@ async function executeFormOnBehalf(args: {
   }
 }
 
+/** The operation descriptor an agent-only operation tool surfaces on success. */
+interface OperationSpec {
+  id: string;
+  method: string;
+  path: string;
+  values: Record<string, unknown>;
+  required: string[];
+}
+
+function isEmptyValue(v: unknown): boolean {
+  return v === undefined || v === null || (typeof v === "string" && v.trim() === "");
+}
+
+/**
+ * Execute one declarative platform OPERATION (the operation registry path) AS
+ * THE OWNER. Mirrors executeFormOnBehalf exactly: escalates when a required
+ * field is missing, resolves the OWNER's role (refusing rather than guessing /
+ * elevating on a miss), mints a fresh short-lived on-behalf token carrying the
+ * owner's role, and calls the underlying internal route with that token as the
+ * Authorization bearer. The token is forwarded verbatim and NEVER logged. The
+ * origin is the trusted server origin (never request-derived, CWE-918). Every
+ * failure path (missing field, missing role, thrown mint/fetch, non-2xx) maps to
+ * a typed outcome, so this never throws into the run loop.
+ */
+async function executeOperationOnBehalf(args: {
+  operation: OperationSpec;
+  task: ExecutableTask;
+  deps: {
+    getOwnerRole: GetOwnerRoleFn;
+    mintToken: MintTokenFn;
+    resolveOrigin: OriginFn;
+    fetchImpl: FetchFn;
+  };
+}): Promise<OnBehalfOutcome> {
+  const { operation, task, deps } = args;
+  try {
+    // Required-field gate: an absent required value escalates to the owner
+    // rather than calling the route with an invalid body.
+    const missing = operation.required.filter((f) => isEmptyValue(operation.values[f]));
+    if (missing.length > 0) {
+      return {
+        kind: "blocked",
+        detail: `Agent needs ${missing.join(", ")} to complete ${operation.id}`,
+      };
+    }
+
+    // Resolve the OWNER's authority. Refuse rather than guess a role: a missing
+    // owner identity must not become a default/elevated capability.
+    const owner = await deps.getOwnerRole(task.ownerUserId);
+    if (!owner) {
+      return {
+        kind: "error",
+        detail: `Could not resolve the owner's role to act on their behalf for ${operation.id}.`,
+      };
+    }
+
+    // Mint a FRESH, short-lived delegation token carrying the OWNER's role only
+    // (never elevated). Never logged. The downstream route enforces the owner's
+    // own capabilities.
+    const token = await deps.mintToken({
+      ownerUserId: task.ownerUserId,
+      ownerRole: owner.role,
+      workspaceId: owner.workspaceId,
+      agentId: task.agentId,
+    });
+
+    const method = operation.method.toUpperCase();
+    const res = await deps.fetchImpl(`${deps.resolveOrigin()}${operation.path}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: method === "GET" ? undefined : JSON.stringify(operation.values),
+    });
+
+    if (res.status >= 200 && res.status < 300) {
+      let detail = `Completed ${operation.id} on behalf of the owner.`;
+      try {
+        const body = (await res.json()) as {
+          shortUrl?: unknown;
+          fullRedirectUrl?: unknown;
+          message?: unknown;
+        };
+        const target =
+          typeof body.fullRedirectUrl === "string" && body.fullRedirectUrl.trim()
+            ? body.fullRedirectUrl
+            : typeof body.shortUrl === "string" && body.shortUrl.trim()
+              ? body.shortUrl
+              : undefined;
+        if (target) {
+          detail = `Completed ${operation.id}: ${target}`;
+        } else if (typeof body.message === "string" && body.message.trim()) {
+          detail = body.message;
+        }
+      } catch {
+        /* non-JSON 2xx is still a success; keep the generic summary */
+      }
+      return { kind: "ran", detail };
+    }
+
+    // Non-2xx: include the HTTP status and any { error } body.
+    let detail = `Operation failed (HTTP ${res.status}).`;
+    try {
+      const body = (await res.json()) as { error?: unknown; message?: unknown };
+      const msg =
+        typeof body.error === "string" && body.error.trim()
+          ? body.error
+          : typeof body.message === "string" && body.message.trim()
+            ? body.message
+            : undefined;
+      if (msg) detail = `Operation failed (HTTP ${res.status}): ${msg}`;
+    } catch {
+      /* no JSON body; keep the status-based message */
+    }
+    return { kind: "error", detail };
+  } catch (err) {
+    // A thrown mint / fetch / origin resolution degrades to an error step so the
+    // run records a clear failure and never crashes.
+    return { kind: "error", detail: `On-behalf operation failed: ${(err as Error).message}` };
+  }
+}
+
 export async function runAgentTask(
   task: ExecutableTask,
   deps: ExecutorDeps = {},
@@ -256,6 +388,7 @@ export async function runAgentTask(
   const executeForm = deps.executeForm ?? executeFormAction;
   const autofill = deps.autofill ?? autofillForm;
   const resolveOrigin = deps.origin ?? resolveInternalOrigin;
+  const fetchImpl = deps.fetchImpl ?? fetch;
 
   // Inheritance: reuse a promoted procedure for this goal instead of
   // re-exploring. Best effort: a memory miss or failure falls back to planning.
@@ -476,6 +609,65 @@ export async function runAgentTask(
         steps.push({ index: i, instruction, tool: res.tool, outcome: "ran", detail: truncate(outcome.detail) });
         continue;
       }
+
+      // GENERIC AGENT OPERATION EXECUTION. A successful result that surfaces an
+      // `operation` is a declarative platform call (the operation registry) the
+      // agent should make on its owner's behalf. Like the form path above, no
+      // per-operation code: every operation flows through this one branch, which
+      // mints a fresh owner-scoped on-behalf token and invokes the route. NEW
+      // operations are a few declarative lines in operations/registry.ts.
+      const operation = (r as { operation?: OperationSpec }).operation;
+      if (operation) {
+        const outcome = await executeOperationOnBehalf({
+          operation,
+          task,
+          deps: { getOwnerRole, mintToken, resolveOrigin, fetchImpl },
+        });
+        if (outcome.kind === "blocked") {
+          steps.push({ index: i, instruction, tool: res.tool, outcome: "blocked", detail: truncate(outcome.detail) });
+          blocked = true;
+          try {
+            await notifyOwner({
+              userId: task.ownerUserId,
+              category: "agent",
+              priority: "high",
+              title: "Agent needs your input to finish",
+              body: outcome.detail,
+              actionUrl: `/admin/agents/${task.agentId}`,
+              actionLabel: "Review agent",
+              source: "agent_task",
+              sourceId: task.id,
+              metadata: { agent_id: task.agentId, task_id: task.id, step: i, operation_id: operation.id },
+              dedup: true,
+            });
+          } catch {
+            /* escalation is best effort; the block already stands */
+          }
+          break;
+        }
+        if (outcome.kind === "error") {
+          steps.push({ index: i, instruction, tool: res.tool, outcome: "error", detail: truncate(outcome.detail) });
+          errored = true;
+          break;
+        }
+        // Ran on behalf of the owner. One analytics row per delegated operation
+        // so no on-behalf execution is lost to the learning loop.
+        try {
+          trackEvent("agent.acted", task.agentId, task.role, {
+            agent_id: task.agentId,
+            tool: res.tool,
+            allowed: true,
+            on_behalf_of_owner: true,
+            operation_id: operation.id,
+            task_id: task.id,
+          });
+        } catch {
+          /* telemetry is best effort; the operation already ran */
+        }
+        steps.push({ index: i, instruction, tool: res.tool, outcome: "ran", detail: truncate(outcome.detail) });
+        continue;
+      }
+
       steps.push({ index: i, instruction, tool: res.tool, outcome: "ran", detail: truncate((r as { answer: string }).answer) });
     } else {
       // A tool-level failure (not a gate block) is a real error: record it and

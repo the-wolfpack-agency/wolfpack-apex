@@ -58,6 +58,12 @@ export async function tryDispatchTool(
        privilege-escalation path). */
     if (ctx.agentPrincipal && tool.humanOnly) continue;
 
+    /* The inverse: agent-only tools (the declarative operation registry) are
+       never invoked by a HUMAN caller. A human's "create a QR code" must reach
+       the real product UI, not this on-behalf delegation path, so skip and let
+       the instruction fall through to a human-facing tool / the LLM. */
+    if (!ctx.agentPrincipal && tool.agentOnly) continue;
+
     const started = Date.now();
     const result = await runOneTool(tool, params, ctx);
     const durationMs = Date.now() - started;

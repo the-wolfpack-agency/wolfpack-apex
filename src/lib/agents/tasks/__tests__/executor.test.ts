@@ -279,6 +279,202 @@ describe("runAgentTask", () => {
   });
 });
 
+describe("on-behalf OPERATION execution (declarative operation registry)", () => {
+  /** A success result carrying an operation descriptor (what an op_<id> tool
+   *  returns). The executor must invoke it on the owner's behalf. */
+  function opResult(values: Record<string, unknown>, required: string[]) {
+    return {
+      tool: "op_create_qr_code",
+      result: {
+        ok: true as const,
+        data: { operation_id: "create_qr_code" },
+        answer: "Executing: Create a QR code linked to a URL.",
+        sources: [],
+        operation: {
+          id: "create_qr_code",
+          method: "POST",
+          path: "/api/qr",
+          values,
+          required,
+        },
+      },
+      durationMs: 1,
+    };
+  }
+
+  it("mints an on-behalf token and fetches POST /api/qr with the owner Bearer + values (ran on 200)", async () => {
+    const dispatch = jest
+      .fn()
+      .mockResolvedValueOnce(
+        opResult({ targetUrl: "https://ogiam.com", label: "AGENT1" }, ["targetUrl"]),
+      );
+    const getOwnerRole = jest.fn().mockResolvedValue({ role: "dev", workspaceId: "ws-1" });
+    const mintToken = jest.fn().mockResolvedValue("onbehalf-op-token");
+    const fetchImpl = jest.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: { slug: "abc" },
+          shortUrl: "/q/abc",
+          fullRedirectUrl: "https://wolfpack-instinct.vercel.app/q/abc",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const out = await runAgentTask(
+      { ...task, goal: "Create a QR code titled AGENT1 that is linked to ogiam.com" },
+      {
+        dispatch: dispatch as never,
+        notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+        getOwnerRole: getOwnerRole as never,
+        mintToken: mintToken as never,
+        origin: (() => "https://internal.example") as never,
+        fetchImpl: fetchImpl as never,
+      },
+    );
+
+    expect(out.status).toBe("succeeded");
+    expect(out.steps[0].outcome).toBe("ran");
+    // A success line surfaces the redirect URL from the QR response.
+    expect(out.steps[0].detail).toMatch(/q\/abc/);
+
+    // Owner role drove the token, never elevated.
+    expect(getOwnerRole).toHaveBeenCalledWith("owner-1");
+    expect(mintToken).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerUserId: "owner-1", ownerRole: "dev", workspaceId: "ws-1", agentId: "agent-1" }),
+    );
+
+    // The route was called with the owner Bearer + the extracted values.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe("https://internal.example/api/qr");
+    expect(init.method).toBe("POST");
+    expect(init.headers.Authorization).toBe("Bearer onbehalf-op-token");
+    expect(JSON.parse(init.body)).toEqual({
+      targetUrl: "https://ogiam.com",
+      label: "AGENT1",
+    });
+
+    // One agent.acted analytics row for the delegated operation.
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "agent.acted",
+      "agent-1",
+      "ops",
+      expect.objectContaining({ on_behalf_of_owner: true, operation_id: "create_qr_code" }),
+    );
+  });
+
+  it("ERRORS (not succeeds) when the route returns non-2xx, including the status + body error", async () => {
+    const dispatch = jest
+      .fn()
+      .mockResolvedValueOnce(opResult({ targetUrl: "https://ogiam.com" }, ["targetUrl"]));
+    const fetchImpl = jest.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "targetUrl is required" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const out = await runAgentTask(
+      { ...task, goal: "Create a QR code linked to ogiam.com" },
+      {
+        dispatch: dispatch as never,
+        notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+        getOwnerRole: jest.fn().mockResolvedValue({ role: "dev", workspaceId: "ws-1" }) as never,
+        mintToken: jest.fn().mockResolvedValue("tok") as never,
+        origin: (() => "https://internal.example") as never,
+        fetchImpl: fetchImpl as never,
+      },
+    );
+    expect(out.status).toBe("failed");
+    expect(out.steps[0].outcome).toBe("error");
+    expect(out.steps[0].detail).toMatch(/400/);
+    expect(out.steps[0].detail).toMatch(/targetUrl is required/);
+  });
+
+  it("BLOCKS + notifies the owner when a required field is missing (no route call, no token)", async () => {
+    const dispatch = jest
+      .fn()
+      .mockResolvedValueOnce(opResult({ label: "AGENT1" }, ["targetUrl"]));
+    const notifyOwner = jest.fn().mockResolvedValue({ id: "n1" });
+    const mintToken = jest.fn();
+    const fetchImpl = jest.fn();
+    const out = await runAgentTask(
+      { ...task, goal: "Create a QR code titled AGENT1" },
+      {
+        dispatch: dispatch as never,
+        notifyOwner: notifyOwner as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+        getOwnerRole: jest.fn().mockResolvedValue({ role: "dev", workspaceId: "ws-1" }) as never,
+        mintToken: mintToken as never,
+        origin: (() => "https://internal.example") as never,
+        fetchImpl: fetchImpl as never,
+      },
+    );
+    expect(out.status).toBe("blocked");
+    expect(out.steps[0].outcome).toBe("blocked");
+    expect(mintToken).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(notifyOwner).toHaveBeenCalledTimes(1);
+    expect(notifyOwner.mock.calls[0][0].body).toMatch(/targetUrl/);
+  });
+
+  it("ERRORS without elevation when the owner role cannot be resolved (no token, no call)", async () => {
+    const dispatch = jest
+      .fn()
+      .mockResolvedValueOnce(opResult({ targetUrl: "https://ogiam.com" }, ["targetUrl"]));
+    const getOwnerRole = jest.fn().mockResolvedValue(null);
+    const mintToken = jest.fn();
+    const fetchImpl = jest.fn();
+    const out = await runAgentTask(
+      { ...task, goal: "Create a QR code linked to ogiam.com" },
+      {
+        dispatch: dispatch as never,
+        notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+        getOwnerRole: getOwnerRole as never,
+        mintToken: mintToken as never,
+        origin: (() => "https://internal.example") as never,
+        fetchImpl: fetchImpl as never,
+      },
+    );
+    expect(out.status).toBe("failed");
+    expect(out.steps[0].outcome).toBe("error");
+    expect(out.steps[0].detail).toMatch(/owner's role/);
+    // No elevation: never minted a token, never called the route.
+    expect(mintToken).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("ERRORS (never throws into the loop) when the fetch throws", async () => {
+    const dispatch = jest
+      .fn()
+      .mockResolvedValueOnce(opResult({ targetUrl: "https://ogiam.com" }, ["targetUrl"]));
+    const fetchImpl = jest.fn().mockRejectedValue(new Error("network down"));
+    const out = await runAgentTask(
+      { ...task, goal: "Create a QR code linked to ogiam.com" },
+      {
+        dispatch: dispatch as never,
+        notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+        getOwnerRole: jest.fn().mockResolvedValue({ role: "dev", workspaceId: "ws-1" }) as never,
+        mintToken: jest.fn().mockResolvedValue("tok") as never,
+        origin: (() => "https://internal.example") as never,
+        fetchImpl: fetchImpl as never,
+      },
+    );
+    expect(out.status).toBe("failed");
+    expect(out.steps[0].outcome).toBe("error");
+    expect(out.steps[0].detail).toMatch(/network down/);
+  });
+});
+
 describe("cumulative memory inheritance", () => {
   it("reuses a promoted procedure and does NOT relearn it", async () => {
     const dispatch = jest.fn().mockResolvedValue(ran("read_status", "ok"));

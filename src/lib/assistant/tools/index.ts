@@ -180,6 +180,16 @@ import "./feedback";
    with chats, emails, calendar, and knowledge. */
 import "./search";
 
+/* Declarative AGENT OPERATION tools, registered LAST, AFTER every curated
+   human-facing tool, so a typed tool still wins the intent cascade for humans.
+   Each operation in src/lib/agents/operations/registry.ts becomes an
+   `op_<id>` tool with NO per-function handler code. They are `agentOnly`: the
+   dispatcher skips them for a human caller (who uses the real product UI), so
+   they only fire on an autonomous agent run and are invoked on the owner's
+   behalf through the existing on-behalf delegation token. Importing the factory
+   triggers its module-load registration. */
+import "@/lib/agents/operations/tool-factory";
+
 export { tryDispatchTool } from "./dispatcher";
 export { getTools, getToolByName, registerTool, __resetRegistryForTests } from "./registry";
 export type {

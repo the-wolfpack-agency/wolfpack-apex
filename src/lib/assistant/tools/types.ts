@@ -139,6 +139,27 @@ export interface ToolSuccess<R> {
    *  tools so the user can act inside the chat (click a day, click
    *  out to a detail page) instead of leaving for another app. */
   widget?: WidgetSpec;
+  /**
+   * Set by an AGENT-ONLY operation tool (tool-factory.ts). Declares a platform
+   * operation the agent should now invoke ON THE OWNER'S BEHALF: the HTTP
+   * method + path of an existing internal route, the extracted field values,
+   * and the required field names. The agent executor mints a fresh short-lived
+   * on-behalf token carrying the OWNER's role and calls the route, mirroring the
+   * generic on-behalf FORM path. Absent on every human-facing tool result; a
+   * human never sees this because operation tools are `agentOnly`.
+   */
+  operation?: {
+    /** The operation id (e.g. "create_qr_code"), for analytics + audit. */
+    id: string;
+    /** HTTP method of the underlying internal route. */
+    method: string;
+    /** Path of the underlying internal route, e.g. "/api/qr". */
+    path: string;
+    /** Extracted field values to send as the request body (or query). */
+    values: Record<string, unknown>;
+    /** Names of the fields the operation requires (gate execution). */
+    required: string[];
+  };
 }
 
 /** Failed tool dispatch — explicit failure code so the caller can react. */
@@ -185,6 +206,16 @@ export interface ToolDef<P, R> {
    * prevents agent-to-agent delegation chains, a privilege-escalation path.
    */
   humanOnly?: boolean;
+  /**
+   * Agent-only tools are invocable ONLY by an agent principal. The dispatcher
+   * skips them for a HUMAN caller, who uses the real product UI for the same
+   * action instead. Operation tools (the declarative agent operation registry,
+   * src/lib/agents/operations) are agent-only: they exist so an autonomous agent
+   * can drive a platform route on its owner's behalf without per-function
+   * handler code, but they must never fire on a human assistant turn (a human's
+   * "create a QR code" should reach the real QR UI, not this delegation path).
+   */
+  agentOnly?: boolean;
   /**
    * Intent classifier — return parsed params when the message looks
    * like a call to this tool, else null. Regex-based + zero-token.
