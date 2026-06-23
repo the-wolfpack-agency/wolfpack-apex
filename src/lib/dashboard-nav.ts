@@ -44,6 +44,12 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Budgets", href: "/programs/budgets", icon: "M3 10h18M7 15h2m4 0h4m-7 4h.01M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
   { label: "Clients", href: "/clients", icon: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" },
   { label: "HR", href: "/hr", roles: ["ceo", "cto", "evp", "hr"], icon: "M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" },
+  /* Agents: the governed agentic workforce (OGIAM). AI principals onboarded,
+     scanned, and delegated to like teammates. Gated to the roles that hold
+     settings.manage_team (the same gate the /admin/agents routes enforce), so
+     only team managers see it. Placed by HR because an agent is onboarded the
+     way a hire is. */
+  { label: "Agents", href: "/admin/agents", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m16-6h2m-2 6h2M7 7h10v10H7V7zm3 3h4v4h-4z" },
   { label: "Financials", href: "/financials", roles: ["ceo", "cto", "evp"], icon: "M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
   { label: "Analytics", href: "/analytics", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
   { label: "Tools", href: "/tools", icon: "M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l5.653-4.655m2.588 2.588l6.294-6.294a2.25 2.25 0 00-3.182-3.182l-6.294 6.294m2.588 2.588l-2.588-2.588" },

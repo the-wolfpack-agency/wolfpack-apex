@@ -162,6 +162,7 @@ function routeByUrl(opts: {
   tasks?: () => any;
   onPatch?: () => any;
   onAssign?: () => any;
+  onScan?: () => any;
   drift?: () => any;
   onBaseline?: () => any;
   onDriftCheck?: () => any;
@@ -169,6 +170,11 @@ function routeByUrl(opts: {
   return (url: unknown, init?: { method?: string }) => {
     const u = String(url);
     if (init?.method === "PATCH" && opts.onPatch) return Promise.resolve(opts.onPatch());
+    // The manager-triggered scan POSTs to .../scan; route it before the generic
+    // scan GET suffix below so the GET loader and the POST trigger stay distinct.
+    if (u.endsWith(SCAN_PATH) && init?.method === "POST") {
+      return Promise.resolve((opts.onScan ?? (() => mkRes({ ok: true, summary: {}, scan_version: "v1", tool_count: 0 })))());
+    }
     // Drift-check is checked before the generic /drift suffix below because
     // ".../drift-check" does not end with "/drift" but is method POST.
     if (u.endsWith(DRIFT_CHECK_PATH) && init?.method === "POST") {
@@ -373,6 +379,98 @@ describe("/admin/agents/[id]: system model (self-onboarding scan)", () => {
       "href",
       "/admin/ogiam?agent=ag-1",
     );
+  });
+});
+
+describe("/admin/agents/[id]: run onboarding scan", () => {
+  it("renders the Run-scan button when the agent has no scan yet (pending)", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent({ scanStatus: "pending" }) }),
+        scan: () => mkRes({ error: "no_scan" }, { ok: false, status: 404 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-scan-empty")).toBeInTheDocument());
+    const btn = screen.getByTestId("agent-run-scan");
+    expect(btn).toHaveTextContent(/run onboarding scan/i);
+    // The helper note explains what the scan does and how to delegate after.
+    expect(screen.getByTestId("agent-run-scan-note")).toHaveTextContent(/introspects the platform/i);
+    expect(screen.getByTestId("agent-run-scan-note")).toHaveTextContent(/delegate work from the Assistant/i);
+  });
+
+  it("clicking Run scan POSTs to the scan endpoint, then refetches scan + agent so the System model appears", async () => {
+    // Before the scan: no scan, agent pending. After: a model with tools and the
+    // agent flips to scanStatus "complete".
+    let scanned = false;
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent({ scanStatus: scanned ? "complete" : "pending" }) }),
+        scan: () =>
+          scanned
+            ? mkRes({ scan: makeScan() })
+            : mkRes({ error: "no_scan" }, { ok: false, status: 404 }),
+        onScan: () => {
+          scanned = true;
+          return mkRes({ ok: true, summary: {}, scan_version: "v1", tool_count: 3 });
+        },
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("agent-run-scan")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-scan-status")).toHaveTextContent(/pending/i);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-run-scan"));
+    });
+
+    // A POST went to the scan endpoint.
+    const post = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).endsWith("/scan"),
+    );
+    expect(post).toBeTruthy();
+    expect(String(post?.[0])).toContain("/api/admin/agents/ag-1/scan");
+
+    // The refetched scan renders the System model and the agent's scan status flips.
+    await waitFor(() => expect(screen.getByTestId("agent-scan-summary")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-scan-tools")).toHaveTextContent("search_mail");
+    expect(screen.getByTestId("agent-scan-status")).toHaveTextContent(/complete/i);
+    // Once complete, the control offers a re-run rather than a first run.
+    expect(screen.getByTestId("agent-run-scan")).toHaveTextContent(/re-run scan/i);
+  });
+
+  it("surfaces the must-be-active message on a 409 and does not blank the page", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent({ state: "paused", scanStatus: "pending" }) }),
+        scan: () => mkRes({ error: "no_scan" }, { ok: false, status: 404 }),
+        onScan: () => mkRes({ error: "agent_not_active" }, { ok: false, status: 409 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("agent-run-scan")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-run-scan"));
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-run-scan-error")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-run-scan-error")).toHaveTextContent(/must be active/i);
+    // The rest of the profile still renders: a failed scan never blanks it.
+    expect(screen.getByTestId("agent-name")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-scan-empty")).toBeInTheDocument();
   });
 });
 

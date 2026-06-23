@@ -417,6 +417,13 @@ export default function AgentProfilePage({
   const { id } = use(params);
   const [agent, setAgent] = useState<AgentRecord | null>(null);
   const [scan, setScan] = useState<ScanState>({ kind: "loading" });
+  /* Manager-triggered self-onboarding scan. The scan is normally agent-initiated;
+     this control lets a manager kick it from the dashboard and watch the System
+     model populate. Busy disables the button while the POST is in flight; the
+     error is a quiet inline message (e.g. 409 = agent must be active) that never
+     blanks the section. */
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -655,6 +662,41 @@ export default function AgentProfilePage({
       /* loadDrift surfaces the quiet error state; nothing more to do here. */
     } finally {
       setDriftBusy(false);
+    }
+  }
+
+  /* Triggers the agent's self-onboarding scan. The agent introspects the platform
+     and learns the tools it can use plus its capability ceiling. On 200 we refetch
+     BOTH the scan (so the System model box renders the learned tools) and the agent
+     (so SCAN STATUS flips to Complete). A 409 means the agent is paused or revoked
+     and must be active to scan; other errors surface quietly without blanking. */
+  async function runScan() {
+    if (scanBusy) return;
+    setScanBusy(true);
+    setScanError(null);
+    try {
+      const res = await fetchWithRefresh(`/api/admin/agents/${id}/scan`, {
+        method: "POST",
+        headers: jsonHeaders(),
+      });
+      if (res.status === 409) {
+        setScanError("This agent must be active to run an onboarding scan. Resume it first.");
+        return;
+      }
+      if (res.status === 404) {
+        setScanError("This agent no longer exists.");
+        return;
+      }
+      if (!res.ok) {
+        setScanError(`Could not run the onboarding scan (HTTP ${res.status}).`);
+        return;
+      }
+      await loadScan();
+      await load();
+    } catch (e) {
+      setScanError((e as Error).message || "Network error");
+    } finally {
+      setScanBusy(false);
     }
   }
 
@@ -991,6 +1033,64 @@ export default function AgentProfilePage({
         >
           System model
         </div>
+
+        {/* Manager-triggered scan. Shown whenever the scan is absent so a manager
+            can kick the agent's self-onboarding from the dashboard; once a scan is
+            present we offer a re-run. The agent must be active to scan (409). */}
+        {(scan.kind === "absent" || scan.kind === "present") && (
+          <div
+            data-testid="agent-run-scan-controls"
+            style={{ marginBottom: "0.8rem" }}
+          >
+            <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
+              <button
+                type="button"
+                data-testid="agent-run-scan"
+                onClick={() => void runScan()}
+                disabled={scanBusy}
+                style={{
+                  padding: "0.5rem 1rem",
+                  borderRadius: "6px",
+                  fontSize: "0.85rem",
+                  fontWeight: 600,
+                  background: "var(--wp-dark-surface2, #1a1a1a)",
+                  color: "var(--wp-gold, #f1c233)",
+                  border: "1px solid var(--wp-gold, #f1c233)",
+                  cursor: scanBusy ? "not-allowed" : "pointer",
+                  opacity: scanBusy ? 0.6 : 1,
+                }}
+              >
+                {scanBusy
+                  ? "Scanning..."
+                  : scan.kind === "present"
+                    ? "Re-run scan"
+                    : "Run onboarding scan"}
+              </button>
+            </div>
+            <div
+              data-testid="agent-run-scan-note"
+              style={{ marginTop: "0.45rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #6b7280)", lineHeight: 1.4 }}
+            >
+              The agent introspects the platform and learns the tools it can use and its capability ceiling. After it completes you can delegate work from the Assistant by typing the agent&apos;s name followed by an instruction.
+            </div>
+            {scanError && (
+              <div
+                data-testid="agent-run-scan-error"
+                style={{
+                  marginTop: "0.5rem",
+                  padding: "0.5rem 0.75rem",
+                  background: "rgba(239,68,68,0.08)",
+                  color: "var(--wp-error, #ef4444)",
+                  border: "1px solid var(--wp-error, #ef4444)",
+                  borderRadius: "6px",
+                  fontSize: "0.8rem",
+                }}
+              >
+                {scanError}
+              </div>
+            )}
+          </div>
+        )}
 
         {scan.kind === "loading" && (
           <div
