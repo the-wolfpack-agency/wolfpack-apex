@@ -932,6 +932,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/agents/act/route.ts",
     reason: "agent governed action: every dispatched step is deterministically authorized and recorded per-decision in the hash-chained OGIAM decision ledger attributed to the agent principal, which IS the agent-action audit trail; agent.acted analytics",
   },
+  {
+    route: "src/app/api/agents/run-tasks/route.ts",
+    reason: "agent runtime: every dispatched step is authorized and recorded per-decision in the hash-chained OGIAM ledger attributed to the agent, and task completion fires agent.task_completed; the endpoint orchestrates, it does not itself mutate domain state",
+  },
 ];
 
 export const AUDIT_ALLOWLIST_ROUTES: ReadonlySet<string> = new Set(
