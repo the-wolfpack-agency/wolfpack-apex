@@ -68,6 +68,16 @@ export interface ToolContext {
     workspaceId: string;
     ownerUserId: string;
   };
+  /**
+   * The human OWNER an agent is acting for in this dispatch. Set by the agent
+   * executor (to `task.ownerUserId`) so a tool that builds owner-scoped options
+   * (e.g. the create-task form's list dropdown) reads the OWNER's data, not the
+   * agent's. Absent on a normal human turn; in that case tools fall back to
+   * `userId`. This is identity only; it never widens authority. The on-behalf
+   * delegation token (minted at execution time) carries the owner's role and is
+   * what the downstream route enforces.
+   */
+  onBehalfOfUserId?: string;
   /** User's email (optional — present when the auth layer surfaced it). */
   userEmail?: string;
   /**

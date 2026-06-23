@@ -1,21 +1,20 @@
 /**
- * create_task_form, agent path. An autonomous agent cannot fill a UI form, so
- * when dispatched by an agent principal the tool EXECUTES the create on behalf
- * of the owner (writes to the owner's Microsoft To-Do) instead of returning a
- * form. A human caller still gets the form. Graceful: a missing title, a
- * disconnected owner mailbox, or a Graph error degrade to a clear ok:false the
- * governed executor records as a failed step (never a false "succeeded").
+ * create_task_form, agent path (post-generic-execution).
+ *
+ * The bespoke per-tool "createTaskAsAgent" path is GONE. The tool now always
+ * returns a FormSpec; the generic agent executor auto-fills it and executes it
+ * on the owner's behalf. The one tool-level responsibility that remains is that
+ * when an agent dispatches it, the form's list dropdown is built with the
+ * OWNER's writable To-Do lists (via ctx.onBehalfOfUserId), so the form carries a
+ * real default listId the executor can submit. A human caller (no
+ * onBehalfOfUserId) gets the form built with their own lists.
  */
 
 const mockListCachedTaskLists = jest.fn();
-const mockListTaskLists = jest.fn();
-const mockCreateTask = jest.fn();
 const mockTrackEvent = jest.fn();
 
 jest.mock("@/lib/integrations/microsoft-tasks", () => ({
   listCachedTaskLists: (...a: unknown[]) => mockListCachedTaskLists(...a),
-  listTaskLists: (...a: unknown[]) => mockListTaskLists(...a),
-  createTask: (...a: unknown[]) => mockCreateTask(...a),
 }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrackEvent(...a) }));
 jest.mock("@/lib/db", () => ({ safeQuery: jest.fn() }));
@@ -26,81 +25,78 @@ const agentCtx = {
   userId: "agent-1",
   userRole: "dev",
   workspaceId: "ws1",
+  onBehalfOfUserId: "owner-9",
   agentPrincipal: { agentId: "agent-1", role: "dev", workspaceId: "ws1", ownerUserId: "owner-9" },
 };
 const humanCtx = { userId: "u1", userRole: "cto", workspaceId: "ws1" };
 
 beforeEach(() => {
   mockListCachedTaskLists.mockReset();
-  mockListTaskLists.mockReset();
-  mockCreateTask.mockReset();
   mockTrackEvent.mockReset();
 });
 
-describe("agent on-behalf-of-owner task creation", () => {
-  test("creates the task in the owner's first writable list and returns no form", async () => {
+describe("create_task_form built for the effective (owner) user", () => {
+  test("agent dispatch builds the form with the OWNER's writable lists + a real default", async () => {
     mockListCachedTaskLists.mockResolvedValue([
-      { id: "u-3", msListId: "CCCC", displayName: "Flagged Emails" },
+      { id: "u-3", msListId: "CCCC", displayName: "Flagged Emails" }, // read-only, skipped
       { id: "u-1", msListId: "AAAA", displayName: "Tasks" },
     ]);
-    mockCreateTask.mockResolvedValue({ id: "local-1", msTaskId: "m-1", title: "Agent1 TEST" });
 
     const r = await createTaskFormTool.handler({ title: "Agent1 TEST" }, agentCtx);
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.form).toBeUndefined(); // a real create, not a form
-    // Owner identity + first WRITABLE list (Flagged Emails skipped).
+    // It returns the form (the generic executor handles execution).
+    expect(r.form).toBeDefined();
+    // Built for the OWNER, not the agent identity.
     expect(mockListCachedTaskLists).toHaveBeenCalledWith("owner-9");
-    expect(mockCreateTask).toHaveBeenCalledWith("owner-9", "AAAA", { title: "Agent1 TEST" });
-    expect(r.answer).toMatch(/Created task "Agent1 TEST"/);
+    // The list dropdown carries the owner's first WRITABLE list as the default
+    // (Flagged Emails filtered out), so the executor submits a real listId.
+    const listField = r.form!.fields.find((f) => f.name === "listId");
+    expect(listField?.type).toBe("select");
+    expect(listField?.defaultValue).toBe("AAAA");
+    // Title prefill flows through.
+    const titleField = r.form!.fields.find((f) => f.name === "title");
+    expect(titleField?.defaultValue).toBe("Agent1 TEST");
   });
 
-  test("missing title fails gracefully and never calls createTask", async () => {
-    const r = await createTaskFormTool.handler({}, agentCtx);
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.code).toBe("validation");
-    expect(mockCreateTask).not.toHaveBeenCalled();
-  });
-
-  test("falls back to LIVE Graph lists when the cache is empty", async () => {
-    mockListCachedTaskLists.mockResolvedValue([]); // cache empty (common for a fresh agent)
-    mockListTaskLists.mockResolvedValue([{ id: "GRAPH-1", displayName: "Tasks" }]);
-    mockCreateTask.mockResolvedValue({ id: "local-1", msTaskId: "m-1" });
-    const r = await createTaskFormTool.handler({ title: "Live List Task" }, agentCtx);
-    expect(r.ok).toBe(true);
-    expect(mockListTaskLists).toHaveBeenCalledWith("owner-9");
-    expect(mockCreateTask).toHaveBeenCalledWith("owner-9", "GRAPH-1", { title: "Live List Task" });
-  });
-
-  test("owner with no list anywhere fails gracefully", async () => {
-    mockListCachedTaskLists.mockResolvedValue([{ id: "u-3", msListId: "CCCC", displayName: "Flagged Emails" }]);
-    mockListTaskLists.mockResolvedValue([]);
-    const r = await createTaskFormTool.handler({ title: "X" }, agentCtx);
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.code).toBe("internal");
-    expect(r.message).toMatch(/Microsoft To-Do/);
-    expect(mockCreateTask).not.toHaveBeenCalled();
-  });
-
-  test("an unconnected owner (401) returns an actionable connect-Microsoft message", async () => {
-    mockListCachedTaskLists.mockResolvedValue([]);
-    mockListTaskLists.mockRejectedValue(new Error("No valid Microsoft token for user"));
-    const r = await createTaskFormTool.handler({ title: "X" }, agentCtx);
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.message).toMatch(/not connected to Microsoft/i);
-    expect(mockCreateTask).not.toHaveBeenCalled();
-  });
-
-  test("a human caller still gets the form, never creates directly", async () => {
-    mockListCachedTaskLists.mockResolvedValue([{ id: "u-1", msListId: "AAAA", displayName: "Tasks" }]);
+  test("a human caller builds the form with their OWN lists", async () => {
+    mockListCachedTaskLists.mockResolvedValue([{ id: "u-1", msListId: "HUMN", displayName: "Tasks" }]);
     const r = await createTaskFormTool.handler({ title: "X" }, humanCtx);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.form).toBeDefined();
-    expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(mockListCachedTaskLists).toHaveBeenCalledWith("u1");
+    const listField = r.form!.fields.find((f) => f.name === "listId");
+    expect(listField?.defaultValue).toBe("HUMN");
+  });
+
+  test("empty owner lists still returns a (text) listId form, with no crash", async () => {
+    mockListCachedTaskLists.mockResolvedValue([]);
+    const r = await createTaskFormTool.handler({ title: "X" }, agentCtx);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.form).toBeDefined();
+    const listField = r.form!.fields.find((f) => f.name === "listId");
+    // No options -> the spec falls back to a text input the executor will report
+    // as missing-required (the executor then blocks + notifies the owner).
+    expect(listField?.type).toBe("text");
+    expect(listField?.defaultValue).toBeUndefined();
+  });
+
+  test("a cache failure degrades to an empty-list form instead of throwing", async () => {
+    mockListCachedTaskLists.mockRejectedValue(new Error("db down"));
+    const r = await createTaskFormTool.handler({ title: "X" }, agentCtx);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.form).toBeDefined();
+  });
+
+  test("fires the form_offered analytics event flagged on_behalf_of_owner for an agent dispatch", async () => {
+    mockListCachedTaskLists.mockResolvedValue([{ id: "u-1", msListId: "AAAA", displayName: "Tasks" }]);
+    await createTaskFormTool.handler({ title: "X" }, agentCtx);
+    const call = mockTrackEvent.mock.calls.find((c) => c[0] === "assistant.form_offered");
+    expect(call).toBeDefined();
+    expect(call?.[3]).toEqual(expect.objectContaining({ form_kind: "create_task", on_behalf_of_owner: true }));
   });
 });

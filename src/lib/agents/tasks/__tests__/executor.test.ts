@@ -122,27 +122,149 @@ describe("runAgentTask", () => {
     expect(out.status).toBe("failed");
   });
 
-  it("FAILS a step that only returned a form (an agent cannot fill a form)", async () => {
-    /* Regression: a form-trigger tool (create_task_form) returns ok:true with a
-       form and no side effect. The agent used to record that as "ran", so the
-       task showed "Succeeded" while nothing was created. */
+  it("EXECUTES a form step on behalf of the owner (ran), via on-behalf token + shared executor", async () => {
+    /* The generic agent path: a form-returning tool (create_task_form) is
+       auto-filled from the instruction and executed AS THE OWNER through a
+       freshly minted, short-lived on-behalf token + the shared form executor.
+       A 2xx response counts as a real "ran" step (replaces the old
+       "form -> error" behavior). */
     const formResult = {
       tool: "create_task_form",
-      result: { ok: true as const, data: {}, answer: "Fill in the task below.", form: { kind: "create_task", fields: [] }, sources: [] },
+      result: {
+        ok: true as const,
+        data: { formKind: "create_task" },
+        answer: "Fill in the task below.",
+        form: {
+          formKind: "create_task",
+          fields: [
+            { name: "title", label: "Title", type: "text", required: true },
+            { name: "listId", label: "List", type: "select", required: true, defaultValue: "LIST-A" },
+          ],
+        },
+        sources: [],
+      },
       durationMs: 1,
     };
     const dispatch = jest.fn().mockResolvedValueOnce(formResult);
+    const getOwnerRole = jest.fn().mockResolvedValue({ role: "dev", workspaceId: "ws-1" });
+    const mintToken = jest.fn().mockResolvedValue("onbehalf-token-xyz");
+    const executeForm = jest.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, message: 'Created task "Doctors Appointment".' }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
     const out = await runAgentTask(
       { ...task, goal: "add a task titled Doctors Appointment" },
       {
         dispatch: dispatch as never, notifyOwner: jest.fn() as never,
         lookupProcedure: jest.fn().mockResolvedValue(null) as never,
         recordProcedure: jest.fn() as never,
+        getOwnerRole: getOwnerRole as never,
+        mintToken: mintToken as never,
+        executeForm: executeForm as never,
+        origin: (() => "https://internal.example") as never,
+      },
+    );
+
+    expect(out.status).toBe("succeeded");
+    expect(out.steps[0].outcome).toBe("ran");
+    // The owner's role drove the token (never elevated).
+    expect(getOwnerRole).toHaveBeenCalledWith("owner-1");
+    expect(mintToken).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerUserId: "owner-1", ownerRole: "dev", workspaceId: "ws-1", agentId: "agent-1" }),
+    );
+    // The shared executor ran with the on-behalf bearer + auto-filled values.
+    expect(executeForm).toHaveBeenCalledTimes(1);
+    const [kind, values, ctx] = executeForm.mock.calls[0];
+    expect(kind).toBe("create_task");
+    expect(values).toEqual(expect.objectContaining({ title: "Doctors Appointment", listId: "LIST-A" }));
+    expect(ctx.authHeader).toBe("Bearer onbehalf-token-xyz");
+    expect(ctx.origin).toBe("https://internal.example");
+  });
+
+  it("BLOCKS + notifies the owner when the form has a required field it cannot fill", async () => {
+    const formResult = {
+      tool: "create_task_form",
+      result: {
+        ok: true as const,
+        data: { formKind: "create_task" },
+        answer: "Fill in the task below.",
+        form: {
+          formKind: "create_task",
+          fields: [
+            { name: "title", label: "Title", type: "text", required: true },
+            // No default and not extractable from the instruction -> missing.
+            { name: "listId", label: "List", type: "text", required: true },
+          ],
+        },
+        sources: [],
+      },
+      durationMs: 1,
+    };
+    const dispatch = jest.fn().mockResolvedValueOnce(formResult);
+    const notifyOwner = jest.fn().mockResolvedValue({ id: "n1" });
+    const executeForm = jest.fn();
+    const out = await runAgentTask(
+      { ...task, goal: "add a task" },
+      {
+        dispatch: dispatch as never, notifyOwner: notifyOwner as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+        getOwnerRole: jest.fn().mockResolvedValue({ role: "dev", workspaceId: "ws-1" }) as never,
+        mintToken: jest.fn() as never,
+        executeForm: executeForm as never,
+      },
+    );
+
+    expect(out.status).toBe("blocked");
+    expect(out.steps[0].outcome).toBe("blocked");
+    // Never executed the action when input is missing.
+    expect(executeForm).not.toHaveBeenCalled();
+    // Owner was notified about the missing input.
+    expect(notifyOwner).toHaveBeenCalledTimes(1);
+    const arg = notifyOwner.mock.calls[0][0];
+    expect(arg.userId).toBe("owner-1");
+    expect(arg.body).toMatch(/listId/);
+  });
+
+  it("ERRORS a form step (not succeeds) when the on-behalf execution returns non-2xx", async () => {
+    const formResult = {
+      tool: "create_task_form",
+      result: {
+        ok: true as const,
+        data: { formKind: "create_task" },
+        answer: "Fill in the task below.",
+        form: {
+          formKind: "create_task",
+          fields: [{ name: "title", label: "Title", type: "text", required: true }],
+        },
+        sources: [],
+      },
+      durationMs: 1,
+    };
+    const dispatch = jest.fn().mockResolvedValueOnce(formResult);
+    const executeForm = jest.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: false, code: "auth", message: "Microsoft account not connected." }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const out = await runAgentTask(
+      { ...task, goal: "add a task titled Demo" },
+      {
+        dispatch: dispatch as never, notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+        getOwnerRole: jest.fn().mockResolvedValue({ role: "dev", workspaceId: "ws-1" }) as never,
+        mintToken: jest.fn().mockResolvedValue("tok") as never,
+        executeForm: executeForm as never,
       },
     );
     expect(out.status).toBe("failed");
     expect(out.steps[0].outcome).toBe("error");
-    expect(out.steps[0].detail).toMatch(/form/i);
+    expect(out.steps[0].detail).toMatch(/Microsoft account not connected/);
   });
 
   it("fails safe when a dispatch throws", async () => {

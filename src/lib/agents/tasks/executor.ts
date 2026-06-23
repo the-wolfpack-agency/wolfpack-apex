@@ -15,6 +15,15 @@
 import { tryDispatchTool } from "@/lib/assistant/tools/dispatcher";
 import { notify } from "@/lib/notifications/in-app";
 import { trackEvent } from "@/lib/analytics";
+import { safeQuery } from "@/lib/db";
+import { mintOnBehalfToken } from "@/lib/agents/on-behalf";
+import { autofillForm } from "@/lib/agents/forms/autofill";
+import {
+  executeFormAction,
+  KNOWN_FORM_KINDS,
+} from "@/lib/assistant/forms/execute";
+import type { FormKind, FormSpec } from "@/lib/assistant/forms/types";
+import { resolveInternalOrigin } from "@/lib/qr/origin";
 import {
   findPromotedProcedure,
   recordLearnedProcedure,
@@ -48,6 +57,36 @@ type GroundFn = typeof groundFromBrain;
 type SelectModelFn = typeof selectModel;
 type LogModelSelectionFn = typeof logModelSelection;
 
+/** The owner's authority for a delegated (on-behalf) execution. */
+export interface OwnerIdentity {
+  role: string;
+  workspaceId: string;
+}
+type GetOwnerRoleFn = (ownerUserId: string) => Promise<OwnerIdentity | null>;
+type MintTokenFn = typeof mintOnBehalfToken;
+type ExecuteFormFn = typeof executeFormAction;
+type AutofillFn = typeof autofillForm;
+type OriginFn = typeof resolveInternalOrigin;
+
+/**
+ * Default owner-role resolver. Reads the OWNER's role + workspace from the
+ * team-members table by id. NEVER elevates: the on-behalf token carries exactly
+ * this role, so the downstream route enforces the owner's own capabilities. A
+ * miss (no row / db down) returns null so the executor fails the step with a
+ * clear error rather than guessing a role.
+ */
+async function defaultGetOwnerRole(
+  ownerUserId: string,
+): Promise<OwnerIdentity | null> {
+  const { rows } = await safeQuery<{ role: string; workspace_id: string | null }>(
+    `SELECT role, workspace_id FROM instinct_team_members WHERE id = $1 AND is_active = true`,
+    [ownerUserId],
+  );
+  const row = rows[0];
+  if (!row || !row.role) return null;
+  return { role: row.role, workspaceId: row.workspace_id ?? "default" };
+}
+
 export interface ExecutorDeps {
   dispatch?: DispatchFn;
   notifyOwner?: NotifyFn;
@@ -73,6 +112,17 @@ export interface ExecutorDeps {
    * insist on a specific model; absent means pure cost-based selection.
    */
   agentPin?: string;
+  /* ---- On-behalf form execution deps (all stubbable for tests) ---- */
+  /** Resolve the OWNER's role + workspace by id. Never elevated. */
+  getOwnerRole?: GetOwnerRoleFn;
+  /** Mint the short-lived on-behalf delegation token. */
+  mintToken?: MintTokenFn;
+  /** Drive the shared form executor with the minted token. */
+  executeForm?: ExecuteFormFn;
+  /** Deterministic form auto-fill from the instruction. */
+  autofill?: AutofillFn;
+  /** Resolve the trusted internal origin for server self-calls. */
+  origin?: OriginFn;
 }
 
 export interface RunResult {
@@ -97,6 +147,99 @@ function isGateBlock(result: { ok: boolean; code?: string; message?: string }): 
   );
 }
 
+/** Outcome of a single on-behalf form execution. */
+type OnBehalfOutcome =
+  | { kind: "ran"; detail: string }
+  | { kind: "blocked"; detail: string }
+  | { kind: "error"; detail: string };
+
+/**
+ * Execute one form action AS THE OWNER. Auto-fills the form, escalates when a
+ * required field is missing, resolves the owner's role (never elevated), mints a
+ * fresh short-lived on-behalf token, and drives the shared form executor. Every
+ * failure path (missing role, thrown mint, thrown execute, non-2xx response)
+ * degrades to a typed outcome, so this never throws into the run loop.
+ */
+async function executeFormOnBehalf(args: {
+  form: FormSpec;
+  formKind: FormKind;
+  instruction: string;
+  parsedParams?: Record<string, unknown>;
+  task: ExecutableTask;
+  deps: {
+    getOwnerRole: GetOwnerRoleFn;
+    mintToken: MintTokenFn;
+    executeForm: ExecuteFormFn;
+    autofill: AutofillFn;
+    resolveOrigin: OriginFn;
+  };
+}): Promise<OnBehalfOutcome> {
+  const { form, formKind, instruction, parsedParams, task, deps } = args;
+  try {
+    const { values, missingRequired } = deps.autofill(form, instruction, parsedParams);
+    if (missingRequired.length > 0) {
+      return {
+        kind: "blocked",
+        detail: `Agent needs ${missingRequired.join(", ")} to complete ${formKind}`,
+      };
+    }
+
+    // Resolve the OWNER's authority. Refuse rather than guess a role: a missing
+    // owner identity must not become a default/elevated capability.
+    const owner = await deps.getOwnerRole(task.ownerUserId);
+    if (!owner) {
+      return {
+        kind: "error",
+        detail: `Could not resolve the owner's role to act on their behalf for ${formKind}.`,
+      };
+    }
+
+    // Mint a FRESH, short-lived delegation token per action (lib default TTL).
+    // The token carries the OWNER's role only (never elevated) and is never
+    // logged. The shared executor forwards it verbatim; the downstream route
+    // enforces the owner's own capabilities.
+    const token = await deps.mintToken({
+      ownerUserId: task.ownerUserId,
+      ownerRole: owner.role,
+      workspaceId: owner.workspaceId,
+      agentId: task.agentId,
+    });
+
+    const res = await deps.executeForm(formKind, values, {
+      origin: deps.resolveOrigin(),
+      authHeader: `Bearer ${token}`,
+      extra: { workspaceId: owner.workspaceId },
+    });
+
+    if (res.status >= 200 && res.status < 300) {
+      let message = `Completed ${formKind} on behalf of the owner.`;
+      try {
+        const body = (await res.json()) as { message?: unknown };
+        if (typeof body.message === "string" && body.message.trim()) {
+          message = body.message;
+        }
+      } catch {
+        /* non-JSON 2xx is still a success; keep the generic summary */
+      }
+      return { kind: "ran", detail: message };
+    }
+
+    // Non-2xx: surface the executor's typed failure message when present.
+    let detail = `Action failed (HTTP ${res.status}).`;
+    try {
+      const body = (await res.json()) as { message?: unknown };
+      if (typeof body.message === "string" && body.message.trim()) detail = body.message;
+    } catch {
+      /* no JSON body; keep the status-based message */
+    }
+    return { kind: "error", detail };
+  } catch (err) {
+    // A thrown mint / executeForm / origin resolution degrades to an error step
+    // so the run records a clear failure and never crashes.
+    return { kind: "error", detail: `On-behalf execution failed: ${(err as Error).message}` };
+  }
+}
+
 export async function runAgentTask(
   task: ExecutableTask,
   deps: ExecutorDeps = {},
@@ -108,6 +251,11 @@ export async function runAgentTask(
   const ground = deps.ground ?? groundFromBrain;
   const chooseModel = deps.selectModel ?? selectModel;
   const recordModelChoice = deps.logModelSelection ?? logModelSelection;
+  const getOwnerRole = deps.getOwnerRole ?? defaultGetOwnerRole;
+  const mintToken = deps.mintToken ?? mintOnBehalfToken;
+  const executeForm = deps.executeForm ?? executeFormAction;
+  const autofill = deps.autofill ?? autofillForm;
+  const resolveOrigin = deps.origin ?? resolveInternalOrigin;
 
   // Inheritance: reuse a promoted procedure for this goal instead of
   // re-exploring. Best effort: a memory miss or failure falls back to planning.
@@ -142,6 +290,7 @@ export async function runAgentTask(
     userId: string;
     userRole: string;
     workspaceId: string;
+    onBehalfOfUserId: string;
     agentPrincipal: {
       agentId: string;
       role: string;
@@ -153,6 +302,10 @@ export async function runAgentTask(
     userId: task.agentId,
     userRole: task.role,
     workspaceId: task.workspaceId,
+    // A form-returning tool builds its owner-scoped options (e.g. the To-Do list
+    // dropdown) for the OWNER, so the form carries a real default the generic
+    // executor can submit on the owner's behalf.
+    onBehalfOfUserId: task.ownerUserId,
     agentPrincipal: {
       agentId: task.agentId,
       role: task.role,
@@ -244,14 +397,84 @@ export async function runAgentTask(
     }
 
     if (r.ok) {
-      // A successful result that only surfaces a FORM did no real work: a form
-      // exists to collect human input, and an agent cannot fill or submit one.
-      // Treat it as a needs-human failure, never a silent "ran" (the bug where
-      // "add a task" returned a form to nobody and the task was never created).
-      if ((r as { form?: unknown }).form) {
-        steps.push({ index: i, instruction, tool: res.tool, outcome: "error", detail: "this step needs a human to complete a form; an agent cannot submit it" });
-        errored = true;
-        break;
+      // GENERIC AGENT FORM EXECUTION. A successful result that surfaces a FORM
+      // is a structured action a human would normally fill + submit. An agent
+      // cannot click a UI, so we auto-fill the form deterministically from the
+      // instruction and execute it AS THE OWNER through the secure on-behalf
+      // token + the shared form executor. No per-workflow code: every
+      // form-returning tool flows through this one path. (Replaces the old
+      // "form -> error" honesty branch: the action now actually runs.)
+      const form = (r as { form?: FormSpec }).form;
+      const dataFormKind = (r as { data?: { formKind?: unknown } }).data?.formKind;
+      if (form) {
+        const formKind =
+          typeof dataFormKind === "string" ? dataFormKind : form.formKind;
+        if (!KNOWN_FORM_KINDS.includes(formKind as FormKind)) {
+          steps.push({ index: i, instruction, tool: res.tool, outcome: "error", detail: truncate(`unsupported form kind for agent execution: ${String(formKind)}`) });
+          errored = true;
+          break;
+        }
+        const outcome = await executeFormOnBehalf({
+          form,
+          formKind: formKind as FormKind,
+          instruction,
+          // The dispatcher's result does not expose the tool's parsed params, so
+          // we pass undefined; the FormSpec defaults + the deterministic
+          // instruction extraction still cover the common cases (e.g. title).
+          parsedParams: undefined,
+          task,
+          deps: {
+            getOwnerRole,
+            mintToken,
+            executeForm,
+            autofill,
+            resolveOrigin,
+          },
+        });
+        if (outcome.kind === "blocked") {
+          steps.push({ index: i, instruction, tool: res.tool, outcome: "blocked", detail: truncate(outcome.detail) });
+          blocked = true;
+          try {
+            await notifyOwner({
+              userId: task.ownerUserId,
+              category: "agent",
+              priority: "high",
+              title: "Agent needs your input to finish",
+              body: outcome.detail,
+              actionUrl: `/admin/agents/${task.agentId}`,
+              actionLabel: "Review agent",
+              source: "agent_task",
+              sourceId: task.id,
+              metadata: { agent_id: task.agentId, task_id: task.id, step: i, form_kind: formKind },
+              dedup: true,
+            });
+          } catch {
+            /* escalation is best effort; the block already stands */
+          }
+          break;
+        }
+        if (outcome.kind === "error") {
+          steps.push({ index: i, instruction, tool: res.tool, outcome: "error", detail: truncate(outcome.detail) });
+          errored = true;
+          break;
+        }
+        // Ran on behalf of the owner. One analytics row per delegated action so
+        // no on-behalf execution is lost to the learning loop. agent.acted is
+        // the existing event for "the agent drove a tool dispatch as itself".
+        try {
+          trackEvent("agent.acted", task.agentId, task.role, {
+            agent_id: task.agentId,
+            tool: res.tool,
+            allowed: true,
+            on_behalf_of_owner: true,
+            form_kind: formKind,
+            task_id: task.id,
+          });
+        } catch {
+          /* telemetry is best effort; the action already ran */
+        }
+        steps.push({ index: i, instruction, tool: res.tool, outcome: "ran", detail: truncate(outcome.detail) });
+        continue;
       }
       steps.push({ index: i, instruction, tool: res.tool, outcome: "ran", detail: truncate((r as { answer: string }).answer) });
     } else {
