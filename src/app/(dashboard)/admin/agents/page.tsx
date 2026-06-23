@@ -244,22 +244,40 @@ export default function AgentsPage() {
         <h1 style={{ margin: 0, fontSize: "1.5rem", color: "var(--wp-gold, #f1c233)" }}>
           Agents
         </h1>
-        <button
-          type="button"
-          onClick={() => void load()}
-          disabled={loading}
-          style={{
-            background: "var(--wp-dark-surface2, #1a1a1a)",
-            color: "var(--wp-text-dim, #aaa)",
-            border: "1px solid var(--wp-dark-border, #333)",
-            borderRadius: "6px",
-            padding: "0.4rem 0.9rem",
-            fontSize: "0.85rem",
-            cursor: loading ? "not-allowed" : "pointer",
-          }}
-        >
-          {loading ? "Loading..." : "Refresh"}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <Link
+            href="/admin/agents/memory"
+            data-testid="agents-memory-link"
+            title="What the agents have learned: the shared procedures one agent records and another inherits."
+            style={{
+              background: "var(--wp-dark-surface2, #1a1a1a)",
+              color: "var(--wp-gold, #f1c233)",
+              border: "1px solid var(--wp-gold, #f1c233)",
+              borderRadius: "6px",
+              padding: "0.4rem 0.9rem",
+              fontSize: "0.85rem",
+              textDecoration: "none",
+            }}
+          >
+            Shared memory
+          </Link>
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            style={{
+              background: "var(--wp-dark-surface2, #1a1a1a)",
+              color: "var(--wp-text-dim, #aaa)",
+              border: "1px solid var(--wp-dark-border, #333)",
+              borderRadius: "6px",
+              padding: "0.4rem 0.9rem",
+              fontSize: "0.85rem",
+              cursor: loading ? "not-allowed" : "pointer",
+            }}
+          >
+            {loading ? "Loading..." : "Refresh"}
+          </button>
+        </div>
       </div>
       <p style={{ color: "var(--wp-text-dim, #aaa)", margin: "0 0 1.5rem 0", fontSize: "0.9rem" }}>
         These are AI principals, governed by OGIAM and onboarded like teammates.

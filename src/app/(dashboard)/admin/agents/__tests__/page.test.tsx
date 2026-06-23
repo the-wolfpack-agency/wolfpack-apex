@@ -90,6 +90,21 @@ describe("/admin/agents: roster", () => {
     expect(screen.getByTestId("admin-agents-page")).toHaveTextContent(/OGIAM/i);
   });
 
+  it("links to the shared agent-memory view", async () => {
+    mockFetchWithRefresh.mockResolvedValue(mkRes({ agents: [] }));
+
+    await act(async () => {
+      render(<AgentsPage />);
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("agents-memory-link")).toBeInTheDocument(),
+    );
+    const link = screen.getByTestId("agents-memory-link");
+    expect(link).toHaveTextContent(/shared memory/i);
+    expect(link).toHaveAttribute("href", "/admin/agents/memory");
+  });
+
   it("renders the empty state when there are no agents", async () => {
     mockFetchWithRefresh.mockResolvedValue(mkRes({ agents: [] }));
 

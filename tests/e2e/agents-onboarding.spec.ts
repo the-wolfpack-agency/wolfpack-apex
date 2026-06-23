@@ -89,6 +89,57 @@ test.describe("Agent-principal onboarding, roster reality check", () => {
     ).toEqual([]);
   });
 
+  test("/admin/agents/memory renders the shared-memory list-or-empty state cleanly", async ({
+    page,
+  }) => {
+    // The shared agent-memory view is what one agent learns and another
+    // inherits: promoted procedures are reusable, quarantined ones wait for the
+    // safety check. This is a render-only reality check: it never promotes or
+    // rejects (no overrides in e2e), so prod memory is not mutated.
+    const snapshot = collectConsoleAndNetworkFailures(page);
+    const nav = await page.goto(`${target.baseUrl}/admin/agents/memory`, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+    expect(nav?.status(), "/admin/agents/memory loads (not 401/blank)").toBe(200);
+
+    // The page is not blank: the title is rendered.
+    const bodyText = (
+      await page.locator("body").innerText().catch(() => "")
+    ).toLowerCase();
+    expect(
+      bodyText.includes("agent memory"),
+      "the agent-memory page is not blank",
+    ).toBe(true);
+
+    // Either the memory list or the explicit empty state is in the DOM, never a
+    // silent blank. One of the two testids is always present.
+    const list = page.getByTestId("memory-list");
+    const empty = page.getByTestId("memory-empty");
+    const listCount = await list.count();
+    const emptyCount = await empty.count();
+    expect(
+      listCount + emptyCount,
+      "the memory list or the empty-state testid is rendered",
+    ).toBeGreaterThan(0);
+
+    // The status filter mounts so an operator can scope to promoted/quarantined.
+    await expect(
+      page.getByTestId("memory-filter"),
+      "the status filter is present",
+    ).toBeVisible({ timeout: 8_000 });
+
+    // No CSP or network failures during the 3s idle window.
+    await page.waitForTimeout(3_000);
+    const failures = snapshot();
+    expect(
+      failures,
+      `CSP/network failures on /admin/agents/memory:\n${failures
+        .map((f) => `  - [${f.kind}] ${f.detail}`)
+        .join("\n")}`,
+    ).toEqual([]);
+  });
+
   test("an agent profile, when one exists, renders its system-model scan section cleanly", async ({
     page,
   }) => {
