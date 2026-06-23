@@ -34,6 +34,7 @@ import { getUserFromRequest } from "@/lib/auth";
 import { signToken } from "@/lib/crypto/sign";
 import { safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 const BOT_EMAIL = "agenticqa-bot@thewolfpack.agency";
 const BOT_NAME = "AgenticQA Health Bot";
@@ -100,6 +101,28 @@ export async function POST(req: NextRequest) {
     view: "provision.health_bot",
     bot_user_id: botId,
   });
+
+  /* Provisioning a service principal grants a capability and mints a
+     long-lived credential, a security-relevant admin action. Hash-chain
+     it: who provisioned, which bot, which capability. Never record the
+     token material. Best-effort; an audit failure must not break the
+     provisioning response. */
+  try {
+    await recordAudit({
+      actor: { user_id: user.id, role: user.role },
+      action: "admin.service_principal_provisioned",
+      resourceType: "team_member",
+      resourceId: botId,
+      afterState: {
+        bot_email: BOT_EMAIL,
+        capability_granted: PROBE_CAPABILITY,
+        token_ttl_days: TOKEN_TTL_DAYS,
+      },
+      ...extractRequestMetadata(req),
+    });
+  } catch (err) {
+    console.error("[provision-health-bot audit]", (err as Error).message);
+  }
 
   return NextResponse.json({
     token,

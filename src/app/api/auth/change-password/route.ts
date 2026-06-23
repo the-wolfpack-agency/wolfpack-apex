@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest, hashPassword, verifyPassword } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 const MIN_LEN = 8;
 
@@ -85,5 +86,22 @@ export async function POST(req: NextRequest) {
   }
 
   trackEvent("system.password_changed", user.id, user.role, { method: "self_service" });
+
+  /* Credential change is a security-relevant event, so hash-chain it. The
+     password material is never recorded; only the actor + that a change
+     occurred. recordAudit is best-effort and must not fail the request. */
+  try {
+    await recordAudit({
+      actor: { user_id: user.id, role: user.role },
+      action: "auth.password_changed",
+      resourceType: "team_member",
+      resourceId: user.id,
+      afterState: { method: "self_service" },
+      ...extractRequestMetadata(req),
+    });
+  } catch (err) {
+    console.error("[change-password audit]", (err as Error).message);
+  }
+
   return NextResponse.json({ ok: true });
 }

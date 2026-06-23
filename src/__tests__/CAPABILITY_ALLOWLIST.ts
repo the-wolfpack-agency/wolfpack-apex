@@ -37,6 +37,24 @@ export const CAPABILITY_ALLOWLIST: readonly string[] = [
   "src/app/api/admin/audit-log/route.ts",
   "src/app/api/admin/audit-log/verify/route.ts",
 
+  // OAuth provider callback: no session capability gate by design. The
+  // signed HMAC state token (workspace, provider, nonce, exp) is verified
+  // here and implicitly proves the requester passed the /start route's
+  // settings.manage_team check. There is no JWT on a provider redirect.
+  "src/app/api/admin/connectors/oauth/[provider]/callback/route.ts",
+
+  // Admin insights + registry reads: authenticate the caller inline via
+  // getUserFromRequest + an explicit ceo/cto/evp role check (the same
+  // inline admin pattern used across the insights/* surface). Not gated by
+  // requireCapability, but genuinely authorized.
+  "src/app/api/admin/insights/unmet-intents/route.ts",
+  "src/app/api/admin/templates/route.ts",
+
+  // Provision health bot: authenticates inline via getUserFromRequest +
+  // an explicit ceo/cto-only role check before minting the service token.
+  // Real auth via the same inline admin pattern as the insights routes.
+  "src/app/api/admin/provision-health-bot/route.ts",
+
   // MS Tasks routes: owned by the tasks stream (migration 018). Should
   // migrate to `requireCapability('tasks.*')` when that stream lands.
   "src/app/api/tasks/[id]/complete/route.ts",

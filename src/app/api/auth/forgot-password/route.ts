@@ -22,6 +22,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes, createHash, randomUUID } from "crypto";
 import { safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import {
   buildResetUrl,
   sendResetEmail,
@@ -143,6 +144,25 @@ export async function forgotFlow(
     email_known: true,
     shadow: false,
   });
+
+  /* A password-reset token was issued for a real account: a
+     security-relevant credential-recovery event. Hash-chain it keyed to
+     the member, never the token material. Best-effort: an audit failure
+     must not break the (enumeration-safe) response. The no-member path
+     above returns before here, so no row is written when the email is
+     unknown, preserving enumeration safety. */
+  try {
+    await recordAudit({
+      actor: { user_id: member.id, role: "anon" },
+      action: "auth.password_reset_requested",
+      resourceType: "team_member",
+      resourceId: member.id,
+      afterState: { reset_id: id },
+      ...extractRequestMetadata(req),
+    });
+  } catch (err) {
+    console.error("[forgot-password audit]", (err as Error).message);
+  }
 
   const resetUrl = buildResetUrl(token);
   const result = await sendResetEmail(
