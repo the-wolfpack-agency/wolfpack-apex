@@ -10,6 +10,7 @@
     "start": "next start",
     "lint": "eslint",
     "handoff": "node scripts/handoff-scaffold.mjs",
+    "proof:agents": "node scripts/agent-workforce-proof.mjs",
     "verify": "bash scripts/verify.sh",
     "test:e2e:smoke": "playwright test tests/e2e/smoke.spec.ts --config=playwright.config.ts",
     "test:e2e:prod": "PROD_URL=${PROD_URL:-https://wolfpack-instinct.vercel.app} playwright test tests/e2e/ --config=playwright.config.ts",
