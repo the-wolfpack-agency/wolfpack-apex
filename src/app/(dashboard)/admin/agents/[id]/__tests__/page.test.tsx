@@ -12,11 +12,14 @@ import "@testing-library/jest-dom";
  * is present (pointing at the agent-filtered OGIAM explorer) so an operator can
  * jump to the agent's gated actions.
  *
- * The page fires THREE GETs on mount: the agent fetch (/api/admin/agents/{id}),
- * the self-onboarding scan fetch (/api/admin/agents/{id}/scan), and the assigned
- * work fetch (/api/admin/agents/{id}/tasks). It also POSTs to the tasks endpoint
- * when a human assigns a goal. The mock is routed by URL + method so each can be
- * present, absent, or errored independently of the others.
+ * The page fires FOUR GETs on mount: the agent fetch (/api/admin/agents/{id}),
+ * the self-onboarding scan fetch (/api/admin/agents/{id}/scan), the assigned
+ * work fetch (/api/admin/agents/{id}/tasks), and the behavior+drift fetch
+ * (/api/admin/agents/{id}/drift). It also POSTs to the tasks endpoint when a
+ * human assigns a goal, to .../baseline when an operator captures a baseline,
+ * and to .../drift-check when an operator runs a drift check now. The mock is
+ * routed by URL + method so each can be present, absent, or errored
+ * independently of the others.
  */
 
 const mockFetchWithRefresh = jest.fn();
@@ -109,14 +112,49 @@ function makeTask(over: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+function makeBaseline(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    metrics: {
+      count: 42,
+      blockRate: 0.1,
+      tierDist: { low: 30, high: 12 },
+      outcomeDist: { ran: 38, blocked: 4 },
+      toolDist: { search_mail: 20, create_event: 22 },
+    },
+    decisionCount: 42,
+    capturedAt: new Date().toISOString(),
+    ...over,
+  };
+}
+
+function makeDriftEvent(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "drift-1",
+    agentId: "ag-1",
+    driftScore: 0.12,
+    verdict: "stable",
+    action: "none",
+    createdAt: new Date().toISOString(),
+    ...over,
+  };
+}
+
 const SCAN_PATH = "/scan";
 const TASKS_PATH = "/tasks";
+const DRIFT_PATH = "/drift";
+const BASELINE_PATH = "/baseline";
+const DRIFT_CHECK_PATH = "/drift-check";
 
 /**
  * Routes the mock by URL + method: the page fires the agent GET, the scan GET,
- * and the tasks GET on mount, plus a tasks POST when a goal is assigned.
- * `agent` is the response for /api/admin/agents/{id} (and any PATCH), `scan` is
- * for .../scan, `tasks` is the tasks GET, `onAssign` is the tasks POST.
+ * the tasks GET, and the drift GET on mount, plus a tasks POST when a goal is
+ * assigned, a baseline POST when a baseline is set, and a drift-check POST when
+ * a drift check is run. `agent` is the response for /api/admin/agents/{id} (and
+ * any PATCH), `scan` is for .../scan, `tasks` is the tasks GET, `onAssign` is
+ * the tasks POST, `drift` is the drift GET, `onBaseline` is the baseline POST,
+ * `onDriftCheck` is the drift-check POST. The drift GET can be made dynamic
+ * (e.g. to return a new baseline/event after a POST) by having `drift` close
+ * over mutable test state.
  */
 function routeByUrl(opts: {
   agent: () => any;
@@ -124,10 +162,28 @@ function routeByUrl(opts: {
   tasks?: () => any;
   onPatch?: () => any;
   onAssign?: () => any;
+  drift?: () => any;
+  onBaseline?: () => any;
+  onDriftCheck?: () => any;
 }) {
   return (url: unknown, init?: { method?: string }) => {
     const u = String(url);
     if (init?.method === "PATCH" && opts.onPatch) return Promise.resolve(opts.onPatch());
+    // Drift-check is checked before the generic /drift suffix below because
+    // ".../drift-check" does not end with "/drift" but is method POST.
+    if (u.endsWith(DRIFT_CHECK_PATH) && init?.method === "POST") {
+      return Promise.resolve(
+        (opts.onDriftCheck ?? (() => mkRes({ result: { verdict: "stable", score: 0.1, action: "none" } })))(),
+      );
+    }
+    if (u.endsWith(BASELINE_PATH) && init?.method === "POST") {
+      return Promise.resolve((opts.onBaseline ?? (() => mkRes({ baseline: makeBaseline() }, { status: 201 })))());
+    }
+    if (u.endsWith(DRIFT_PATH)) {
+      return Promise.resolve(
+        (opts.drift ?? (() => mkRes({ baseline: null, events: [], latest: null })))(),
+      );
+    }
     if (u.endsWith(TASKS_PATH) && init?.method === "POST") {
       return Promise.resolve((opts.onAssign ?? (() => mkRes({ task: makeTask() }, { status: 201 })))());
     }
@@ -461,5 +517,188 @@ describe("/admin/agents/[id]: assigned work (tasks)", () => {
     // No task row was added on the failed assign.
     expect(screen.queryByTestId("agent-tasks-list")).not.toBeInTheDocument();
     expect(screen.getByTestId("agent-tasks-empty")).toBeInTheDocument();
+  });
+});
+
+describe("/admin/agents/[id]: behavior and drift", () => {
+  it("renders a stable status, the baseline, and the drift event history", async () => {
+    const baseline = makeBaseline({ decisionCount: 42 });
+    const stable = makeDriftEvent({ id: "drift-stable", verdict: "stable", driftScore: 0.08, action: "none" });
+    const drifting = makeDriftEvent({ id: "drift-amber", verdict: "drifting", driftScore: 0.41, action: "none" });
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        drift: () =>
+          mkRes({ baseline, events: [stable, drifting], latest: stable }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-drift-status")).toBeInTheDocument());
+
+    // Status line reflects the latest verdict + score.
+    const status = screen.getByTestId("agent-drift-status");
+    expect(status).toHaveTextContent(/stable/i);
+    expect(status).toHaveTextContent("0.08");
+
+    // Baseline info reflects capture + decision count.
+    const baselineEl = screen.getByTestId("agent-drift-baseline");
+    expect(baselineEl).toHaveTextContent(/baseline captured/i);
+    expect(baselineEl).toHaveTextContent("42 decisions");
+    expect(baselineEl).toHaveTextContent(/normal behavior/i);
+
+    // Both events render in the history with their verdicts.
+    const events = screen.getByTestId("agent-drift-events");
+    expect(events).toBeInTheDocument();
+    expect(screen.getByTestId("agent-drift-event-drift-stable")).toHaveTextContent(/stable/i);
+    expect(screen.getByTestId("agent-drift-event-drift-amber")).toHaveTextContent(/drifting/i);
+    expect(screen.getByTestId("agent-drift-event-drift-amber")).toHaveTextContent("0.41");
+
+    // No paused note when the latest action is "none".
+    expect(screen.queryByTestId("agent-drift-paused-note")).not.toBeInTheDocument();
+    // The empty state must not show when events are present.
+    expect(screen.queryByTestId("agent-drift-empty")).not.toBeInTheDocument();
+  });
+
+  it("shows the no-baseline state and the empty history when the agent has neither", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        drift: () => mkRes({ baseline: null, events: [], latest: null }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-drift-baseline")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-drift-baseline")).toHaveTextContent(/no baseline yet/i);
+    expect(screen.getByTestId("agent-drift-status")).toHaveTextContent(/no checks yet/i);
+    expect(screen.getByTestId("agent-drift-empty")).toHaveTextContent(/no drift checks recorded yet/i);
+    expect(screen.queryByTestId("agent-drift-events")).not.toBeInTheDocument();
+  });
+
+  it("Set baseline POSTs to the baseline endpoint and refetches the drift view", async () => {
+    // The drift GET is dynamic: null before the baseline POST, present after.
+    let hasBaseline = false;
+    const captured = makeBaseline({ decisionCount: 17 });
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        drift: () =>
+          hasBaseline
+            ? mkRes({ baseline: captured, events: [], latest: null })
+            : mkRes({ baseline: null, events: [], latest: null }),
+        onBaseline: () => {
+          hasBaseline = true;
+          return mkRes({ baseline: captured }, { status: 201 });
+        },
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("agent-set-baseline")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-drift-baseline")).toHaveTextContent(/no baseline yet/i);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-set-baseline"));
+    });
+
+    // A POST went to the baseline endpoint.
+    const post = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).endsWith("/baseline"),
+    );
+    expect(post).toBeTruthy();
+    expect(String(post?.[0])).toContain("/api/admin/agents/ag-1/baseline");
+
+    // The refetched drift view now shows the captured baseline.
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-drift-baseline")).toHaveTextContent(/baseline captured/i),
+    );
+    expect(screen.getByTestId("agent-drift-baseline")).toHaveTextContent("17 decisions");
+  });
+
+  it("Check drift now POSTs, and when the result is a pause, the UI reflects the auto-pause", async () => {
+    // Before the check: active agent, stable, no events. After the check: a
+    // critical paused event and the agent flips to paused (auto-pause).
+    let checked = false;
+    const baseline = makeBaseline();
+    const pausedEvent = makeDriftEvent({
+      id: "drift-crit",
+      verdict: "critical",
+      driftScore: 0.92,
+      action: "paused",
+    });
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent({ state: checked ? "paused" : "active" }) }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        drift: () =>
+          checked
+            ? mkRes({ baseline, events: [pausedEvent], latest: pausedEvent })
+            : mkRes({ baseline, events: [], latest: null }),
+        onDriftCheck: () => {
+          checked = true;
+          return mkRes({ result: { verdict: "critical", score: 0.92, action: "paused" } });
+        },
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("agent-check-drift")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-state-chip")).toHaveTextContent("active");
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-check-drift"));
+    });
+
+    // A POST went to the drift-check endpoint.
+    const post = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).endsWith("/drift-check"),
+    );
+    expect(post).toBeTruthy();
+    expect(String(post?.[0])).toContain("/api/admin/agents/ag-1/drift-check");
+
+    // The auto-pause is reflected: the lifecycle state chip flips to paused
+    // (the agent was refetched) and the drift section shows the paused note.
+    await waitFor(() => expect(screen.getByTestId("agent-drift-paused-note")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-drift-paused-note")).toHaveTextContent(/auto-paused for drift/i);
+    expect(screen.getByTestId("agent-state-chip")).toHaveTextContent("paused");
+    expect(screen.getByTestId("agent-drift-status")).toHaveTextContent(/critical/i);
+    expect(screen.getByTestId("agent-drift-event-drift-crit")).toHaveTextContent(/critical/i);
+  });
+
+  it("collapses to a quiet error state when the drift fetch fails", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        drift: () => mkRes({}, { ok: false, status: 500 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-drift-error")).toBeInTheDocument());
+    // The rest of the profile still renders: a drift failure never blanks it.
+    expect(screen.getByTestId("agent-name")).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-drift-status")).not.toBeInTheDocument();
   });
 });

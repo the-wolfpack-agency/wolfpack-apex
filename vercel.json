@@ -3,6 +3,7 @@
     { "path": "/api/support/poll", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/principles-sync", "schedule": "0 */2 * * *" },
     { "path": "/api/cron/principles-evaluate", "schedule": "15 */4 * * *" },
-    { "path": "/api/cron/ogiam-checkpoint", "schedule": "0 * * * *" }
+    { "path": "/api/cron/ogiam-checkpoint", "schedule": "0 * * * *" },
+    { "path": "/api/cron/agent-drift", "schedule": "0 * * * *" }
   ]
 }

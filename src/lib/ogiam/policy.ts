@@ -124,13 +124,19 @@ function evaluateRules(action: OgiamAction, tier: OgiamRiskTier): RuleHit {
     };
   }
 
-  // Any other mutation is confirmed by a human, matching the assistant's
-  // existing confirm-before-mutate rule.
+  // Any other (medium-risk) mutation is allowed: the principal only reached this
+  // tool because the role gate authorized it, and OGIAM reserves escalation for
+  // HIGH-risk actions (money, send, delete, admin) and denial for secrets. This
+  // is what lets an agent do its authorized job, exactly as the human whose role
+  // it carries would, while still stopping the dangerous actions. The human
+  // assistant additionally hits the dispatcher's confirm-before-mutate gate, so
+  // a person still confirms; an agent acting on assigned work does not need a
+  // second per-action approval inside its authorized envelope.
   if (action.isMutation) {
     return {
-      ruleId: "R-MUTATION-ESCALATE",
-      reason: "a state-changing action requires confirmation",
-      intendedOutcome: "escalate",
+      ruleId: "R-MUTATION-ALLOW",
+      reason: "a state-changing action within the principal's authorized role",
+      intendedOutcome: "allow",
     };
   }
 

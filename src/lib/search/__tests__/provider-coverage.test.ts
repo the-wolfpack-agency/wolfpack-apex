@@ -66,6 +66,24 @@ export const SEARCH_PROVIDER_EXEMPT_TOOLS: Record<string, string> = {
   "create-message-form-tool.ts": "form trigger (mutation, not searchable)",
   "create-okr-form-tool.ts": "form trigger (mutation, not searchable)",
   "create-task-form-tool.ts": "form trigger (mutation, not searchable)",
+  "clarify-widget-tool.ts":
+    "did-you-mean chip widget for typo'd queries; a disambiguation surface, not a searchable index",
+  "cross-tool-insights-widget-tool.ts":
+    "rule-based cross-integration insight widget; derives signals, not itself a searchable source",
+  "feedback.ts":
+    "the /feedback slash-command tool; writes user feedback, returns a compose widget, not searchable",
+  "gate.ts":
+    "shared helper module (not a tool); exports the agent/role tool-access gate used by the dispatcher and scan",
+  "integrations-list-widget-tool.ts":
+    "discoverability widget enumerating connected integrations, not a free-text searchable surface",
+  "log-time.ts": "time-logging action tool (write only, not searchable)",
+  "scan-hr-doc.ts": "document-scan action tool (extracts + writes HR doc fields, not searchable)",
+  "scan-invoice.ts": "document-scan action tool (extracts + writes invoice fields, not searchable)",
+  "scan-receipt.ts": "document-scan action tool (extracts + writes receipt fields, not searchable)",
+  "vercel-deployments-widget-tool.ts":
+    "deployments widget; free-text Vercel search lives in the vercel provider (src/lib/search/providers/vercel.ts)",
+  "delegate-to-agent-tool.ts":
+    "delegation action tool; routes a human instruction to an agent, nothing searchable",
   "dms-inventory-widget-tool.ts":
     "specialized inventory widget with structured make/model/year/price filters; free-text DMS search lives in the dms provider (src/lib/search/providers/dms.ts)",
   "meeting-prep.ts":
@@ -144,6 +162,7 @@ describe("Universal Search provider coverage", () => {
       "knowledge",
       "crm",
       "dms",
+      "vercel",
     ]);
     for (const provider of SEARCH_PROVIDERS) {
       expect(SEARCH_TYPE_VALUES.has(provider.type)).toBe(true);

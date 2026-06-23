@@ -87,10 +87,17 @@ describe("decide: rules and outcomes", () => {
     expect(d.intendedOutcome).toBe("escalate");
   });
 
-  it("R-MUTATION-ESCALATE for an ordinary mutation", () => {
+  it("R-MUTATION-ALLOW for an ordinary mutation (authorized by the role gate)", () => {
     const d = decide(action({ isMutation: true, tool: "create_note" }), { mode: "enforce" });
-    expect(d.ruleId).toBe("R-MUTATION-ESCALATE");
-    expect(d.intendedOutcome).toBe("escalate");
+    expect(d.ruleId).toBe("R-MUTATION-ALLOW");
+    expect(d.intendedOutcome).toBe("allow");
+    expect(d.wouldBlock).toBe(false);
+  });
+
+  it("still escalates a HIGH-risk mutation (the dangerous ones need approval)", () => {
+    const d = decide(action({ isMutation: true, tool: "send_wire", capability: "finance.write" }), { mode: "enforce" });
+    expect(d.ruleId).toBe("R-HIGHRISK-MUTATION-ESCALATE");
+    expect(d.wouldBlock).toBe(true);
   });
 });
 

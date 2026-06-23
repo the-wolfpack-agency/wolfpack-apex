@@ -175,6 +175,15 @@ test.describe("Agent-principal onboarding, roster reality check", () => {
       "the system-model scan section is present",
     ).toBeVisible({ timeout: 8_000 });
 
+    // The behavior + drift section mounts (status, baseline, history). It is
+    // render-only here: we never POST a baseline or a drift check from e2e, so
+    // prod agent state is not mutated. The section renders either a baseline +
+    // history or the calm "no baseline yet" / empty state, never a silent blank.
+    await expect(
+      page.getByTestId("agent-drift-section"),
+      "the behavior + drift section is present",
+    ).toBeVisible({ timeout: 8_000 });
+
     // The bridge to the agent-filtered OGIAM explorer is present.
     await expect(
       page.getByTestId("agent-activity-link"),

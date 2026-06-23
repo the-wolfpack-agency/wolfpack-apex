@@ -936,6 +936,20 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/agents/run-tasks/route.ts",
     reason: "agent runtime: every dispatched step is authorized and recorded per-decision in the hash-chained OGIAM ledger attributed to the agent, and task completion fires agent.task_completed; the endpoint orchestrates, it does not itself mutate domain state",
   },
+
+  // OGIAM agent drift detection. The baseline capture is a read-derived
+  // snapshot; the hourly sweep auto-pauses via the lib (recorded in the drift
+  // events table + agent.auto_paused analytics). The interactive drift-check
+  // route calls recordAudit on pause so it needs no allowlist; the drift GET
+  // is read-only.
+  {
+    route: "src/app/api/admin/agents/[id]/baseline/route.ts",
+    reason: "captures a behavior baseline derived from the OGIAM decision ledger; read-derived snapshot, fires agent.baseline_captured; no domain-state mutation",
+  },
+  {
+    route: "src/app/api/cron/agent-drift/route.ts",
+    reason: "scheduled drift sweep; any auto-pause is recorded in instinct_agent_drift_events and agent.auto_paused analytics, and the drift-check route audits an interactive pause",
+  },
 ];
 
 export const AUDIT_ALLOWLIST_ROUTES: ReadonlySet<string> = new Set(

@@ -29,6 +29,13 @@ import "./save-team-fact-tool";
 // generic REST adapter). Register AFTER connectors so the registry
 // has them at tool-handler invocation time.
 import "@/lib/assistant/connectors";
+/* delegate_to_agent OWNS explicit agent-direction phrasings ("Agent1 add a
+   task titled X", "tell Scout to log my hours", "@Scout draft the report").
+   Registered BEFORE who_is and BEFORE the generic search / widget tools so an
+   explicit "Agent1 ..." direction routes to the agent instead of being swallowed
+   by another tool's intent. The handler enforces authorization (owner or
+   manager-or-above) and the agent's own per-step OGIAM gate governs execution. */
+import "./delegate-to-agent-tool";
 /* who_is OWNS "who is <name>" — team-first, CRM-fallback. Registered
    BEFORE search_external_records so the cascade stops at the right
    answer: a literal teammate returns their roster info instead of

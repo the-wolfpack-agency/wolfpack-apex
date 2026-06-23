@@ -485,6 +485,20 @@ export type InstinctEventType =
   | "agent.procedure_promoted"
   | "agent.procedure_rejected"
   | "agent.procedure_inherited"
+  // Agent drift detection (the gate keeps agents in check across model changes).
+  // agent.baseline_captured { agent_id, workspace_id, decision_count }
+  //   a behavior baseline was snapshotted from the agent's decisions.
+  // agent.drift_checked     { agent_id, workspace_id, verdict, score, action }
+  //   a drift check ran (stable, drifting, critical, insufficient_data).
+  // agent.auto_paused       { agent_id, workspace_id, score }
+  //   the agent drifted critically and was auto-paused for owner review.
+  | "agent.baseline_captured"
+  | "agent.drift_checked"
+  | "agent.auto_paused"
+  // Assistant-driven agent delegation: a user told an agent to do something.
+  // agent.delegated         { agent_id, task_id, status }
+  //   a human delegated a task to an agent from the assistant chat.
+  | "agent.delegated"
   // Universal-search assistant tool (`search`). Fired by the tool's
   // handler after runSearch returns successfully so the learning loop
   // sees parity with the /search page route's `insight.search.queried`
