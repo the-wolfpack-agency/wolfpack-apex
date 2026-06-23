@@ -141,7 +141,7 @@ export const feedbackTool: ToolDef<Params, FeedbackData> = {
         ok: true,
         data: { kind: "feedback", mode: "compose" },
         answer:
-          "Happy to capture that. Drop a note in the box below and I'll save it for the team.",
+          "Happy to capture that. Drop a note in the box below, and if it is about a bug, attach a screenshot of the issue so the team can see exactly what you saw. Then I'll save it for the team.",
         sources: [],
         widget: spec,
       };

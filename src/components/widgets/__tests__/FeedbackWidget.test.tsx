@@ -20,6 +20,55 @@ jest.mock("@/lib/client-auth", () => ({
   jsonHeaders: () => ({ "Content-Type": "application/json" }),
 }));
 
+/* jsdom has no real canvas, so the real compressImageFile would no-op and
+ * return the input file anyway. We mock it to resolve to the input file
+ * unchanged for determinism, and let isCompressibleImage / formatBytes
+ * pass through to the real implementation (the gate + the human-readable
+ * size strings are what the widget's behavior depends on). */
+jest.mock("@/lib/assistant/image-compress", () => {
+  const actual = jest.requireActual("@/lib/assistant/image-compress");
+  return {
+    ...actual,
+    compressImageFile: jest.fn(async (file: File) => file),
+  };
+});
+
+/** Build a fake image File with a controllable type, name, and byte size. */
+function fakeImageFile(
+  opts: {
+    name?: string;
+    type?: string;
+    size?: number;
+  } = {},
+): File {
+  const { name = "screen.png", type = "image/png", size = 1024 } = opts;
+  const file = new File([new Uint8Array(8)], name, { type });
+  /* File.size is read-only and tied to the blob bytes; override it so the
+   * over-limit path is testable without allocating huge buffers. */
+  Object.defineProperty(file, "size", { value: size, configurable: true });
+  return file;
+}
+
+const FAKE_DATA_URL = "data:image/png;base64,QUJD";
+
+/* Stub FileReader.readAsDataURL deterministically so the attached payload
+ * is a known data URL regardless of jsdom's blob handling. */
+beforeAll(() => {
+  jest
+    .spyOn(FileReader.prototype, "readAsDataURL")
+    .mockImplementation(function (this: FileReader) {
+      Object.defineProperty(this, "result", {
+        value: FAKE_DATA_URL,
+        configurable: true,
+      });
+      this.onload?.(new ProgressEvent("load") as ProgressEvent<FileReader>);
+    });
+});
+
+afterAll(() => {
+  jest.restoreAllMocks();
+});
+
 import { FeedbackWidget } from "@/components/widgets/FeedbackWidget";
 import type { FeedbackWidgetSpec } from "@/lib/assistant/widgets/types";
 
@@ -374,5 +423,184 @@ describe("FeedbackWidget — compose mode (textarea + submit)", () => {
         "recorded",
       );
     });
+  });
+});
+
+describe("FeedbackWidget: optional screenshot attachment", () => {
+  async function attach(file: File) {
+    const input = screen.getByTestId(
+      "feedback-screenshot-input",
+    ) as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } });
+    });
+  }
+
+  test("compose mode renders the attach-screenshot control", () => {
+    render(<FeedbackWidget spec={COMPOSE_SPEC} />);
+    expect(
+      screen.getByTestId("feedback-screenshot-attach"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("feedback-screenshot-input"),
+    ).toBeInTheDocument();
+  });
+
+  test("selecting an image attaches it: thumbnail + remove appear and screenshot_attached is POSTed", async () => {
+    render(<FeedbackWidget spec={COMPOSE_SPEC} workflowId="wf-9" />);
+    await attach(fakeImageFile({ name: "bug.png", type: "image/png", size: 2048 }));
+
+    expect(
+      screen.getByTestId("feedback-screenshot-preview"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("feedback-screenshot-remove"),
+    ).toBeInTheDocument();
+    const thumb = screen.getByAltText(
+      "Attached screenshot preview",
+    ) as HTMLImageElement;
+    expect(thumb).toHaveAttribute("src", FAKE_DATA_URL);
+    expect(screen.getByTestId("feedback-screenshot-meta")).toHaveTextContent(
+      /bug\.png/,
+    );
+
+    /* The attach-button is gone; the preview replaced it. */
+    expect(screen.queryByTestId("feedback-screenshot-attach")).toBeNull();
+
+    const interaction = mockFetch.mock.calls.find(
+      ([u, init]) =>
+        u === "/api/analytics" &&
+        String((init as RequestInit).body).includes("screenshot_attached"),
+    );
+    expect(interaction).toBeDefined();
+    const body = JSON.parse(String((interaction![1] as RequestInit).body));
+    expect(body.event).toBe("assistant.widget_interaction");
+    expect(body.metadata).toEqual(
+      expect.objectContaining({
+        widget_kind: "feedback",
+        action: "screenshot_attached",
+        value: 2048,
+        workflow_id: "wf-9",
+      }),
+    );
+  });
+
+  test("clicking remove clears the thumbnail and fires screenshot_removed", async () => {
+    render(<FeedbackWidget spec={COMPOSE_SPEC} />);
+    await attach(fakeImageFile());
+    expect(
+      screen.getByTestId("feedback-screenshot-preview"),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("feedback-screenshot-remove"));
+    });
+
+    expect(screen.queryByTestId("feedback-screenshot-preview")).toBeNull();
+    expect(
+      screen.getByTestId("feedback-screenshot-attach"),
+    ).toBeInTheDocument();
+
+    const removed = mockFetch.mock.calls.find(
+      ([u, init]) =>
+        u === "/api/analytics" &&
+        String((init as RequestInit).body).includes("screenshot_removed"),
+    );
+    expect(removed).toBeDefined();
+    const body = JSON.parse(String((removed![1] as RequestInit).body));
+    expect(body.metadata.action).toBe("screenshot_removed");
+  });
+
+  test("selecting a non-image shows the inline rejection and does NOT attach", async () => {
+    render(<FeedbackWidget spec={COMPOSE_SPEC} />);
+    await attach(
+      fakeImageFile({ name: "doc.pdf", type: "application/pdf" }),
+    );
+
+    expect(
+      screen.getByTestId("feedback-screenshot-error"),
+    ).toHaveTextContent(/PNG, JPG, or WebP/);
+    expect(screen.queryByTestId("feedback-screenshot-preview")).toBeNull();
+    expect(
+      mockFetch.mock.calls.some(
+        ([u, init]) =>
+          u === "/api/analytics" &&
+          String((init as RequestInit).body).includes("screenshot_attached"),
+      ),
+    ).toBe(false);
+  });
+
+  test("selecting an SVG (non-compressible vector) is rejected too", async () => {
+    render(<FeedbackWidget spec={COMPOSE_SPEC} />);
+    await attach(
+      fakeImageFile({ name: "icon.svg", type: "image/svg+xml" }),
+    );
+    expect(
+      screen.getByTestId("feedback-screenshot-error"),
+    ).toHaveTextContent(/PNG, JPG, or WebP/);
+    expect(screen.queryByTestId("feedback-screenshot-preview")).toBeNull();
+  });
+
+  test("submitting WITH a screenshot includes screenshot { content_type, data_base64, byte_size } in the POST body", async () => {
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url === "/api/feedback") {
+        return jsonResponse({ id: "shot-id-001" }, 201);
+      }
+      return jsonResponse({ ok: true });
+    });
+
+    render(<FeedbackWidget spec={COMPOSE_SPEC} workflowId="wf-77" />);
+    fireEvent.change(
+      screen.getByTestId("feedback-widget-textarea") as HTMLTextAreaElement,
+      { target: { value: "see the attached repro" } },
+    );
+    await attach(
+      fakeImageFile({ name: "repro.png", type: "image/png", size: 3200 }),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("feedback-widget-submit"));
+    });
+
+    const apiCall = mockFetch.mock.calls.find(([u]) => u === "/api/feedback");
+    expect(apiCall).toBeDefined();
+    const body = JSON.parse(String((apiCall![1] as RequestInit).body));
+    expect(body).toEqual({
+      message: "see the attached repro",
+      surface: "/assistant",
+      workflow_id: "wf-77",
+      screenshot: {
+        content_type: "image/png",
+        data_base64: "QUJD",
+        byte_size: 3200,
+      },
+    });
+  });
+
+  test("submitting WITHOUT a screenshot omits the screenshot field", async () => {
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url === "/api/feedback") {
+        return jsonResponse({ id: "no-shot-001" }, 201);
+      }
+      return jsonResponse({ ok: true });
+    });
+
+    render(<FeedbackWidget spec={COMPOSE_SPEC} />);
+    fireEvent.change(
+      screen.getByTestId("feedback-widget-textarea") as HTMLTextAreaElement,
+      { target: { value: "no image here" } },
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("feedback-widget-submit"));
+    });
+
+    const apiCall = mockFetch.mock.calls.find(([u]) => u === "/api/feedback");
+    expect(apiCall).toBeDefined();
+    const body = JSON.parse(String((apiCall![1] as RequestInit).body));
+    expect(body).not.toHaveProperty("screenshot");
+    expect(Object.keys(body)).toEqual(
+      expect.arrayContaining(["message", "surface"]),
+    );
   });
 });

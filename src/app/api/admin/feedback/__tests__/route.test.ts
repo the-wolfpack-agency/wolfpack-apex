@@ -38,20 +38,53 @@ describe("GET /api/admin/feedback", () => {
     expect(mockSafeQuery).not.toHaveBeenCalled();
   });
 
-  it("200 returns workspace-scoped feedback", async () => {
+  it("200 returns workspace-scoped feedback, forwarding has_screenshot per row", async () => {
     mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
     mockSafeQuery.mockResolvedValue({
-      rows: [{ id: "f1", workspace_id: "default", user_id: "u1", message: "hi", created_at: "t" }],
+      rows: [
+        {
+          id: "f1",
+          workspace_id: "default",
+          user_id: "u1",
+          message: "hi",
+          created_at: "t",
+          has_screenshot: true,
+        },
+        {
+          id: "f2",
+          workspace_id: "default",
+          user_id: "u2",
+          message: "no pic",
+          created_at: "t",
+          has_screenshot: false,
+        },
+      ],
       fromCache: false,
     });
     const { GET } = await import("@/app/api/admin/feedback/route");
     const res = await GET(mkReq("?status=all&limit=50"));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { workspace_id: string; feedback: unknown[] };
+    const body = (await res.json()) as {
+      workspace_id: string;
+      feedback: Array<{ id: string; has_screenshot: boolean }>;
+    };
     expect(body.workspace_id).toBe("default");
-    expect(body.feedback).toHaveLength(1);
+    expect(body.feedback).toHaveLength(2);
+    // The route forwards the per-row screenshot flag the SQL EXISTS produced.
+    expect(body.feedback[0].has_screenshot).toBe(true);
+    expect(body.feedback[1].has_screenshot).toBe(false);
     // workspace scoping is parameterized (first arg is workspace_id)
     expect(mockSafeQuery.mock.calls[0][1][0]).toBe("default");
+  });
+
+  it("queries the screenshot table via an EXISTS clause for has_screenshot", async () => {
+    mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
+    const { GET } = await import("@/app/api/admin/feedback/route");
+    await GET(mkReq("?status=all"));
+    const sql = String(mockSafeQuery.mock.calls[0][0]);
+    expect(sql).toMatch(/EXISTS/);
+    expect(sql).toContain("instinct_feedback_screenshot");
+    expect(sql).toContain("AS has_screenshot");
   });
 
   it("collapses duplicate submissions: one row per (workspace, user, lower(trimmed message))", async () => {

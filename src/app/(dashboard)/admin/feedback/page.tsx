@@ -28,6 +28,10 @@ interface FeedbackRow {
      older API/build that omits them still renders. */
   times_filed?: number;
   last_filed_at?: string | null;
+  /* True when the submitter attached a screenshot of the bug. The image is
+     fetched lazily from the screenshot route (authenticated via the same
+     session cookie that loaded this page). Optional for older builds. */
+  has_screenshot?: boolean;
 }
 
 interface FeedbackResponse {
@@ -300,6 +304,34 @@ export default function FeedbackPage() {
               >
                 {r.message}
               </div>
+              {r.has_screenshot && (
+                <a
+                  href={`/api/admin/feedback/${r.id}/screenshot`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid={`admin-feedback-screenshot-${r.id}`}
+                  style={{ display: "inline-block", marginTop: "0.6rem" }}
+                  title="Open the attached screenshot"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element --
+                      the screenshot is an auth-gated, same-origin binary
+                      endpoint, not a static asset, so next/image (which needs
+                      fixed dimensions + a loader) does not fit here. */}
+                  <img
+                    src={`/api/admin/feedback/${r.id}/screenshot`}
+                    alt="Feedback screenshot"
+                    loading="lazy"
+                    style={{
+                      maxWidth: "240px",
+                      maxHeight: "160px",
+                      borderRadius: "6px",
+                      border: "1px solid var(--wp-dark-border, #333)",
+                      objectFit: "cover",
+                      cursor: "zoom-in",
+                    }}
+                  />
+                </a>
+              )}
               {isResolved && r.resolved_at && (
                 <div style={{ marginTop: "0.4rem", fontSize: "0.75rem", color: "var(--wp-text-muted, #6b7280)" }}>
                   Resolved {relativeTime(r.resolved_at)}

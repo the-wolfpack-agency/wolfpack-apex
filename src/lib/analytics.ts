@@ -654,6 +654,15 @@ export type InstinctEventType =
   | "assistant.feedback_recorded"
   | "assistant.feedback_widget_opened"
   | "assistant.feedback_submitted_from_widget"
+  // assistant.feedback_notified  { feedback_id, recipient_count, surface }
+  //   fires after recordUserFeedback notifies the feedback readers (the
+  //   settings.manage_team holders) so the learning loop can see reach
+  //   and whether the inbox is actually being watched.
+  // assistant.feedback_screenshot_stored  { feedback_id, byte_size, content_type }
+  //   fires when a compose-widget screenshot is persisted alongside the
+  //   feedback row, so we can measure how often bug reports carry an image.
+  | "assistant.feedback_notified"
+  | "assistant.feedback_screenshot_stored"
   // SharePoint connector lifecycle events (migration 139).
   // source_added/removed: admin UI added or soft-deleted a folder source.
   // sync_started/finished: every sync run is bracketed by these two.

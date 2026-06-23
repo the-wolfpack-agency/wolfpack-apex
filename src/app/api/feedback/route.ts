@@ -35,6 +35,10 @@ import {
   recordUserFeedback,
   MAX_FEEDBACK_LENGTH,
 } from "@/lib/feedback/record-feedback";
+import {
+  storeFeedbackScreenshot,
+  validateScreenshot,
+} from "@/lib/feedback/screenshot-store";
 
 /* --------------------- Per-user rate limiter -------------------------- */
 
@@ -80,7 +84,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: { message?: unknown; surface?: unknown; workflow_id?: unknown } = {};
+  let body: {
+    message?: unknown;
+    surface?: unknown;
+    workflow_id?: unknown;
+    screenshot?: unknown;
+  } = {};
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -118,6 +127,28 @@ export async function POST(req: NextRequest) {
 
   const userAgent = req.headers.get("user-agent") ?? undefined;
 
+  /* Validate any attached screenshot up front so a bad image is a clean 400
+     rather than a partial write. The image itself is stored AFTER the text
+     row lands (below), and a storage failure there never fails the request:
+     the words are the feedback, the picture is a bonus. */
+  let screenshotValid:
+    | { contentType: string; dataBase64: string; byteSize: number }
+    | null = null;
+  if (body.screenshot !== undefined && body.screenshot !== null) {
+    const v = validateScreenshot(body.screenshot);
+    if (!v.ok) {
+      return NextResponse.json(
+        { error: "invalid_input", detail: `screenshot ${v.reason}` },
+        { status: 400 },
+      );
+    }
+    screenshotValid = {
+      contentType: v.contentType,
+      dataBase64: v.dataBase64,
+      byteSize: v.byteSize,
+    };
+  }
+
   try {
     const out = await recordUserFeedback({
       workspaceId: user.workspaceId || "default",
@@ -129,8 +160,26 @@ export async function POST(req: NextRequest) {
       userAgent,
       workflowId,
     });
+
+    let hasScreenshot = false;
+    if (screenshotValid) {
+      try {
+        await storeFeedbackScreenshot(out.id, screenshotValid, {
+          userId: user.id,
+          userRole: user.role,
+        });
+        hasScreenshot = true;
+      } catch (err) {
+        // Non-fatal: the feedback text is saved; log and move on.
+        console.warn(
+          "[feedback route] screenshot store failed:",
+          (err as Error).message,
+        );
+      }
+    }
+
     return NextResponse.json(
-      { id: out.id, recorded_at: out.recordedAt },
+      { id: out.id, recorded_at: out.recordedAt, has_screenshot: hasScreenshot },
       { status: 201 },
     );
   } catch (err) {

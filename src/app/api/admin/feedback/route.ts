@@ -41,6 +41,10 @@ interface FeedbackRow {
   /** Most recent occurrence in the group. Lets the UI say "first on
    *  <created_at>, last on <last_filed_at>" instead of one fresh stamp. */
   last_filed_at: string;
+  /** True when the representative row has a screenshot attached (migration
+   *  168). The image itself is fetched lazily from the screenshot route, so
+   *  the list stays lean. */
+  has_screenshot: boolean;
 }
 
 export async function GET(req: NextRequest) {
@@ -96,7 +100,11 @@ export async function GET(req: NextRequest) {
             resolved_by,
             resolution_note,
             times_filed,
-            last_filed_at::text AS last_filed_at
+            last_filed_at::text AS last_filed_at,
+            EXISTS (
+              SELECT 1 FROM instinct_feedback_screenshot s
+               WHERE s.feedback_id = deduped.id
+            ) AS has_screenshot
      FROM (
        SELECT DISTINCT ON (workspace_id, user_id, lower(btrim(message)))
               id, workspace_id, user_id, user_email, user_role, message,

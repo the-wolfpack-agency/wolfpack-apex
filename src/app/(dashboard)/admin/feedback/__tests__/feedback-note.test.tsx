@@ -146,6 +146,45 @@ describe("/admin/feedback — comment + resolve", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("renders a screenshot link pointing at the screenshot route when has_screenshot is true", async () => {
+    const shotRow = { ...sampleRow, id: "fb-shot-1", has_screenshot: true };
+    mockFetchWithRefresh.mockResolvedValueOnce(
+      mkRes({ workspace_id: "w", count: 1, limit: 200, status: "all", feedback: [shotRow] }),
+    );
+    await act(async () => {
+      render(<FeedbackPage />);
+    });
+    const el = await screen.findByTestId(`admin-feedback-screenshot-${shotRow.id}`);
+    // The anchor points at the auth-gated screenshot byte endpoint.
+    expect(el).toHaveAttribute(
+      "href",
+      `/api/admin/feedback/${shotRow.id}/screenshot`,
+    );
+    // ...and the inline preview image sources the same endpoint.
+    const img = el.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img).toHaveAttribute(
+      "src",
+      `/api/admin/feedback/${shotRow.id}/screenshot`,
+    );
+  });
+
+  it("does NOT render the screenshot element for a row without a screenshot", async () => {
+    const noShotRow = { ...sampleRow, id: "fb-noshot-1", has_screenshot: false };
+    mockFetchWithRefresh.mockResolvedValueOnce(
+      mkRes({ workspace_id: "w", count: 1, limit: 200, status: "all", feedback: [noShotRow] }),
+    );
+    await act(async () => {
+      render(<FeedbackPage />);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId(`admin-feedback-row-${noShotRow.id}`)).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByTestId(`admin-feedback-screenshot-${noShotRow.id}`),
+    ).not.toBeInTheDocument();
+  });
+
   it("plain Mark resolved (no comment) still works and sends no note", async () => {
     mockFetchWithRefresh
       .mockResolvedValueOnce(
