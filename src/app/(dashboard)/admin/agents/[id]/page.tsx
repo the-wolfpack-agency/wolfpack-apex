@@ -41,6 +41,52 @@ interface AgentResponse {
   agent: AgentRecord;
 }
 
+/* The self-onboarding scan: the system model the agent learned the first time
+   it logged in and introspected its own toolset. The scan is agent-initiated,
+   so it is absent (404 no_scan) until the agent has actually run it. */
+interface ScanTool {
+  name: string;
+  description: string;
+  capability: string;
+  isMutation: boolean;
+  allowed: boolean;
+}
+
+interface ScanModel {
+  capabilities: string[];
+  tools: ScanTool[];
+  summary: {
+    toolCount: number;
+    allowedToolCount: number;
+    mutationCount: number;
+    capabilityCount: number;
+  };
+}
+
+interface ScanRecord {
+  id: string;
+  agentId: string;
+  workspaceId: string;
+  scanVersion: string | number;
+  toolCount: number;
+  allowedToolCount: number;
+  capabilityCount: number;
+  createdAt: string;
+  model: ScanModel;
+}
+
+interface ScanResponse {
+  scan: ScanRecord;
+}
+
+/* Scan load is independent of the agent load: a missing scan (404 no_scan) is
+   the expected steady state for a freshly onboarded agent, not an error. */
+type ScanState =
+  | { kind: "loading" }
+  | { kind: "absent" }
+  | { kind: "error" }
+  | { kind: "present"; scan: ScanRecord };
+
 type LifecycleAction = "pause" | "resume" | "revoke";
 
 function relativeTime(iso: string | null): string {
@@ -93,6 +139,7 @@ export default function AgentProfilePage({
 }) {
   const { id } = use(params);
   const [agent, setAgent] = useState<AgentRecord | null>(null);
+  const [scan, setScan] = useState<ScanState>({ kind: "loading" });
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,9 +178,40 @@ export default function AgentProfilePage({
     }
   }, [id]);
 
+  /* Fetches the agent's self-onboarding scan. A 404 (no_scan) is a first-class
+     state, not an error: the scan is agent-initiated and absent until the agent
+     logs in and introspects. Any other failure collapses to a quiet error state
+     so the section never blanks the page. */
+  const loadScan = useCallback(async () => {
+    setScan({ kind: "loading" });
+    try {
+      const res = await fetchWithRefresh(`/api/admin/agents/${id}/scan`);
+      if (res.status === 404) {
+        setScan({ kind: "absent" });
+        return;
+      }
+      if (!res.ok) {
+        setScan({ kind: "error" });
+        return;
+      }
+      const body = (await res.json()) as ScanResponse;
+      if (body.scan) {
+        setScan({ kind: "present", scan: body.scan });
+      } else {
+        setScan({ kind: "absent" });
+      }
+    } catch {
+      setScan({ kind: "error" });
+    }
+  }, [id]);
+
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void loadScan();
+  }, [loadScan]);
 
   async function runAction(action: LifecycleAction) {
     setBusy(true);
@@ -467,11 +545,169 @@ export default function AgentProfilePage({
         )}
       </div>
 
-      {/* Bridge to the agent's governed activity. The OGIAM explorer is where
-          this agent's gated actions show up once it acts. */}
+      {/* System model: the self-onboarding scan the agent learned about its own
+          toolset. Agent-initiated, so "no scan yet" is the expected state until
+          the agent logs in and introspects. We render only the ALLOWED tools by
+          default, capped to a scrollable list so the section stays compact. */}
+      <div
+        data-testid="agent-scan-section"
+        style={{
+          marginBottom: "1.5rem",
+          padding: "1.1rem 1.2rem",
+          background: "var(--wp-dark-surface, #1f1f22)",
+          border: "1px solid var(--wp-dark-border, #333)",
+          borderRadius: "8px",
+        }}
+      >
+        <div
+          style={{
+            fontSize: "0.72rem",
+            color: "var(--wp-text-muted, #6b7280)",
+            textTransform: "uppercase",
+            letterSpacing: "0.03em",
+            marginBottom: "0.6rem",
+          }}
+        >
+          System model
+        </div>
+
+        {scan.kind === "loading" && (
+          <div
+            data-testid="agent-scan-loading"
+            style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}
+          >
+            Loading...
+          </div>
+        )}
+
+        {scan.kind === "error" && (
+          <div
+            data-testid="agent-scan-error"
+            style={{ fontSize: "0.85rem", color: "var(--wp-text-muted, #6b7280)" }}
+          >
+            Could not load the agent&apos;s system model right now.
+          </div>
+        )}
+
+        {scan.kind === "absent" && (
+          <div
+            data-testid="agent-scan-empty"
+            style={{
+              padding: "1rem",
+              background: "var(--wp-dark-surface2, #1a1a1a)",
+              border: "1px dashed var(--wp-dark-border, #333)",
+              borderRadius: "8px",
+              fontSize: "0.85rem",
+              color: "var(--wp-text-muted, #6b7280)",
+            }}
+          >
+            This agent has not run its onboarding scan yet.
+          </div>
+        )}
+
+        {scan.kind === "present" && (() => {
+          const s = scan.scan;
+          const m = s.model;
+          const allowedTools = m.tools.filter((t) => t.allowed);
+          const hiddenCount = m.tools.length - allowedTools.length;
+          return (
+            <>
+              <div
+                data-testid="agent-scan-summary"
+                style={{ fontSize: "0.9rem", color: "var(--wp-text, #eee)" }}
+              >
+                Learned{" "}
+                <strong>{m.summary.toolCount}</strong> tools, allowed{" "}
+                <strong>{m.summary.allowedToolCount}</strong>,{" "}
+                <strong>{m.summary.capabilityCount}</strong> capabilities.
+              </div>
+              <div
+                style={{
+                  marginTop: "0.3rem",
+                  fontSize: "0.78rem",
+                  color: "var(--wp-text-muted, #6b7280)",
+                }}
+              >
+                Scan {String(s.scanVersion)} · {relativeTime(s.createdAt)}
+              </div>
+
+              <ul
+                data-testid="agent-scan-tools"
+                style={{
+                  listStyle: "none",
+                  padding: 0,
+                  margin: "0.8rem 0 0 0",
+                  maxHeight: "240px",
+                  overflowY: "auto",
+                }}
+              >
+                {allowedTools.map((t) => (
+                  <li
+                    key={t.name}
+                    data-testid={`agent-scan-tool-${t.name}`}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "0.5rem",
+                      padding: "0.4rem 0.6rem",
+                      marginBottom: "0.3rem",
+                      background: "var(--wp-dark-surface2, #1a1a1a)",
+                      border: "1px solid var(--wp-dark-border, #333)",
+                      borderRadius: "6px",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "0.82rem",
+                        color: "var(--wp-text, #eee)",
+                        fontFamily: "var(--wp-mono, monospace)",
+                        wordBreak: "break-word",
+                      }}
+                    >
+                      {t.name}
+                    </span>
+                    {t.isMutation && (
+                      <span
+                        style={{
+                          flexShrink: 0,
+                          padding: "0.05rem 0.4rem",
+                          borderRadius: "8px",
+                          fontSize: "0.65rem",
+                          background: "rgba(160,160,160,0.10)",
+                          color: "var(--wp-text-muted, #6b7280)",
+                          border: "1px solid var(--wp-dark-border, #333)",
+                        }}
+                      >
+                        mutation
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+
+              {hiddenCount > 0 && (
+                <div
+                  data-testid="agent-scan-hidden-note"
+                  style={{
+                    marginTop: "0.5rem",
+                    fontSize: "0.75rem",
+                    color: "var(--wp-text-muted, #6b7280)",
+                  }}
+                >
+                  and {hiddenCount} more the agent cannot use
+                </div>
+              )}
+            </>
+          );
+        })()}
+      </div>
+
+      {/* Bridge to the agent's governed activity. The OGIAM explorer, filtered
+          to this agent, is where its gated actions show up once it acts. */}
       <Link
-        href="/admin/ogiam"
-        data-testid="agent-ogiam-link"
+        href={`/admin/ogiam?agent=${encodeURIComponent(id)}`}
+        data-testid="agent-activity-link"
         style={{
           display: "inline-block",
           padding: "0.6rem 1rem",

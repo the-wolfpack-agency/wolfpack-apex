@@ -88,4 +88,56 @@ test.describe("Agent-principal onboarding, roster reality check", () => {
         .join("\n")}`,
     ).toEqual([]);
   });
+
+  test("an agent profile, when one exists, renders its system-model scan section cleanly", async ({
+    page,
+  }) => {
+    const snapshot = collectConsoleAndNetworkFailures(page);
+    const nav = await page.goto(`${target.baseUrl}/admin/agents`, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+    expect(nav?.status(), "/admin/agents loads (not 401/blank)").toBe(200);
+
+    // Find the first profile link in the roster. When the roster is empty
+    // (the empty-state testid is showing), there is no profile to visit, so we
+    // skip cleanly: this is render-only and must never pollute prod data.
+    const profileLink = page.locator('a[href^="/admin/agents/"]').first();
+    if ((await profileLink.count()) === 0) {
+      test.skip(true, "no agents in the roster to open a profile for");
+      return;
+    }
+
+    await profileLink.click();
+    await page.waitForLoadState("domcontentloaded");
+
+    // The profile mounts (not a 401 blank) and the system-model section is
+    // present. The scan is agent-initiated, so the section renders either the
+    // learned-tools summary or the calm "has not run its onboarding scan yet"
+    // empty state, never a silent blank.
+    await expect(
+      page.getByTestId("admin-agent-page"),
+      "the agent profile page mounts",
+    ).toBeVisible({ timeout: 8_000 });
+    await expect(
+      page.getByTestId("agent-scan-section"),
+      "the system-model scan section is present",
+    ).toBeVisible({ timeout: 8_000 });
+
+    // The bridge to the agent-filtered OGIAM explorer is present.
+    await expect(
+      page.getByTestId("agent-activity-link"),
+      "the gated-actions link is present",
+    ).toBeVisible();
+
+    // No CSP or network failures during the idle window.
+    await page.waitForTimeout(3_000);
+    const failures = snapshot();
+    expect(
+      failures,
+      `CSP/network failures on the agent profile:\n${failures
+        .map((f) => `  - [${f.kind}] ${f.detail}`)
+        .join("\n")}`,
+    ).toEqual([]);
+  });
 });
