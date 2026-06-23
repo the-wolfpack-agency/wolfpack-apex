@@ -56,6 +56,18 @@ export interface ToolContext {
   userId: string;
   /** User's role (cto, ceo, evp, dev, sales, ops, hr, ...). */
   userRole: string;
+  /**
+   * Set when this dispatch is being driven by an AGENT principal rather than a
+   * human. When present, the OGIAM gate runs in enforce mode and attributes the
+   * decision to the agent's identity, so the agent's actions are governed and
+   * traceable under its own principal. Absent for normal human assistant turns.
+   */
+  agentPrincipal?: {
+    agentId: string;
+    role: string;
+    workspaceId: string;
+    ownerUserId: string;
+  };
   /** User's email (optional — present when the auth layer surfaced it). */
   userEmail?: string;
   /**

@@ -27,12 +27,17 @@ export type OgiamRiskTier = "low" | "medium" | "high" | "critical";
  *  for AGI": a human is always accountable for an AI principal. */
 export interface OgiamPrincipal {
   kind: "ai_agent";
-  /** Stable agent id, e.g. "instinct.assistant". */
+  /** Stable agent id. "instinct.assistant" for the human-driven assistant, or
+   *  an agent principal id when an onboarded agent is acting as itself. */
   agent: string;
-  /** The human the AI is acting on behalf of. */
+  /** The actor the action runs as. The agent id when an agent acts as itself,
+   *  or the human's id for the assistant. */
   onBehalfOfUserId: string;
   onBehalfOfRole: string;
   workspaceId: string;
+  /** The accountable human owner, when the actor is an onboarded agent (the
+   *  owner for AGI). Absent for the human-driven assistant. */
+  ownerUserId?: string;
 }
 
 /** Advisory signals from the policy information points (PIP). NEVER the gate;

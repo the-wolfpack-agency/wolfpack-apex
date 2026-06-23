@@ -19,6 +19,7 @@
 
 import { trackEvent } from "@/lib/analytics";
 import { authorize } from "@/lib/ogiam/authorize";
+import { canInvokeTool } from "./gate";
 import { getTools } from "./registry";
 import type {
   ToolContext,
@@ -118,54 +119,63 @@ async function runOneTool<P, R>(
     );
   }
 
-  /* 1b. OGIAM Phase 0 (shadow). Record the deterministic authorization
-         decision for this well-formed action, BEFORE the legacy capability and
-         confirmation gates, so even a mutation the dispatcher is about to bounce
-         is captured in the evidence stream. Monitor mode: the decision is
-         enforced=false, so nothing is blocked here and dispatch proceeds exactly
-         as before. authorize() never throws (best effort), but we guard anyway
-         so the shadow gate can never break the assistant. */
+  /* 1b. OGIAM authorization. Record the deterministic decision for this
+         well-formed action BEFORE the legacy gates, so even a mutation the
+         dispatcher is about to bounce is captured.
+
+         For the human assistant this runs in MONITOR mode (records the would-be
+         decision, never blocks). For an AGENT principal it runs in ENFORCE mode
+         and is attributed to the agent's own identity: a blocking decision
+         (deny or escalate) actually refuses the action, and a gate failure fails
+         safe (denies) rather than silently allowing. That is what makes an
+         autonomous agent governed: every step is authorized under its identity,
+         and high-risk steps are stopped, not just logged. */
+  const agent = ctx.agentPrincipal;
   try {
-    await authorize({
-      principal: {
-        kind: "ai_agent",
-        agent: "instinct.assistant",
-        onBehalfOfUserId: ctx.userId,
-        onBehalfOfRole: ctx.userRole,
-        workspaceId: ctx.workspaceId ?? "default",
-      },
+    const decision = await authorize({
+      principal: agent
+        ? {
+            kind: "ai_agent",
+            agent: agent.agentId,
+            onBehalfOfUserId: agent.agentId,
+            onBehalfOfRole: agent.role,
+            workspaceId: agent.workspaceId,
+            ownerUserId: agent.ownerUserId,
+          }
+        : {
+            kind: "ai_agent",
+            agent: "instinct.assistant",
+            onBehalfOfUserId: ctx.userId,
+            onBehalfOfRole: ctx.userRole,
+            workspaceId: ctx.workspaceId ?? "default",
+          },
       tool: tool.name,
       capability: tool.capability,
       isMutation: Boolean(tool.requiresConfirmation),
-      surface: "/assistant",
+      surface: agent ? "/agent" : "/assistant",
       workflowId: ctx.workflowId,
       params: parsed.data,
-      mode: "monitor",
+      mode: agent ? "enforce" : "monitor",
     });
-  } catch {
-    /* shadow gate is non-blocking and must never break dispatch */
-  }
-
-  /* 2. Capability gate. "*" = any authenticated user (just need a
-        userId, which the chat surface already enforces). */
-  if (tool.capability !== "*") {
-    /* The capability registry lives in src/lib/auth/require-capability.ts.
-       For the Phase-1 read-only tools we keep this simple: role-string
-       gating. Phase 3 promotes to full requireCapability when action
-       tools land. */
-    const ROLE_HIERARCHY: Record<string, number> = {
-      ceo: 100, cto: 95, evp: 80, vp: 70,
-      lead: 60, manager: 55, dev: 40, sales: 30, ops: 30, hr: 30,
-      viewer: 10, member: 10,
-    };
-    const need = ROLE_HIERARCHY[tool.capability] ?? 0;
-    const have = ROLE_HIERARCHY[ctx.userRole.toLowerCase()] ?? 0;
-    if (have < need) {
+    if (agent && decision.enforced && decision.wouldBlock) {
       return failure(
         "capability",
-        `tool ${tool.name} requires role ≥ ${tool.capability} (you have ${ctx.userRole})`,
+        `OGIAM ${decision.intendedOutcome}: ${decision.reason} (rule ${decision.ruleId})`,
       );
     }
+  } catch {
+    /* Human (monitor) dispatch must never break on a gate error. An agent
+       (enforce) must fail closed: no authorization, no action. */
+    if (agent) return failure("internal", "authorization gate unavailable");
+  }
+
+  /* 2. Role gate (shared with the agent self-onboarding scan, see ./gate).
+        "*" = any authenticated principal. */
+  if (!canInvokeTool(ctx.userRole, tool.capability)) {
+    return failure(
+      "capability",
+      `tool ${tool.name} requires role ${tool.capability} (you have ${ctx.userRole})`,
+    );
   }
 
   /* 3. Action-tool confirmation gate. Action tools MUST set
