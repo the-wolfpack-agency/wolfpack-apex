@@ -97,6 +97,17 @@ export interface ToolContext {
    * friendly "tell me a city" message rather than guessing.
    */
   geo?: VercelGeo;
+  /**
+   * Org-knowledge context an AI-backed tool MAY fold into its prompt to
+   * spend fewer tokens. Populated only on EXPLORING agent runs, where the
+   * executor grounds the goal against the workspace Brain before the agent
+   * spends tokens (deterministic procedure reuse never sets this; reuse is
+   * free of token consideration). Always optional and best-effort: it may be
+   * absent (Brain unavailable, embeddings unconfigured, or a deterministic
+   * tool path). DETERMINISTIC tools ignore it; only AI-backed tools read it.
+   * `snippets` are short, pre-truncated knowledge excerpts.
+   */
+  grounding?: { snippets: string[] };
 }
 
 /** Successful tool dispatch — the handler ran and produced data. */

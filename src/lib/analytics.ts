@@ -471,6 +471,15 @@ export type InstinctEventType =
   //   approval, or failed), every step governed under its identity.
   | "agent.task_assigned"
   | "agent.task_completed"
+  // agent.execution_grounded { agent_id, task_id, inherited, brain_hits,
+  //                            brain_grounded, model_id?, est_cost_usd? }
+  //   one row per agent run capturing the maturation / familiarity curve:
+  //   whether the run reused a deterministic learned procedure (inherited,
+  //   zero token consideration) or explored, and when it explored, whether it
+  //   grounded in the org Brain and which best-priced model the cost-aware
+  //   router picked. The deterministic-vs-AI ratio over time is the
+  //   "gets cheaper as it learns the system" signal.
+  | "agent.execution_grounded"
   // Cumulative agent memory (one agent's learning benefits the next).
   // agent.procedure_learned  { workspace_id, goal_key, status, step_count }
   //   a succeeded task became a candidate procedure.

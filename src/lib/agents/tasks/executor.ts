@@ -19,6 +19,15 @@ import {
   findPromotedProcedure,
   recordLearnedProcedure,
 } from "@/lib/agents/memory/store";
+import {
+  groundFromBrain,
+  type Grounding,
+} from "@/lib/agents/grounding/brain-grounding";
+import {
+  selectModel,
+  logModelSelection,
+  type ModelSelection,
+} from "@/lib/ai/models";
 import { getPlanner } from "./planner";
 import type { TaskStatus, TaskStep } from "./types";
 
@@ -35,6 +44,9 @@ type DispatchFn = typeof tryDispatchTool;
 type NotifyFn = typeof notify;
 type LookupFn = typeof findPromotedProcedure;
 type RecordFn = typeof recordLearnedProcedure;
+type GroundFn = typeof groundFromBrain;
+type SelectModelFn = typeof selectModel;
+type LogModelSelectionFn = typeof logModelSelection;
 
 export interface ExecutorDeps {
   dispatch?: DispatchFn;
@@ -43,6 +55,24 @@ export interface ExecutorDeps {
   lookupProcedure?: LookupFn;
   /** Learning: record the plan a succeeded task ran. */
   recordProcedure?: RecordFn;
+  /**
+   * Brain grounding: consult org knowledge before an EXPLORING run spends
+   * tokens. Best-effort and only invoked when the run is NOT inherited
+   * (deterministic-first: a reused procedure never triggers Brain spend).
+   */
+  ground?: GroundFn;
+  /**
+   * Cost-aware model selection: which best-priced capable model an exploring
+   * run would use. Pure + deterministic; invoked only when NOT inherited.
+   */
+  selectModel?: SelectModelFn;
+  /** Records the model decision to analytics so no routing decision is lost. */
+  logModelSelection?: LogModelSelectionFn;
+  /**
+   * Optional model pin for this agent. Threaded into the router so an agent can
+   * insist on a specific model; absent means pure cost-based selection.
+   */
+  agentPin?: string;
 }
 
 export interface RunResult {
@@ -75,6 +105,9 @@ export async function runAgentTask(
   const notifyOwner = deps.notifyOwner ?? notify;
   const lookupProcedure = deps.lookupProcedure ?? findPromotedProcedure;
   const recordProcedure = deps.recordProcedure ?? recordLearnedProcedure;
+  const ground = deps.ground ?? groundFromBrain;
+  const chooseModel = deps.selectModel ?? selectModel;
+  const recordModelChoice = deps.logModelSelection ?? logModelSelection;
 
   // Inheritance: reuse a promoted procedure for this goal instead of
   // re-exploring. Best effort: a memory miss or failure falls back to planning.
@@ -97,7 +130,26 @@ export async function runAgentTask(
   let blocked = false;
   let errored = false;
 
-  const agentCtx = {
+  // Maturation telemetry. An agent that deploys into a new system should get
+  // MORE deterministic and CHEAPER over time: it reuses learned procedures (no
+  // token consideration at all) and, only when it must explore, it grounds in
+  // the Brain and picks the best-priced capable model. We record both so the
+  // "familiarity / deterministic-vs-AI" curve is measurable run over run.
+  let grounding: Grounding = { used: false, hits: 0, snippets: [] };
+  let modelSelection: ModelSelection | undefined;
+
+  const agentCtx: {
+    userId: string;
+    userRole: string;
+    workspaceId: string;
+    agentPrincipal: {
+      agentId: string;
+      role: string;
+      workspaceId: string;
+      ownerUserId: string;
+    };
+    grounding?: { snippets: string[] };
+  } = {
     userId: task.agentId,
     userRole: task.role,
     workspaceId: task.workspaceId,
@@ -108,6 +160,47 @@ export async function runAgentTask(
       ownerUserId: task.ownerUserId,
     },
   };
+
+  // DETERMINISTIC-FIRST. Only an EXPLORING run (no inherited procedure) ever
+  // considers tokens. A reused procedure is free: we deliberately do NOT ground
+  // against the Brain and do NOT consult the cost-aware router, so reuse never
+  // triggers any token spend or model decision. This is the cost plateau made
+  // concrete.
+  if (!inherited) {
+    // Best-effort grounding. A Brain/embedder hiccup never throws here
+    // (groundFromBrain swallows failures) and never blocks the task: on any
+    // failure we keep the empty grounding and run ungrounded.
+    try {
+      grounding = await ground(task.goal, task.workspaceId, {
+        userId: task.agentId,
+        userRole: task.role,
+      });
+    } catch {
+      /* grounding is a best-effort speedup; the task still runs ungrounded */
+    }
+    if (grounding.snippets.length > 0) {
+      // Hand org knowledge to AI-backed tools so they spend fewer tokens.
+      // Deterministic tools ignore this field.
+      agentCtx.grounding = { snippets: grounding.snippets };
+    }
+
+    // Cost-aware model selection. selectModel is pure + never throws, but we
+    // still guard the whole block so a router/analytics hiccup can never break
+    // or slow the task beyond this best-effort call.
+    try {
+      modelSelection = chooseModel({
+        requiredTier: "large",
+        agentPin: deps.agentPin,
+      });
+      recordModelChoice(modelSelection, {
+        userId: task.agentId,
+        userRole: task.role,
+        extra: { task_id: task.id, brain_grounded: grounding.used },
+      });
+    } catch {
+      /* model routing is best effort; the task runs regardless */
+    }
+  }
 
   for (let i = 0; i < instructions.length; i++) {
     const instruction = instructions[i];
@@ -200,6 +293,14 @@ export async function runAgentTask(
         : `Failed: completed ${ran} of ${steps.length} step(s).`
       : `Completed ${ran} of ${steps.length} step(s).`;
 
+  const brainGrounded = grounding.snippets.length > 0;
+  const modelId = modelSelection?.model.id;
+  const estCostUsd = modelSelection?.estimatedCostUsd;
+
+  // Maturation telemetry on the existing completion event: `inherited`,
+  // `brain_grounded`, and `model_id` make the deterministic-vs-AI / familiarity
+  // curve queryable over time without a new join. Inherited (deterministic)
+  // runs carry brain_grounded:false and no model_id by construction.
   trackEvent("agent.task_completed", task.agentId, task.role, {
     agent_id: task.agentId,
     task_id: task.id,
@@ -207,7 +308,38 @@ export async function runAgentTask(
     step_count: steps.length,
     ran_count: ran,
     blocked,
+    inherited,
+    brain_grounded: brainGrounded,
+    ...(modelId ? { model_id: modelId } : {}),
   });
 
+  // Dedicated grounding/maturation event so the familiarity curve has its own
+  // namespace independent of task outcome. Best-effort: never breaks the task.
+  try {
+    trackEvent("agent.execution_grounded", task.agentId, task.role, {
+      agent_id: task.agentId,
+      task_id: task.id,
+      inherited,
+      brain_hits: grounding.hits,
+      brain_grounded: brainGrounded,
+      ...(modelId ? { model_id: modelId } : {}),
+      ...(typeof estCostUsd === "number" ? { est_cost_usd: estCostUsd } : {}),
+    });
+  } catch {
+    /* telemetry is best effort; the task already ran */
+  }
+
   return { status, steps, resultSummary, inherited };
+}
+
+/**
+ * Familiarity score for a sequence of runs: the fraction (0..1) that reused a
+ * deterministic learned procedure instead of exploring. As an agent matures in
+ * a system this trends toward 1 (more deterministic, cheaper). A future surface
+ * can chart it directly. Empty history scores 0 (no familiarity yet). Pure.
+ */
+export function familiarityScore(history: { inherited: boolean }[]): number {
+  if (!history || history.length === 0) return 0;
+  const reused = history.filter((h) => h.inherited).length;
+  return reused / history.length;
 }

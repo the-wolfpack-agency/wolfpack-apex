@@ -7,7 +7,20 @@
 
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
 
-import { runAgentTask, type ExecutableTask } from "@/lib/agents/tasks/executor";
+import { trackEvent } from "@/lib/analytics";
+import {
+  runAgentTask,
+  familiarityScore,
+  type ExecutableTask,
+} from "@/lib/agents/tasks/executor";
+
+const mockTrackEvent = trackEvent as jest.MockedFunction<typeof trackEvent>;
+
+/** The metadata object the executor passed to a given analytics event. */
+function metaFor(event: string): Record<string, unknown> | undefined {
+  const call = mockTrackEvent.mock.calls.find((c) => c[0] === event);
+  return call?.[3] as Record<string, unknown> | undefined;
+}
 
 const task: ExecutableTask = {
   id: "task-1",
@@ -168,5 +181,193 @@ describe("cumulative memory inheritance", () => {
     });
     expect(out.status).toBe("blocked");
     expect(recordProcedure).not.toHaveBeenCalled();
+  });
+});
+
+describe("maturation: deterministic-first grounding + cost-aware model selection", () => {
+  beforeEach(() => mockTrackEvent.mockClear());
+
+  const modelSel = {
+    model: { id: "gpt-4o-mini", provider: "openai", capabilityTier: "large" },
+    reason: "cheapest_at_tier",
+    estimatedCostUsd: 0.0021,
+  };
+
+  it("an INHERITED run does NOT ground or select a model (deterministic-first, zero token consideration)", async () => {
+    const dispatch = jest.fn().mockResolvedValue(ran("read_status", "ok"));
+    const lookupProcedure = jest.fn().mockResolvedValue({
+      plan: [{ instruction: "inherited step", tool: "read_status" }],
+    });
+    const ground = jest.fn();
+    const selectModel = jest.fn();
+    const logModelSelection = jest.fn();
+
+    const out = await runAgentTask(
+      { ...task, goal: "do the known thing" },
+      {
+        dispatch: dispatch as never,
+        notifyOwner: jest.fn() as never,
+        lookupProcedure: lookupProcedure as never,
+        recordProcedure: jest.fn() as never,
+        ground: ground as never,
+        selectModel: selectModel as never,
+        logModelSelection: logModelSelection as never,
+      },
+    );
+
+    expect(out.inherited).toBe(true);
+    // Reuse is free: no Brain spend, no model decision.
+    expect(ground).not.toHaveBeenCalled();
+    expect(selectModel).not.toHaveBeenCalled();
+    expect(logModelSelection).not.toHaveBeenCalled();
+    // The dispatch ctx carries no grounding for a deterministic run.
+    const ctx = dispatch.mock.calls[0][1];
+    expect(ctx.grounding).toBeUndefined();
+
+    const meta = metaFor("agent.task_completed");
+    expect(meta?.inherited).toBe(true);
+    expect(meta?.brain_grounded).toBe(false);
+    expect(meta?.model_id).toBeUndefined();
+
+    const g = metaFor("agent.execution_grounded");
+    expect(g?.inherited).toBe(true);
+    expect(g?.brain_grounded).toBe(false);
+  });
+
+  it("a NON-inherited successful run grounds, selects a model, and attaches grounding to the dispatch ctx", async () => {
+    const dispatch = jest.fn().mockResolvedValue(ran("read_status", "ok"));
+    const ground = jest
+      .fn()
+      .mockResolvedValue({ used: true, hits: 2, snippets: ["org fact A", "org fact B"] });
+    const selectModel = jest.fn().mockReturnValue(modelSel);
+    const logModelSelection = jest.fn();
+
+    const out = await runAgentTask(
+      { ...task, goal: "explore something new" },
+      {
+        dispatch: dispatch as never,
+        notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn().mockResolvedValue({ status: "promoted" }) as never,
+        ground: ground as never,
+        selectModel: selectModel as never,
+        logModelSelection: logModelSelection as never,
+      },
+    );
+
+    expect(out.inherited).toBe(false);
+    expect(out.status).toBe("succeeded");
+    // The agent consulted the Brain and the cost-aware router.
+    expect(ground).toHaveBeenCalledWith(
+      "explore something new",
+      "ws-1",
+      expect.objectContaining({ userId: "agent-1", userRole: "ops" }),
+    );
+    expect(selectModel).toHaveBeenCalledWith(
+      expect.objectContaining({ requiredTier: "large" }),
+    );
+    expect(logModelSelection).toHaveBeenCalledTimes(1);
+
+    // The dispatch ctx carries the org-knowledge snippets so AI-backed tools
+    // are grounded.
+    const ctx = dispatch.mock.calls[0][1];
+    expect(ctx.grounding).toEqual({ snippets: ["org fact A", "org fact B"] });
+
+    const meta = metaFor("agent.task_completed");
+    expect(meta?.inherited).toBe(false);
+    expect(meta?.brain_grounded).toBe(true);
+    expect(meta?.model_id).toBe("gpt-4o-mini");
+
+    const g = metaFor("agent.execution_grounded");
+    expect(g?.inherited).toBe(false);
+    expect(g?.brain_hits).toBe(2);
+    expect(g?.brain_grounded).toBe(true);
+    expect(g?.model_id).toBe("gpt-4o-mini");
+    expect(g?.est_cost_usd).toBe(0.0021);
+  });
+
+  it("completes the task gracefully when grounding AND model selection throw", async () => {
+    const dispatch = jest.fn().mockResolvedValue(ran("read_status", "ok"));
+    const ground = jest.fn().mockRejectedValue(new Error("brain down"));
+    const selectModel = jest.fn(() => {
+      throw new Error("router down");
+    });
+    const logModelSelection = jest.fn();
+
+    const out = await runAgentTask(
+      { ...task, goal: "explore with broken deps" },
+      {
+        dispatch: dispatch as never,
+        notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn().mockResolvedValue({ status: "promoted" }) as never,
+        ground: ground as never,
+        selectModel: selectModel as never,
+        logModelSelection: logModelSelection as never,
+      },
+    );
+
+    // Graceful degradation: the task still runs and succeeds.
+    expect(out.status).toBe("succeeded");
+    const ctx = dispatch.mock.calls[0][1];
+    expect(ctx.grounding).toBeUndefined();
+    const meta = metaFor("agent.task_completed");
+    expect(meta?.brain_grounded).toBe(false);
+    expect(meta?.model_id).toBeUndefined();
+  });
+
+  it("runs ungrounded (no ctx grounding) when the Brain returns zero snippets", async () => {
+    const dispatch = jest.fn().mockResolvedValue(ran("read_status", "ok"));
+    const ground = jest.fn().mockResolvedValue({ used: true, hits: 0, snippets: [] });
+    const selectModel = jest.fn().mockReturnValue(modelSel);
+
+    const out = await runAgentTask(
+      { ...task, goal: "explore but no brain hits" },
+      {
+        dispatch: dispatch as never,
+        notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn().mockResolvedValue({ status: "promoted" }) as never,
+        ground: ground as never,
+        selectModel: selectModel as never,
+        logModelSelection: jest.fn() as never,
+      },
+    );
+
+    expect(out.status).toBe("succeeded");
+    const ctx = dispatch.mock.calls[0][1];
+    expect(ctx.grounding).toBeUndefined();
+    expect(metaFor("agent.task_completed")?.brain_grounded).toBe(false);
+    // A model is still selected even with no Brain hits.
+    expect(metaFor("agent.task_completed")?.model_id).toBe("gpt-4o-mini");
+  });
+});
+
+describe("familiarityScore", () => {
+  it("is 0 for an all-explored history", () => {
+    expect(
+      familiarityScore([{ inherited: false }, { inherited: false }]),
+    ).toBe(0);
+  });
+
+  it("is 1 for an all-inherited history", () => {
+    expect(
+      familiarityScore([{ inherited: true }, { inherited: true }]),
+    ).toBe(1);
+  });
+
+  it("is the correct fraction for a mix", () => {
+    expect(
+      familiarityScore([
+        { inherited: true },
+        { inherited: false },
+        { inherited: true },
+        { inherited: false },
+      ]),
+    ).toBe(0.5);
+  });
+
+  it("is 0 for an empty history", () => {
+    expect(familiarityScore([])).toBe(0);
   });
 });
