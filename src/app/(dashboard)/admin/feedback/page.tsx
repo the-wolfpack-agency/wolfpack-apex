@@ -22,6 +22,12 @@ interface FeedbackRow {
   resolved_at: string | null;
   resolved_by: string | null;
   resolution_note: string | null;
+  /* Dedup metadata from the inbox collapse. times_filed > 1 means the
+     same note was submitted more than once; created_at is the EARLIEST
+     (original) date and last_filed_at the most recent. Optional so an
+     older API/build that omits them still renders. */
+  times_filed?: number;
+  last_filed_at?: string | null;
 }
 
 interface FeedbackResponse {
@@ -46,6 +52,19 @@ function relativeTime(iso: string | null): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.round(hours / 24);
   return `${days}d ago`;
+}
+
+/* Absolute short date ("May 1, 2026") for the "first on <date>" line so an
+   old note that was re-filed recently reads as old, not fresh. */
+function shortDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return iso;
+  return new Date(t).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 export default function FeedbackPage() {
@@ -256,6 +275,19 @@ export default function FeedbackPage() {
                   {relativeTime(r.created_at)}
                 </div>
               </div>
+              {(r.times_filed ?? 1) > 1 && (
+                <div
+                  data-testid={`admin-feedback-times-filed-${r.id}`}
+                  style={{
+                    marginTop: "0.35rem",
+                    fontSize: "0.72rem",
+                    color: "var(--wp-text-muted, #6b7280)",
+                  }}
+                >
+                  Filed {r.times_filed} times, first on {shortDate(r.created_at)}
+                  {r.last_filed_at ? `, last ${relativeTime(r.last_filed_at)}` : ""}
+                </div>
+              )}
               <div
                 style={{
                   marginTop: "0.6rem",

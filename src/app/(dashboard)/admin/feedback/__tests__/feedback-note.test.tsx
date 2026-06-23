@@ -109,6 +109,43 @@ describe("/admin/feedback — comment + resolve", () => {
     expect(body).toEqual({ action: "resolve", note: "fixed via migration 148" });
   });
 
+  it("shows 'Filed N times, first on <date>' when a note was de-duplicated", async () => {
+    const dupRow = {
+      ...sampleRow,
+      id: "fb-dup-1",
+      created_at: "2026-05-01T10:00:00.000Z",
+      times_filed: 3,
+      last_filed_at: "2026-05-03T18:00:00.000Z",
+    };
+    mockFetchWithRefresh.mockResolvedValueOnce(
+      mkRes({ workspace_id: "w", count: 1, limit: 200, status: "all", feedback: [dupRow] }),
+    );
+    await act(async () => {
+      render(<FeedbackPage />);
+    });
+    const line = await screen.findByTestId(`admin-feedback-times-filed-${dupRow.id}`);
+    expect(line).toHaveTextContent(/Filed 3 times/i);
+    // The original (earliest) date, not a fresh "now".
+    expect(line).toHaveTextContent(/first on/i);
+    expect(line).toHaveTextContent(/2026/);
+  });
+
+  it("does NOT show the times-filed line for a single submission", async () => {
+    const singleRow = { ...sampleRow, id: "fb-single-1", times_filed: 1 };
+    mockFetchWithRefresh.mockResolvedValueOnce(
+      mkRes({ workspace_id: "w", count: 1, limit: 200, status: "all", feedback: [singleRow] }),
+    );
+    await act(async () => {
+      render(<FeedbackPage />);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId(`admin-feedback-row-${singleRow.id}`)).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByTestId(`admin-feedback-times-filed-${singleRow.id}`),
+    ).not.toBeInTheDocument();
+  });
+
   it("plain Mark resolved (no comment) still works and sends no note", async () => {
     mockFetchWithRefresh
       .mockResolvedValueOnce(

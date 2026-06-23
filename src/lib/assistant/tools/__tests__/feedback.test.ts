@@ -44,36 +44,83 @@ beforeEach(() => {
 });
 
 describe("feedback intent matching", () => {
+  /* IMMEDIATE-WRITE forms: an explicit command (leading slash OR a colon
+     separator) with a non-empty body returns that body so the handler
+     records it right away. */
   test.each([
-    ["/feedback", ""],
-    ["/feedback ", ""],
-    ["/Feedback", ""],
-    ["feedback", ""],
-    ["i have feedback", ""],
-    ["share feedback", ""],
+    ["/feedback hi", "hi"],
     ["/feedback the calendar widget is broken", "the calendar widget is broken"],
+    ["/Feedback Caps Stem Works", "Caps Stem Works"],
+    ["feedback: hi", "hi"],
     ["feedback: the calendar widget is broken", "the calendar widget is broken"],
-    ["feedback the calendar widget is broken", "the calendar widget is broken"],
-    ["i have feedback the layout shifts on mobile", "the layout shifts on mobile"],
-    ["share feedback please add a dark theme", "please add a dark theme"],
-  ])("'%s' matches with body %j", (q, expected) => {
+    ["i have feedback: hi", "hi"],
+    ["share feedback: hi", "hi"],
+    ["share feedback: please add a dark theme", "please add a dark theme"],
+  ])("'%s' records immediately with body %j", (q, expected) => {
     const out = matchFeedbackIntent(q);
     expect(out).not.toBeNull();
     expect(out?.message).toBe(expected);
   });
 
+  /* COMPOSE forms: bare verb stem, OR natural language with a body but NO
+     slash and NO colon. These must return an EMPTY body so the handler opens
+     the compose widget and NEVER writes silently. This is the fix for the
+     duplicate-rows bug (a "share feedback about Instinct" chip used to write a
+     row on every click). */
+  test.each([
+    ["feedback", ""],
+    ["/feedback", ""],
+    ["/feedback ", ""],
+    ["/Feedback", ""],
+    ["i have feedback", ""],
+    ["share feedback", ""],
+    ["share feedback about Instinct", ""],
+    ["feedback about the calendar", ""],
+    ["i have feedback the layout shifts on mobile", ""],
+    ["share feedback please add a dark theme", ""],
+  ])("'%s' opens compose (empty body, no write)", (q) => {
+    const out = matchFeedbackIntent(q);
+    expect(out).not.toBeNull();
+    expect(out?.message).toBe("");
+  });
+
+  /* NOT a feedback intent: the verb stem does not lead the message, or it is a
+     plural noun in a different sentence. */
   test.each([
     "",
     "find emails about feedback",
     "what's the feedback survey link",
     "feedbacks dashboard",
+    "feedbacks are great",
   ])("'%s' does NOT match", (q) => {
     expect(matchFeedbackIntent(q)).toBeNull();
   });
 
-  test("rejects oversized free-text at intent time", () => {
+  test("rejects oversized free-text at intent time (explicit command form)", () => {
     const tooBig = "/feedback " + "x".repeat(2001);
     expect(matchFeedbackIntent(tooBig)).toBeNull();
+  });
+});
+
+describe("feedback handler: compose mode never writes for natural language", () => {
+  /* End-to-end guard: feeding a natural-language phrase through
+     matchIntent -> handler must NOT call recordUserFeedback. This is the
+     exact path the starter chip "share feedback about Instinct" took when it
+     was silently writing a row on every click. */
+  test.each([
+    "share feedback about Instinct",
+    "feedback about the calendar",
+    "i have feedback",
+    "feedback",
+  ])("'%s' routes to compose without recording", async (q) => {
+    const params = matchFeedbackIntent(q);
+    expect(params).not.toBeNull();
+    const res = await feedbackTool.handler(params!, CTX);
+    expect(res.ok).toBe(true);
+    expect(mockRecordUserFeedback).not.toHaveBeenCalled();
+    if (!res.ok) return;
+    const spec = res.widget as { mode?: string };
+    expect(spec.mode).toBe("compose");
   });
 });
 

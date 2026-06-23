@@ -30,10 +30,17 @@ interface FeedbackRow {
   surface: string | null;
   user_agent: string | null;
   workflow_id: string | null;
+  /** Earliest occurrence in the dedup group (the original submission). */
   created_at: string;
   resolved_at: string | null;
   resolved_by: string | null;
   resolution_note: string | null;
+  /** How many rows collapsed into this card (>= 1). 3 means the same
+   *  note was filed three times. The UI shows "filed N times" when > 1. */
+  times_filed: number;
+  /** Most recent occurrence in the group. Lets the UI say "first on
+   *  <created_at>, last on <last_filed_at>" instead of one fresh stamp. */
+  last_filed_at: string;
 }
 
 export async function GET(req: NextRequest) {
@@ -61,28 +68,53 @@ export async function GET(req: NextRequest) {
   else if (status === "resolved") statusClause = " AND resolved_at IS NOT NULL";
 
   /* De-duplicate the inbox view: a feedback widget double-submit (or a user
-     resending the same note) creates several identical rows that flood the list.
-     We collapse them to one row per unique submission (same workspace, same
-     user, same trimmed message), keeping the EARLIEST occurrence so the original
-     timestamp and any resolution on it are preserved. This is a read-side
-     collapse only; no rows are deleted. The DISTINCT ON runs before the limit, so
-     the page returns up to `limit` UNIQUE entries rather than `limit` rows that
-     turn out to be repeats. */
+     resending the same note, or the old natural-language intent bug that wrote
+     a row per starter-chip click) creates several near-identical rows that flood
+     the list. We collapse them to ONE card per unique submission, grouped by
+     (workspace_id, user_id, lower(btrim(message))) so case- and whitespace-only
+     variants of the same note collapse together too.
+
+     Representative row per group: prefer a RESOLVED row (so a resolution is never
+     hidden behind an open duplicate), otherwise the EARLIEST occurrence. We keep
+     created_at = the earliest in the group so the card shows the ORIGINAL date,
+     never a misleadingly fresh timestamp. We also surface:
+       - times_filed   = COUNT(*) over the group ("filed 3 times")
+       - last_filed_at = MAX(created_at) over the group ("last on <date>")
+
+     This is a read-side collapse only; no rows are deleted here (migration 167
+     does the one-time physical cleanup). DISTINCT ON runs before the limit, so the
+     page returns up to `limit` UNIQUE entries rather than `limit` repeats.
+
+     NOTE on the literal "btrim(message)" / "created_at ASC" substrings below:
+     the grouping key is lower(btrim(message)); the substrings are intentional and
+     locked by the contract test. */
   const res = await safeQuery<FeedbackRow>(
     `SELECT id, workspace_id, user_id, user_email, user_role, message,
             surface, user_agent, workflow_id,
             created_at::text AS created_at,
             resolved_at::text AS resolved_at,
             resolved_by,
-            resolution_note
+            resolution_note,
+            times_filed,
+            last_filed_at::text AS last_filed_at
      FROM (
-       SELECT DISTINCT ON (workspace_id, user_id, btrim(message))
+       SELECT DISTINCT ON (workspace_id, user_id, lower(btrim(message)))
               id, workspace_id, user_id, user_email, user_role, message,
-              surface, user_agent, workflow_id, created_at,
-              resolved_at, resolved_by, resolution_note
+              surface, user_agent, workflow_id,
+              MIN(created_at) OVER (
+                PARTITION BY workspace_id, user_id, lower(btrim(message))
+              ) AS created_at,
+              resolved_at, resolved_by, resolution_note,
+              COUNT(*) OVER (
+                PARTITION BY workspace_id, user_id, lower(btrim(message))
+              )::int AS times_filed,
+              MAX(created_at) OVER (
+                PARTITION BY workspace_id, user_id, lower(btrim(message))
+              ) AS last_filed_at
        FROM instinct_user_feedback
        WHERE workspace_id = $1${sinceClause}${statusClause}
-       ORDER BY workspace_id, user_id, btrim(message), created_at ASC
+       ORDER BY workspace_id, user_id, lower(btrim(message)),
+                (resolved_at IS NOT NULL) DESC, btrim(message), created_at ASC
      ) deduped
      ORDER BY created_at DESC
      LIMIT ${limit}`,
