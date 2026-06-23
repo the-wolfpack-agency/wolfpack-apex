@@ -91,6 +91,10 @@ type JwtClaims = JwtPayload & {
   name: string;
   /** Optional — legacy JWTs minted before migration 137 don't carry it. */
   workspaceId?: string;
+  /** Present and set to "agent" on agent credentials. A human session token
+   *  never carries this. The human resolver rejects it so an agent token can
+   *  never be used as a person's session. */
+  kind?: string;
 };
 
 export function verifyToken(token: string): JwtClaims {
@@ -191,6 +195,9 @@ export function getUserFromRequest(authHeader: string | null): TeamMember | null
   if (!authHeader?.startsWith("Bearer ")) return null;
   try {
     const payload = verifyToken(authHeader.slice(7));
+    /* Security boundary: an agent credential must never resolve to a human
+       session. Agents are resolved only by resolveAgentFromRequest. */
+    if (payload.kind === "agent") return null;
     return {
       id: payload.userId,
       email: payload.email,

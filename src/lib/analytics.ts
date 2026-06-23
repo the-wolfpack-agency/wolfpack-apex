@@ -443,6 +443,19 @@ export type InstinctEventType =
   //   fired when an admin probes the signing wiring (sign a server-generated
   //   probe, then independently verify it). No secrets in the payload.
   | "ogiam.signing_selftest"
+  // Agent principals (OGIAM, agents onboarded like people).
+  // agent.created          { agent_id, role, owner_user_id, identity_provider }
+  //   an admin onboarded an agent through the invite flow.
+  // agent.activated        { agent_id, workspace_id }
+  //   the agent presented its onboarding secret and got its first token.
+  // agent.lifecycle_changed { agent_id, state }
+  //   paused, resumed, or revoked.
+  // agent.token_issued     { agent_id, ttl_seconds }
+  //   a short-lived access token was minted for the agent.
+  | "agent.created"
+  | "agent.activated"
+  | "agent.lifecycle_changed"
+  | "agent.token_issued"
   // Universal-search assistant tool (`search`). Fired by the tool's
   // handler after runSearch returns successfully so the learning loop
   // sees parity with the /search page route's `insight.search.queried`
