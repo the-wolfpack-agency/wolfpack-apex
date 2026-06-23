@@ -52,6 +52,12 @@ export async function tryDispatchTool(
     const params = safeMatchIntent(tool, message);
     if (params === null) continue;
 
+    /* Human-only tools (e.g. delegate_to_agent) are never invoked BY an agent
+       principal. Skip rather than fail, so the instruction falls through to the
+       real work tool, and an agent can never delegate to another agent (a
+       privilege-escalation path). */
+    if (ctx.agentPrincipal && tool.humanOnly) continue;
+
     const started = Date.now();
     const result = await runOneTool(tool, params, ctx);
     const durationMs = Date.now() - started;

@@ -158,6 +158,13 @@ export interface ToolDef<P, R> {
    */
   requiresConfirmation?: boolean;
   /**
+   * Human-only tools (e.g. delegate_to_agent) must never be invoked BY an
+   * agent principal. When set, the dispatcher skips this tool for an agent
+   * caller so the instruction falls through to a real work tool. This also
+   * prevents agent-to-agent delegation chains, a privilege-escalation path.
+   */
+  humanOnly?: boolean;
+  /**
    * Intent classifier — return parsed params when the message looks
    * like a call to this tool, else null. Regex-based + zero-token.
    * If multiple tools match, the FIRST registered wins (so ordering

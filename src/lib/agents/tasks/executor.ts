@@ -95,6 +95,7 @@ export async function runAgentTask(
   const steps: TaskStep[] = [];
   let status: TaskStatus = "running";
   let blocked = false;
+  let errored = false;
 
   const agentCtx = {
     userId: task.agentId,
@@ -152,11 +153,26 @@ export async function runAgentTask(
     if (r.ok) {
       steps.push({ index: i, instruction, tool: res.tool, outcome: "ran", detail: truncate((r as { answer: string }).answer) });
     } else {
+      // A tool-level failure (not a gate block) is a real error: record it and
+      // stop acting. A task whose step errored has NOT succeeded.
       steps.push({ index: i, instruction, tool: res.tool, outcome: "error", detail: truncate((r as { message: string }).message) });
+      errored = true;
+      break;
     }
   }
 
-  if (status !== "failed") status = blocked ? "blocked" : "succeeded";
+  const ran = steps.filter((s) => s.outcome === "ran").length;
+  // Honest terminal status. Blocked (a governance escalation) takes precedence.
+  // A real tool error fails the task, and a task where NOTHING ran never counts
+  // as success (the bug that showed "Succeeded / Completed 0 of 1 step"). A
+  // partial run where at least one step ran and none errored is a success with
+  // the honest step count in the summary.
+  if (status !== "failed") {
+    if (blocked) status = "blocked";
+    else if (errored) status = "failed";
+    else if (ran === 0) status = "failed";
+    else status = "succeeded";
+  }
 
   // Learning: a freshly-explored, fully-successful plan becomes a candidate
   // procedure (the safety check inside recordProcedure decides if it is shareable
@@ -176,11 +192,12 @@ export async function runAgentTask(
     }
   }
 
-  const ran = steps.filter((s) => s.outcome === "ran").length;
   const resultSummary = blocked
     ? `Stopped for approval after ${ran} step(s).`
     : status === "failed"
-      ? "Failed during execution."
+      ? ran === steps.length && steps.length > 0
+        ? "Failed during execution."
+        : `Failed: completed ${ran} of ${steps.length} step(s).`
       : `Completed ${ran} of ${steps.length} step(s).`;
 
   trackEvent("agent.task_completed", task.agentId, task.role, {

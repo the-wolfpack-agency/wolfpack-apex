@@ -126,6 +126,11 @@ export const delegateToAgentTool: ToolDef<Params, DelegateResult> = {
   // so we do not double-gate the human with a confirmation prompt.
   capability: "*",
   requiresConfirmation: false,
+  // Delegation is a HUMAN action. An executing agent must never invoke this
+  // (no agent-to-agent delegation chains, and no self-delegation recursion when
+  // a goal text happens to start with an agent name). The dispatcher skips
+  // human-only tools for an agent principal so the instruction falls through.
+  humanOnly: true,
   matchIntent: matchDelegateIntent,
   async handler(params, ctx): Promise<ToolResult<DelegateResult>> {
     const workspaceId =

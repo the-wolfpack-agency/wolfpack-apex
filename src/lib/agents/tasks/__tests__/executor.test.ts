@@ -74,6 +74,41 @@ describe("runAgentTask", () => {
     expect(out.status).toBe("succeeded");
   });
 
+  it("FAILS (not succeeds) when a step returns a tool error", async () => {
+    /* Regression: a step that returned ok:false used to leave status at the
+       default "succeeded", so the UI showed "Succeeded / Completed 0 of 1". */
+    const toolError = {
+      tool: "delegate_to_agent",
+      result: { ok: false as const, code: "internal" as const, message: "could not resolve agent" },
+      durationMs: 1,
+    };
+    const dispatch = jest.fn().mockResolvedValueOnce(toolError);
+    const out = await runAgentTask(
+      { ...task, goal: "do the thing" },
+      {
+        dispatch: dispatch as never, notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+      },
+    );
+    expect(out.status).toBe("failed");
+    expect(out.steps[0].outcome).toBe("error");
+    expect(out.resultSummary).toMatch(/Failed/);
+  });
+
+  it("FAILS when nothing ran (all steps unmatched)", async () => {
+    const dispatch = jest.fn().mockResolvedValue(null);
+    const out = await runAgentTask(
+      { ...task, goal: "mystery instruction" },
+      {
+        dispatch: dispatch as never, notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+      },
+    );
+    expect(out.status).toBe("failed");
+  });
+
   it("fails safe when a dispatch throws", async () => {
     const dispatch = jest.fn().mockRejectedValue(new Error("boom"));
     const out = await runAgentTask(task, {

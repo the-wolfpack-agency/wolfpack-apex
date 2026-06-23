@@ -86,3 +86,32 @@ describe("agent enforcement", () => {
     expect(arg.decision.mode).toBe("monitor");
   });
 });
+
+describe("human-only tools are never invoked by an agent", () => {
+  beforeEach(() => {
+    // A human-only tool (like delegate_to_agent) that also matches "handle",
+    // registered BEFORE a real work tool that matches the same phrase.
+    registerTool({
+      name: "delegate_like",
+      description: "human-only delegation",
+      capability: "*",
+      requiresConfirmation: false,
+      humanOnly: true,
+      paramSchema: z.object({}).passthrough(),
+      matchIntent: (m: string) => (m.includes("handle") ? {} : null),
+      handler: async () => ({ ok: false as const, code: "internal" as const, message: "should not run for an agent" }),
+    });
+    tool("do_handle_work", { match: "handle" });
+  });
+
+  it("skips the human-only tool for an agent and falls through to the work tool", async () => {
+    const res = await tryDispatchTool("handle this", agentCtx);
+    expect(res?.tool).toBe("do_handle_work");
+    expect(res?.result.ok).toBe(true);
+  });
+
+  it("still lets a human invoke the human-only tool", async () => {
+    const res = await tryDispatchTool("handle this", humanCtx);
+    expect(res?.tool).toBe("delegate_like");
+  });
+});
