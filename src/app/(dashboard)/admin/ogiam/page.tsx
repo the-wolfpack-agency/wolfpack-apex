@@ -48,6 +48,42 @@ interface DecisionsResponse {
   decisions: DecisionRow[];
 }
 
+interface ChainVerification {
+  ok: boolean;
+  verifiedCount: number;
+  legacyCount: number;
+  brokenAtSeq: number | null;
+  headSeq: number;
+  headHash: string | null;
+}
+
+interface ChainCheckpoint {
+  id: string;
+  workspaceId: string;
+  throughSeq: number;
+  headHash: string;
+  algorithm: string;
+  keyId: string;
+  signed: boolean;
+  signedAt: string | null;
+  createdAt: string;
+}
+
+interface VerifyResponse {
+  workspace_id: string;
+  verification: ChainVerification;
+  checkpoint: ChainCheckpoint | null;
+}
+
+/* Key ids can be a full Key Vault URL (.../keys/<name>) or a short local label.
+   Show the trailing segment so the banner reads "by ogiam-key" rather than a
+   200-char URL. */
+function shortKeyId(keyId: string): string {
+  if (!keyId) return "unknown key";
+  const parts = keyId.split("/").filter(Boolean);
+  return parts[parts.length - 1] ?? keyId;
+}
+
 const TIER_ORDER = ["critical", "high", "medium", "low"] as const;
 
 function relativeTime(iso: string | null): string {
@@ -85,6 +121,22 @@ export default function OgiamPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [wouldBlockOnly, setWouldBlockOnly] = useState(false);
+  const [chain, setChain] = useState<VerifyResponse | null>(null);
+
+  const loadChain = useCallback(async () => {
+    try {
+      const res = await fetchWithRefresh("/api/admin/ogiam/verify");
+      if (!res.ok) {
+        // The banner is supplementary; a failed verify fetch just hides it
+        // rather than blocking the decisions list below.
+        setChain(null);
+        return;
+      }
+      setChain((await res.json()) as VerifyResponse);
+    } catch {
+      setChain(null);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -117,6 +169,10 @@ export default function OgiamPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void loadChain();
+  }, [loadChain]);
 
   return (
     <div
@@ -169,6 +225,59 @@ export default function OgiamPage() {
         Shadow mode: monitoring, not blocking. Every action below was allowed to
         run; the gate records what it would have decided.
       </p>
+
+      {chain && (() => {
+        const v = chain.verification;
+        const cp = chain.checkpoint;
+        const failed = !v.ok;
+        const fg = failed
+          ? "var(--wp-error, #ef4444)"
+          : "var(--wp-success, #22c55e)";
+        const bg = failed
+          ? "rgba(239,68,68,0.08)"
+          : "rgba(34,197,94,0.08)";
+        return (
+          <div
+            data-testid="ogiam-chain-status"
+            style={{
+              padding: "0.7rem 1rem",
+              marginBottom: "1.25rem",
+              background: bg,
+              border: `1px solid ${fg}`,
+              borderRadius: "8px",
+              fontSize: "0.82rem",
+            }}
+          >
+            {failed ? (
+              <div style={{ color: fg, fontWeight: 600 }}>
+                Chain integrity check FAILED at sequence {v.brokenAtSeq ?? "?"}
+              </div>
+            ) : (
+              <>
+                <div style={{ color: fg, fontWeight: 600 }}>
+                  Chain verified: {v.verifiedCount} decisions, head sequence{" "}
+                  {v.headSeq}
+                </div>
+                <div
+                  style={{
+                    marginTop: "0.25rem",
+                    color: "var(--wp-text-dim, #aaa)",
+                  }}
+                >
+                  {cp && cp.signed ? (
+                    <>
+                      Notarized through sequence {cp.throughSeq}, signed{" "}
+                      {relativeTime(cp.signedAt)} by {shortKeyId(cp.keyId)}
+                    </>
+                  ) : (
+                    <>Tamper-evident, notarization not yet configured</>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })()}
 
       {summary && (
         <div
