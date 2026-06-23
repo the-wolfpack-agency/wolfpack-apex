@@ -456,6 +456,14 @@ export type InstinctEventType =
   | "agent.activated"
   | "agent.lifecycle_changed"
   | "agent.token_issued"
+  // agent.scan_completed  { agent_id, workspace_id, scan_version, tool_count,
+  //                         allowed_tool_count, capability_count }
+  //   the agent ran its self-onboarding scan and stored its system model.
+  // agent.acted           { agent_id, tool, allowed, rule_id? }
+  //   the agent drove a tool dispatch as itself; allowed reflects whether the
+  //   OGIAM enforce gate let it through.
+  | "agent.scan_completed"
+  | "agent.acted"
   // Universal-search assistant tool (`search`). Fired by the tool's
   // handler after runSearch returns successfully so the learning loop
   // sees parity with the /search page route's `insight.search.queried`
