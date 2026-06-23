@@ -59,14 +59,26 @@ export function clampDecisionsLimit(raw: number | undefined): number {
  * Most recent decisions for a workspace, newest first.
  *
  * `wouldBlockOnly` narrows to the rows enforcement would have stopped (the
- * headline shadow-mode metric). `limit` defaults to 100 and is clamped to 500.
+ * headline shadow-mode metric). `agentId` narrows to a single acting agent
+ * (so an agent profile can show only its own gated actions), matched on the
+ * parameterized `principal_agent`. `limit` defaults to 100 and is clamped to
+ * 500.
  */
 export async function listDecisions(
   workspaceId: string,
-  opts?: { limit?: number; wouldBlockOnly?: boolean },
+  opts?: { limit?: number; wouldBlockOnly?: boolean; agentId?: string },
 ): Promise<OgiamDecisionRow[]> {
   const limit = clampDecisionsLimit(opts?.limit);
   const wouldBlockClause = opts?.wouldBlockOnly ? " AND would_block = true" : "";
+
+  /* The agent filter is always parameterized ($2) so an agent id can never be
+     injected into the SQL. Absent when no agentId is supplied. */
+  const params: unknown[] = [workspaceId];
+  let agentClause = "";
+  if (opts?.agentId) {
+    params.push(opts.agentId);
+    agentClause = ` AND principal_agent = $${params.length}`;
+  }
 
   const res = await safeQuery<OgiamDecisionRow>(
     `SELECT id,
@@ -87,10 +99,10 @@ export async function listDecisions(
             reason,
             policy_version
        FROM ogiam_decisions
-      WHERE workspace_id = $1${wouldBlockClause}
+      WHERE workspace_id = $1${wouldBlockClause}${agentClause}
       ORDER BY created_at DESC
       LIMIT ${limit}`,
-    [workspaceId],
+    params,
   );
 
   return res.rows;

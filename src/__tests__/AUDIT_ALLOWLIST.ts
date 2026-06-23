@@ -922,6 +922,16 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/time-entries/route.ts",
     reason: "timesheet entry CRUD: business operational data scoped by user.id + RLS, time.entry_* analytics; not security-relevant",
   },
+
+  // OGIAM agent runtime. Agent actions are governed and recorded elsewhere.
+  {
+    route: "src/app/api/agents/scan/route.ts",
+    reason: "agent self-onboarding scan: read-only introspection of the tool registry; persists a derived system model, no security-relevant state change; agent.scan_completed analytics",
+  },
+  {
+    route: "src/app/api/agents/act/route.ts",
+    reason: "agent governed action: every dispatched step is deterministically authorized and recorded per-decision in the hash-chained OGIAM decision ledger attributed to the agent principal, which IS the agent-action audit trail; agent.acted analytics",
+  },
 ];
 
 export const AUDIT_ALLOWLIST_ROUTES: ReadonlySet<string> = new Set(

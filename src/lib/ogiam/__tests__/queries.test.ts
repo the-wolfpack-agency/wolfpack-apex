@@ -72,6 +72,29 @@ describe("listDecisions", () => {
     expect(String(mockSafeQuery.mock.calls[0][0])).not.toContain("would_block = true");
   });
 
+  it("adds a parameterized principal_agent filter only when agentId is set", async () => {
+    await listDecisions("ws_1", { agentId: "a_42" });
+    let [sql, params] = mockSafeQuery.mock.calls[0];
+    // The agent id is bound as $2, never interpolated into the SQL text.
+    expect(String(sql)).toContain("AND principal_agent = $2");
+    expect(String(sql)).not.toContain("a_42");
+    expect(params).toEqual(["ws_1", "a_42"]);
+
+    mockSafeQuery.mockClear();
+    await listDecisions("ws_1");
+    [sql, params] = mockSafeQuery.mock.calls[0];
+    expect(String(sql)).not.toContain("principal_agent = $");
+    expect(params).toEqual(["ws_1"]);
+  });
+
+  it("combines the wouldBlockOnly and agent filters and binds the agent at $2", async () => {
+    await listDecisions("ws_1", { wouldBlockOnly: true, agentId: "a_7" });
+    const [sql, params] = mockSafeQuery.mock.calls[0];
+    expect(String(sql)).toContain("would_block = true");
+    expect(String(sql)).toContain("AND principal_agent = $2");
+    expect(params).toEqual(["ws_1", "a_7"]);
+  });
+
   it("maps the rows straight through", async () => {
     mockSafeQuery.mockResolvedValueOnce({
       rows: [

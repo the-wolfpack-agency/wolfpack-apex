@@ -10,6 +10,7 @@
  * Query params:
  *   limit        : 1..500, default 100 (most recent first)
  *   would_block  : "1" to narrow to the rows enforcement would have stopped
+ *   agent        : narrow to a single acting agent's gated actions
  *
  * Capability: settings.manage_team (same gate as /api/admin/feedback, the
  * people who manage the team are the people who should review what the
@@ -30,12 +31,16 @@ export async function GET(req: NextRequest) {
   const rawLimit = url.searchParams.get("limit");
   const limit = rawLimit === null ? undefined : Number(rawLimit);
   const wouldBlockOnly = url.searchParams.get("would_block") === "1";
+  /* Optional single-agent filter: an agent profile passes ?agent=<id> to show
+     only that agent's gated actions. Absent (or empty) means no filter. */
+  const agentParam = url.searchParams.get("agent");
+  const agentId = agentParam && agentParam.trim() ? agentParam.trim() : undefined;
 
   const workspaceId = auth.user.workspaceId ?? "default";
 
   const [summary, decisions] = await Promise.all([
     summarizeDecisions(workspaceId),
-    listDecisions(workspaceId, { limit, wouldBlockOnly }),
+    listDecisions(workspaceId, { limit, wouldBlockOnly, agentId }),
   ]);
 
   /* listDecisions returns [] on both "no rows" and "db unavailable". We can't

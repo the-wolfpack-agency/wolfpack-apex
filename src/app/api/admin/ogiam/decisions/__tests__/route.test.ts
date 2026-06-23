@@ -130,7 +130,33 @@ describe("GET /api/admin/ogiam/decisions", () => {
     mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
     const { GET } = await import("@/app/api/admin/ogiam/decisions/route");
     await GET(mkReq());
-    expect(mockList).toHaveBeenCalledWith("default", { limit: undefined, wouldBlockOnly: false });
+    expect(mockList).toHaveBeenCalledWith("default", {
+      limit: undefined,
+      wouldBlockOnly: false,
+      agentId: undefined,
+    });
+  });
+
+  it("forwards ?agent as the agentId filter to listDecisions", async () => {
+    mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
+    const { GET } = await import("@/app/api/admin/ogiam/decisions/route");
+    await GET(mkReq("?agent=a_42"));
+    expect(mockList).toHaveBeenCalledWith("default", {
+      limit: undefined,
+      wouldBlockOnly: false,
+      agentId: "a_42",
+    });
+  });
+
+  it("treats a blank ?agent as no filter (agentId undefined)", async () => {
+    mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
+    const { GET } = await import("@/app/api/admin/ogiam/decisions/route");
+    await GET(mkReq("?agent=%20%20"));
+    expect(mockList).toHaveBeenCalledWith("default", {
+      limit: undefined,
+      wouldBlockOnly: false,
+      agentId: undefined,
+    });
   });
 
   it("503 when no DATABASE_URL is configured", async () => {
