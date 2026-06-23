@@ -18,6 +18,7 @@
  
 
 import { getValidToken, type CalendarEvent } from "@/lib/microsoft-graph";
+import { normalizeGraphDateTime } from "@/lib/calendar/timezone";
 import { query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { recordAudit } from "@/lib/audit-log";
@@ -591,8 +592,11 @@ export async function listEvents(
     return {
       id: ev.id,
       subject: ev.subject,
-      start: ev.start.dateTime,
-      end: ev.end.dateTime,
+      // Graph returns a naive wall-clock string plus a separate timeZone.
+      // Normalize to a real UTC instant so callers (and new Date()) do not
+      // read a UTC value as local time, which shifted events across days.
+      start: normalizeGraphDateTime(ev.start.dateTime, ev.start.timeZone),
+      end: normalizeGraphDateTime(ev.end.dateTime, ev.end.timeZone),
       location: ev.location?.displayName || "",
       attendees: rawAttendees.map((a) => a.emailAddress.name || a.emailAddress.address),
       attendeeEmails: rawAttendees

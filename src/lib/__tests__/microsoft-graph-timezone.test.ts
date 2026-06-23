@@ -36,12 +36,14 @@ describe("normalizeGraphDateTime", () => {
     );
   });
 
-  it("leaves a non-UTC naive string alone (no regression vs. prior behavior)", () => {
-    // If Graph ever returns a non-UTC zone as `timeZone`, we need the
-    // caller to know — silently appending Z would be worse than the
-    // original naive-local parse.
+  it("converts a non-UTC zoned naive string to the correct UTC instant", () => {
+    // Previously this passed through unchanged because there was no zone
+    // conversion, only a UTC append. The shared helper now maps the Windows
+    // zone to IANA and converts the wall clock to a real UTC instant, which
+    // is what the OOO scheduled times need. April 21 is PDT (UTC-7), so
+    // 10:30 Pacific is 17:30 UTC.
     expect(normalizeGraphDateTime("2026-04-21T10:30:00", "Pacific Standard Time")).toBe(
-      "2026-04-21T10:30:00",
+      "2026-04-21T17:30:00.000Z",
     );
   });
 

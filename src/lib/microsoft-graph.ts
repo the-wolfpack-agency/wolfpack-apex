@@ -12,6 +12,7 @@ import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 import { safeQuery, query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { getSecretOrThrow } from "@/lib/secrets";
+import { normalizeGraphDateTime as sharedNormalizeGraphDateTime } from "@/lib/calendar/timezone";
 import { getObsClient } from "@/lib/obs";
 import { sanitizeForLog } from "@/lib/log-sanitize";
 
@@ -909,29 +910,18 @@ export async function getConnectionStatus(userId: string): Promise<MsConnectionS
 // ---------------------------------------------------------------------------
 
 /**
- * Microsoft Graph returns calendar `start.dateTime` / `end.dateTime`
- * as a naive string (`"2026-04-21T14:30:00.0000000"`) with an
- * accompanying `timeZone` field (defaults to `"UTC"`). JS `new Date()`
- * parses a naive ISO string as LOCAL time — so a UTC value gets shown
- * at the wrong wall-clock offset (UTC 14:30 → 14:30 local, hiding a
- * 4h shift for EDT callers).
- *
- * Coerce into a TZ-designated ISO so Date() interprets it correctly.
- * We only handle the Graph default ("UTC") here; if Graph starts
- * returning a non-UTC zone the naive path stays and the caller sees
- * the same behavior as before (no regression).
+ * Microsoft Graph returns calendar start/end dateTimes as a naive wall-clock
+ * string plus a separate timeZone field. Parsing the naive string with
+ * new Date() reads it as local time and shifts the instant. This delegates to
+ * the shared timezone helper (src/lib/calendar/timezone), which handles the
+ * Graph default ("UTC") and also correctly converts Windows or IANA zones to a
+ * true UTC instant. Re-exported here so existing importers keep working.
  */
 export function normalizeGraphDateTime(
   dateTime: string,
   timeZone: string | undefined,
 ): string {
-  if (/[Zz]$/.test(dateTime) || /[+-]\d{2}:\d{2}$/.test(dateTime)) {
-    return dateTime;
-  }
-  if ((timeZone || "").toUpperCase() === "UTC") {
-    return dateTime + "Z";
-  }
-  return dateTime;
+  return sharedNormalizeGraphDateTime(dateTime, timeZone);
 }
 
 async function fetchLiveCalendarEvents(userId: string, startDate: string, endDate: string): Promise<CalendarEvent[]> {
