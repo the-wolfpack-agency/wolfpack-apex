@@ -1,5 +1,5 @@
 /**
- * src/lib/ai/types — provider-neutral shapes for the AI abstraction.
+ * src/lib/ai/types, provider-neutral shapes for the AI abstraction.
  *
  * Every feature that needs a model call goes through getAIClient() (see
  * router.ts) and speaks AICompleteRequest / AICompleteResponse only.
@@ -25,6 +25,10 @@ export interface AICompleteRequestMetadata {
   feature: string;
   user_id?: string;
   user_role?: string;
+  /** Owning workspace, drives per-team cost attribution + chargeback
+   *  (v_ai_cost_daily) and per-workspace routing policy. Falls back to
+   *  "default" in the gateway when a call site omits it. */
+  workspace_id?: string;
 }
 
 export interface AICompleteRequest {

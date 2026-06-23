@@ -123,8 +123,12 @@ const ISO_TIMESTAMP_RE =
    pipeline anyway). The single allowed separator class `[\s.()-]` is
    non-overlapping with the digit class, keeping the matcher linear and
    defeating polynomial backtracking on adversarial digit-heavy input. */
+/* The area code is an alternation (\(\d{3}\)|\d{3}) so the optional country
+   code cannot eat the first digits of a bare 10-digit number; the earlier
+   \b...\b form matched nothing for "(555) 867-5309" and leaked the number.
+   Left boundary is a negative lookbehind (?<!\d) because \b fails before "(". */
 const PHONE_RE =
-  /\b\+?\d{1,3}?[\s.()-]{0,2}\d{3}[\s.()-]{0,2}\d{3}[\s.()-]{0,2}\d{4}\b/g;
+  /(?<!\d)(?:\+?\d{1,3}[\s.()-]{0,2})?(?:\(\d{3}\)|\d{3})[\s.()-]{0,2}\d{3}[\s.()-]{0,2}\d{4}(?!\d)/g;
 /* Person-name heuristic: strip standalone capitalized tokens (Title-
    case, not all-caps acronyms like CEO/MFA/AADSTS). This must run
    before lowercasing. Imperfect by design — false positives just
