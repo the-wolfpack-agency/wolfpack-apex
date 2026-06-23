@@ -69,6 +69,16 @@ jobs:
         continue-on-error: true
         run: npx playwright test tests/e2e/feature-requests-data-flow.spec.ts --config=playwright.config.ts --reporter=github
 
+      # Feedback screenshot round-trip: POST /api/feedback with an image,
+      # read it back through the admin list + the lazy screenshot endpoint,
+      # then assert the thumbnail renders on /admin/feedback with no CSP
+      # failures. Catches a 201 that silently drops the image or an admin
+      # page that 200s but shows a blank widget. Soft gate until smoke creds
+      # are in secrets; promote to hard gate after a few green runs.
+      - name: Feedback screenshot flow spec (soft)
+        continue-on-error: true
+        run: npx playwright test tests/e2e/feedback-screenshot-flow.spec.ts --config=playwright.config.ts --reporter=github
+
       # Real-browser specs for /emails /messages /dashboard /search.
       # These cover regressions jsdom missed: layout/wrap, focus,
       # computed styles, IntersectionObserver / scroll. Soft gate
