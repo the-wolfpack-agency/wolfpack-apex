@@ -416,6 +416,22 @@ function TaskRow({ task }: { task: AgentTask }) {
                   >
                     {step.tool ?? "no tool"}
                   </span>
+                  {step.detail ? (
+                    <span
+                      data-testid={`agent-task-${task.id}-step-${step.index}-detail`}
+                      style={{
+                        display: "block",
+                        marginTop: "0.2rem",
+                        fontSize: "0.72rem",
+                        lineHeight: 1.4,
+                        color: step.outcome === "error" || step.outcome === "blocked"
+                          ? "var(--wp-danger, #f08a8a)"
+                          : "var(--wp-text-muted, #9ca3af)",
+                      }}
+                    >
+                      {step.detail}
+                    </span>
+                  ) : null}
                 </span>
                 <span
                   data-testid={`agent-task-${task.id}-step-${step.index}-outcome`}

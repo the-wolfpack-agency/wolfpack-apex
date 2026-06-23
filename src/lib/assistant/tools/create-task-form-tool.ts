@@ -10,7 +10,7 @@
 
 import { z } from "zod";
 import { trackEvent } from "@/lib/analytics";
-import { listCachedTaskLists, createTask } from "@/lib/integrations/microsoft-tasks";
+import { listCachedTaskLists, listTaskLists, createTask } from "@/lib/integrations/microsoft-tasks";
 import { registerTool } from "./registry";
 import type { ToolContext, ToolDef, ToolResult } from "./types";
 import { taskFormSpec, type TaskListOption } from "@/lib/assistant/forms/specs";
@@ -68,14 +68,28 @@ async function createTaskAsAgent(
   }
   const ownerUserId = principal.ownerUserId;
   try {
-    const lists = await listCachedTaskLists(ownerUserId);
-    const target = lists.find((l) => !READ_ONLY_LIST_NAMES.has(l.displayName));
+    /* Prefer the cached lists, but fall back to LIVE Graph when the cache is
+     * empty (the owner may be connected to Microsoft yet never have synced their
+     * To-Do lists into our cache, which is the common case for a fresh agent). */
+    let target: { msListId: string; displayName: string } | undefined;
+    try {
+      const cached = await listCachedTaskLists(ownerUserId);
+      const c = cached.find((l) => !READ_ONLY_LIST_NAMES.has(l.displayName));
+      if (c) target = { msListId: c.msListId, displayName: c.displayName };
+    } catch {
+      /* cache read failed; try live below */
+    }
+    if (!target) {
+      const live = await listTaskLists(ownerUserId);
+      const l = live.find((x) => !READ_ONLY_LIST_NAMES.has(x.displayName));
+      if (l) target = { msListId: l.id, displayName: l.displayName };
+    }
     if (!target) {
       return {
         ok: false,
         code: "internal",
         message:
-          "The agent owner has no writable Microsoft To-Do list connected. Connect Microsoft To-Do so the agent can create tasks on the owner's behalf.",
+          "The agent owner has no Microsoft To-Do list. Open Microsoft To-Do once to create a default list, then retry.",
       };
     }
     await createTask(ownerUserId, target.msListId, { title });
@@ -91,10 +105,21 @@ async function createTaskAsAgent(
       sources: [],
     };
   } catch (err) {
+    const msg = (err as Error).message ?? "";
+    /* A missing/expired Microsoft token surfaces as a 401 from the integration.
+     * Turn it into an actionable message instead of a raw Graph error. */
+    if (/no valid microsoft token|\b401\b|unauthor/i.test(msg)) {
+      return {
+        ok: false,
+        code: "internal",
+        message:
+          "The agent owner is not connected to Microsoft (or the token expired). Connect Microsoft in Settings so the agent can create tasks on the owner's behalf.",
+      };
+    }
     return {
       ok: false,
       code: "internal",
-      message: `Could not create the task on behalf of the owner: ${(err as Error).message}`,
+      message: `Could not create the task on behalf of the owner: ${msg}`,
     };
   }
 }
