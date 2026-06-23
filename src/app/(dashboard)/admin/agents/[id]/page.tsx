@@ -113,6 +113,38 @@ interface TasksResponse {
   tasks: AgentTask[];
 }
 
+interface RunTasksResponse {
+  ran: number;
+  tasks: AgentTask[];
+}
+
+/* Terminal vs in-flight. A task is terminal once the runtime has finished
+   governing it (every step ran, a step was blocked by the gate, or it errored).
+   queued and running are in-flight: the agent has work left to do, so the UI
+   polls until nothing is in-flight (or a poll cap is hit). */
+const TERMINAL_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
+  "succeeded",
+  "blocked",
+  "failed",
+]);
+
+function isTerminalTask(task: AgentTask): boolean {
+  return TERMINAL_TASK_STATUSES.has(task.status);
+}
+
+function hasInFlightTask(tasks: AgentTask[]): boolean {
+  return tasks.some((t) => !isTerminalTask(t));
+}
+
+function hasQueuedTask(tasks: AgentTask[]): boolean {
+  return tasks.some((t) => t.status === "queued");
+}
+
+/* Cap the live poll so a stuck task (runtime never finishes it) can never spin
+   an interval forever. At 3s a poll this is one minute of watching. */
+const MAX_TASK_POLLS = 20;
+const TASK_POLL_INTERVAL_MS = 3000;
+
 /* Behavior + drift: the gate keeps an agent in check across model changes by
    comparing its recent behavior to a captured baseline. A behavior shift past
    the threshold raises the drift score and, when critical, auto-pauses the
@@ -439,6 +471,10 @@ export default function AgentProfilePage({
   const [goal, setGoal] = useState("");
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
+  /* Run-queued control: drains tasks already sitting in "queued" (e.g. ones
+     created before execution was wired up) via the run endpoint, then refreshes
+     the list with the returned, now-executed tasks. */
+  const [runningQueued, setRunningQueued] = useState(false);
 
   /* Behavior + drift. Loads independently of the agent so a drift failure never
      blanks the profile. The two controls (set baseline, check drift now) POST
@@ -561,6 +597,47 @@ export default function AgentProfilePage({
     void loadDrift();
   }, [loadDrift]);
 
+  /* Live progress polling. While any task is in-flight (queued or running) we
+     poll the tasks GET every few seconds and replace the list with the fresh
+     one, so a manager watches the agent execute in real time. The poll stops as
+     soon as every task is terminal, or after a sane cap so a stuck task can
+     never spin the interval forever. A single interval, cleaned up on unmount
+     and whenever polling should stop. The effect is keyed on whether the list
+     currently has an in-flight task so it (re)arms when assigning new work and
+     tears down once everything settles. */
+  const tasksInFlight = tasks.kind === "present" && hasInFlightTask(tasks.tasks);
+  useEffect(() => {
+    if (!tasksInFlight) return;
+    let polls = 0;
+    let cancelled = false;
+    const interval = setInterval(() => {
+      void (async () => {
+        if (cancelled) return;
+        polls += 1;
+        try {
+          const res = await fetchWithRefresh(`/api/admin/agents/${id}/tasks`);
+          if (cancelled) return;
+          if (res.ok) {
+            const body = (await res.json()) as TasksResponse;
+            const next = body.tasks ?? [];
+            setTasks({ kind: "present", tasks: next });
+            if (!hasInFlightTask(next)) {
+              clearInterval(interval);
+            }
+          }
+        } catch {
+          /* A transient poll failure is non-fatal: keep the last good list and
+             let the next tick (or the cap) resolve it. */
+        }
+        if (polls >= MAX_TASK_POLLS) clearInterval(interval);
+      })();
+    }, TASK_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [tasksInFlight, id]);
+
   async function runAction(action: LifecycleAction) {
     setBusy(true);
     setError(null);
@@ -585,9 +662,13 @@ export default function AgentProfilePage({
     }
   }
 
-  /* Assigns a goal. The agent runtime (not this UI) executes the task; here we
-     just hand it the goal and observe. On 201 we prepend the returned task and
-     clear the textarea; 400/404/409 surface inline (409 = revoked agent). */
+  /* Assigns a goal and watches it execute. The POST now returns the task already
+     governed to a terminal status (succeeded / blocked / failed) with its steps
+     populated, so we prepend it and the manager immediately sees what the agent
+     did rather than a stuck "Queued". We also refetch the list so any task the
+     agent executed out of band is reflected; if a task still reports in-flight,
+     the poll effect picks it up. Clears the textarea on success; 400/404/409
+     surface inline (409 = the agent must be active to run work). */
   async function assignTask() {
     const trimmed = goal.trim();
     if (!trimmed || assigning) return;
@@ -602,16 +683,22 @@ export default function AgentProfilePage({
       if (res.status === 201 || res.ok) {
         const body = (await res.json()) as TaskResponse;
         if (body.task) {
+          const created = body.task;
           setTasks((prev) => {
             const existing = prev.kind === "present" ? prev.tasks : [];
-            return { kind: "present", tasks: [body.task, ...existing] };
+            return { kind: "present", tasks: [created, ...existing] };
           });
         }
         setGoal("");
+        /* The returned task is already terminal (or, if the runtime is still
+           draining it, queued/running), so prepending it is enough: a terminal
+           task renders its real status and steps at once, and a still-in-flight
+           one arms the live poll, which makes the list canonical without a
+           redundant fetch here. */
         return;
       }
       if (res.status === 409) {
-        setAssignError("This agent is revoked and can no longer be assigned work.");
+        setAssignError("This agent must be active to run work. Resume it first.");
       } else if (res.status === 404) {
         setAssignError("This agent no longer exists.");
       } else if (res.status === 400) {
@@ -624,6 +711,43 @@ export default function AgentProfilePage({
       setAssignError((e as Error).message || "Network error");
     } finally {
       setAssigning(false);
+    }
+  }
+
+  /* Drains tasks already sitting in "queued" by POSTing the run endpoint, then
+     refreshes the list from the returned, now-executed tasks. This lets a
+     manager kick off work that was queued before execution was wired up. The
+     200 body carries the updated task list; we also fall back to loadTasks so
+     the UI is canonical even if the body is shaped differently. */
+  async function runQueuedWork() {
+    if (runningQueued) return;
+    setRunningQueued(true);
+    setAssignError(null);
+    try {
+      const res = await fetchWithRefresh(`/api/admin/agents/${id}/tasks/run`, {
+        method: "POST",
+        headers: jsonHeaders(),
+      });
+      if (res.ok) {
+        const body = (await res.json().catch(() => null)) as RunTasksResponse | null;
+        if (body && Array.isArray(body.tasks)) {
+          setTasks({ kind: "present", tasks: body.tasks });
+        } else {
+          await loadTasks();
+        }
+        return;
+      }
+      if (res.status === 409) {
+        setAssignError("This agent must be active to run work. Resume it first.");
+      } else if (res.status === 404) {
+        setAssignError("This agent no longer exists.");
+      } else {
+        setAssignError(`Could not run queued work (HTTP ${res.status}).`);
+      }
+    } catch (e) {
+      setAssignError((e as Error).message || "Network error");
+    } finally {
+      setRunningQueued(false);
     }
   }
 
@@ -1318,6 +1442,43 @@ export default function AgentProfilePage({
             </button>
           </div>
         </form>
+
+        {/* Run-queued control. Shown only when work is already sitting queued
+            (e.g. created before execution was wired up, or surfaced by the
+            agent's own drain). It drains those tasks via the run endpoint and
+            refreshes the list, so a manager can kick them off without
+            re-assigning. Disabled while in flight. */}
+        {tasks.kind === "present" && hasQueuedTask(tasks.tasks) && (
+          <div data-testid="agent-run-queued-controls" style={{ marginBottom: "1rem" }}>
+            <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
+              <button
+                type="button"
+                data-testid="agent-run-queued"
+                onClick={() => void runQueuedWork()}
+                disabled={runningQueued}
+                style={{
+                  padding: "0.5rem 1rem",
+                  borderRadius: "6px",
+                  fontSize: "0.85rem",
+                  fontWeight: 600,
+                  background: "var(--wp-dark-surface2, #1a1a1a)",
+                  color: "var(--wp-gold, #f1c233)",
+                  border: "1px solid var(--wp-gold, #f1c233)",
+                  cursor: runningQueued ? "not-allowed" : "pointer",
+                  opacity: runningQueued ? 0.6 : 1,
+                }}
+              >
+                {runningQueued ? "Running..." : "Run queued work"}
+              </button>
+            </div>
+            <div
+              data-testid="agent-run-queued-note"
+              style={{ marginTop: "0.45rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #6b7280)", lineHeight: 1.4 }}
+            >
+              Runs the tasks already sitting queued and shows each governed step as the agent works through them.
+            </div>
+          </div>
+        )}
 
         {tasks.kind === "loading" && (
           <div

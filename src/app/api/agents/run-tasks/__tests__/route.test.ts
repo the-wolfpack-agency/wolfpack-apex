@@ -26,9 +26,11 @@ jest.mock("@/lib/agents/store", () => ({
 
 const mockClaim = jest.fn();
 const mockComplete = jest.fn();
+const mockGetTask = jest.fn();
 jest.mock("@/lib/agents/tasks/store", () => ({
   claimNextQueuedTask: (...a: any[]) => mockClaim(...a),
   completeTask: (...a: any[]) => mockComplete(...a),
+  getTask: (...a: any[]) => mockGetTask(...a),
 }));
 
 const mockRun = jest.fn();
@@ -71,6 +73,31 @@ function runResult(status: string, stepCount: number) {
   return { status, steps, resultSummary: `did ${stepCount}` };
 }
 
+/* The inline helper persists via completeTask, then reads the row back via
+   getTask to surface the terminal status + governed steps. Reflect whatever
+   completeTask was last called with for the matching task id so the runtime's
+   per-task summaries stay anchored to the persisted state. */
+function reflectGetTask() {
+  mockGetTask.mockImplementation(async (id: string) => {
+    const calls = mockComplete.mock.calls.filter((c) => c[0] === id);
+    if (calls.length === 0) return null;
+    const [, status, steps] = calls[calls.length - 1];
+    return {
+      id,
+      agentId: "a_1",
+      workspaceId: "default",
+      assignedBy: "u_cto",
+      goal: `goal ${id}`,
+      status,
+      steps,
+      resultSummary: null,
+      createdAt: "2026-06-23T00:00:00Z",
+      startedAt: "2026-06-23T00:00:00Z",
+      finishedAt: "2026-06-23T00:00:01Z",
+    };
+  });
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockResolve.mockResolvedValue(PRINCIPAL);
@@ -78,6 +105,7 @@ beforeEach(() => {
   mockClaim.mockResolvedValue(null);
   mockRun.mockResolvedValue(runResult("succeeded", 2));
   mockComplete.mockResolvedValue(undefined);
+  reflectGetTask();
 });
 
 describe("POST /api/agents/run-tasks", () => {
@@ -135,15 +163,21 @@ describe("POST /api/agents/run-tasks", () => {
       { task_id: "t_2", status: "blocked", steps: 1 },
     ]);
 
-    // Each claimed task ran under the agent principal and was persisted.
-    expect(mockRun).toHaveBeenNthCalledWith(1, {
-      id: "t_1",
-      goal: "goal t_1",
-      agentId: "a_1",
-      role: "ops",
-      workspaceId: "default",
-      ownerUserId: "u_cto",
-    });
+    // Each claimed task ran under the agent principal and was persisted. The
+    // shared inline helper passes an optional executor-deps argument through
+    // (undefined here), so the run is asserted by its first (task) argument.
+    expect(mockRun).toHaveBeenNthCalledWith(
+      1,
+      {
+        id: "t_1",
+        goal: "goal t_1",
+        agentId: "a_1",
+        role: "ops",
+        workspaceId: "default",
+        ownerUserId: "u_cto",
+      },
+      undefined,
+    );
     expect(mockComplete).toHaveBeenCalledWith("t_1", "succeeded", expect.any(Array), "did 3");
     expect(mockComplete).toHaveBeenCalledWith("t_2", "blocked", expect.any(Array), "did 1");
     expect(res.headers.get("Cache-Control")).toBe("no-store");

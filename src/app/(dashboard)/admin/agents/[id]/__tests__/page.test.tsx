@@ -141,6 +141,7 @@ function makeDriftEvent(over: Partial<Record<string, unknown>> = {}) {
 
 const SCAN_PATH = "/scan";
 const TASKS_PATH = "/tasks";
+const TASKS_RUN_PATH = "/tasks/run";
 const DRIFT_PATH = "/drift";
 const BASELINE_PATH = "/baseline";
 const DRIFT_CHECK_PATH = "/drift-check";
@@ -152,9 +153,10 @@ const DRIFT_CHECK_PATH = "/drift-check";
  * a drift check is run. `agent` is the response for /api/admin/agents/{id} (and
  * any PATCH), `scan` is for .../scan, `tasks` is the tasks GET, `onAssign` is
  * the tasks POST, `drift` is the drift GET, `onBaseline` is the baseline POST,
- * `onDriftCheck` is the drift-check POST. The drift GET can be made dynamic
- * (e.g. to return a new baseline/event after a POST) by having `drift` close
- * over mutable test state.
+ * `onDriftCheck` is the drift-check POST, and `onRun` is the tasks-drain POST
+ * (.../tasks/run). The drift GET (and the tasks GET) can be made dynamic (e.g.
+ * to return an updated list after a POST or between poll ticks) by having the
+ * relevant function close over mutable test state.
  */
 function routeByUrl(opts: {
   agent: () => any;
@@ -162,6 +164,7 @@ function routeByUrl(opts: {
   tasks?: () => any;
   onPatch?: () => any;
   onAssign?: () => any;
+  onRun?: () => any;
   onScan?: () => any;
   drift?: () => any;
   onBaseline?: () => any;
@@ -170,6 +173,13 @@ function routeByUrl(opts: {
   return (url: unknown, init?: { method?: string }) => {
     const u = String(url);
     if (init?.method === "PATCH" && opts.onPatch) return Promise.resolve(opts.onPatch());
+    // The run endpoint (".../tasks/run") drains queued work. It is checked
+    // before the generic "/tasks" suffixes because "/tasks/run" does not end
+    // with "/tasks"; route the POST here so the drain stays distinct from the
+    // assign POST and the list GET.
+    if (u.endsWith(TASKS_RUN_PATH) && init?.method === "POST") {
+      return Promise.resolve((opts.onRun ?? (() => mkRes({ ran: 0, tasks: [] })))());
+    }
     // The manager-triggered scan POSTs to .../scan; route it before the generic
     // scan GET suffix below so the GET loader and the POST trigger stay distinct.
     if (u.endsWith(SCAN_PATH) && init?.method === "POST") {
@@ -544,7 +554,14 @@ describe("/admin/agents/[id]: assigned work (tasks)", () => {
   });
 
   it("assigns a goal: POSTs to the tasks endpoint and prepends the returned task", async () => {
-    const created = makeTask({ id: "task-new", goal: "Summarise Q2 numbers", status: "queued", steps: [] });
+    // The assign POST now returns a TERMINAL task (steps populated), so the
+    // prepended row shows its real status, not a stuck "Queued".
+    const created = makeTask({
+      id: "task-new",
+      goal: "Summarise Q2 numbers",
+      status: "succeeded",
+      steps: [{ index: 0, instruction: "Summarise", tool: "search_mail", outcome: "ran", detail: null }],
+    });
     mockFetchWithRefresh.mockImplementation(
       routeByUrl({
         agent: () => mkRes({ agent: makeAgent() }),
@@ -586,13 +603,15 @@ describe("/admin/agents/[id]: assigned work (tasks)", () => {
     expect(screen.getByTestId("agent-task-goal")).toHaveValue("");
   });
 
-  it("shows an inline error when assigning to a revoked agent (409)", async () => {
+  it("shows an inline error when assigning to an inactive agent (409)", async () => {
+    // The execute-on-assign contract returns 409 agent_not_active when the agent
+    // is paused or revoked; the UI surfaces a single must-be-active message.
     mockFetchWithRefresh.mockImplementation(
       routeByUrl({
         agent: () => mkRes({ agent: makeAgent() }),
         scan: () => mkRes({}, { ok: false, status: 404 }),
         tasks: () => mkRes({ tasks: [] }),
-        onAssign: () => mkRes({ error: "agent_revoked" }, { ok: false, status: 409 }),
+        onAssign: () => mkRes({ error: "agent_not_active" }, { ok: false, status: 409 }),
       }),
     );
 
@@ -611,10 +630,245 @@ describe("/admin/agents/[id]: assigned work (tasks)", () => {
     });
 
     await waitFor(() => expect(screen.getByTestId("agent-task-error")).toBeInTheDocument());
-    expect(screen.getByTestId("agent-task-error")).toHaveTextContent(/revoked/i);
+    expect(screen.getByTestId("agent-task-error")).toHaveTextContent(/must be active/i);
     // No task row was added on the failed assign.
     expect(screen.queryByTestId("agent-tasks-list")).not.toBeInTheDocument();
     expect(screen.getByTestId("agent-tasks-empty")).toBeInTheDocument();
+  });
+});
+
+describe("/admin/agents/[id]: live execution", () => {
+  it("assign returns a terminal task that renders its status and governed steps, not Queued, and the button shows a busy state", async () => {
+    // The POST resolves on a deferred promise so we can observe the in-flight
+    // busy state on the Assign button before it settles.
+    let resolveAssign: ((v: any) => void) | null = null;
+    const created = makeTask({
+      id: "task-done",
+      goal: "Reconcile the ledger",
+      status: "succeeded",
+      steps: [
+        { index: 0, instruction: "Pull ledger", tool: "search_mail", outcome: "ran", detail: null },
+        { index: 1, instruction: "Reconcile totals", tool: "create_event", outcome: "ran", detail: null },
+      ],
+      resultSummary: "Reconciled.",
+    });
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        tasks: () => mkRes({ tasks: [] }),
+        onAssign: () =>
+          new Promise((resolve) => {
+            resolveAssign = () => resolve(mkRes({ task: created }, { status: 201 }));
+          }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("agent-task-form")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("agent-task-goal"), {
+        target: { value: "Reconcile the ledger" },
+      });
+    });
+
+    // Fire the assign but do not resolve the POST yet.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-task-submit"));
+    });
+
+    // While the request is in flight the button is busy and disabled.
+    const submit = screen.getByTestId("agent-task-submit") as HTMLButtonElement;
+    expect(submit).toBeDisabled();
+    expect(submit).toHaveTextContent(/assigning/i);
+
+    // Now let the POST resolve with the terminal task.
+    await act(async () => {
+      resolveAssign?.(null);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-task-task-done")).toBeInTheDocument());
+
+    // The terminal status renders, NOT "queued".
+    const statusChip = screen.getByTestId("agent-task-status-task-done");
+    expect(statusChip).toHaveTextContent(/succeeded/i);
+    expect(statusChip).not.toHaveTextContent(/queued/i);
+
+    // The governed steps are visible once expanded.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-task-toggle-task-done"));
+    });
+    expect(screen.getByTestId("agent-task-steps-task-done")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-task-task-done-step-0-outcome")).toHaveTextContent("ran");
+    expect(screen.getByTestId("agent-task-task-done-step-1-outcome")).toHaveTextContent("ran");
+
+    // The button has returned to its idle label.
+    expect(screen.getByTestId("agent-task-submit")).toHaveTextContent(/^assign$/i);
+  });
+
+  it("surfaces the must-be-active message on a 409 assign and does not blank the section", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        tasks: () => mkRes({ tasks: [] }),
+        onAssign: () => mkRes({ error: "agent_not_active" }, { ok: false, status: 409 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("agent-task-form")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("agent-task-goal"), { target: { value: "Do work" } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-task-submit"));
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-task-error")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-task-error")).toHaveTextContent(/must be active/i);
+    // The section is intact: form + empty state still render, nothing blanked.
+    expect(screen.getByTestId("agent-task-form")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-tasks-empty")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-name")).toBeInTheDocument();
+  });
+
+  it("polls while a task is running and stops once it is terminal", async () => {
+    jest.useFakeTimers();
+    try {
+      // The list starts with one running task; the first poll returns it
+      // succeeded, after which polling must stop (no further GET to /tasks).
+      const running = makeTask({ id: "task-run", goal: "Crunch numbers", status: "running", steps: [] });
+      const done = makeTask({
+        id: "task-run",
+        goal: "Crunch numbers",
+        status: "succeeded",
+        steps: [{ index: 0, instruction: "Crunch", tool: "search_mail", outcome: "ran", detail: null }],
+        resultSummary: "Done.",
+      });
+      let tasksGetCount = 0;
+      let settled = false;
+      mockFetchWithRefresh.mockImplementation(
+        routeByUrl({
+          agent: () => mkRes({ agent: makeAgent() }),
+          scan: () => mkRes({}, { ok: false, status: 404 }),
+          tasks: () => {
+            tasksGetCount += 1;
+            // Mount GET returns running; the first poll returns succeeded.
+            return mkRes({ tasks: [settled ? done : running] });
+          },
+        }),
+      );
+
+      await act(async () => {
+        render(<AgentProfilePage params={params} />);
+      });
+      await waitFor(() => expect(screen.getByTestId("agent-task-status-task-run")).toBeInTheDocument());
+      expect(screen.getByTestId("agent-task-status-task-run")).toHaveTextContent(/running/i);
+
+      const afterMountGets = tasksGetCount;
+
+      // Flip the backing data to terminal, then advance one poll interval.
+      settled = true;
+      await act(async () => {
+        jest.advanceTimersByTime(3000);
+      });
+      // Flush the in-flight poll's async work.
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // The poll fired exactly one extra GET and the UI now reads succeeded.
+      expect(tasksGetCount).toBe(afterMountGets + 1);
+      expect(screen.getByTestId("agent-task-status-task-run")).toHaveTextContent(/succeeded/i);
+
+      // Polling has stopped: further timer advances trigger no more GETs.
+      const afterTerminalGets = tasksGetCount;
+      await act(async () => {
+        jest.advanceTimersByTime(9000);
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(tasksGetCount).toBe(afterTerminalGets);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("shows Run queued work when a queued task exists, POSTs to /tasks/run, and refreshes", async () => {
+    const queued = makeTask({ id: "task-q", goal: "Backfilled work", status: "queued", steps: [] });
+    const drained = makeTask({
+      id: "task-q",
+      goal: "Backfilled work",
+      status: "succeeded",
+      steps: [{ index: 0, instruction: "Backfill", tool: "search_mail", outcome: "ran", detail: null }],
+      resultSummary: "Drained.",
+    });
+    let runCount = 0;
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        tasks: () => mkRes({ tasks: [queued] }),
+        onRun: () => {
+          runCount += 1;
+          return mkRes({ ran: 1, tasks: [drained] });
+        },
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    // The control shows because a queued task exists.
+    await waitFor(() => expect(screen.getByTestId("agent-run-queued")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-task-status-task-q")).toHaveTextContent(/queued/i);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-run-queued"));
+    });
+
+    // A POST went to the run endpoint.
+    const post = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).endsWith("/tasks/run"),
+    );
+    expect(post).toBeTruthy();
+    expect(String(post?.[0])).toContain("/api/admin/agents/ag-1/tasks/run");
+    expect(runCount).toBe(1);
+
+    // The list refreshed from the drain response: the task is now succeeded and
+    // the run control is gone (no more queued tasks).
+    await waitFor(() => expect(screen.getByTestId("agent-task-status-task-q")).toHaveTextContent(/succeeded/i));
+    expect(screen.queryByTestId("agent-run-queued")).not.toBeInTheDocument();
+  });
+
+  it("hides Run queued work when there are no queued tasks", async () => {
+    const succeeded = makeTask({ id: "task-ok2", status: "succeeded" });
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        tasks: () => mkRes({ tasks: [succeeded] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-task-task-ok2")).toBeInTheDocument());
+    expect(screen.queryByTestId("agent-run-queued")).not.toBeInTheDocument();
   });
 });
 

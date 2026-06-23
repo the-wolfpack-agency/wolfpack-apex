@@ -3,11 +3,16 @@
  *
  *   POST:
  *     - capability denied -> 401 (requireCapability response is returned verbatim).
- *     - unknown agent -> 404 agent_not_found (no createTask).
- *     - revoked agent -> 409 agent_revoked (no createTask).
+ *     - unknown agent -> 404 agent_not_found (no createTask, no execution).
+ *     - paused / revoked agent -> 409 agent_not_active (no createTask, no
+ *       execution): an inactive principal must not run.
  *     - empty / oversized goal -> 400 (no createTask).
- *     - happy path -> 201 { task }, createTask called with the resolved actor,
- *       recordAudit fired with agent.task_assigned.
+ *     - happy path -> 201 { task } with a TERMINAL status and governed steps,
+ *       createTask called with the resolved actor, recordAudit fired with
+ *       agent.task_assigned, and the task executed inline as the agent
+ *       (executeTaskAsAgent).
+ *     - blocked run -> 201 task.status "blocked" (governance surfaced, owner
+ *       notified inside the executor).
  *   GET:
  *     - 200 { tasks } shape from listTasksForAgent.
  */
@@ -35,6 +40,11 @@ const mockRecordAudit = jest.fn();
 jest.mock("@/lib/audit-log", () => ({
   recordAudit: (...a: any[]) => mockRecordAudit(...a),
   extractRequestMetadata: () => ({ ipAddress: "1.2.3.4", userAgent: "jest" }),
+}));
+
+const mockExecuteTaskAsAgent = jest.fn();
+jest.mock("@/lib/agents/tasks/run-inline", () => ({
+  executeTaskAsAgent: (...a: any[]) => mockExecuteTaskAsAgent(...a),
 }));
 
 import { POST, GET } from "@/app/api/admin/agents/[id]/tasks/route";
@@ -79,13 +89,39 @@ const TASK = {
   finishedAt: null,
 };
 
+function completedTask(status: string, stepCount: number) {
+  return {
+    ...TASK,
+    status,
+    steps: Array.from({ length: stepCount }, (_, i) => ({
+      index: i,
+      instruction: "x",
+      tool: "search",
+      outcome: "ran",
+      detail: "ok",
+    })),
+    resultSummary: `did ${stepCount}`,
+    startedAt: "2026-06-23T00:00:00Z",
+    finishedAt: "2026-06-23T00:00:01Z",
+  };
+}
+
+const ACTIVE_AGENT = {
+  id: "a_1",
+  workspaceId: "default",
+  state: "active",
+  role: "ops",
+  ownerUserId: "u_owner",
+};
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockRequireCapability.mockResolvedValue(okAuth());
-  mockGetAgent.mockResolvedValue({ id: "a_1", workspaceId: "default", state: "active" });
+  mockGetAgent.mockResolvedValue(ACTIVE_AGENT);
   mockCreateTask.mockResolvedValue(TASK);
   mockListTasksForAgent.mockResolvedValue([TASK]);
   mockRecordAudit.mockResolvedValue(undefined);
+  mockExecuteTaskAsAgent.mockResolvedValue(completedTask("succeeded", 2));
 });
 
 describe("POST /api/admin/agents/[id]/tasks", () => {
@@ -110,15 +146,27 @@ describe("POST /api/admin/agents/[id]/tasks", () => {
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("agent_not_found");
     expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(mockExecuteTaskAsAgent).not.toHaveBeenCalled();
   });
 
-  it("409 agent_revoked when the agent is revoked", async () => {
-    mockGetAgent.mockResolvedValue({ id: "a_1", workspaceId: "default", state: "revoked" });
+  it("409 agent_not_active when the agent is revoked; nothing runs", async () => {
+    mockGetAgent.mockResolvedValue({ ...ACTIVE_AGENT, state: "revoked" });
     const res = await POST(mkReq({ goal: "x" }), ctx as any);
     expect(res.status).toBe(409);
     const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("agent_revoked");
+    expect(body.error).toBe("agent_not_active");
     expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(mockExecuteTaskAsAgent).not.toHaveBeenCalled();
+  });
+
+  it("409 agent_not_active when the agent is paused; nothing runs", async () => {
+    mockGetAgent.mockResolvedValue({ ...ACTIVE_AGENT, state: "paused" });
+    const res = await POST(mkReq({ goal: "x" }), ctx as any);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("agent_not_active");
+    expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(mockExecuteTaskAsAgent).not.toHaveBeenCalled();
   });
 
   it("400 when goal is empty / whitespace", async () => {
@@ -133,11 +181,16 @@ describe("POST /api/admin/agents/[id]/tasks", () => {
     expect(mockCreateTask).not.toHaveBeenCalled();
   });
 
-  it("201 creates the task with the resolved actor and fires the audit", async () => {
+  it("201 creates, audits, and executes inline, returning a TERMINAL task with steps", async () => {
     const res = await POST(mkReq({ goal: "  draft the brief  " }), ctx as any);
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { task: { id: string } };
+    const body = (await res.json()) as {
+      task: { id: string; status: string; steps: unknown[] };
+    };
+    // The UI sees the real outcome, not an eternal "queued".
     expect(body.task.id).toBe("t_1");
+    expect(body.task.status).toBe("succeeded");
+    expect(body.task.steps).toHaveLength(2);
 
     expect(mockCreateTask).toHaveBeenCalledWith({
       agentId: "a_1",
@@ -146,6 +199,12 @@ describe("POST /api/admin/agents/[id]/tasks", () => {
       assignedByRole: "admin",
       goal: "draft the brief", // trimmed
     });
+
+    // The task was executed inline AS the agent's identity.
+    expect(mockExecuteTaskAsAgent).toHaveBeenCalledWith(
+      { id: "a_1", role: "ops", ownerUserId: "u_owner", workspaceId: "default" },
+      { id: "t_1", goal: "draft the brief" },
+    );
 
     expect(mockRecordAudit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -158,10 +217,28 @@ describe("POST /api/admin/agents/[id]/tasks", () => {
     );
   });
 
+  it("201 surfaces a blocked run as task.status blocked", async () => {
+    mockExecuteTaskAsAgent.mockResolvedValue(completedTask("blocked", 1));
+    const res = await POST(mkReq({ goal: "wire money" }), ctx as any);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { task: { status: string } };
+    expect(body.task.status).toBe("blocked");
+    expect(mockExecuteTaskAsAgent).toHaveBeenCalled();
+  });
+
+  it("falls back to the created task when the inline run returns null", async () => {
+    mockExecuteTaskAsAgent.mockResolvedValue(null);
+    const res = await POST(mkReq({ goal: "draft" }), ctx as any);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { task: { id: string } };
+    expect(body.task.id).toBe("t_1");
+  });
+
   it("still returns 201 when the audit write throws (best-effort)", async () => {
     mockRecordAudit.mockRejectedValue(new Error("ledger down"));
     const res = await POST(mkReq({ goal: "draft" }), ctx as any);
     expect(res.status).toBe(201);
+    expect(mockExecuteTaskAsAgent).toHaveBeenCalled();
   });
 });
 

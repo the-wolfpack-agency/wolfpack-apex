@@ -27,8 +27,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveAgentFromRequest } from "@/lib/agents/identity";
 import { getAgent } from "@/lib/agents/store";
-import { claimNextQueuedTask, completeTask } from "@/lib/agents/tasks/store";
-import { runAgentTask } from "@/lib/agents/tasks/executor";
+import { claimNextQueuedTask } from "@/lib/agents/tasks/store";
+import { executeTaskAsAgent } from "@/lib/agents/tasks/run-inline";
 
 /* --------------------- Per-agent rate limiter ------------------------- */
 
@@ -99,33 +99,27 @@ export async function POST(req: NextRequest) {
 
   const results: TaskResult[] = [];
 
+  const agentIdentity = {
+    id: principal.agentId,
+    role: principal.role,
+    ownerUserId: principal.ownerUserId,
+    workspaceId: principal.workspaceId,
+  };
+
   for (let i = 0; i < MAX_RUN; i++) {
     const t = await claimNextQueuedTask(principal.agentId, principal.workspaceId);
     if (!t) break;
 
-    /* Isolate each task: a thrown executor or persistence error is recorded as
-       a failed task and the batch continues. One bad task must not abort the
-       whole drain or 500 the request. */
-    try {
-      const run = await runAgentTask({
-        id: t.id,
-        goal: t.goal,
-        agentId: principal.agentId,
-        role: principal.role,
-        workspaceId: principal.workspaceId,
-        ownerUserId: principal.ownerUserId,
-      });
-      await completeTask(t.id, run.status, run.steps, run.resultSummary);
-      results.push({ task_id: t.id, status: run.status, steps: run.steps.length });
-    } catch (err) {
-      console.error("[run-tasks] task failed", t.id, (err as Error).message);
-      try {
-        await completeTask(t.id, "failed", [], "Failed during execution.");
-      } catch (markErr) {
-        console.error("[run-tasks] could not mark task failed", t.id, (markErr as Error).message);
-      }
-      results.push({ task_id: t.id, status: "failed", steps: 0 });
-    }
+    /* Run the claimed task through the single shared inline-execution helper.
+       It runs the governed executor under the agent's identity, persists the
+       outcome, and best-effort marks a thrown task failed, so one bad task can
+       never abort the whole drain or 500 the request. */
+    const completed = await executeTaskAsAgent(agentIdentity, { id: t.id, goal: t.goal });
+    results.push({
+      task_id: t.id,
+      status: completed?.status ?? "failed",
+      steps: completed?.steps.length ?? 0,
+    });
   }
 
   return json({ ok: true, ran: results.length, tasks: results }, 200);

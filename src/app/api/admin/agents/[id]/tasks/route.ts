@@ -11,14 +11,19 @@
  *
  * Assignment is security-relevant, telling an autonomous principal what to do
  * on the team's behalf, so every successful POST is recorded in the
- * hash-chained audit ledger (agent.task_assigned). The agent runtime that
- * actually executes the queued work lives at POST /api/agents/run-tasks.
+ * hash-chained audit ledger (agent.task_assigned). The task is then executed
+ * inline AS the agent through the shared governed-execution helper so the UI
+ * shows the real outcome immediately instead of an eternal "queued" row. The
+ * same helper backs the agent runtime at POST /api/agents/run-tasks; the
+ * executor it calls fires agent.task_completed and the learning hooks, so this
+ * route never counts completion twice.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { getAgent } from "@/lib/agents/store";
 import { createTask, listTasksForAgent } from "@/lib/agents/tasks/store";
+import { executeTaskAsAgent } from "@/lib/agents/tasks/run-inline";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 const MAX_GOAL_LEN = 4000;
@@ -33,14 +38,17 @@ export async function POST(
   const { id } = await params;
   const workspace = auth.user.workspaceId ?? "default";
 
-  /* Verify the agent exists and is not revoked from the source of truth. Work
-     must never be queued onto an agent that no longer holds its mandate. */
+  /* Verify the agent exists and is active from the source of truth. Work must
+     never be queued onto an agent that no longer holds its mandate (revoked) or
+     has been suspended (paused): since the task now executes inline as the
+     agent, an inactive principal must not run. Both inactive states are refused
+     up front before createTask, so nothing is persisted onto a dead agent. */
   const agent = await getAgent(id, workspace);
   if (!agent) {
     return NextResponse.json({ error: "agent_not_found" }, { status: 404 });
   }
-  if (agent.state === "revoked") {
-    return NextResponse.json({ error: "agent_revoked" }, { status: 409 });
+  if (agent.state !== "active") {
+    return NextResponse.json({ error: "agent_not_active" }, { status: 409 });
   }
 
   const body = (await req.json().catch(() => null)) as { goal?: unknown } | null;
@@ -81,7 +89,23 @@ export async function POST(
     console.error("[agent-task-assign audit]", (err as Error).message);
   }
 
-  return NextResponse.json({ task }, { status: 201 });
+  /* Execute the task inline AS the agent through the shared governed-execution
+     helper: it runs the OGIAM-enforced executor under the agent's identity,
+     persists the terminal state, and (inside the executor) fires
+     agent.task_completed plus the learning hooks exactly once. The returned row
+     carries the terminal status + governed steps so the UI shows the real
+     outcome instead of an eternal "queued". The helper never throws. */
+  const completed = await executeTaskAsAgent(
+    {
+      id: agent.id,
+      role: agent.role,
+      ownerUserId: agent.ownerUserId,
+      workspaceId: workspace,
+    },
+    { id: task.id, goal: task.goal },
+  );
+
+  return NextResponse.json({ task: completed ?? task }, { status: 201 });
 }
 
 export async function GET(
