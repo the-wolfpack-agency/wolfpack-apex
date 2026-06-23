@@ -43,8 +43,15 @@ function canonicalJSON(value: unknown): string {
   return JSON.stringify(sort(value));
 }
 
-/** The exact fields the chain commits to. Excludes cosmetic fields (reason is
- *  derived from rule_id; redacted_params is covered by params_hash). */
+/** The canonical, stable serialization of the fields the chain commits to.
+ *  Stored verbatim as hash_payload so verification recomputes the exact bytes
+ *  rather than reconstructing them from typed columns (a timestamptz column, for
+ *  example, would not round-trip to the identical string). */
+export function ogiamCanonicalPayload(fields: Record<string, unknown>): string {
+  return canonicalJSON(fields);
+}
+
+/** entry_hash = sha256(prev_hash || "|" || canonical payload). */
 export function computeOgiamEntryHash(
   prevHash: string,
   fields: Record<string, unknown>,
@@ -52,7 +59,7 @@ export function computeOgiamEntryHash(
   return createHash("sha256")
     .update(prevHash)
     .update("|")
-    .update(canonicalJSON(fields))
+    .update(ogiamCanonicalPayload(fields))
     .digest("hex");
 }
 
@@ -134,7 +141,12 @@ export async function recordDecision(
       params_hash: action.paramsHash,
       signals: action.signals,
     };
-    const entryHash = computeOgiamEntryHash(prevHash, hashFields);
+    const hashPayload = ogiamCanonicalPayload(hashFields);
+    const entryHash = createHash("sha256")
+      .update(prevHash)
+      .update("|")
+      .update(hashPayload)
+      .digest("hex");
 
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO ogiam_decisions (
@@ -142,10 +154,10 @@ export async function recordDecision(
          on_behalf_role, tool, capability, is_mutation, surface, workflow_id,
          risk_tier, intended_outcome, effective_outcome, enforced, mode,
          policy_version, rule_id, reason, would_block, params_hash,
-         redacted_params, signals, prev_hash, entry_hash
+         redacted_params, signals, prev_hash, entry_hash, hash_payload
        ) VALUES (
          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
-         $20,$21,$22,$23::jsonb,$24,$25
+         $20,$21,$22,$23::jsonb,$24,$25,$26
        ) RETURNING id`,
       [
         principal.workspaceId,
@@ -173,6 +185,7 @@ export async function recordDecision(
         JSON.stringify(action.signals),
         prevHash,
         entryHash,
+        hashPayload,
       ],
     );
     await client.query("COMMIT");

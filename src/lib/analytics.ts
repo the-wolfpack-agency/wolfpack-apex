@@ -432,6 +432,13 @@ export type InstinctEventType =
   //   enforcement would have stopped, so we can tune before enforcing.
   | "ogiam.action_authorized"
   | "ogiam.action_flagged"
+  // ogiam.checkpoint_signed  { workspace_id, through_seq, algorithm, key_id,
+  //                            signed, chain_ok, verified_count }
+  //   fired when the scheduled sweep notarizes a workspace's decision chain by
+  //   signing its head. signed=false means the chain verified but no signer was
+  //   configured (tamper-evident, not yet non-repudiable). chain_ok=false means
+  //   verification failed and the chain was NOT signed.
+  | "ogiam.checkpoint_signed"
   // Universal-search assistant tool (`search`). Fired by the tool's
   // handler after runSearch returns successfully so the learning loop
   // sees parity with the /search page route's `insight.search.queried`
