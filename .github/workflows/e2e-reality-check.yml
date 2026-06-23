@@ -79,6 +79,16 @@ jobs:
         continue-on-error: true
         run: npx playwright test tests/e2e/feedback-screenshot-flow.spec.ts --config=playwright.config.ts --reporter=github
 
+      # OGIAM shadow-mode explorer reality check: GET the decisions API and
+      # assert the { workspace_id, summary, decisions[] } shape, then load
+      # /admin/ogiam and assert it is not blank, the list or empty-state testid
+      # renders, and there are no CSP/network failures. Catches a 200 with the
+      # wrong shape or a blank explorer that unit tests miss. Soft gate until
+      # smoke creds are in secrets; promote to hard gate after a few green runs.
+      - name: OGIAM shadow flow spec (soft)
+        continue-on-error: true
+        run: npx playwright test tests/e2e/ogiam-shadow-flow.spec.ts --config=playwright.config.ts --reporter=github
+
       # Real-browser specs for /emails /messages /dashboard /search.
       # These cover regressions jsdom missed: layout/wrap, focus,
       # computed styles, IntersectionObserver / scroll. Soft gate
