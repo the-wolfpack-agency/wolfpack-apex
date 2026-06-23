@@ -24,6 +24,12 @@ import { AssistantStarterPrompts } from "@/components/AssistantStarterPrompts";
 import { AssistantSuggestionsOverlay } from "@/components/AssistantSuggestionsOverlay";
 import { AssistantHistoryOverlay } from "@/components/AssistantHistoryOverlay";
 import { AssistantWelcomeModal } from "@/components/AssistantWelcomeModal";
+import {
+  compressImageFile,
+  needsImageCompression,
+  isCompressibleImage,
+  formatBytes,
+} from "@/lib/assistant/image-compress";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +39,9 @@ interface AttachedFile {
   name: string;
   type: string;
   content: string; // text content or base64 for images
+  /** Byte size of the prepared (post-compression) file. Used to
+   *  de-duplicate by content, not just by filename. */
+  size?: number;
 }
 
 interface RelatedPage {
@@ -245,7 +254,12 @@ export default function InstinctChat({
   }, [input]);
 
   // --- File attachment constants ---
-  const MAX_FILE_SIZE = 512_000; // 512KB per file
+  const MAX_FILE_SIZE = 512_000; // 512KB per ATTACHED file (post-compression)
+  /* Largest ORIGINAL we will even read into memory. Images above the
+     attach cap are downscaled client-side to fit (see image-compress),
+     but a source bigger than this is rejected outright so a 40 MB photo
+     never gets decoded on a phone. */
+  const MAX_SOURCE_SIZE = 25 * 1024 * 1024; // 25MB
   const MAX_FILES = 5;
   const MAX_TEXT_LENGTH = 50_000; // chars of text content per file
   const ALLOWED_EXTENSIONS = new Set([
@@ -279,6 +293,10 @@ export default function InstinctChat({
     "image/",
   ];
 
+  /* Type + emptiness check ONLY. The size verdict is deliberately NOT
+     here: images over the cap get downscaled first (handleFiles), so we
+     check the FINAL size after that step rather than rejecting a
+     screenshot before we have tried to shrink it. */
   function isAllowedFile(file: File): string | null {
     // Check extension
     const ext = "." + file.name.split(".").pop()?.toLowerCase();
@@ -289,12 +307,11 @@ export default function InstinctChat({
     if (file.type && !ALLOWED_MIME_PREFIXES.some((p) => file.type.startsWith(p))) {
       return `"${file.name}" has an unexpected content type`;
     }
-    // Check size
-    if (file.size > MAX_FILE_SIZE) {
-      return `"${file.name}" exceeds the 512KB limit`;
-    }
     if (file.size === 0) {
       return `"${file.name}" is empty`;
+    }
+    if (file.size > MAX_SOURCE_SIZE) {
+      return `"${file.name}" is ${formatBytes(file.size)}, too large to attach (max ${formatBytes(MAX_SOURCE_SIZE)})`;
     }
     return null;
   }
@@ -325,6 +342,7 @@ export default function InstinctChat({
           name: file.name,
           type: file.type || "text/plain",
           content: isBinary ? raw : sanitizeTextContent(raw),
+          size: file.size,
         });
       };
       reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
@@ -361,14 +379,47 @@ export default function InstinctChat({
         errors.push(err);
         continue;
       }
-      // Reject duplicates
-      if (attachedFiles.some((af) => af.name === file.name)) {
-        errors.push(`"${file.name}" is already attached`);
+
+      /* Downscale oversize images so a screenshot (routinely 1 to 3 MB)
+         actually attaches instead of bouncing off the 512KB cap. Text,
+         PDF, and other binaries are never altered. In a runtime without
+         canvas (tests) this is a no-op and the size check below still
+         applies, so behavior never gets worse. */
+      let prepared = file;
+      if (needsImageCompression(file, MAX_FILE_SIZE)) {
+        try {
+          prepared = await compressImageFile(file, { maxBytes: MAX_FILE_SIZE });
+        } catch {
+          prepared = file;
+        }
+      }
+
+      // Final size verdict, AFTER any compression attempt.
+      if (prepared.size > MAX_FILE_SIZE) {
+        const hint = isCompressibleImage(prepared.type)
+          ? " Try attaching a smaller crop or region of the screenshot."
+          : "";
+        errors.push(
+          `"${file.name}" is ${formatBytes(prepared.size)}, over the ${formatBytes(MAX_FILE_SIZE)} attachment limit.${hint}`,
+        );
         continue;
       }
+
+      /* De-duplicate by name AND size, not name alone. Two different
+         screenshots are very often both named "image.png", and a
+         name-only check rejected the second as a dup, which is the
+         "it only lets me attach the same photo" report. */
+      const isDup = (n: string, s: number): boolean =>
+        attachedFiles.some((af) => af.name === n && (af.size ?? -1) === s) ||
+        newFiles.some((af) => af.name === n && (af.size ?? -1) === s);
+      if (isDup(prepared.name, prepared.size)) {
+        errors.push(`"${prepared.name}" is already attached`);
+        continue;
+      }
+
       try {
-        newFiles.push(await readFile(file));
-        toIngest.push(file);
+        newFiles.push(await readFile(prepared));
+        toIngest.push(prepared);
       } catch {
         errors.push(`Could not read "${file.name}"`);
       }
