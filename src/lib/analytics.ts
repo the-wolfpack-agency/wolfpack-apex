@@ -464,6 +464,13 @@ export type InstinctEventType =
   //   OGIAM enforce gate let it through.
   | "agent.scan_completed"
   | "agent.acted"
+  // agent.task_assigned   { agent_id, task_id, workspace_id }
+  //   a human assigned work to an agent.
+  // agent.task_completed  { agent_id, task_id, status, step_count, ran_count, blocked }
+  //   the agent finished running an assigned task (succeeded, blocked for
+  //   approval, or failed), every step governed under its identity.
+  | "agent.task_assigned"
+  | "agent.task_completed"
   // Universal-search assistant tool (`search`). Fired by the tool's
   // handler after runSearch returns successfully so the learning loop
   // sees parity with the /search page route's `insight.search.queried`
