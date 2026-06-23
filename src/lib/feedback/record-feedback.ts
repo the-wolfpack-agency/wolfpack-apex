@@ -21,6 +21,7 @@
 import { query, writeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { MAX_FEEDBACK_LENGTH } from "@/lib/feedback/limits";
+import { notifyFeedbackReaders } from "@/lib/feedback/notify-readers";
 
 /**
  * How recent a prior row counts as a duplicate of the current submission.
@@ -158,6 +159,27 @@ export async function recordUserFeedback(
       ...(input.workflowId ? { workflow_id: input.workflowId } : {}),
     },
   );
+
+  /* Tell the feedback readers (the /admin/feedback gate holders) so a new
+   * note is not missed until someone happens to open the page. Best-effort
+   * and awaited so a test can assert it, but its own try/catch means a
+   * notification failure never turns a saved row into a thrown error. */
+  try {
+    await notifyFeedbackReaders({
+      workspaceId: input.workspaceId,
+      feedbackId: row.id,
+      authorUserId: input.userId,
+      authorRole: input.userRole,
+      authorLabel: input.userEmail || input.userRole,
+      message,
+      surface: input.surface,
+    });
+  } catch (err) {
+    console.warn(
+      "[record-feedback] reader notification failed:",
+      (err as Error).message,
+    );
+  }
 
   return { id: row.id, recordedAt: row.created_at };
 }

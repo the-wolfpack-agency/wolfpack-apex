@@ -9,6 +9,7 @@
 const mockWriteQuery = jest.fn();
 const mockQuery = jest.fn();
 const mockTrackEvent = jest.fn();
+const mockNotifyReaders = jest.fn();
 
 class FakeWriteQueryError extends Error {
   readonly code: string;
@@ -26,6 +27,14 @@ jest.mock("@/lib/db", () => ({
 
 jest.mock("@/lib/analytics", () => ({
   trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}));
+
+/* The insert path now fans the new note out to the feedback readers. It is
+ * awaited inside recordUserFeedback's own try/catch, so mock it to resolve
+ * cleanly: the existing assertions only care that the row was written and the
+ * recorded event fired, not that anyone was notified. */
+jest.mock("@/lib/feedback/notify-readers", () => ({
+  notifyFeedbackReaders: (...args: unknown[]) => mockNotifyReaders(...args),
 }));
 
 import {
@@ -48,6 +57,8 @@ beforeEach(() => {
   mockWriteQuery.mockReset();
   mockQuery.mockReset();
   mockTrackEvent.mockReset();
+  mockNotifyReaders.mockReset();
+  mockNotifyReaders.mockResolvedValue({ recipientCount: 0 });
   /* Default the dedup lookup to "no prior row" so existing happy-path
    * tests fall through to the INSERT path without any change. Tests
    * that exercise the dedup behavior override this. */
@@ -130,6 +141,24 @@ describe("recordUserFeedback — happy path", () => {
     await recordUserFeedback(rest);
     const metadata = mockTrackEvent.mock.calls[0][3];
     expect(metadata).not.toHaveProperty("workflow_id");
+  });
+
+  test("notifies the feedback readers with the new id + workspace + author after a successful insert", async () => {
+    mockWriteQuery.mockResolvedValueOnce({
+      rows: [{ id: "id-notify", created_at: "2026-05-19T12:00:00.000Z" }],
+    });
+    await recordUserFeedback(BASE_INPUT);
+    expect(mockNotifyReaders).toHaveBeenCalledTimes(1);
+    expect(mockNotifyReaders).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: BASE_INPUT.workspaceId,
+        feedbackId: "id-notify",
+        authorUserId: BASE_INPUT.userId,
+        authorRole: BASE_INPUT.userRole,
+        message: BASE_INPUT.message,
+        surface: BASE_INPUT.surface,
+      }),
+    );
   });
 
   test("falls back to 'unknown' role/surface in analytics when omitted", async () => {
