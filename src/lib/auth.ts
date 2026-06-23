@@ -16,6 +16,7 @@ import { hashSync, compareSync } from "bcryptjs";
 import { query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { signToken, verifyToken as cryptoVerifyToken } from "@/lib/crypto/sign";
+import { verifyOnBehalfTokenSync } from "@/lib/agents/on-behalf";
 
 export type TeamRole = "ceo" | "cto" | "evp" | "vp" | "cco" | "dev" | "sales" | "ops" | "hr";
 
@@ -29,6 +30,12 @@ export interface TeamMember {
   workspaceId: string;
   avatar_url?: string;
   created_at: string;
+  /** Present ONLY when this request was authenticated by an on-behalf-of
+   *  delegation token (RFC 8693): the identity is the human OWNER, and this
+   *  field names the agent that is really acting. Routes and the audit log read
+   *  it to record the delegation. Absent on a normal human session, where the
+   *  user is acting directly. The authority enforced is always the owner's. */
+  actingAgentId?: string;
 }
 
 /** Singleton-tenant fallback for shadow mode, legacy JWTs, and any
@@ -193,10 +200,37 @@ export async function authenticate(email: string, password: string): Promise<Aut
  */
 export function getUserFromRequest(authHeader: string | null): TeamMember | null {
   if (!authHeader?.startsWith("Bearer ")) return null;
+  const raw = authHeader.slice(7);
+
+  /* On-behalf-of delegation (RFC 8693). A SEPARATE, owner-identity token whose
+     distinct audience ("instinct-onbehalf") segregates it from both human
+     sessions and agent credentials. The identity returned here is the human
+     OWNER, so the route's capability gate enforces the OWNER's authority, never
+     the agent's, never elevated, and actingAgentId records who is really
+     acting for audit. verifyOnBehalfTokenSync returns null on any failure
+     (expired, wrong audience, tampered, malformed), so an invalid delegation
+     simply falls through to the normal human-token path below and is rejected
+     there. This is purely additive: it does NOT relax the agent rejection. */
+  const delegated = verifyOnBehalfTokenSync(raw);
+  if (delegated) {
+    return {
+      id: delegated.ownerUserId,
+      email: "",
+      name: "",
+      role: delegated.ownerRole as TeamRole,
+      workspaceId: delegated.workspaceId,
+      created_at: "",
+      actingAgentId: delegated.actingAgentId,
+    };
+  }
+
   try {
-    const payload = verifyToken(authHeader.slice(7));
+    const payload = verifyToken(raw);
     /* Security boundary: an agent credential must never resolve to a human
-       session. Agents are resolved only by resolveAgentFromRequest. */
+       session. Agents are resolved only by resolveAgentFromRequest. This check
+       is UNCHANGED: a pure agent token (kind:"agent" / aud:"ogiam-agent") is
+       still rejected. The on-behalf token above is a different family
+       (kind:"on-behalf") and never reaches this branch. */
     if (payload.kind === "agent") return null;
     return {
       id: payload.userId,
