@@ -99,6 +99,16 @@ jobs:
         continue-on-error: true
         run: npx playwright test tests/e2e/ogiam-adversarial-flow.spec.ts --config=playwright.config.ts --reporter=github
 
+      # Agent-principal onboarding reality check: load /admin/agents and assert
+      # the roster-or-empty testid renders, the onboard form + role select mount,
+      # the page is not blank, and there are no CSP/network failures. Non-
+      # destructive (never POSTs a real agent). Catches a blank roster or an
+      # onboard form that never mounts, which unit tests miss. Soft gate until
+      # smoke creds are in secrets; promote to hard gate after a few green runs.
+      - name: Agents onboarding spec (soft)
+        continue-on-error: true
+        run: npx playwright test tests/e2e/agents-onboarding.spec.ts --config=playwright.config.ts --reporter=github
+
       # Real-browser specs for /emails /messages /dashboard /search.
       # These cover regressions jsdom missed: layout/wrap, focus,
       # computed styles, IntersectionObserver / scroll. Soft gate
