@@ -26,6 +26,7 @@
 import { getValidToken } from "@/lib/microsoft-graph";
 import { query, safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
+import { normalizeGraphDateTime } from "@/lib/calendar/timezone";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -140,11 +141,17 @@ function normalizeAutoReply(g: GraphAutoReply | null | undefined): AutoReplySett
   const fetchedAt = new Date().toISOString();
   const startIso =
     g.scheduledStartDateTime?.dateTime
-      ? new Date(g.scheduledStartDateTime.dateTime).toISOString()
+      ? normalizeGraphDateTime(
+          g.scheduledStartDateTime.dateTime,
+          g.scheduledStartDateTime.timeZone,
+        )
       : null;
   const endIso =
     g.scheduledEndDateTime?.dateTime
-      ? new Date(g.scheduledEndDateTime.dateTime).toISOString()
+      ? normalizeGraphDateTime(
+          g.scheduledEndDateTime.dateTime,
+          g.scheduledEndDateTime.timeZone,
+        )
       : null;
   return {
     status: coerceStatus(g.status),
@@ -240,7 +247,11 @@ export async function getOwnMailboxSettings(userId: string): Promise<MailboxSett
   try {
     const res = await fetch(`${GRAPH_BASE_URL}/me/mailboxSettings`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+        Prefer: 'outlook.timezone="UTC"',
+      },
     });
     if (res.status === 403) {
       trackEvent("system.ms_mailbox_settings_failed", userId, "system", {
@@ -309,7 +320,11 @@ export async function getOwnAutoReplySettings(
       `${GRAPH_BASE_URL}/me/mailboxSettings/automaticRepliesSetting`,
       {
         method: "GET",
-        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          Prefer: 'outlook.timezone="UTC"',
+        },
       },
     );
     if (res.status === 403) {

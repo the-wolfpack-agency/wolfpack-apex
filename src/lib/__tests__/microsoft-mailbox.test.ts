@@ -84,6 +84,8 @@ describe("getOwnMailboxSettings", () => {
       "system",
       expect.objectContaining({ auto_reply_status: "scheduled" }),
     );
+    // Belt-and-suspenders: Graph is asked to return scheduled times in UTC.
+    expect(fetchMock.mock.calls[0][1].headers.Prefer).toBe('outlook.timezone="UTC"');
   });
 
   it("returns null on 403 and tracks failure", async () => {
@@ -123,6 +125,70 @@ describe("getOwnAutoReplySettings", () => {
     fetchMock.mockResolvedValueOnce(errResponse(403));
     const { getOwnAutoReplySettings } = await import("@/lib/integrations/microsoft-mailbox");
     expect(await getOwnAutoReplySettings("u")).toBeNull();
+  });
+
+  it("honors a Windows timeZone when normalizing scheduled times (OOO day-off-by-one fix)", async () => {
+    // Graph returns a naive wall-clock string plus a SEPARATE Windows timeZone.
+    // EDT is UTC-4 on these June dates, so midnight local is 04:00Z, NOT 00:00Z.
+    fetchMock.mockResolvedValueOnce(okResponse({
+      status: "scheduled",
+      externalAudience: "all",
+      internalReplyMessage: "out",
+      externalReplyMessage: "out",
+      scheduledStartDateTime: {
+        dateTime: "2026-06-24T00:00:00.0000000",
+        timeZone: "Eastern Standard Time",
+      },
+      scheduledEndDateTime: {
+        dateTime: "2026-06-25T00:00:00.0000000",
+        timeZone: "Eastern Standard Time",
+      },
+    }));
+    const { getOwnAutoReplySettings } = await import("@/lib/integrations/microsoft-mailbox");
+    const a = await getOwnAutoReplySettings("u");
+    expect(a?.scheduledStartDateTime).toBe("2026-06-24T04:00:00.000Z");
+    expect(a?.scheduledEndDateTime).toBe("2026-06-25T04:00:00.000Z");
+    // Regression guard: the buggy code produced the off-by-one 00:00Z instants.
+    expect(a?.scheduledStartDateTime).not.toBe("2026-06-24T00:00:00.000Z");
+  });
+
+  it("appends Z for a UTC timeZone", async () => {
+    fetchMock.mockResolvedValueOnce(okResponse({
+      status: "scheduled",
+      externalAudience: "all",
+      scheduledStartDateTime: { dateTime: "2026-06-24T09:30:00.0000000", timeZone: "UTC" },
+      scheduledEndDateTime: { dateTime: "2026-06-25T17:00:00.0000000", timeZone: "UTC" },
+    }));
+    const { getOwnAutoReplySettings } = await import("@/lib/integrations/microsoft-mailbox");
+    const a = await getOwnAutoReplySettings("u");
+    // UTC zone means the naive string is already UTC: the helper just appends Z.
+    expect(a?.scheduledStartDateTime).toBe("2026-06-24T09:30:00.0000000Z");
+    expect(a?.scheduledEndDateTime).toBe("2026-06-25T17:00:00.0000000Z");
+    // And it parses to the correct instant.
+    expect(Date.parse(a!.scheduledStartDateTime!)).toBe(Date.UTC(2026, 5, 24, 9, 30, 0));
+  });
+
+  it("passes through values that already carry a Z offset", async () => {
+    fetchMock.mockResolvedValueOnce(okResponse({
+      status: "scheduled",
+      externalAudience: "all",
+      scheduledStartDateTime: { dateTime: "2026-06-24T04:00:00Z", timeZone: "Eastern Standard Time" },
+      scheduledEndDateTime: { dateTime: "2026-06-25T04:00:00Z", timeZone: "Eastern Standard Time" },
+    }));
+    const { getOwnAutoReplySettings } = await import("@/lib/integrations/microsoft-mailbox");
+    const a = await getOwnAutoReplySettings("u");
+    expect(a?.scheduledStartDateTime).toBe("2026-06-24T04:00:00Z");
+    expect(a?.scheduledEndDateTime).toBe("2026-06-25T04:00:00Z");
+  });
+
+  it("sends the Prefer: outlook.timezone UTC header to Graph", async () => {
+    fetchMock.mockResolvedValueOnce(okResponse({ status: "disabled", externalAudience: "none" }));
+    const { getOwnAutoReplySettings } = await import("@/lib/integrations/microsoft-mailbox");
+    await getOwnAutoReplySettings("u");
+    const init = fetchMock.mock.calls[0][1];
+    expect(init.headers.Prefer).toBe('outlook.timezone="UTC"');
+    expect(init.headers.Authorization).toBe("Bearer tok");
+    expect(init.headers.Accept).toBe("application/json");
   });
 });
 
