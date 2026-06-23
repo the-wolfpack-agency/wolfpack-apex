@@ -110,6 +110,23 @@ test.describe("OGIAM decision explorer, shadow-mode reality check", () => {
       "the decisions list or the empty-state testid is rendered",
     ).toBeGreaterThan(0);
 
+    // 4. The signing self-test control: clicking it probes the signing backend
+    //    and renders a result region. The outcome (verified / configured /
+    //    not-configured) depends on whether Key Vault env is set on the target,
+    //    so we assert only that the RESULT REGION appears, never a specific
+    //    signing state, and we never hard-fail on the signing outcome. The
+    //    button is capability-gated; if it is not present on this target we skip
+    //    this leg rather than fail the contract leg above.
+    const selfTestButton = page.getByTestId("ogiam-signing-selftest-button");
+    if ((await selfTestButton.count()) > 0) {
+      await selfTestButton.click();
+      const selfTestResult = page.getByTestId("ogiam-signing-selftest-result");
+      await expect(
+        selfTestResult,
+        "the signing self-test result region appears after clicking the control",
+      ).toBeVisible({ timeout: 8_000 });
+    }
+
     // No CSP or network failures during the 3s idle window.
     await page.waitForTimeout(3_000);
     const failures = snapshot();

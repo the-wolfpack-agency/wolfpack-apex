@@ -305,3 +305,193 @@ describe("/admin/ogiam: notarization banner", () => {
     expect(screen.queryByTestId("ogiam-chain-status")).not.toBeInTheDocument();
   });
 });
+
+describe("/admin/ogiam: signing self-test control", () => {
+  const quietDecisions = {
+    workspace_id: "default",
+    summary: { total: 0, would_block: 0, by_tier: {}, by_outcome: {} },
+    decisions: [],
+  };
+
+  /**
+   * Routes the two mount fetches (decisions + verify) and the click-triggered
+   * self-test fetch by URL. `selfTest` is what POST /signing-selftest returns:
+   * either a body, or a { status } stub to simulate a 429 / non-ok response.
+   */
+  function routeWithSelfTest(
+    selfTest: unknown | { __status: number },
+  ) {
+    mockFetchWithRefresh.mockImplementation((url: unknown) => {
+      const u = String(url);
+      if (u.includes("/api/admin/ogiam/signing-selftest")) {
+        if (
+          selfTest &&
+          typeof selfTest === "object" &&
+          "__status" in (selfTest as Record<string, unknown>)
+        ) {
+          const status = (selfTest as { __status: number }).__status;
+          return Promise.resolve(mkRes({ error: "rate_limited" }, { ok: false, status }));
+        }
+        return Promise.resolve(mkRes(selfTest));
+      }
+      if (u.includes("/api/admin/ogiam/verify")) {
+        return Promise.resolve(mkRes({}, { ok: false, status: 500 }));
+      }
+      return Promise.resolve(mkRes(quietDecisions));
+    });
+  }
+
+  const verifiedOk = {
+    ok: true,
+    mode: "keyvault",
+    is_production: true,
+    signed: true,
+    verified: true,
+    key_id: "https://vault.azure.net/keys/ogiam-key",
+    algorithm: "ES256",
+    latency_ms: 42,
+    keyvault_configured: true,
+    env_present: {
+      OGIAM_KEYVAULT_URL: true,
+      OGIAM_KEYVAULT_KEY: true,
+      AZURE_TENANT_ID: true,
+      AZURE_CLIENT_ID: true,
+      AZURE_CLIENT_SECRET: true,
+    },
+    message: "Signed and verified via Key Vault.",
+  };
+
+  const notConfigured = {
+    ok: false,
+    mode: "none",
+    is_production: false,
+    signed: false,
+    verified: false,
+    key_id: "",
+    algorithm: "",
+    latency_ms: 3,
+    keyvault_configured: false,
+    env_present: {
+      OGIAM_KEYVAULT_URL: false,
+      OGIAM_KEYVAULT_KEY: false,
+      AZURE_TENANT_ID: true,
+      AZURE_CLIENT_ID: false,
+      AZURE_CLIENT_SECRET: false,
+    },
+    message: "No signing backend configured.",
+  };
+
+  it("does not run on mount; the result region is absent until the button is clicked", async () => {
+    routeWithSelfTest(verifiedOk);
+
+    await act(async () => {
+      render(<OgiamPage />);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("ogiam-decisions-empty")).toBeInTheDocument(),
+    );
+
+    // No self-test fetch fired, no result region.
+    expect(
+      mockFetchWithRefresh.mock.calls
+        .map((c) => String(c[0]))
+        .some((u) => u.includes("/api/admin/ogiam/signing-selftest")),
+    ).toBe(false);
+    expect(
+      screen.queryByTestId("ogiam-signing-selftest-result"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("clicking POSTs to the self-test endpoint and renders the verified-ok state", async () => {
+    routeWithSelfTest(verifiedOk);
+
+    await act(async () => {
+      render(<OgiamPage />);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("ogiam-signing-selftest-button")).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("ogiam-signing-selftest-button"));
+    });
+
+    const result = await screen.findByTestId("ogiam-signing-selftest-result");
+    expect(result).toHaveTextContent(/Signing verified/i);
+    expect(result).toHaveTextContent(/Signed and verified via Key Vault/i);
+    expect(screen.getByTestId("ogiam-signing-selftest-mode")).toHaveTextContent(/keyvault/i);
+
+    // The POST hit the right endpoint with method POST.
+    const call = mockFetchWithRefresh.mock.calls.find((c) =>
+      String(c[0]).includes("/api/admin/ogiam/signing-selftest"),
+    );
+    expect(call).toBeTruthy();
+    expect((call?.[1] as { method?: string } | undefined)?.method).toBe("POST");
+
+    // Not-configured env breakdown is absent in the verified state.
+    expect(
+      screen.queryByTestId("ogiam-signing-selftest-env"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the not-configured state with the env_present breakdown when mode is none", async () => {
+    routeWithSelfTest(notConfigured);
+
+    await act(async () => {
+      render(<OgiamPage />);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("ogiam-signing-selftest-button")).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("ogiam-signing-selftest-button"));
+    });
+
+    const result = await screen.findByTestId("ogiam-signing-selftest-result");
+    expect(result).toHaveTextContent(/Not configured/i);
+    expect(result).toHaveTextContent(/No signing backend configured/i);
+
+    // All five env vars are listed; a present one and a missing one both render.
+    const env = screen.getByTestId("ogiam-signing-selftest-env");
+    expect(env).toBeInTheDocument();
+    for (const k of [
+      "OGIAM_KEYVAULT_URL",
+      "OGIAM_KEYVAULT_KEY",
+      "AZURE_TENANT_ID",
+      "AZURE_CLIENT_ID",
+      "AZURE_CLIENT_SECRET",
+    ]) {
+      expect(screen.getByTestId(`ogiam-signing-selftest-env-${k}`)).toBeInTheDocument();
+    }
+    // A present var shows a check, a missing one shows an x; values never leak.
+    expect(
+      screen.getByTestId("ogiam-signing-selftest-env-AZURE_TENANT_ID"),
+    ).toHaveTextContent("✓");
+    expect(
+      screen.getByTestId("ogiam-signing-selftest-env-OGIAM_KEYVAULT_URL"),
+    ).toHaveTextContent("✗");
+  });
+
+  it("renders the rate-limited line on a 429", async () => {
+    routeWithSelfTest({ __status: 429 });
+
+    await act(async () => {
+      render(<OgiamPage />);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("ogiam-signing-selftest-button")).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("ogiam-signing-selftest-button"));
+    });
+
+    const result = await screen.findByTestId("ogiam-signing-selftest-result");
+    expect(result).toHaveTextContent(/Rate limited, try again shortly/i);
+    // No env breakdown on the rate-limited path.
+    expect(
+      screen.queryByTestId("ogiam-signing-selftest-env"),
+    ).not.toBeInTheDocument();
+  });
+});

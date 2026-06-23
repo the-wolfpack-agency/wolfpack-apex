@@ -75,6 +75,51 @@ interface VerifyResponse {
   checkpoint: ChainCheckpoint | null;
 }
 
+/* Self-test of the signing wiring. Mirrors the response contract of
+   POST /api/admin/ogiam/signing-selftest: it exercises sign + verify against
+   whichever backend (Key Vault / local / none) is configured and reports which
+   of the 5 Azure env vars are present, so an operator can see at a glance why
+   notarization is or is not wired without leaking any secret values. */
+interface SelfTestEnvPresent {
+  OGIAM_KEYVAULT_URL: boolean;
+  OGIAM_KEYVAULT_KEY: boolean;
+  AZURE_TENANT_ID: boolean;
+  AZURE_CLIENT_ID: boolean;
+  AZURE_CLIENT_SECRET: boolean;
+}
+
+interface SelfTestResponse {
+  ok: boolean;
+  mode: "keyvault" | "local" | "none" | "unknown";
+  is_production: boolean;
+  signed: boolean;
+  verified: boolean;
+  key_id: string;
+  algorithm: string;
+  latency_ms: number;
+  keyvault_configured: boolean;
+  env_present: SelfTestEnvPresent;
+  message: string;
+}
+
+/* The five Azure env vars, in a stable display order, paired with the labels we
+   show in the not-configured breakdown. These are booleans only: we never read
+   or render the underlying secret values. */
+const SELFTEST_ENV_KEYS: ReadonlyArray<keyof SelfTestEnvPresent> = [
+  "OGIAM_KEYVAULT_URL",
+  "OGIAM_KEYVAULT_KEY",
+  "AZURE_TENANT_ID",
+  "AZURE_CLIENT_ID",
+  "AZURE_CLIENT_SECRET",
+];
+
+type SelfTestState =
+  | { kind: "idle" }
+  | { kind: "running" }
+  | { kind: "rate_limited" }
+  | { kind: "error"; message: string }
+  | { kind: "result"; data: SelfTestResponse };
+
 /* Key ids can be a full Key Vault URL (.../keys/<name>) or a short local label.
    Show the trailing segment so the banner reads "by ogiam-key" rather than a
    200-char URL. */
@@ -122,6 +167,38 @@ export default function OgiamPage() {
   const [error, setError] = useState<string | null>(null);
   const [wouldBlockOnly, setWouldBlockOnly] = useState(false);
   const [chain, setChain] = useState<VerifyResponse | null>(null);
+  const [selfTest, setSelfTest] = useState<SelfTestState>({ kind: "idle" });
+
+  /* Operator-triggered probe of the signing backend. Only runs on click (never
+     on mount): the endpoint is capability-gated and rate-limited, so an
+     auto-run would burn the budget. A 429 surfaces a soft "try again" line
+     rather than an error. */
+  const runSelfTest = useCallback(async () => {
+    setSelfTest({ kind: "running" });
+    try {
+      const res = await fetchWithRefresh("/api/admin/ogiam/signing-selftest", {
+        method: "POST",
+      });
+      if (res.status === 429) {
+        setSelfTest({ kind: "rate_limited" });
+        return;
+      }
+      if (!res.ok) {
+        setSelfTest({
+          kind: "error",
+          message: `Self-test request failed (HTTP ${res.status}).`,
+        });
+        return;
+      }
+      const data = (await res.json()) as SelfTestResponse;
+      setSelfTest({ kind: "result", data });
+    } catch (e) {
+      setSelfTest({
+        kind: "error",
+        message: (e as Error).message || "Network error",
+      });
+    }
+  }, []);
 
   const loadChain = useCallback(async () => {
     try {
@@ -274,6 +351,156 @@ export default function OgiamPage() {
                   )}
                 </div>
               </>
+            )}
+          </div>
+        );
+      })()}
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem",
+          flexWrap: "wrap",
+          marginBottom: selfTest.kind === "idle" ? "1.25rem" : "0.75rem",
+        }}
+      >
+        <button
+          type="button"
+          data-testid="ogiam-signing-selftest-button"
+          onClick={() => void runSelfTest()}
+          disabled={selfTest.kind === "running"}
+          style={{
+            background: "var(--wp-dark-surface2, #1a1a1a)",
+            color: "var(--wp-text-dim, #aaa)",
+            border: "1px solid var(--wp-dark-border, #333)",
+            borderRadius: "6px",
+            padding: "0.4rem 0.9rem",
+            fontSize: "0.85rem",
+            cursor: selfTest.kind === "running" ? "not-allowed" : "pointer",
+          }}
+        >
+          {selfTest.kind === "running" ? "Testing..." : "Test signing wiring"}
+        </button>
+      </div>
+
+      {selfTest.kind !== "idle" && selfTest.kind !== "running" && (() => {
+        /* Status line color + label is derived from the verify outcome:
+           green when signing verified end-to-end, amber when signed but the
+           verify step did not confirm, grey when no backend is configured, and
+           red for everything else (including request/network errors). */
+        let fg = "var(--wp-text-dim, #aaa)";
+        let bg = "rgba(160,160,160,0.08)";
+        let statusLabel = "Self-test failed";
+        let message = "";
+        let mode: string | null = null;
+        let env: SelfTestEnvPresent | null = null;
+
+        if (selfTest.kind === "rate_limited") {
+          fg = "var(--wp-gold, #f1c233)";
+          bg = "rgba(241,194,51,0.10)";
+          statusLabel = "Rate limited, try again shortly";
+        } else if (selfTest.kind === "error") {
+          fg = "var(--wp-error, #ef4444)";
+          bg = "rgba(239,68,68,0.08)";
+          statusLabel = "Self-test failed";
+          message = selfTest.message;
+        } else {
+          const d = selfTest.data;
+          message = d.message;
+          mode = d.mode;
+          if (d.ok && d.verified) {
+            fg = "var(--wp-success, #22c55e)";
+            bg = "rgba(34,197,94,0.08)";
+            statusLabel = "Signing verified";
+          } else if (d.signed && !d.verified) {
+            fg = "var(--wp-gold, #f1c233)";
+            bg = "rgba(241,194,51,0.10)";
+            statusLabel = "Configured, not verified";
+          } else if (d.mode === "none") {
+            fg = "var(--wp-text-dim, #aaa)";
+            bg = "rgba(160,160,160,0.08)";
+            statusLabel = "Not configured";
+            env = d.env_present;
+          } else {
+            fg = "var(--wp-error, #ef4444)";
+            bg = "rgba(239,68,68,0.08)";
+            statusLabel = "Self-test failed";
+          }
+        }
+
+        return (
+          <div
+            data-testid="ogiam-signing-selftest-result"
+            style={{
+              padding: "0.7rem 1rem",
+              marginBottom: "1.25rem",
+              background: bg,
+              border: `1px solid ${fg}`,
+              borderRadius: "8px",
+              fontSize: "0.82rem",
+            }}
+          >
+            <div
+              data-testid="ogiam-signing-selftest-status"
+              style={{ color: fg, fontWeight: 600 }}
+            >
+              {statusLabel}
+            </div>
+            {message && (
+              <div
+                data-testid="ogiam-signing-selftest-message"
+                style={{ marginTop: "0.25rem", color: "var(--wp-text-dim, #aaa)" }}
+              >
+                {message}
+              </div>
+            )}
+            {mode && (
+              <div
+                data-testid="ogiam-signing-selftest-mode"
+                style={{
+                  marginTop: "0.25rem",
+                  color: "var(--wp-text-muted, #6b7280)",
+                }}
+              >
+                mode: {mode}
+              </div>
+            )}
+            {env && (
+              <div
+                data-testid="ogiam-signing-selftest-env"
+                style={{
+                  marginTop: "0.5rem",
+                  display: "flex",
+                  gap: "0.4rem",
+                  flexWrap: "wrap",
+                }}
+              >
+                {SELFTEST_ENV_KEYS.map((k) => {
+                  const set = (env as SelfTestEnvPresent)[k];
+                  return (
+                    <span
+                      key={k}
+                      data-testid={`ogiam-signing-selftest-env-${k}`}
+                      style={{
+                        padding: "0.1rem 0.5rem",
+                        borderRadius: "8px",
+                        fontSize: "0.7rem",
+                        fontFamily: "var(--wp-mono, monospace)",
+                        background: set
+                          ? "rgba(34,197,94,0.10)"
+                          : "rgba(160,160,160,0.10)",
+                        color: set
+                          ? "var(--wp-success, #22c55e)"
+                          : "var(--wp-text-muted, #6b7280)",
+                        border: `1px solid ${set ? "var(--wp-success, #22c55e)" : "var(--wp-dark-border, #333)"}`,
+                      }}
+                    >
+                      {set ? "✓" : "✗"} {k}
+                    </span>
+                  );
+                })}
+              </div>
             )}
           </div>
         );

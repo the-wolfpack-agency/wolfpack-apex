@@ -9,9 +9,15 @@ import {
   readKeyVaultConfig,
   checkpointPayload,
   verifyLocalHmac,
+  verifyEs256,
+  runSignerSelfTest,
   KeyVaultSigner,
 } from "@/lib/ogiam/signing";
-import { createHmac } from "crypto";
+import { createHmac, generateKeyPairSync, sign as cryptoSign } from "crypto";
+
+function b64url(buf: Buffer): string {
+  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
 
 describe("readKeyVaultConfig", () => {
   it("returns config only when every field is present", () => {
@@ -73,6 +79,39 @@ describe("verifyLocalHmac", () => {
     expect(verifyLocalHmac(payload, sig, "secret")).toBe(true);
     expect(verifyLocalHmac(payload, sig, "wrong-secret")).toBe(false);
     expect(verifyLocalHmac("tampered", sig, "secret")).toBe(false);
+  });
+});
+
+describe("verifyEs256 (independent ES256 verification)", () => {
+  it("verifies a real P-256 signature (r||s) and rejects a tampered one", () => {
+    const { publicKey, privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const payload = checkpointPayload("ws", 9, "head-hash");
+    // Sign as Key Vault does: ES256 over the payload, raw r||s.
+    const sig = b64url(
+      cryptoSign("sha256", Buffer.from(payload), { key: privateKey, dsaEncoding: "ieee-p1363" }),
+    );
+    const jwk = publicKey.export({ format: "jwk" }) as { x: string; y: string };
+    expect(verifyEs256(payload, sig, { kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y })).toBe(true);
+    expect(verifyEs256("tampered", sig, { kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y })).toBe(false);
+  });
+});
+
+describe("runSignerSelfTest", () => {
+  it("local signer signs and independently verifies the probe", async () => {
+    const s = getSigner({ OGIAM_SIGNING_SECRET: "shh", NODE_ENV: "test" } as unknown as NodeJS.ProcessEnv);
+    const r = await runSignerSelfTest(s, "nonce-1");
+    expect(r.mode).toBe("local");
+    expect(r.signed).toBe(true);
+    expect(r.verified).toBe(true);
+  });
+
+  it("disabled signer reports not signed and no key id", async () => {
+    const s = getSigner({ NODE_ENV: "production" } as unknown as NodeJS.ProcessEnv);
+    const r = await runSignerSelfTest(s, "nonce-2");
+    expect(r.mode).toBe("none");
+    expect(r.signed).toBe(false);
+    expect(r.verified).toBe(false);
+    expect(r.keyId).toBe("");
   });
 });
 

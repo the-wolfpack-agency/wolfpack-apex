@@ -87,7 +87,9 @@ function stubSigner(signature: string | null): OgiamSigner {
     keyId: "test-key",
     algorithm: signature ? "ES256" : "none",
     isProduction: Boolean(signature),
+    mode: signature ? "keyvault" : "none",
     sign: async () => ({ signature, keyId: "test-key", algorithm: signature ? "ES256" : "none" }),
+    verify: async () => Boolean(signature),
   };
 }
 

@@ -33,7 +33,13 @@
  * explorer shows that notarization is not yet configured.
  */
 
-import { createHash, createHmac } from "crypto";
+import {
+  createHash,
+  createHmac,
+  createPublicKey,
+  verify as cryptoVerify,
+  type JsonWebKey as CryptoJsonWebKey,
+} from "crypto";
 
 export interface SignResult {
   /** base64 signature, or null when signing is disabled or failed. */
@@ -49,9 +55,16 @@ export interface OgiamSigner {
   readonly algorithm: string;
   /** Whether this signer produces real (non-local) signatures. */
   readonly isProduction: boolean;
+  /** A short label of the active mode for diagnostics: keyvault, local, none. */
+  readonly mode: "keyvault" | "local" | "none";
   /** Sign the canonical payload. Best effort: returns a null signature on
    *  failure rather than throwing. */
   sign(payload: string): Promise<SignResult>;
+  /** Independently verify a signature over a payload. Returns false (never
+   *  throws) on any error or when verification is not possible. This is the
+   *  offline verifiability the non-repudiation story depends on: a stored
+   *  checkpoint signature can be re-checked later against the public key. */
+  verify(payload: string, signature: string): Promise<boolean>;
 }
 
 /** The canonical bytes a checkpoint commits to. Kept stable so verification
@@ -72,13 +85,53 @@ function base64url(buf: Buffer): string {
   return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+function base64urlToBuffer(s: string): Buffer {
+  return Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+}
+
+/** EC P-256 public key in JWK form, as Key Vault returns it. */
+export interface EcPublicJwk {
+  kty: "EC";
+  crv: "P-256";
+  x: string;
+  y: string;
+}
+
+/**
+ * Verify an ES256 signature (raw r||s, as Azure Key Vault returns it) over the
+ * payload, using the EC public key. Independent of Key Vault: a third party can
+ * run the same check offline. Returns false on any error rather than throwing.
+ */
+export function verifyEs256(
+  payload: string,
+  signatureB64url: string,
+  jwk: EcPublicJwk,
+): boolean {
+  try {
+    const key = createPublicKey({ key: jwk as unknown as CryptoJsonWebKey, format: "jwk" });
+    const sig = base64urlToBuffer(signatureB64url);
+    return cryptoVerify(
+      "sha256",
+      Buffer.from(payload),
+      { key, dsaEncoding: "ieee-p1363" },
+      sig,
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Signing disabled: chain stays tamper-evident, no notarization. */
 class NullSigner implements OgiamSigner {
   readonly keyId = "none";
   readonly algorithm = "none";
   readonly isProduction = false;
+  readonly mode = "none" as const;
   async sign(): Promise<SignResult> {
     return { signature: null, keyId: this.keyId, algorithm: this.algorithm };
+  }
+  async verify(): Promise<boolean> {
+    return false;
   }
 }
 
@@ -89,10 +142,14 @@ class LocalHmacSigner implements OgiamSigner {
   readonly keyId = "local-hmac";
   readonly algorithm = "HS256-local";
   readonly isProduction = false;
+  readonly mode = "local" as const;
   constructor(private readonly secret: string) {}
   async sign(payload: string): Promise<SignResult> {
     const sig = createHmac("sha256", this.secret).update(payload).digest("base64");
     return { signature: sig, keyId: this.keyId, algorithm: this.algorithm };
+  }
+  async verify(payload: string, signature: string): Promise<boolean> {
+    return verifyLocalHmac(payload, signature, this.secret);
   }
 }
 
@@ -112,6 +169,7 @@ let cachedToken: { token: string; expiresAtMs: number } | null = null;
 export class KeyVaultSigner implements OgiamSigner {
   readonly algorithm = "ES256";
   readonly isProduction = true;
+  readonly mode = "keyvault" as const;
   constructor(private readonly cfg: KeyVaultConfig) {}
   get keyId(): string {
     return `${this.cfg.vaultUrl.replace(/\/$/, "")}/keys/${this.cfg.keyName}`;
@@ -166,6 +224,32 @@ export class KeyVaultSigner implements OgiamSigner {
       return { signature: null, keyId: this.keyId, algorithm: this.algorithm };
     }
   }
+
+  /** Fetch the EC public key (public material only) so signatures can be
+   *  verified independently. Returns null on any failure. */
+  private async getPublicJwk(): Promise<EcPublicJwk | null> {
+    try {
+      const token = await this.getToken(Date.now());
+      if (!token) return null;
+      const res = await fetch(
+        `${this.cfg.vaultUrl.replace(/\/$/, "")}/keys/${this.cfg.keyName}?api-version=7.4`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!res.ok) return null;
+      const json = (await res.json()) as { key?: { kty?: string; crv?: string; x?: string; y?: string } };
+      const k = json.key;
+      if (!k || k.kty !== "EC" || k.crv !== "P-256" || !k.x || !k.y) return null;
+      return { kty: "EC", crv: "P-256", x: k.x, y: k.y };
+    } catch {
+      return null;
+    }
+  }
+
+  async verify(payload: string, signature: string): Promise<boolean> {
+    const jwk = await this.getPublicJwk();
+    if (!jwk) return false;
+    return verifyEs256(payload, signature, jwk);
+  }
 }
 
 /** Read Key Vault config from the environment, or null when not fully set. */
@@ -198,6 +282,58 @@ export function getSigner(env: NodeJS.ProcessEnv = process.env): OgiamSigner {
     return new LocalHmacSigner(localSecret);
   }
   return new NullSigner();
+}
+
+export interface SignerSelfTestResult {
+  /** keyvault, local, or none. */
+  mode: OgiamSigner["mode"];
+  /** True for the Key Vault path (real non-repudiation). */
+  isProduction: boolean;
+  /** True when a signature was produced. */
+  signed: boolean;
+  /** True when the produced signature verified independently (sign then verify
+   *  round trip). The strongest "the wiring works" proof. */
+  verified: boolean;
+  /** Public key identifier (not a secret). Empty when disabled. */
+  keyId: string;
+  algorithm: string;
+  latencyMs: number;
+}
+
+/**
+ * Probe the configured signer end to end: sign a SERVER-GENERATED probe (never a
+ * caller-supplied value, so the endpoint cannot be used as a signing oracle),
+ * then independently verify the signature. Pure of secrets: returns only status
+ * and the public key id. Never throws.
+ */
+export async function runSignerSelfTest(
+  signer: OgiamSigner,
+  nonce: string,
+): Promise<SignerSelfTestResult> {
+  const probe = `ogiam:keyvault-selftest:${nonce}`;
+  const started = Date.now();
+  let signed = false;
+  let verified = false;
+  let keyId = signer.keyId;
+  try {
+    const sig = await signer.sign(probe);
+    keyId = sig.keyId;
+    signed = sig.signature != null;
+    if (signed && sig.signature) {
+      verified = await signer.verify(probe, sig.signature);
+    }
+  } catch {
+    /* never throw; report what we have */
+  }
+  return {
+    mode: signer.mode,
+    isProduction: signer.isProduction,
+    signed,
+    verified,
+    keyId: signer.mode === "none" ? "" : keyId,
+    algorithm: signer.algorithm,
+    latencyMs: Date.now() - started,
+  };
 }
 
 /** Verify a local HMAC signature (used by the dev fallback path). Key Vault

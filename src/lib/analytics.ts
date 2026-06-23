@@ -439,6 +439,10 @@ export type InstinctEventType =
   //   configured (tamper-evident, not yet non-repudiable). chain_ok=false means
   //   verification failed and the chain was NOT signed.
   | "ogiam.checkpoint_signed"
+  // ogiam.signing_selftest  { mode, signed, verified, latency_ms }
+  //   fired when an admin probes the signing wiring (sign a server-generated
+  //   probe, then independently verify it). No secrets in the payload.
+  | "ogiam.signing_selftest"
   // Universal-search assistant tool (`search`). Fired by the tool's
   // handler after runSearch returns successfully so the learning loop
   // sees parity with the /search page route's `insight.search.queried`
