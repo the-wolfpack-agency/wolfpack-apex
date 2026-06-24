@@ -2,23 +2,26 @@
 @import "tailwindcss";
 
 :root {
-  /* Wolfpack Agency Brand Colors */
-  --wp-gold: #f1c233;
-  --wp-gold-hover: #eed077;
-  --wp-dark: #212124;
-  --wp-dark-surface: #2a2a2e;
-  --wp-dark-surface2: #333338;
-  --wp-dark-border: #3a3a40;
-  --wp-text: #ffffff;
-  --wp-text-dim: #a0a8b4;
-  --wp-text-muted: #5e6e80;
+  /* Brand palette aligned to ogiam.com for one uniform brand: a cooler
+     near-black base, soft off-white text, and antique-brass gold. Re-mapping the
+     existing --wp-* token names shifts the whole app without touching any
+     component, so behavior is unchanged. */
+  --wp-gold: #e8b528;
+  --wp-gold-hover: #f2c84a;
+  --wp-dark: #0b0d11;
+  --wp-dark-surface: #12151c;
+  --wp-dark-surface2: #1a1f29;
+  --wp-dark-border: #242a36;
+  --wp-text: #e9edf4;
+  --wp-text-dim: #b4bcc8;
+  --wp-text-muted: #929cad;
   --wp-success: #22c55e;
   --wp-warning: #f97316;
   --wp-error: #ef4444;
   --wp-info: #3b82f6;
 
-  --background: #212124;
-  --foreground: #ffffff;
+  --background: #0b0d11;
+  --foreground: #e9edf4;
 }
 
 @theme inline {
@@ -41,7 +44,17 @@ html, body {
 }
 
 body {
-  background: var(--wp-dark);
+  /* Layered background matching ogiam.com: two faint radial glows (gold
+     top-right, blue top-left) over a very faint 56px grid, then the base color.
+     Fixed-attachment so it stays put as the dashboard scrolls. Kept subtle so it
+     never hurts readability of dense dashboard content. */
+  background:
+    radial-gradient(820px 540px at 82% -10%, rgba(232, 181, 40, 0.05), transparent 58%),
+    radial-gradient(680px 520px at -6% 8%, rgba(106, 166, 255, 0.05), transparent 55%),
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px) 0 0 / 100% 56px,
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px) 0 0 / 56px 100%,
+    var(--wp-dark);
+  background-attachment: fixed, fixed, fixed, fixed, scroll;
   color: var(--wp-text);
   font-family: 'Lexend Peta', sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -55,7 +68,7 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: var(--wp-gold); }
 
 /* Selection */
-::selection { background: rgba(241, 194, 51, 0.3); color: #fff; }
+::selection { background: rgba(232, 181, 40, 0.3); color: #fff; }
 
 /* Prevent iOS Safari auto-zoom on input focus */
 @supports (-webkit-touch-callout: none) {
