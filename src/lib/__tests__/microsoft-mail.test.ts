@@ -81,7 +81,7 @@ function errResMail(status: number, body: unknown, headers: Record<string, strin
 }
 
 // ---------------------------------------------------------------------------
-// sendMail — happy path
+// sendMail - happy path
 // ---------------------------------------------------------------------------
 
 describe("sendMail", () => {
@@ -292,7 +292,7 @@ describe("replyToMessage", () => {
 });
 
 // ---------------------------------------------------------------------------
-// searchMessages — Graph /search/query wrapper used by the assistant
+// searchMessages - Graph /search/query wrapper used by the assistant
 // context resolver.
 // ---------------------------------------------------------------------------
 
@@ -424,5 +424,69 @@ describe("searchMessages", () => {
       "cto",
       expect.objectContaining({ status: 403, scope_missing: true, code: "scope_missing" }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createDraft - POST /me/messages, 
+// ---------------------------------------------------------------------------
+describe("createDraft", () => {
+  it("posts to /me/messages and returns the draft id + webLink (no send)", async () => {
+    fetchMockMail.mockResolvedValueOnce(
+      okJsonResMail({ id: "draft-7", webLink: "https://outlook/draft-7" }, { "x-ms-message-id": "draft-7" }),
+    );
+    const { createDraft } = await import("@/lib/integrations/microsoft-mail");
+    const result = await createDraft(
+      "user-1",
+      { to: ["dana@acme.com"], subject: "Overdue invoice", bodyText: "Please remit INV-204." },
+      "ceo",
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.value.id).toBe("draft-7");
+    expect(result.value.webLink).toBe("https://outlook/draft-7");
+
+    expect(fetchMockMail).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMockMail.mock.calls[0];
+    expect(url).toBe("https://graph.microsoft.com/v1.0/me/messages");
+    expect(init.method).toBe("POST");
+    const sent = JSON.parse(init.body);
+    expect(sent.toRecipients).toEqual([{ emailAddress: { address: "dana@acme.com" } }]);
+    expect(sent.subject).toBe("Overdue invoice");
+    // Audited as a draft + analytics fired.
+    expect(mockRecordAuditMail).toHaveBeenCalled();
+    expect(mockTrackMail).toHaveBeenCalledWith(
+      "mail.draft_created",
+      "user-1",
+      "ceo",
+      expect.objectContaining({ to_count: 1 }),
+    );
+  });
+
+  it("returns scope_missing on 403 (Mail.ReadWrite) and does not audit", async () => {
+    fetchMockMail.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      headers: { get: () => null },
+      json: () => Promise.resolve({ error: { code: "ErrorAccessDeniedMissingScope", message: "Missing Mail.ReadWrite" } }),
+      text: () => Promise.resolve(""),
+    } as any);
+    const { createDraft } = await import("@/lib/integrations/microsoft-mail");
+    const result = await createDraft("u", { to: ["a@b.com"], subject: "hi", bodyText: "y" });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected err");
+    expect(result.code).toBe("scope_missing");
+    expect(result.scope).toBe("Mail.ReadWrite");
+    expect(mockRecordAuditMail).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing recipient before calling Graph", async () => {
+    const { createDraft } = await import("@/lib/integrations/microsoft-mail");
+    const result = await createDraft("u", { to: [], subject: "hi", bodyText: "y" });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected err");
+    expect(result.code).toBe("invalid_input");
+    expect(fetchMockMail).not.toHaveBeenCalled();
   });
 });

@@ -328,7 +328,7 @@ async function recordSendHistory(params: {
 async function auditMailSent(params: {
   userId: string;
   role: string;
-  action: "mail.sent" | "mail.replied";
+  action: "mail.sent" | "mail.replied" | "mail.drafted";
   msMessageId: string;
   subject: string;
   to: string[];
@@ -455,6 +455,96 @@ export async function sendMail(
   });
 
   return { ok: true, value: { id: msMessageId, savedToSent: saveToSentItems } };
+}
+
+/** Input for createDraft. A subset of SendMailInput: no cc/bcc/save flags. */
+export interface DraftMailInput {
+  to: string[];
+  subject: string;
+  bodyHtml?: string;
+  bodyText?: string;
+}
+
+export interface DraftSummary {
+  /** Graph message id of the created draft. */
+  id: string;
+  /** Outlook deep link to open + review the draft, when Graph returns one. */
+  webLink?: string;
+}
+
+/**
+ * Create an Outlook DRAFT via Graph `POST /me/messages`. The message lands in
+ * the user's Drafts folder and is NOT sent: this is the safe, reversible action
+ * an agent is allowed to take on its owner's behalf (the OGIAM gate escalates an
+ * actual send, but a draft has no external effect, so the agent prepares it and
+ * the human reviews + sends). Mirrors sendMail's contract exactly: typed Result,
+ * never throws, 403 -> scope_missing (Mail.ReadWrite), 429 -> rate_limited,
+ * 401 -> not_connected. Emits mail.draft_created + audits "mail.drafted" so the
+ * action is never lost to the learning + audit loop.
+ */
+export async function createDraft(
+  userId: string,
+  input: DraftMailInput,
+  role = "system",
+): Promise<Result<DraftSummary>> {
+  const invalid = validateSendInput(input as SendMailInput);
+  if (invalid) return invalid;
+
+  const token = await getValidToken(userId);
+  if (!token) {
+    trackEvent("system.ms_mail_draft_failed", userId, role, { reason: "not_connected" });
+    return { ok: false, code: "not_connected", message: "microsoft_not_connected" };
+  }
+
+  // POST /me/messages creates the message in Drafts (no send). isDraft is true.
+  const message = {
+    subject: input.subject,
+    body: buildMessageBody(input),
+    toRecipients: normalizeRecipients(input.to),
+  };
+
+  const res = await graphPost<{ id?: string; webLink?: string }>(
+    "me/messages",
+    token.accessToken,
+    message,
+    "Mail.ReadWrite",
+  );
+
+  if (!res.ok) {
+    trackEvent("system.ms_mail_draft_failed", userId, role, {
+      reason: res.code,
+      status: res.status ?? 0,
+      scope: res.scope ?? "",
+    });
+    return {
+      ok: false,
+      code: res.code,
+      scope: res.scope,
+      retryAfter: res.retryAfter,
+      status: res.status,
+      message: res.message,
+    };
+  }
+
+  const id = res.messageId ?? res.data?.id ?? `draft:${Date.now()}`;
+  const webLink = typeof res.data?.webLink === "string" ? res.data.webLink : undefined;
+
+  await auditMailSent({
+    userId,
+    role,
+    action: "mail.drafted",
+    msMessageId: id,
+    subject: input.subject,
+    to: input.to ?? [],
+  });
+
+  trackEvent("mail.draft_created", userId, role, {
+    to_count: (input.to ?? []).length,
+    subject_len: input.subject.length,
+    body_len: truncateBodyPreview(input).length,
+  });
+
+  return { ok: true, value: { id, webLink } };
 }
 
 /**

@@ -26,7 +26,9 @@
 import {
   extractDocumentBody,
   extractDocumentTitle,
+  extractEmailSubject,
   extractLabel,
+  extractRecipient,
   extractSearchQuery,
   extractUrl,
 } from "./extract";
@@ -164,5 +166,40 @@ export const AGENT_OPERATIONS: AgentOperation[] = [
     // "Create a document summary of the results" carries the prior step's output
     // into the body, so a chained search -> summarize lands a real document.
     fillFromPriorResults: "answer",
+  },
+  {
+    id: "draft_email",
+    summary: "Draft a follow-up email for review (created in Drafts, not sent)",
+    // "draft/compose/prepare/write ... a follow-up | email | message | reply |
+    // note". Anchored on a mail noun so it does not collide with create_document
+    // (document/summary) or the send path. Deliberately excludes "send": an
+    // actual send is the human-approved action, a draft is the safe agent step.
+    intent:
+      /\b(?:draft|compose|prepare|write)\b[^.!?]*\b(?:e-?mail|message|reply|note|follow[\s-]?up)\b/i,
+    method: "POST",
+    path: "/api/mail/draft",
+    // Compose authority. The draft has no external effect; the gate keeps an
+    // actual send escalated to the owner.
+    capability: "emails.send",
+    fields: [
+      {
+        name: "to",
+        required: true,
+        extract: (instruction) => extractRecipient(instruction),
+      },
+      {
+        name: "subject",
+        required: false,
+        extract: (instruction) => extractEmailSubject(instruction),
+      },
+      {
+        // Maps to the route's bodyText. Filled inline ("...saying X") or, for a
+        // chained "draft a follow-up about the results", from prior step output.
+        name: "bodyText",
+        required: true,
+        extract: (instruction) => extractDocumentBody(instruction),
+      },
+    ],
+    fillFromPriorResults: "bodyText",
   },
 ];

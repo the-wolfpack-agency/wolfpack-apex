@@ -1154,6 +1154,9 @@ export type InstinctEventType =
   | "system.ms_mail_reply_all_sent"
   | "system.ms_mail_forward_sent"
   | "system.ms_mail_send_failed"
+  // Agent-prepared draft (created, not sent): the safe terminal step.
+  | "mail.draft_created"
+  | "system.ms_mail_draft_failed"
   | "system.ms_mail_read"
   | "system.ms_mail_listed"
   | "system.ms_mail_read_state_changed"

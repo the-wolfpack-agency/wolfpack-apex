@@ -211,6 +211,35 @@ export function extractDocumentBody(instruction: string): string | undefined {
 }
 
 /**
+ * Extract the recipient email address for a draft_email operation. Pulls the
+ * first literal email address in the instruction (e.g. "draft a follow-up to
+ * dana@acme.com"). Returns undefined when none is present; `to` is required, so
+ * a missing recipient makes the executor escalate to the owner rather than draft
+ * to nobody. Pure.
+ */
+export function extractRecipient(instruction: string): string | undefined {
+  const text = (instruction ?? "").trim();
+  if (!text) return undefined;
+  const m = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.exec(text);
+  return m ? m[0] : undefined;
+}
+
+/**
+ * Extract an email SUBJECT from an explicit "subject/re/titled/about X" clause,
+ * else a sensible default ("Follow-up") so a draft is never rejected for a
+ * missing subject. Pure, never empty.
+ */
+export function extractEmailSubject(instruction: string): string {
+  const text = (instruction ?? "").trim();
+  if (!text) return "Follow-up";
+  const m = /\b(?:subject|titled|re|about)\s*:?\s+["']?(.+?)["']?\s*$/i.exec(text);
+  if (m && m[1].trim().length > 0) {
+    return stripTrailingPunctuation(m[1].trim()).trim();
+  }
+  return "Follow-up";
+}
+
+/**
  * Trim trailing sentence punctuation that a URL/domain match may have greedily
  * swallowed (a period, comma, paren, quote). A trailing slash is meaningful in a
  * path and is kept.

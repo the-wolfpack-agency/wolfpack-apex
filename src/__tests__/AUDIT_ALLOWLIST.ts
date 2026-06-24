@@ -283,6 +283,14 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "replyToMessage in src/lib/integrations/microsoft-mail.ts audits via mail.replied",
   },
   {
+    route: "src/app/api/mail/draft/route.ts",
+    reason: "createDraft in src/lib/integrations/microsoft-mail.ts audits via mail.drafted",
+  },
+  {
+    route: "src/app/api/web-search/route.ts",
+    reason: "read-only external web-search proxy; returns results, mutates no persistent state",
+  },
+  {
     route: "src/app/api/calendar/events/route.ts",
     reason: "createEvent in src/lib/integrations/microsoft-calendar.ts audits via calendar.event.created",
   },

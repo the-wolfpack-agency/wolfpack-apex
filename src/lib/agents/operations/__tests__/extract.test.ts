@@ -11,6 +11,8 @@ import {
   extractSearchQuery,
   extractDocumentTitle,
   extractDocumentBody,
+  extractRecipient,
+  extractEmailSubject,
 } from "@/lib/agents/operations/extract";
 
 describe("extractUrl", () => {
@@ -183,5 +185,33 @@ describe("extractDocumentBody", () => {
   it("returns undefined when no inline content is present (body comes from prior results)", () => {
     expect(extractDocumentBody("Create a document summary of the results")).toBeUndefined();
     expect(extractDocumentBody("")).toBeUndefined();
+  });
+});
+
+describe("extractRecipient", () => {
+  it("pulls the first email address from a draft instruction", () => {
+    expect(extractRecipient("draft a follow-up to dana@acme.com about her overdue invoice")).toBe(
+      "dana@acme.com",
+    );
+    expect(extractRecipient("compose an email to Sam <sam@x.co>")).toBe("sam@x.co");
+  });
+  it("returns undefined when there is no address (executor escalates)", () => {
+    expect(extractRecipient("draft a follow-up to the overdue accounts")).toBeUndefined();
+    expect(extractRecipient("")).toBeUndefined();
+  });
+});
+
+describe("extractEmailSubject", () => {
+  it("pulls an explicit subject/re/about clause", () => {
+    expect(extractEmailSubject("draft an email to x@y subject Overdue invoice")).toBe(
+      "Overdue invoice",
+    );
+    expect(extractEmailSubject("draft a follow-up to x@y about their overdue balance")).toBe(
+      "their overdue balance",
+    );
+  });
+  it("defaults to 'Follow-up' when no subject is stated", () => {
+    expect(extractEmailSubject("draft a follow-up to x@y")).toBe("Follow-up");
+    expect(extractEmailSubject("")).toBe("Follow-up");
   });
 });
