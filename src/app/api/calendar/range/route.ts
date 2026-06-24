@@ -58,7 +58,14 @@ export async function GET(req: NextRequest) {
     cursor = next;
   }
   const batches = await Promise.all(
-    slices.map(([s, e]) => fetchCalendarEvents(user.id, s, e).catch(() => [])),
+    slices.map(([s, e]) =>
+      fetchCalendarEvents(user.id, s, e).catch((err) => {
+        /* Log the real reason (scope_missing, token, normalize throw) so an
+           empty calendar is diagnosable instead of a silent blank range. */
+        console.error("[calendar/range] slice fetch failed:", (err as Error)?.message ?? err);
+        return [];
+      }),
+    ),
   );
   const seen = new Set<string>();
   const events = batches

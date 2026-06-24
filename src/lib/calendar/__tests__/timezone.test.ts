@@ -76,6 +76,33 @@ describe("normalizeGraphDateTime", () => {
       normalizeGraphDateTime("2026-01-15T09:00:00", "America/Los_Angeles"),
     ).toBe("2026-01-15T17:00:00.000Z"); // PST UTC-8
   });
+  it("NEVER throws and always returns a string (totality: this runs on every event)", () => {
+    /* Regression: normalizeGraphDateTime ran on every calendar/mailbox datetime;
+       a non-finite instant made new Date().toISOString() throw, which both
+       calendar surfaces swallowed into a blank "no meetings". It must be total. */
+    const inputs: [string, string | null | undefined][] = [
+      ["2026-06-24T09:00:00.0000000", "Eastern Standard Time"],
+      ["2026-02-29T00:00:00", "America/New_York"],
+      ["9999-12-31T23:59:59", "Pacific Standard Time"],
+      ["0001-01-01T00:00:00", "UTC"],
+      ["not-a-date", "Eastern Standard Time"],
+      ["", "UTC"],
+      ["2026-06-24T09:00:00", undefined],
+      ["2026-06-24T09:00:00", "Totally Made Up Zone"],
+    ];
+    for (const [dt, tz] of inputs) {
+      expect(() => normalizeGraphDateTime(dt, tz)).not.toThrow();
+      expect(typeof normalizeGraphDateTime(dt, tz)).toBe("string");
+    }
+  });
+  it("dayWindowInTimeZone never throws and yields valid ISO bounds", () => {
+    for (const tz of ["Eastern Standard Time", "UTC", "Totally Made Up Zone", undefined]) {
+      const w = dayWindowInTimeZone(tz, Date.UTC(2026, 5, 24, 10, 36, 0));
+      expect(() => new Date(w.startUtcIso).toISOString()).not.toThrow();
+      expect(Number.isNaN(new Date(w.startUtcIso).getTime())).toBe(false);
+      expect(Number.isNaN(new Date(w.endUtcIso).getTime())).toBe(false);
+    }
+  });
   it("returns the value unchanged for an unknown zone (no invented instant)", () => {
     expect(normalizeGraphDateTime("2026-06-23T14:00:00", "Narnia Standard Time")).toBe(
       "2026-06-23T14:00:00",

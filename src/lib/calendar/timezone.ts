@@ -189,6 +189,11 @@ export function normalizeGraphDateTime(
     parts.second,
     iana,
   );
+  /* Totality guard: this runs on EVERY calendar/mailbox datetime. If the zone
+     math ever yields a non-finite instant, return the original string unchanged
+     rather than throwing "Invalid time value" out of new Date().toISOString().
+     A single bad event must never blank the whole calendar. */
+  if (!Number.isFinite(utcMs)) return dateTime;
   return new Date(utcMs).toISOString();
 }
 
@@ -238,9 +243,18 @@ export function dayWindowInTimeZone(
       : zonedWallClockToUtcMs(year, month1, day + 1, 0, 0, 0, iana);
 
   const localDate = `${dmap.year}-${dmap.month}-${dmap.day}`;
+  /* Totality guard: if the zoned math ever yields a non-finite instant, fall
+     back to the plain UTC calendar day rather than throwing out of toISOString()
+     and collapsing the whole calendar fetch to "no meetings". */
+  const safeStartMs = Number.isFinite(startMs)
+    ? startMs
+    : Date.UTC(year, month1 - 1, day, 0, 0, 0);
+  const safeEndMs = Number.isFinite(endMs)
+    ? endMs
+    : Date.UTC(year, month1 - 1, day + 1, 0, 0, 0);
   return {
-    startUtcIso: new Date(startMs).toISOString(),
-    endUtcIso: new Date(endMs).toISOString(),
+    startUtcIso: new Date(safeStartMs).toISOString(),
+    endUtcIso: new Date(safeEndMs).toISOString(),
     localDate,
   };
 }

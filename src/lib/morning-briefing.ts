@@ -654,7 +654,13 @@ export async function generateBriefing(
   const isCeo = userRole === "ceo";
   const [financialData, msGraphData, teamActivity, clientAttention] = await Promise.all([
     isCeo ? fetchFinancialData().catch(() => null) : Promise.resolve(null),
-    fetchMsGraphData(userId, timeZone).catch(() => null),
+    fetchMsGraphData(userId, timeZone).catch((e) => {
+      /* Do NOT silently show "no meetings" on a real failure: log the reason
+         (scope_missing, token expiry, a Graph 5xx, or a normalize throw) so a
+         blank calendar is diagnosable instead of looking like an empty day. */
+      console.error("[morning-briefing] calendar/graph fetch failed:", (e as Error)?.message ?? e);
+      return null;
+    }),
     hasDb ? fetchTeamActivity().catch(() => ({ activeMembers: 0, recentHighlights: [] })) : Promise.resolve(null),
     hasDb ? fetchClientAttention().catch(() => []) : Promise.resolve([]),
   ]);
