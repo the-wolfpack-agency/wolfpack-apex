@@ -542,4 +542,54 @@ describe("normalizeMessage extensions (Bug 1)", () => {
       "2026-05-11T12:01:00Z",
     );
   });
+
+  it("surfaces lastMessagePreview.eventDetail + attachments on Chat (2026-06-19)", async () => {
+    // The meeting-invite fix: the preview must carry the same eventDetail +
+    // attachment signals the timeline has, so the unread-count can tell a
+    // meeting invite from a typed message.
+    fetchMock.mockResolvedValueOnce(
+      okJson({
+        value: [
+          {
+            id: "c-meeting",
+            topic: "Next Steps: A Weekend with Porsche",
+            chatType: "meeting",
+            lastUpdatedDateTime: "2026-06-19T11:00:00Z",
+            members: [],
+            lastMessagePreview: {
+              body: { content: "Next Steps", contentType: "text" },
+              from: { user: { displayName: "Organizer", email: "o@x" } },
+              createdDateTime: "2026-06-19T11:00:00Z",
+              messageType: "message",
+              eventDetail: {
+                "@odata.type": "#microsoft.graph.meetingStartedEventMessageDetail",
+              },
+            },
+          },
+          {
+            id: "c-card",
+            topic: "Deck",
+            chatType: "group",
+            lastUpdatedDateTime: "2026-06-19T11:30:00Z",
+            members: [],
+            lastMessagePreview: {
+              body: { content: "", contentType: "text" },
+              from: { user: { displayName: "Sam", email: "s@x" } },
+              createdDateTime: "2026-06-19T11:30:00Z",
+              messageType: "message",
+              attachments: [
+                { contentType: "application/vnd.microsoft.card.meeting", name: "Meeting" },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+    const res = await listChatsResult("T", 25, "u");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const byId = Object.fromEntries(res.chats.map((c) => [c.id, c]));
+    expect(byId["c-meeting"].lastMessagePreview?.eventDetail?.subtype).toBe("meetingStarted");
+    expect(byId["c-card"].lastMessagePreview?.attachments?.[0].name).toBe("Meeting");
+  });
 });

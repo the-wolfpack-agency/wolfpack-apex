@@ -244,6 +244,79 @@ describe("GET /api/ms/chats/unread-count", () => {
     expect(body.total_chats).toBe(2);
   });
 
+  it("does NOT count a meeting-invite chat (preview carries eventDetail) even with body text", async () => {
+    /* Regression for the 2026-06-19 screenshot: a Teams meeting invite
+       ("Next Steps: A Weekend with Porsche") flashed a blank "new message"
+       notification. The invite preview has a non-empty body but carries
+       eventDetail (Graph attaches it only to system/meeting events), so the
+       timeline drops it while the badge previously counted it. The badge must
+       now agree with the timeline and skip it. */
+    mockGetUser.mockReturnValue(USER);
+    mockGetValidToken.mockResolvedValue({ accessToken: "T", userEmail: "a@x.com" });
+    mockListChatsResult.mockResolvedValue({
+      ok: true,
+      chats: [
+        {
+          id: "meeting-invite",
+          topic: "Next Steps: A Weekend with Porsche",
+          chatType: "meeting",
+          lastUpdatedDateTime: "2026-04-23T11:00:00Z",
+          members: [],
+          lastMessagePreview: {
+            body: { content: "Next Steps: A Weekend with Porsche", contentType: "text" as const },
+            bodyText: "Next Steps: A Weekend with Porsche",
+            from: { displayName: "Organizer", email: "org@x" },
+            createdDateTime: "2026-04-23T11:00:00Z",
+            messageType: "message",
+            eventDetail: { subtype: "meetingStarted" },
+          },
+        },
+        {
+          id: "attachment-card",
+          topic: "Deck",
+          chatType: "group",
+          lastUpdatedDateTime: "2026-04-23T11:15:00Z",
+          members: [],
+          lastMessagePreview: {
+            body: { content: "", contentType: "text" as const },
+            bodyText: "",
+            from: { displayName: "Sam", email: "s@x" },
+            createdDateTime: "2026-04-23T11:15:00Z",
+            messageType: "message",
+            attachments: [
+              { contentType: "application/vnd.microsoft.card.meeting", name: "Meeting" },
+            ],
+          },
+        },
+        {
+          id: "real",
+          topic: "team chat",
+          chatType: "group",
+          lastUpdatedDateTime: "2026-04-23T11:30:00Z",
+          members: [],
+          lastMessagePreview: {
+            body: { content: "hey", contentType: "text" as const },
+            bodyText: "hey",
+            from: { displayName: "Nick", email: "n@x" },
+            createdDateTime: "2026-04-23T11:30:00Z",
+            messageType: "message",
+          },
+        },
+      ],
+    });
+
+    const since = "2026-04-22T00:00:00Z";
+    const { GET } = await import("@/app/api/ms/chats/unread-count/route");
+    const res = await GET(
+      mkReq(`/api/ms/chats/unread-count?since=${encodeURIComponent(since)}`, "Bearer t"),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Only the real typed message counts; the meeting invite + card are skipped.
+    expect(body.count).toBe(1);
+    expect(body.total_chats).toBe(3);
+  });
+
   it("does NOT count chats whose lastMessagePreview was deleted", async () => {
     /* Graph sets `deletedDateTime` when the sender tombstones the
        message. body is usually blanked too, but the explicit signal

@@ -54,6 +54,18 @@ export interface ChatLastMessagePreview {
   messageType?: string;
   /** Set by Graph when the last preview message was deleted. */
   deletedDateTime?: string;
+  /**
+   * Present when the preview message is a Teams system/meeting event (call
+   * started/ended, meeting scheduled, members added). Graph only attaches this
+   * to non-human events, so it is a strong "not a real message" signal the
+   * unread-count uses to avoid notifying on meeting invites.
+   */
+  eventDetail?: ChatMessageEventDetail;
+  /**
+   * Attachment summaries (meeting cards, file shares, adaptive cards). A preview
+   * with attachments and no body text is a card, not a typed message.
+   */
+  attachments?: ChatMessageAttachment[];
 }
 
 export interface Chat {
@@ -161,6 +173,8 @@ interface RawLastMessagePreview {
   createdDateTime?: string;
   messageType?: unknown;
   deletedDateTime?: unknown;
+  attachments?: RawAttachment[] | unknown;
+  eventDetail?: RawEventDetail | unknown;
 }
 
 interface RawChat {
@@ -275,6 +289,12 @@ function normalizeChat(raw: RawChat): Chat {
     ) {
       preview.deletedDateTime = raw.lastMessagePreview.deletedDateTime;
     }
+    // System/meeting-event + attachment signals, so the unread-count can tell a
+    // real typed message from a meeting invite / card the timeline drops.
+    const previewAttachments = normalizeAttachments(raw.lastMessagePreview.attachments);
+    if (previewAttachments) preview.attachments = previewAttachments;
+    const previewEventDetail = normalizeEventDetail(raw.lastMessagePreview.eventDetail);
+    if (previewEventDetail) preview.eventDetail = previewEventDetail;
     chat.lastMessagePreview = preview;
   }
   return chat;

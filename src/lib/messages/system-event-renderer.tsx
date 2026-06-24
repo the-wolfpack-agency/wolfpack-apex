@@ -33,25 +33,18 @@ import type {
   ChatMessageAttachment,
 } from "@/lib/ms-graph-chats";
 import { fetchWithRefresh } from "@/lib/client-auth";
+// Pure classification predicates live in a server-safe module so the
+// unread-count route can share them. Re-exported below to keep the existing
+// `@/lib/messages/system-event-renderer` import surface stable.
+import {
+  type RenderableMessage,
+  isAttachmentOnly,
+  shouldRenderAsPill,
+  isNoiseMessage,
+} from "@/lib/messages/message-classify";
 
-/**
- * Renderer-shaped subset of `ChatMessage`. Accepts both the lib's
- * strict `ChatMessage` (where `from` is required) and the page's
- * looser local interface (where `from` may be undefined). Renderers
- * only need `id`, `from.displayName`, attachments, and event detail —
- * not the strict identity set — so this widening is safe.
- */
-export interface RenderableMessage {
-  id: string;
-  from?: { displayName?: string };
-  bodyText?: string;
-  body?: { content?: string; contentType?: string };
-  messageType?: string;
-  attachments?: ChatMessageAttachment[];
-  eventDetail?: ChatMessageEventDetail;
-  /** ISO timestamp set by Graph when the user deletes the message. */
-  deletedDateTime?: string | null;
-}
+export type { RenderableMessage };
+export { isAttachmentOnly, shouldRenderAsPill, isNoiseMessage };
 
 /**
  * Plain-language phrasing for each known Graph systemEvent subtype.
@@ -153,87 +146,6 @@ function humanJoin(names: string[]): string {
   if (names.length === 1) return names[0];
   if (names.length === 2) return `${names[0]} and ${names[1]}`;
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-}
-
-/**
- * True when a `messageType: 'message'` row has no body content but DOES
- * have at least one attachment — render as AttachmentSummaryPill in
- * that case. We compare on the trimmed text representation so HTML
- * messages with only `<div></div>` wrappers (Teams pads thread starts
- * this way) are also classified as attachment-only.
- */
-export function isAttachmentOnly(message: RenderableMessage): boolean {
-  const bodyText = (message.bodyText || "").trim();
-  const bodyContent = (message.body?.content || "").trim();
-  const text = bodyText.length > 0 ? bodyText : bodyContent;
-  const hasAttachments =
-    Array.isArray(message.attachments) && message.attachments.length > 0;
-  return text.length === 0 && hasAttachments;
-}
-
-/**
- * True when this message should render via the system-event / attachment
- * pill path instead of the normal bubble. Keeps the page-level branch
- * tiny — page calls `shouldRenderAsPill(m)` and dispatches.
- */
-export function shouldRenderAsPill(message: RenderableMessage): boolean {
-  if (message.messageType === "systemEventMessage") return true;
-  return isAttachmentOnly(message);
-}
-
-/**
- * True when the message carries no useful payload at all — empty body
- * text, no attachments, not a system event. Teams emits these for
- * reactions, deleted messages, OOO auto-replies that resolve to empty
- * bodies, and various Graph chatEvent subtypes whose `messageType` is
- * `message` (not `systemEventMessage`). Rendering them as a normal
- * bubble produces a noise row with only a timestamp ("21h" / "5/11/2026")
- * and no content — every dealer who looked at the inbox flagged this
- * as broken. Filter them out at the page level.
- *
- * NOTE: we intentionally only call this BEFORE the pill check so
- * legitimate system events + attachments still render. Only truly
- * empty rows are dropped.
- */
-export function isNoiseMessage(message: RenderableMessage): boolean {
-  if (message.messageType === "systemEventMessage") return false;
-  if (Array.isArray(message.attachments) && message.attachments.length > 0) {
-    return false;
-  }
-  /* Graph sets `deletedDateTime` when the sender deletes the message.
-     The body usually becomes `<div></div>` but the deletion itself is
-     the canonical signal. Treat as noise regardless of body content. */
-  if (message.deletedDateTime) return true;
-
-  /* `bodyText` is parser-extracted plain text — set in
-     normalizeBody via htmlToText. If it has content, the user sees
-     something readable; not noise. */
-  const bodyText = (message.bodyText || "").trim();
-  if (bodyText.length > 0) return false;
-
-  /* Fallback for callers that don't pre-populate bodyText (older
-     fixtures, hand-built RenderableMessages). Strip ALL HTML tags +
-     entities + whitespace; if nothing remains, the bubble would be
-     blank. We use a broad `<[^>]+>` strip rather than the narrow
-     div/p/br/span pattern so Teams custom tags (`<emoji>`, `<at>`,
-     `<attachment>`, `<systemcontent>`, `<itemmention>`) are also
-     handled — those caused the 2026-06-01 blank-bubble screenshot. */
-  const rawContent = (message.body?.content || "").trim();
-  if (rawContent.length === 0) return true;
-  /* Strip tags repeatedly until stable: a single pass over `<[^>]+>`
-     leaves a residual `<tag` when tags are nested or overlapping
-     (e.g. `<a<b>>`), so loop to a fixed point. */
-  let stripped = rawContent;
-  let prev: string;
-  do {
-    prev = stripped;
-    stripped = stripped.replace(/<[^>]+>/g, "");
-  } while (stripped !== prev);
-  stripped = stripped
-    .replace(/&nbsp;|&#160;|&zwj;|&#8203;/gi, "")
-    .replace(/\s+/g, "")
-    .trim();
-  return stripped.length === 0;
 }
 
 /**

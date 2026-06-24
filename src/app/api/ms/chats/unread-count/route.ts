@@ -34,6 +34,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { getValidToken } from "@/lib/microsoft-graph";
 import { listChatsResult } from "@/lib/ms-graph-chats";
+import { isNotificationWorthy } from "@/lib/messages/message-classify";
 import { trackEvent } from "@/lib/analytics";
 
 /**
@@ -81,15 +82,16 @@ export async function GET(req: NextRequest) {
     // moment a user logs in. The client will set `last_seen` to now()
     // on first click and subsequent polls will be accurate.
     //
-    // We also skip chats whose lastMessagePreview has no displayable
-    // text body. Graph reports lastUpdatedDateTime for system events
-    // (call started/ended, member added, meeting recording posted) even
-    // when there's no human message — those previously caused the badge
-    // to flash on an empty chat (see the screenshot: Messages(1) with
-    // an open chat showing only timestamp pills, no message body).
-    // Filtering by `bodyText.length > 0`, explicit messageType, and
-    // deletedDateTime lines the badge up with the user's intuition:
-    // "I have a new message I haven't read." Bug fix 2026-06-01.
+    // We also only count a chat whose latest message is a GENUINE typed human
+    // message. Graph reports lastUpdatedDateTime for system + meeting events
+    // (call started/ended, member added, meeting invite / scheduled, meeting
+    // recording posted) and for attachment-only cards even when there is no
+    // human message. Those are exactly what the message timeline drops or
+    // renders as a pill, so the badge must agree: a meeting invite is not a
+    // "new message" and must not flash a notification. `isNotificationWorthy`
+    // is the shared predicate the timeline renderer uses, so the count and the
+    // timeline can never disagree. Bug fix 2026-06-19 (blank meeting-invite
+    // notification); supersedes the inline messageType/body/deleted checks.
     let count = 0;
     if (since !== null) {
       for (const chat of result.chats) {
@@ -99,10 +101,7 @@ export async function GET(req: NextRequest) {
         if (Number.isNaN(ts) || ts <= since) continue;
         const preview = chat.lastMessagePreview;
         if (!preview) continue;
-        if (preview.messageType === "systemEventMessage") continue;
-        if (preview.deletedDateTime) continue;
-        const bodyText = preview.bodyText?.trim() ?? "";
-        if (bodyText.length === 0) continue;
+        if (!isNotificationWorthy(preview)) continue;
         count += 1;
       }
     }
