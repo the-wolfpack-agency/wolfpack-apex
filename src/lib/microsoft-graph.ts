@@ -634,6 +634,19 @@ export async function exchangeCode(code: string): Promise<MsTokens | null> {
 }
 
 /**
+ * Thrown when Microsoft PERMANENTLY revokes the grant (AADSTS50173 /
+ * invalid_grant): the refresh token is dead and only a fresh user consent
+ * restores access. Distinct from a transient refresh failure so the caller can
+ * clear the dead token and prompt a reconnect instead of silently blanking.
+ */
+export class MsGrantRevokedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MsGrantRevokedError";
+  }
+}
+
+/**
  * Refresh an expired access token using the refresh token.
  */
 export async function refreshAccessToken(currentRefreshToken: string): Promise<MsTokens | null> {
@@ -665,8 +678,17 @@ export async function refreshAccessToken(currentRefreshToken: string): Promise<M
     handle.setAttribute("status_code", res.status);
 
     if (!res.ok) {
-      console.error("[microsoft-graph] Token refresh failed:", res.status, sanitizeForLog(await res.text()));
+      const bodyText = await res.text();
+      console.error("[microsoft-graph] Token refresh failed:", res.status, sanitizeForLog(bodyText));
       handle.end("error");
+      /* A revoked/expired grant (AADSTS50173 and friends all surface as
+         invalid_grant) is PERMANENT: the refresh token is dead and only fresh
+         user consent fixes it. Signal it distinctly so the caller clears the
+         dead token and the connection reads as disconnected (prompting a
+         reconnect), instead of a stale "connected" banner over empty data. */
+      if (/invalid_grant/i.test(bodyText)) {
+        throw new MsGrantRevokedError(`grant revoked (status ${res.status})`);
+      }
       return null;
     }
 
@@ -681,6 +703,12 @@ export async function refreshAccessToken(currentRefreshToken: string): Promise<M
       expires_at: expiresAt,
     };
   } catch (err) {
+    // A permanent revocation must NOT be swallowed into a transient null: let it
+    // propagate so the caller clears the dead token and prompts a reconnect.
+    if (err instanceof MsGrantRevokedError) {
+      handle.end("error");
+      throw err;
+    }
     console.error("[microsoft-graph] Token refresh error:", sanitizeForLog((err as Error).message));
     handle.setAttribute("error_message", (err as Error).message);
     handle.end("error");
@@ -765,7 +793,24 @@ export async function getValidToken(
   }
 
   // Token expired or expiring soon — refresh
-  const refreshed = await refreshAccessToken(row.refresh_token);
+  let refreshed: Awaited<ReturnType<typeof refreshAccessToken>> = null;
+  try {
+    refreshed = await refreshAccessToken(row.refresh_token);
+  } catch (err) {
+    if (err instanceof MsGrantRevokedError) {
+      /* Microsoft permanently revoked this grant (e.g. a password reset or an
+         admin/Conditional-Access token revocation). Clear the dead token so the
+         connection reads as DISCONNECTED and the UI prompts a reconnect, rather
+         than showing "Microsoft 365 connected" with an empty calendar/inbox. */
+      await deleteTokens(userId);
+      trackEvent("microsoft.token_refresh_failed", userId, "system", {
+        user_email: row.user_email,
+        revoked: true,
+      });
+      return null;
+    }
+    throw err;
+  }
   if (!refreshed) {
     trackEvent("microsoft.token_refresh_failed", userId, "system", {
       user_email: row.user_email,
