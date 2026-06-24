@@ -112,6 +112,31 @@ function formatCountdown(m: UpcomingMeeting, nowMs: number): string {
  * the OOO tokens leaves the person's name. Falls back to the raw
  * subject if stripping yields nothing useful.
  */
+/**
+ * True when an out-of-office entry overlaps the user's LOCAL today. The OOO list
+ * comes from a -30min..+48h window, which includes TOMORROW, so without this an
+ * OOO scheduled for tomorrow was being labelled "Out today" (a wrong, embarrassing
+ * client-facing error). An entry counts as today when its [start, end) overlaps
+ * [local midnight today, local midnight tomorrow); a start-only entry counts when
+ * its start falls within today.
+ */
+export function isOutToday(
+  start: string,
+  end: string,
+  nowMs: number = Date.now(),
+): boolean {
+  const now = new Date(nowMs);
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const endOfToday = startOfToday + 24 * 60 * 60 * 1000;
+  const s = Date.parse(start);
+  const e = Date.parse(end);
+  const sOk = !Number.isNaN(s);
+  const eOk = !Number.isNaN(e);
+  if (sOk && eOk) return e > startOfToday && s < endOfToday;
+  if (sOk) return s >= startOfToday && s < endOfToday;
+  return false;
+}
+
 function ooEntryLabel(subject: string): string {
   if (!subject) return "";
   const stripped = subject
@@ -161,6 +186,13 @@ export default function MeetingPreBriefPanel({ lookaheadHours = 48 }: Props) {
   // Tick the client clock every 30s so the countdown label stays live
   // without needing to refetch. 30s is fine for a minute-granularity label.
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  /* Only show people whose OOO actually overlaps TODAY. The fetch window is 48h
+     (it powers the meeting dropdown), so tomorrow's OOO would otherwise read as
+     "Out today". Recomputes with the live clock so it stays right across midnight. */
+  const outOfOfficeToday = useMemo(
+    () => outOfOffice.filter((m) => isOutToday(m.start, m.end, nowMs)),
+    [outOfOffice, nowMs],
+  );
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 30_000);
     return () => clearInterval(id);
@@ -262,14 +294,14 @@ export default function MeetingPreBriefPanel({ lookaheadHours = 48 }: Props) {
         <h2 className="text-lg font-semibold mb-1" style={{ color: "var(--wp-gold)" }}>
           Meeting Pre-Brief
         </h2>
-        {outOfOffice.length > 0 && (
+        {outOfOfficeToday.length > 0 && (
           <p
             className="text-xs mb-2"
             data-testid="prebrief-out-of-office"
             style={{ color: "var(--wp-text-dim)" }}
           >
             <span style={{ color: "var(--wp-text)" }}>Out today: </span>
-            {outOfOffice.map((m) => ooEntryLabel(m.subject)).join(", ")}
+            {outOfOfficeToday.map((m) => ooEntryLabel(m.subject)).join(", ")}
           </p>
         )}
         <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>
@@ -293,14 +325,14 @@ export default function MeetingPreBriefPanel({ lookaheadHours = 48 }: Props) {
         >
           Meeting Pre-Brief
         </h2>
-        {outOfOffice.length > 0 && (
+        {outOfOfficeToday.length > 0 && (
           <p
             className="text-xs"
             data-testid="prebrief-out-of-office"
             style={{ color: "var(--wp-text-dim)" }}
           >
             <span style={{ color: "var(--wp-text)" }}>Out today: </span>
-            {outOfOffice.map((m) => ooEntryLabel(m.subject)).join(", ")}
+            {outOfOfficeToday.map((m) => ooEntryLabel(m.subject)).join(", ")}
           </p>
         )}
         <div className="flex items-center gap-2 w-full">

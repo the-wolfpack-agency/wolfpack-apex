@@ -222,6 +222,28 @@ describe("MeetingPreBriefPanel", () => {
   });
 
   describe("out-of-office handling", () => {
+    // OOO entries are filtered to events overlapping LOCAL today (the fetch window
+    // is 48h, so tomorrow's OOO must NOT read as "Out today"). Build day-relative
+    // ISO strings off the real clock so these stay correct on any run date.
+    const clock = new Date();
+    const dayAt = (offsetDays: number, hour: number): string =>
+      new Date(
+        clock.getFullYear(),
+        clock.getMonth(),
+        clock.getDate() + offsetDays,
+        hour,
+        0,
+        0,
+      ).toISOString();
+    const today = (id: string, subject: string) =>
+      meeting({
+        id,
+        subject,
+        isOutOfOffice: true,
+        start: dayAt(0, 9),
+        end: dayAt(0, 17),
+      } as never);
+
     function mockUpcomingWithOoo(meetings: unknown[], outOfOffice: unknown[]): void {
       mockFetchWithRefresh.mockImplementation((url: string) => {
         if (typeof url === "string" && url.startsWith("/api/meetings/upcoming")) {
@@ -238,10 +260,7 @@ describe("MeetingPreBriefPanel", () => {
     test("renders 'Out today' line above the dropdown when outOfOffice entries are returned", async () => {
       mockUpcomingWithOoo(
         [meeting({ id: "real", subject: "Q2 Review" })],
-        [
-          meeting({ id: "o1", subject: "Ashley OOO", isOutOfOffice: true } as never),
-          meeting({ id: "o2", subject: "Hoxsie OoO", isOutOfOffice: true } as never),
-        ],
+        [today("o1", "Ashley OOO"), today("o2", "Hoxsie OoO")],
       );
       render(<MeetingPreBriefPanel />);
       const ooo = await screen.findByTestId("prebrief-out-of-office");
@@ -253,7 +272,7 @@ describe("MeetingPreBriefPanel", () => {
     test("does NOT include OOO entries in the meeting dropdown", async () => {
       mockUpcomingWithOoo(
         [meeting({ id: "real", subject: "Q2 Review" })],
-        [meeting({ id: "o1", subject: "Ashley OOO", isOutOfOffice: true } as never)],
+        [today("o1", "Ashley OOO")],
       );
       render(<MeetingPreBriefPanel />);
       const picker = await screen.findByTestId("prebrief-meeting-picker");
@@ -270,13 +289,7 @@ describe("MeetingPreBriefPanel", () => {
     });
 
     test("renders OOO line in the empty-meetings state when only OOO entries exist", async () => {
-      mockUpcomingWithOoo(
-        [],
-        [
-          meeting({ id: "o1", subject: "Ashley OOO", isOutOfOffice: true } as never),
-          meeting({ id: "o2", subject: "Hoxsie Vacation", isOutOfOffice: true } as never),
-        ],
-      );
+      mockUpcomingWithOoo([], [today("o1", "Ashley OOO"), today("o2", "Hoxsie Vacation")]);
       render(<MeetingPreBriefPanel />);
       await screen.findByTestId("meeting-prebrief-panel-empty");
       const ooo = screen.getByTestId("prebrief-out-of-office");
@@ -288,10 +301,7 @@ describe("MeetingPreBriefPanel", () => {
     test("strips OOO tokens from the display label", async () => {
       mockUpcomingWithOoo(
         [meeting({ id: "real", subject: "Q2 Review" })],
-        [
-          meeting({ id: "o1", subject: "Ashley OOO", isOutOfOffice: true } as never),
-          meeting({ id: "o2", subject: "Hoxsie - Out of office", isOutOfOffice: true } as never),
-        ],
+        [today("o1", "Ashley OOO"), today("o2", "Hoxsie - Out of office")],
       );
       render(<MeetingPreBriefPanel />);
       const ooo = await screen.findByTestId("prebrief-out-of-office");
@@ -300,6 +310,49 @@ describe("MeetingPreBriefPanel", () => {
       expect(ooo).toHaveTextContent(/Hoxsie/);
       expect(ooo.textContent).not.toMatch(/OOO/);
       expect(ooo.textContent).not.toMatch(/Out of office/i);
+    });
+
+    // Regression: the "Out today: Ashley" prod bug. The OOO list arrives from a
+    // -30min..+48h window, so an OOO that starts TOMORROW must never be labelled
+    // "Out today" (and if it's the only OOO, the whole line must disappear).
+    test("excludes an OOO that is scheduled for tomorrow", async () => {
+      mockUpcomingWithOoo(
+        [meeting({ id: "real", subject: "Q2 Review" })],
+        [
+          today("o1", "Hoxsie OOO"),
+          meeting({
+            id: "o2",
+            subject: "Ashley OOO",
+            isOutOfOffice: true,
+            start: dayAt(1, 9),
+            end: dayAt(1, 17),
+          } as never),
+        ],
+      );
+      render(<MeetingPreBriefPanel />);
+      const ooo = await screen.findByTestId("prebrief-out-of-office");
+      expect(ooo).toHaveTextContent(/Out today/);
+      expect(ooo).toHaveTextContent(/Hoxsie/);
+      // Tomorrow's OOO must NOT appear in today's line.
+      expect(ooo).not.toHaveTextContent(/Ashley/);
+    });
+
+    test("hides the OOO line when the only OOO entry is tomorrow", async () => {
+      mockUpcomingWithOoo(
+        [meeting({ id: "real", subject: "Q2 Review" })],
+        [
+          meeting({
+            id: "o1",
+            subject: "Ashley OOO",
+            isOutOfOffice: true,
+            start: dayAt(1, 9),
+            end: dayAt(1, 17),
+          } as never),
+        ],
+      );
+      render(<MeetingPreBriefPanel />);
+      await screen.findByTestId("prebrief-meeting-picker");
+      expect(screen.queryByTestId("prebrief-out-of-office")).toBeNull();
     });
   });
 });

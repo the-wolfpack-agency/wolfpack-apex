@@ -139,9 +139,9 @@ function LoginContent() {
       >
         <div className="flex flex-col items-center mb-8">
           <img
-            src="/wolfpack-logo.png"
-            alt="Wolfpack"
-            className="h-16 w-auto mb-4"
+            src="/ogiam-logo.png"
+            alt="OGIAM"
+            className="h-12 w-auto mb-4"
           />
           <h1
             className="text-3xl font-bold"

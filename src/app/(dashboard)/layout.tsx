@@ -264,7 +264,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           className="flex items-center gap-3 px-5 py-4 border-b"
           style={{ borderColor: "var(--wp-dark-border)" }}
         >
-          <img src="/wolfpack-logo.png" alt="Wolfpack" className="h-8 w-auto" />
+          <img src="/ogiam-icon.png" alt="OGIAM" className="h-8 w-auto" />
           <span className="text-xl font-bold" style={{ color: "var(--wp-gold)" }}>
             Instinct
           </span>
@@ -407,7 +407,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <img src="/wolfpack-logo.png" alt="Wolfpack" className="h-6 w-auto" />
+          <img src="/ogiam-icon.png" alt="OGIAM" className="h-6 w-auto" />
           <span className="text-lg font-bold" style={{ color: "var(--wp-gold)" }}>Instinct</span>
           <div className="ml-auto flex items-center gap-2">
             <TeamsUnreadBadge />

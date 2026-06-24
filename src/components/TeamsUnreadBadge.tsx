@@ -151,7 +151,7 @@ export default function TeamsUnreadBadge() {
           delta === 1 ? "New Teams message" : `${delta} new Teams messages`,
           {
             body: "Open Instinct to read and reply.",
-            icon: "/wolfpack-logo.png",
+            icon: "/ogiam-icon.png",
             tag: "instinct-teams-unread",
             // Renotify on each new arrival rather than silently
             // collapsing into the previous notification.
