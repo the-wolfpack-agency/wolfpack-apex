@@ -471,6 +471,11 @@ export type InstinctEventType =
   //   approval, or failed), every step governed under its identity.
   | "agent.task_assigned"
   | "agent.task_completed"
+  // agent.log_viewed      { agent_id, decision_count }
+  //   a manager opened an agent's action log (the OGIAM decision ledger). The
+  //   ledger is the IAM audit trail and the same data the drift detector and
+  //   procedure-learning loop consume, so a review is itself a learning signal.
+  | "agent.log_viewed"
   // agent.execution_grounded { agent_id, task_id, inherited, brain_hits,
   //                            brain_grounded, model_id?, est_cost_usd? }
   //   one row per agent run capturing the maturation / familiarity curve:

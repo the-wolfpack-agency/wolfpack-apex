@@ -184,6 +184,17 @@ test.describe("Agent-principal onboarding, roster reality check", () => {
       "the behavior + drift section is present",
     ).toBeVisible({ timeout: 8_000 });
 
+    // The agent log section mounts: the IAM audit trail of every governed
+    // action the agent took (the OGIAM decision ledger), which the drift
+    // detector and procedure learning also consume. Render-only here: we never
+    // mutate the ledger from e2e. The section renders either its decision rows
+    // or the calm "no governed actions recorded yet" empty state, never a
+    // silent blank.
+    await expect(
+      page.getByTestId("agent-log-section"),
+      "the agent log (decision ledger) section is present",
+    ).toBeVisible({ timeout: 8_000 });
+
     // The bridge to the agent-filtered OGIAM explorer is present.
     await expect(
       page.getByTestId("agent-activity-link"),

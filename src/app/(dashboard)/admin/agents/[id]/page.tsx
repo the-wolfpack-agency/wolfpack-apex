@@ -194,6 +194,45 @@ type DriftState =
   | { kind: "error" }
   | { kind: "present"; baseline: DriftBaseline | null; events: DriftEvent[]; latest: DriftEvent | null };
 
+/* Agent log: the IAM auditing pillar. The chronological audit trail of every
+   governed action this agent took, straight from the OGIAM decision ledger.
+   The same ledger feeds drift detection and procedure learning, so nothing the
+   agent does is lost: it is recorded once and consumed for audit, drift, and
+   learning alike. Loads independently of the agent so a log failure never
+   blanks the profile; an empty list is the expected steady state for a freshly
+   onboarded agent that has not acted yet. */
+interface OgiamDecisionRow {
+  id: string;
+  created_at: string;
+  principal_agent: string | null;
+  on_behalf_user_id: string | null;
+  on_behalf_role: string | null;
+  tool: string;
+  capability: string;
+  surface: string | null;
+  risk_tier: string;
+  intended_outcome: string;
+  effective_outcome: string;
+  rule_id: string | null;
+  reason: string | null;
+  policy_version: string | null;
+}
+
+interface DecisionsResponse {
+  workspace_id?: string;
+  summary?: unknown;
+  decisions: OgiamDecisionRow[];
+}
+
+/* Cap the visible ledger so a chatty agent can never render thousands of rows
+   into the page; the GET already requests at most this many, newest first. */
+const MAX_LOG_ROWS = 50;
+
+type LogState =
+  | { kind: "loading" }
+  | { kind: "error" }
+  | { kind: "present"; decisions: OgiamDecisionRow[] };
+
 interface TaskResponse {
   task: AgentTask;
 }
@@ -276,6 +315,25 @@ function driftVerdictColor(verdict: DriftVerdict): { fg: string; bg: string } {
       return { fg: "var(--wp-gold, #f1c233)", bg: "rgba(241,194,51,0.12)" };
     case "critical":
       return { fg: "var(--wp-error, #ef4444)", bg: "rgba(239,68,68,0.12)" };
+    default:
+      return { fg: "var(--wp-text-dim, #aaa)", bg: "rgba(160,160,160,0.12)" };
+  }
+}
+
+/* The OGIAM decision-outcome palette, matched to the hexes already used across
+   the gate's decision surfaces: allow green, deny red, escalate amber,
+   transform blue, and monitor / anything-else grey. These are the documented
+   outcome colors, not free-form picks. */
+function outcomeColor(outcome: string): { fg: string; bg: string } {
+  switch (outcome) {
+    case "allow":
+      return { fg: "#22A55C", bg: "rgba(34,165,92,0.12)" };
+    case "deny":
+      return { fg: "#FF5F57", bg: "rgba(255,95,87,0.12)" };
+    case "escalate":
+      return { fg: "#E8B528", bg: "rgba(232,181,40,0.12)" };
+    case "transform":
+      return { fg: "#6FA8DC", bg: "rgba(111,168,220,0.12)" };
     default:
       return { fg: "var(--wp-text-dim, #aaa)", bg: "rgba(160,160,160,0.12)" };
   }
@@ -457,6 +515,103 @@ function TaskRow({ task }: { task: AgentTask }) {
   );
 }
 
+/* One row of the agent's decision ledger: when it happened, the tool +
+   capability it exercised (mono, muted), a colored outcome pill, the rule that
+   decided it, and the risk tier. The decision's reason rides on a small second
+   line (and the row title) so the audit narrative is one click / hover away
+   without crowding the row. */
+function LogRow({ decision }: { decision: OgiamDecisionRow }) {
+  const oc = outcomeColor(decision.effective_outcome);
+  return (
+    <li
+      data-testid={`agent-log-row-${decision.id}`}
+      title={decision.reason ?? undefined}
+      style={{
+        listStyle: "none",
+        padding: "0.5rem 0.6rem",
+        marginBottom: "0.3rem",
+        background: "var(--wp-dark-surface2, #1a1a1a)",
+        border: "1px solid var(--wp-dark-border, #333)",
+        borderRadius: "6px",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+        <span
+          data-testid={`agent-log-row-${decision.id}-outcome`}
+          style={{
+            flexShrink: 0,
+            padding: "0.05rem 0.4rem",
+            borderRadius: "8px",
+            fontSize: "0.65rem",
+            fontWeight: 600,
+            textTransform: "capitalize",
+            background: oc.bg,
+            color: oc.fg,
+            border: `1px solid ${oc.fg}`,
+          }}
+        >
+          {decision.effective_outcome}
+        </span>
+        <span
+          style={{
+            flex: "1 1 auto",
+            minWidth: 0,
+            fontSize: "0.8rem",
+            color: "var(--wp-text-muted, #6b7280)",
+            fontFamily: "var(--wp-mono, monospace)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {decision.tool}
+          {decision.capability ? ` · ${decision.capability}` : ""}
+        </span>
+        <span
+          data-testid={`agent-log-row-${decision.id}-rule`}
+          style={{
+            flexShrink: 0,
+            fontSize: "0.72rem",
+            color: "var(--wp-text-muted, #6b7280)",
+            fontFamily: "var(--wp-mono, monospace)",
+          }}
+        >
+          {decision.rule_id ?? "no rule"}
+        </span>
+        <span
+          style={{
+            flexShrink: 0,
+            padding: "0.05rem 0.4rem",
+            borderRadius: "8px",
+            fontSize: "0.65rem",
+            background: "rgba(160,160,160,0.10)",
+            color: "var(--wp-text-muted, #6b7280)",
+            border: "1px solid var(--wp-dark-border, #333)",
+          }}
+        >
+          {decision.risk_tier}
+        </span>
+        <span style={{ flexShrink: 0, fontSize: "0.72rem", color: "var(--wp-text-muted, #6b7280)" }}>
+          {relativeTime(decision.created_at)}
+        </span>
+      </div>
+      {decision.reason ? (
+        <div
+          data-testid={`agent-log-row-${decision.id}-reason`}
+          style={{
+            marginTop: "0.3rem",
+            fontSize: "0.72rem",
+            lineHeight: 1.4,
+            color: "var(--wp-text-muted, #6b7280)",
+          }}
+        >
+          {decision.reason}
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
 export default function AgentProfilePage({
   params,
 }: {
@@ -498,6 +653,13 @@ export default function AgentProfilePage({
      an auto-pause reflects in the lifecycle state chip. */
   const [drift, setDrift] = useState<DriftState>({ kind: "loading" });
   const [driftBusy, setDriftBusy] = useState(false);
+
+  /* Agent log: the OGIAM decision ledger for this agent. Loads independently of
+     the agent so a log failure never blanks the profile; an empty list is a
+     first-class "no governed actions yet" state, not an error. The Refresh
+     control re-runs loadLog (which re-fires the analytics view event). */
+  const [log, setLog] = useState<LogState>({ kind: "loading" });
+  const [logBusy, setLogBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -597,6 +759,39 @@ export default function AgentProfilePage({
     }
   }, [id]);
 
+  /* Loads the agent's OGIAM decision ledger (the IAM audit trail) newest-first,
+     capped by the GET. On success we fire ONE analytics event ("agent.log_viewed",
+     already in the InstinctEventType union) carrying the decision count: a review
+     is itself a learning signal, the same ledger the drift detector and
+     procedure-learning loop consume. The analytics POST is best effort: a
+     failure must never break the section, so it is fire-and-forget. A fetch
+     failure collapses to a quiet error state so the section never blanks. */
+  const loadLog = useCallback(async () => {
+    setLog({ kind: "loading" });
+    try {
+      const res = await fetchWithRefresh(`/api/admin/ogiam/decisions?agent=${id}&limit=50`);
+      if (!res.ok) {
+        setLog({ kind: "error" });
+        return;
+      }
+      const body = (await res.json()) as DecisionsResponse;
+      const decisions = body.decisions ?? [];
+      setLog({ kind: "present", decisions });
+      /* Best effort: the IAM review is recorded once, consumed for learning. An
+         analytics failure must not break the log section, so we swallow it. */
+      void fetchWithRefresh("/api/analytics", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          event: "agent.log_viewed",
+          metadata: { agent_id: id, decision_count: decisions.length },
+        }),
+      }).catch(() => undefined);
+    } catch {
+      setLog({ kind: "error" });
+    }
+  }, [id]);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -612,6 +807,10 @@ export default function AgentProfilePage({
   useEffect(() => {
     void loadDrift();
   }, [loadDrift]);
+
+  useEffect(() => {
+    void loadLog();
+  }, [loadLog]);
 
   /* Live progress polling. While any task is in-flight (queued or running) we
      poll the tasks GET every few seconds and replace the list with the fresh
@@ -802,6 +1001,19 @@ export default function AgentProfilePage({
       /* loadDrift surfaces the quiet error state; nothing more to do here. */
     } finally {
       setDriftBusy(false);
+    }
+  }
+
+  /* Re-fetches the agent log on demand (the Refresh control). Reuses the same
+     busy/refresh pattern the other sections use; loadLog re-fires the view
+     analytics event so a manual review is captured too. */
+  async function refreshLog() {
+    if (logBusy) return;
+    setLogBusy(true);
+    try {
+      await loadLog();
+    } finally {
+      setLogBusy(false);
     }
   }
 
@@ -1807,6 +2019,134 @@ export default function AgentProfilePage({
                   })}
                 </ul>
               )}
+            </>
+          );
+        })()}
+      </div>
+
+      {/* Agent log: the IAM auditing pillar. The chronological audit trail of
+          every governed action this agent took, straight from the OGIAM
+          decision ledger (newest first). The same ledger feeds drift detection
+          and the agent's learning, so nothing it does is lost: it is recorded
+          once and consumed for audit, drift, and learning alike. Loads
+          independently so a log failure never blanks the profile. */}
+      <div
+        data-testid="agent-log-section"
+        style={{
+          marginBottom: "1.5rem",
+          padding: "1.1rem 1.2rem",
+          background: "var(--wp-dark-surface, #1f1f22)",
+          border: "1px solid var(--wp-dark-border, #333)",
+          borderRadius: "8px",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "0.5rem",
+            flexWrap: "wrap",
+            marginBottom: "0.6rem",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "0.72rem",
+              color: "var(--wp-text-muted, #6b7280)",
+              textTransform: "uppercase",
+              letterSpacing: "0.03em",
+            }}
+          >
+            Agent log
+          </div>
+          <button
+            type="button"
+            data-testid="agent-log-refresh"
+            onClick={() => void refreshLog()}
+            disabled={logBusy}
+            style={{
+              padding: "0.35rem 0.8rem",
+              borderRadius: "6px",
+              fontSize: "0.78rem",
+              fontWeight: 600,
+              background: "var(--wp-dark-surface2, #1a1a1a)",
+              color: "var(--wp-text, #eee)",
+              border: "1px solid var(--wp-dark-border, #333)",
+              cursor: logBusy ? "not-allowed" : "pointer",
+              opacity: logBusy ? 0.6 : 1,
+            }}
+          >
+            {logBusy ? "..." : "Refresh"}
+          </button>
+        </div>
+
+        <div
+          data-testid="agent-log-note"
+          style={{ fontSize: "0.72rem", color: "var(--wp-text-muted, #6b7280)", lineHeight: 1.4, marginBottom: "0.8rem" }}
+        >
+          The full audit trail of every governed action this agent took: this is the IAM record. The same ledger feeds drift detection and the agent&apos;s learning, so nothing it does is lost.
+        </div>
+
+        {log.kind === "loading" && (
+          <div
+            data-testid="agent-log-loading"
+            style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}
+          >
+            Loading...
+          </div>
+        )}
+
+        {log.kind === "error" && (
+          <div
+            data-testid="agent-log-error"
+            style={{ fontSize: "0.85rem", color: "var(--wp-text-muted, #6b7280)" }}
+          >
+            Could not load this agent&apos;s log right now.
+          </div>
+        )}
+
+        {log.kind === "present" && log.decisions.length === 0 && (
+          <div
+            data-testid="agent-log-empty"
+            style={{
+              padding: "1rem",
+              background: "var(--wp-dark-surface2, #1a1a1a)",
+              border: "1px dashed var(--wp-dark-border, #333)",
+              borderRadius: "8px",
+              fontSize: "0.85rem",
+              color: "var(--wp-text-muted, #6b7280)",
+            }}
+          >
+            No governed actions recorded yet.
+          </div>
+        )}
+
+        {log.kind === "present" && log.decisions.length > 0 && (() => {
+          const shown = log.decisions.slice(0, MAX_LOG_ROWS);
+          const total = log.decisions.length;
+          return (
+            <>
+              <ul
+                data-testid="agent-log-list"
+                style={{
+                  listStyle: "none",
+                  padding: 0,
+                  margin: 0,
+                  maxHeight: "320px",
+                  overflowY: "auto",
+                }}
+              >
+                {shown.map((d) => (
+                  <LogRow key={d.id} decision={d} />
+                ))}
+              </ul>
+              <div
+                data-testid="agent-log-count"
+                style={{ marginTop: "0.5rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #6b7280)" }}
+              >
+                Showing {shown.length} of {total} governed action{total === 1 ? "" : "s"}.
+              </div>
             </>
           );
         })()}

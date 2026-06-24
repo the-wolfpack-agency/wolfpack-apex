@@ -139,12 +139,34 @@ function makeDriftEvent(over: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+function makeDecision(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "dec-1",
+    created_at: new Date().toISOString(),
+    principal_agent: "ag-1",
+    on_behalf_user_id: "u-cto",
+    on_behalf_role: "admin",
+    tool: "search_mail",
+    capability: "mail.read",
+    surface: "mail",
+    risk_tier: "low",
+    intended_outcome: "allow",
+    effective_outcome: "allow",
+    rule_id: "rule-allow-read",
+    reason: "read-only capability within ceiling",
+    policy_version: "v1",
+    ...over,
+  };
+}
+
 const SCAN_PATH = "/scan";
 const TASKS_PATH = "/tasks";
 const TASKS_RUN_PATH = "/tasks/run";
 const DRIFT_PATH = "/drift";
 const BASELINE_PATH = "/baseline";
 const DRIFT_CHECK_PATH = "/drift-check";
+const ANALYTICS_PATH = "/api/analytics";
+const DECISIONS_PATH = "/api/admin/ogiam/decisions";
 
 /**
  * Routes the mock by URL + method: the page fires the agent GET, the scan GET,
@@ -169,10 +191,22 @@ function routeByUrl(opts: {
   drift?: () => any;
   onBaseline?: () => any;
   onDriftCheck?: () => any;
+  decisions?: () => any;
+  onAnalytics?: () => any;
 }) {
   return (url: unknown, init?: { method?: string }) => {
     const u = String(url);
     if (init?.method === "PATCH" && opts.onPatch) return Promise.resolve(opts.onPatch());
+    // Analytics POSTs (the agent.log_viewed view event) are best effort; route
+    // them first so the fire-and-forget POST never falls through to a data GET.
+    if (u.includes(ANALYTICS_PATH) && init?.method === "POST") {
+      return Promise.resolve((opts.onAnalytics ?? (() => mkRes({ ok: true })))());
+    }
+    // The agent log GETs the OGIAM decision ledger (with a query string), so we
+    // match on the path prefix rather than a suffix.
+    if (u.includes(DECISIONS_PATH)) {
+      return Promise.resolve((opts.decisions ?? (() => mkRes({ decisions: [] })))());
+    }
     // The run endpoint (".../tasks/run") drains queued work. It is checked
     // before the generic "/tasks" suffixes because "/tasks/run" does not end
     // with "/tasks"; route the POST here so the drain stays distinct from the
@@ -1052,5 +1086,188 @@ describe("/admin/agents/[id]: behavior and drift", () => {
     // The rest of the profile still renders: a drift failure never blanks it.
     expect(screen.getByTestId("agent-name")).toBeInTheDocument();
     expect(screen.queryByTestId("agent-drift-status")).not.toBeInTheDocument();
+  });
+});
+
+describe("/admin/agents/[id]: agent log (OGIAM decision ledger)", () => {
+  it("renders the decision rows newest-first with the right outcome pill colors", async () => {
+    const allow = makeDecision({
+      id: "dec-allow",
+      tool: "search_mail",
+      capability: "mail.read",
+      effective_outcome: "allow",
+      rule_id: "rule-allow-read",
+      risk_tier: "low",
+      reason: "read-only capability within ceiling",
+    });
+    const deny = makeDecision({
+      id: "dec-deny",
+      tool: "send_mail",
+      capability: "mail.send",
+      effective_outcome: "deny",
+      rule_id: "rule-deny-send",
+      risk_tier: "high",
+      reason: "send not in capability ceiling",
+    });
+    const escalate = makeDecision({
+      id: "dec-esc",
+      tool: "wire_transfer",
+      capability: "finance.pay",
+      effective_outcome: "escalate",
+      rule_id: "rule-escalate-pay",
+      risk_tier: "critical",
+      reason: "owner approval required",
+    });
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        decisions: () => mkRes({ decisions: [deny, escalate, allow] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-log-list")).toBeInTheDocument());
+
+    // All three rows render with their tool + capability, rule, and risk tier.
+    const allowRow = screen.getByTestId("agent-log-row-dec-allow");
+    expect(allowRow).toHaveTextContent("search_mail");
+    expect(allowRow).toHaveTextContent("mail.read");
+    expect(allowRow).toHaveTextContent("rule-allow-read");
+    expect(allowRow).toHaveTextContent("low");
+    expect(screen.getByTestId("agent-log-row-dec-deny")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-log-row-dec-esc")).toBeInTheDocument();
+
+    // The outcome pills carry the documented OGIAM palette: allow green, deny
+    // red, escalate amber. We assert the foreground hex on each pill.
+    expect(screen.getByTestId("agent-log-row-dec-allow-outcome")).toHaveStyle({ color: "#22A55C" });
+    expect(screen.getByTestId("agent-log-row-dec-deny-outcome")).toHaveStyle({ color: "#FF5F57" });
+    expect(screen.getByTestId("agent-log-row-dec-esc-outcome")).toHaveStyle({ color: "#E8B528" });
+
+    // The reason rides on a small second line.
+    expect(screen.getByTestId("agent-log-row-dec-deny-reason")).toHaveTextContent(/not in capability ceiling/i);
+
+    // The count line reflects the rendered total, and the empty state is absent.
+    expect(screen.getByTestId("agent-log-count")).toHaveTextContent(/3 governed actions/i);
+    expect(screen.queryByTestId("agent-log-empty")).not.toBeInTheDocument();
+  });
+
+  it("shows the empty state when the agent has no governed actions yet", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        decisions: () => mkRes({ decisions: [] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-log-empty")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-log-empty")).toHaveTextContent(/no governed actions recorded yet/i);
+    expect(screen.queryByTestId("agent-log-list")).not.toBeInTheDocument();
+  });
+
+  it("fires the agent.log_viewed analytics POST with the decision_count on a successful load", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        decisions: () => mkRes({ decisions: [makeDecision({ id: "d-1" }), makeDecision({ id: "d-2" })] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-log-list")).toBeInTheDocument());
+
+    // One analytics POST fired with the view event and the decision count.
+    await waitFor(() => {
+      const post = mockFetchWithRefresh.mock.calls.find(
+        (c) =>
+          (c[1] as { method?: string } | undefined)?.method === "POST" &&
+          String(c[0]).includes("/api/analytics"),
+      );
+      expect(post).toBeTruthy();
+    });
+    const post = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).includes("/api/analytics"),
+    );
+    const body = JSON.parse((post?.[1] as { body: string }).body);
+    expect(body.event).toBe("agent.log_viewed");
+    expect(body.metadata.agent_id).toBe("ag-1");
+    expect(body.metadata.decision_count).toBe(2);
+  });
+
+  it("collapses to a quiet error state when the log fetch fails, without blanking the page or other sections", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        drift: () => mkRes({ baseline: null, events: [], latest: null }),
+        decisions: () => mkRes({}, { ok: false, status: 500 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-log-error")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-log-error")).toHaveTextContent(/could not load this agent.+log/i);
+    // The rest of the profile still renders: a log failure never blanks it.
+    expect(screen.getByTestId("agent-name")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-drift-baseline")).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-log-list")).not.toBeInTheDocument();
+    // No view analytics fires on a failed load.
+    const post = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).includes("/api/analytics"),
+    );
+    expect(post).toBeFalsy();
+  });
+
+  it("Refresh re-fetches the decision ledger", async () => {
+    let decisionsGetCount = 0;
+    let refreshed = false;
+    const first = makeDecision({ id: "dec-first", tool: "search_mail" });
+    const second = makeDecision({ id: "dec-second", tool: "create_event" });
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        decisions: () => {
+          decisionsGetCount += 1;
+          return mkRes({ decisions: refreshed ? [first, second] : [first] });
+        },
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-log-row-dec-first")).toBeInTheDocument());
+    const afterMount = decisionsGetCount;
+    expect(screen.queryByTestId("agent-log-row-dec-second")).not.toBeInTheDocument();
+
+    refreshed = true;
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-log-refresh"));
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-log-row-dec-second")).toBeInTheDocument());
+    // The Refresh fired at least one more decisions GET.
+    expect(decisionsGetCount).toBeGreaterThan(afterMount);
   });
 });
