@@ -35,13 +35,16 @@ export async function authorize(input: AuthorizeInput): Promise<OgiamDecision> {
   const decision = decide(action, { mode });
 
   // Record the decision. recordDecision never throws (best effort), so the gate
-  // never breaks the caller even if the database is unavailable.
-  await recordDecision({
+  // never breaks the caller even if the database is unavailable. Capture its
+  // return so the caller can link an action OUTCOME to this decision's seq; a
+  // null return (skipped or failed) simply leaves recordedSeq absent.
+  const recorded = await recordDecision({
     principal: input.principal,
     action,
     decision,
     redactedParams,
   });
+  if (recorded) decision.recordedSeq = recorded.seq;
 
   return decision;
 }

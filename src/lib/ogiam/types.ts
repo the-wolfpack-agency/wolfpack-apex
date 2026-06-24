@@ -92,4 +92,9 @@ export interface OgiamDecision {
   /** True when the intended outcome would have blocked the action (deny or
    *  escalate). The headline shadow-mode metric. */
   wouldBlock: boolean;
+  /** The ledger seq the decision was recorded under, when the append-only
+   *  write succeeded. Lets the caller link an action OUTCOME (the result) back
+   *  to this decision (the input) without mutating the decision row. Absent
+   *  when the ledger write was skipped (no DATABASE_URL) or failed. */
+  recordedSeq?: number;
 }

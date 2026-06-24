@@ -184,16 +184,32 @@ test.describe("Agent-principal onboarding, roster reality check", () => {
       "the behavior + drift section is present",
     ).toBeVisible({ timeout: 8_000 });
 
-    // The agent log section mounts: the IAM audit trail of every governed
-    // action the agent took (the OGIAM decision ledger), which the drift
-    // detector and procedure learning also consume. Render-only here: we never
-    // mutate the ledger from e2e. The section renders either its decision rows
-    // or the calm "no governed actions recorded yet" empty state, never a
-    // silent blank.
+    // The agent log section mounts: the granular IAM audit trail of every
+    // governed action the agent took, which the drift detector and procedure
+    // learning also consume. Render-only here: we never mutate the ledger from
+    // e2e. The section renders either its (now clickable, drill-down) entry rows
+    // or the calm "no governed actions recorded yet" empty state, never a silent
+    // blank.
     await expect(
       page.getByTestId("agent-log-section"),
-      "the agent log (decision ledger) section is present",
+      "the agent log (granular audit trail) section is present",
     ).toBeVisible({ timeout: 8_000 });
+
+    // Guarded, non-mutating drill-down check: when the agent has at least one
+    // logged action, its row toggle is present and exposes aria-expanded so the
+    // full prompt-to-response trail can be opened. We do NOT click it here (the
+    // expand fires the analytics view event already covered on load, and we keep
+    // this reality check strictly render-only); we only assert the affordance
+    // exists. When the ledger is empty there is no row, so we skip cleanly.
+    const logToggle = page
+      .locator('[data-testid^="agent-log-row-"][data-testid$="-toggle"]')
+      .first();
+    if ((await logToggle.count()) > 0) {
+      await expect(
+        logToggle,
+        "a log row exposes an expandable drill-down toggle",
+      ).toHaveAttribute("aria-expanded", /true|false/);
+    }
 
     // The bridge to the agent-filtered OGIAM explorer is present.
     await expect(

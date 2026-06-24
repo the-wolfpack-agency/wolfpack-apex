@@ -108,6 +108,155 @@ export async function listDecisions(
   return res.rows;
 }
 
+/** The recorded RESULT of a governed action, joined from
+ *  ogiam_action_outcomes. Null when no outcome was recorded (e.g. the action
+ *  was blocked before execution, or the outcome write was skipped). */
+export interface AgentActionOutcome {
+  ok: boolean;
+  code: string | null;
+  result_redacted: string | null;
+  duration_ms: number | null;
+}
+
+/**
+ * One full prompt-to-response entry in a per-agent action trail: the decision
+ * detail (the redacted INPUT, identity, deterministic outcome, and the
+ * tamper-evident hashes) plus the recorded RESULT, joined by decision seq.
+ */
+export interface AgentLogEntry {
+  id: string;
+  seq: number;
+  created_at: string;
+  tool: string;
+  capability: string;
+  surface: string | null;
+  risk_tier: string;
+  intended_outcome: string;
+  effective_outcome: string;
+  would_block: boolean;
+  rule_id: string;
+  reason: string | null;
+  policy_version: string;
+  on_behalf_user_id: string;
+  on_behalf_role: string | null;
+  redacted_params: string | null;
+  signals: unknown;
+  params_hash: string;
+  entry_hash: string;
+  outcome: AgentActionOutcome | null;
+}
+
+/** Raw joined row before it is shaped into AgentLogEntry's nested outcome. */
+interface AgentLogRow {
+  id: string;
+  seq: string | number;
+  created_at: string;
+  tool: string;
+  capability: string;
+  surface: string | null;
+  risk_tier: string;
+  intended_outcome: string;
+  effective_outcome: string;
+  would_block: boolean;
+  rule_id: string;
+  reason: string | null;
+  policy_version: string;
+  on_behalf_user_id: string;
+  on_behalf_role: string | null;
+  redacted_params: string | null;
+  signals: unknown;
+  params_hash: string;
+  entry_hash: string;
+  outcome_ok: boolean | null;
+  outcome_code: string | null;
+  outcome_result_redacted: string | null;
+  outcome_duration_ms: number | null;
+}
+
+/**
+ * The full per-agent action trail: each governed decision (INPUT) for the agent
+ * LEFT JOINed to its recorded outcome (RESULT) by (workspace_id, decision_seq),
+ * newest first, workspace-scoped and parameterized on both the workspace and the
+ * acting agent. Degrades to an empty array on a missing DATABASE_URL or DB error
+ * (safeQuery), so the route renders an explicit empty state rather than 500ing.
+ *
+ * The LEFT JOIN keeps decisions that have no outcome yet (blocked before
+ * execution, or the outcome write skipped) as entries with `outcome: null`.
+ */
+export async function listAgentActionTrail(
+  workspaceId: string,
+  agentId: string,
+  limit?: number,
+): Promise<AgentLogEntry[]> {
+  const clamped = clampDecisionsLimit(limit);
+
+  const res = await safeQuery<AgentLogRow>(
+    `SELECT d.id,
+            d.seq,
+            d.created_at::text AS created_at,
+            d.tool,
+            d.capability,
+            d.surface,
+            d.risk_tier,
+            d.intended_outcome,
+            d.effective_outcome,
+            d.would_block,
+            d.rule_id,
+            d.reason,
+            d.policy_version,
+            d.on_behalf_user_id,
+            d.on_behalf_role,
+            d.redacted_params,
+            d.signals,
+            d.params_hash,
+            d.entry_hash,
+            o.ok              AS outcome_ok,
+            o.code            AS outcome_code,
+            o.result_redacted AS outcome_result_redacted,
+            o.duration_ms     AS outcome_duration_ms
+       FROM ogiam_decisions d
+       LEFT JOIN ogiam_action_outcomes o
+         ON o.workspace_id = d.workspace_id
+        AND o.decision_seq = d.seq
+      WHERE d.workspace_id = $1
+        AND d.principal_agent = $2
+      ORDER BY d.created_at DESC
+      LIMIT ${clamped}`,
+    [workspaceId, agentId],
+  );
+
+  return res.rows.map((r) => ({
+    id: r.id,
+    seq: typeof r.seq === "number" ? r.seq : Number(r.seq),
+    created_at: r.created_at,
+    tool: r.tool,
+    capability: r.capability,
+    surface: r.surface,
+    risk_tier: r.risk_tier,
+    intended_outcome: r.intended_outcome,
+    effective_outcome: r.effective_outcome,
+    would_block: r.would_block,
+    rule_id: r.rule_id,
+    reason: r.reason,
+    policy_version: r.policy_version,
+    on_behalf_user_id: r.on_behalf_user_id,
+    on_behalf_role: r.on_behalf_role,
+    redacted_params: r.redacted_params,
+    signals: r.signals,
+    params_hash: r.params_hash,
+    entry_hash: r.entry_hash,
+    outcome:
+      r.outcome_ok === null
+        ? null
+        : {
+            ok: r.outcome_ok,
+            code: r.outcome_code,
+            result_redacted: r.outcome_result_redacted,
+            duration_ms: r.outcome_duration_ms,
+          },
+  }));
+}
+
 interface CountRow {
   total: string | number;
   would_block: string | number;

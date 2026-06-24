@@ -19,6 +19,9 @@
 
 import { trackEvent } from "@/lib/analytics";
 import { authorize } from "@/lib/ogiam/authorize";
+import { recordActionOutcome } from "@/lib/ogiam/ledger";
+import { ingestAgentAction } from "@/lib/agents/audit/brain-ingest";
+import type { OgiamDecision } from "@/lib/ogiam/types";
 import { canInvokeTool } from "./gate";
 import { getTools } from "./registry";
 import type {
@@ -143,8 +146,11 @@ async function runOneTool<P, R>(
          autonomous agent governed: every step is authorized under its identity,
          and high-risk steps are stopped, not just logged. */
   const agent = ctx.agentPrincipal;
+  /* Held across the gate so an agent OUTCOME can be linked to its decision seq
+     after execution. Absent when the ledger write was skipped/failed. */
+  let decision: OgiamDecision | null = null;
   try {
-    const decision = await authorize({
+    decision = await authorize({
       principal: agent
         ? {
             kind: "ai_agent",
@@ -201,14 +207,52 @@ async function runOneTool<P, R>(
   }
 
   /* 4. Execute. Tool handlers should never throw — but we guard. */
+  const startedExec = Date.now();
+  let result: ToolResult<R>;
   try {
-    return await tool.handler(parsed.data, ctx);
+    result = await tool.handler(parsed.data, ctx);
   } catch (err) {
-    return failure(
+    result = failure(
       "internal",
       `tool ${tool.name} threw: ${(err as Error)?.message ?? "unknown"}`,
     );
   }
+  const execDurationMs = Date.now() - startedExec;
+
+  /* 5. Record the action OUTCOME (the RESULT half of the audit trail) for a
+        GOVERNED AGENT principal only, linked to the decision seq. The decision
+        captured the redacted INPUT; this captures the redacted RESULT, so the
+        per-agent trail is true prompt-to-response. Both the outcome write and
+        the Brain summary are best effort and MUST NEVER throw into dispatch:
+        the human path is unchanged (no agent → skip), and an outcome/Brain
+        failure can never break dispatch or the gate. */
+  if (agent && typeof decision?.recordedSeq === "number") {
+    const code = result.ok ? "ok" : result.code;
+    const resultText = result.ok ? result.answer : result.message;
+    await recordActionOutcome({
+      workspaceId: agent.workspaceId,
+      decisionSeq: decision.recordedSeq,
+      agentId: agent.agentId,
+      ok: result.ok,
+      code,
+      resultRedacted: resultText,
+      durationMs: execDurationMs,
+    }).catch(() => {
+      /* swallowed: outcome persistence never breaks dispatch */
+    });
+    await ingestAgentAction({
+      workspaceId: agent.workspaceId,
+      agentId: agent.agentId,
+      tool: tool.name,
+      outcome: code,
+      ruleId: decision.ruleId,
+      resultRedacted: resultText,
+    }).catch(() => {
+      /* swallowed: Brain ingest never breaks dispatch */
+    });
+  }
+
+  return result;
 }
 
 function failure(

@@ -139,22 +139,35 @@ function makeDriftEvent(over: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-function makeDecision(over: Partial<Record<string, unknown>> = {}) {
+/**
+ * A full agent-log entry from the granular endpoint
+ * (/api/admin/agents/{id}/log). Each entry is the complete trail from prompt to
+ * response: the redacted input, the governance decision, the redacted result,
+ * the acting identity, and the tamper-evident hash chain. The drill-down test
+ * suite builds entries off this and overrides the fields it asserts on.
+ */
+function makeLogEntry(over: Partial<Record<string, unknown>> = {}) {
   return {
-    id: "dec-1",
+    id: "log-1",
+    seq: 1,
     created_at: new Date().toISOString(),
-    principal_agent: "ag-1",
-    on_behalf_user_id: "u-cto",
-    on_behalf_role: "admin",
     tool: "search_mail",
     capability: "mail.read",
     surface: "mail",
     risk_tier: "low",
     intended_outcome: "allow",
     effective_outcome: "allow",
+    would_block: false,
     rule_id: "rule-allow-read",
     reason: "read-only capability within ceiling",
     policy_version: "v1",
+    on_behalf_user_id: "u-cto",
+    on_behalf_role: "admin",
+    redacted_params: { query: "invoices from ACME", folder: "inbox" },
+    signals: { pii: false, secret: false, injection: false },
+    params_hash: "ph_1234567890abcdefdeadbeef",
+    entry_hash: "eh_abcdef1234567890cafebabe",
+    outcome: { ok: true, code: "ok", result_redacted: { count: 3 }, duration_ms: 142 },
     ...over,
   };
 }
@@ -166,7 +179,9 @@ const DRIFT_PATH = "/drift";
 const BASELINE_PATH = "/baseline";
 const DRIFT_CHECK_PATH = "/drift-check";
 const ANALYTICS_PATH = "/api/analytics";
-const DECISIONS_PATH = "/api/admin/ogiam/decisions";
+// The granular agent-log endpoint. The page GETs it with a query string
+// (?limit=50), so the router matches on this path fragment rather than a suffix.
+const LOG_PATH = "/log";
 
 /**
  * Routes the mock by URL + method: the page fires the agent GET, the scan GET,
@@ -191,7 +206,7 @@ function routeByUrl(opts: {
   drift?: () => any;
   onBaseline?: () => any;
   onDriftCheck?: () => any;
-  decisions?: () => any;
+  log?: () => any;
   onAnalytics?: () => any;
 }) {
   return (url: unknown, init?: { method?: string }) => {
@@ -202,10 +217,10 @@ function routeByUrl(opts: {
     if (u.includes(ANALYTICS_PATH) && init?.method === "POST") {
       return Promise.resolve((opts.onAnalytics ?? (() => mkRes({ ok: true })))());
     }
-    // The agent log GETs the OGIAM decision ledger (with a query string), so we
-    // match on the path prefix rather than a suffix.
-    if (u.includes(DECISIONS_PATH)) {
-      return Promise.resolve((opts.decisions ?? (() => mkRes({ decisions: [] })))());
+    // The granular agent log GETs /api/admin/agents/{id}/log (with a ?limit
+    // query string), so we match on the "/log" fragment rather than a suffix.
+    if (u.includes(LOG_PATH)) {
+      return Promise.resolve((opts.log ?? (() => mkRes({ entries: [] })))());
     }
     // The run endpoint (".../tasks/run") drains queued work. It is checked
     // before the generic "/tasks" suffixes because "/tasks/run" does not end
@@ -1089,42 +1104,42 @@ describe("/admin/agents/[id]: behavior and drift", () => {
   });
 });
 
-describe("/admin/agents/[id]: agent log (OGIAM decision ledger)", () => {
-  it("renders the decision rows newest-first with the right outcome pill colors", async () => {
-    const allow = makeDecision({
-      id: "dec-allow",
+describe("/admin/agents/[id]: agent log (granular audit trail)", () => {
+  it("loads entries from the granular endpoint and renders summary rows with the right outcome pill colors", async () => {
+    const allow = makeLogEntry({
+      id: "log-allow",
       tool: "search_mail",
       capability: "mail.read",
       effective_outcome: "allow",
       rule_id: "rule-allow-read",
       risk_tier: "low",
-      reason: "read-only capability within ceiling",
     });
-    const deny = makeDecision({
-      id: "dec-deny",
+    const deny = makeLogEntry({
+      id: "log-deny",
       tool: "send_mail",
       capability: "mail.send",
       effective_outcome: "deny",
       rule_id: "rule-deny-send",
       risk_tier: "high",
-      reason: "send not in capability ceiling",
     });
-    const escalate = makeDecision({
-      id: "dec-esc",
+    const escalate = makeLogEntry({
+      id: "log-esc",
       tool: "wire_transfer",
       capability: "finance.pay",
       effective_outcome: "escalate",
       rule_id: "rule-escalate-pay",
       risk_tier: "critical",
-      reason: "owner approval required",
     });
-    mockFetchWithRefresh.mockImplementation(
-      routeByUrl({
+    let logGetUrl = "";
+    mockFetchWithRefresh.mockImplementation((url: unknown, init?: { method?: string }) => {
+      const u = String(url);
+      if (u.includes("/log")) logGetUrl = u;
+      return routeByUrl({
         agent: () => mkRes({ agent: makeAgent() }),
         scan: () => mkRes({}, { ok: false, status: 404 }),
-        decisions: () => mkRes({ decisions: [deny, escalate, allow] }),
-      }),
-    );
+        log: () => mkRes({ entries: [deny, escalate, allow] }),
+      })(url, init);
+    });
 
     await act(async () => {
       render(<AgentProfilePage params={params} />);
@@ -1132,27 +1147,173 @@ describe("/admin/agents/[id]: agent log (OGIAM decision ledger)", () => {
 
     await waitFor(() => expect(screen.getByTestId("agent-log-list")).toBeInTheDocument());
 
-    // All three rows render with their tool + capability, rule, and risk tier.
-    const allowRow = screen.getByTestId("agent-log-row-dec-allow");
+    // The data source is the granular endpoint, requested with the limit.
+    expect(logGetUrl).toContain("/api/admin/agents/ag-1/log");
+    expect(logGetUrl).toContain("limit=50");
+
+    // All three rows render the compact summary with tool + capability + rule + tier.
+    const allowRow = screen.getByTestId("agent-log-row-log-allow");
     expect(allowRow).toHaveTextContent("search_mail");
     expect(allowRow).toHaveTextContent("mail.read");
     expect(allowRow).toHaveTextContent("rule-allow-read");
     expect(allowRow).toHaveTextContent("low");
-    expect(screen.getByTestId("agent-log-row-dec-deny")).toBeInTheDocument();
-    expect(screen.getByTestId("agent-log-row-dec-esc")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-log-row-log-deny")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-log-row-log-esc")).toBeInTheDocument();
 
     // The outcome pills carry the documented OGIAM palette: allow green, deny
     // red, escalate amber. We assert the foreground hex on each pill.
-    expect(screen.getByTestId("agent-log-row-dec-allow-outcome")).toHaveStyle({ color: "#22A55C" });
-    expect(screen.getByTestId("agent-log-row-dec-deny-outcome")).toHaveStyle({ color: "#FF5F57" });
-    expect(screen.getByTestId("agent-log-row-dec-esc-outcome")).toHaveStyle({ color: "#E8B528" });
-
-    // The reason rides on a small second line.
-    expect(screen.getByTestId("agent-log-row-dec-deny-reason")).toHaveTextContent(/not in capability ceiling/i);
+    expect(screen.getByTestId("agent-log-row-log-allow-outcome")).toHaveStyle({ color: "#22A55C" });
+    expect(screen.getByTestId("agent-log-row-log-deny-outcome")).toHaveStyle({ color: "#FF5F57" });
+    expect(screen.getByTestId("agent-log-row-log-esc-outcome")).toHaveStyle({ color: "#E8B528" });
 
     // The count line reflects the rendered total, and the empty state is absent.
     expect(screen.getByTestId("agent-log-count")).toHaveTextContent(/3 governed actions/i);
     expect(screen.queryByTestId("agent-log-empty")).not.toBeInTheDocument();
+
+    // Detail panels are collapsed until a row is clicked.
+    expect(screen.queryByTestId("agent-log-detail-log-allow")).not.toBeInTheDocument();
+  });
+
+  it("clicking a row expands the full trail (input, governance, response, identity, integrity) and clicking again collapses it", async () => {
+    const entry = makeLogEntry({
+      id: "log-x",
+      tool: "send_mail",
+      capability: "mail.send",
+      effective_outcome: "escalate",
+      intended_outcome: "allow",
+      rule_id: "rule-escalate-pay",
+      risk_tier: "high",
+      policy_version: "v7",
+      would_block: true,
+      on_behalf_user_id: "u-owner",
+      on_behalf_role: "admin",
+      surface: "mail",
+      redacted_params: { to: "[REDACTED]", subject: "Q2 numbers" },
+      entry_hash: "eh_proofchainvalue000111222",
+      params_hash: "ph_inputproof999888777",
+      outcome: { ok: true, code: "queued", result_redacted: { message_id: "[REDACTED]" }, duration_ms: 88 },
+    });
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        log: () => mkRes({ entries: [entry] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-log-row-log-x")).toBeInTheDocument());
+
+    // Collapsed by default; the toggle reports aria-expanded false.
+    const toggle = screen.getByTestId("agent-log-row-log-x-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("agent-log-detail-log-x")).not.toBeInTheDocument();
+
+    // Click expands the detail panel.
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+
+    const detail = screen.getByTestId("agent-log-detail-log-x");
+    expect(detail).toBeInTheDocument();
+    expect(screen.getByTestId("agent-log-row-log-x-toggle")).toHaveAttribute("aria-expanded", "true");
+
+    // INPUT: the redacted prompt is rendered readably.
+    const input = screen.getByTestId("agent-log-detail-log-x-input");
+    expect(input).toHaveTextContent(/Input/i);
+    expect(input).toHaveTextContent("Q2 numbers");
+    expect(input).toHaveTextContent("[REDACTED]");
+
+    // GOVERNANCE: intended -> effective, rule, risk, policy, would-block.
+    const gov = screen.getByTestId("agent-log-detail-log-x-governance");
+    expect(gov).toHaveTextContent(/allow/i);
+    expect(gov).toHaveTextContent(/escalate/i);
+    expect(gov).toHaveTextContent("rule-escalate-pay");
+    expect(gov).toHaveTextContent("high");
+    expect(gov).toHaveTextContent("v7");
+    expect(gov).toHaveTextContent(/would block yes/i);
+
+    // RESPONSE: ok state + redacted result.
+    const resp = screen.getByTestId("agent-log-detail-log-x-response");
+    expect(resp).toHaveTextContent(/Succeeded/i);
+    expect(resp).toHaveTextContent("queued");
+    expect(resp).toHaveTextContent("message_id");
+
+    // IDENTITY: on-behalf user + role + surface.
+    const identity = screen.getByTestId("agent-log-detail-log-x-identity");
+    expect(identity).toHaveTextContent("u-owner");
+    expect(identity).toHaveTextContent("admin");
+    expect(identity).toHaveTextContent("mail");
+
+    // INTEGRITY: the tamper-evident chain proof, with the full hash on the title.
+    const integrity = screen.getByTestId("agent-log-detail-log-x-integrity");
+    expect(integrity).toHaveTextContent(/Integrity/i);
+    expect(integrity).toHaveTextContent(/seq 1/i);
+    // The full entry hash is preserved (on a title attribute) even though the
+    // visible value is truncated.
+    expect(integrity.innerHTML).toContain("eh_proofchainvalue000111222");
+
+    // Clicking again collapses the panel.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-log-row-log-x-toggle"));
+    });
+    expect(screen.queryByTestId("agent-log-detail-log-x")).not.toBeInTheDocument();
+    expect(screen.getByTestId("agent-log-row-log-x-toggle")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("shows the no-recorded-result response state when an entry has outcome null (older action)", async () => {
+    const legacy = makeLogEntry({ id: "log-legacy", outcome: null });
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        log: () => mkRes({ entries: [legacy] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-log-row-log-legacy")).toBeInTheDocument());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-log-row-log-legacy-toggle"));
+    });
+
+    expect(screen.getByTestId("agent-log-detail-log-legacy-no-response")).toHaveTextContent(
+      /no recorded result for this action/i,
+    );
+  });
+
+  it("renders a warning chip for each raised input signal (PII/secret/injection)", async () => {
+    const flagged = makeLogEntry({
+      id: "log-flagged",
+      signals: { pii: true, secret: false, injection: false },
+    });
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        log: () => mkRes({ entries: [flagged] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-log-row-log-flagged")).toBeInTheDocument());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-log-row-log-flagged-toggle"));
+    });
+
+    // The raised flag renders a chip; the false flags do not.
+    expect(screen.getByTestId("agent-log-detail-log-flagged-signal-pii")).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-log-detail-log-flagged-signal-secret")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("agent-log-detail-log-flagged-signal-injection")).not.toBeInTheDocument();
   });
 
   it("shows the empty state when the agent has no governed actions yet", async () => {
@@ -1160,7 +1321,7 @@ describe("/admin/agents/[id]: agent log (OGIAM decision ledger)", () => {
       routeByUrl({
         agent: () => mkRes({ agent: makeAgent() }),
         scan: () => mkRes({}, { ok: false, status: 404 }),
-        decisions: () => mkRes({ decisions: [] }),
+        log: () => mkRes({ entries: [] }),
       }),
     );
 
@@ -1173,12 +1334,12 @@ describe("/admin/agents/[id]: agent log (OGIAM decision ledger)", () => {
     expect(screen.queryByTestId("agent-log-list")).not.toBeInTheDocument();
   });
 
-  it("fires the agent.log_viewed analytics POST with the decision_count on a successful load", async () => {
+  it("fires the agent.log_viewed analytics POST with the entry count on a successful load", async () => {
     mockFetchWithRefresh.mockImplementation(
       routeByUrl({
         agent: () => mkRes({ agent: makeAgent() }),
         scan: () => mkRes({}, { ok: false, status: 404 }),
-        decisions: () => mkRes({ decisions: [makeDecision({ id: "d-1" }), makeDecision({ id: "d-2" })] }),
+        log: () => mkRes({ entries: [makeLogEntry({ id: "l-1" }), makeLogEntry({ id: "l-2" })] }),
       }),
     );
 
@@ -1188,7 +1349,7 @@ describe("/admin/agents/[id]: agent log (OGIAM decision ledger)", () => {
 
     await waitFor(() => expect(screen.getByTestId("agent-log-list")).toBeInTheDocument());
 
-    // One analytics POST fired with the view event and the decision count.
+    // One analytics POST fired with the view event and the rendered entry count.
     await waitFor(() => {
       const post = mockFetchWithRefresh.mock.calls.find(
         (c) =>
@@ -1214,7 +1375,7 @@ describe("/admin/agents/[id]: agent log (OGIAM decision ledger)", () => {
         agent: () => mkRes({ agent: makeAgent() }),
         scan: () => mkRes({}, { ok: false, status: 404 }),
         drift: () => mkRes({ baseline: null, events: [], latest: null }),
-        decisions: () => mkRes({}, { ok: false, status: 500 }),
+        log: () => mkRes({}, { ok: false, status: 500 }),
       }),
     );
 
@@ -1237,18 +1398,18 @@ describe("/admin/agents/[id]: agent log (OGIAM decision ledger)", () => {
     expect(post).toBeFalsy();
   });
 
-  it("Refresh re-fetches the decision ledger", async () => {
-    let decisionsGetCount = 0;
+  it("Refresh re-fetches the granular log", async () => {
+    let logGetCount = 0;
     let refreshed = false;
-    const first = makeDecision({ id: "dec-first", tool: "search_mail" });
-    const second = makeDecision({ id: "dec-second", tool: "create_event" });
+    const first = makeLogEntry({ id: "log-first", tool: "search_mail" });
+    const second = makeLogEntry({ id: "log-second", tool: "create_event" });
     mockFetchWithRefresh.mockImplementation(
       routeByUrl({
         agent: () => mkRes({ agent: makeAgent() }),
         scan: () => mkRes({}, { ok: false, status: 404 }),
-        decisions: () => {
-          decisionsGetCount += 1;
-          return mkRes({ decisions: refreshed ? [first, second] : [first] });
+        log: () => {
+          logGetCount += 1;
+          return mkRes({ entries: refreshed ? [first, second] : [first] });
         },
       }),
     );
@@ -1257,17 +1418,17 @@ describe("/admin/agents/[id]: agent log (OGIAM decision ledger)", () => {
       render(<AgentProfilePage params={params} />);
     });
 
-    await waitFor(() => expect(screen.getByTestId("agent-log-row-dec-first")).toBeInTheDocument());
-    const afterMount = decisionsGetCount;
-    expect(screen.queryByTestId("agent-log-row-dec-second")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("agent-log-row-log-first")).toBeInTheDocument());
+    const afterMount = logGetCount;
+    expect(screen.queryByTestId("agent-log-row-log-second")).not.toBeInTheDocument();
 
     refreshed = true;
     await act(async () => {
       fireEvent.click(screen.getByTestId("agent-log-refresh"));
     });
 
-    await waitFor(() => expect(screen.getByTestId("agent-log-row-dec-second")).toBeInTheDocument());
-    // The Refresh fired at least one more decisions GET.
-    expect(decisionsGetCount).toBeGreaterThan(afterMount);
+    await waitFor(() => expect(screen.getByTestId("agent-log-row-log-second")).toBeInTheDocument());
+    // The Refresh fired at least one more log GET.
+    expect(logGetCount).toBeGreaterThan(afterMount);
   });
 });

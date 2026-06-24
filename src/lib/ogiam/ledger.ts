@@ -22,7 +22,94 @@
 import { createHash } from "crypto";
 import { pool } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
+import { redactText } from "@/lib/ai/redaction";
 import type { OgiamAction, OgiamDecision, OgiamPrincipal } from "./types";
+
+/** Hard cap on the stored result string. The result is a redacted SNIPPET for
+ *  the audit trail, not the full payload: a long answer is truncated so an
+ *  outcome row can never blow the DB row size or leak a wall of content. */
+export const OGIAM_RESULT_MAX_CHARS = 500;
+
+/**
+ * Redact then hard-truncate a free-text result for safe storage. Runs the same
+ * redactor the ledger applies to params (so emails, keys, SSNs, cards, etc. are
+ * masked), then caps the length. Defensive against a non-string input. Never
+ * throws: a redactor error degrades to a plain truncated string.
+ */
+export function redactAndTruncateResult(
+  value: unknown,
+  max = OGIAM_RESULT_MAX_CHARS,
+): string {
+  const raw = typeof value === "string" ? value : value == null ? "" : String(value);
+  let redacted = raw;
+  try {
+    redacted = redactText(raw).text;
+  } catch {
+    /* redactor failure must never break the outcome write; fall back to raw,
+       which is then truncated below. */
+  }
+  return redacted.length > max ? `${redacted.slice(0, max)}…` : redacted;
+}
+
+export interface RecordActionOutcomeInput {
+  workspaceId: string;
+  /** The ogiam_decisions.seq this outcome is the result of. */
+  decisionSeq: number;
+  agentId: string;
+  ok: boolean;
+  /** "ok" on success, else the ToolFailure code. */
+  code: string;
+  /** The (already redactable) result text. Redacted + truncated here. */
+  resultRedacted: string;
+  durationMs: number;
+}
+
+/**
+ * Append an action OUTCOME (the RESULT) to ogiam_action_outcomes, linked to its
+ * decision by (workspace_id, decision_seq). Best effort: no DATABASE_URL or any
+ * error returns silently and NEVER throws, so a failed outcome write can never
+ * break dispatch or the gate. The result string is redacted + hard-truncated
+ * before storage so no secret or PII lands in the trail.
+ *
+ * Append-only by design: this is an INSERT, never an UPDATE, and the linked
+ * decision row + its hash chain are left untouched.
+ */
+export async function recordActionOutcome(
+  input: RecordActionOutcomeInput,
+): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+
+  const resultRedacted = redactAndTruncateResult(input.resultRedacted);
+
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    console.warn("[ogiam] outcome connect failed:", (err as Error).message);
+    return;
+  }
+
+  try {
+    await client.query(
+      `INSERT INTO ogiam_action_outcomes (
+         workspace_id, decision_seq, agent_id, ok, code, result_redacted, duration_ms
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [
+        input.workspaceId,
+        input.decisionSeq,
+        input.agentId,
+        input.ok,
+        input.code,
+        resultRedacted,
+        Number.isFinite(input.durationMs) ? Math.trunc(input.durationMs) : null,
+      ],
+    );
+  } catch (err) {
+    console.warn("[ogiam] outcome write failed:", (err as Error).message);
+  } finally {
+    client.release();
+  }
+}
 
 /** Genesis prev_hash for the first entry in a workspace chain. */
 export const OGIAM_GENESIS_HASH = "ogiam:ledger:genesis";

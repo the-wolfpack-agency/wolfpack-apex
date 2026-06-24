@@ -194,34 +194,47 @@ type DriftState =
   | { kind: "error" }
   | { kind: "present"; baseline: DriftBaseline | null; events: DriftEvent[]; latest: DriftEvent | null };
 
-/* Agent log: the IAM auditing pillar. The chronological audit trail of every
-   governed action this agent took, straight from the OGIAM decision ledger.
-   The same ledger feeds drift detection and procedure learning, so nothing the
-   agent does is lost: it is recorded once and consumed for audit, drift, and
-   learning alike. Loads independently of the agent so a log failure never
-   blanks the profile; an empty list is the expected steady state for a freshly
-   onboarded agent that has not acted yet. */
-interface OgiamDecisionRow {
+/* Agent log: the IAM auditing pillar. A TRUE granular audit trail of every
+   governed action this agent took, straight from the richer agent-log endpoint.
+   Each entry is the full trail from prompt to response: the redacted input, the
+   governance decision, the redacted tool result, the acting identity, and the
+   tamper-evident hash chain. The same ledger feeds drift detection and
+   procedure learning, so nothing the agent does is lost: it is recorded once
+   and consumed for audit, drift, and learning alike. Loads independently of the
+   agent so a log failure never blanks the profile; an empty list is the
+   expected steady state for a freshly onboarded agent that has not acted yet. */
+interface AgentLogOutcome {
+  ok: boolean;
+  code: string | null;
+  result_redacted: unknown;
+  duration_ms: number | null;
+}
+
+interface AgentLogEntry {
   id: string;
+  seq: number;
   created_at: string;
-  principal_agent: string | null;
-  on_behalf_user_id: string | null;
-  on_behalf_role: string | null;
   tool: string;
   capability: string;
   surface: string | null;
   risk_tier: string;
   intended_outcome: string;
   effective_outcome: string;
+  would_block: boolean;
   rule_id: string | null;
   reason: string | null;
   policy_version: string | null;
+  on_behalf_user_id: string | null;
+  on_behalf_role: string | null;
+  redacted_params: unknown;
+  signals: Record<string, unknown> | null;
+  params_hash: string | null;
+  entry_hash: string | null;
+  outcome: AgentLogOutcome | null;
 }
 
-interface DecisionsResponse {
-  workspace_id?: string;
-  summary?: unknown;
-  decisions: OgiamDecisionRow[];
+interface AgentLogResponse {
+  entries: AgentLogEntry[];
 }
 
 /* Cap the visible ledger so a chatty agent can never render thousands of rows
@@ -231,7 +244,7 @@ const MAX_LOG_ROWS = 50;
 type LogState =
   | { kind: "loading" }
   | { kind: "error" }
-  | { kind: "present"; decisions: OgiamDecisionRow[] };
+  | { kind: "present"; entries: AgentLogEntry[] };
 
 interface TaskResponse {
   task: AgentTask;
@@ -515,17 +528,91 @@ function TaskRow({ task }: { task: AgentTask }) {
   );
 }
 
-/* One row of the agent's decision ledger: when it happened, the tool +
-   capability it exercised (mono, muted), a colored outcome pill, the rule that
-   decided it, and the risk tier. The decision's reason rides on a small second
-   line (and the row title) so the audit narrative is one click / hover away
-   without crowding the row. */
-function LogRow({ decision }: { decision: OgiamDecisionRow }) {
-  const oc = outcomeColor(decision.effective_outcome);
+/* Pretty-prints a redacted value for the audit drill-down. An object (or array)
+   is JSON-formatted so the structure reads cleanly; a string is shown verbatim;
+   null / undefined collapses to an em-free placeholder. This is the redacted
+   payload the gate captured, never the raw secret-bearing input. */
+function formatRedacted(value: unknown): string {
+  if (value === null || value === undefined) return "(none)";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+/* The signal flags the gate raised on the input (PII, secret, injection, ...).
+   A flag counts as raised when it is boolean true or a non-empty value, so an
+   all-false / empty signals object surfaces no chips. Returns the raised flag
+   names so the row can render one warning chip each. */
+function raisedSignals(signals: Record<string, unknown> | null): string[] {
+  if (!signals) return [];
+  return Object.entries(signals)
+    .filter(([, v]) => {
+      if (v === true) return true;
+      if (typeof v === "number") return v > 0;
+      if (typeof v === "string") return v.length > 0;
+      if (Array.isArray(v)) return v.length > 0;
+      return false;
+    })
+    .map(([k]) => k);
+}
+
+/* Truncates a hash to a head/tail proof string; the full value rides on the
+   title so the chain is verifiable on hover without crowding the row. */
+function shortHash(hash: string | null): string {
+  if (!hash) return "(none)";
+  if (hash.length <= 18) return hash;
+  return `${hash.slice(0, 10)}...${hash.slice(-6)}`;
+}
+
+const GROUP_LABEL_STYLE = {
+  fontFamily: "var(--wp-mono, monospace)",
+  fontSize: "10px",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  color: "var(--wp-text-muted, #6b7280)",
+  marginBottom: "0.35rem",
+} as const;
+
+const GROUP_STYLE = {
+  marginTop: "0.7rem",
+  padding: "0.6rem 0.7rem",
+  background: "var(--wp-dark-surface, #1f1f22)",
+  border: "1px solid var(--wp-dark-border, #333)",
+  borderRadius: "6px",
+} as const;
+
+const DETAIL_TEXT_STYLE = {
+  fontSize: "0.78rem",
+  lineHeight: 1.45,
+  color: "var(--wp-text, #eee)",
+  wordBreak: "break-word",
+} as const;
+
+const MONO_VALUE_STYLE = {
+  fontFamily: "var(--wp-mono, monospace)",
+  fontSize: "0.74rem",
+  color: "var(--wp-text-dim, #aaa)",
+  wordBreak: "break-all",
+} as const;
+
+/* One row of the agent's decision ledger, now a clickable audit entry. The
+   compact summary stays one line (outcome pill, tool + capability mono, rule,
+   risk tier, relative time); clicking it toggles a detail panel that walks the
+   FULL trail from prompt to response: the redacted input, the governance
+   decision, the redacted tool result, the acting identity, and the
+   tamper-evident hash chain. Accessible: the summary is a button carrying
+   aria-expanded. */
+function LogRow({ entry }: { entry: AgentLogEntry }) {
+  const [expanded, setExpanded] = useState(false);
+  const oc = outcomeColor(entry.effective_outcome);
+  const signals = raisedSignals(entry.signals);
+  const detailId = `agent-log-detail-${entry.id}`;
   return (
     <li
-      data-testid={`agent-log-row-${decision.id}`}
-      title={decision.reason ?? undefined}
+      data-testid={`agent-log-row-${entry.id}`}
       style={{
         listStyle: "none",
         padding: "0.5rem 0.6rem",
@@ -535,9 +622,35 @@ function LogRow({ decision }: { decision: OgiamDecisionRow }) {
         borderRadius: "6px",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+      <button
+        type="button"
+        data-testid={`agent-log-row-${entry.id}-toggle`}
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-controls={detailId}
+        title={entry.reason ?? undefined}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem",
+          flexWrap: "wrap",
+          width: "100%",
+          padding: 0,
+          background: "transparent",
+          border: "none",
+          textAlign: "left",
+          cursor: "pointer",
+          color: "inherit",
+        }}
+      >
         <span
-          data-testid={`agent-log-row-${decision.id}-outcome`}
+          aria-hidden="true"
+          style={{ flexShrink: 0, fontSize: "0.7rem", color: "var(--wp-text-muted, #6b7280)", width: "0.8rem" }}
+        >
+          {expanded ? "▾" : "▸"}
+        </span>
+        <span
+          data-testid={`agent-log-row-${entry.id}-outcome`}
           style={{
             flexShrink: 0,
             padding: "0.05rem 0.4rem",
@@ -550,7 +663,7 @@ function LogRow({ decision }: { decision: OgiamDecisionRow }) {
             border: `1px solid ${oc.fg}`,
           }}
         >
-          {decision.effective_outcome}
+          {entry.effective_outcome}
         </span>
         <span
           style={{
@@ -564,11 +677,11 @@ function LogRow({ decision }: { decision: OgiamDecisionRow }) {
             whiteSpace: "nowrap",
           }}
         >
-          {decision.tool}
-          {decision.capability ? ` · ${decision.capability}` : ""}
+          {entry.tool}
+          {entry.capability ? ` · ${entry.capability}` : ""}
         </span>
         <span
-          data-testid={`agent-log-row-${decision.id}-rule`}
+          data-testid={`agent-log-row-${entry.id}-rule`}
           style={{
             flexShrink: 0,
             fontSize: "0.72rem",
@@ -576,7 +689,7 @@ function LogRow({ decision }: { decision: OgiamDecisionRow }) {
             fontFamily: "var(--wp-mono, monospace)",
           }}
         >
-          {decision.rule_id ?? "no rule"}
+          {entry.rule_id ?? "no rule"}
         </span>
         <span
           style={{
@@ -589,25 +702,152 @@ function LogRow({ decision }: { decision: OgiamDecisionRow }) {
             border: "1px solid var(--wp-dark-border, #333)",
           }}
         >
-          {decision.risk_tier}
+          {entry.risk_tier}
         </span>
         <span style={{ flexShrink: 0, fontSize: "0.72rem", color: "var(--wp-text-muted, #6b7280)" }}>
-          {relativeTime(decision.created_at)}
+          {relativeTime(entry.created_at)}
         </span>
-      </div>
-      {decision.reason ? (
+      </button>
+
+      {expanded && (
         <div
-          data-testid={`agent-log-row-${decision.id}-reason`}
-          style={{
-            marginTop: "0.3rem",
-            fontSize: "0.72rem",
-            lineHeight: 1.4,
-            color: "var(--wp-text-muted, #6b7280)",
-          }}
+          id={detailId}
+          data-testid={detailId}
+          style={{ marginTop: "0.3rem" }}
         >
-          {decision.reason}
+          {/* INPUT: the prompt the agent sent the tool, as the gate redacted it. */}
+          <div data-testid={`agent-log-detail-${entry.id}-input`} style={GROUP_STYLE}>
+            <div style={GROUP_LABEL_STYLE}>Input</div>
+            <pre
+              style={{
+                ...DETAIL_TEXT_STYLE,
+                fontFamily: "var(--wp-mono, monospace)",
+                fontSize: "0.74rem",
+                margin: 0,
+                whiteSpace: "pre-wrap",
+                maxHeight: "180px",
+                overflowY: "auto",
+              }}
+            >
+              {formatRedacted(entry.redacted_params)}
+            </pre>
+            <div style={{ marginTop: "0.35rem", fontSize: "0.68rem", color: "var(--wp-text-muted, #6b7280)" }}>
+              This is the redacted prompt: secret-bearing values are stripped at the gate before capture.
+            </div>
+            {signals.length > 0 && (
+              <div
+                data-testid={`agent-log-detail-${entry.id}-signals`}
+                style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", marginTop: "0.4rem" }}
+              >
+                {signals.map((s) => (
+                  <span
+                    key={s}
+                    data-testid={`agent-log-detail-${entry.id}-signal-${s}`}
+                    style={{
+                      padding: "0.05rem 0.4rem",
+                      borderRadius: "8px",
+                      fontSize: "0.62rem",
+                      fontWeight: 600,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.03em",
+                      background: "rgba(232,181,40,0.12)",
+                      color: "#E8B528",
+                      border: "1px solid #E8B528",
+                    }}
+                  >
+                    {s.replace(/_/g, " ")}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* GOVERNANCE: how the gate decided, intended vs effective. */}
+          <div data-testid={`agent-log-detail-${entry.id}-governance`} style={GROUP_STYLE}>
+            <div style={GROUP_LABEL_STYLE}>Governance</div>
+            <div style={DETAIL_TEXT_STYLE}>
+              <span style={{ fontFamily: "var(--wp-mono, monospace)", textTransform: "capitalize" }}>
+                {entry.intended_outcome}
+              </span>
+              {" → "}
+              <span style={{ fontFamily: "var(--wp-mono, monospace)", color: oc.fg, textTransform: "capitalize" }}>
+                {entry.effective_outcome}
+              </span>
+            </div>
+            <div style={{ marginTop: "0.3rem", ...MONO_VALUE_STYLE }}>
+              rule {entry.rule_id ?? "(none)"} · risk {entry.risk_tier} · policy {entry.policy_version ?? "(none)"} · would block {entry.would_block ? "yes" : "no"}
+            </div>
+            {entry.reason ? (
+              <div
+                data-testid={`agent-log-detail-${entry.id}-reason`}
+                style={{ marginTop: "0.3rem", fontSize: "0.74rem", lineHeight: 1.4, color: "var(--wp-text-muted, #6b7280)" }}
+              >
+                {entry.reason}
+              </div>
+            ) : null}
+          </div>
+
+          {/* RESPONSE: the redacted tool result, or a note for older actions. */}
+          <div data-testid={`agent-log-detail-${entry.id}-response`} style={GROUP_STYLE}>
+            <div style={GROUP_LABEL_STYLE}>Response</div>
+            {entry.outcome ? (
+              <>
+                <div style={DETAIL_TEXT_STYLE}>
+                  <span style={{ fontWeight: 600, color: entry.outcome.ok ? "#22A55C" : "#FF5F57" }}>
+                    {entry.outcome.ok ? "Succeeded" : "Failed"}
+                  </span>
+                  {" · "}
+                  <span style={{ fontFamily: "var(--wp-mono, monospace)" }}>
+                    {entry.outcome.code ?? "no code"}
+                  </span>
+                  {entry.outcome.duration_ms !== null ? ` · ${entry.outcome.duration_ms}ms` : ""}
+                </div>
+                <pre
+                  style={{
+                    ...DETAIL_TEXT_STYLE,
+                    fontFamily: "var(--wp-mono, monospace)",
+                    fontSize: "0.74rem",
+                    margin: "0.35rem 0 0 0",
+                    whiteSpace: "pre-wrap",
+                    maxHeight: "180px",
+                    overflowY: "auto",
+                  }}
+                >
+                  {formatRedacted(entry.outcome.result_redacted)}
+                </pre>
+              </>
+            ) : (
+              <div
+                data-testid={`agent-log-detail-${entry.id}-no-response`}
+                style={{ fontSize: "0.76rem", color: "var(--wp-text-muted, #6b7280)" }}
+              >
+                No recorded result for this action.
+              </div>
+            )}
+          </div>
+
+          {/* IDENTITY: who the agent acted on behalf of, and where. */}
+          <div data-testid={`agent-log-detail-${entry.id}-identity`} style={GROUP_STYLE}>
+            <div style={GROUP_LABEL_STYLE}>Identity</div>
+            <div style={MONO_VALUE_STYLE}>
+              on behalf of {entry.on_behalf_user_id ?? "(none)"} · role {entry.on_behalf_role ?? "(none)"} · surface {entry.surface ?? "(none)"}
+            </div>
+          </div>
+
+          {/* INTEGRITY: the tamper-evident chain proof for this entry. */}
+          <div data-testid={`agent-log-detail-${entry.id}-integrity`} style={GROUP_STYLE}>
+            <div style={GROUP_LABEL_STYLE}>Integrity</div>
+            <div style={MONO_VALUE_STYLE}>
+              <div>seq {entry.seq}</div>
+              <div title={entry.params_hash ?? undefined}>params {shortHash(entry.params_hash)}</div>
+              <div title={entry.entry_hash ?? undefined}>entry {shortHash(entry.entry_hash)}</div>
+            </div>
+            <div style={{ marginTop: "0.3rem", fontSize: "0.68rem", color: "var(--wp-text-muted, #6b7280)" }}>
+              The hash chain makes this record tamper-evident: each entry seals the one before it.
+            </div>
+          </div>
         </div>
-      ) : null}
+      )}
     </li>
   );
 }
@@ -769,22 +1009,23 @@ export default function AgentProfilePage({
   const loadLog = useCallback(async () => {
     setLog({ kind: "loading" });
     try {
-      const res = await fetchWithRefresh(`/api/admin/ogiam/decisions?agent=${id}&limit=50`);
+      const res = await fetchWithRefresh(`/api/admin/agents/${id}/log?limit=50`);
       if (!res.ok) {
         setLog({ kind: "error" });
         return;
       }
-      const body = (await res.json()) as DecisionsResponse;
-      const decisions = body.decisions ?? [];
-      setLog({ kind: "present", decisions });
+      const body = (await res.json()) as AgentLogResponse;
+      const entries = body.entries ?? [];
+      setLog({ kind: "present", entries });
       /* Best effort: the IAM review is recorded once, consumed for learning. An
-         analytics failure must not break the log section, so we swallow it. */
+         analytics failure must not break the log section, so we swallow it. The
+         decision_count carries the rendered entry total (same event name). */
       void fetchWithRefresh("/api/analytics", {
         method: "POST",
         headers: jsonHeaders(),
         body: JSON.stringify({
           event: "agent.log_viewed",
-          metadata: { agent_id: id, decision_count: decisions.length },
+          metadata: { agent_id: id, decision_count: entries.length },
         }),
       }).catch(() => undefined);
     } catch {
@@ -2024,12 +2265,13 @@ export default function AgentProfilePage({
         })()}
       </div>
 
-      {/* Agent log: the IAM auditing pillar. The chronological audit trail of
-          every governed action this agent took, straight from the OGIAM
-          decision ledger (newest first). The same ledger feeds drift detection
-          and the agent's learning, so nothing it does is lost: it is recorded
-          once and consumed for audit, drift, and learning alike. Loads
-          independently so a log failure never blanks the profile. */}
+      {/* Agent log: the IAM auditing pillar. A granular audit trail of every
+          governed action this agent took (newest first). Each row is a clickable
+          summary that expands into the full trail from prompt to response: the
+          redacted input, the governance decision, the redacted result, the
+          acting identity, and the tamper-evident hash chain. The same ledger
+          feeds drift detection and the agent's learning, so nothing it does is
+          lost. Loads independently so a log failure never blanks the profile. */}
       <div
         data-testid="agent-log-section"
         style={{
@@ -2085,7 +2327,7 @@ export default function AgentProfilePage({
           data-testid="agent-log-note"
           style={{ fontSize: "0.72rem", color: "var(--wp-text-muted, #6b7280)", lineHeight: 1.4, marginBottom: "0.8rem" }}
         >
-          The full audit trail of every governed action this agent took: this is the IAM record. The same ledger feeds drift detection and the agent&apos;s learning, so nothing it does is lost.
+          The full audit trail of every governed action this agent took: this is the IAM record. Click any row to expand the complete trail, from the redacted prompt through the governance decision to the redacted response. The same ledger feeds drift detection and the agent&apos;s learning, so nothing it does is lost.
         </div>
 
         {log.kind === "loading" && (
@@ -2106,7 +2348,7 @@ export default function AgentProfilePage({
           </div>
         )}
 
-        {log.kind === "present" && log.decisions.length === 0 && (
+        {log.kind === "present" && log.entries.length === 0 && (
           <div
             data-testid="agent-log-empty"
             style={{
@@ -2122,9 +2364,9 @@ export default function AgentProfilePage({
           </div>
         )}
 
-        {log.kind === "present" && log.decisions.length > 0 && (() => {
-          const shown = log.decisions.slice(0, MAX_LOG_ROWS);
-          const total = log.decisions.length;
+        {log.kind === "present" && log.entries.length > 0 && (() => {
+          const shown = log.entries.slice(0, MAX_LOG_ROWS);
+          const total = log.entries.length;
           return (
             <>
               <ul
@@ -2137,15 +2379,15 @@ export default function AgentProfilePage({
                   overflowY: "auto",
                 }}
               >
-                {shown.map((d) => (
-                  <LogRow key={d.id} decision={d} />
+                {shown.map((e) => (
+                  <LogRow key={e.id} entry={e} />
                 ))}
               </ul>
               <div
                 data-testid="agent-log-count"
                 style={{ marginTop: "0.5rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #6b7280)" }}
               >
-                Showing {shown.length} of {total} governed action{total === 1 ? "" : "s"}.
+                Showing {shown.length} of {total} governed action{total === 1 ? "" : "s"}. Click any row for the full trail.
               </div>
             </>
           );
