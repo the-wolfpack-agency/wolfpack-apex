@@ -173,6 +173,12 @@ export interface ToolSuccess<R> {
     values: Record<string, unknown>;
     /** Names of the fields the operation requires (gate execution). */
     required: string[];
+    /**
+     * Result chaining: the name of a body-like field the executor should fill
+     * from earlier steps' output when the instruction refers back to it (e.g. a
+     * document body for "summarize the results"). Undefined = no chaining.
+     */
+    fillFromPriorResults?: string;
   };
 }
 

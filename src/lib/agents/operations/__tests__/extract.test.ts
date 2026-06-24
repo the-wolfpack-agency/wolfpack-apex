@@ -9,6 +9,8 @@ import {
   extractUrl,
   extractLabel,
   extractSearchQuery,
+  extractDocumentTitle,
+  extractDocumentBody,
 } from "@/lib/agents/operations/extract";
 
 describe("extractUrl", () => {
@@ -139,5 +141,47 @@ describe("extractSearchQuery", () => {
   it("returns undefined for empty input", () => {
     expect(extractSearchQuery("")).toBeUndefined();
     expect(extractSearchQuery("   ")).toBeUndefined();
+  });
+});
+
+describe("extractDocumentTitle", () => {
+  it("derives a title from a create-document instruction, keeping the noun", () => {
+    expect(extractDocumentTitle("Create a document summary of the results")).toBe(
+      "Document summary of the results",
+    );
+    expect(extractDocumentTitle("write a report on Q3 sales")).toBe("Report on Q3 sales");
+  });
+
+  it("prefers an explicit titled/called/named clause", () => {
+    expect(extractDocumentTitle("create a document titled Auto SAAS Brief")).toBe(
+      "Auto SAAS Brief",
+    );
+  });
+
+  it("strips trailing sentence punctuation", () => {
+    expect(extractDocumentTitle("Create a summary of the findings.")).toBe(
+      "Summary of the findings",
+    );
+  });
+
+  it("returns undefined when there is no usable remainder", () => {
+    expect(extractDocumentTitle("")).toBeUndefined();
+    expect(extractDocumentTitle("create a")).toBeUndefined();
+  });
+});
+
+describe("extractDocumentBody", () => {
+  it("pulls inline dictated content", () => {
+    expect(extractDocumentBody("create a note saying buy more inventory")).toBe(
+      "buy more inventory",
+    );
+    expect(extractDocumentBody("write a doc with content the launch is delayed")).toBe(
+      "the launch is delayed",
+    );
+  });
+
+  it("returns undefined when no inline content is present (body comes from prior results)", () => {
+    expect(extractDocumentBody("Create a document summary of the results")).toBeUndefined();
+    expect(extractDocumentBody("")).toBeUndefined();
   });
 });

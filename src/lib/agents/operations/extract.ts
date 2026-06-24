@@ -161,6 +161,56 @@ export function extractSearchQuery(instruction: string): string | undefined {
 }
 
 /**
+ * Extract a document/summary TITLE from a create-document instruction. Backs the
+ * create_document operation's `question` field (the knowledge route stores the
+ * title under `question`).
+ *
+ * Priority:
+ *   1. An explicit "titled/called/named X" clause (reuses extractLabel).
+ *   2. Otherwise strip the leading imperative verb + article and keep the rest,
+ *      including the document noun, as the title:
+ *        "create a document summary of the results" -> "Document summary of the
+ *        results"; "write a report on sales" -> "Report on sales".
+ * Returns the trimmed, sentence-cased title, or undefined when nothing sensible
+ * remains (a required title left undefined makes the executor escalate). Pure.
+ */
+export function extractDocumentTitle(instruction: string): string | undefined {
+  const text = (instruction ?? "").trim();
+  if (!text) return undefined;
+
+  const explicit = extractLabel(text);
+  if (explicit) return explicit;
+
+  const m =
+    /^\s*(?:please\s+)?(?:create|make|write|draft|compose|generate|produce|prepare|save|put\s+together)\s+(?:an?\s+|the\s+)?(?:new\s+)?(.+)$/i.exec(
+      text,
+    );
+  if (m) {
+    const rest = stripTrailingPunctuation(m[1].trim()).trim();
+    if (rest.length >= 2) return rest.charAt(0).toUpperCase() + rest.slice(1);
+  }
+  return undefined;
+}
+
+/**
+ * Extract an EXPLICIT document body from the instruction, when the user dictated
+ * the content inline ("...saying X", "...with content X", "...containing X").
+ * Backs the create_document operation's `answer` field. Returns undefined when no
+ * inline content is present; the executor then folds in the carried prior-step
+ * output (result chaining) so "summarize the results" gets a real body. Pure.
+ */
+export function extractDocumentBody(instruction: string): string | undefined {
+  const text = (instruction ?? "").trim();
+  if (!text) return undefined;
+  const m =
+    /\b(?:saying|that\s+says|with\s+(?:the\s+)?(?:content|body|text)|containing|content:)\s+["']?(.+?)["']?\s*$/i.exec(
+      text,
+    );
+  if (m && m[1].trim().length > 0) return m[1].trim();
+  return undefined;
+}
+
+/**
  * Trim trailing sentence punctuation that a URL/domain match may have greedily
  * swallowed (a period, comma, paren, quote). A trailing slash is meaningful in a
  * path and is kept.

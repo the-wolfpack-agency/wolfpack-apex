@@ -78,8 +78,10 @@ const PRIOR_REFERENCE_TOKENS = [
   "the output",
 ];
 
-/** True when the instruction references the output of a prior step. */
-function referencesPriorOutput(instruction: string): boolean {
+/** True when the instruction references the output of a prior step. Exported so
+ *  the operation path (operations/registry.ts via the executor) reuses the exact
+ *  same result-chaining trigger as the form path, rather than duplicating it. */
+export function referencesPriorOutput(instruction: string): boolean {
   const lower = (instruction ?? "").toLowerCase();
   return PRIOR_REFERENCE_TOKENS.some((tok) =>
     new RegExp(`\\b${tok.replace(/\s+/g, "\\s+")}\\b`).test(lower),
@@ -92,7 +94,7 @@ function referencesPriorOutput(instruction: string): boolean {
  * PRIOR_RESULTS_BODY_CAP characters so the payload stays bounded. Returns
  * undefined when there is nothing usable to carry forward. Pure.
  */
-function summarizePriorResults(
+export function summarizePriorResults(
   priorResults: { instruction: string; result: string }[] | undefined,
 ): string | undefined {
   if (!priorResults || priorResults.length === 0) return undefined;

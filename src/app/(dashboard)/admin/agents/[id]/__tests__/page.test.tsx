@@ -602,6 +602,42 @@ describe("/admin/agents/[id]: assigned work (tasks)", () => {
     expect(screen.queryByTestId("agent-tasks-list")).not.toBeInTheDocument();
   });
 
+  it("renders a clear Assign call-to-action with how-to guidance and a governance note", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        tasks: () => mkRes({ tasks: [] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("agent-task-form")).toBeInTheDocument());
+
+    // A descriptive heading + plain-language how-to, not just a bare label.
+    expect(screen.getByText(/give this agent a job/i)).toBeInTheDocument();
+    expect(screen.getByText(/runs each one through the governance gate/i)).toBeInTheDocument();
+
+    // The CTA reads "Assign" and is a real, enabled action once a goal is typed.
+    const submit = screen.getByTestId("agent-task-submit") as HTMLButtonElement;
+    expect(submit).toHaveTextContent(/^assign$/i);
+    // Disabled while the textarea is empty (nothing to assign yet).
+    expect(submit.disabled).toBe(true);
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("agent-task-goal"), {
+        target: { value: "Draft a summary" },
+      });
+    });
+    expect(submit.disabled).toBe(false);
+
+    // The governance note explains the Blocked outcome so it does not read as a failure.
+    expect(screen.getByTestId("agent-task-governance-note")).toHaveTextContent(
+      /asks you to approve/i,
+    );
+  });
+
   it("assigns a goal: POSTs to the tasks endpoint and prepends the returned task", async () => {
     // The assign POST now returns a TERMINAL task (steps populated), so the
     // prepended row shows its real status, not a stuck "Queued".

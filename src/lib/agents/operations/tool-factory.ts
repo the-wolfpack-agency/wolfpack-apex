@@ -85,6 +85,9 @@ export function registerOperationTool(op: AgentOperation): void {
         path: op.path,
         values: params as Record<string, unknown>,
         required: op.fields.filter((f) => f.required).map((f) => f.name),
+        // Carry the result-chaining target (if any) so the executor can fold
+        // prior-step output into this body field before the required-field gate.
+        fillFromPriorResults: op.fillFromPriorResults,
       },
     }),
   });

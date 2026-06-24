@@ -17,7 +17,11 @@ import { notify } from "@/lib/notifications/in-app";
 import { trackEvent } from "@/lib/analytics";
 import { safeQuery } from "@/lib/db";
 import { mintOnBehalfToken } from "@/lib/agents/on-behalf";
-import { autofillForm } from "@/lib/agents/forms/autofill";
+import {
+  autofillForm,
+  referencesPriorOutput,
+  summarizePriorResults,
+} from "@/lib/agents/forms/autofill";
 import {
   executeFormAction,
   KNOWN_FORM_KINDS,
@@ -277,6 +281,8 @@ interface OperationSpec {
   path: string;
   values: Record<string, unknown>;
   required: string[];
+  /** Result-chaining target: a body field to fill from prior-step output. */
+  fillFromPriorResults?: string;
 }
 
 function isEmptyValue(v: unknown): boolean {
@@ -296,6 +302,10 @@ function isEmptyValue(v: unknown): boolean {
  */
 async function executeOperationOnBehalf(args: {
   operation: OperationSpec;
+  /** The step instruction, used for the result-chaining reference check. */
+  instruction: string;
+  /** Carried output of earlier steps (already capped + truncated upstream). */
+  priorResults?: { instruction: string; result: string }[];
   task: ExecutableTask;
   deps: {
     getOwnerRole: GetOwnerRoleFn;
@@ -304,8 +314,27 @@ async function executeOperationOnBehalf(args: {
     fetchImpl: FetchFn;
   };
 }): Promise<OnBehalfOutcome> {
-  const { operation, task, deps } = args;
+  const { operation, instruction, priorResults, task, deps } = args;
   try {
+    // RESULT CHAINING. A body field declared as fillFromPriorResults draws from
+    // the carried prior-step output when the instruction refers back to it
+    // ("create a document summary of the results") and the field is otherwise
+    // empty. Reuses the exact form-path helpers, and runs BEFORE the required
+    // gate so a chained body counts as filled instead of escalating.
+    const fillField = operation.fillFromPriorResults;
+    if (
+      fillField &&
+      isEmptyValue(operation.values[fillField]) &&
+      referencesPriorOutput(instruction) &&
+      priorResults &&
+      priorResults.length > 0
+    ) {
+      const carried = summarizePriorResults(priorResults);
+      if (carried) {
+        operation.values = { ...operation.values, [fillField]: carried };
+      }
+    }
+
     // Required-field gate: an absent required value escalates to the owner
     // rather than calling the route with an invalid body.
     const missing = operation.required.filter((f) => isEmptyValue(operation.values[f]));
@@ -674,6 +703,11 @@ export async function runAgentTask(
       if (operation) {
         const outcome = await executeOperationOnBehalf({
           operation,
+          instruction,
+          // Result chaining: hand the prior steps' outputs to the operation so a
+          // body field (e.g. a document summary) gets filled from them when the
+          // instruction references prior output.
+          priorResults: agentCtx.priorResults,
           task,
           deps: { getOwnerRole, mintToken, resolveOrigin, fetchImpl },
         });

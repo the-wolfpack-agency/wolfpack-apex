@@ -1839,11 +1839,33 @@ export default function AgentProfilePage({
             color: "var(--wp-text-muted, #6b7280)",
             textTransform: "uppercase",
             letterSpacing: "0.03em",
-            marginBottom: "0.6rem",
+            marginBottom: "0.3rem",
           }}
         >
           Assigned work
         </div>
+        <h3
+          style={{
+            margin: 0,
+            fontSize: "1.05rem",
+            fontWeight: 600,
+            color: "var(--wp-text, #eee)",
+          }}
+        >
+          Give this agent a job
+        </h3>
+        <p
+          style={{
+            margin: "0.35rem 0 0.9rem",
+            fontSize: "0.82rem",
+            lineHeight: 1.5,
+            color: "var(--wp-text-muted, #9ca3af)",
+          }}
+        >
+          Write what you want in plain language, then press Assign. The agent plans the
+          steps and runs each one through the governance gate on your behalf. Number the
+          lines to run several actions in sequence (for example, search, then summarize).
+        </p>
 
         <form
           data-testid="agent-task-form"
@@ -1888,30 +1910,69 @@ export default function AgentProfilePage({
               {assignError}
             </div>
           )}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "0.72rem", color: "var(--wp-text-muted, #6b7280)" }}>
-              A blocked task means the gate stopped the agent and asked the owner to approve: governance working as intended.
-            </span>
-            <button
-              type="submit"
-              data-testid="agent-task-submit"
-              disabled={isRevoked || assigning || goal.trim().length === 0}
-              style={{
-                flexShrink: 0,
-                padding: "0.5rem 1rem",
-                borderRadius: "6px",
-                fontSize: "0.85rem",
-                fontWeight: 600,
-                background: "var(--wp-dark-surface2, #1a1a1a)",
-                color: "var(--wp-gold, #f1c233)",
-                border: "1px solid var(--wp-gold, #f1c233)",
-                cursor: isRevoked || assigning || goal.trim().length === 0 ? "not-allowed" : "pointer",
-                opacity: isRevoked || assigning || goal.trim().length === 0 ? 0.6 : 1,
-              }}
-            >
-              {assigning ? "Assigning..." : "Assign"}
-            </button>
-          </div>
+          {(() => {
+            const disabled = isRevoked || assigning || goal.trim().length === 0;
+            return (
+              <button
+                type="submit"
+                data-testid="agent-task-submit"
+                disabled={disabled}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "0.45rem",
+                  width: "100%",
+                  padding: "0.8rem 1.25rem",
+                  borderRadius: "8px",
+                  fontSize: "0.95rem",
+                  fontWeight: 700,
+                  letterSpacing: "0.01em",
+                  background: disabled
+                    ? "var(--wp-dark-surface2, #1a1a1a)"
+                    : "var(--wp-gold, #e8b528)",
+                  color: disabled ? "var(--wp-text-muted, #6b7280)" : "var(--wp-dark, #0b0d11)",
+                  border: "1px solid var(--wp-gold, #e8b528)",
+                  cursor: disabled ? "not-allowed" : "pointer",
+                  opacity: disabled ? 0.7 : 1,
+                  transition: "background 0.15s, opacity 0.15s",
+                }}
+              >
+                {assigning ? "Assigning..." : "Assign"}
+                {!assigning && (
+                  <svg
+                    aria-hidden="true"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    style={{ flexShrink: 0 }}
+                  >
+                    <path
+                      d="M3 8h10m0 0L9 4m4 4l-4 4"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
+              </button>
+            );
+          })()}
+          <p
+            data-testid="agent-task-governance-note"
+            style={{
+              margin: "0.1rem 0 0",
+              fontSize: "0.72rem",
+              lineHeight: 1.5,
+              color: "var(--wp-text-muted, #6b7280)",
+            }}
+          >
+            If a step is high-risk, the agent stops and asks you to approve. A
+            <span style={{ color: "var(--wp-gold, #e8b528)", fontWeight: 600 }}> Blocked </span>
+            result below means the gate did its job, not that anything failed.
+          </p>
         </form>
 
         {/* Run-queued control. Shown only when work is already sitting queued

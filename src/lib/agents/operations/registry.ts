@@ -23,7 +23,13 @@
  * authority exactly as it would for a human request.
  */
 
-import { extractLabel, extractSearchQuery, extractUrl } from "./extract";
+import {
+  extractDocumentBody,
+  extractDocumentTitle,
+  extractLabel,
+  extractSearchQuery,
+  extractUrl,
+} from "./extract";
 
 /** One declarative field of an operation: how to pull its value from the
  *  natural-language instruction, and whether the operation needs it. */
@@ -57,6 +63,14 @@ export interface AgentOperation {
   capability: string;
   /** Declarative field extraction. Required fields gate execution. */
   fields: OperationField[];
+  /**
+   * Result chaining: the name of a body-like field that should be filled from
+   * the carried output of EARLIER steps when the instruction refers back to it
+   * ("summarize the results") and the field is otherwise empty. The executor
+   * folds in a concise, capped join of prior-step output before the required
+   * gate, reusing the exact form-path helper. Undefined = no chaining.
+   */
+  fillFromPriorResults?: string;
 }
 
 /**
@@ -113,5 +127,42 @@ export const AGENT_OPERATIONS: AgentOperation[] = [
         extract: (instruction) => extractSearchQuery(instruction),
       },
     ],
+  },
+  {
+    id: "create_document",
+    summary: "Create a document or written summary in the knowledge base",
+    // "create/make/write/draft/... a document|summary|write-up|brief|report|memo|
+    //  doc ...", or a bare "summarize/summarise ...". Anchored on a document-like
+    // surface noun so it does not swallow "create a task"/"create an event".
+    intent:
+      /\b(?:create|make|write|draft|compose|generate|produce|prepare|save|put\s+together)\b[^.!?]*\b(?:document|summary|write[\s-]?up|writeup|brief|report|memo|doc)\b|\bsummari[sz]e\b/i,
+    method: "POST",
+    path: "/api/knowledge",
+    // The knowledge create path accepts any role holding knowledge.search; the
+    // OWNER must hold it, enforced by the same gate as every other operation.
+    capability: "knowledge.search",
+    fields: [
+      {
+        // The knowledge route stores the title under `question`.
+        name: "question",
+        required: true,
+        extract: (instruction) => extractDocumentTitle(instruction),
+      },
+      {
+        // The body. Filled inline when dictated, else from prior results below.
+        name: "answer",
+        required: true,
+        extract: (instruction) => extractDocumentBody(instruction),
+      },
+      {
+        // Provenance marker for the audit + learning loop: agent-authored.
+        name: "source",
+        required: false,
+        extract: () => "agent",
+      },
+    ],
+    // "Create a document summary of the results" carries the prior step's output
+    // into the body, so a chained search -> summarize lands a real document.
+    fillFromPriorResults: "answer",
   },
 ];
