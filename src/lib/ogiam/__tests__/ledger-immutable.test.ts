@@ -15,10 +15,11 @@
  * scan, and a simulated client.
  */
 
-import { readFileSync } from "fs";
+import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
 
 const REPO = join(__dirname, "..", "..", "..", "..");
+const MIGRATIONS_DIR = join(REPO, "src", "db", "migrations");
 const LEDGER_LIB = join(REPO, "src", "lib", "ogiam", "ledger.ts");
 const MIGRATION = join(
   REPO,
@@ -65,6 +66,38 @@ describe("OGIAM ledger append-only enforcement - static checks", () => {
     expect(migrationSource).toMatch(/DROP\s+TRIGGER\s+IF\s+EXISTS/i);
     expect(migrationSource).toMatch(/CREATE\s+OR\s+REPLACE\s+FUNCTION/i);
   });
+});
+
+/**
+ * Coverage guard: every append-only ledger table MUST be defended by a
+ * database-level immutability trigger SOMEWHERE in the migration set, not just
+ * by an application promise. This is the repo-idiomatic stand-in for a live-DB
+ * CI assertion: it catches a future ledger table shipped without a trigger
+ * (the exact gap migration 177 just closed for the OGIAM tables). Add the table
+ * to this list when a new append-only ledger is introduced.
+ */
+describe("append-only ledger immutability coverage", () => {
+  const APPEND_ONLY_LEDGER_TABLES = [
+    "instinct_audit_log",
+    "ogiam_decisions",
+    "ogiam_action_outcomes",
+  ];
+
+  const allMigrations = readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith(".sql") && !f.endsWith(".down.sql"))
+    .map((f) => readFileSync(join(MIGRATIONS_DIR, f), "utf8"))
+    .join("\n");
+
+  it.each(APPEND_ONLY_LEDGER_TABLES)(
+    "%s has a BEFORE UPDATE OR DELETE immutability trigger",
+    (table) => {
+      const re = new RegExp(
+        `CREATE\\s+TRIGGER\\s+\\w+[\\s\\S]*?BEFORE\\s+UPDATE\\s+OR\\s+DELETE\\s+ON\\s+${table}\\b`,
+        "i",
+      );
+      expect(allMigrations).toMatch(re);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
