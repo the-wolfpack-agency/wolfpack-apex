@@ -406,9 +406,11 @@ function TaskRow({ task }: { task: AgentTask }) {
             minWidth: 0,
             fontSize: "0.88rem",
             color: "var(--wp-text, #eee)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
+            /* Wrap long goals instead of clipping with an ellipsis: a long
+               instruction (e.g. a web-search request) was getting cut off so the
+               manager could not read what was assigned. */
+            overflowWrap: "anywhere",
+            whiteSpace: "normal",
           }}
           title={task.goal}
         >

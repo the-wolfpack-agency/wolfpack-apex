@@ -23,7 +23,7 @@
  * authority exactly as it would for a human request.
  */
 
-import { extractLabel, extractUrl } from "./extract";
+import { extractLabel, extractSearchQuery, extractUrl } from "./extract";
 
 /** One declarative field of an operation: how to pull its value from the
  *  natural-language instruction, and whether the operation needs it. */
@@ -87,6 +87,30 @@ export const AGENT_OPERATIONS: AgentOperation[] = [
         required: false,
         // Pull a "titled/called/named X" label.
         extract: (instruction) => extractLabel(instruction),
+      },
+    ],
+  },
+  {
+    id: "web_search",
+    summary: "Search the web for information",
+    // Two routing shapes, anchored on a PUBLIC-web surface noun so this does NOT
+    // swallow internal "search the knowledge base / search my mail" phrasings:
+    //   (a) a search/scan/look-up/find/research verb combined with
+    //       web|internet|online (in either order: "search the web", "scan the
+    //       internet for X", "look X up online");
+    //   (b) "search for X" / "find news on X" / "the latest news on X" - the
+    //       "news" surface noun (or a bare "search for") routing to web search.
+    intent:
+      /\b(?:search|scan|look(?:\s*up)?|lookup|find|research|google)\b.*\b(?:web|internet|online)\b|\b(?:web|internet|online)\b.*\b(?:search|scan|look(?:\s*up)?|lookup|find|research)\b|\b(?:search\s+for|find\s+news|latest\s+news|news)\b/i,
+    method: "POST",
+    path: "/api/web-search",
+    capability: "*",
+    fields: [
+      {
+        name: "query",
+        required: true,
+        // Pull the search terms after for/about/on, else the meaningful remainder.
+        extract: (instruction) => extractSearchQuery(instruction),
       },
     ],
   },

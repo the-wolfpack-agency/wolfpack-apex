@@ -72,6 +72,58 @@ describe("registerOperationTools", () => {
   });
 });
 
+const SCAN_INSTRUCTION =
+  "scan the internet for the latest news on auto SAAS companies";
+
+describe("op_web_search", () => {
+  it("is registered as an agent-only tool", () => {
+    const tool = getToolByName("op_web_search");
+    expect(tool).not.toBeNull();
+    expect(tool?.agentOnly).toBe(true);
+    expect(tool?.capability).toBe("*");
+  });
+
+  it("matches the 'scan the internet for X' example and extracts the query", () => {
+    const tool = getToolByName("op_web_search")!;
+    const params = tool.matchIntent(SCAN_INSTRUCTION);
+    expect(params).toEqual({
+      query: "the latest news on auto SAAS companies",
+    });
+  });
+
+  it("matches 'search the web for X'", () => {
+    const tool = getToolByName("op_web_search")!;
+    expect(tool.matchIntent("search the web for Tesla earnings")).toEqual({
+      query: "Tesla earnings",
+    });
+  });
+
+  it("matches 'look X up online'", () => {
+    const tool = getToolByName("op_web_search")!;
+    const params = tool.matchIntent("look up the GDP of France online");
+    expect(params).toEqual({ query: "the GDP of France" });
+  });
+
+  it("does NOT swallow a bare 'create a task' instruction", () => {
+    const tool = getToolByName("op_web_search")!;
+    expect(tool.matchIntent("create a task to follow up with the client")).toBeNull();
+  });
+
+  it("carries the /api/web-search operation descriptor on success", async () => {
+    const res = await tryDispatchTool(SCAN_INSTRUCTION, agentCtx);
+    expect(res?.tool).toBe("op_web_search");
+    expect(res?.result.ok).toBe(true);
+    const success = res!.result as ToolSuccess<unknown>;
+    expect(success.operation).toEqual({
+      id: "web_search",
+      method: "POST",
+      path: "/api/web-search",
+      values: { query: "the latest news on auto SAAS companies" },
+      required: ["query"],
+    });
+  });
+});
+
 describe("dispatch routing", () => {
   it("an AGENT dispatch routes to op_create_qr_code and returns the operation descriptor", async () => {
     const res = await tryDispatchTool(QR_INSTRUCTION, agentCtx);
