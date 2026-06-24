@@ -291,6 +291,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "read-only external web-search proxy; returns results, mutates no persistent state",
   },
   {
+    route: "src/app/api/site-analytics/ingest/route.ts",
+    reason: "anonymous marketing-site telemetry (no PII, no user, no security-relevant state)",
+  },
+  {
     route: "src/app/api/calendar/events/route.ts",
     reason: "createEvent in src/lib/integrations/microsoft-calendar.ts audits via calendar.event.created",
   },
