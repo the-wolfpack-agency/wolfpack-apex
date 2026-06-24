@@ -684,6 +684,144 @@ describe("maturation: deterministic-first grounding + cost-aware model selection
   });
 });
 
+describe("result chaining: earlier step outputs flow to later steps", () => {
+  beforeEach(() => mockTrackEvent.mockClear());
+
+  /**
+   * The executor reuses a single mutable agentCtx across steps (so it can attach
+   * grounding once), which means ctx.priorResults is mutated in place between
+   * dispatches. To observe what each step ACTUALLY saw, snapshot priorResults at
+   * dispatch time via a recording dispatch impl rather than reading the shared
+   * object after the run.
+   */
+  function recordingDispatch(
+    seen: ({ instruction: string; result: string }[] | undefined)[],
+    responses: unknown[],
+  ) {
+    let i = 0;
+    return jest.fn(async (_instruction: string, ctx: { priorResults?: { instruction: string; result: string }[] }) => {
+      seen.push(ctx.priorResults ? ctx.priorResults.slice() : undefined);
+      return responses[i++];
+    });
+  }
+
+  it("carries a ran step's instruction+result into the NEXT dispatch's ctx.priorResults", async () => {
+    const seen: ({ instruction: string; result: string }[] | undefined)[] = [];
+    const dispatch = recordingDispatch(seen, [
+      ran("web_search", "OGIAM is an identity gate."),
+      ran("read_more", "ok"),
+    ]);
+    const out = await runAgentTask(
+      { ...task, goal: "search the web for OGIAM\nsummarize the results" },
+      {
+        dispatch: dispatch as never, notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+      },
+    );
+
+    expect(out.status).toBe("succeeded");
+    // First dispatch sees no prior output.
+    expect(seen[0]).toBeUndefined();
+    // Second dispatch carries step 1's instruction + (truncated) result.
+    expect(seen[1]).toEqual([
+      { instruction: "search the web for OGIAM", result: "OGIAM is an identity gate." },
+    ]);
+  });
+
+  it("does NOT add a non-ran step (no_match) to priorResults", async () => {
+    const seen: ({ instruction: string; result: string }[] | undefined)[] = [];
+    const dispatch = recordingDispatch(seen, [null, ran("read_more", "ok")]);
+    await runAgentTask(
+      { ...task, goal: "mystery step\nread more" },
+      {
+        dispatch: dispatch as never, notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+      },
+    );
+    // The second dispatch sees no prior output because the first step didn't run.
+    expect(seen[1]).toBeUndefined();
+  });
+
+  it("caps the carried context to the most recent 5 step outputs", async () => {
+    const seen: ({ instruction: string; result: string }[] | undefined)[] = [];
+    const responses: unknown[] = [];
+    for (let i = 1; i <= 8; i++) responses.push(ran(`tool_${i}`, `result ${i}`));
+    const dispatch = recordingDispatch(seen, responses);
+    const goal = Array.from({ length: 8 }, (_, i) => `step ${i + 1}`).join("\n");
+    await runAgentTask(
+      { ...task, goal },
+      {
+        dispatch: dispatch as never, notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+      },
+    );
+    const carried = seen[7] as { instruction: string; result: string }[];
+    expect(carried).toHaveLength(5);
+    // Most recent five (steps 3..7), oldest dropped.
+    expect(carried[0]).toEqual({ instruction: "step 3", result: "result 3" });
+    expect(carried[4]).toEqual({ instruction: "step 7", result: "result 7" });
+  });
+
+  it("a chained FORM step fills its body from the prior results (summarize the results)", async () => {
+    /* Step 1 runs a search; step 2 returns a feature form whose body-like field
+       is summarized FROM step 1's output because the instruction references it.
+       This is the end-to-end chaining flow through the on-behalf form path. */
+    const formResult = {
+      tool: "create_feature_form",
+      result: {
+        ok: true as const,
+        data: { formKind: "create_task" },
+        answer: "Fill in the feature below.",
+        form: {
+          formKind: "create_task",
+          fields: [
+            { name: "title", label: "Title", type: "text", required: true, defaultValue: "New feature" },
+            { name: "description", label: "Description", type: "textarea", required: true },
+          ],
+        },
+        sources: [],
+      },
+      durationMs: 1,
+    };
+    const dispatch = jest.fn()
+      .mockResolvedValueOnce(ran("web_search", "OGIAM enforces capabilities at the gate."))
+      .mockResolvedValueOnce(formResult);
+    const executeForm = jest.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, message: "Created feature." }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const out = await runAgentTask(
+      { ...task, goal: "search the web for OGIAM\nCreate a feature summarizing the results" },
+      {
+        dispatch: dispatch as never, notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+        getOwnerRole: jest.fn().mockResolvedValue({ role: "dev", workspaceId: "ws-1" }) as never,
+        mintToken: jest.fn().mockResolvedValue("tok") as never,
+        executeForm: executeForm as never,
+        origin: (() => "https://internal.example") as never,
+      },
+    );
+
+    expect(out.status).toBe("succeeded");
+    expect(out.steps.map((s) => s.outcome)).toEqual(["ran", "ran"]);
+    // The executed form's description was filled from the prior search output.
+    const [, values] = executeForm.mock.calls[0];
+    expect(values.description).toMatch(/OGIAM enforces capabilities/);
+    expect(values.description).not.toMatch(/Create a feature/);
+    // Title is NEVER taken from prior results (title-like fields are excluded
+    // from result chaining); it comes from the instruction/title extraction.
+    expect(values.title).not.toMatch(/OGIAM/);
+    expect(typeof values.title).toBe("string");
+  });
+});
+
 describe("familiarityScore", () => {
   it("is 0 for an all-explored history", () => {
     expect(

@@ -147,6 +147,15 @@ function truncate(s: string, n = 240): string {
   return one.length > n ? `${one.slice(0, n - 1)}…` : one;
 }
 
+/**
+ * RESULT-CHAINING bound. How many prior step outputs the executor carries
+ * forward into the next step's dispatch context. Keeps the chained context
+ * deterministic and small (each result string is already truncated by
+ * `truncate`), so a long plan never balloons the dispatch payload. We keep the
+ * MOST RECENT N, which is what a "summarize the results" style step needs.
+ */
+const PRIOR_RESULTS_CAP = 5;
+
 /** True when a dispatch failure is the OGIAM enforce gate refusing the step. */
 function isGateBlock(result: { ok: boolean; code?: string; message?: string }): boolean {
   return (
@@ -174,6 +183,13 @@ async function executeFormOnBehalf(args: {
   formKind: FormKind;
   instruction: string;
   parsedParams?: Record<string, unknown>;
+  /**
+   * Outputs of earlier steps in this task (result chaining). Threaded into the
+   * deterministic auto-fill so a body-like field can be summarized FROM the
+   * carried prior output when the instruction references it (e.g. "create a
+   * feature summarizing the results"). Already capped + truncated upstream.
+   */
+  priorResults?: { instruction: string; result: string }[];
   task: ExecutableTask;
   deps: {
     getOwnerRole: GetOwnerRoleFn;
@@ -183,9 +199,14 @@ async function executeFormOnBehalf(args: {
     resolveOrigin: OriginFn;
   };
 }): Promise<OnBehalfOutcome> {
-  const { form, formKind, instruction, parsedParams, task, deps } = args;
+  const { form, formKind, instruction, parsedParams, priorResults, task, deps } = args;
   try {
-    const { values, missingRequired } = deps.autofill(form, instruction, parsedParams);
+    const { values, missingRequired } = deps.autofill(
+      form,
+      instruction,
+      parsedParams,
+      priorResults,
+    );
     if (missingRequired.length > 0) {
       return {
         kind: "blocked",
@@ -431,6 +452,7 @@ export async function runAgentTask(
       ownerUserId: string;
     };
     grounding?: { snippets: string[] };
+    priorResults?: { instruction: string; result: string }[];
   } = {
     userId: task.agentId,
     userRole: task.role,
@@ -488,8 +510,32 @@ export async function runAgentTask(
     }
   }
 
+  // RESULT-CHAINING accumulator. Ordered outputs of the steps that already ran,
+  // carried forward so a later step can consume an earlier one's output (e.g.
+  // "search the web for X; create a feature summarizing the results"). Bounded to
+  // the most recent PRIOR_RESULTS_CAP entries; each result is the truncated step
+  // answer, so the carried context stays small and deterministic. Nothing
+  // sensitive beyond the already-truncated answers is ever added.
+  const priorResults: { instruction: string; result: string }[] = [];
+
+  // Record one completed step's output for later steps to chain on. `result` is
+  // the already-truncated step detail/answer, so no payload growth; the list is
+  // clamped to the most recent PRIOR_RESULTS_CAP entries.
+  const recordPriorResult = (stepInstruction: string, result: string): void => {
+    priorResults.push({ instruction: stepInstruction, result });
+    if (priorResults.length > PRIOR_RESULTS_CAP) {
+      priorResults.splice(0, priorResults.length - PRIOR_RESULTS_CAP);
+    }
+  };
+
   for (let i = 0; i < instructions.length; i++) {
     const instruction = instructions[i];
+    // Expose the prior steps' outputs to THIS dispatch. A shallow copy so a tool
+    // (or the form path below) cannot mutate the accumulator. Set only when there
+    // is something to carry, so a normal first step looks exactly as before.
+    agentCtx.priorResults =
+      priorResults.length > 0 ? priorResults.slice() : undefined;
+
     let res;
     try {
       res = await dispatch(instruction, agentCtx);
@@ -555,6 +601,10 @@ export async function runAgentTask(
           // we pass undefined; the FormSpec defaults + the deterministic
           // instruction extraction still cover the common cases (e.g. title).
           parsedParams: undefined,
+          // Result chaining: hand the prior steps' outputs to the auto-fill so a
+          // body-like field gets summarized from them when the instruction
+          // references prior output (e.g. "summarizing the results").
+          priorResults: agentCtx.priorResults,
           task,
           deps: {
             getOwnerRole,
@@ -606,7 +656,11 @@ export async function runAgentTask(
         } catch {
           /* telemetry is best effort; the action already ran */
         }
-        steps.push({ index: i, instruction, tool: res.tool, outcome: "ran", detail: truncate(outcome.detail) });
+        {
+          const detail = truncate(outcome.detail);
+          steps.push({ index: i, instruction, tool: res.tool, outcome: "ran", detail });
+          recordPriorResult(instruction, detail);
+        }
         continue;
       }
 
@@ -664,11 +718,19 @@ export async function runAgentTask(
         } catch {
           /* telemetry is best effort; the operation already ran */
         }
-        steps.push({ index: i, instruction, tool: res.tool, outcome: "ran", detail: truncate(outcome.detail) });
+        {
+          const detail = truncate(outcome.detail);
+          steps.push({ index: i, instruction, tool: res.tool, outcome: "ran", detail });
+          recordPriorResult(instruction, detail);
+        }
         continue;
       }
 
-      steps.push({ index: i, instruction, tool: res.tool, outcome: "ran", detail: truncate((r as { answer: string }).answer) });
+      {
+        const detail = truncate((r as { answer: string }).answer);
+        steps.push({ index: i, instruction, tool: res.tool, outcome: "ran", detail });
+        recordPriorResult(instruction, detail);
+      }
     } else {
       // A tool-level failure (not a gate block) is a real error: record it and
       // stop acting. A task whose step errored has NOT succeeded.

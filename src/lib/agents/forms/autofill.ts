@@ -21,6 +21,17 @@
  * the executor can stop and escalate to the owner for the missing input rather
  * than submit an invalid action.
  *
+ * RESULT CHAINING. A multi-step agent task can carry the outputs of earlier
+ * steps forward (`priorResults`). When a BODY_LIKE field is otherwise only
+ * fillable from the raw instruction text AND that instruction REFERENCES prior
+ * output (e.g. "summarize the results", "write up the above"), the raw
+ * instruction remainder ("summarizing the results") is useless content, so we
+ * fill the field from a concise, hard-truncated join of the prior results
+ * instead. This is what makes "search for X; create a feature summarizing the
+ * results" land a real description. parsedParams and the FormSpec default still
+ * win (they are explicit / trustworthy); only the weak instruction-remainder
+ * fill is overridden, and only for body-like fields (never title-like).
+ *
  * Pure + deterministic + zero-token by design. NOTE: a future enhancement is to
  * fall back to an LLM fill (via the model router in src/lib/ai/models) for hard
  * free-text fields the deterministic rules cannot infer; this pass deliberately
@@ -39,7 +50,61 @@ export interface Autofilled {
 /** Field names that take a short "what is this called" value. */
 const TITLE_LIKE = new Set(["title", "subject", "name"]);
 /** Field names that take the free-text remainder of the instruction. */
-const BODY_LIKE = new Set(["body", "description", "notes", "details"]);
+const BODY_LIKE = new Set(["body", "description", "content", "notes", "details", "summary"]);
+
+/**
+ * Hard cap on the total characters of joined prior-result content folded into a
+ * body field. Keeps the carried context bounded so a chained step never balloons
+ * the form payload, deterministic regardless of how much earlier steps emitted.
+ */
+const PRIOR_RESULTS_BODY_CAP = 1000;
+
+/**
+ * Tokens that signal the instruction is referring back to an EARLIER step's
+ * output ("summarize the results", "write up the above", "use those", ...). A
+ * deterministic word-boundary match drives the result-chaining body fill. Kept
+ * conservative on purpose: a false positive only happens when the instruction
+ * literally names prior output, and the rule is gated on priorResults being
+ * non-empty anyway.
+ */
+const PRIOR_REFERENCE_TOKENS = [
+  "the results",
+  "the above",
+  "previous",
+  "them",
+  "those",
+  "that",
+  "the findings",
+  "the output",
+];
+
+/** True when the instruction references the output of a prior step. */
+function referencesPriorOutput(instruction: string): boolean {
+  const lower = (instruction ?? "").toLowerCase();
+  return PRIOR_REFERENCE_TOKENS.some((tok) =>
+    new RegExp(`\\b${tok.replace(/\s+/g, "\\s+")}\\b`).test(lower),
+  );
+}
+
+/**
+ * Build a concise, hard-truncated body from the carried prior results. Joins the
+ * already-truncated step answers in order and clamps the total to
+ * PRIOR_RESULTS_BODY_CAP characters so the payload stays bounded. Returns
+ * undefined when there is nothing usable to carry forward. Pure.
+ */
+function summarizePriorResults(
+  priorResults: { instruction: string; result: string }[] | undefined,
+): string | undefined {
+  if (!priorResults || priorResults.length === 0) return undefined;
+  const joined = priorResults
+    .map((p) => (p?.result ?? "").replace(/\s+/g, " ").trim())
+    .filter((s) => s.length > 0)
+    .join("\n\n");
+  if (joined.length === 0) return undefined;
+  return joined.length > PRIOR_RESULTS_BODY_CAP
+    ? `${joined.slice(0, PRIOR_RESULTS_BODY_CAP - 1)}…`
+    : joined;
+}
 
 /**
  * Extract a title-like value from the instruction.
@@ -93,10 +158,21 @@ export function autofillForm(
   form: { fields: FormField[] },
   instruction: string,
   parsedParams?: Record<string, unknown>,
+  priorResults?: { instruction: string; result: string }[],
 ): Autofilled {
   const values: Record<string, unknown> = {};
   const missingRequired: string[] = [];
   const fields = form?.fields ?? [];
+
+  // Result-chaining inputs, resolved once. The prior-results body is only built
+  // when the instruction actually refers back to an earlier step's output AND we
+  // have something to carry forward; otherwise it stays undefined and the body
+  // falls back to the normal instruction-remainder extraction (existing behavior
+  // is unchanged for every non-chained call).
+  const chainBody =
+    referencesPriorOutput(instruction) && priorResults && priorResults.length > 0
+      ? summarizePriorResults(priorResults)
+      : undefined;
 
   // Extracted once, reused across fields. Cheap + deterministic.
   let titleExtraction: string | undefined;
@@ -106,6 +182,11 @@ export function autofillForm(
 
   for (const field of fields) {
     let value: unknown;
+    // Track whether the only thing filling a body-like field was the weak
+    // instruction-remainder extraction. If so, a prior-results reference may
+    // override it (the remainder, e.g. "summarizing the results", is not real
+    // content). parsedParams and the FormSpec default are stronger and stand.
+    let bodyFromInstructionRemainder = false;
 
     // (a) the tool's own parsed param for this field name.
     if (parsedParams && !isEmpty(parsedParams[field.name])) {
@@ -125,13 +206,30 @@ export function autofillForm(
           bodyExtraction = extractBody(instruction);
           bodyExtracted = true;
         }
-        if (!isEmpty(bodyExtraction)) value = bodyExtraction;
+        if (!isEmpty(bodyExtraction)) {
+          value = bodyExtraction;
+          bodyFromInstructionRemainder = true;
+        }
       }
     }
 
     // (c) the FormSpec's own default.
     if (isEmpty(value) && !isEmpty(field.defaultValue)) {
       value = field.defaultValue;
+    }
+
+    // (d) RESULT CHAINING. For a body-like field that is either still empty OR
+    // was only filled by the weak instruction-remainder, fold in the carried
+    // prior-step output when the instruction references it. Title-like fields
+    // are NEVER filled from prior results (a title is a short label, not a body
+    // of carried text). Applied before the missingRequired decision so a chained
+    // body counts as filled.
+    if (
+      BODY_LIKE.has(field.name) &&
+      !isEmpty(chainBody) &&
+      (isEmpty(value) || bodyFromInstructionRemainder)
+    ) {
+      value = chainBody;
     }
 
     if (!isEmpty(value)) {

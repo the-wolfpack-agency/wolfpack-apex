@@ -118,6 +118,20 @@ export interface ToolContext {
    * `snippets` are short, pre-truncated knowledge excerpts.
    */
   grounding?: { snippets: string[] };
+  /**
+   * Outputs of EARLIER steps in the same agent task (result chaining). Set by
+   * the agent executor before it dispatches each step: the ordered, capped list
+   * of `{ instruction, result }` pairs for the steps that already ran. A later
+   * step can consume an earlier step's output instead of re-querying, so a goal
+   * like "search the web for X; create a feature summarizing the results" fills
+   * the new feature's body from the search output rather than leaving it empty.
+   * Always optional and best-effort: absent on the first step, on a human turn,
+   * and for any step with no prior `ran` outputs. Each `result` string is the
+   * already-truncated step answer (see the executor's `truncate`), and the list
+   * is bounded (the executor keeps only the last N), so this never balloons the
+   * dispatch payload. Consumers must still treat it as untrusted text.
+   */
+  priorResults?: { instruction: string; result: string }[];
 }
 
 /** Successful tool dispatch — the handler ran and produced data. */
