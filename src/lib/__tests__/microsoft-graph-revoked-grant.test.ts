@@ -16,6 +16,8 @@ jest.mock("@/lib/secrets", () => ({
   getSecretOrThrow: (...args: unknown[]) => mockSecretResolver(...args),
 }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
+const mockNotify = jest.fn().mockResolvedValue({ id: "n1" });
+jest.mock("@/lib/notifications/in-app", () => ({ notify: (...a: unknown[]) => mockNotify(...a) }));
 jest.mock("@/lib/db", () => ({
   query: (...a: unknown[]) => mockQuery(...a),
   safeQuery: (...a: unknown[]) => mockSafeQuery(...a),
@@ -91,4 +93,17 @@ test("getValidToken clears the dead token on a revoked grant and returns null", 
   const deleteCall = mockQuery.mock.calls.find((c) => /DELETE FROM instinct_ms_tokens/.test(String(c[0])));
   expect(deleteCall).toBeDefined();
   expect(deleteCall?.[1]).toEqual(["user-1"]);
+  // The user is INFORMED: a deduped high-priority reconnect notification fires.
+  expect(mockNotify).toHaveBeenCalledTimes(1);
+  const n = mockNotify.mock.calls[0][0];
+  expect(n).toEqual(
+    expect.objectContaining({
+      userId: "user-1",
+      source: "microsoft",
+      sourceId: "ms_grant_revoked",
+      priority: "high",
+      dedup: true,
+      actionUrl: "/settings",
+    }),
+  );
 });

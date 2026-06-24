@@ -807,6 +807,29 @@ export async function getValidToken(
         user_email: row.user_email,
         revoked: true,
       });
+      /* INFORM the user: a revoked grant breaks calendar, mail, and tasks
+         silently. Fire a high-priority, deduped in-app notification (which also
+         drives the email fan-out) with a one-tap reconnect. The token is now
+         cleared, so this fires once on the connected -> revoked transition. Best
+         effort and dynamically imported so a notifications hiccup never blocks
+         the auth path. */
+      try {
+        const { notify } = await import("@/lib/notifications/in-app");
+        await notify({
+          userId,
+          category: "system",
+          priority: "high",
+          title: "Microsoft 365 connection expired",
+          body: "Your Microsoft sign-in was revoked (often after a password change or a security policy). Reconnect to restore your calendar, mail, and tasks.",
+          actionUrl: "/settings",
+          actionLabel: "Reconnect Microsoft",
+          source: "microsoft",
+          sourceId: "ms_grant_revoked",
+          dedup: true,
+        });
+      } catch (notifyErr) {
+        console.error("[microsoft-graph] revocation notify failed:", sanitizeForLog((notifyErr as Error).message));
+      }
       return null;
     }
     throw err;
