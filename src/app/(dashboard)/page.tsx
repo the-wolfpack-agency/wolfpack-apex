@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import IntegrationStatusBanner from "@/components/IntegrationStatusBanner";
+import MicrosoftConnectionBanner from "@/components/MicrosoftConnectionBanner";
 import MorningBriefing from "@/components/MorningBriefing";
 import MsInsightsPanel from "@/components/MsInsightsPanel";
 import Skeleton from "@/components/ui/Skeleton";
@@ -377,6 +378,12 @@ export default function DashboardPage() {
       <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>
         Dashboard
       </h1>
+
+      {/* Microsoft 365 disconnected warning, rendered FIRST so a revoked or
+          expired MS token is never silent. Without it, a disconnected token
+          just blanks the calendar/mail/tasks widgets with no on-screen
+          reason. Renders null while loading, on error, or when connected. */}
+      <MicrosoftConnectionBanner />
 
       {/* OAuth callback status banner (Microsoft / QuickBooks) */}
       <IntegrationStatusBanner />
