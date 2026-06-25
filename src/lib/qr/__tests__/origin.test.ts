@@ -1,6 +1,7 @@
 import { resolvePublicOrigin, resolveInternalOrigin } from "@/lib/qr/origin";
 
 const SAVED = {
+  QR_PUBLIC_ORIGIN: process.env.QR_PUBLIC_ORIGIN,
   NEXT_PUBLIC_BASE_URL: process.env.NEXT_PUBLIC_BASE_URL,
   VERCEL_PROJECT_PRODUCTION_URL: process.env.VERCEL_PROJECT_PRODUCTION_URL,
   VERCEL_BRANCH_URL: process.env.VERCEL_BRANCH_URL,
@@ -9,6 +10,7 @@ const SAVED = {
 };
 
 beforeEach(() => {
+  delete process.env.QR_PUBLIC_ORIGIN;
   delete process.env.NEXT_PUBLIC_BASE_URL;
   delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
   delete process.env.VERCEL_BRANCH_URL;
@@ -27,6 +29,18 @@ function fakeReq(url: string): Request {
 }
 
 describe("resolvePublicOrigin", () => {
+  test("QR_PUBLIC_ORIGIN (branded host) wins over everything else", () => {
+    process.env.QR_PUBLIC_ORIGIN = "https://go.ogiam.com/";
+    process.env.NEXT_PUBLIC_BASE_URL = "https://wolfpack-instinct.vercel.app";
+    expect(resolvePublicOrigin(fakeReq("https://x/api/qr"))).toBe("https://go.ogiam.com");
+  });
+
+  test("a malformed QR_PUBLIC_ORIGIN is ignored (falls through to canonical)", () => {
+    process.env.QR_PUBLIC_ORIGIN = "go.ogiam.com"; // missing scheme
+    process.env.NEXT_PUBLIC_BASE_URL = "https://example.com";
+    expect(resolvePublicOrigin(fakeReq("https://x/y"))).toBe("https://example.com");
+  });
+
   test("uses NEXT_PUBLIC_BASE_URL when set", () => {
     process.env.NEXT_PUBLIC_BASE_URL = "https://example.com";
     expect(resolvePublicOrigin(fakeReq("https://other.com/api/qr"))).toBe(
@@ -81,6 +95,14 @@ describe("resolvePublicOrigin", () => {
 describe("resolveInternalOrigin (server self-calls — never trusts the request)", () => {
   test("uses NEXT_PUBLIC_BASE_URL when set", () => {
     process.env.NEXT_PUBLIC_BASE_URL = "https://example.com/";
+    expect(resolveInternalOrigin()).toBe("https://example.com");
+  });
+
+  test("IGNORES QR_PUBLIC_ORIGIN (the branded QR host must never become a self-call target)", () => {
+    process.env.QR_PUBLIC_ORIGIN = "https://go.ogiam.com";
+    process.env.NEXT_PUBLIC_BASE_URL = "https://example.com";
+    // Internal self-calls forward the caller's bearer; they must trust only the
+    // canonical origin, not the public QR host (SSRF / token-exfil defense).
     expect(resolveInternalOrigin()).toBe("https://example.com");
   });
 
