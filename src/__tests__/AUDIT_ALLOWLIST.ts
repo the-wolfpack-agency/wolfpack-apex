@@ -894,6 +894,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/qr/route.ts",
     reason: "QR image generator: read-only POST, renders an image from input; no DB write",
   },
+  {
+    route: "src/app/api/qr/[id]/export/route.ts",
+    reason: "export beacon: read-only POST, fires assistant.qr_code_exported analytics on download; no DB write/state change",
+  },
 
   // Support tickets: ticket CRUD, AI draft, send, feedback, diagnostics,
   // pattern config. Support-desk product data + LLM drafting. Capability-gated

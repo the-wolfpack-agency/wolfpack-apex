@@ -4,24 +4,25 @@
  * Given a QR SVG string + a slug, save it to disk in any of the
  * formats the team actually needs for printing and digital share:
  *
- *   .svg  — vector, scales to any size; best for print files
- *   .png  — transparent-friendly raster; best for slides + web
- *   .jpg  — compressed raster with a white background; best for
+ *   .svg  - vector, scales to any size; best for print files
+ *   .png  - transparent-friendly raster; best for slides + web
+ *   .jpg  - compressed raster with a white background; best for
  *           email and platforms that reject PNG transparency
- *   .pdf  — single-page Letter PDF with the QR centered; best for
+ *   .pdf  - single-page Letter PDF with the QR centered; best for
  *           handouts, business cards, and one-off prints
  *
  * Pure client-side. Uses Canvas for raster conversion and a tiny
  * inline PDF 1.4 builder for the PDF format. No new npm deps.
  */
 
-export type QrFormat = "svg" | "png" | "jpg" | "pdf";
+export type QrFormat = "svg" | "png" | "jpg" | "pdf" | "eps";
 
 export const QR_FORMATS: { label: string; value: QrFormat }[] = [
   { label: "SVG (vector)", value: "svg" },
   { label: "PNG (transparent)", value: "png" },
   { label: "JPG (white background)", value: "jpg" },
   { label: "PDF (printable Letter page)", value: "pdf" },
+  { label: "EPS (vector, print / Illustrator)", value: "eps" },
 ];
 
 export const QR_RASTER_SIZES = [256, 512, 1024, 2048] as const;
@@ -61,7 +62,74 @@ export async function downloadQr(args: DownloadArgs): Promise<void> {
       const pdf = await buildPdf(jpeg, args.slug);
       return saveBlob(pdf, filename);
     }
+    case "eps": {
+      const eps = svgToEps(args.svg, args.slug);
+      return saveBlob(new Blob([eps], { type: "application/postscript" }), filename);
+    }
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* SVG → vector EPS (PostScript)                                        */
+/* ------------------------------------------------------------------ */
+
+/** Parse `#rgb` / `#rrggbb` / black|white into a PostScript "r g b" triple (0..1). */
+function hexToPs(color: string): string {
+  const c = color.trim().toLowerCase();
+  if (c === "black" || c === "#000" || c === "#000000") return "0 0 0";
+  if (c === "white" || c === "#fff" || c === "#ffffff") return "1 1 1";
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(c);
+  if (!m) return "0 0 0";
+  const h = m[1].length === 3 ? m[1].replace(/(.)/g, "$1$1") : m[1];
+  const v = (i: number) => (parseInt(h.slice(i, i + 2), 16) / 255).toFixed(4);
+  return `${v(0)} ${v(2)} ${v(4)}`;
+}
+
+/**
+ * Convert a renderQrSvg SVG into a TRUE-VECTOR EPS (not a raster embed), so it
+ * stays crisp at any print size and opens cleanly in Illustrator / InDesign.
+ *
+ * It reuses the single source every other format uses - the SVG we already
+ * produce - which is a grid of `<rect x y width height fill>` dark modules over a
+ * full-canvas light `<rect>`. Each dark module becomes a PostScript `rectfill`,
+ * with the Y axis flipped (PostScript origin is bottom-left; SVG is top-left).
+ * Exported so it is unit-testable without a DOM.
+ */
+export function svgToEps(svg: string, slug: string): string {
+  const vb = /viewBox="0 0 ([\d.]+) ([\d.]+)"/.exec(svg);
+  const wAttr = /<svg[^>]*\bwidth="([\d.]+)"/.exec(svg);
+  const side = Number(vb?.[2] ?? wAttr?.[1] ?? 256);
+
+  // Background = the rect with no x attribute; modules = rects with x.
+  const bg = /<rect\b(?![^>]*\bx=)[^>]*\bfill="([^"]+)"/.exec(svg);
+  const bgPs = hexToPs(bg?.[1] ?? "#fff");
+
+  const moduleRe = /<rect\b[^>]*\bx="([\d.]+)"[^>]*\by="([\d.]+)"[^>]*\bwidth="([\d.]+)"[^>]*\bheight="([\d.]+)"[^>]*\bfill="([^"]+)"/g;
+  const fills: string[] = [];
+  let darkPs = "0 0 0";
+  let m: RegExpExecArray | null;
+  while ((m = moduleRe.exec(svg)) !== null) {
+    const x = Number(m[1]), y = Number(m[2]), w = Number(m[3]), h = Number(m[4]);
+    darkPs = hexToPs(m[5]);
+    // Flip Y: EPS bottom edge = side - (y + h).
+    fills.push(`${x.toFixed(3)} ${(side - y - h).toFixed(3)} ${w.toFixed(3)} ${h.toFixed(3)} rectfill`);
+  }
+
+  const safeSlug = slug.replace(/[^\w.-]/g, "-").slice(0, 64);
+  return [
+    "%!PS-Adobe-3.0 EPSF-3.0",
+    "%%Creator: Wolfpack Instinct QR",
+    `%%Title: qr-${safeSlug}`,
+    `%%BoundingBox: 0 0 ${Math.ceil(side)} ${Math.ceil(side)}`,
+    `%%HiResBoundingBox: 0 0 ${side.toFixed(3)} ${side.toFixed(3)}`,
+    "%%EndComments",
+    `${bgPs} setrgbcolor 0 0 ${side.toFixed(3)} ${side.toFixed(3)} rectfill`,
+    `${darkPs} setrgbcolor`,
+    ...fills,
+    "showpage",
+    "%%EOF",
+    "",
+  ].join("\n");
 }
 
 /* ------------------------------------------------------------------ */
@@ -75,7 +143,7 @@ export async function downloadQr(args: DownloadArgs): Promise<void> {
  *
  * The source SVG already carries width/height attributes (renderQrSvg
  * emits `width="N" height="N"`), so we must STRIP any existing
- * width/height before adding ours — otherwise the tag ends up with
+ * width/height before adding ours - otherwise the tag ends up with
  * DUPLICATE width/height attributes. An `<img>` decodes SVG as strict
  * XML, and duplicate attributes make the document invalid, so the
  * decode fails ("svg image decode failed") in every browser. This is
@@ -186,7 +254,7 @@ async function buildPdf(jpeg: Blob, slug: string): Promise<Blob> {
   );
   endObj();
 
-  /* 4: Content stream — draw the image + caption */
+  /* 4: Content stream - draw the image + caption */
   const safeSlug = slug.replace(/[()\\]/g, "");
   const stream =
     `q\n${qrSide} 0 0 ${qrSide} ${qrX} ${qrY} cm\n/Im0 Do\nQ\n` +
@@ -198,7 +266,7 @@ async function buildPdf(jpeg: Blob, slug: string): Promise<Blob> {
   push(`\nendstream`);
   endObj();
 
-  /* 5: Image XObject — embed JPEG bytes via /DCTDecode */
+  /* 5: Image XObject - embed JPEG bytes via /DCTDecode */
   startObj(5);
   push(
     `<< /Type /XObject /Subtype /Image /Width 1024 /Height 1024 ` +

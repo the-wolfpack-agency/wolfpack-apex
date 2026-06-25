@@ -11,7 +11,7 @@
  * playwright.qr.config.ts.
  */
 import { test, expect } from "@playwright/test";
-import { normalizeSvgSize } from "../../src/app/(dashboard)/qr/download";
+import { normalizeSvgSize, svgToEps } from "../../src/app/(dashboard)/qr/download";
 
 // Mirrors the exact <svg> open tag renderQrSvg emits (xmlns + viewBox +
 // width + height + shape-rendering), which is the bug precondition.
@@ -109,5 +109,22 @@ test.describe("qr download rasterization", () => {
     await page.setContent("<!doctype html><html><body></body></html>");
     const png = await rasterizeInBrowser(page, BUGGY, "image/png");
     expect(png.decoded).toBe(false);
+  });
+
+  test("EPS export yields a non-empty PostScript blob in a real browser", async ({
+    page,
+  }) => {
+    await page.setContent("<!doctype html><html><body></body></html>");
+    const eps = svgToEps(SOURCE_SVG, "nick-card");
+    // The actual download artifact, built the way saveBlob does, in a real engine.
+    const result = await page.evaluate((epsStr) => {
+      const blob = new Blob([epsStr], { type: "application/postscript" });
+      return { size: blob.size, type: blob.type };
+    }, eps);
+    expect(result.type).toBe("application/postscript");
+    expect(result.size).toBeGreaterThan(0);
+    expect(eps.startsWith("%!PS-Adobe-3.0 EPSF-3.0")).toBe(true);
+    // True vector: one rectfill per dark module (3 in SOURCE_SVG) + 1 background.
+    expect((eps.match(/ rectfill/g) || []).length).toBe(4);
   });
 });

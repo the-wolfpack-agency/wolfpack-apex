@@ -34,6 +34,7 @@ import {
   getInstinctToken,
 } from "@/lib/client-auth";
 import { downloadQr, QR_FORMATS, type QrFormat } from "./download";
+import { reportExport } from "./export-beacon";
 import { HourHeatmap } from "@/components/HourHeatmap";
 
 /* ------------------------------------------------------------------ */
@@ -353,10 +354,12 @@ function DownloadMenu({
   testId,
   svg,
   slug,
+  codeId,
 }: {
   testId: string;
   svg: string;
   slug: string;
+  codeId?: string;
 }) {
   const [format, setFormat] = useState<QrFormat>("png");
   const [size, setSize] = useState<number>(1024);
@@ -375,6 +378,8 @@ function DownloadMenu({
         format,
         size: isRaster ? (size as 256 | 512 | 1024 | 2048) : undefined,
       });
+      // Tie the export into the learning loop (fire-and-forget, never blocks).
+      reportExport(codeId, format);
     } catch (e) {
       setErr((e as Error).message || "Download failed");
     }
@@ -1145,6 +1150,7 @@ function QrPageInner() {
                   testId="qr-latest-download"
                   svg={latestCreated.qrSvg}
                   slug={latestCreated.code.slug}
+                  codeId={latestCreated.code.id}
                 />
               </div>
             </div>
@@ -1447,6 +1453,7 @@ function QrPageInner() {
                                 testId={`qr-row-svg-download-${c.slug}`}
                                 svg={row.qrSvg}
                                 slug={c.slug}
+                                codeId={c.id}
                               />
                             ) : null}
                             <span style={{ fontSize: 12, color: "var(--wp-text-dim)" }}>
