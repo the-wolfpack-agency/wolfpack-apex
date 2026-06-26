@@ -538,6 +538,62 @@ export const VENDOR_PRESETS: Record<string, VendorPreset> = {
     description:
       "QuickBooks Online. baseUrl: https://quickbooks.api.intuit.com (sandbox: https://sandbox-quickbooks.api.intuit.com). Replace REALM_ID in objectMap with the company realm. Auth: 'Bearer <oauth-access-token>'.",
   },
+  "wolfpack-auto": {
+    /* Wolfpack Auto dealer platform (Next.js DOS, REST API). baseUrl is the
+       deployment origin (e.g. https://<dealer>.vercel.app); auth is a Bearer
+       agency API key. The dealer's objects map onto the existing CRM-typed tools
+       so an agent operates a dealership exactly as it operates a CRM:
+         deal    -> inventory (vehicles, the READ surface)
+         contact -> leads (the approval-gated WRITE surface). */
+    baseUrl: "",
+    objectMap: {
+      deal: "api/inventory",
+      contact: "api/leads",
+    },
+    description:
+      "Wolfpack Auto dealer platform. baseUrl = the deployment API origin (e.g. https://<dealer>.vercel.app). Auth: 'Bearer <agency API key>'. deal=inventory (read), contact=leads (write).",
+    search: {
+      build(objectType, query, limit) {
+        /* Inventory is the read surface; the dealer API filters structurally,
+           so the free-text query rides as a keyword `q`. Response envelope is
+           { vehicles: [...] } (leads/results tolerated too). */
+        const RESOURCE: Record<string, string> = { deal: "api/inventory", contact: "api/leads" };
+        const resource = RESOURCE[objectType] ?? `api/${objectType}`;
+        return {
+          path: `/${resource}?q=${encodeURIComponent(query)}&limit=${limit}`,
+          extract: (raw) => {
+            const r = raw as { vehicles?: unknown[]; leads?: unknown[]; results?: unknown[] };
+            return (r.vehicles ?? r.leads ?? r.results ?? []) as Array<Record<string, unknown>>;
+          },
+        };
+      },
+    },
+    writes: {
+      create(objectType, fields) {
+        /* Lead creation is the agent's write: POST /api/leads with the fields;
+           the dealer returns { id, created_at }. */
+        const RESOURCE: Record<string, string> = { contact: "api/leads", deal: "api/inventory" };
+        const resource = RESOURCE[objectType] ?? `api/${objectType}`;
+        return {
+          path: `/${resource}`,
+          body: fields,
+          extractCreatedId: (raw) => {
+            const r = raw as { id?: string };
+            return typeof r?.id === "string" ? r.id : null;
+          },
+        };
+      },
+      update(objectType, id, fields) {
+        const RESOURCE: Record<string, string> = { contact: "api/leads", deal: "api/inventory" };
+        const resource = RESOURCE[objectType] ?? `api/${objectType}`;
+        return {
+          path: `/${resource}/${encodeURIComponent(id)}`,
+          body: fields,
+          extractCreatedId: () => id,
+        };
+      },
+    },
+  },
 };
 
 /** Returns the preset (baseUrl + objectMap + optional search) for a
