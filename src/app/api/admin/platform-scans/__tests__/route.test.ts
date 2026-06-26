@@ -9,7 +9,7 @@
  *   POST unknown platform -> 404; static mode w/o a static target -> 400.
  *   gate failure -> 403. GET -> findings, ?status/?platform passed through.
  */
-const mockGetManifest = jest.fn();
+const mockResolveTarget = jest.fn();
 const mockScan = jest.fn();
 const mockScanSource = jest.fn();
 const mockReadFile = jest.fn();
@@ -37,7 +37,7 @@ jest.mock("@/lib/platform-scan/discover", () => ({
   discoverRoutes: (...a: unknown[]) => mockDiscover(...a),
   mergeManifest: (...a: unknown[]) => mockMerge(...a),
 }));
-jest.mock("@/lib/platform-scan/manifests", () => ({ getScanManifest: (...a: unknown[]) => mockGetManifest(...a) }));
+jest.mock("@/lib/platform-scan/manifests", () => ({ resolveScanTarget: (...a: unknown[]) => mockResolveTarget(...a) }));
 const mockLoadCreds = jest.fn();
 const mockEstablish = jest.fn();
 const mockProbeApi = jest.fn();
@@ -88,7 +88,7 @@ function get(url: string) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockAuth = async () => ({ ok: true, user: { id: "admin-1", role: "admin", workspaceId: "ws-1" } });
-  mockGetManifest.mockReturnValue({ ...MANIFEST });
+  mockResolveTarget.mockResolvedValue({ ...MANIFEST });
   mockScan.mockResolvedValue({ ...RESULT });
   mockScanSource.mockResolvedValue({ ...RESULT });
   mockReadFile.mockReturnValue(async () => null);
@@ -121,11 +121,11 @@ describe("POST /api/admin/platform-scans (http mode)", () => {
 
   it("defaults to the wolfpack-auto platform when body has none", async () => {
     await post({});
-    expect(mockGetManifest).toHaveBeenCalledWith("wolfpack-auto");
+    expect(mockResolveTarget).toHaveBeenCalledWith("ws-1", "wolfpack-auto");
   });
 
   it("404s an unknown platform and NEVER runs the engine", async () => {
-    mockGetManifest.mockReturnValue(null);
+    mockResolveTarget.mockResolvedValue(null);
     const res = await post({ platform: "nope" });
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "unknown_platform" });
@@ -137,7 +137,7 @@ describe("POST /api/admin/platform-scans (http mode)", () => {
     mockAuth = async () => ({ ok: false, response: new Response(null, { status: 403 }) });
     const res = await post({ platform: "wolfpack-auto" });
     expect(res.status).toBe(403);
-    expect(mockGetManifest).not.toHaveBeenCalled();
+    expect(mockResolveTarget).not.toHaveBeenCalled();
     expect(mockScan).not.toHaveBeenCalled();
   });
 });
@@ -165,7 +165,7 @@ describe("POST /api/admin/platform-scans (static mode)", () => {
   });
 
   it("400s static mode when the platform has no static target", async () => {
-    mockGetManifest.mockReturnValue({ baseUrl: MANIFEST.baseUrl, routes: MANIFEST.routes }); // no .static
+    mockResolveTarget.mockResolvedValue({ baseUrl: MANIFEST.baseUrl, routes: MANIFEST.routes }); // no .static
     const res = await post({ platform: "wolfpack-auto", mode: "static" });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "no_static_target" });
@@ -182,7 +182,7 @@ describe("authenticated scan (form-login connection)", () => {
   };
 
   it("http mode logs in and crawls AUTHENTICATED when a username/password connection exists", async () => {
-    mockGetManifest.mockReturnValue(LOGIN_MANIFEST);
+    mockResolveTarget.mockResolvedValue(LOGIN_MANIFEST);
     mockLoadCreds.mockResolvedValue({ authType: "username_password", username: "u@e.com", password: "pw", loginPath: "/api/auth/login", sessionCookieName: "session" });
     mockEstablish.mockResolvedValue({ cookie: "session=abc" });
 
@@ -193,7 +193,7 @@ describe("authenticated scan (form-login connection)", () => {
   });
 
   it("falls back to UNauthenticated crawl when no connection is configured", async () => {
-    mockGetManifest.mockReturnValue(LOGIN_MANIFEST);
+    mockResolveTarget.mockResolvedValue(LOGIN_MANIFEST);
     mockLoadCreds.mockResolvedValue(null);
     await post({ platform: "wolfpack-beyond", mode: "http" });
     expect(mockEstablish).not.toHaveBeenCalled();
@@ -201,7 +201,7 @@ describe("authenticated scan (form-login connection)", () => {
   });
 
   it("api mode logs in then runs the gray-box probe and persists", async () => {
-    mockGetManifest.mockReturnValue(LOGIN_MANIFEST);
+    mockResolveTarget.mockResolvedValue(LOGIN_MANIFEST);
     mockLoadCreds.mockResolvedValue({ authType: "username_password", username: "u@e.com", password: "pw", loginPath: "/api/auth/login", sessionCookieName: "session" });
     mockEstablish.mockResolvedValue({ cookie: "session=abc" });
     mockProbeApi.mockResolvedValue([{ route: "/api/dashboard", severity: "critical", category: "security", title: "x", detail: "y", evidence: {} }]);
@@ -215,7 +215,7 @@ describe("authenticated scan (form-login connection)", () => {
   });
 
   it("400s api mode when the platform has no apiEndpoints", async () => {
-    mockGetManifest.mockReturnValue({ baseUrl: MANIFEST.baseUrl, routes: MANIFEST.routes }); // no apiEndpoints
+    mockResolveTarget.mockResolvedValue({ baseUrl: MANIFEST.baseUrl, routes: MANIFEST.routes }); // no apiEndpoints
     const res = await post({ platform: "wolfpack-auto", mode: "api" });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "no_api_endpoints" });

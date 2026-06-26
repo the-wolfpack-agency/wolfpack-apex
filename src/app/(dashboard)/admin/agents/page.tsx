@@ -278,6 +278,22 @@ export default function AgentsPage() {
             Platform scans
           </Link>
           <Link
+            href="/admin/connectors"
+            data-testid="agents-connectors-link"
+            title="Client platforms an agent is connected to with a saved login, ready for an authenticated scan."
+            style={{
+              background: "var(--wp-dark-surface2, #1a1a1a)",
+              color: "var(--wp-gold, #f1c233)",
+              border: "1px solid var(--wp-gold, #f1c233)",
+              borderRadius: "6px",
+              padding: "0.4rem 0.9rem",
+              fontSize: "0.85rem",
+              textDecoration: "none",
+            }}
+          >
+            Connections
+          </Link>
+          <Link
             href="/admin/agents/memory"
             data-testid="agents-memory-link"
             title="What the agents have learned: the shared procedures one agent records and another inherits."

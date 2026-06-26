@@ -247,6 +247,32 @@ type LogState =
   | { kind: "error" }
   | { kind: "present"; entries: AgentLogEntry[] };
 
+/* Connected systems (Access): a connector is a client platform this agent
+   operates on the owner's behalf. The masked GET never returns the password; a
+   username_password connector is one the operator wired with the login (username
+   + password) they themselves use on the client's system, so the agent can run
+   an authenticated scan of it. Loads independently of the agent so a connectors
+   failure never blanks the profile; an empty list is the expected steady state
+   for an agent with nothing connected yet. */
+interface ConnectorRecord {
+  connectorName: string;
+  baseUrl: string;
+  authType: string;
+  authHeaderHint: string | null;
+  loginPath: string | null;
+  sessionCookieName: string | null;
+  isActive: boolean;
+}
+
+interface ConnectorsResponse {
+  connectors: ConnectorRecord[];
+}
+
+type ConnectionsState =
+  | { kind: "loading" }
+  | { kind: "error" }
+  | { kind: "present"; connectors: ConnectorRecord[] };
+
 interface TaskResponse {
   task: AgentTask;
 }
@@ -904,6 +930,21 @@ export default function AgentProfilePage({
   const [log, setLog] = useState<LogState>({ kind: "loading" });
   const [logBusy, setLogBusy] = useState(false);
 
+  /* Connected systems (Access). Loads independently of the agent so a
+     connectors failure never blanks the profile; an empty list is a first-class
+     "nothing connected yet" state, not an error. The add form POSTs a
+     username_password connection (the client login the operator uses), clears
+     the password on success, and reloads the masked list. */
+  const [connections, setConnections] = useState<ConnectionsState>({ kind: "loading" });
+  const [connName, setConnName] = useState("");
+  const [connBaseUrl, setConnBaseUrl] = useState("");
+  const [connLoginPath, setConnLoginPath] = useState("/api/auth/login");
+  const [connUsername, setConnUsername] = useState("");
+  const [connPassword, setConnPassword] = useState("");
+  const [connSessionCookie, setConnSessionCookie] = useState("session");
+  const [connecting, setConnecting] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -1036,6 +1077,25 @@ export default function AgentProfilePage({
     }
   }, [id]);
 
+  /* Loads the masked connector list (the systems this agent is connected to). A
+     failure collapses to a quiet error state so the section never blanks the
+     page; an empty array is a first-class "nothing connected yet" state, not an
+     error. The GET is masked: it never returns a connector's password. */
+  const loadConnections = useCallback(async () => {
+    setConnections({ kind: "loading" });
+    try {
+      const res = await fetchWithRefresh("/api/admin/connectors");
+      if (!res.ok) {
+        setConnections({ kind: "error" });
+        return;
+      }
+      const body = (await res.json()) as ConnectorsResponse;
+      setConnections({ kind: "present", connectors: body.connectors ?? [] });
+    } catch {
+      setConnections({ kind: "error" });
+    }
+  }, []);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -1055,6 +1115,10 @@ export default function AgentProfilePage({
   useEffect(() => {
     void loadLog();
   }, [loadLog]);
+
+  useEffect(() => {
+    void loadConnections();
+  }, [loadConnections]);
 
   /* Live progress polling. While any task is in-flight (queued or running) we
      poll the tasks GET every few seconds and replace the list with the fresh
@@ -1258,6 +1322,55 @@ export default function AgentProfilePage({
       await loadLog();
     } finally {
       setLogBusy(false);
+    }
+  }
+
+  /* Connects this agent to a client platform with the username + password the
+     operator uses to sign in there (e.g. an account a client invited them to).
+     POSTs a username_password connection; the password is encrypted server-side
+     and never returned. On success we clear the password (it is never shown
+     again) and reload the masked list so the new connection appears with its
+     "Run authenticated scan" link. A failure surfaces inline without blanking. */
+  async function addConnection() {
+    if (connecting) return;
+    const name = connName.trim();
+    const baseUrl = connBaseUrl.trim();
+    const loginPath = connLoginPath.trim();
+    const username = connUsername.trim();
+    const sessionCookie = connSessionCookie.trim();
+    if (!name || !baseUrl || !username || !connPassword || !loginPath) {
+      setConnectionError("Fill in the system name, URL, username, password, and login path.");
+      return;
+    }
+    setConnecting(true);
+    setConnectionError(null);
+    try {
+      const res = await fetchWithRefresh("/api/admin/connectors", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          connectorName: name,
+          baseUrl,
+          authType: "username_password",
+          username,
+          password: connPassword,
+          loginPath,
+          ...(sessionCookie ? { sessionCookieName: sessionCookie } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const b = (await res.json().catch(() => ({}))) as { error?: string };
+        setConnectionError(b.error || `Could not connect that system (HTTP ${res.status}).`);
+        return;
+      }
+      /* The password is never shown again: clear it on success and reload the
+         masked list so the new connection appears with its scan link. */
+      setConnPassword("");
+      await loadConnections();
+    } catch (e) {
+      setConnectionError((e as Error).message || "Network error");
+    } finally {
+      setConnecting(false);
     }
   }
 
@@ -2095,6 +2208,343 @@ export default function AgentProfilePage({
           testIdPrefix="agent-approvals"
           emptyText="No pending writes. This agent has nothing awaiting approval."
         />
+      </div>
+
+      {/* Connected systems (Access). The agent operates a client platform on the
+          operator's behalf; here the operator connects one with the username +
+          password they use to sign in there (e.g. an account a client invited
+          them to). The password is encrypted server-side and never shown again.
+          A username_password connection is scannable: it offers a "Run
+          authenticated scan" link into the platform-scans surface. Loads
+          independently so a connectors failure never blanks the profile. */}
+      <div
+        data-testid="agent-connections-section"
+        style={{
+          marginBottom: "1.5rem",
+          padding: "1.1rem 1.2rem",
+          background: "var(--wp-dark-surface, #1f1f22)",
+          border: "1px solid var(--wp-dark-border, #333)",
+          borderRadius: "8px",
+        }}
+      >
+        <div
+          style={{
+            fontSize: "0.72rem",
+            color: "var(--wp-text-muted, #6b7280)",
+            textTransform: "uppercase",
+            letterSpacing: "0.03em",
+            marginBottom: "0.3rem",
+          }}
+        >
+          Access
+        </div>
+        <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "var(--wp-text, #eee)" }}>
+          Connected systems
+        </h3>
+        <p style={{ margin: "0.35rem 0 0.9rem", fontSize: "0.82rem", lineHeight: 1.5, color: "var(--wp-text-muted, #6b7280)" }}>
+          This agent operates a client platform on your behalf. Connect one with the username and password you use to sign in (for example, an account a client invited you to). The password is encrypted and never shown again.
+        </p>
+
+        {connections.kind === "loading" && (
+          <div
+            data-testid="connections-loading"
+            style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}
+          >
+            Loading...
+          </div>
+        )}
+
+        {connections.kind === "error" && (
+          <div
+            data-testid="connections-error"
+            style={{ fontSize: "0.85rem", color: "var(--wp-text-muted, #6b7280)" }}
+          >
+            Could not load this agent&apos;s connected systems right now.
+          </div>
+        )}
+
+        {connections.kind === "present" && connections.connectors.length === 0 && (
+          <div
+            data-testid="connections-empty"
+            style={{
+              padding: "1rem",
+              background: "var(--wp-dark-surface2, #1a1a1a)",
+              border: "1px dashed var(--wp-dark-border, #333)",
+              borderRadius: "8px",
+              fontSize: "0.85rem",
+              color: "var(--wp-text-muted, #6b7280)",
+            }}
+          >
+            No systems connected. Add a client platform&apos;s login below.
+          </div>
+        )}
+
+        {connections.kind === "present" && connections.connectors.length > 0 && (
+          <ul data-testid="connections-list" style={{ listStyle: "none", padding: 0, margin: "0 0 1rem 0" }}>
+            {connections.connectors.map((conn) => {
+              const isLogin = conn.authType === "username_password";
+              return (
+                <li
+                  key={conn.connectorName}
+                  data-testid={`connection-row-${conn.connectorName}`}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "0.6rem",
+                    flexWrap: "wrap",
+                    padding: "0.6rem 0.7rem",
+                    marginBottom: "0.4rem",
+                    background: "var(--wp-dark-surface2, #1a1a1a)",
+                    border: "1px solid var(--wp-dark-border, #333)",
+                    borderRadius: "6px",
+                  }}
+                >
+                  <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                      <span
+                        style={{
+                          fontSize: "0.88rem",
+                          fontWeight: 600,
+                          color: "var(--wp-text, #eee)",
+                          fontFamily: "var(--wp-mono, monospace)",
+                          wordBreak: "break-word",
+                        }}
+                      >
+                        {conn.connectorName}
+                      </span>
+                      <span
+                        data-testid={`connection-authtype-${conn.connectorName}`}
+                        style={{
+                          flexShrink: 0,
+                          padding: "0.05rem 0.4rem",
+                          borderRadius: "8px",
+                          fontSize: "0.65rem",
+                          fontWeight: 600,
+                          background: isLogin ? "rgba(34,197,94,0.12)" : "rgba(160,160,160,0.10)",
+                          color: isLogin ? "var(--wp-success, #22c55e)" : "var(--wp-text-muted, #6b7280)",
+                          border: `1px solid ${isLogin ? "var(--wp-success, #22c55e)" : "var(--wp-dark-border, #333)"}`,
+                        }}
+                      >
+                        {isLogin ? "form login" : conn.authType}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        marginTop: "0.2rem",
+                        fontSize: "0.74rem",
+                        color: "var(--wp-text-muted, #6b7280)",
+                        wordBreak: "break-all",
+                      }}
+                    >
+                      {conn.baseUrl}
+                    </div>
+                  </div>
+                  {isLogin && (
+                    <Link
+                      href="/admin/platform-scans"
+                      data-testid={`scan-link-${conn.connectorName}`}
+                      style={{
+                        flexShrink: 0,
+                        padding: "0.4rem 0.8rem",
+                        borderRadius: "6px",
+                        fontSize: "0.8rem",
+                        fontWeight: 600,
+                        background: "var(--wp-dark-surface2, #1a1a1a)",
+                        color: "var(--wp-gold, #f1c233)",
+                        border: "1px solid var(--wp-gold, #f1c233)",
+                        textDecoration: "none",
+                      }}
+                    >
+                      Run authenticated scan
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {/* Add a connection. POSTs the username_password body the contract
+            expects; on success the password is cleared (never shown again) and
+            the masked list reloads. */}
+        <form
+          data-testid="add-connection-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void addConnection();
+          }}
+          style={{
+            marginTop: "0.5rem",
+            padding: "0.9rem 1rem",
+            background: "var(--wp-dark-surface2, #1a1a1a)",
+            border: "1px solid var(--wp-dark-border, #333)",
+            borderRadius: "8px",
+          }}
+        >
+          <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.7rem", color: "var(--wp-text, #eee)" }}>
+            Add a connection
+          </div>
+          <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
+            <label style={{ flex: "1 1 200px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+              <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>System name</span>
+              <input
+                type="text"
+                data-testid="conn-name"
+                value={connName}
+                onChange={(e) => setConnName(e.target.value)}
+                placeholder="acme-portal"
+                style={{
+                  padding: "0.5rem 0.65rem",
+                  fontSize: "0.85rem",
+                  background: "var(--wp-dark-surface, #1f1f22)",
+                  color: "var(--wp-text, #eee)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  borderRadius: "6px",
+                }}
+              />
+            </label>
+            <label style={{ flex: "1 1 220px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+              <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>Platform URL</span>
+              <input
+                type="text"
+                data-testid="conn-base-url"
+                value={connBaseUrl}
+                onChange={(e) => setConnBaseUrl(e.target.value)}
+                placeholder="https://app.client.com"
+                style={{
+                  padding: "0.5rem 0.65rem",
+                  fontSize: "0.85rem",
+                  background: "var(--wp-dark-surface, #1f1f22)",
+                  color: "var(--wp-text, #eee)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  borderRadius: "6px",
+                }}
+              />
+            </label>
+          </div>
+          <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
+            <label style={{ flex: "1 1 200px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+              <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>Username / email</span>
+              <input
+                type="text"
+                data-testid="conn-username"
+                value={connUsername}
+                onChange={(e) => setConnUsername(e.target.value)}
+                autoComplete="off"
+                style={{
+                  padding: "0.5rem 0.65rem",
+                  fontSize: "0.85rem",
+                  background: "var(--wp-dark-surface, #1f1f22)",
+                  color: "var(--wp-text, #eee)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  borderRadius: "6px",
+                }}
+              />
+            </label>
+            <label style={{ flex: "1 1 200px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+              <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>Password</span>
+              <input
+                type="password"
+                data-testid="conn-password"
+                value={connPassword}
+                onChange={(e) => setConnPassword(e.target.value)}
+                autoComplete="new-password"
+                style={{
+                  padding: "0.5rem 0.65rem",
+                  fontSize: "0.85rem",
+                  background: "var(--wp-dark-surface, #1f1f22)",
+                  color: "var(--wp-text, #eee)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  borderRadius: "6px",
+                }}
+              />
+            </label>
+          </div>
+          <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
+            <label style={{ flex: "1 1 200px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+              <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>Login path</span>
+              <input
+                type="text"
+                data-testid="conn-login-path"
+                value={connLoginPath}
+                onChange={(e) => setConnLoginPath(e.target.value)}
+                placeholder="/api/auth/login"
+                style={{
+                  padding: "0.5rem 0.65rem",
+                  fontSize: "0.85rem",
+                  background: "var(--wp-dark-surface, #1f1f22)",
+                  color: "var(--wp-text, #eee)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  borderRadius: "6px",
+                  fontFamily: "var(--wp-mono, monospace)",
+                }}
+              />
+            </label>
+            <label style={{ flex: "1 1 160px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+              <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>Session cookie</span>
+              <input
+                type="text"
+                data-testid="conn-session-cookie"
+                value={connSessionCookie}
+                onChange={(e) => setConnSessionCookie(e.target.value)}
+                placeholder="session"
+                style={{
+                  padding: "0.5rem 0.65rem",
+                  fontSize: "0.85rem",
+                  background: "var(--wp-dark-surface, #1f1f22)",
+                  color: "var(--wp-text, #eee)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  borderRadius: "6px",
+                  fontFamily: "var(--wp-mono, monospace)",
+                }}
+              />
+            </label>
+          </div>
+
+          {connectionError && (
+            <div
+              data-testid="connection-error"
+              style={{
+                marginBottom: "0.6rem",
+                padding: "0.5rem 0.75rem",
+                background: "rgba(239,68,68,0.08)",
+                color: "var(--wp-error, #ef4444)",
+                border: "1px solid var(--wp-error, #ef4444)",
+                borderRadius: "6px",
+                fontSize: "0.8rem",
+              }}
+            >
+              {connectionError}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            data-testid="add-connection-submit"
+            disabled={connecting}
+            style={{
+              padding: "0.55rem 1.1rem",
+              borderRadius: "6px",
+              fontSize: "0.85rem",
+              fontWeight: 600,
+              background: "var(--wp-gold, #f1c233)",
+              color: "var(--wp-dark, #111)",
+              border: "1px solid var(--wp-gold, #f1c233)",
+              cursor: connecting ? "not-allowed" : "pointer",
+              opacity: connecting ? 0.6 : 1,
+            }}
+          >
+            {connecting ? "Connecting..." : "Connect system"}
+          </button>
+
+          <p
+            data-testid="connection-invite-help"
+            style={{ margin: "0.7rem 0 0", fontSize: "0.74rem", lineHeight: 1.5, color: "var(--wp-text-muted, #6b7280)" }}
+          >
+            Got an invite link from a client? Accept it on their system to set your username and password, then add them here.
+          </p>
+        </form>
       </div>
 
       {/* Behavior + drift. The gate keeps an agent in check across model changes

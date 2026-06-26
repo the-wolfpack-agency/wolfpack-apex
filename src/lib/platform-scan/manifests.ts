@@ -16,6 +16,7 @@
 
 import type { ScanRouteSpec } from "./types";
 import type { ApiEndpointSpec } from "./api-probe";
+import { loadConnectorCredentials, listConnectorCredentials } from "@/lib/assistant/connectors/credentials";
 
 /** A static-source-scan target: which repo + which source files to read and run
  *  the bug detectors over (the white-box layer that catches client-side defects
@@ -130,14 +131,67 @@ export function getScanManifest(platform: string): ScanManifest | null {
   return SCAN_MANIFESTS[platform] ?? null;
 }
 
-/** The scan targets the UI offers — drives the platform selector so an operator
- *  picks WHICH platform to scan (and the findings list labels each by platform). */
-export function listScanTargets(): { platform: string; baseUrl: string; hasStatic: boolean; hasApi: boolean; hasLogin: boolean }[] {
-  return Object.entries(SCAN_MANIFESTS).map(([platform, m]) => ({
+/** Default routes probed for a connected client system that has no curated
+ *  manifest. Sitemap discovery (run route) unions real routes on top; these are
+ *  the common surfaces worth checking even when a sitemap is absent. */
+const DEFAULT_CONNECTION_ROUTES: ScanRouteSpec[] = [
+  { path: "/", journey: "Home", auth: "public" },
+  { path: "/login", journey: "Login", auth: "public" },
+  { path: "/dashboard", journey: "Dashboard", auth: "required" },
+  { path: "/account", journey: "Account", auth: "required" },
+  { path: "/settings", journey: "Settings", auth: "required" },
+];
+
+/**
+ * Resolve a scan target by name: a curated SCAN_MANIFESTS entry if one exists,
+ * otherwise an ad-hoc manifest built from a SAVED CONNECTION (so any client
+ * platform an operator connects with a username/password is scannable, not just
+ * our hardcoded platforms). Returns null if neither exists.
+ */
+export async function resolveScanTarget(workspaceId: string, platform: string): Promise<ScanManifest | null> {
+  const curated = SCAN_MANIFESTS[platform];
+  if (curated) return curated;
+
+  const creds = await loadConnectorCredentials(workspaceId, platform);
+  if (!creds || !creds.baseUrl) return null;
+  return {
+    baseUrl: creds.baseUrl,
+    routes: DEFAULT_CONNECTION_ROUTES,
+    login:
+      creds.authType === "username_password"
+        ? {
+            connectorName: platform,
+            loginPath: creds.loginPath ?? "/api/auth/login",
+            sessionCookieName: creds.sessionCookieName ?? "session",
+          }
+        : undefined,
+  };
+}
+
+/** The scan targets the UI offers — curated manifests PLUS every saved connection
+ *  in the workspace, so an operator picks WHICH platform to scan (and the findings
+ *  list labels each by platform). Curated entries win on a name collision. */
+export async function listScanTargets(
+  workspaceId: string,
+): Promise<{ platform: string; baseUrl: string; hasStatic: boolean; hasApi: boolean; hasLogin: boolean }[]> {
+  const curated = Object.entries(SCAN_MANIFESTS).map(([platform, m]) => ({
     platform,
     baseUrl: m.baseUrl,
     hasStatic: !!m.static,
     hasApi: !!m.apiEndpoints?.length,
     hasLogin: !!m.login,
   }));
+  const seen = new Set(curated.map((t) => t.platform));
+
+  const connections = (await listConnectorCredentials(workspaceId))
+    .filter((c) => c.isActive && c.baseUrl && !seen.has(c.connectorName))
+    .map((c) => ({
+      platform: c.connectorName,
+      baseUrl: c.baseUrl,
+      hasStatic: false,
+      hasApi: false,
+      hasLogin: c.authType === "username_password",
+    }));
+
+  return [...curated, ...connections];
 }

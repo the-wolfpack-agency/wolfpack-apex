@@ -172,6 +172,24 @@ function makeLogEntry(over: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+// The connected-systems section GETs /api/admin/connectors on mount and POSTs
+// the same path to add a username_password connection. Matched on the full path
+// so unrelated agent/scan/tasks/drift GETs never fall through to it.
+const CONNECTORS_PATH = "/api/admin/connectors";
+
+function makeConnector(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    connectorName: "acme-portal",
+    baseUrl: "https://app.acme.com",
+    authType: "username_password",
+    authHeaderHint: null,
+    loginPath: "/api/auth/login",
+    sessionCookieName: "session",
+    isActive: true,
+    ...over,
+  };
+}
+
 const SCAN_PATH = "/scan";
 const TASKS_PATH = "/tasks";
 const TASKS_RUN_PATH = "/tasks/run";
@@ -208,10 +226,21 @@ function routeByUrl(opts: {
   onDriftCheck?: () => any;
   log?: () => any;
   onAnalytics?: () => any;
+  connectors?: () => any;
+  onAddConnection?: () => any;
 }) {
   return (url: unknown, init?: { method?: string }) => {
     const u = String(url);
     if (init?.method === "PATCH" && opts.onPatch) return Promise.resolve(opts.onPatch());
+    // The connected-systems section: GET lists masked connectors, POST adds a
+    // username_password connection. Matched on the full path so the agent GET
+    // fall-through below never swallows it.
+    if (u.includes(CONNECTORS_PATH) && init?.method === "POST") {
+      return Promise.resolve((opts.onAddConnection ?? (() => mkRes({ connector: makeConnector() }, { status: 201 })))());
+    }
+    if (u.includes(CONNECTORS_PATH)) {
+      return Promise.resolve((opts.connectors ?? (() => mkRes({ connectors: [] })))());
+    }
     // Analytics POSTs (the agent.log_viewed view event) are best effort; route
     // them first so the fire-and-forget POST never falls through to a data GET.
     if (u.includes(ANALYTICS_PATH) && init?.method === "POST") {
@@ -1466,5 +1495,148 @@ describe("/admin/agents/[id]: agent log (granular audit trail)", () => {
     await waitFor(() => expect(screen.getByTestId("agent-log-row-log-second")).toBeInTheDocument());
     // The Refresh fired at least one more log GET.
     expect(logGetCount).toBeGreaterThan(afterMount);
+  });
+});
+
+describe("/admin/agents/[id]: connected systems (access)", () => {
+  it("renders the section and a connected username_password system with its authenticated-scan link", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        connectors: () => mkRes({ connectors: [makeConnector({ connectorName: "acme-portal" })] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    // The section renders with its eyebrow + heading.
+    await waitFor(() => expect(screen.getByTestId("agent-connections-section")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-connections-section")).toHaveTextContent(/connected systems/i);
+
+    // The connection row shows the name, baseUrl, and a "form login" badge.
+    const row = screen.getByTestId("connection-row-acme-portal");
+    expect(row).toHaveTextContent("acme-portal");
+    expect(row).toHaveTextContent("https://app.acme.com");
+    expect(screen.getByTestId("connection-authtype-acme-portal")).toHaveTextContent(/form login/i);
+
+    // The authenticated-scan link points at the platform-scans surface.
+    const scanLink = screen.getByTestId("scan-link-acme-portal");
+    expect(scanLink).toHaveAttribute("href", "/admin/platform-scans");
+    expect(scanLink).toHaveTextContent(/run authenticated scan/i);
+
+    // The empty state must not show when a connection is present.
+    expect(screen.queryByTestId("connections-empty")).not.toBeInTheDocument();
+  });
+
+  it("shows the empty state when no systems are connected", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        connectors: () => mkRes({ connectors: [] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("connections-empty")).toBeInTheDocument());
+    expect(screen.getByTestId("connections-empty")).toHaveTextContent(/no systems connected/i);
+    expect(screen.queryByTestId("connections-list")).not.toBeInTheDocument();
+  });
+
+  it("submitting the add form POSTs the username_password body and reloads the list", async () => {
+    // Empty before the POST; the connection appears after the reload.
+    let added = false;
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        connectors: () =>
+          added
+            ? mkRes({ connectors: [makeConnector({ connectorName: "client-crm" })] })
+            : mkRes({ connectors: [] }),
+        onAddConnection: () => {
+          added = true;
+          return mkRes({ connector: makeConnector({ connectorName: "client-crm" }) }, { status: 201 });
+        },
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("add-connection-form")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("conn-name"), { target: { value: "client-crm" } });
+      fireEvent.change(screen.getByTestId("conn-base-url"), { target: { value: "https://app.client.com" } });
+      fireEvent.change(screen.getByTestId("conn-username"), { target: { value: "ops@wolfpack.com" } });
+      fireEvent.change(screen.getByTestId("conn-password"), { target: { value: "s3cret-pw" } });
+    });
+    // The login-path + session-cookie carry sensible defaults already.
+    expect(screen.getByTestId("conn-login-path")).toHaveValue("/api/auth/login");
+    expect(screen.getByTestId("conn-session-cookie")).toHaveValue("session");
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-connection-submit"));
+    });
+
+    // A POST went to /api/admin/connectors with the username_password body.
+    const post = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).includes("/api/admin/connectors"),
+    );
+    expect(post).toBeTruthy();
+    const body = JSON.parse((post?.[1] as { body: string }).body);
+    expect(body).toMatchObject({
+      connectorName: "client-crm",
+      baseUrl: "https://app.client.com",
+      authType: "username_password",
+      username: "ops@wolfpack.com",
+      password: "s3cret-pw",
+      loginPath: "/api/auth/login",
+      sessionCookieName: "session",
+    });
+
+    // The list reloaded and now shows the new connection; the password is cleared.
+    await waitFor(() => expect(screen.getByTestId("connection-row-client-crm")).toBeInTheDocument());
+    expect(screen.getByTestId("conn-password")).toHaveValue("");
+  });
+
+  it("surfaces an inline error when the add fails, without blanking the page", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        connectors: () => mkRes({ connectors: [] }),
+        onAddConnection: () => mkRes({ error: "invalid connector" }, { ok: false, status: 400 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("add-connection-form")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("conn-name"), { target: { value: "bad" } });
+      fireEvent.change(screen.getByTestId("conn-base-url"), { target: { value: "https://x.com" } });
+      fireEvent.change(screen.getByTestId("conn-username"), { target: { value: "u@x.com" } });
+      fireEvent.change(screen.getByTestId("conn-password"), { target: { value: "pw" } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-connection-submit"));
+    });
+
+    await waitFor(() => expect(screen.getByTestId("connection-error")).toBeInTheDocument());
+    expect(screen.getByTestId("connection-error")).toHaveTextContent(/invalid connector/i);
+    // The rest of the profile still renders: a failed add never blanks it.
+    expect(screen.getByTestId("agent-name")).toBeInTheDocument();
   });
 });

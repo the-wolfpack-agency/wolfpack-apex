@@ -9,7 +9,7 @@ import { discoverRoutes, mergeManifest } from "@/lib/platform-scan/discover";
 import { establishSession } from "@/lib/platform-scan/session";
 import { probeApi } from "@/lib/platform-scan/api-probe";
 import { loadConnectorCredentials } from "@/lib/assistant/connectors/credentials";
-import { getScanManifest, type ScanManifest } from "@/lib/platform-scan/manifests";
+import { resolveScanTarget, type ScanManifest } from "@/lib/platform-scan/manifests";
 import type { PlatformScanResult } from "@/lib/platform-scan/types";
 
 /** Establish an authenticated session if the platform uses form login and a
@@ -55,7 +55,8 @@ export async function POST(req: NextRequest) {
   const platform = body.platform ?? "wolfpack-auto";
   const mode = body.mode === "static" || body.mode === "api" ? body.mode : "http";
 
-  const manifest = getScanManifest(platform);
+  // Curated platform OR a saved client connection (so any connected system is scannable).
+  const manifest = await resolveScanTarget(workspaceId, platform);
   if (!manifest) {
     return NextResponse.json({ error: "unknown_platform" }, { status: 404 });
   }

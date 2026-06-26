@@ -11,5 +11,6 @@ import { listScanTargets } from "@/lib/platform-scan/manifests";
 export async function GET(req: NextRequest) {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
-  return NextResponse.json({ targets: listScanTargets() });
+  const workspaceId = auth.user.workspaceId ?? "default";
+  return NextResponse.json({ targets: await listScanTargets(workspaceId) });
 }

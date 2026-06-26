@@ -81,8 +81,27 @@ export async function POST(req: NextRequest) {
   }
 
   /* --- Validate --- */
-  const connectorName = typeof body.connectorName === "string" ? body.connectorName : "";
-  if (!SUPPORTED_CONNECTORS.has(connectorName)) {
+  const connectorName = typeof body.connectorName === "string" ? body.connectorName.trim() : "";
+  // auth_type defaults to static_bearer so existing vendor callers keep working.
+  const rawAuthType = body.authType === undefined ? "static_bearer" : body.authType;
+  if (rawAuthType !== "static_bearer" && rawAuthType !== "oauth2" && rawAuthType !== "username_password") {
+    return NextResponse.json(
+      { error: "authType must be one of: static_bearer, oauth2, username_password" },
+      { status: 400 },
+    );
+  }
+  // Vendor (bearer/oauth2) connectors must be a known preset name. A
+  // username_password connection targets an ARBITRARY client platform, so any
+  // url-safe slug is allowed (this is what lets an operator connect a client
+  // system an agent was invited to, not just our preset vendors).
+  if (rawAuthType === "username_password") {
+    if (!/^[a-z0-9][a-z0-9-]{1,48}$/.test(connectorName)) {
+      return NextResponse.json(
+        { error: "connectorName must be a url-safe slug (a-z, 0-9, dash; 2-49 chars)" },
+        { status: 400 },
+      );
+    }
+  } else if (!SUPPORTED_CONNECTORS.has(connectorName)) {
     return NextResponse.json(
       { error: `connectorName must be one of: ${[...SUPPORTED_CONNECTORS].join(", ")}` },
       { status: 400 },
@@ -106,20 +125,7 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-
-  /* auth_type defaults to static_bearer so existing callers (authHeader
-     only) keep working unchanged. */
-  const rawAuthType = body.authType === undefined ? "static_bearer" : body.authType;
-  if (
-    rawAuthType !== "static_bearer" &&
-    rawAuthType !== "oauth2" &&
-    rawAuthType !== "username_password"
-  ) {
-    return NextResponse.json(
-      { error: "authType must be one of: static_bearer, oauth2, username_password" },
-      { status: 400 },
-    );
-  }
+  // (authType already validated above, before the connectorName gate.)
   const authType: AuthType = rawAuthType;
 
   /* --- Per-auth-type field validation --- */
