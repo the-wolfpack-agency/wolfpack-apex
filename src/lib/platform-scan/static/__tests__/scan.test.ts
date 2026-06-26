@@ -44,8 +44,10 @@ describe("scanSource", () => {
     expect(result.routeCount).toBe(3);
     // clean file counts ok; buggy file does not; missing file is skipped.
     expect(result.okCount).toBe(1);
-    // buggy file fires all three detectors.
-    expect(result.findings).toHaveLength(3);
+    // buggy file fires silentFetch + hardcodedTenantId (the raw-fetch detector
+    // was removed as an apex-specific false-positive source).
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings.map((f) => f.category).sort()).toEqual(["bug", "security"]);
     expect(result.findings.every((f) => f.route === "app/page.tsx")).toBe(true);
     expect(readFile).toHaveBeenCalledTimes(3);
   });

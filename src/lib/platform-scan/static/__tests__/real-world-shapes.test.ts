@@ -11,8 +11,6 @@
  */
 import { runDetectors } from "@/lib/platform-scan/static/detectors";
 
-const cat = (fs: ReturnType<typeof runDetectors>, c: string) => fs.filter((f) => f.category === c);
-
 it("fires silentFetch on the real 'await fetch -> json -> ?? []' shape guarded only by try/catch (customers page)", () => {
   // try/catch catches network throws, but a 401/500 returns a Response, json()
   // parses the error body, and `?? []` renders an empty grid: the silent blank.
@@ -29,10 +27,10 @@ function Customers() {
   };
 }`;
   const findings = runDetectors({ path: "src/app/admin/customers/page.tsx", content });
-  expect(cat(findings, "bug")).toHaveLength(1);
-  expect(findings.find((f) => f.category === "bug")).toMatchObject({ severity: "high", title: expect.stringMatching(/ok\/status/) });
-  // The same line is also a raw authed fetch from a client component.
-  expect(cat(findings, "security").some((f) => /raw fetch/i.test(f.title))).toBe(true);
+  // Exactly one finding: the silent-fetch bug. No raw-fetch security noise (that
+  // detector was removed) and no empty-catch (the catch sets an error).
+  expect(findings).toHaveLength(1);
+  expect(findings[0]).toMatchObject({ severity: "high", category: "bug", title: expect.stringMatching(/ok\/status/) });
 });
 
 it("does NOT fire silentFetch when the real code guards with `if (res.ok)` (leads page)", () => {
@@ -45,8 +43,9 @@ async function load() {
   }
 }`;
   const findings = runDetectors({ path: "src/app/admin/leads/page.tsx", content });
-  expect(cat(findings, "bug")).toHaveLength(0); // guarded -> true negative
-  expect(cat(findings, "security").length).toBeGreaterThan(0); // raw /api fetch still flagged
+  // Guarded by if(res.ok) -> no silent-fetch finding; with the raw-fetch detector
+  // removed, a guarded client fetch is correctly silent (true negative).
+  expect(findings).toHaveLength(0);
 });
 
 it("fires hardcodedTenantId on the real `process.env.DEALER_ID ?? <uuid>` default (inventory/settings)", () => {

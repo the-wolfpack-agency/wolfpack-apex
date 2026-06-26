@@ -66,43 +66,13 @@ export function silentFetch(file: SourceFile): ScanFinding[] {
   return findings;
 }
 
-const USE_CLIENT = /["']use client["']/;
-// fetch("/api/...) or fetch(`/api/...`) but NOT fetchWithRefresh.
-const RAW_API_FETCH = /(?<!WithRefresh)\bfetch\s*\(\s*[`"']\/api\//;
-
-/**
- * rawAuthedFetchInClient: a "use client" file that calls raw fetch() against
- * /api directly (not via fetchWithRefresh). Client fetches must go through the
- * refresh wrapper; a raw call gets a 401 when the 15-min JWT expires and blanks
- * the page instead of rotating the token.
- */
-export function rawAuthedFetchInClient(file: SourceFile): ScanFinding[] {
-  if (!USE_CLIENT.test(file.content)) return [];
-
-  const lines = file.content.split("\n");
-  const findings: ScanFinding[] = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!RAW_API_FETCH.test(line)) continue;
-    // Defensive: skip fetchWithRefresh even if the lookbehind somehow misses.
-    if (/fetchWithRefresh/.test(line)) continue;
-
-    findings.push({
-      route: file.path,
-      severity: "medium",
-      category: "security",
-      title:
-        "raw fetch to /api from a client component (no token refresh; 401 blanks the page)",
-      detail:
-        "This client component calls fetch() against /api directly instead of fetchWithRefresh. " +
-        "On JWT expiry the 401 is not handled, so the page blanks instead of refreshing the token.",
-      evidence: { line: i + 1, snippet: line.trim() },
-    });
-  }
-
-  return findings;
-}
+// NOTE: a "raw fetch to /api from a client component" detector was removed.
+// That was an *apex* convention (all client fetches must use fetchWithRefresh for
+// JWT rotation) — it does NOT generalize to an arbitrary client platform with a
+// different auth model, and it fired on essentially every client API call (343
+// findings on one target, ~all false positives), duplicating silentFetch on the
+// lines that are genuine bugs. The universal, real bug — a response consumed
+// without an ok/status check — is caught by silentFetch above.
 
 const DEALER_ID = /process\.env\.DEALER_ID\b/;
 const COMPONENT_PATH = /(page\.tsx|route\.tsx|components?\/|\.tsx$|\.jsx$)/i;
@@ -151,6 +121,16 @@ const SAME_LINE_BRACE_CLOSE = /\bcatch\s*(?:\([^)]*\))?\s*\{([^}]*)\}/;
  * `catch (e) { }`) we check that inner text is blank; otherwise we scan forward
  * to the first non-blank line and flag if it is the closing brace.
  */
+/** An empty catch only matters when it swallows an ASYNC/network error (a silent
+ *  failure that blanks a page or drops a write). A trivial empty catch (e.g.
+ *  around a JSON.parse or a feature check) is noise. We scope to catches whose
+ *  preceding try body (the ~12 lines above) contains an await / fetch / .then. */
+const ASYNC_OP = /\b(await\b|fetch\s*\(|\.then\s*\()/;
+function swallowsAsync(lines: string[], catchIndex: number): boolean {
+  const from = Math.max(0, catchIndex - 12);
+  return lines.slice(from, catchIndex + 1).some((l) => ASYNC_OP.test(l));
+}
+
 export function emptyCatch(file: SourceFile): ScanFinding[] {
   const lines = file.content.split("\n");
   const findings: ScanFinding[] = [];
@@ -161,7 +141,9 @@ export function emptyCatch(file: SourceFile): ScanFinding[] {
     // Case A: catch and its closing brace are on the same line.
     const sameLine = SAME_LINE_BRACE_CLOSE.exec(line);
     if (sameLine) {
-      if (sameLine[1].trim() === "") {
+      // `catch {} finally { ... }` is the intentional best-effort idiom: the
+      // error is deliberately ignored because cleanup runs in finally. Not a bug.
+      if (sameLine[1].trim() === "" && !/\}\s*finally\b/.test(line) && swallowsAsync(lines, i)) {
         findings.push(makeEmptyCatchFinding(file, i, line));
       }
       continue;
@@ -176,7 +158,8 @@ export function emptyCatch(file: SourceFile): ScanFinding[] {
     // Scan forward to the first non-blank line.
     let j = i + 1;
     while (j < lines.length && lines[j].trim() === "") j++;
-    if (j < lines.length && lines[j].trim() === "}") {
+    // Empty body, NOT followed by finally, and wraps an async op.
+    if (j < lines.length && lines[j].trim() === "}" && !/^\}\s*finally\b/.test(lines[j + 1]?.trim() ?? "") && swallowsAsync(lines, i)) {
       findings.push(makeEmptyCatchFinding(file, i, line));
     }
   }
@@ -191,12 +174,15 @@ function makeEmptyCatchFinding(
 ): ScanFinding {
   return {
     route: file.path,
-    severity: "medium",
+    // Low: a code smell, not a high-impact bug — a bare empty catch (no finally
+    // cleanup) swallows an error, but many are deliberate best-effort. Surfaced
+    // for review, not alarm.
+    severity: "low",
     category: "bug",
     title: "error silently swallowed (empty catch)",
     detail:
-      "A catch block has an empty body, so the error is swallowed with no log, " +
-      "no user-facing message, and no rethrow. Failures disappear silently.",
+      "A catch block has an empty body and no finally cleanup, so the error is " +
+      "swallowed with no log, no user-facing message, and no rethrow.",
     evidence: { line: index + 1, snippet: line.trim() },
   };
 }
@@ -253,6 +239,13 @@ export function dangerousInnerHtml(file: SourceFile): ScanFinding[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!DANGEROUS_INNER_HTML.test(line)) continue;
+    // The __html value sits on this line or the next couple (object literal).
+    const ctx = `${line}\n${lines[i + 1] ?? ""}\n${lines[i + 2] ?? ""}`;
+    // JSON.stringify(...) is the standard SAFE JSON-LD / structured-data pattern
+    // (serialized data, not markup) — not an XSS vector.
+    if (/JSON\.stringify\s*\(/.test(ctx)) continue;
+    // A reviewer already vetted this site (audit-safe / eslint-disable comment).
+    if (/(audit-safe|eslint-disable)/i.test(`${lines[i - 1] ?? ""}\n${line}`)) continue;
 
     findings.push({
       route: file.path,
@@ -305,7 +298,6 @@ export function suppressedTypecheck(file: SourceFile): ScanFinding[] {
 export function runDetectors(file: SourceFile): ScanFinding[] {
   return [
     ...silentFetch(file),
-    ...rawAuthedFetchInClient(file),
     ...hardcodedTenantId(file),
     ...emptyCatch(file),
     ...unvalidatedNumericInput(file),

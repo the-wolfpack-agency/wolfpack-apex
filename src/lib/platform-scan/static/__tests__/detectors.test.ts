@@ -6,7 +6,6 @@
  */
 import {
   silentFetch,
-  rawAuthedFetchInClient,
   hardcodedTenantId,
   emptyCatch,
   unvalidatedNumericInput,
@@ -58,45 +57,8 @@ describe("silentFetch", () => {
   });
 });
 
-describe("rawAuthedFetchInClient", () => {
-  it("fires on a raw /api fetch in a use client file", () => {
-    const content = [
-      '"use client";',
-      "export function Widget() {",
-      '  const p = fetch("/api/widgets");',
-      "  return p;",
-      "}",
-    ].join("\n");
-    const f = rawAuthedFetchInClient({ path: "components/widget.tsx", content });
-    expect(f).toHaveLength(1);
-    expect(f[0]).toMatchObject({
-      severity: "medium",
-      category: "security",
-      title:
-        "raw fetch to /api from a client component (no token refresh; 401 blanks the page)",
-    });
-    expect(f[0].evidence.line).toBe(3);
-  });
-
-  it("does NOT fire when fetchWithRefresh is used", () => {
-    const content = [
-      '"use client";',
-      "export function Widget() {",
-      '  return fetchWithRefresh("/api/widgets");',
-      "}",
-    ].join("\n");
-    expect(rawAuthedFetchInClient({ path: "components/widget.tsx", content })).toHaveLength(0);
-  });
-
-  it("does NOT fire in a server file (no use client directive)", () => {
-    const content = [
-      "export async function GET() {",
-      '  return fetch("/api/widgets");',
-      "}",
-    ].join("\n");
-    expect(rawAuthedFetchInClient({ path: "app/api/route.ts", content })).toHaveLength(0);
-  });
-});
+// rawAuthedFetchInClient was REMOVED (apex-specific convention, redundant with
+// silentFetch, ~all false positives on a generic client platform). No tests.
 
 describe("hardcodedTenantId", () => {
   it("fires on process.env.DEALER_ID in a page component", () => {
@@ -128,11 +90,11 @@ describe("hardcodedTenantId", () => {
 });
 
 describe("emptyCatch", () => {
-  it("fires on a multi-line empty catch body", () => {
+  it("fires (low) on a multi-line empty catch around an ASYNC op", () => {
     const content = [
-      "function risky() {",
+      "async function load() {",
       "  try {",
-      "    doThing();",
+      "    await fetch('/api/x');",
       "  } catch (e) {",
       "  }",
       "}",
@@ -140,7 +102,7 @@ describe("emptyCatch", () => {
     const f = emptyCatch({ path: "app/page.tsx", content });
     expect(f).toHaveLength(1);
     expect(f[0]).toMatchObject({
-      severity: "medium",
+      severity: "low",
       category: "bug",
       title: "error silently swallowed (empty catch)",
       route: "app/page.tsx",
@@ -148,34 +110,41 @@ describe("emptyCatch", () => {
     expect(f[0].evidence.line).toBe(4);
   });
 
-  it("fires on a same-line empty catch (catch {})", () => {
+  it("fires on a same-line empty catch around an await", () => {
     const content = [
-      "function risky() {",
-      "  try { doThing(); } catch {}",
+      "async function load() {",
+      "  try { await fetch('/api/x'); } catch {}",
       "}",
     ].join("\n");
-    const f = emptyCatch({ path: "app/page.tsx", content });
-    expect(f).toHaveLength(1);
-    expect(f[0].evidence.line).toBe(2);
+    expect(emptyCatch({ path: "app/page.tsx", content })).toHaveLength(1);
   });
 
-  it("does NOT fire when the catch body has a statement", () => {
+  it("does NOT fire on an empty catch with NO async op (low-signal noise)", () => {
     const content = [
-      "function risky() {",
-      "  try {",
-      "    doThing();",
-      "  } catch (e) {",
-      "    setError(e);",
-      "  }",
+      "function parse(s) {",
+      "  try { return JSON.parse(s); } catch {}",
       "}",
     ].join("\n");
     expect(emptyCatch({ path: "app/page.tsx", content })).toHaveLength(0);
   });
 
-  it("does NOT fire when the catch rethrows on the same line", () => {
+  it("does NOT fire on the `catch {} finally {}` cleanup idiom", () => {
     const content = [
-      "function risky() {",
-      "  try { doThing(); } catch (e) { throw e; }",
+      "async function load() {",
+      "  try { await fetch('/api/x'); } catch {} finally { setLoading(false); }",
+      "}",
+    ].join("\n");
+    expect(emptyCatch({ path: "app/page.tsx", content })).toHaveLength(0);
+  });
+
+  it("does NOT fire when the catch body has a statement", () => {
+    const content = [
+      "async function load() {",
+      "  try {",
+      "    await fetch('/api/x');",
+      "  } catch (e) {",
+      "    setError(e);",
+      "  }",
       "}",
     ].join("\n");
     expect(emptyCatch({ path: "app/page.tsx", content })).toHaveLength(0);
@@ -235,6 +204,25 @@ describe("dangerousInnerHtml", () => {
       route: "components/body.tsx",
     });
     expect(f[0].evidence.line).toBe(2);
+  });
+
+  it("does NOT fire on the safe JSON-LD JSON.stringify pattern", () => {
+    const content = [
+      "export function Ld({ data }) {",
+      '  return <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }} />;',
+      "}",
+    ].join("\n");
+    expect(dangerousInnerHtml({ path: "components/ld.tsx", content })).toHaveLength(0);
+  });
+
+  it("does NOT fire on a line a reviewer marked audit-safe", () => {
+    const content = [
+      "export function Body({ html }) {",
+      "  // audit-safe: html is a hardcoded literal",
+      "  return <div dangerouslySetInnerHTML={{ __html: html }} />;",
+      "}",
+    ].join("\n");
+    expect(dangerousInnerHtml({ path: "components/body.tsx", content })).toHaveLength(0);
   });
 
   it("does NOT fire on a plain div with sanitized text", () => {
@@ -299,9 +287,6 @@ describe("runDetectors", () => {
     const f = runDetectors({ path: "app/page.tsx", content });
     const titles = f.map((x) => x.title).sort();
     expect(titles).toContain("fetch result used without an ok/status check");
-    expect(titles).toContain(
-      "raw fetch to /api from a client component (no token refresh; 401 blanks the page)",
-    );
     expect(titles).toContain(
       "hardcoded tenant id (process.env.DEALER_ID) in a page/component",
     );
