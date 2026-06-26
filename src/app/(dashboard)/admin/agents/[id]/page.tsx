@@ -942,6 +942,13 @@ export default function AgentProfilePage({
   const [connUsername, setConnUsername] = useState("");
   const [connPassword, setConnPassword] = useState("");
   const [connSessionCookie, setConnSessionCookie] = useState("session");
+  /* The connection auth type. "username_password" is a client form login (the
+     default); "oauth_password" wires an OAuth Resource-Owner-Password provider
+     (e.g. a Salesforce sandbox) where baseUrl is the login host and loginPath
+     the token path. */
+  const [connAuthType, setConnAuthType] = useState<"username_password" | "oauth_password">("username_password");
+  const [connClientId, setConnClientId] = useState("");
+  const [connClientSecret, setConnClientSecret] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
@@ -1338,34 +1345,55 @@ export default function AgentProfilePage({
     const loginPath = connLoginPath.trim();
     const username = connUsername.trim();
     const sessionCookie = connSessionCookie.trim();
-    if (!name || !baseUrl || !username || !connPassword || !loginPath) {
+    const clientId = connClientId.trim();
+    const clientSecret = connClientSecret.trim();
+    if (connAuthType === "oauth_password") {
+      if (!name || !baseUrl || !clientId || !clientSecret || !username || !connPassword || !loginPath) {
+        setConnectionError("Fill in the system name, login URL, client id, client secret, username, password, and token path.");
+        return;
+      }
+    } else if (!name || !baseUrl || !username || !connPassword || !loginPath) {
       setConnectionError("Fill in the system name, URL, username, password, and login path.");
       return;
     }
     setConnecting(true);
     setConnectionError(null);
     try {
+      const body =
+        connAuthType === "oauth_password"
+          ? {
+              connectorName: name,
+              baseUrl,
+              authType: "oauth_password",
+              clientId,
+              clientSecret,
+              username,
+              password: connPassword,
+              loginPath,
+            }
+          : {
+              connectorName: name,
+              baseUrl,
+              authType: "username_password",
+              username,
+              password: connPassword,
+              loginPath,
+              ...(sessionCookie ? { sessionCookieName: sessionCookie } : {}),
+            };
       const res = await fetchWithRefresh("/api/admin/connectors", {
         method: "POST",
         headers: jsonHeaders(),
-        body: JSON.stringify({
-          connectorName: name,
-          baseUrl,
-          authType: "username_password",
-          username,
-          password: connPassword,
-          loginPath,
-          ...(sessionCookie ? { sessionCookieName: sessionCookie } : {}),
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const b = (await res.json().catch(() => ({}))) as { error?: string };
         setConnectionError(b.error || `Could not connect that system (HTTP ${res.status}).`);
         return;
       }
-      /* The password is never shown again: clear it on success and reload the
-         masked list so the new connection appears with its scan link. */
+      /* The secrets are never shown again: clear the password (and client secret)
+         on success and reload the masked list so the new connection appears. */
       setConnPassword("");
+      setConnClientSecret("");
       await loadConnections();
     } catch (e) {
       setConnectionError((e as Error).message || "Network error");
@@ -2387,6 +2415,49 @@ export default function AgentProfilePage({
           </div>
           <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
             <label style={{ flex: "1 1 200px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+              <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>Connection type</span>
+              <select
+                data-testid="conn-auth-type"
+                value={connAuthType}
+                onChange={(e) => {
+                  const next = e.target.value as "username_password" | "oauth_password";
+                  setConnAuthType(next);
+                  /* Switch the login-path default to the right idiom for the
+                     selected mode, but only when it is still the other mode's
+                     default so a typed override is preserved. */
+                  if (next === "oauth_password" && connLoginPath.trim() === "/api/auth/login") {
+                    setConnLoginPath("/services/oauth2/token");
+                  } else if (next === "username_password" && connLoginPath.trim() === "/services/oauth2/token") {
+                    setConnLoginPath("/api/auth/login");
+                  }
+                }}
+                style={{
+                  padding: "0.5rem 0.65rem",
+                  fontSize: "0.85rem",
+                  background: "var(--wp-dark-surface, #1f1f22)",
+                  color: "var(--wp-text, #eee)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  borderRadius: "6px",
+                }}
+              >
+                <option value="username_password">Username &amp; password</option>
+                <option value="oauth_password">OAuth password (Salesforce)</option>
+              </select>
+            </label>
+          </div>
+          {connAuthType === "oauth_password" && (
+            <p
+              data-testid="conn-oauth-help"
+              style={{ margin: "0 0 0.6rem", fontSize: "0.74rem", lineHeight: 1.5, color: "var(--wp-text-muted, #6b7280)" }}
+            >
+              OAuth Resource-Owner-Password grant. The platform URL is the login
+              host (https://test.salesforce.com for a sandbox,
+              https://login.salesforce.com for production). For Salesforce, append
+              your security token to the password (password + security token).
+            </p>
+          )}
+          <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
+            <label style={{ flex: "1 1 200px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
               <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>System name</span>
               <input
                 type="text"
@@ -2423,6 +2494,47 @@ export default function AgentProfilePage({
               />
             </label>
           </div>
+          {connAuthType === "oauth_password" && (
+            <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
+              <label style={{ flex: "1 1 200px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>Consumer key / client_id</span>
+                <input
+                  type="text"
+                  data-testid="conn-client-id"
+                  value={connClientId}
+                  onChange={(e) => setConnClientId(e.target.value)}
+                  autoComplete="off"
+                  placeholder="3MVG9..."
+                  style={{
+                    padding: "0.5rem 0.65rem",
+                    fontSize: "0.85rem",
+                    background: "var(--wp-dark-surface, #1f1f22)",
+                    color: "var(--wp-text, #eee)",
+                    border: "1px solid var(--wp-dark-border, #333)",
+                    borderRadius: "6px",
+                  }}
+                />
+              </label>
+              <label style={{ flex: "1 1 200px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>Consumer secret</span>
+                <input
+                  type="password"
+                  data-testid="conn-client-secret"
+                  value={connClientSecret}
+                  onChange={(e) => setConnClientSecret(e.target.value)}
+                  autoComplete="off"
+                  style={{
+                    padding: "0.5rem 0.65rem",
+                    fontSize: "0.85rem",
+                    background: "var(--wp-dark-surface, #1f1f22)",
+                    color: "var(--wp-text, #eee)",
+                    border: "1px solid var(--wp-dark-border, #333)",
+                    borderRadius: "6px",
+                  }}
+                />
+              </label>
+            </div>
+          )}
           <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
             <label style={{ flex: "1 1 200px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
               <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>Username / email</span>
@@ -2463,13 +2575,15 @@ export default function AgentProfilePage({
           </div>
           <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
             <label style={{ flex: "1 1 200px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-              <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>Login path</span>
+              <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>
+                {connAuthType === "oauth_password" ? "Token path" : "Login path"}
+              </span>
               <input
                 type="text"
                 data-testid="conn-login-path"
                 value={connLoginPath}
                 onChange={(e) => setConnLoginPath(e.target.value)}
-                placeholder="/api/auth/login"
+                placeholder={connAuthType === "oauth_password" ? "/services/oauth2/token" : "/api/auth/login"}
                 style={{
                   padding: "0.5rem 0.65rem",
                   fontSize: "0.85rem",
@@ -2481,25 +2595,27 @@ export default function AgentProfilePage({
                 }}
               />
             </label>
-            <label style={{ flex: "1 1 160px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-              <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>Session cookie</span>
-              <input
-                type="text"
-                data-testid="conn-session-cookie"
-                value={connSessionCookie}
-                onChange={(e) => setConnSessionCookie(e.target.value)}
-                placeholder="session"
-                style={{
-                  padding: "0.5rem 0.65rem",
-                  fontSize: "0.85rem",
-                  background: "var(--wp-dark-surface, #1f1f22)",
-                  color: "var(--wp-text, #eee)",
-                  border: "1px solid var(--wp-dark-border, #333)",
-                  borderRadius: "6px",
-                  fontFamily: "var(--wp-mono, monospace)",
-                }}
-              />
-            </label>
+            {connAuthType === "username_password" && (
+              <label style={{ flex: "1 1 160px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>Session cookie</span>
+                <input
+                  type="text"
+                  data-testid="conn-session-cookie"
+                  value={connSessionCookie}
+                  onChange={(e) => setConnSessionCookie(e.target.value)}
+                  placeholder="session"
+                  style={{
+                    padding: "0.5rem 0.65rem",
+                    fontSize: "0.85rem",
+                    background: "var(--wp-dark-surface, #1f1f22)",
+                    color: "var(--wp-text, #eee)",
+                    border: "1px solid var(--wp-dark-border, #333)",
+                    borderRadius: "6px",
+                    fontFamily: "var(--wp-mono, monospace)",
+                  }}
+                />
+              </label>
+            )}
           </div>
 
           {connectionError && (

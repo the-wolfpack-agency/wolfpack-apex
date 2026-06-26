@@ -22,6 +22,27 @@ const DEFAULT_SESSION_COOKIE = "session";
 /** Login request timeout. */
 const DEFAULT_LOGIN_TIMEOUT_MS = 8000;
 
+/**
+ * Input for an OAuth 2.0 Resource Owner Password Credentials token exchange,
+ * the Salesforce-style flow where an agent trades a client credential pair plus
+ * a user's username/password for a bearer token and an instance URL to operate
+ * against.
+ */
+export interface EstablishOAuthPasswordSessionInput {
+  /** Token-endpoint origin, e.g. "https://test.salesforce.com". */
+  baseUrl: string;
+  /** Token-endpoint path, e.g. "/services/oauth2/token". */
+  loginPath: string;
+  clientId: string;
+  clientSecret: string;
+  username: string;
+  password: string;
+  /** Injectable for tests; defaults to global fetch. */
+  fetchImpl?: typeof fetch;
+  /** Token request timeout. Default 8000ms. */
+  timeoutMs?: number;
+}
+
 export interface EstablishSessionInput {
   baseUrl: string;
   loginPath: string;
@@ -106,6 +127,75 @@ export async function establishSession(
     return pair ? { cookie: pair } : null;
   } catch {
     // Network error, abort/timeout, or a malformed response — degrade to null.
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Perform an OAuth 2.0 Resource Owner Password Credentials token exchange
+ * (Salesforce-style) and return a ready-to-send bearer auth header plus the
+ * instance URL the token operates against, or null on any failure.
+ *
+ * POSTs a `grant_type=password` form to `${baseUrl}${loginPath}` (e.g.
+ * https://test.salesforce.com/services/oauth2/token) with the client credential
+ * pair and the user's username/password. On a 2xx JSON body carrying an
+ * `access_token`, returns `{ authHeader: "Bearer <token>", instanceUrl }` —
+ * preferring the provider's `instance_url`, falling back to `baseUrl` when the
+ * provider doesn't return one.
+ *
+ * Like `establishSession`, this is a credential-bearing call against an EXTERNAL
+ * target and degrades gracefully in every failure mode: a non-2xx response
+ * (Salesforce returns 400 `{ error, error_description }` on bad creds), a
+ * missing `access_token`, invalid JSON, a network error, or a timeout all yield
+ * `null`. It NEVER throws.
+ */
+export async function establishOAuthPasswordSession(
+  input: EstablishOAuthPasswordSessionInput,
+): Promise<{ authHeader: string; instanceUrl: string } | null> {
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const timeoutMs = input.timeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS;
+  const url = `${input.baseUrl}${input.loginPath}`;
+
+  const body = new URLSearchParams({
+    grant_type: "password",
+    client_id: input.clientId,
+    client_secret: input.clientSecret,
+    username: input.username,
+    password: input.password,
+  });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetchImpl(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+      signal: controller.signal,
+      redirect: "manual",
+    });
+
+    if (res.status < 200 || res.status >= 300) return null;
+
+    const data = (await res.json()) as {
+      access_token?: unknown;
+      instance_url?: unknown;
+    };
+
+    const accessToken = data?.access_token;
+    if (typeof accessToken !== "string" || accessToken.length === 0) return null;
+
+    const instanceUrl =
+      typeof data.instance_url === "string" && data.instance_url.length > 0
+        ? data.instance_url
+        : input.baseUrl;
+
+    return { authHeader: `Bearer ${accessToken}`, instanceUrl };
+  } catch {
+    // Network error, abort/timeout, or invalid JSON — degrade to null.
     return null;
   } finally {
     clearTimeout(timer);

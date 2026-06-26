@@ -281,6 +281,100 @@ describe("POST /api/admin/connectors", () => {
     expect(JSON.stringify(auditArg)).not.toContain("s3cret-pw");
   });
 
+  test("400 when oauth_password body is missing the clientSecret", async () => {
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: ADMIN });
+    const res = await POST(
+      mkReq({
+        connectorName: "salesforce-prod",
+        baseUrl: "https://test.salesforce.com",
+        authType: "oauth_password",
+        clientId: "3MVG9_cid",
+        /* clientSecret omitted */
+        username: "integration@acme.com",
+        password: "sf-pw+token",
+        loginPath: "/services/oauth2/token",
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/oauth_password requires/);
+    /* Never reached the persistence layer. */
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  test("400 when oauth_password loginPath isn't a path", async () => {
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: ADMIN });
+    const res = await POST(
+      mkReq({
+        connectorName: "salesforce-prod",
+        baseUrl: "https://test.salesforce.com",
+        authType: "oauth_password",
+        clientId: "3MVG9_cid",
+        clientSecret: "sf-client-secret",
+        username: "integration@acme.com",
+        password: "sf-pw+token",
+        loginPath: "https://test.salesforce.com/services/oauth2/token",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  test("200 oauth_password happy path: forwards the quad to save + audits auth_type/login_path only", async () => {
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: ADMIN });
+    mockSave.mockResolvedValueOnce({
+      workspaceId: "default",
+      connectorName: "salesforce-prod",
+      baseUrl: "https://test.salesforce.com",
+      authHeaderHint: "OAuthPassword ****",
+      isActive: true,
+      createdAt: "x",
+      updatedAt: "y",
+      authType: "oauth_password",
+      loginPath: "/services/oauth2/token",
+    });
+    const res = await POST(
+      mkReq({
+        connectorName: "salesforce-prod",
+        baseUrl: "https://test.salesforce.com",
+        authType: "oauth_password",
+        clientId: "3MVG9_cid",
+        clientSecret: "sf-client-secret",
+        username: "integration@acme.com",
+        password: "sf-pw+token",
+        loginPath: "/services/oauth2/token",
+      }),
+    );
+    expect(res.status).toBe(200);
+
+    expect(mockSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "default",
+        connectorName: "salesforce-prod",
+        authType: "oauth_password",
+        clientId: "3MVG9_cid",
+        clientSecret: "sf-client-secret",
+        username: "integration@acme.com",
+        password: "sf-pw+token",
+        loginPath: "/services/oauth2/token",
+        createdBy: "u1",
+      }),
+    );
+    /* authHeader must NOT be forwarded for the oauth_password flow. */
+    expect(mockSave.mock.calls[0][0]).not.toHaveProperty("authHeader");
+
+    /* Audit captures auth_type + login_path, never the secrets. */
+    const auditArg = mockAudit.mock.calls[0][0];
+    expect(auditArg.afterState).toEqual(
+      expect.objectContaining({
+        auth_type: "oauth_password",
+        login_path: "/services/oauth2/token",
+      }),
+    );
+    expect(JSON.stringify(auditArg)).not.toContain("sf-client-secret");
+    expect(JSON.stringify(auditArg)).not.toContain("sf-pw+token");
+  });
+
   test("500 when save fails", async () => {
     mockRequireCapability.mockResolvedValueOnce({ ok: true, user: ADMIN });
     mockSave.mockResolvedValueOnce(null);

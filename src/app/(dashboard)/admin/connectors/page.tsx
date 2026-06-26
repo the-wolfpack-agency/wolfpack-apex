@@ -111,12 +111,17 @@ export default function AdminConnectorsPage() {
 
   const [vendor, setVendor] = useState("rest-default");
   const [baseUrl, setBaseUrl] = useState("");
-  const [authType, setAuthType] = useState<"static_bearer" | "username_password">("static_bearer");
+  const [authType, setAuthType] = useState<"static_bearer" | "username_password" | "oauth_password">("static_bearer");
   const [authHeader, setAuthHeader] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loginPath, setLoginPath] = useState("");
   const [sessionCookieName, setSessionCookieName] = useState("");
+  /* OAuth Resource-Owner-Password (e.g. a Salesforce sandbox): the operator
+     pastes the connected-app consumer key/secret plus the user login. baseUrl is
+     reused as the LOGIN url and loginPath as the token path. */
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
   const [objectMapText, setObjectMapText] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -239,26 +244,40 @@ export default function AdminConnectorsPage() {
         }
       }
 
-      const payload =
-        authType === "username_password"
-          ? {
-              connectorName: vendor,
-              baseUrl,
-              authType: "username_password" as const,
-              username,
-              password,
-              loginPath,
-              ...(sessionCookieName.trim().length > 0
-                ? { sessionCookieName: sessionCookieName.trim() }
-                : {}),
-              objectMap,
-            }
-          : {
-              connectorName: vendor,
-              baseUrl,
-              authHeader,
-              objectMap,
-            };
+      let payload: Record<string, unknown>;
+      if (authType === "oauth_password") {
+        payload = {
+          connectorName: vendor,
+          baseUrl,
+          authType: "oauth_password" as const,
+          clientId,
+          clientSecret,
+          username,
+          password,
+          loginPath,
+          objectMap,
+        };
+      } else if (authType === "username_password") {
+        payload = {
+          connectorName: vendor,
+          baseUrl,
+          authType: "username_password" as const,
+          username,
+          password,
+          loginPath,
+          ...(sessionCookieName.trim().length > 0
+            ? { sessionCookieName: sessionCookieName.trim() }
+            : {}),
+          objectMap,
+        };
+      } else {
+        payload = {
+          connectorName: vendor,
+          baseUrl,
+          authHeader,
+          objectMap,
+        };
+      }
 
       const res = await fetchWithRefresh("/api/admin/connectors", {
         method: "POST",
@@ -273,6 +292,7 @@ export default function AdminConnectorsPage() {
       setOkMessage(`Saved ${vendor}. Tools using this connector will pick up the new credentials immediately.`);
       setAuthHeader(""); // never keep plaintext in the form
       setPassword(""); // never keep plaintext in the form
+      setClientSecret(""); // never keep plaintext in the form
       await loadRows();
     } catch (e) {
       setError((e as Error).message || "Save failed");
@@ -419,11 +439,21 @@ export default function AdminConnectorsPage() {
             <select
               data-testid="conn-auth-type"
               value={authType}
-              onChange={(e) => setAuthType(e.target.value as "static_bearer" | "username_password")}
+              onChange={(e) => {
+                const next = e.target.value as "static_bearer" | "username_password" | "oauth_password";
+                setAuthType(next);
+                /* OAuth password defaults the token path to Salesforce's, so the
+                   operator only types it to override; clear it leaving the other
+                   modes so a stale Salesforce path is not posted. */
+                if (next === "oauth_password" && loginPath.trim().length === 0) {
+                  setLoginPath("/services/oauth2/token");
+                }
+              }}
               style={inputStyle}
             >
               <option value="static_bearer">Bearer token</option>
               <option value="username_password">Username &amp; password</option>
+              <option value="oauth_password">OAuth password (Salesforce)</option>
             </select>
           </label>
 
@@ -502,6 +532,86 @@ export default function AdminConnectorsPage() {
             </>
           )}
 
+          {authType === "oauth_password" && (
+            <>
+              <p style={{ fontSize: 12, color: "var(--wp-text-dim,#a0a8b4)", marginTop: -4, marginBottom: 12 }}>
+                OAuth Resource-Owner-Password grant. Base URL above is the login
+                host (<code>https://test.salesforce.com</code> for a sandbox,{" "}
+                <code>https://login.salesforce.com</code> for production). We
+                exchange the consumer key/secret + user login for a token at the
+                token path, stored encrypted at rest.
+              </p>
+              <label style={labelStyle}>
+                Consumer key / client_id
+                <input
+                  type="text"
+                  placeholder="3MVG9..."
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  style={inputStyle}
+                  required
+                  autoComplete="off"
+                  data-testid="conn-client-id"
+                />
+              </label>
+              <label style={labelStyle}>
+                Consumer secret
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={clientSecret}
+                  onChange={(e) => setClientSecret(e.target.value)}
+                  style={inputStyle}
+                  required
+                  autoComplete="off"
+                  data-testid="conn-client-secret"
+                />
+              </label>
+              <label style={labelStyle}>
+                Username or email
+                <input
+                  type="text"
+                  placeholder="user@example.com"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  style={inputStyle}
+                  required
+                  autoComplete="off"
+                  data-testid="conn-username"
+                />
+              </label>
+              <label style={labelStyle}>
+                Password
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  style={inputStyle}
+                  required
+                  autoComplete="off"
+                  data-testid="conn-password"
+                />
+              </label>
+              <p style={{ fontSize: 12, color: "var(--wp-text-dim,#a0a8b4)", marginTop: -8, marginBottom: 12 }}>
+                For Salesforce, append your security token to the password
+                (password + security token, no space).
+              </p>
+              <label style={labelStyle}>
+                Token path
+                <input
+                  type="text"
+                  placeholder="/services/oauth2/token"
+                  value={loginPath}
+                  onChange={(e) => setLoginPath(e.target.value)}
+                  style={inputStyle}
+                  required
+                  data-testid="conn-login-path"
+                />
+              </label>
+            </>
+          )}
+
           <label style={labelStyle}>
             Object map (JSON, optional)
             <textarea
@@ -520,7 +630,9 @@ export default function AdminConnectorsPage() {
               !baseUrl ||
               (authType === "static_bearer"
                 ? !authHeader
-                : !username || !password || !loginPath)
+                : authType === "oauth_password"
+                  ? !clientId || !clientSecret || !username || !password || !loginPath
+                  : !username || !password || !loginPath)
             }
             style={{
               padding: "8px 16px",

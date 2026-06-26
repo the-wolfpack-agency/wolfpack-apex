@@ -100,6 +100,41 @@ describe("loadConnectorCredentials", () => {
     expect(r?.sessionCookieName).toBe("session");
   });
 
+  test("oauth_password: JSON-decodes the credential quad + surfaces loginPath", async () => {
+    const blob = JSON.stringify({
+      clientId: "3MVG9_cid",
+      clientSecret: "sf-client-secret",
+      username: "integration@acme.com",
+      password: "sf-pw+token",
+    });
+    const enc = encryptSecret(blob);
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          workspace_id: "default",
+          connector_name: "salesforce-prod",
+          base_url: "https://test.salesforce.com",
+          auth_header_enc: enc,
+          object_map_json: null,
+          is_active: true,
+          auth_type: "oauth_password",
+          access_token_expires_at: null,
+          login_path: "/services/oauth2/token",
+          session_cookie_name: null,
+        },
+      ],
+    });
+    const r = await loadConnectorCredentials("default", "salesforce-prod");
+    expect(r).not.toBeNull();
+    expect(r?.authType).toBe("oauth_password");
+    /* The connector gets the full quad to run the token exchange. */
+    expect(r?.clientId).toBe("3MVG9_cid");
+    expect(r?.clientSecret).toBe("sf-client-secret");
+    expect(r?.username).toBe("integration@acme.com");
+    expect(r?.password).toBe("sf-pw+token");
+    expect(r?.loginPath).toBe("/services/oauth2/token");
+  });
+
   test("static_bearer rows do NOT expose username/password", async () => {
     const enc = encryptSecret("Bearer abc123xyz");
     mockSafeQuery.mockResolvedValueOnce({
@@ -122,6 +157,8 @@ describe("loadConnectorCredentials", () => {
     expect(r?.authType).toBe("static_bearer");
     expect(r?.username).toBeUndefined();
     expect(r?.password).toBeUndefined();
+    expect(r?.clientId).toBeUndefined();
+    expect(r?.clientSecret).toBeUndefined();
     expect(r?.loginPath).toBeUndefined();
   });
 
@@ -253,6 +290,81 @@ describe("saveConnectorCredentials", () => {
     /* The masked hint must NOT leak the password. */
     expect(r?.authHeaderHint).toMatch(/^Basic \*\*\*\*/);
     expect(JSON.stringify(r)).not.toContain("s3cret-pw");
+  });
+
+  test("oauth_password: stores an ENCRYPTED JSON blob of the quad + persists login_path", async () => {
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          workspace_id: "ws1",
+          connector_name: "salesforce-prod",
+          base_url: "https://test.salesforce.com",
+          object_map_json: null,
+          is_active: true,
+          created_at: "2026-06-19T12:00:00",
+          updated_at: "2026-06-19T12:00:00",
+          auth_type: "oauth_password",
+          login_path: "/services/oauth2/token",
+          session_cookie_name: null,
+        },
+      ],
+    });
+    const r = await saveConnectorCredentials({
+      workspaceId: "ws1",
+      connectorName: "salesforce-prod",
+      baseUrl: "https://test.salesforce.com",
+      authType: "oauth_password",
+      clientId: "3MVG9_cid",
+      clientSecret: "sf-client-secret",
+      username: "integration@acme.com",
+      password: "sf-pw+token",
+      loginPath: "/services/oauth2/token",
+      createdBy: "u1",
+    });
+    expect(r).not.toBeNull();
+    expect(r?.authType).toBe("oauth_password");
+    expect(r?.loginPath).toBe("/services/oauth2/token");
+
+    /* The stored auth_header (param index 3) must be the ENCRYPTED JSON
+       blob — not plaintext, and never the raw secrets. */
+    const params = mockSafeQuery.mock.calls[0][1] as string[];
+    const storedEnc = params[3];
+    expect(storedEnc).toMatch(/^v1\./);
+    expect(storedEnc).not.toContain("sf-client-secret");
+    expect(storedEnc).not.toContain("sf-pw+token");
+    expect(storedEnc).not.toContain("3MVG9_cid");
+    /* Decrypting yields the canonical JSON quad. */
+    const decoded = JSON.parse(decryptSecret(storedEnc) as string);
+    expect(decoded).toEqual({
+      clientId: "3MVG9_cid",
+      clientSecret: "sf-client-secret",
+      username: "integration@acme.com",
+      password: "sf-pw+token",
+    });
+
+    /* auth_type / login_path bound to the insert. */
+    expect(params[6]).toBe("oauth_password");
+    expect(params[7]).toBe("/services/oauth2/token");
+
+    /* The masked hint + serialized result must NOT leak any secret. */
+    expect(r?.authHeaderHint).toBe("OAuthPassword ****");
+    expect(JSON.stringify(r)).not.toContain("sf-client-secret");
+    expect(JSON.stringify(r)).not.toContain("sf-pw+token");
+  });
+
+  test("oauth_password: returns null when clientSecret is missing (fail-closed)", async () => {
+    const r = await saveConnectorCredentials({
+      connectorName: "salesforce-prod",
+      baseUrl: "https://test.salesforce.com",
+      authType: "oauth_password",
+      clientId: "3MVG9_cid",
+      /* clientSecret omitted */
+      username: "integration@acme.com",
+      password: "sf-pw+token",
+      loginPath: "/services/oauth2/token",
+    });
+    expect(r).toBeNull();
+    expect(mockSafeQuery).not.toHaveBeenCalled();
   });
 
   test("username_password: returns null when password is missing (fail-closed)", async () => {

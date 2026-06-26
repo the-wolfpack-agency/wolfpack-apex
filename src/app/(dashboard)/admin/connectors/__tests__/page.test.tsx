@@ -133,6 +133,70 @@ it("username/password create POSTs the username_password body", async () => {
   expect(body.authHeader).toBeUndefined();
 });
 
+it("selecting 'OAuth password' reveals the client-id/secret fields", async () => {
+  routeOk();
+  render(<AdminConnectorsPage />);
+  await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalled());
+
+  expect(screen.queryByTestId("conn-client-id")).not.toBeInTheDocument();
+
+  fireEvent.change(screen.getByTestId("conn-auth-type"), {
+    target: { value: "oauth_password" },
+  });
+
+  expect(screen.getByTestId("conn-client-id")).toBeInTheDocument();
+  expect(screen.getByTestId("conn-client-secret")).toBeInTheDocument();
+  expect(screen.getByTestId("conn-username")).toBeInTheDocument();
+  expect(screen.getByTestId("conn-password")).toBeInTheDocument();
+  // The token path defaults to the Salesforce OAuth endpoint.
+  expect(screen.getByTestId("conn-login-path")).toHaveValue("/services/oauth2/token");
+  // bearer + username_password-only fields are hidden in this mode
+  expect(screen.queryByTestId("conn-auth-header")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("conn-session-cookie")).not.toBeInTheDocument();
+});
+
+it("oauth-password create POSTs the oauth_password body", async () => {
+  routeOk();
+  render(<AdminConnectorsPage />);
+  await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalled());
+
+  fireEvent.change(screen.getByTestId("conn-base-url"), {
+    target: { value: "https://test.salesforce.com" },
+  });
+  fireEvent.change(screen.getByTestId("conn-auth-type"), {
+    target: { value: "oauth_password" },
+  });
+  fireEvent.change(screen.getByTestId("conn-client-id"), {
+    target: { value: "3MVG9consumerkey" },
+  });
+  fireEvent.change(screen.getByTestId("conn-client-secret"), {
+    target: { value: "consumer-secret" },
+  });
+  fireEvent.change(screen.getByTestId("conn-username"), {
+    target: { value: "sf@acme.com" },
+  });
+  fireEvent.change(screen.getByTestId("conn-password"), {
+    target: { value: "pw+token" },
+  });
+  fireEvent.click(screen.getByTestId("conn-submit"));
+
+  await waitFor(() => expect(createPost()).toBeTruthy());
+  const body = JSON.parse(String(createPost()![1].body));
+  expect(body).toMatchObject({
+    connectorName: "rest-default",
+    baseUrl: "https://test.salesforce.com",
+    authType: "oauth_password",
+    clientId: "3MVG9consumerkey",
+    clientSecret: "consumer-secret",
+    username: "sf@acme.com",
+    password: "pw+token",
+    loginPath: "/services/oauth2/token",
+  });
+  // bearer + session-cookie fields must not be sent in this mode
+  expect(body.authHeader).toBeUndefined();
+  expect(body.sessionCookieName).toBeUndefined();
+});
+
 it("surfaces an error when the create response fails", async () => {
   mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
     if (url === "/api/admin/connectors" && opts?.method === "POST") {

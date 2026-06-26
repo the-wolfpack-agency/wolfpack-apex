@@ -43,7 +43,7 @@ describe("auth-enforcement", () => {
     ];
     // 200 whether or not a cookie is present → leaks data.
     const fetchImpl = mockFetch(() => 200);
-    const findings = await probeApi({ baseUrl: BASE, cookie: COOKIE, endpoints, fetchImpl });
+    const findings = await probeApi({ baseUrl: BASE, authHeaders: { Cookie: COOKIE }, endpoints, fetchImpl });
     const auth = findings.find((f) => f.evidence.check === "auth");
     expect(auth).toMatchObject({
       route: "/api/leads",
@@ -58,7 +58,7 @@ describe("auth-enforcement", () => {
       { path: "/api/leads", method: "GET", journey: "Lead list", requiresAuth: true },
     ];
     const fetchImpl = mockFetch(({ hasCookie }) => (hasCookie ? 200 : 401));
-    const findings = await probeApi({ baseUrl: BASE, cookie: COOKIE, endpoints, fetchImpl });
+    const findings = await probeApi({ baseUrl: BASE, authHeaders: { Cookie: COOKIE }, endpoints, fetchImpl });
     expect(findings).toEqual([]);
   });
 });
@@ -70,7 +70,7 @@ describe("input-validation", () => {
     ];
     // POST (invalid body) → 200; GET reachability → 200.
     const fetchImpl = mockFetch(() => 200);
-    const findings = await probeApi({ baseUrl: BASE, cookie: COOKIE, endpoints, fetchImpl });
+    const findings = await probeApi({ baseUrl: BASE, authHeaders: { Cookie: COOKIE }, endpoints, fetchImpl });
     const v = findings.find((f) => f.evidence.check === "validation");
     expect(v).toMatchObject({ route: "/api/leads", severity: "high", category: "bug" });
     expect(v?.evidence).toMatchObject({ status: 200, check: "validation", method: "POST" });
@@ -81,7 +81,7 @@ describe("input-validation", () => {
       { path: "/api/leads", method: "POST", journey: "Create lead", invalidBody: { junk: true } },
     ];
     const fetchImpl = mockFetch(({ method }) => (method === "POST" ? 500 : 200));
-    const findings = await probeApi({ baseUrl: BASE, cookie: COOKIE, endpoints, fetchImpl });
+    const findings = await probeApi({ baseUrl: BASE, authHeaders: { Cookie: COOKIE }, endpoints, fetchImpl });
     const v = findings.find((f) => f.evidence.check === "validation");
     expect(v).toMatchObject({ route: "/api/leads", severity: "critical", category: "bug" });
     expect(v?.evidence).toMatchObject({ status: 500, check: "validation", method: "POST" });
@@ -98,7 +98,7 @@ describe("input-validation", () => {
       },
     ];
     const fetchImpl = mockFetch(({ method }) => (method === "PATCH" ? 409 : 200));
-    const findings = await probeApi({ baseUrl: BASE, cookie: COOKIE, endpoints, fetchImpl });
+    const findings = await probeApi({ baseUrl: BASE, authHeaders: { Cookie: COOKIE }, endpoints, fetchImpl });
     expect(findings).toEqual([]);
   });
 });
@@ -109,7 +109,7 @@ describe("reachability", () => {
       { path: "/api/health", method: "GET", journey: "Health" },
     ];
     const fetchImpl = mockFetch(() => 500);
-    const findings = await probeApi({ baseUrl: BASE, cookie: COOKIE, endpoints, fetchImpl });
+    const findings = await probeApi({ baseUrl: BASE, authHeaders: { Cookie: COOKIE }, endpoints, fetchImpl });
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ route: "/api/health", severity: "critical", category: "bug" });
     expect(findings[0].evidence).toMatchObject({ check: "reachability", method: "GET" });
@@ -120,7 +120,7 @@ describe("reachability", () => {
       { path: "/api/health", method: "GET", journey: "Health" },
     ];
     const fetchImpl = mockFetch(() => "throw");
-    const findings = await probeApi({ baseUrl: BASE, cookie: COOKIE, endpoints, fetchImpl });
+    const findings = await probeApi({ baseUrl: BASE, authHeaders: { Cookie: COOKIE }, endpoints, fetchImpl });
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ route: "/api/health", severity: "high", category: "bug" });
     expect(findings[0].evidence).toMatchObject({ check: "reachability", status: null });
@@ -142,7 +142,7 @@ it("emits NO findings for a clean endpoint (401 unauth, 400 on invalid, 200 norm
     if (method === "POST") return 400; // invalid body correctly rejected
     return 200; // GET reachability
   });
-  const findings = await probeApi({ baseUrl: BASE, cookie: COOKIE, endpoints, fetchImpl });
+  const findings = await probeApi({ baseUrl: BASE, authHeaders: { Cookie: COOKIE }, endpoints, fetchImpl });
   expect(findings).toEqual([]);
 });
 
@@ -156,7 +156,7 @@ it("never throws; aggregates findings across multiple endpoints", async () => {
     if (path === "/api/b" && method === "POST") return 500; // 500s on invalid → bug crit
     return 200;
   });
-  const findings = await probeApi({ baseUrl: BASE, cookie: COOKIE, endpoints, fetchImpl });
+  const findings = await probeApi({ baseUrl: BASE, authHeaders: { Cookie: COOKIE }, endpoints, fetchImpl });
   expect(findings.map((f) => `${f.route}:${f.evidence.check}:${f.severity}`)).toEqual(
     expect.arrayContaining([
       "/api/a:auth:critical",

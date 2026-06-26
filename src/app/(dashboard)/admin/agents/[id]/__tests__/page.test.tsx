@@ -1609,6 +1609,151 @@ describe("/admin/agents/[id]: connected systems (access)", () => {
     expect(screen.getByTestId("conn-password")).toHaveValue("");
   });
 
+  it("selecting 'OAuth password' reveals the client-id/secret fields and defaults the token path", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        connectors: () => mkRes({ connectors: [] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("add-connection-form")).toBeInTheDocument());
+
+    // Hidden in the default username_password mode.
+    expect(screen.queryByTestId("conn-client-id")).not.toBeInTheDocument();
+    expect(screen.getByTestId("conn-session-cookie")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("conn-auth-type"), {
+        target: { value: "oauth_password" },
+      });
+    });
+
+    expect(screen.getByTestId("conn-client-id")).toBeInTheDocument();
+    expect(screen.getByTestId("conn-client-secret")).toBeInTheDocument();
+    expect(screen.getByTestId("conn-username")).toBeInTheDocument();
+    expect(screen.getByTestId("conn-password")).toBeInTheDocument();
+    // Token path swaps to the Salesforce default; session-cookie is hidden.
+    expect(screen.getByTestId("conn-login-path")).toHaveValue("/services/oauth2/token");
+    expect(screen.queryByTestId("conn-session-cookie")).not.toBeInTheDocument();
+  });
+
+  it("submitting the oauth_password add POSTs the oauth_password body and reloads the list", async () => {
+    let added = false;
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        connectors: () =>
+          added
+            ? mkRes({ connectors: [makeConnector({ connectorName: "sf-sandbox", authType: "oauth_password" })] })
+            : mkRes({ connectors: [] }),
+        onAddConnection: () => {
+          added = true;
+          return mkRes({ connector: makeConnector({ connectorName: "sf-sandbox" }) }, { status: 201 });
+        },
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("add-connection-form")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("conn-auth-type"), { target: { value: "oauth_password" } });
+      fireEvent.change(screen.getByTestId("conn-name"), { target: { value: "sf-sandbox" } });
+      fireEvent.change(screen.getByTestId("conn-base-url"), { target: { value: "https://test.salesforce.com" } });
+      fireEvent.change(screen.getByTestId("conn-client-id"), { target: { value: "3MVG9key" } });
+      fireEvent.change(screen.getByTestId("conn-client-secret"), { target: { value: "secret" } });
+      fireEvent.change(screen.getByTestId("conn-username"), { target: { value: "sf@acme.com" } });
+      fireEvent.change(screen.getByTestId("conn-password"), { target: { value: "pw+token" } });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-connection-submit"));
+    });
+
+    const post = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).includes("/api/admin/connectors"),
+    );
+    expect(post).toBeTruthy();
+    const body = JSON.parse((post?.[1] as { body: string }).body);
+    expect(body).toMatchObject({
+      connectorName: "sf-sandbox",
+      baseUrl: "https://test.salesforce.com",
+      authType: "oauth_password",
+      clientId: "3MVG9key",
+      clientSecret: "secret",
+      username: "sf@acme.com",
+      password: "pw+token",
+      loginPath: "/services/oauth2/token",
+    });
+    expect(body.sessionCookieName).toBeUndefined();
+
+    // The list reloaded and shows the new connection; the password is cleared.
+    await waitFor(() => expect(screen.getByTestId("connection-row-sf-sandbox")).toBeInTheDocument());
+    expect(screen.getByTestId("conn-password")).toHaveValue("");
+  });
+
+  it("the existing username_password add still works (no regression)", async () => {
+    let added = false;
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        connectors: () =>
+          added
+            ? mkRes({ connectors: [makeConnector({ connectorName: "client-crm" })] })
+            : mkRes({ connectors: [] }),
+        onAddConnection: () => {
+          added = true;
+          return mkRes({ connector: makeConnector({ connectorName: "client-crm" }) }, { status: 201 });
+        },
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("add-connection-form")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("conn-name"), { target: { value: "client-crm" } });
+      fireEvent.change(screen.getByTestId("conn-base-url"), { target: { value: "https://app.client.com" } });
+      fireEvent.change(screen.getByTestId("conn-username"), { target: { value: "ops@wolfpack.com" } });
+      fireEvent.change(screen.getByTestId("conn-password"), { target: { value: "s3cret-pw" } });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-connection-submit"));
+    });
+
+    const post = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).includes("/api/admin/connectors"),
+    );
+    expect(post).toBeTruthy();
+    const body = JSON.parse((post?.[1] as { body: string }).body);
+    expect(body).toMatchObject({
+      connectorName: "client-crm",
+      authType: "username_password",
+      username: "ops@wolfpack.com",
+      password: "s3cret-pw",
+      loginPath: "/api/auth/login",
+      sessionCookieName: "session",
+    });
+    expect(body.clientId).toBeUndefined();
+    expect(body.clientSecret).toBeUndefined();
+  });
+
   it("surfaces an inline error when the add fails, without blanking the page", async () => {
     mockFetchWithRefresh.mockImplementation(
       routeByUrl({

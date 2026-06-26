@@ -6,27 +6,54 @@ import { scanPlatform } from "@/lib/platform-scan/engine";
 import { scanSource, defaultReadFile } from "@/lib/platform-scan/static/scan";
 import { discoverRepoFiles } from "@/lib/platform-scan/static/discover-files";
 import { discoverRoutes, mergeManifest } from "@/lib/platform-scan/discover";
-import { establishSession } from "@/lib/platform-scan/session";
+import { establishSession, establishOAuthPasswordSession } from "@/lib/platform-scan/session";
 import { probeApi } from "@/lib/platform-scan/api-probe";
 import { loadConnectorCredentials } from "@/lib/assistant/connectors/credentials";
 import { resolveScanTarget, type ScanManifest } from "@/lib/platform-scan/manifests";
 import type { PlatformScanResult } from "@/lib/platform-scan/types";
 
-/** Establish an authenticated session if the platform uses form login and a
- *  username/password Connection exists. Returns the `name=value` Cookie string,
- *  or null (the scan then runs unauthenticated — still valid, just shallower). */
-async function resolveSessionCookie(workspaceId: string, manifest: ScanManifest): Promise<string | null> {
+/**
+ * Establish an authenticated session for a platform that needs login, returning
+ * the auth headers to send AND the base URL to scan against (oauth providers like
+ * Salesforce return a per-org instance_url that differs from the login host).
+ *   - username_password -> form login -> { Cookie }, base = manifest.baseUrl
+ *   - oauth_password    -> token exchange -> { Authorization: Bearer }, base = instance_url
+ * Returns null when there's no login config / no connection / login fails (the
+ * scan then runs unauthenticated — still valid, just shallower).
+ */
+async function resolveAuth(
+  workspaceId: string,
+  manifest: ScanManifest,
+): Promise<{ headers: Record<string, string>; baseUrl: string } | null> {
   if (!manifest.login) return null;
   const creds = await loadConnectorCredentials(workspaceId, manifest.login.connectorName);
-  if (!creds || creds.authType !== "username_password" || !creds.username || !creds.password) return null;
-  const session = await establishSession({
-    baseUrl: manifest.baseUrl,
-    loginPath: creds.loginPath ?? manifest.login.loginPath,
-    username: creds.username,
-    password: creds.password,
-    sessionCookieName: creds.sessionCookieName ?? manifest.login.sessionCookieName,
-  });
-  return session?.cookie ?? null;
+  if (!creds) return null;
+
+  if (creds.authType === "username_password" && creds.username && creds.password) {
+    const session = await establishSession({
+      baseUrl: manifest.baseUrl,
+      loginPath: creds.loginPath ?? manifest.login.loginPath,
+      username: creds.username,
+      password: creds.password,
+      sessionCookieName: creds.sessionCookieName ?? manifest.login.sessionCookieName,
+    });
+    return session ? { headers: { Cookie: session.cookie }, baseUrl: manifest.baseUrl } : null;
+  }
+
+  if (creds.authType === "oauth_password" && creds.clientId && creds.clientSecret && creds.username && creds.password) {
+    const session = await establishOAuthPasswordSession({
+      baseUrl: manifest.baseUrl,
+      loginPath: creds.loginPath ?? manifest.login.loginPath,
+      clientId: creds.clientId,
+      clientSecret: creds.clientSecret,
+      username: creds.username,
+      password: creds.password,
+    });
+    // Scan the per-org instance the token is scoped to, with the bearer.
+    return session ? { headers: { Authorization: session.authHeader }, baseUrl: session.instanceUrl } : null;
+  }
+
+  return null;
 }
 import {
   recordScan,
@@ -71,14 +98,18 @@ export async function POST(req: NextRequest) {
   if (mode === "api" && manifest.apiEndpoints) {
     // Gray-box API contract probe: log in (if the platform needs it), then
     // exercise the target's API for auth-enforcement + input-validation bugs.
-    const cookie = await resolveSessionCookie(workspaceId, manifest);
+    const auth = await resolveAuth(workspaceId, manifest);
     trackEvent("platform.scan_started", user.id, user.role, {
       platform,
       mode,
       route_count: manifest.apiEndpoints.length,
-      authenticated: !!cookie,
+      authenticated: !!auth,
     });
-    const findings = await probeApi({ baseUrl: manifest.baseUrl, cookie: cookie ?? undefined, endpoints: manifest.apiEndpoints });
+    const findings = await probeApi({
+      baseUrl: auth?.baseUrl ?? manifest.baseUrl,
+      authHeaders: auth?.headers,
+      endpoints: manifest.apiEndpoints,
+    });
     const flagged = new Set(findings.map((f) => f.route)).size;
     result = {
       platform,
@@ -116,23 +147,24 @@ export async function POST(req: NextRequest) {
     // so the scan covers the real surface, not just the hardcoded list. If the
     // platform uses form login + a Connection exists, log in first and crawl
     // AUTHENTICATED so behind-login pages are reached (not just login redirects).
-    const discovered = await discoverRoutes(manifest.baseUrl);
+    const auth = await resolveAuth(workspaceId, manifest);
+    const scanBaseUrl = auth?.baseUrl ?? manifest.baseUrl;
+    const discovered = await discoverRoutes(scanBaseUrl);
     const routes = mergeManifest(manifest.routes, discovered);
-    const cookie = await resolveSessionCookie(workspaceId, manifest);
     trackEvent("platform.scan_started", user.id, user.role, {
       platform,
       mode,
       route_count: routes.length,
       discovered_count: discovered.length,
-      authenticated: !!cookie,
+      authenticated: !!auth,
     });
     result = await scanPlatform({
       workspaceId,
       platform,
-      baseUrl: manifest.baseUrl,
+      baseUrl: scanBaseUrl,
       routes,
-      headers: cookie ? { Cookie: cookie } : undefined,
-      authenticated: !!cookie,
+      headers: auth?.headers,
+      authenticated: !!auth,
     });
   }
 

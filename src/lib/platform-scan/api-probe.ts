@@ -42,8 +42,9 @@ export interface ApiEndpointSpec {
 
 export interface ProbeApiInput {
   baseUrl: string;
-  /** Session cookie pair (`name=value`) for authenticated checks. */
-  cookie?: string;
+  /** Auth headers for authenticated checks — `{ Cookie: "session=…" }` (form
+   *  login) or `{ Authorization: "Bearer …" }` (oauth). Omitted = unauthenticated. */
+  authHeaders?: Record<string, string>;
   endpoints: ApiEndpointSpec[];
   /** Injectable for tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
@@ -61,7 +62,7 @@ interface CallOptions {
   fetchImpl: typeof fetch;
   url: string;
   method: ApiEndpointSpec["method"];
-  cookie?: string;
+  authHeaders?: Record<string, string>;
   body?: unknown;
   timeoutMs: number;
 }
@@ -71,8 +72,7 @@ async function call(opts: CallOptions): Promise<ProbeResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
   try {
-    const headers: Record<string, string> = {};
-    if (opts.cookie) headers["Cookie"] = opts.cookie;
+    const headers: Record<string, string> = { ...(opts.authHeaders ?? {}) };
     const init: RequestInit = {
       method: opts.method,
       headers,
@@ -121,7 +121,7 @@ export async function probeApi(input: ProbeApiInput): Promise<ScanFinding[]> {
           severity: "critical",
           category: "security",
           title: "Endpoint serves data without auth",
-          detail: `${ep.method} ${ep.path} returned ${r.status} with no session cookie; it should require authentication.`,
+          detail: `${ep.method} ${ep.path} returned ${r.status} with no auth headers; it should require authentication.`,
           evidence: { status: r.status ?? null, check: "auth", method: ep.method, journey: ep.journey },
         });
       }
@@ -134,7 +134,7 @@ export async function probeApi(input: ProbeApiInput): Promise<ScanFinding[]> {
         fetchImpl,
         url,
         method: ep.method,
-        cookie: input.cookie,
+        authHeaders: input.authHeaders,
         body: ep.invalidBody,
         timeoutMs,
       });
@@ -165,7 +165,7 @@ export async function probeApi(input: ProbeApiInput): Promise<ScanFinding[]> {
 
     // --- reachability: a GET (with cookie) sanity check. ---
     {
-      const r = await call({ fetchImpl, url, method: "GET", cookie: input.cookie, timeoutMs });
+      const r = await call({ fetchImpl, url, method: "GET", authHeaders: input.authHeaders, timeoutMs });
       if (r.networkError) {
         findings.push({
           route: ep.path,

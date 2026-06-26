@@ -11,6 +11,12 @@
  *            { connectorName, baseUrl, authType: "username_password",
  *              username, password, loginPath, sessionCookieName?,
  *              objectMap? }
+ *          oauth_password (OAuth2 Resource Owner Password, e.g.
+ *          Salesforce — baseUrl is the login URL like
+ *          https://test.salesforce.com, loginPath the token endpoint):
+ *            { connectorName, baseUrl, authType: "oauth_password",
+ *              clientId, clientSecret, username, password, loginPath,
+ *              objectMap? }
  *
  * CTO/CEO only (settings.manage_team capability). Audit-log every
  * mutation. The workspaceId is resolved from the caller's session —
@@ -40,7 +46,11 @@ const SUPPORTED_CONNECTORS = new Set([
   "quickbooks",
 ]);
 
-type AuthType = "static_bearer" | "oauth2" | "username_password";
+type AuthType =
+  | "static_bearer"
+  | "oauth2"
+  | "username_password"
+  | "oauth_password";
 
 interface PostBody {
   connectorName?: unknown;
@@ -51,6 +61,8 @@ interface PostBody {
   password?: unknown;
   loginPath?: unknown;
   sessionCookieName?: unknown;
+  clientId?: unknown;
+  clientSecret?: unknown;
   objectMap?: unknown;
 }
 
@@ -84,17 +96,26 @@ export async function POST(req: NextRequest) {
   const connectorName = typeof body.connectorName === "string" ? body.connectorName.trim() : "";
   // auth_type defaults to static_bearer so existing vendor callers keep working.
   const rawAuthType = body.authType === undefined ? "static_bearer" : body.authType;
-  if (rawAuthType !== "static_bearer" && rawAuthType !== "oauth2" && rawAuthType !== "username_password") {
+  if (
+    rawAuthType !== "static_bearer" &&
+    rawAuthType !== "oauth2" &&
+    rawAuthType !== "username_password" &&
+    rawAuthType !== "oauth_password"
+  ) {
     return NextResponse.json(
-      { error: "authType must be one of: static_bearer, oauth2, username_password" },
+      {
+        error:
+          "authType must be one of: static_bearer, oauth2, username_password, oauth_password",
+      },
       { status: 400 },
     );
   }
   // Vendor (bearer/oauth2) connectors must be a known preset name. A
-  // username_password connection targets an ARBITRARY client platform, so any
-  // url-safe slug is allowed (this is what lets an operator connect a client
-  // system an agent was invited to, not just our preset vendors).
-  if (rawAuthType === "username_password") {
+  // username_password / oauth_password connection targets an ARBITRARY client
+  // platform, so any url-safe slug is allowed (this is what lets an operator
+  // connect a client system an agent was invited to, not just our preset
+  // vendors).
+  if (rawAuthType === "username_password" || rawAuthType === "oauth_password") {
     if (!/^[a-z0-9][a-z0-9-]{1,48}$/.test(connectorName)) {
       return NextResponse.json(
         { error: "connectorName must be a url-safe slug (a-z, 0-9, dash; 2-49 chars)" },
@@ -134,8 +155,33 @@ export async function POST(req: NextRequest) {
   let password: string | undefined;
   let loginPath: string | undefined;
   let sessionCookieName: string | undefined;
+  let clientId: string | undefined;
+  let clientSecret: string | undefined;
 
-  if (authType === "username_password") {
+  if (authType === "oauth_password") {
+    /* OAuth2 Resource Owner Password (Salesforce-style): needs the full
+       credential quad + the token-endpoint path. */
+    clientId = typeof body.clientId === "string" ? body.clientId.trim() : "";
+    clientSecret = typeof body.clientSecret === "string" ? body.clientSecret : "";
+    username = typeof body.username === "string" ? body.username : "";
+    password = typeof body.password === "string" ? body.password : "";
+    loginPath = typeof body.loginPath === "string" ? body.loginPath.trim() : "";
+    if (!clientId || !clientSecret || !username || !password || !loginPath) {
+      return NextResponse.json(
+        {
+          error:
+            "oauth_password requires clientId, clientSecret, username, password, and loginPath",
+        },
+        { status: 400 },
+      );
+    }
+    if (!loginPath.startsWith("/")) {
+      return NextResponse.json(
+        { error: "loginPath must be a path starting with '/'" },
+        { status: 400 },
+      );
+    }
+  } else if (authType === "username_password") {
     username = typeof body.username === "string" ? body.username : "";
     password = typeof body.password === "string" ? body.password : "";
     loginPath = typeof body.loginPath === "string" ? body.loginPath.trim() : "";
@@ -207,12 +253,15 @@ export async function POST(req: NextRequest) {
     connectorName,
     baseUrl,
     authType,
-    /* authHeader only carries a value for static_bearer / oauth2; for
+    /* authHeader only carries a value for static_bearer / oauth2. For
        username_password the lib derives the Basic header from
-       username + password. */
-    ...(authType === "username_password"
-      ? { username, password, loginPath, sessionCookieName }
-      : { authHeader }),
+       username + password; for oauth_password it stores an encrypted JSON
+       blob of the clientId/clientSecret/username/password quad. */
+    ...(authType === "oauth_password"
+      ? { clientId, clientSecret, username, password, loginPath }
+      : authType === "username_password"
+        ? { username, password, loginPath, sessionCookieName }
+        : { authHeader }),
     objectMap,
     createdBy: user.id,
   });
@@ -237,11 +286,14 @@ export async function POST(req: NextRequest) {
       auth_type: authType,
       auth_header_hint: saved.authHeaderHint,
       has_object_map: Boolean(objectMap),
-      /* Never audit the password — only the (non-secret) form-login path
-         + cookie name so an operator can see how the connector auths. */
+      /* Never audit secrets (password / clientSecret) — only the
+         (non-secret) auth-endpoint path (+ cookie name for form login) so
+         an operator can see how the connector auths. */
       ...(authType === "username_password"
         ? { login_path: loginPath, session_cookie_name: sessionCookieName ?? null }
-        : {}),
+        : authType === "oauth_password"
+          ? { login_path: loginPath }
+          : {}),
     },
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,

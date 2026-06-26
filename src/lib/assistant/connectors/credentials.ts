@@ -32,26 +32,39 @@ export interface ConnectorCredentials {
   isActive: boolean;
   /** "static_bearer" for legacy / single-token rows, "oauth2" when the
    *  row is managed by the OAuth orchestrator (migration 138),
-   *  "username_password" for form-login platforms (migration 181). */
+   *  "username_password" for form-login platforms (migration 181),
+   *  "oauth_password" for OAuth2 Resource Owner Password platforms
+   *  (Salesforce-style; migration 182). */
   authType: AuthType;
   /** When the cached access token expires. Null for static_bearer. */
   accessTokenExpiresAt: string | null;
-  /** Form-login endpoint path. Only set for username_password rows. */
+  /** Auth endpoint path. Form-login path for username_password rows; the
+   *  OAuth2 token endpoint for oauth_password rows. */
   loginPath?: string;
   /** Session cookie the platform sets on login. username_password only. */
   sessionCookieName?: string;
-  /** Decoded username — server-side only, NEVER logged. Only present for
-   *  username_password rows (base64-decoded from the Basic auth header
-   *  in-memory). */
+  /** Decoded username — server-side only, NEVER logged. Present for
+   *  username_password rows (base64-decoded from the Basic auth header)
+   *  and oauth_password rows (JSON-decoded from the credential blob). */
   username?: string;
   /** Decoded password — server-side only, NEVER logged. username_password
-   *  only. */
+   *  + oauth_password only. */
   password?: string;
+  /** OAuth2 Resource Owner Password client_id — server-side only, NEVER
+   *  logged. oauth_password only (JSON-decoded from the credential blob). */
+  clientId?: string;
+  /** OAuth2 Resource Owner Password client_secret — server-side only,
+   *  NEVER logged. oauth_password only. */
+  clientSecret?: string;
 }
 
 /** Supported connector auth flows. Mirrors the auth_type CHECK constraint
- *  (migrations 138 + 181). */
-export type AuthType = "static_bearer" | "oauth2" | "username_password";
+ *  (migrations 138 + 181 + 182). */
+export type AuthType =
+  | "static_bearer"
+  | "oauth2"
+  | "username_password"
+  | "oauth_password";
 
 export interface MaskedConnectorCredentials {
   workspaceId: string;
@@ -63,14 +76,15 @@ export interface MaskedConnectorCredentials {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
-  /** "static_bearer", "oauth2", or "username_password" — drives the admin
-   *  UI badge that tells the operator which flow / whether refresh
-   *  applies. The password is NEVER surfaced (only authHeaderHint's
-   *  last-4 masking of the encoded Basic header). */
+  /** "static_bearer", "oauth2", "username_password", or "oauth_password" —
+   *  drives the admin UI badge that tells the operator which flow / whether
+   *  refresh applies. Secrets are NEVER surfaced (only authHeaderHint's
+   *  last-4 masking of the encrypted credential blob). */
   authType: AuthType;
   /** ISO timestamp when the cached access token expires (oauth2 only). */
   accessTokenExpiresAt: string | null;
-  /** Form-login endpoint path (username_password only). */
+  /** Auth endpoint path. Form-login path (username_password) or OAuth2
+   *  token endpoint (oauth_password). */
   loginPath?: string;
   /** Session cookie name the platform sets (username_password only). */
   sessionCookieName?: string;
@@ -146,6 +160,18 @@ export async function loadConnectorCredentials(
         result.username = decoded.username;
         result.password = decoded.password;
       }
+    } else if (authType === "oauth_password") {
+      /* Decode the JSON credential blob in-memory so the connector can run
+         the OAuth2 Resource Owner Password exchange (POST client_id +
+         client_secret + username + password to login_path). These fields
+         are server-side only and MUST NOT be logged. */
+      const quad = decodeOAuthPasswordBlob(authHeader);
+      if (quad) {
+        result.clientId = quad.clientId;
+        result.clientSecret = quad.clientSecret;
+        result.username = quad.username;
+        result.password = quad.password;
+      }
     }
     return result;
   } catch {
@@ -170,11 +196,16 @@ export async function saveConnectorCredentials(args: {
   createdBy?: string;
   /** Defaults to "static_bearer" to preserve existing call sites. */
   authType?: AuthType;
-  /** username_password only — required together with password + loginPath. */
+  /** username_password + oauth_password — required together with password
+   *  + loginPath. */
   username?: string;
   password?: string;
   loginPath?: string;
   sessionCookieName?: string;
+  /** oauth_password only — required together with clientSecret + username +
+   *  password + loginPath. */
+  clientId?: string;
+  clientSecret?: string;
 }): Promise<MaskedConnectorCredentials | null> {
   if (!process.env.DATABASE_URL) return null;
   const workspaceId = args.workspaceId || DEFAULT_WORKSPACE;
@@ -197,6 +228,30 @@ export async function saveConnectorCredentials(args: {
     plaintextHeader =
       "Basic " +
       Buffer.from(`${args.username}:${args.password}`, "utf8").toString("base64");
+    loginPath = args.loginPath;
+    sessionCookieName = args.sessionCookieName ?? null;
+  } else if (authType === "oauth_password") {
+    /* OAuth2 Resource Owner Password: store the credential quad as an
+       encrypted JSON blob in auth_header_enc. No Basic header — the
+       connector exchanges these four fields at login_path (the token
+       endpoint) for a bearer + instance_url at request time. Fail-closed
+       on any missing field so a bad direct call can't persist a
+       half-formed row. */
+    if (
+      !args.clientId ||
+      !args.clientSecret ||
+      !args.username ||
+      !args.password ||
+      !args.loginPath
+    ) {
+      return null;
+    }
+    plaintextHeader = JSON.stringify({
+      clientId: args.clientId,
+      clientSecret: args.clientSecret,
+      username: args.username,
+      password: args.password,
+    });
     loginPath = args.loginPath;
     sessionCookieName = args.sessionCookieName ?? null;
   } else {
@@ -374,7 +429,36 @@ export async function listConnectorCredentials(
 function normalizeAuthType(raw: string | null): AuthType {
   if (raw === "oauth2") return "oauth2";
   if (raw === "username_password") return "username_password";
+  if (raw === "oauth_password") return "oauth_password";
   return "static_bearer";
+}
+
+/** Decode the oauth_password JSON credential blob back into its four
+ *  fields. Returns null when the blob isn't well-formed. In-memory only —
+ *  callers must never log the result. */
+function decodeOAuthPasswordBlob(
+  blob: string,
+): { clientId: string; clientSecret: string; username: string; password: string } | null {
+  try {
+    const parsed = JSON.parse(blob) as Record<string, unknown>;
+    if (
+      !parsed ||
+      typeof parsed.clientId !== "string" ||
+      typeof parsed.clientSecret !== "string" ||
+      typeof parsed.username !== "string" ||
+      typeof parsed.password !== "string"
+    ) {
+      return null;
+    }
+    return {
+      clientId: parsed.clientId,
+      clientSecret: parsed.clientSecret,
+      username: parsed.username,
+      password: parsed.password,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Decode a "Basic <base64(user:pass)>" header back into its parts.
@@ -400,6 +484,12 @@ function decodeBasicHeader(
 
 function maskHeader(plaintext: string): string {
   if (!plaintext) return "(decrypt_failed)";
+  /* oauth_password rows store a JSON credential blob, not a header. Never
+     derive the hint from the blob (its tail leaks password chars) — return
+     a constant, scheme-style hint that signals the flow without secrets. */
+  if (plaintext.startsWith("{") && plaintext.includes('"clientId"')) {
+    return "OAuthPassword ****";
+  }
   /* "Bearer abc...xyz" — preserve scheme word, show last 4. */
   const parts = plaintext.split(/\s+/);
   if (parts.length === 2) {

@@ -38,6 +38,17 @@ describe("resolveScanTarget", () => {
     expect(m?.routes.length).toBeGreaterThan(0); // default routes (sitemap unions on top)
   });
 
+  it("builds an oauth_password (Salesforce) target with the token login path + a default REST probe", async () => {
+    mockLoad.mockResolvedValue({
+      baseUrl: "https://test.salesforce.com", authType: "oauth_password",
+      clientId: "cid", clientSecret: "sec", username: "i@acme.com", password: "pw", loginPath: "/services/oauth2/token",
+    });
+    const m = await resolveScanTarget("ws-1", "salesforce-sbx");
+    expect(m?.baseUrl).toBe("https://test.salesforce.com");
+    expect(m?.login).toEqual({ connectorName: "salesforce-sbx", loginPath: "/services/oauth2/token", sessionCookieName: "" });
+    expect(m?.apiEndpoints?.[0]).toMatchObject({ path: "/services/data/", method: "GET", requiresAuth: true });
+  });
+
   it("a non-login connection still resolves but without a login config", async () => {
     mockLoad.mockResolvedValue({ baseUrl: "https://api.client.com", authType: "static_bearer" });
     const m = await resolveScanTarget("ws-1", "some-api");

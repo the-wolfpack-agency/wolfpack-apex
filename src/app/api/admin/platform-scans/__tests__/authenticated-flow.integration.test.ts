@@ -35,7 +35,7 @@ jest.mock("@/lib/auth/require-capability", () => ({
 //    curated manifest, so resolveScanTarget falls to the connection path). The
 //    list is empty so listScanTargets isn't relevant here.
 const mockLoadCreds = jest.fn();
-const mockListCreds = jest.fn(async (_ws?: string) => [] as unknown[]);
+const mockListCreds = jest.fn(async () => [] as unknown[]);
 jest.mock("@/lib/assistant/connectors/credentials", () => ({
   loadConnectorCredentials: (ws: string, name: string) => mockLoadCreds(ws, name),
   listConnectorCredentials: (ws?: string) => mockListCreds(ws),

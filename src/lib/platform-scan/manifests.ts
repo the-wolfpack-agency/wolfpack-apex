@@ -154,6 +154,21 @@ export async function resolveScanTarget(workspaceId: string, platform: string): 
 
   const creds = await loadConnectorCredentials(workspaceId, platform);
   if (!creds || !creds.baseUrl) return null;
+
+  if (creds.authType === "oauth_password") {
+    // Salesforce-style: the token endpoint is the login path; after auth the scan
+    // runs against the returned instance_url with a bearer. A safe authenticated
+    // probe of the REST API root proves login + execution work.
+    return {
+      baseUrl: creds.baseUrl,
+      routes: DEFAULT_CONNECTION_ROUTES,
+      login: { connectorName: platform, loginPath: creds.loginPath ?? "/services/oauth2/token", sessionCookieName: "" },
+      apiEndpoints: [
+        { path: "/services/data/", method: "GET", journey: "REST API root (authenticated)", requiresAuth: true },
+      ],
+    };
+  }
+
   return {
     baseUrl: creds.baseUrl,
     routes: DEFAULT_CONNECTION_ROUTES,

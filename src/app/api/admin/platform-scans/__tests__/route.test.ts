@@ -42,7 +42,8 @@ const mockLoadCreds = jest.fn();
 const mockEstablish = jest.fn();
 const mockProbeApi = jest.fn();
 jest.mock("@/lib/assistant/connectors/credentials", () => ({ loadConnectorCredentials: (...a: unknown[]) => mockLoadCreds(...a) }));
-jest.mock("@/lib/platform-scan/session", () => ({ establishSession: (...a: unknown[]) => mockEstablish(...a) }));
+const mockEstablishOAuth = jest.fn();
+jest.mock("@/lib/platform-scan/session", () => ({ establishSession: (...a: unknown[]) => mockEstablish(...a), establishOAuthPasswordSession: (...a: unknown[]) => mockEstablishOAuth(...a) }));
 jest.mock("@/lib/platform-scan/api-probe", () => ({ probeApi: (...a: unknown[]) => mockProbeApi(...a) }));
 jest.mock("@/lib/platform-scan/store", () => ({
   recordScan: (...a: unknown[]) => mockRecord(...a),
@@ -96,6 +97,7 @@ beforeEach(() => {
   mockDiscover.mockResolvedValue([]); // no sitemap routes by default
   mockLoadCreds.mockResolvedValue(null); // no connection -> unauthenticated by default
   mockEstablish.mockResolvedValue(null);
+  mockEstablishOAuth.mockResolvedValue(null);
   mockProbeApi.mockResolvedValue([]);
   mockMerge.mockImplementation((seed) => seed); // merge returns the seed
   mockRecord.mockResolvedValue({ scanId: "scan-1", findingCount: 1, criticalCount: 1 });
@@ -209,9 +211,30 @@ describe("authenticated scan (form-login connection)", () => {
     const res = await post({ platform: "wolfpack-beyond", mode: "api" });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ mode: "api", scanId: "scan-1" });
-    expect(mockProbeApi).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "https://beyond.example", cookie: "session=abc", endpoints: LOGIN_MANIFEST.apiEndpoints }));
+    expect(mockProbeApi).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "https://beyond.example", authHeaders: { Cookie: "session=abc" }, endpoints: LOGIN_MANIFEST.apiEndpoints }));
     expect(mockScan).not.toHaveBeenCalled(); // http engine not used in api mode
     expect(mockRecord).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ findings: expect.any(Array) }) }));
+  });
+
+  it("oauth_password (Salesforce): exchanges a token, then probes the INSTANCE url with a bearer", async () => {
+    const SF_MANIFEST = {
+      baseUrl: "https://test.salesforce.com",
+      routes: MANIFEST.routes,
+      login: { connectorName: "salesforce-sbx", loginPath: "/services/oauth2/token", sessionCookieName: "" },
+      apiEndpoints: [{ path: "/services/data/", method: "GET" as const, journey: "REST root", requiresAuth: true }],
+    };
+    mockResolveTarget.mockResolvedValue(SF_MANIFEST);
+    mockLoadCreds.mockResolvedValue({ authType: "oauth_password", clientId: "cid", clientSecret: "sec", username: "i@acme.com", password: "pw+tok", loginPath: "/services/oauth2/token" });
+    mockEstablishOAuth.mockResolvedValue({ authHeader: "Bearer 00Dxx!AR", instanceUrl: "https://acme.my.salesforce.com" });
+    mockProbeApi.mockResolvedValue([]);
+
+    const res = await post({ platform: "salesforce-sbx", mode: "api" });
+    expect(res.status).toBe(200);
+    expect(mockEstablishOAuth).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "https://test.salesforce.com", clientId: "cid", clientSecret: "sec", username: "i@acme.com" }));
+    expect(mockEstablish).not.toHaveBeenCalled(); // not the cookie path
+    // Probes the per-org INSTANCE url with the bearer (not the login host).
+    expect(mockProbeApi).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "https://acme.my.salesforce.com", authHeaders: { Authorization: "Bearer 00Dxx!AR" } }));
+    expect(mockTrack).toHaveBeenCalledWith("platform.scan_started", "admin-1", "admin", expect.objectContaining({ authenticated: true }));
   });
 
   it("400s api mode when the platform has no apiEndpoints", async () => {
