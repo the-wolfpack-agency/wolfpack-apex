@@ -22,6 +22,7 @@ import {
   canonicalJSON,
   computeEntryHash,
   GENESIS_HASH,
+  AUDIT_CHAIN_LOCK_KEY,
   _setAuditMetaSampleRateForTests,
 } from "@/lib/audit-log";
 
@@ -172,6 +173,7 @@ describe("recordAudit", () => {
   it("inserts with GENESIS prev hash when table is empty, returns id/seq/hash", async () => {
     const { client } = buildClient([
       [], // BEGIN
+      [], // pg_advisory_xact_lock
       [], // SELECT prev (empty)
       [{ nextval: "1" }], // nextval
       [{ id: "uuid-1" }], // INSERT RETURNING id
@@ -193,10 +195,53 @@ describe("recordAudit", () => {
     expect(client.release).toHaveBeenCalled();
   });
 
+  it("takes the advisory chain lock BEFORE reading the latest row and inserting", async () => {
+    const { client, queries } = buildClient([
+      [], // BEGIN
+      [], // pg_advisory_xact_lock
+      [], // SELECT prev (empty)
+      [{ nextval: "1" }], // nextval
+      [{ id: "uuid-lock" }], // INSERT RETURNING id
+      [], // COMMIT
+    ]);
+    mockConnect.mockResolvedValueOnce(client);
+
+    await recordAudit({
+      actor: { user_id: "u1", role: "cto" },
+      action: "hr.employee.created",
+      resourceType: "employee",
+    });
+
+    const lockIdx = queries.findIndex((q) => q.includes("pg_advisory_xact_lock"));
+    const selectIdx = queries.findIndex(
+      (q) => q.includes("SELECT entry_hash, seq FROM instinct_audit_log"),
+    );
+    const insertIdx = queries.findIndex((q) => q.includes("INSERT INTO instinct_audit_log"));
+
+    expect(lockIdx).toBeGreaterThanOrEqual(0);
+    expect(selectIdx).toBeGreaterThan(lockIdx); // lock taken before reading latest
+    expect(insertIdx).toBeGreaterThan(selectIdx); // and before the insert
+
+    // Lock is called with the single fixed chain key.
+    const lockCall = client.query.mock.calls.find((c) =>
+      String(c[0]).includes("pg_advisory_xact_lock"),
+    );
+    expect(lockCall).toBeDefined();
+    expect((lockCall![1] as unknown[])[0]).toBe(AUDIT_CHAIN_LOCK_KEY);
+
+    // The latest-row read no longer uses FOR UPDATE (advisory lock is the
+    // serializer); guard against the old race-prone query coming back.
+    const selectCall = client.query.mock.calls.find((c) =>
+      String(c[0]).includes("SELECT entry_hash, seq FROM instinct_audit_log"),
+    );
+    expect(String(selectCall![0])).not.toContain("FOR UPDATE");
+  });
+
   it("uses previous row's entry_hash as prev_hash for seq > 1", async () => {
     const priorHash = "a".repeat(64);
     const { client } = buildClient([
       [], // BEGIN
+      [], // pg_advisory_xact_lock
       [{ entry_hash: priorHash, seq: "5" }],
       [{ nextval: "6" }],
       [{ id: "uuid-6" }],
@@ -220,11 +265,12 @@ describe("recordAudit", () => {
 
   it("redacts PII in beforeState and afterState BEFORE inserting", async () => {
     const { client } = buildClient([
-      [],
-      [],
+      [], // BEGIN
+      [], // pg_advisory_xact_lock
+      [], // SELECT prev
       [{ nextval: "1" }],
       [{ id: "uuid-x" }],
-      [],
+      [], // COMMIT
     ]);
     mockConnect.mockResolvedValueOnce(client);
 
@@ -257,6 +303,7 @@ describe("recordAudit", () => {
     ]);
     // Make INSERT throw
     client.query.mockImplementationOnce(async () => ({ rows: [] })); // BEGIN
+    client.query.mockImplementationOnce(async () => ({ rows: [] })); // pg_advisory_xact_lock
     client.query.mockImplementationOnce(async () => ({ rows: [] })); // SELECT prev
     client.query.mockImplementationOnce(async () => ({ rows: [{ nextval: "1" }] }));
     client.query.mockImplementationOnce(async () => {

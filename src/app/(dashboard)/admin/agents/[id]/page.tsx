@@ -957,6 +957,17 @@ export default function AgentProfilePage({
   const [connecting, setConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
+  /* Backup agent (failover for uptime). This agent can designate a backup; when
+     it goes unhealthy (paused/revoked) its queued work fails over to the backup,
+     which runs it under the SAME OGIAM gate and scope. The select is populated
+     from the OTHER agents in the workspace; saving POSTs the backup endpoint.
+     Loads independently so a failure never blanks the profile. */
+  const [backupAgentId, setBackupAgentId] = useState<string | null>(null);
+  const [backupOptions, setBackupOptions] = useState<{ id: string; name: string }[]>([]);
+  const [backupSelection, setBackupSelection] = useState<string>("");
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupError, setBackupError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -1115,6 +1126,35 @@ export default function AgentProfilePage({
     }
   }, [id]);
 
+  /* Loads this agent's designated backup plus the roster of OTHER agents that
+     can serve as a backup. The backup select is populated from the roster minus
+     THIS agent. A failure collapses to a quiet state (no options, no current
+     backup) so the section never blanks the page. */
+  const loadBackup = useCallback(async () => {
+    setBackupError(null);
+    try {
+      const [backupRes, rosterRes] = await Promise.all([
+        fetchWithRefresh(`/api/admin/agents/${id}/backup`),
+        fetchWithRefresh(`/api/admin/agents`),
+      ]);
+      if (backupRes.ok) {
+        const b = (await backupRes.json()) as { backupAgentId?: string | null };
+        const current = b.backupAgentId ?? null;
+        setBackupAgentId(current);
+        setBackupSelection(current ?? "");
+      }
+      if (rosterRes.ok) {
+        const r = (await rosterRes.json()) as { agents?: { id: string; name: string }[] };
+        const others = (r.agents ?? [])
+          .filter((a) => a.id !== id)
+          .map((a) => ({ id: a.id, name: a.name }));
+        setBackupOptions(others);
+      }
+    } catch {
+      /* Quiet: a backup-load failure must never blank the profile. */
+    }
+  }, [id]);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -1122,6 +1162,10 @@ export default function AgentProfilePage({
   useEffect(() => {
     void loadScan();
   }, [loadScan]);
+
+  useEffect(() => {
+    void loadBackup();
+  }, [loadBackup]);
 
   useEffect(() => {
     void loadTasks();
@@ -1397,6 +1441,45 @@ export default function AgentProfilePage({
       setConnectionError((e as Error).message || "Network error");
     } finally {
       setBinding(false);
+    }
+  }
+
+  /* Sets or clears this agent's backup. POSTs { backupAgentId } (null clears) to
+     the backup endpoint; on success it updates the current backup chip. The
+     server validates the backup is a different, existing, same-workspace,
+     non-cyclic agent, so a 400/404 surfaces inline without blanking. */
+  async function saveBackup() {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    setBackupError(null);
+    try {
+      const next = backupSelection.trim() === "" ? null : backupSelection.trim();
+      const res = await fetchWithRefresh(`/api/admin/agents/${id}/backup`, {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ backupAgentId: next }),
+      });
+      if (!res.ok) {
+        const b = (await res.json().catch(() => ({}))) as { error?: string };
+        if (res.status === 404) {
+          setBackupError(b.error === "backup_not_found" ? "That backup agent no longer exists." : "This agent no longer exists.");
+        } else if (b.error === "backup_is_self") {
+          setBackupError("An agent cannot be its own backup. Pick a different agent.");
+        } else if (b.error === "backup_cycle") {
+          setBackupError("That would create a backup loop (it already backs up this agent). Pick a different agent.");
+        } else if (b.error === "backup_cross_workspace") {
+          setBackupError("The backup must be in the same workspace.");
+        } else {
+          setBackupError(b.error || `Could not save the backup (HTTP ${res.status}).`);
+        }
+        return;
+      }
+      const body = (await res.json().catch(() => ({}))) as { backupAgentId?: string | null };
+      setBackupAgentId(body.backupAgentId ?? next);
+    } catch (e) {
+      setBackupError((e as Error).message || "Network error");
+    } finally {
+      setBackupBusy(false);
     }
   }
 
@@ -2323,6 +2406,117 @@ export default function AgentProfilePage({
         />
       </div>
 
+      {/* Backup agent (failover for uptime). This agent can designate a backup;
+          when it goes unhealthy (paused/revoked) or a task stalls, its queued
+          work fails over to the backup, which runs it under the SAME OGIAM gate
+          and the SAME least-privilege scope. Failover never bypasses governance
+          and never escalates scope (the backup must be bound to a superset of
+          this agent's connections, enforced server-side). */}
+      <div
+        data-testid="agent-backup-section"
+        style={{
+          marginBottom: "1.5rem",
+          padding: "1.1rem 1.2rem",
+          background: "var(--wp-dark-surface, #1f1f22)",
+          border: "1px solid var(--wp-dark-border, #333)",
+          borderRadius: "8px",
+        }}
+      >
+        <div
+          style={{
+            fontSize: "0.72rem",
+            color: "var(--wp-text-muted, #6b7280)",
+            textTransform: "uppercase",
+            letterSpacing: "0.03em",
+            marginBottom: "0.3rem",
+          }}
+        >
+          Uptime
+        </div>
+        <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "var(--wp-text, #eee)" }}>
+          Backup agent
+        </h3>
+        <p style={{ margin: "0.35rem 0 0.9rem", fontSize: "0.82rem", lineHeight: 1.5, color: "var(--wp-text-muted, #6b7280)" }}>
+          Designate a backup so this agent&apos;s queued work keeps moving if it is
+          paused or revoked. The backup runs the failed-over tasks under the same
+          governance gate and the same scope; it only receives work it is already
+          authorized for, so failover never escalates access.
+        </p>
+
+        <div
+          data-testid="agent-backup-current"
+          style={{ marginBottom: "0.8rem", fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}
+        >
+          {backupAgentId ? (
+            <>
+              Current backup:{" "}
+              <span
+                data-testid="agent-backup-current-id"
+                style={{ fontFamily: "var(--wp-mono, monospace)", color: "var(--wp-text, #eee)" }}
+              >
+                {backupOptions.find((o) => o.id === backupAgentId)?.name ?? backupAgentId}
+              </span>
+            </>
+          ) : (
+            <span data-testid="agent-backup-none">No backup designated.</span>
+          )}
+        </div>
+
+        <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
+          <select
+            data-testid="backup-select"
+            value={backupSelection}
+            onChange={(e) => setBackupSelection(e.target.value)}
+            disabled={backupBusy}
+            style={{
+              flex: "1 1 220px",
+              minWidth: 0,
+              padding: "0.5rem 0.6rem",
+              borderRadius: "6px",
+              fontSize: "0.85rem",
+              background: "var(--wp-dark-surface2, #1a1a1a)",
+              color: "var(--wp-text, #eee)",
+              border: "1px solid var(--wp-dark-border, #333)",
+            }}
+          >
+            <option value="">No backup</option>
+            {backupOptions.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            data-testid="backup-save"
+            onClick={() => void saveBackup()}
+            disabled={backupBusy}
+            style={{
+              padding: "0.5rem 1rem",
+              borderRadius: "6px",
+              fontSize: "0.85rem",
+              fontWeight: 600,
+              background: "var(--wp-gold, #f1c233)",
+              color: "#1a1a1a",
+              border: "none",
+              cursor: backupBusy ? "not-allowed" : "pointer",
+              opacity: backupBusy ? 0.6 : 1,
+            }}
+          >
+            {backupBusy ? "Saving..." : "Save"}
+          </button>
+        </div>
+
+        {backupError && (
+          <div
+            data-testid="backup-error"
+            style={{ marginTop: "0.6rem", fontSize: "0.8rem", color: "var(--wp-error, #ef4444)" }}
+          >
+            {backupError}
+          </div>
+        )}
+      </div>
+
       {/* Connected systems (Access). These are the systems THIS agent operates
           on the operator's behalf, the bindings that make it a Salesforce / Jira
           / ... agent. The operator binds an existing workspace connection or
@@ -2518,7 +2712,7 @@ export default function AgentProfilePage({
               borderRadius: "8px",
             }}
           >
-            <label style={{ flex: "1 1 220px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+            <label style={{ flex: "1 1 220px", minWidth: 0, display: "flex", flexDirection: "column", gap: "0.25rem" }}>
               <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--wp-text, #eee)" }}>
                 Connect an existing system
               </span>
@@ -2527,18 +2721,23 @@ export default function AgentProfilePage({
                 value={bindSelection}
                 onChange={(e) => setBindSelection(e.target.value)}
                 style={{
+                  width: "100%",
+                  minWidth: 0,
+                  maxWidth: "100%",
+                  boxSizing: "border-box",
                   padding: "0.5rem 0.65rem",
                   fontSize: "0.85rem",
                   background: "var(--wp-dark-surface, #1f1f22)",
                   color: "var(--wp-text, #eee)",
                   border: "1px solid var(--wp-dark-border, #333)",
                   borderRadius: "6px",
+                  textOverflow: "ellipsis",
                 }}
               >
                 <option value="">Choose a system…</option>
                 {connections.available.map((conn) => (
                   <option key={conn.connectorName} value={conn.connectorName}>
-                    {conn.connectorName} ({conn.baseUrl})
+                    {conn.connectorName} ({conn.baseUrl.replace(/^https?:\/\//, "")})
                   </option>
                 ))}
               </select>
@@ -2586,7 +2785,7 @@ export default function AgentProfilePage({
             Add a new system and connect it to this agent
           </div>
           <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
-            <label style={{ flex: "1 1 200px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+            <label style={{ flex: "1 1 200px", minWidth: 0, display: "flex", flexDirection: "column", gap: "0.25rem" }}>
               <span style={{ fontSize: "0.74rem", color: "var(--wp-text-dim, #aaa)" }}>Connection type</span>
               <select
                 data-testid="conn-auth-type"
@@ -2604,6 +2803,10 @@ export default function AgentProfilePage({
                   }
                 }}
                 style={{
+                  width: "100%",
+                  minWidth: 0,
+                  maxWidth: "100%",
+                  boxSizing: "border-box",
                   padding: "0.5rem 0.65rem",
                   fontSize: "0.85rem",
                   background: "var(--wp-dark-surface, #1f1f22)",

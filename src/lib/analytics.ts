@@ -519,6 +519,34 @@ export type InstinctEventType =
   | "agent.baseline_captured"
   | "agent.drift_checked"
   | "agent.auto_paused"
+  // GOVERNED backup-agent failover for uptime (migration 184). An agent can
+  // designate a BACKUP; when the primary goes unhealthy (paused/revoked) or a
+  // task stalls, its queued work fails over to the backup, which runs it under
+  // the SAME OGIAM gate and the SAME least-privilege scope. Failover never
+  // bypasses governance and never escalates scope.
+  // agent.backup_designated  { agent_id, backup_agent_id, cleared }
+  //   an operator set or cleared this agent's backup designation.
+  // agent.failover_triggered { primary_agent_id, backup_agent_id, task_count }
+  //   an unhealthy primary's queued tasks were reassigned to a scope-compatible
+  //   active backup. task_count is the number reassigned this sweep.
+  // agent.task_reassigned    { task_id, from_agent_id, to_agent_id, workspace_id }
+  //   one queued task moved from the unhealthy primary to the backup. The task
+  //   stays 'queued' and runs as the backup under the gate (no state bypass).
+  | "agent.backup_designated"
+  | "agent.failover_triggered"
+  | "agent.task_reassigned"
+  // agent.task_reclaimed { task_id, agent_id, workspace_id, action }
+  //   a stalled 'running' task (started_at older than the stall window) was
+  //   freed by the reclaimer: action 'requeued' (back to 'queued', under the
+  //   retry cap) or 'failed' (over the cap, marked 'failed' so a permanently
+  //   stuck task can never loop forever). A dead agent leaves a stuck task; this
+  //   frees it so failover can pick it up.
+  | "agent.task_reclaimed"
+  // agent.failover_swept { reclaimed, reassigned, skipped }
+  //   one full failover cron sweep finished. reclaimed = stalled tasks freed,
+  //   reassigned = queued tasks moved to a backup, skipped = unhealthy primaries
+  //   whose backup was scope-incompatible or inactive (no escalation).
+  | "agent.failover_swept"
   // Assistant-driven agent delegation: a user told an agent to do something.
   // agent.delegated         { agent_id, task_id, status }
   //   a human delegated a task to an agent from the assistant chat.
@@ -545,6 +573,14 @@ export type InstinctEventType =
   | "platform.scan_finding_detected"
   | "platform.scan_completed"
   | "platform.scan_finding_triaged"
+  // Demo-login canary: a continuous end-to-end proof that the scan tool still
+  // logs into demo target platforms, runs a scan, and surfaces the expected
+  // findings — catching a regression (login broke / scan broke / a known-buggy
+  // demo's findings dropped to zero) BEFORE a client does.
+  // canary.demo_run    { name, login_ok, scan_ok, finding_count, healthy } — one per canary target per run.
+  // canary.demo_failed { name, login_ok, scan_ok, finding_count, reason }  — fires only for an UNHEALTHY target.
+  | "canary.demo_run"
+  | "canary.demo_failed"
   // Universal-search assistant tool (`search`). Fired by the tool's
   // handler after runSearch returns successfully so the learning loop
   // sees parity with the /search page route's `insight.search.queried`
@@ -1161,6 +1197,10 @@ export type InstinctEventType =
   | "system.audit_log_viewed"
   | "system.audit_log_tamper_suspected"
   | "system.audit_log_export"
+  // Re-anchor: an admin acknowledged a KNOWN, non-tamper chain break (e.g. the
+  // seq-509 concurrency fork) at a specific seq, opening a new chain segment.
+  // verifyChain honors anchored seqs; tamper at any other seq still fails.
+  | "system.audit_log_reanchored"
   // Scheduled hash-chain verification (cron) — emitted on every run with
   // { valid, checked }. Distinct from audit_log_tamper_suspected (failure-only,
   // manual/admin path); this records that the unattended verifier ran at all.

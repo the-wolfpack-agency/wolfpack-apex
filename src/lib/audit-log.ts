@@ -16,10 +16,27 @@
  *   entry_hash = sha256(prev_hash || canonical_json(fields_excluding_hashes))
  *   For seq = 1, prev_hash = GENESIS_HASH constant.
  *
- * Threading / concurrency: recordAudit wraps SELECT-prev + INSERT in a single
- * serializable transaction. Under contention, Postgres serialization errors
- * bubble up to the caller; callers should retry. In the common low-write case
- * (HR mutations, auth events), contention is negligible.
+ * Threading / concurrency: recordAudit serializes every append GLOBALLY with a
+ * transaction-scoped Postgres advisory lock (pg_advisory_xact_lock) taken on a
+ * single fixed key (AUDIT_CHAIN_LOCK_KEY) immediately after BEGIN. This makes
+ * the "read latest -> compute prev_hash -> insert next" sequence atomic per
+ * chain: no two transactions can both observe the same latest row and fork the
+ * chain. The lock auto-releases at COMMIT/ROLLBACK (no leak on error path).
+ *
+ * Why an advisory lock and NOT `BEGIN ISOLATION LEVEL SERIALIZABLE` + retry:
+ *   - SERIALIZABLE detects the conflict only AFTER the fact and raises a
+ *     serialization_failure (SQLSTATE 40001) that the caller must catch and
+ *     RETRY in a loop. recordAudit sits on hot mutation paths (HR edits, auth
+ *     events); surfacing 40001 there means every call site needs retry logic or
+ *     audit writes start failing under load — exactly when we most need them.
+ *   - The advisory lock instead makes appends WAIT their turn and proceed in a
+ *     total order. No retry loop, no serialization-failure surface, and a global
+ *     ordering guarantee for the single-writer chain. Append throughput is
+ *     bounded by the lock, which is acceptable: the audit chain is intentionally
+ *     a single linear log, not a high-fan-out hot table.
+ * The historical bug (chain fork at seq 509) was a READ-COMMITTED `FOR UPDATE`
+ * on the latest row: under contention two txns both re-evaluated row 508 (not
+ * the freshly-committed 509) and computed prev_hash off the wrong predecessor.
  */
 
 import { createHash } from "crypto";
@@ -76,6 +93,13 @@ export interface VerifyResult {
   brokenAt?: number;
   checkedCount: number;
   reason?: string;
+  /**
+   * Acknowledged re-anchor seqs that verifyChain honored within the scanned
+   * range. A prev_hash mismatch AT one of these seqs is an expected new-segment
+   * genesis (a legitimate, operator-acknowledged break) and does NOT fail
+   * verification. Present so callers can show "verified across N anchors".
+   */
+  honoredAnchors?: number[];
 }
 
 export interface QueryFilter {
@@ -99,6 +123,15 @@ export interface QueryResultPage {
 // ---------------------------------------------------------------------------
 
 export const GENESIS_HASH = "instinct:audit:genesis";
+
+/**
+ * Fixed advisory-lock key for the audit chain. A single stable bigint shared by
+ * every recordAudit transaction so all appends serialize against ONE lock and
+ * the chain can never fork. The value is arbitrary but MUST never change — it is
+ * the chain's global mutex identity. (Chosen as a fixed constant, not derived,
+ * so it is greppable and collision-free against any other advisory-lock user.)
+ */
+export const AUDIT_CHAIN_LOCK_KEY = 778_021_509 as const;
 
 /**
  * Sensitive field registry. Any key matching (case-insensitive) in before/after
@@ -240,9 +273,21 @@ export async function recordAudit(entry: AuditEntryInput): Promise<RecordResult>
   try {
     await client.query("BEGIN");
 
+    // Serialize ALL audit appends globally. Transaction-scoped advisory lock on
+    // the single fixed chain key: every concurrent recordAudit waits here, so
+    // the read-latest -> compute prev_hash -> insert sequence below is atomic
+    // and the chain can never fork (the seq 509 bug). Auto-released at
+    // COMMIT/ROLLBACK. See the file header for why this over SERIALIZABLE+retry.
+    await client.query("SELECT pg_advisory_xact_lock($1)", [AUDIT_CHAIN_LOCK_KEY]);
+
+    // The advisory lock is the real serializer; FOR UPDATE is dropped. Under the
+    // old READ-COMMITTED FOR UPDATE, a waiter re-evaluated the SAME stale row
+    // after the lock released and computed prev_hash off the wrong predecessor.
+    // With the chain held by ONE lock for the whole txn, the latest row we read
+    // here is guaranteed to be the true tail.
     const prev = await client.query<{ entry_hash: string; seq: string }>(
       `SELECT entry_hash, seq FROM instinct_audit_log
-       ORDER BY seq DESC LIMIT 1 FOR UPDATE`,
+       ORDER BY seq DESC LIMIT 1`,
     );
 
     const prevHash = prev.rows.length > 0 ? prev.rows[0].entry_hash : GENESIS_HASH;
@@ -338,6 +383,17 @@ export async function verifyChain(fromSeq?: number, toSeq?: number): Promise<Ver
     return { valid: true, checkedCount: 0, reason: "shadow_mode" };
   }
 
+  // Load acknowledged re-anchor seqs FIRST. A prev_hash mismatch AT an anchored
+  // seq is a legitimate new-segment genesis (e.g. the seq-509 concurrency fork
+  // an admin cleared) and must NOT fail verification. An UNanchored prev_hash
+  // mismatch, or ANY entry_hash (content) mismatch, still fails — tamper stays
+  // detectable.
+  const { rows: anchorRows } = await safeQuery<{ seq: string }>(
+    `SELECT seq FROM instinct_audit_chain_anchors`,
+  );
+  const anchoredSeqs = new Set<number>(anchorRows.map((r) => Number(r.seq)));
+  const honoredAnchors: number[] = [];
+
   const from = Math.max(1, fromSeq ?? 1);
   const params: unknown[] = [from];
   let where = "seq >= $1";
@@ -389,7 +445,22 @@ export async function verifyChain(fromSeq?: number, toSeq?: number): Promise<Ver
     // prev_hash column must match expectedPrev (null means genesis).
     const storedPrev = row.prev_hash ?? GENESIS_HASH;
     if (storedPrev !== expectedPrev) {
-      return { valid: false, brokenAt: seq, checkedCount: checked, reason: "prev_hash_mismatch" };
+      if (anchoredSeqs.has(seq)) {
+        // Acknowledged re-anchor: this seq begins a NEW segment. Adopt the row's
+        // own stored prev_hash as the segment genesis and keep verifying so the
+        // rest of the chain (and this row's own content hash, below) is still
+        // checked against THIS row's recorded predecessor.
+        honoredAnchors.push(seq);
+        expectedPrev = storedPrev;
+      } else {
+        return {
+          valid: false,
+          brokenAt: seq,
+          checkedCount: checked,
+          reason: "prev_hash_mismatch",
+          honoredAnchors,
+        };
+      }
     }
 
     const expectedHash = computeEntryHash(expectedPrev, {
@@ -408,14 +479,85 @@ export async function verifyChain(fromSeq?: number, toSeq?: number): Promise<Ver
     });
 
     if (expectedHash !== row.entry_hash) {
-      return { valid: false, brokenAt: seq, checkedCount: checked, reason: "entry_hash_mismatch" };
+      // Content tamper: even at an anchored seq, the row's OWN hash must match
+      // its recorded fields + prev_hash. An anchor excuses a chain break, never
+      // a rewritten row. This is what keeps tampering detectable post-reanchor.
+      return {
+        valid: false,
+        brokenAt: seq,
+        checkedCount: checked,
+        reason: "entry_hash_mismatch",
+        honoredAnchors,
+      };
     }
 
     expectedPrev = row.entry_hash;
     checked++;
   }
 
-  return { valid: true, checkedCount: checked };
+  return { valid: true, checkedCount: checked, honoredAnchors };
+}
+
+// ---------------------------------------------------------------------------
+// reanchorChain — acknowledge a known, non-tamper chain break
+// ---------------------------------------------------------------------------
+
+export interface ReanchorResult {
+  seq: number;
+  reason: string;
+  acknowledgedBy: string;
+  /** true if this seq was already anchored (idempotent re-ack). */
+  alreadyAnchored: boolean;
+}
+
+/**
+ * Record an acknowledged re-anchor at `seq`. After this, verifyChain treats a
+ * prev_hash mismatch AT `seq` as an expected new-segment genesis instead of a
+ * tamper signal. This NEVER rewrites instinct_audit_log rows — history stays
+ * intact and tamper-evident; we only annotate a known break as acknowledged.
+ *
+ * Idempotent: re-anchoring an already-anchored seq is a no-op success
+ * (UNIQUE(seq) on the anchors table). The action is itself audited (hash-chained
+ * meta entry, no secrets) and emits a learning-loop analytics event.
+ */
+export async function reanchorChain(
+  seq: number,
+  reason: string,
+  by: AuditActor,
+): Promise<ReanchorResult> {
+  if (!process.env.DATABASE_URL) {
+    return { seq, reason, acknowledgedBy: by.user_id, alreadyAnchored: false };
+  }
+
+  // ON CONFLICT DO NOTHING => idempotent. xmax = 0 on the returned row means a
+  // fresh insert; no returned row means the seq was already anchored.
+  const { rows } = await safeQuery<{ seq: string }>(
+    `INSERT INTO instinct_audit_chain_anchors (seq, reason, acknowledged_by)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (seq) DO NOTHING
+     RETURNING seq`,
+    [seq, reason, by.user_id],
+  );
+  const alreadyAnchored = rows.length === 0;
+
+  // Audit the re-anchor itself — meta only, no secrets. The afterState records
+  // WHAT was acknowledged and WHY so the action is itself tamper-evident.
+  await recordAudit({
+    actor: by,
+    action: "audit.chain.reanchored",
+    resourceType: "audit_chain",
+    resourceId: String(seq),
+    afterState: { seq, reason, already_anchored: alreadyAnchored },
+  });
+
+  // Learning loop: surface that a known break was acknowledged.
+  trackEvent("system.audit_log_reanchored", by.user_id, by.role, {
+    seq,
+    reason,
+    already_anchored: alreadyAnchored,
+  });
+
+  return { seq, reason, acknowledgedBy: by.user_id, alreadyAnchored };
 }
 
 // ---------------------------------------------------------------------------

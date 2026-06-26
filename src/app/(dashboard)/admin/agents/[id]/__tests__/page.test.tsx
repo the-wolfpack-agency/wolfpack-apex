@@ -194,6 +194,7 @@ function makeConnection(over: Partial<Record<string, unknown>> = {}) {
 }
 
 const SCAN_PATH = "/scan";
+const BACKUP_PATH = "/backup";
 const TASKS_PATH = "/tasks";
 const TASKS_RUN_PATH = "/tasks/run";
 const DRIFT_PATH = "/drift";
@@ -233,10 +234,28 @@ function routeByUrl(opts: {
   onBind?: () => any;
   onUnbind?: () => any;
   onCreateConnector?: () => any;
+  backup?: () => any;
+  onBackup?: () => any;
+  roster?: () => any;
 }) {
   return (url: unknown, init?: { method?: string }) => {
     const u = String(url);
     if (init?.method === "PATCH" && opts.onPatch) return Promise.resolve(opts.onPatch());
+    // Backup designation: GET /api/admin/agents/{id}/backup returns
+    // { backupAgentId }, POST sets it. Matched before the bare-agents roster GET
+    // and the agent fall-through so neither swallows it.
+    if (u.endsWith(BACKUP_PATH) && init?.method === "POST") {
+      return Promise.resolve((opts.onBackup ?? (() => mkRes({ ok: true, backupAgentId: "ag-2" })))());
+    }
+    if (u.endsWith(BACKUP_PATH)) {
+      return Promise.resolve((opts.backup ?? (() => mkRes({ backupAgentId: null })))());
+    }
+    // The roster GET /api/admin/agents (no id suffix) populates the backup
+    // select. Matched on the exact bare-collection path so the per-agent GET
+    // (/api/admin/agents/{id}) still falls through to opts.agent().
+    if (/\/api\/admin\/agents$/.test(u) && (init?.method ?? "GET") === "GET") {
+      return Promise.resolve((opts.roster ?? (() => mkRes({ agents: [] })))());
+    }
     // Creating a brand-new connection POSTs /api/admin/connectors. Matched
     // before the agent-connections path so the create stays distinct from the
     // bind. (The path "/api/admin/connectors" does not contain "/connections".)
@@ -1894,6 +1913,107 @@ describe("/admin/agents/[id]: connected systems (access)", () => {
     );
     expect(bindPost).toBeFalsy();
     // The rest of the profile still renders: a failed add never blanks it.
+    expect(screen.getByTestId("agent-name")).toBeInTheDocument();
+  });
+});
+
+describe("/admin/agents/[id]: backup agent (failover for uptime)", () => {
+  it("renders the backup section, populates the select from the OTHER agents, and shows the current backup", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        backup: () => mkRes({ backupAgentId: "ag-2" }),
+        roster: () =>
+          mkRes({
+            agents: [
+              { id: "ag-1", name: "Research Scout" }, // self -> excluded
+              { id: "ag-2", name: "Backup Scout" },
+              { id: "ag-3", name: "Spare Scout" },
+            ],
+          }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-backup-section")).toBeInTheDocument());
+
+    const select = screen.getByTestId("backup-select") as HTMLSelectElement;
+    // "No backup" + the two OTHER agents (self excluded).
+    const optionValues = Array.from(select.options).map((o) => o.value);
+    expect(optionValues).toEqual(["", "ag-2", "ag-3"]);
+    // The current backup is reflected on the select and the current-backup chip.
+    await waitFor(() => expect(select.value).toBe("ag-2"));
+    expect(screen.getByTestId("agent-backup-current-id")).toHaveTextContent("Backup Scout");
+  });
+
+  it("saves a designated backup via POST { backupAgentId }", async () => {
+    const onBackup = jest.fn(() => mkRes({ ok: true, backupAgentId: "ag-3" }));
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        backup: () => mkRes({ backupAgentId: null }),
+        roster: () =>
+          mkRes({
+            agents: [
+              { id: "ag-1", name: "Research Scout" },
+              { id: "ag-3", name: "Spare Scout" },
+            ],
+          }),
+        onBackup,
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("backup-select")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByTestId("backup-select"), { target: { value: "ag-3" } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("backup-save"));
+    });
+
+    await waitFor(() => expect(onBackup).toHaveBeenCalled());
+    const postCall = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).endsWith("/api/admin/agents/ag-1/backup"),
+    );
+    expect(postCall).toBeTruthy();
+    expect(JSON.parse((postCall![1] as { body: string }).body)).toEqual({ backupAgentId: "ag-3" });
+    // The current-backup chip reflects the saved backup.
+    await waitFor(() => expect(screen.getByTestId("agent-backup-current-id")).toHaveTextContent("Spare Scout"));
+  });
+
+  it("surfaces a self/cycle reject inline without blanking the profile", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        backup: () => mkRes({ backupAgentId: null }),
+        roster: () => mkRes({ agents: [{ id: "ag-3", name: "Spare Scout" }] }),
+        onBackup: () => mkRes({ error: "backup_cycle" }, { ok: false, status: 400 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("backup-select")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByTestId("backup-select"), { target: { value: "ag-3" } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("backup-save"));
+    });
+
+    await waitFor(() => expect(screen.getByTestId("backup-error")).toBeInTheDocument());
+    expect(screen.getByTestId("backup-error")).toHaveTextContent(/loop/i);
+    // The profile still renders: a failed save never blanks it.
     expect(screen.getByTestId("agent-name")).toBeInTheDocument();
   });
 });
