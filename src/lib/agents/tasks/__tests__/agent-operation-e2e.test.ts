@@ -13,7 +13,7 @@
  * REAL. Previously this instruction returned no_match because no QR tool existed.
  */
 
-const mockRecordDecision = jest.fn((..._args: unknown[]) => Promise.resolve(null));
+const mockRecordDecision = jest.fn((..._args: unknown[]) => Promise.resolve({ id: "d_test", seq: 1, entryHash: "h" }));
 jest.mock("@/lib/ogiam/ledger", () => ({
   ...jest.requireActual("@/lib/ogiam/ledger"),
   recordDecision: (...a: unknown[]) => mockRecordDecision(...a),

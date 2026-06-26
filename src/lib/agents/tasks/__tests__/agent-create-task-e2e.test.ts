@@ -17,7 +17,7 @@ jest.mock("@/lib/integrations/microsoft-tasks", () => ({
 }));
 jest.mock("@/lib/ogiam/ledger", () => ({
   ...jest.requireActual("@/lib/ogiam/ledger"),
-  recordDecision: jest.fn(() => Promise.resolve(null)),
+  recordDecision: jest.fn(() => Promise.resolve({ id: "d_test", seq: 1, entryHash: "h" })),
 }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
 jest.mock("@/lib/db", () => ({ safeQuery: jest.fn(() => Promise.resolve({ rows: [] })), writeQuery: jest.fn(() => Promise.resolve({ rows: [] })) }));

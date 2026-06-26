@@ -8,7 +8,10 @@
  */
 
 // Capture every OGIAM decision without a database. Keep the real hash helpers.
-const mockRecordDecision = jest.fn((..._args: unknown[]) => Promise.resolve(null));
+const mockRecordDecision = jest.fn(
+  (..._args: unknown[]): Promise<{ id: string; seq: number; entryHash: string } | null> =>
+    Promise.resolve({ id: "d_test", seq: 1, entryHash: "h" }),
+);
 jest.mock("@/lib/ogiam/ledger", () => ({
   ...jest.requireActual("@/lib/ogiam/ledger"),
   recordDecision: (...a: unknown[]) => mockRecordDecision(...a),
@@ -19,6 +22,7 @@ import { z } from "zod";
 import { tryDispatchTool } from "@/lib/assistant/tools/dispatcher";
 import { registerTool, __resetRegistryForTests } from "@/lib/assistant/tools/registry";
 import type { ToolContext } from "@/lib/assistant/tools/types";
+import { trackEvent } from "@/lib/analytics";
 
 function tool(name: string, opts: { capability?: string; mutation?: boolean; match: string }) {
   registerTool({
@@ -113,5 +117,30 @@ describe("human-only tools are never invoked by an agent", () => {
   it("still lets a human invoke the human-only tool", async () => {
     const res = await tryDispatchTool("handle this", humanCtx);
     expect(res?.tool).toBe("delegate_like");
+  });
+});
+
+describe("fail closed when a decision cannot be audited (enforce)", () => {
+  it("blocks the agent action, never runs the tool, and records the block when the ledger write fails", async () => {
+    mockRecordDecision.mockResolvedValue(null); // ledger unavailable -> unauditable in enforce
+    const res = await tryDispatchTool("show status", agentCtx);
+    expect(res?.result.ok).toBe(false);
+    if (res && !res.result.ok) {
+      expect(res.result.code).toBe("internal");
+      expect(res.result.message).toMatch(/could not be audited/i);
+    }
+    // The block is captured off-ledger (best effort) so the data is not lost.
+    expect(trackEvent).toHaveBeenCalledWith(
+      "ogiam.action_blocked_unauditable",
+      "agent-1",
+      "ops",
+      expect.objectContaining({ tool: "read_status" }),
+    );
+  });
+
+  it("the human (monitor) path still runs when the ledger write fails (untouched)", async () => {
+    mockRecordDecision.mockResolvedValue(null);
+    const res = await tryDispatchTool("show status", humanCtx);
+    expect(res?.result.ok).toBe(true);
   });
 });

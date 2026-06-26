@@ -34,16 +34,35 @@ export async function authorize(input: AuthorizeInput): Promise<OgiamDecision> {
   const { action, redactedParams } = buildAction(input);
   const decision = decide(action, { mode });
 
-  // Record the decision. recordDecision never throws (best effort), so the gate
-  // never breaks the caller even if the database is unavailable. Capture its
-  // return so the caller can link an action OUTCOME to this decision's seq; a
-  // null return (skipped or failed) simply leaves recordedSeq absent.
-  const recorded = await recordDecision({
+  // Record the decision. recordDecision never throws (best effort) and returns
+  // null on failure. In the human MONITOR path that is fine: a ledger failure is
+  // swallowed and the assistant proceeds exactly as before.
+  let recorded = await recordDecision({
     principal: input.principal,
     action,
     decision,
     redactedParams,
   });
+
+  // FAIL CLOSED ON UNAUDITABLE (enforce only). For a governed AGENT the audit IS
+  // the guarantee: an action that cannot be written to the tamper-evident ledger
+  // must not execute. Retry once for a transient failure, then mark the decision
+  // unauditable and force a block, so the PEP refuses it - "no audit, no action",
+  // the same integrity rule as "no authorization, no action". The MONITOR path
+  // is deliberately untouched (it never blocks).
+  if (!recorded && mode === "enforce") {
+    recorded = await recordDecision({
+      principal: input.principal,
+      action,
+      decision,
+      redactedParams,
+    });
+    if (!recorded) {
+      decision.unauditable = true;
+      decision.wouldBlock = true;
+    }
+  }
+
   if (recorded) decision.recordedSeq = recorded.seq;
 
   return decision;

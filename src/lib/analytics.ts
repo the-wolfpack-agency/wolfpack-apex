@@ -432,6 +432,7 @@ export type InstinctEventType =
   //   enforcement would have stopped, so we can tune before enforcing.
   | "ogiam.action_authorized"
   | "ogiam.action_flagged"
+  | "ogiam.action_blocked_unauditable"
   // ogiam.checkpoint_signed  { workspace_id, through_seq, algorithm, key_id,
   //                            signed, chain_ok, verified_count }
   //   fired when the scheduled sweep notarizes a workspace's decision chain by

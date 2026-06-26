@@ -97,4 +97,8 @@ export interface OgiamDecision {
    *  to this decision (the input) without mutating the decision row. Absent
    *  when the ledger write was skipped (no DATABASE_URL) or failed. */
   recordedSeq?: number;
+  /** Set true ONLY in enforce mode when the decision could not be written to the
+   *  tamper-evident ledger, even after a retry. The PEP MUST block the action:
+   *  no audit, no action. Never set in monitor mode. */
+  unauditable?: boolean;
 }

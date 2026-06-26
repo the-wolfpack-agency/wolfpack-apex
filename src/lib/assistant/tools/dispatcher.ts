@@ -175,6 +175,22 @@ async function runOneTool<P, R>(
       params: parsed.data,
       mode: agent ? "enforce" : "monitor",
     });
+    if (agent && decision.unauditable) {
+      // Fail closed: the action could not be written to the tamper-evident
+      // ledger, so it must not run. The ledger is unavailable, so this block can
+      // only be captured off-ledger (best effort) - but the action is stopped.
+      trackEvent("ogiam.action_blocked_unauditable", agent.agentId, agent.role, {
+        agent_id: agent.agentId,
+        workspace_id: agent.workspaceId,
+        tool: tool.name,
+        capability: tool.capability,
+        ...(ctx.workflowId ? { workflow_id: ctx.workflowId } : {}),
+      });
+      return failure(
+        "internal",
+        "blocked: action could not be audited (fail-closed; no audit, no action)",
+      );
+    }
     if (agent && decision.enforced && decision.wouldBlock) {
       return failure(
         "capability",
