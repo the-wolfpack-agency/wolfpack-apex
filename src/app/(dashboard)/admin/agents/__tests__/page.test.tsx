@@ -90,6 +90,38 @@ describe("/admin/agents: roster", () => {
     expect(screen.getByTestId("admin-agents-page")).toHaveTextContent(/OGIAM/i);
   });
 
+  it("renders the agent's bound services as chips when it has connections", async () => {
+    const agent = makeAgent({ id: "ag-sf", connections: ["salesforce", "jira"] });
+    mockFetchWithRefresh.mockResolvedValue(mkRes({ agents: [agent] }));
+
+    await act(async () => {
+      render(<AgentsPage />);
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-services-ag-sf")).toBeInTheDocument(),
+    );
+    const services = screen.getByTestId("agent-services-ag-sf");
+    expect(services).toHaveTextContent("salesforce");
+    expect(services).toHaveTextContent("jira");
+    // The chips are the services, not the no-service hint.
+    expect(services).not.toHaveTextContent(/no service/i);
+  });
+
+  it("shows the no-service hint for an agent with no connections", async () => {
+    const agent = makeAgent({ id: "ag-bare", connections: [] });
+    mockFetchWithRefresh.mockResolvedValue(mkRes({ agents: [agent] }));
+
+    await act(async () => {
+      render(<AgentsPage />);
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-services-ag-bare")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("agent-services-ag-bare")).toHaveTextContent(/no service/i);
+  });
+
   it("links to the shared agent-memory view", async () => {
     mockFetchWithRefresh.mockResolvedValue(mkRes({ agents: [] }));
 

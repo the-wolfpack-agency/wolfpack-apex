@@ -17,7 +17,7 @@ jest.mock("@/lib/db", () => ({
 const mockTrackEvent = jest.fn();
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrackEvent(...a) }));
 
-import { createAgent, activateWithOnboardingSecret, setAgentState } from "@/lib/agents/store";
+import { createAgent, activateWithOnboardingSecret, setAgentState, listAgents } from "@/lib/agents/store";
 
 function row(over: Record<string, unknown> = {}) {
   return {
@@ -87,6 +87,30 @@ describe("activateWithOnboardingSecret", () => {
   it("returns null for an unknown agent", async () => {
     mockQuery.mockResolvedValue({ rows: [] });
     expect(await activateWithOnboardingSecret("nope", "x")).toBeNull();
+  });
+});
+
+describe("listAgents", () => {
+  it("includes each agent's bound connections via ONE extra grouped query (no N+1)", async () => {
+    // First safeQuery: the agents roster. Second safeQuery: the grouped
+    // connections-by-agent read that listAgents joins onto the roster.
+    mockSafeQuery
+      .mockResolvedValueOnce({
+        rows: [row({ id: "agent-1" }), row({ id: "agent-2" })],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          { agent_id: "agent-1", connector_name: "salesforce" },
+          { agent_id: "agent-1", connector_name: "jira" },
+        ],
+      });
+    const agents = await listAgents("ws-1");
+    expect(agents.map((a) => a.id)).toEqual(["agent-1", "agent-2"]);
+    expect(agents[0].connections).toEqual(["salesforce", "jira"]);
+    // agent-2 has no bindings -> empty array, never undefined.
+    expect(agents[1].connections).toEqual([]);
+    // Exactly two queries total: roster + grouped connections (not N+1).
+    expect(mockSafeQuery).toHaveBeenCalledTimes(2);
   });
 });
 

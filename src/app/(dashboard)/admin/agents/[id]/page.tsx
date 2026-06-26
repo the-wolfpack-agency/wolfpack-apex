@@ -247,31 +247,31 @@ type LogState =
   | { kind: "error" }
   | { kind: "present"; entries: AgentLogEntry[] };
 
-/* Connected systems (Access): a connector is a client platform this agent
-   operates on the owner's behalf. The masked GET never returns the password; a
-   username_password connector is one the operator wired with the login (username
-   + password) they themselves use on the client's system, so the agent can run
-   an authenticated scan of it. Loads independently of the agent so a connectors
-   failure never blanks the profile; an empty list is the expected steady state
-   for an agent with nothing connected yet. */
-interface ConnectorRecord {
+/* Connected systems (Access): a binding ties a client platform to THIS agent,
+   making it "a Salesforce agent", "a Jira agent", etc. The GET returns the
+   connections BOUND to this agent (the systems it operates) plus the workspace
+   connections AVAILABLE to bind but not yet attached. The masked shape never
+   returns a password; a username_password connection is one the operator wired
+   with the login (username + password) they themselves use on the client's
+   system, so the agent can run an authenticated scan of it. Loads independently
+   of the agent so a connections failure never blanks the profile; an empty
+   bound list is the expected steady state for an agent with nothing connected
+   yet. */
+interface AgentConnection {
   connectorName: string;
   baseUrl: string;
   authType: string;
-  authHeaderHint: string | null;
-  loginPath: string | null;
-  sessionCookieName: string | null;
-  isActive: boolean;
 }
 
-interface ConnectorsResponse {
-  connectors: ConnectorRecord[];
+interface AgentConnectionsResponse {
+  bound: AgentConnection[];
+  available: AgentConnection[];
 }
 
 type ConnectionsState =
   | { kind: "loading" }
   | { kind: "error" }
-  | { kind: "present"; connectors: ConnectorRecord[] };
+  | { kind: "present"; bound: AgentConnection[]; available: AgentConnection[] };
 
 interface TaskResponse {
   task: AgentTask;
@@ -931,11 +931,16 @@ export default function AgentProfilePage({
   const [logBusy, setLogBusy] = useState(false);
 
   /* Connected systems (Access). Loads independently of the agent so a
-     connectors failure never blanks the profile; an empty list is a first-class
-     "nothing connected yet" state, not an error. The add form POSTs a
-     username_password connection (the client login the operator uses), clears
-     the password on success, and reloads the masked list. */
+     connections failure never blanks the profile; an empty bound list is a
+     first-class "nothing connected yet" state, not an error. The add form
+     creates a NEW connection (POST /api/admin/connectors) and binds it to this
+     agent in one action; the bind-existing control attaches a workspace
+     connection already created elsewhere. */
   const [connections, setConnections] = useState<ConnectionsState>({ kind: "loading" });
+  /* The connector chosen in the bind-existing select, and the in-flight flag
+     shared by both the bind-existing and unbind actions. */
+  const [bindSelection, setBindSelection] = useState("");
+  const [binding, setBinding] = useState(false);
   const [connName, setConnName] = useState("");
   const [connBaseUrl, setConnBaseUrl] = useState("");
   const [connLoginPath, setConnLoginPath] = useState("/api/auth/login");
@@ -1084,24 +1089,31 @@ export default function AgentProfilePage({
     }
   }, [id]);
 
-  /* Loads the masked connector list (the systems this agent is connected to). A
-     failure collapses to a quiet error state so the section never blanks the
-     page; an empty array is a first-class "nothing connected yet" state, not an
-     error. The GET is masked: it never returns a connector's password. */
+  /* Loads the systems BOUND to this agent (the ones it operates) plus the
+     workspace connections AVAILABLE to bind. A failure collapses to a quiet
+     error state so the section never blanks the page; an empty bound list is a
+     first-class "nothing connected yet" state, not an error. The GET is masked:
+     it never returns a connection's password. Scoped to this agent, not the
+     whole workspace, so the section reflects what makes it a Salesforce / Jira /
+     ... agent. */
   const loadConnections = useCallback(async () => {
     setConnections({ kind: "loading" });
     try {
-      const res = await fetchWithRefresh("/api/admin/connectors");
+      const res = await fetchWithRefresh(`/api/admin/agents/${id}/connections`);
       if (!res.ok) {
         setConnections({ kind: "error" });
         return;
       }
-      const body = (await res.json()) as ConnectorsResponse;
-      setConnections({ kind: "present", connectors: body.connectors ?? [] });
+      const body = (await res.json()) as AgentConnectionsResponse;
+      setConnections({
+        kind: "present",
+        bound: body.bound ?? [],
+        available: body.available ?? [],
+      });
     } catch {
       setConnections({ kind: "error" });
     }
-  }, []);
+  }, [id]);
 
   useEffect(() => {
     void load();
@@ -1332,12 +1344,71 @@ export default function AgentProfilePage({
     }
   }
 
-  /* Connects this agent to a client platform with the username + password the
-     operator uses to sign in there (e.g. an account a client invited them to).
-     POSTs a username_password connection; the password is encrypted server-side
-     and never returned. On success we clear the password (it is never shown
-     again) and reload the masked list so the new connection appears with its
-     "Run authenticated scan" link. A failure surfaces inline without blanking. */
+  /* Binds an existing workspace connection to THIS agent, making the agent
+     operate that system. POSTs { connectorName } to the agent-connections
+     endpoint; on success it reloads so the connection moves from "available"
+     into the bound list. A failure surfaces inline without blanking. */
+  async function bindExisting() {
+    const name = bindSelection.trim();
+    if (!name || binding) return;
+    setBinding(true);
+    setConnectionError(null);
+    try {
+      const res = await fetchWithRefresh(`/api/admin/agents/${id}/connections`, {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ connectorName: name }),
+      });
+      if (!res.ok) {
+        const b = (await res.json().catch(() => ({}))) as { error?: string };
+        setConnectionError(b.error || `Could not connect that system (HTTP ${res.status}).`);
+        return;
+      }
+      setBindSelection("");
+      await loadConnections();
+    } catch (e) {
+      setConnectionError((e as Error).message || "Network error");
+    } finally {
+      setBinding(false);
+    }
+  }
+
+  /* Unbinds a connection from this agent: the agent stops operating that system,
+     but the workspace connection itself is left intact (it returns to the
+     available list). DELETEs { connectorName } to the agent-connections
+     endpoint, then reloads. A failure surfaces inline without blanking. */
+  async function unbindConnection(connectorName: string) {
+    if (binding) return;
+    setBinding(true);
+    setConnectionError(null);
+    try {
+      const res = await fetchWithRefresh(`/api/admin/agents/${id}/connections`, {
+        method: "DELETE",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ connectorName }),
+      });
+      if (!res.ok) {
+        const b = (await res.json().catch(() => ({}))) as { error?: string };
+        setConnectionError(b.error || `Could not disconnect that system (HTTP ${res.status}).`);
+        return;
+      }
+      await loadConnections();
+    } catch (e) {
+      setConnectionError((e as Error).message || "Network error");
+    } finally {
+      setBinding(false);
+    }
+  }
+
+  /* Connects this agent to a NEW client platform with the username + password
+     the operator uses to sign in there (e.g. an account a client invited them
+     to). "Add" is create + bind in one action: it POSTs the new connection to
+     /api/admin/connectors, then POSTs { connectorName } to this agent's
+     connections endpoint so the agent operates it. The password is encrypted
+     server-side and never returned. On success we clear the password (it is
+     never shown again) and reload the agent's bound list so the new connection
+     appears with its "Run authenticated scan" link. A failure surfaces inline
+     without blanking. */
   async function addConnection() {
     if (connecting) return;
     const name = connName.trim();
@@ -1390,8 +1461,22 @@ export default function AgentProfilePage({
         setConnectionError(b.error || `Could not connect that system (HTTP ${res.status}).`);
         return;
       }
+      /* "Add" is create + bind: the connection now exists at the workspace level,
+         so bind it to THIS agent in the same action. The bind POST carries just
+         the connector name; its failure surfaces inline but the secrets are
+         still cleared because the connection was created. */
+      const bindRes = await fetchWithRefresh(`/api/admin/agents/${id}/connections`, {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ connectorName: name }),
+      });
+      if (!bindRes.ok) {
+        const b = (await bindRes.json().catch(() => ({}))) as { error?: string };
+        setConnectionError(b.error || `Created the connection but could not attach it to this agent (HTTP ${bindRes.status}).`);
+      }
       /* The secrets are never shown again: clear the password (and client secret)
-         on success and reload the masked list so the new connection appears. */
+         on success and reload the agent's bound list so the new connection
+         appears. */
       setConnPassword("");
       setConnClientSecret("");
       await loadConnections();
@@ -2238,13 +2323,15 @@ export default function AgentProfilePage({
         />
       </div>
 
-      {/* Connected systems (Access). The agent operates a client platform on the
-          operator's behalf; here the operator connects one with the username +
-          password they use to sign in there (e.g. an account a client invited
-          them to). The password is encrypted server-side and never shown again.
-          A username_password connection is scannable: it offers a "Run
-          authenticated scan" link into the platform-scans surface. Loads
-          independently so a connectors failure never blanks the profile. */}
+      {/* Connected systems (Access). These are the systems THIS agent operates
+          on the operator's behalf, the bindings that make it a Salesforce / Jira
+          / ... agent. The operator binds an existing workspace connection or
+          creates + binds a new one with the username + password they use to sign
+          in there (e.g. an account a client invited them to). The password is
+          encrypted server-side and never shown again. A username_password
+          connection is scannable: it offers a "Run authenticated scan" link into
+          the platform-scans surface. Loads independently so a connections
+          failure never blanks the profile. */}
       <div
         data-testid="agent-connections-section"
         style={{
@@ -2270,7 +2357,7 @@ export default function AgentProfilePage({
           Connected systems
         </h3>
         <p style={{ margin: "0.35rem 0 0.9rem", fontSize: "0.82rem", lineHeight: 1.5, color: "var(--wp-text-muted, #6b7280)" }}>
-          This agent operates a client platform on your behalf. Connect one with the username and password you use to sign in (for example, an account a client invited you to). The password is encrypted and never shown again.
+          These are the systems this agent operates on your behalf, the bindings that make it (for example) a Salesforce or Jira agent. Connect an existing system below, or add a new one with the username and password you use to sign in (for example, an account a client invited you to). The password is encrypted and never shown again.
         </p>
 
         {connections.kind === "loading" && (
@@ -2291,7 +2378,7 @@ export default function AgentProfilePage({
           </div>
         )}
 
-        {connections.kind === "present" && connections.connectors.length === 0 && (
+        {connections.kind === "present" && connections.bound.length === 0 && (
           <div
             data-testid="connections-empty"
             style={{
@@ -2303,13 +2390,13 @@ export default function AgentProfilePage({
               color: "var(--wp-text-muted, #6b7280)",
             }}
           >
-            No systems connected. Add a client platform&apos;s login below.
+            No system connected to this agent yet. Connect one below.
           </div>
         )}
 
-        {connections.kind === "present" && connections.connectors.length > 0 && (
+        {connections.kind === "present" && connections.bound.length > 0 && (
           <ul data-testid="connections-list" style={{ listStyle: "none", padding: 0, margin: "0 0 1rem 0" }}>
-            {connections.connectors.map((conn) => {
+            {connections.bound.map((conn) => {
               const isLogin = conn.authType === "username_password";
               return (
                 <li
@@ -2368,29 +2455,114 @@ export default function AgentProfilePage({
                       {conn.baseUrl}
                     </div>
                   </div>
-                  {isLogin && (
-                    <Link
-                      href="/admin/platform-scans"
-                      data-testid={`scan-link-${conn.connectorName}`}
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 0, flexWrap: "wrap" }}>
+                    {isLogin && (
+                      <Link
+                        href="/admin/platform-scans"
+                        data-testid={`scan-link-${conn.connectorName}`}
+                        style={{
+                          padding: "0.4rem 0.8rem",
+                          borderRadius: "6px",
+                          fontSize: "0.8rem",
+                          fontWeight: 600,
+                          background: "var(--wp-dark-surface2, #1a1a1a)",
+                          color: "var(--wp-gold, #f1c233)",
+                          border: "1px solid var(--wp-gold, #f1c233)",
+                          textDecoration: "none",
+                        }}
+                      >
+                        Run authenticated scan
+                      </Link>
+                    )}
+                    <button
+                      type="button"
+                      data-testid={`unbind-${conn.connectorName}`}
+                      onClick={() => void unbindConnection(conn.connectorName)}
+                      disabled={binding}
                       style={{
-                        flexShrink: 0,
                         padding: "0.4rem 0.8rem",
                         borderRadius: "6px",
                         fontSize: "0.8rem",
                         fontWeight: 600,
-                        background: "var(--wp-dark-surface2, #1a1a1a)",
-                        color: "var(--wp-gold, #f1c233)",
-                        border: "1px solid var(--wp-gold, #f1c233)",
-                        textDecoration: "none",
+                        background: "transparent",
+                        color: "var(--wp-error, #ef4444)",
+                        border: "1px solid var(--wp-error, #ef4444)",
+                        cursor: binding ? "not-allowed" : "pointer",
+                        opacity: binding ? 0.6 : 1,
                       }}
                     >
-                      Run authenticated scan
-                    </Link>
-                  )}
+                      Unbind
+                    </button>
+                  </div>
                 </li>
               );
             })}
           </ul>
+        )}
+
+        {/* Connect an existing system: bind a workspace connection that was
+            created elsewhere to THIS agent. Hidden when nothing is available to
+            bind so the operator is steered to the add form below instead. */}
+        {connections.kind === "present" && connections.available.length > 0 && (
+          <div
+            data-testid="bind-existing"
+            style={{
+              display: "flex",
+              gap: "0.5rem",
+              flexWrap: "wrap",
+              alignItems: "flex-end",
+              marginBottom: "1rem",
+              padding: "0.9rem 1rem",
+              background: "var(--wp-dark-surface2, #1a1a1a)",
+              border: "1px solid var(--wp-dark-border, #333)",
+              borderRadius: "8px",
+            }}
+          >
+            <label style={{ flex: "1 1 220px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+              <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--wp-text, #eee)" }}>
+                Connect an existing system
+              </span>
+              <select
+                data-testid="bind-existing-select"
+                value={bindSelection}
+                onChange={(e) => setBindSelection(e.target.value)}
+                style={{
+                  padding: "0.5rem 0.65rem",
+                  fontSize: "0.85rem",
+                  background: "var(--wp-dark-surface, #1f1f22)",
+                  color: "var(--wp-text, #eee)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  borderRadius: "6px",
+                }}
+              >
+                <option value="">Choose a system…</option>
+                {connections.available.map((conn) => (
+                  <option key={conn.connectorName} value={conn.connectorName}>
+                    {conn.connectorName} ({conn.baseUrl})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              data-testid="bind-existing-submit"
+              onClick={() => void bindExisting()}
+              disabled={binding || bindSelection.trim().length === 0}
+              style={{
+                padding: "0.5rem 1.1rem",
+                borderRadius: "6px",
+                fontSize: "0.85rem",
+                fontWeight: 600,
+                background: "var(--wp-gold, #f1c233)",
+                color: "var(--wp-dark, #111)",
+                border: "1px solid var(--wp-gold, #f1c233)",
+                cursor: binding || bindSelection.trim().length === 0 ? "not-allowed" : "pointer",
+                opacity: binding || bindSelection.trim().length === 0 ? 0.6 : 1,
+              }}
+            >
+              {binding ? "Connecting..." : "Connect system"}
+            </button>
+          </div>
         )}
 
         {/* Add a connection. POSTs the username_password body the contract
@@ -2411,7 +2583,7 @@ export default function AgentProfilePage({
           }}
         >
           <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.7rem", color: "var(--wp-text, #eee)" }}>
-            Add a connection
+            Add a new system and connect it to this agent
           </div>
           <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
             <label style={{ flex: "1 1 200px", display: "flex", flexDirection: "column", gap: "0.25rem" }}>

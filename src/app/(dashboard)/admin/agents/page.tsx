@@ -37,6 +37,11 @@ interface AgentRecord {
   activatedAt: string | null;
   lastSeenAt: string | null;
   revokedAt: string | null;
+  /* The connector names BOUND to this agent: the systems it operates, which
+     make it (for example) a Salesforce or Jira agent. The roster GET returns
+     this so each row can show the agent's services at a glance. Optional so an
+     older payload without it degrades to the "no service" hint, not a crash. */
+  connections?: string[];
 }
 
 interface AgentsResponse {
@@ -662,6 +667,52 @@ export default function AgentsPage() {
                 owner: {a.ownerUserId ?? "unassigned"}
                 {a.description ? ` · ${a.description}` : ""}
               </div>
+              {/* Bound services: the systems this agent operates, rendered as
+                  small chips so the roster shows at a glance which agent is a
+                  Salesforce / Jira / ... agent. A muted hint stands in when the
+                  agent has nothing connected yet. */}
+              {a.connections && a.connections.length > 0 ? (
+                <div
+                  data-testid={`agent-services-${a.id}`}
+                  style={{
+                    marginTop: "0.5rem",
+                    display: "flex",
+                    gap: "0.35rem",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                  }}
+                >
+                  {a.connections.map((conn) => (
+                    <span
+                      key={conn}
+                      style={{
+                        padding: "0.1rem 0.5rem",
+                        borderRadius: "10px",
+                        fontSize: "0.7rem",
+                        fontWeight: 600,
+                        fontFamily: "var(--wp-mono, monospace)",
+                        background: "rgba(34,197,94,0.12)",
+                        color: "var(--wp-success, #22c55e)",
+                        border: "1px solid var(--wp-success, #22c55e)",
+                      }}
+                    >
+                      {conn}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div
+                  data-testid={`agent-services-${a.id}`}
+                  style={{
+                    marginTop: "0.5rem",
+                    fontSize: "0.72rem",
+                    color: "var(--wp-text-muted, #6b7280)",
+                    fontStyle: "italic",
+                  }}
+                >
+                  no service connected
+                </div>
+              )}
             </Link>
           </li>
         ))}

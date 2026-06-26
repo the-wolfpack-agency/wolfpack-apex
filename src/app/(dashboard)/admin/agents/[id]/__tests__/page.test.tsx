@@ -172,20 +172,23 @@ function makeLogEntry(over: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-// The connected-systems section GETs /api/admin/connectors on mount and POSTs
-// the same path to add a username_password connection. Matched on the full path
-// so unrelated agent/scan/tasks/drift GETs never fall through to it.
+// The connected-systems section is scoped to THIS agent: it GETs
+// /api/admin/agents/{id}/connections on mount (returning { bound, available }),
+// POSTs the same path to bind a connection, and DELETEs it to unbind. Creating a
+// brand-new connection still POSTs /api/admin/connectors, after which the page
+// binds it by POSTing the agent-connections path. Matched on path fragments so
+// unrelated agent/scan/tasks/drift GETs never fall through.
 const CONNECTORS_PATH = "/api/admin/connectors";
+const AGENT_CONNECTIONS_PATH = "/connections";
 
-function makeConnector(over: Partial<Record<string, unknown>> = {}) {
+// A masked agent-connection (bound or available). The connections endpoint
+// returns this shape; the create endpoint (/api/admin/connectors) is mocked
+// separately by onCreateConnector.
+function makeConnection(over: Partial<Record<string, unknown>> = {}) {
   return {
     connectorName: "acme-portal",
     baseUrl: "https://app.acme.com",
     authType: "username_password",
-    authHeaderHint: null,
-    loginPath: "/api/auth/login",
-    sessionCookieName: "session",
-    isActive: true,
     ...over,
   };
 }
@@ -226,20 +229,31 @@ function routeByUrl(opts: {
   onDriftCheck?: () => any;
   log?: () => any;
   onAnalytics?: () => any;
-  connectors?: () => any;
-  onAddConnection?: () => any;
+  connections?: () => any;
+  onBind?: () => any;
+  onUnbind?: () => any;
+  onCreateConnector?: () => any;
 }) {
   return (url: unknown, init?: { method?: string }) => {
     const u = String(url);
     if (init?.method === "PATCH" && opts.onPatch) return Promise.resolve(opts.onPatch());
-    // The connected-systems section: GET lists masked connectors, POST adds a
-    // username_password connection. Matched on the full path so the agent GET
-    // fall-through below never swallows it.
+    // Creating a brand-new connection POSTs /api/admin/connectors. Matched
+    // before the agent-connections path so the create stays distinct from the
+    // bind. (The path "/api/admin/connectors" does not contain "/connections".)
     if (u.includes(CONNECTORS_PATH) && init?.method === "POST") {
-      return Promise.resolve((opts.onAddConnection ?? (() => mkRes({ connector: makeConnector() }, { status: 201 })))());
+      return Promise.resolve((opts.onCreateConnector ?? (() => mkRes({ connector: makeConnection() }, { status: 201 })))());
     }
-    if (u.includes(CONNECTORS_PATH)) {
-      return Promise.resolve((opts.connectors ?? (() => mkRes({ connectors: [] })))());
+    // The agent-scoped connections endpoint: GET returns { bound, available },
+    // POST binds a connection, DELETE unbinds one. Matched on the "/connections"
+    // fragment so the agent GET fall-through below never swallows it.
+    if (u.includes(AGENT_CONNECTIONS_PATH) && init?.method === "POST") {
+      return Promise.resolve((opts.onBind ?? (() => mkRes({ ok: true, bound: [] })))());
+    }
+    if (u.includes(AGENT_CONNECTIONS_PATH) && init?.method === "DELETE") {
+      return Promise.resolve((opts.onUnbind ?? (() => mkRes({ ok: true })))());
+    }
+    if (u.includes(AGENT_CONNECTIONS_PATH)) {
+      return Promise.resolve((opts.connections ?? (() => mkRes({ bound: [], available: [] })))());
     }
     // Analytics POSTs (the agent.log_viewed view event) are best effort; route
     // them first so the fire-and-forget POST never falls through to a data GET.
@@ -1499,14 +1513,23 @@ describe("/admin/agents/[id]: agent log (granular audit trail)", () => {
 });
 
 describe("/admin/agents/[id]: connected systems (access)", () => {
-  it("renders the section and a connected username_password system with its authenticated-scan link", async () => {
-    mockFetchWithRefresh.mockImplementation(
-      routeByUrl({
+  it("loads from the agent-connections endpoint and renders a BOUND row with unbind + authenticated-scan link", async () => {
+    let connUrl = "";
+    mockFetchWithRefresh.mockImplementation((url: unknown, init?: { method?: string }) => {
+      const u = String(url);
+      // Capture the connections GET (the read with no method) so we can assert
+      // it targets the agent-scoped endpoint, not /api/admin/connectors.
+      if (u.includes(AGENT_CONNECTIONS_PATH) && !init?.method) connUrl = u;
+      return routeByUrl({
         agent: () => mkRes({ agent: makeAgent() }),
         scan: () => mkRes({}, { ok: false, status: 404 }),
-        connectors: () => mkRes({ connectors: [makeConnector({ connectorName: "acme-portal" })] }),
-      }),
-    );
+        connections: () =>
+          mkRes({
+            bound: [makeConnection({ connectorName: "acme-portal" })],
+            available: [],
+          }),
+      })(url, init);
+    });
 
     await act(async () => {
       render(<AgentProfilePage params={params} />);
@@ -1516,7 +1539,10 @@ describe("/admin/agents/[id]: connected systems (access)", () => {
     await waitFor(() => expect(screen.getByTestId("agent-connections-section")).toBeInTheDocument());
     expect(screen.getByTestId("agent-connections-section")).toHaveTextContent(/connected systems/i);
 
-    // The connection row shows the name, baseUrl, and a "form login" badge.
+    // The data source is the agent-scoped endpoint, not /api/admin/connectors.
+    expect(connUrl).toContain("/api/admin/agents/ag-1/connections");
+
+    // The bound row shows the name, baseUrl, and a "form login" badge.
     const row = screen.getByTestId("connection-row-acme-portal");
     expect(row).toHaveTextContent("acme-portal");
     expect(row).toHaveTextContent("https://app.acme.com");
@@ -1527,16 +1553,19 @@ describe("/admin/agents/[id]: connected systems (access)", () => {
     expect(scanLink).toHaveAttribute("href", "/admin/platform-scans");
     expect(scanLink).toHaveTextContent(/run authenticated scan/i);
 
-    // The empty state must not show when a connection is present.
+    // The Unbind control is present on the bound row.
+    expect(screen.getByTestId("unbind-acme-portal")).toHaveTextContent(/unbind/i);
+
+    // The empty state must not show when a connection is bound.
     expect(screen.queryByTestId("connections-empty")).not.toBeInTheDocument();
   });
 
-  it("shows the empty state when no systems are connected", async () => {
+  it("shows the empty state when no system is connected to this agent", async () => {
     mockFetchWithRefresh.mockImplementation(
       routeByUrl({
         agent: () => mkRes({ agent: makeAgent() }),
         scan: () => mkRes({}, { ok: false, status: 404 }),
-        connectors: () => mkRes({ connectors: [] }),
+        connections: () => mkRes({ bound: [], available: [] }),
       }),
     );
 
@@ -1545,24 +1574,131 @@ describe("/admin/agents/[id]: connected systems (access)", () => {
     });
 
     await waitFor(() => expect(screen.getByTestId("connections-empty")).toBeInTheDocument());
-    expect(screen.getByTestId("connections-empty")).toHaveTextContent(/no systems connected/i);
+    expect(screen.getByTestId("connections-empty")).toHaveTextContent(/no system connected to this agent yet/i);
     expect(screen.queryByTestId("connections-list")).not.toBeInTheDocument();
   });
 
-  it("submitting the add form POSTs the username_password body and reloads the list", async () => {
-    // Empty before the POST; the connection appears after the reload.
+  it("clicking Unbind DELETEs { connectorName } to the agent-connections endpoint and reloads", async () => {
+    // Bound before the unbind; the bound list is empty after the reload.
+    let unbound = false;
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        connections: () =>
+          unbound
+            ? mkRes({ bound: [], available: [makeConnection({ connectorName: "acme-portal" })] })
+            : mkRes({ bound: [makeConnection({ connectorName: "acme-portal" })], available: [] }),
+        onUnbind: () => {
+          unbound = true;
+          return mkRes({ ok: true });
+        },
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() => expect(screen.getByTestId("connection-row-acme-portal")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("unbind-acme-portal"));
+    });
+
+    // A DELETE went to the agent-connections endpoint with the connector name.
+    const del = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "DELETE" &&
+        String(c[0]).includes("/api/admin/agents/ag-1/connections"),
+    );
+    expect(del).toBeTruthy();
+    const body = JSON.parse((del?.[1] as { body: string }).body);
+    expect(body).toMatchObject({ connectorName: "acme-portal" });
+
+    // The reload drops the row from the bound list and surfaces the empty state.
+    await waitFor(() => expect(screen.getByTestId("connections-empty")).toBeInTheDocument());
+    expect(screen.queryByTestId("connection-row-acme-portal")).not.toBeInTheDocument();
+  });
+
+  it("binding an existing available connection POSTs { connectorName } and reloads it into the bound list", async () => {
+    // Available before the bind; the connection moves into the bound list after.
+    let bound = false;
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        connections: () =>
+          bound
+            ? mkRes({ bound: [makeConnection({ connectorName: "shared-crm" })], available: [] })
+            : mkRes({ bound: [], available: [makeConnection({ connectorName: "shared-crm" })] }),
+        onBind: () => {
+          bound = true;
+          return mkRes({ ok: true, bound: [makeConnection({ connectorName: "shared-crm" })] });
+        },
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    // The bind-existing control shows because something is available to bind.
+    await waitFor(() => expect(screen.getByTestId("bind-existing-select")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("bind-existing-select"), { target: { value: "shared-crm" } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("bind-existing-submit"));
+    });
+
+    // A POST went to the agent-connections endpoint with the connector name.
+    const post = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).includes("/api/admin/agents/ag-1/connections"),
+    );
+    expect(post).toBeTruthy();
+    const body = JSON.parse((post?.[1] as { body: string }).body);
+    expect(body).toMatchObject({ connectorName: "shared-crm" });
+
+    // The reload moves the connection into the bound list and the now-empty
+    // available list hides the bind-existing control.
+    await waitFor(() => expect(screen.getByTestId("connection-row-shared-crm")).toBeInTheDocument());
+    expect(screen.queryByTestId("bind-existing-select")).not.toBeInTheDocument();
+  });
+
+  it("hides the bind-existing control when nothing is available to bind", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        connections: () => mkRes({ bound: [makeConnection({ connectorName: "acme-portal" })], available: [] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("connection-row-acme-portal")).toBeInTheDocument());
+    expect(screen.queryByTestId("bind-existing-select")).not.toBeInTheDocument();
+  });
+
+  it("the add form creates a NEW connection then binds it to this agent (both POSTs fire), and reloads", async () => {
+    // Empty before; the created+bound connection appears after the reload.
     let added = false;
     mockFetchWithRefresh.mockImplementation(
       routeByUrl({
         agent: () => mkRes({ agent: makeAgent() }),
         scan: () => mkRes({}, { ok: false, status: 404 }),
-        connectors: () =>
+        connections: () =>
           added
-            ? mkRes({ connectors: [makeConnector({ connectorName: "client-crm" })] })
-            : mkRes({ connectors: [] }),
-        onAddConnection: () => {
+            ? mkRes({ bound: [makeConnection({ connectorName: "client-crm" })], available: [] })
+            : mkRes({ bound: [], available: [] }),
+        onCreateConnector: () => mkRes({ connector: makeConnection({ connectorName: "client-crm" }) }, { status: 201 }),
+        onBind: () => {
           added = true;
-          return mkRes({ connector: makeConnector({ connectorName: "client-crm" }) }, { status: 201 });
+          return mkRes({ ok: true, bound: [makeConnection({ connectorName: "client-crm" })] });
         },
       }),
     );
@@ -1586,15 +1722,15 @@ describe("/admin/agents/[id]: connected systems (access)", () => {
       fireEvent.click(screen.getByTestId("add-connection-submit"));
     });
 
-    // A POST went to /api/admin/connectors with the username_password body.
-    const post = mockFetchWithRefresh.mock.calls.find(
+    // The CREATE POST went to /api/admin/connectors with the username_password body.
+    const createPost = mockFetchWithRefresh.mock.calls.find(
       (c) =>
         (c[1] as { method?: string } | undefined)?.method === "POST" &&
         String(c[0]).includes("/api/admin/connectors"),
     );
-    expect(post).toBeTruthy();
-    const body = JSON.parse((post?.[1] as { body: string }).body);
-    expect(body).toMatchObject({
+    expect(createPost).toBeTruthy();
+    const createBody = JSON.parse((createPost?.[1] as { body: string }).body);
+    expect(createBody).toMatchObject({
       connectorName: "client-crm",
       baseUrl: "https://app.client.com",
       authType: "username_password",
@@ -1604,7 +1740,18 @@ describe("/admin/agents/[id]: connected systems (access)", () => {
       sessionCookieName: "session",
     });
 
-    // The list reloaded and now shows the new connection; the password is cleared.
+    // The BIND POST went to the agent-connections endpoint with the new name.
+    const bindPost = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).includes("/api/admin/agents/ag-1/connections"),
+    );
+    expect(bindPost).toBeTruthy();
+    expect(JSON.parse((bindPost?.[1] as { body: string }).body)).toMatchObject({
+      connectorName: "client-crm",
+    });
+
+    // The agent's bound list reloaded and now shows the connection; password cleared.
     await waitFor(() => expect(screen.getByTestId("connection-row-client-crm")).toBeInTheDocument());
     expect(screen.getByTestId("conn-password")).toHaveValue("");
   });
@@ -1614,7 +1761,7 @@ describe("/admin/agents/[id]: connected systems (access)", () => {
       routeByUrl({
         agent: () => mkRes({ agent: makeAgent() }),
         scan: () => mkRes({}, { ok: false, status: 404 }),
-        connectors: () => mkRes({ connectors: [] }),
+        connections: () => mkRes({ bound: [], available: [] }),
       }),
     );
 
@@ -1642,19 +1789,20 @@ describe("/admin/agents/[id]: connected systems (access)", () => {
     expect(screen.queryByTestId("conn-session-cookie")).not.toBeInTheDocument();
   });
 
-  it("submitting the oauth_password add POSTs the oauth_password body and reloads the list", async () => {
+  it("the oauth_password add creates then binds (both POSTs fire) and reloads", async () => {
     let added = false;
     mockFetchWithRefresh.mockImplementation(
       routeByUrl({
         agent: () => mkRes({ agent: makeAgent() }),
         scan: () => mkRes({}, { ok: false, status: 404 }),
-        connectors: () =>
+        connections: () =>
           added
-            ? mkRes({ connectors: [makeConnector({ connectorName: "sf-sandbox", authType: "oauth_password" })] })
-            : mkRes({ connectors: [] }),
-        onAddConnection: () => {
+            ? mkRes({ bound: [makeConnection({ connectorName: "sf-sandbox", authType: "oauth_password" })], available: [] })
+            : mkRes({ bound: [], available: [] }),
+        onCreateConnector: () => mkRes({ connector: makeConnection({ connectorName: "sf-sandbox" }) }, { status: 201 }),
+        onBind: () => {
           added = true;
-          return mkRes({ connector: makeConnector({ connectorName: "sf-sandbox" }) }, { status: 201 });
+          return mkRes({ ok: true, bound: [makeConnection({ connectorName: "sf-sandbox" })] });
         },
       }),
     );
@@ -1678,13 +1826,13 @@ describe("/admin/agents/[id]: connected systems (access)", () => {
       fireEvent.click(screen.getByTestId("add-connection-submit"));
     });
 
-    const post = mockFetchWithRefresh.mock.calls.find(
+    const createPost = mockFetchWithRefresh.mock.calls.find(
       (c) =>
         (c[1] as { method?: string } | undefined)?.method === "POST" &&
         String(c[0]).includes("/api/admin/connectors"),
     );
-    expect(post).toBeTruthy();
-    const body = JSON.parse((post?.[1] as { body: string }).body);
+    expect(createPost).toBeTruthy();
+    const body = JSON.parse((createPost?.[1] as { body: string }).body);
     expect(body).toMatchObject({
       connectorName: "sf-sandbox",
       baseUrl: "https://test.salesforce.com",
@@ -1697,70 +1845,27 @@ describe("/admin/agents/[id]: connected systems (access)", () => {
     });
     expect(body.sessionCookieName).toBeUndefined();
 
+    // The bind POST fired too.
+    const bindPost = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).includes("/api/admin/agents/ag-1/connections"),
+    );
+    expect(bindPost).toBeTruthy();
+    expect(JSON.parse((bindPost?.[1] as { body: string }).body)).toMatchObject({ connectorName: "sf-sandbox" });
+
     // The list reloaded and shows the new connection; the password is cleared.
     await waitFor(() => expect(screen.getByTestId("connection-row-sf-sandbox")).toBeInTheDocument());
     expect(screen.getByTestId("conn-password")).toHaveValue("");
   });
 
-  it("the existing username_password add still works (no regression)", async () => {
-    let added = false;
+  it("surfaces an inline error when the create fails, without blanking the page", async () => {
     mockFetchWithRefresh.mockImplementation(
       routeByUrl({
         agent: () => mkRes({ agent: makeAgent() }),
         scan: () => mkRes({}, { ok: false, status: 404 }),
-        connectors: () =>
-          added
-            ? mkRes({ connectors: [makeConnector({ connectorName: "client-crm" })] })
-            : mkRes({ connectors: [] }),
-        onAddConnection: () => {
-          added = true;
-          return mkRes({ connector: makeConnector({ connectorName: "client-crm" }) }, { status: 201 });
-        },
-      }),
-    );
-
-    await act(async () => {
-      render(<AgentProfilePage params={params} />);
-    });
-    await waitFor(() => expect(screen.getByTestId("add-connection-form")).toBeInTheDocument());
-
-    await act(async () => {
-      fireEvent.change(screen.getByTestId("conn-name"), { target: { value: "client-crm" } });
-      fireEvent.change(screen.getByTestId("conn-base-url"), { target: { value: "https://app.client.com" } });
-      fireEvent.change(screen.getByTestId("conn-username"), { target: { value: "ops@wolfpack.com" } });
-      fireEvent.change(screen.getByTestId("conn-password"), { target: { value: "s3cret-pw" } });
-    });
-
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("add-connection-submit"));
-    });
-
-    const post = mockFetchWithRefresh.mock.calls.find(
-      (c) =>
-        (c[1] as { method?: string } | undefined)?.method === "POST" &&
-        String(c[0]).includes("/api/admin/connectors"),
-    );
-    expect(post).toBeTruthy();
-    const body = JSON.parse((post?.[1] as { body: string }).body);
-    expect(body).toMatchObject({
-      connectorName: "client-crm",
-      authType: "username_password",
-      username: "ops@wolfpack.com",
-      password: "s3cret-pw",
-      loginPath: "/api/auth/login",
-      sessionCookieName: "session",
-    });
-    expect(body.clientId).toBeUndefined();
-    expect(body.clientSecret).toBeUndefined();
-  });
-
-  it("surfaces an inline error when the add fails, without blanking the page", async () => {
-    mockFetchWithRefresh.mockImplementation(
-      routeByUrl({
-        agent: () => mkRes({ agent: makeAgent() }),
-        scan: () => mkRes({}, { ok: false, status: 404 }),
-        connectors: () => mkRes({ connectors: [] }),
-        onAddConnection: () => mkRes({ error: "invalid connector" }, { ok: false, status: 400 }),
+        connections: () => mkRes({ bound: [], available: [] }),
+        onCreateConnector: () => mkRes({ error: "invalid connector" }, { ok: false, status: 400 }),
       }),
     );
 
@@ -1781,6 +1886,13 @@ describe("/admin/agents/[id]: connected systems (access)", () => {
 
     await waitFor(() => expect(screen.getByTestId("connection-error")).toBeInTheDocument());
     expect(screen.getByTestId("connection-error")).toHaveTextContent(/invalid connector/i);
+    // No bind POST fired because the create failed first.
+    const bindPost = mockFetchWithRefresh.mock.calls.find(
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).includes("/api/admin/agents/ag-1/connections"),
+    );
+    expect(bindPost).toBeFalsy();
     // The rest of the profile still renders: a failed add never blanks it.
     expect(screen.getByTestId("agent-name")).toBeInTheDocument();
   });

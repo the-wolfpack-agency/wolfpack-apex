@@ -11,6 +11,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { query, writeQuery, safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
+import { listConnectionsByAgent } from "./connections/store";
 import type {
   AgentRecord,
   AgentState,
@@ -47,6 +48,8 @@ function mapRow(r: Record<string, unknown>): AgentRecord {
     activatedAt: (r.activated_at as string | null) ?? null,
     lastSeenAt: (r.last_seen_at as string | null) ?? null,
     revokedAt: (r.revoked_at as string | null) ?? null,
+    /* Default empty; listAgents joins the real bound connector names. */
+    connections: [],
   };
 }
 
@@ -122,7 +125,14 @@ export async function listAgents(workspaceId: string): Promise<AgentRecord[]> {
       WHERE workspace_id = $1 ORDER BY created_at DESC`,
     [workspaceId],
   );
-  return res.rows.map(mapRow);
+  /* One extra query (NOT N+1): fetch every agent's bound connector names for
+     the workspace in a single grouped read, then map onto the roster. */
+  const connectionsByAgent = await listConnectionsByAgent(workspaceId);
+  return res.rows.map((r) => {
+    const agent = mapRow(r);
+    agent.connections = connectionsByAgent[agent.id] ?? [];
+    return agent;
+  });
 }
 
 /** Set lifecycle state (pause, resume, revoke). Returns the updated record. */

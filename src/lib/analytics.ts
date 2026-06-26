@@ -523,6 +523,14 @@ export type InstinctEventType =
   // agent.delegated         { agent_id, task_id, status }
   //   a human delegated a task to an agent from the assistant chat.
   | "agent.delegated"
+  // Agent↔connection association layer (migration 183). An operator binds a
+  // reusable workspace connector credential to an agent to build "a Salesforce
+  // agent", "a Jira agent", etc. The connection stays workspace-scoped; this
+  // only records the association lifecycle.
+  // agent.connection_bound   { agent_id, connector_name }
+  // agent.connection_unbound { agent_id, connector_name }
+  | "agent.connection_bound"
+  | "agent.connection_unbound"
   // Platform scan: an agent crawls a TARGET external platform's routes and
   // classifies each into a finding (bug / ux gap / broken journey / security /
   // performance). This is how an agent familiarizes with a client platform and

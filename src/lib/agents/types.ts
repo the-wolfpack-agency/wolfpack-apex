@@ -24,6 +24,9 @@ export interface AgentRecord {
   activatedAt: string | null;
   lastSeenAt: string | null;
   revokedAt: string | null;
+  /** Connector names bound to this agent (migration 183). Populated by
+   *  listAgents; defaults to [] for single-record reads that don't join it. */
+  connections: string[];
 }
 
 /**
