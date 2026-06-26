@@ -348,9 +348,17 @@ export async function saveConnectorCredentials(args: {
  *  Used by tools that want to pick the right connector automatically —
  *  e.g. when the user asks "look up contact id 003xxx" without naming
  *  Salesforce, we route to whatever's actually configured.
+ *
+ *  Least-privilege (agent-aware): when `agentId` is provided (the agent-act
+ *  path), the pick is RESTRICTED to the connectors the agent is bound to in
+ *  instinct_agent_connections — an agent auto-routes only to a connector it may
+ *  operate, and gets null when it has none bound. When `agentId` is omitted (the
+ *  HUMAN assistant path) behavior is byte-for-byte identical to before: no
+ *  binding lookup, no filtering.
  */
 export async function pickConfiguredConnector(
   workspaceId: string,
+  agentId?: string,
 ): Promise<string | null> {
   if (!process.env.DATABASE_URL) return null;
   try {
@@ -367,7 +375,18 @@ export async function pickConfiguredConnector(
           connector_name`,
       [workspaceId || DEFAULT_WORKSPACE],
     );
-    return r.rows[0]?.connector_name ?? null;
+    /* HUMAN path (no agentId) — unchanged: first configured connector wins. */
+    if (!agentId) return r.rows[0]?.connector_name ?? null;
+    /* AGENT path — only auto-route to a connector this agent is bound to.
+       Lazy import avoids a cycle (scope.ts → store.ts → db; credentials.ts is a
+       low-level module the tools share with the human path). */
+    const { agentBoundConnectors, ASSISTANT_SENTINEL } = await import(
+      "@/lib/agents/connections/scope"
+    );
+    if (agentId === ASSISTANT_SENTINEL) return r.rows[0]?.connector_name ?? null;
+    const bound = new Set(await agentBoundConnectors(workspaceId, agentId));
+    const allowed = r.rows.find((row) => bound.has(row.connector_name));
+    return allowed?.connector_name ?? null;
   } catch {
     return null;
   }

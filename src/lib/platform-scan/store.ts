@@ -13,6 +13,7 @@
 
 import { safeQuery, writeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
+import { notify } from "@/lib/notifications/in-app";
 import { ingestPlatformScanFinding } from "./brain-ingest";
 import type { PlatformScanResult, ScanSeverity, ScanCategory } from "./types";
 
@@ -95,6 +96,39 @@ export async function recordScan(
     finding_count: result.findings.length,
     critical_count: criticalCount,
   });
+
+  // HUMAN ALERTING: a critical finding is a security event a human must see, not
+  // an analytics row nobody watches. Notify the workspace admin/owner who ran the
+  // scan (actorId), mirroring the drift store's auto-pause notify idiom. The
+  // notification row IS the persisted learning signal (notify persists + emits
+  // system.notification_created). Best effort: a notify failure must never break
+  // the scan that was just persisted.
+  if (criticalCount > 0) {
+    try {
+      await notify({
+        userId: actorId,
+        category: "security",
+        priority: "high",
+        title: `Critical scan finding on ${result.platform}`,
+        body: `The platform scan of ${result.platform} found ${criticalCount} critical ${
+          criticalCount === 1 ? "issue" : "issues"
+        }. Review and triage before they reach clients.`,
+        actionUrl: "/admin/platform-scans",
+        actionLabel: "Review scan findings",
+        source: "platform_scan",
+        sourceId: scanId,
+        metadata: {
+          scan_id: scanId,
+          platform: result.platform,
+          critical_count: criticalCount,
+          finding_count: result.findings.length,
+        },
+        dedup: true,
+      });
+    } catch {
+      /* notification is best effort; the scan + findings already stand */
+    }
+  }
 
   return { scanId, findingCount: result.findings.length, criticalCount };
 }

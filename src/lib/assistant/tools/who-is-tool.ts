@@ -24,11 +24,8 @@ import { z } from "zod";
 import { safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
-import {
-  buildRestConnectorForWorkspace,
-  pickConfiguredConnector,
-} from "@/lib/assistant/connectors";
-import type { ToolDef, ToolResult } from "./types";
+import { resolveScopedConnector } from "./resolve-connector";
+import type { ToolContext, ToolDef, ToolResult } from "./types";
 
 const ParamSchema = z.object({
   query: z.string().min(1).max(120),
@@ -136,7 +133,7 @@ function renderMiss(query: string, crmAvailable: boolean): string {
 }
 
 async function searchCrmContacts(
-  workspaceId: string,
+  ctx: ToolContext,
   query: string,
 ): Promise<{
   ok: boolean;
@@ -144,13 +141,15 @@ async function searchCrmContacts(
   records: Array<Record<string, unknown>>;
 }> {
   try {
-    const preferred = await pickConfiguredConnector(workspaceId);
-    const connectorName =
-      preferred && preferred !== "rest-default" ? preferred : "rest-default";
-    const connector = await buildRestConnectorForWorkspace(
-      workspaceId,
-      connectorName,
-    );
+    /* Scope-enforcing resolve: for a real agent the resolver returns a failure
+       when the agent is not bound to a CRM connector. who_is is team-first, so
+       we degrade that to "CRM not available" (the team-only miss message) rather
+       than surfacing a hard error. The human path resolves exactly as before. */
+    const resolved = await resolveScopedConnector(ctx, "rest-default");
+    if (!resolved.ok) {
+      return { ok: true, configured: false, records: [] };
+    }
+    const connector = resolved.connector;
     if (!connector || !connector.isConfigured()) {
       return { ok: true, configured: false, records: [] };
     }
@@ -194,8 +193,7 @@ export const whoIsTool: ToolDef<Params, WhoIsResult> = {
       };
     }
 
-    const workspaceId = ctx.workspaceId || "default";
-    const crm = await searchCrmContacts(workspaceId, params.query);
+    const crm = await searchCrmContacts(ctx, params.query);
 
     if (crm.records.length > 0) {
       trackEvent("assistant.tool_invoked", ctx.userId, ctx.userRole, {

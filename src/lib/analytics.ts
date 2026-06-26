@@ -531,6 +531,8 @@ export type InstinctEventType =
   // agent.connection_unbound { agent_id, connector_name }
   | "agent.connection_bound"
   | "agent.connection_unbound"
+  // agent.connector_scope_denied { connector, workspace_id } — least-privilege: an agent targeted a connector it is NOT bound to (instinct_agent_connections); refused before any connector was built.
+  | "agent.connector_scope_denied"
   // Platform scan: an agent crawls a TARGET external platform's routes and
   // classifies each into a finding (bug / ux gap / broken journey / security /
   // performance). This is how an agent familiarizes with a client platform and
@@ -1159,6 +1161,10 @@ export type InstinctEventType =
   | "system.audit_log_viewed"
   | "system.audit_log_tamper_suspected"
   | "system.audit_log_export"
+  // Scheduled hash-chain verification (cron) — emitted on every run with
+  // { valid, checked }. Distinct from audit_log_tamper_suspected (failure-only,
+  // manual/admin path); this records that the unattended verifier ran at all.
+  | "audit.chain_verified"
   | "system.unusual_access_pattern"
   // Notifications (in-app + digest)
   | "system.notification_created"

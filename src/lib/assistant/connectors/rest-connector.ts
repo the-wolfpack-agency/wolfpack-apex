@@ -489,11 +489,30 @@ function parseEnvObjectMap(raw: string | undefined): Record<string, string> {
  * defaults when no row exists. Callers wanting tenant-isolated
  * connector behavior use this; the env-driven default still serves
  * single-workspace deployments via the registered "rest-default".
+ *
+ * Least-privilege (agent-aware): when `agentId` is provided (the agent-act
+ * path) and the agent is NOT bound to `connectorName` in
+ * instinct_agent_connections, this THROWS `ConnectorScopeError` instead of
+ * building a connector the agent may not operate. Connector tools pre-check
+ * scope and return a typed dispatch failure, so this throw is a defense-in-depth
+ * backstop for any un-pre-checked agent path. When `agentId` is omitted (the
+ * HUMAN assistant path) behavior is byte-for-byte identical to before.
  */
 export async function buildRestConnectorForWorkspace(
   workspaceId: string,
   connectorName = "rest-default",
+  agentId?: string,
 ): Promise<RestConnector> {
+  if (agentId) {
+    /* Backstop scope check for an agent caller. Lazy import to avoid a module
+       cycle and to keep the human path free of the binding lookup. */
+    const { assertAgentConnectorScope, ConnectorScopeError, ASSISTANT_SENTINEL } =
+      await import("@/lib/agents/connections/scope");
+    if (agentId !== ASSISTANT_SENTINEL) {
+      const { allowed } = await assertAgentConnectorScope(agentId, workspaceId, connectorName);
+      if (!allowed) throw new ConnectorScopeError(agentId, workspaceId, connectorName);
+    }
+  }
   const creds = await loadConnectorCredentials(workspaceId, connectorName);
   if (creds) {
     return new RestConnector({

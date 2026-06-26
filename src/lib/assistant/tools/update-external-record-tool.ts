@@ -193,18 +193,31 @@ export function describeUpdateAction(p: Params): string {
 
 export async function executeUpdateExternalRecord(
   params: Params,
-  ctx: { userId: string; userRole: string; workspaceId?: string },
+  ctx: { userId: string; userRole: string; workspaceId?: string; agentId?: string },
 ): Promise<
   | { ok: true; id: string; connector: string }
   | { ok: false; reason: string; matchCount?: number }
 > {
   const workspaceId = ctx.workspaceId || "default";
+  /* Least-privilege at approval-execution: scope the connector to the agent's
+     bound set when ctx.agentId is set (the approval route passes it). The human
+     path (no agentId) resolves byte-for-byte as before. */
+  const agentId = ctx.agentId;
   let resolvedConnectorName = params.connector;
   if (params.connector === "rest-default") {
-    const preferred = await pickConfiguredConnector(workspaceId);
+    const preferred = agentId
+      ? await pickConfiguredConnector(workspaceId, agentId)
+      : await pickConfiguredConnector(workspaceId);
     if (preferred && preferred !== "rest-default") resolvedConnectorName = preferred;
   }
-  const connector = await buildRestConnectorForWorkspace(workspaceId, resolvedConnectorName);
+  let connector: Awaited<ReturnType<typeof buildRestConnectorForWorkspace>>;
+  try {
+    connector = agentId
+      ? await buildRestConnectorForWorkspace(workspaceId, resolvedConnectorName, agentId)
+      : await buildRestConnectorForWorkspace(workspaceId, resolvedConnectorName);
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  }
   if (!connector.isConfigured()) {
     return { ok: false, reason: `connector "${resolvedConnectorName}" is not configured` };
   }

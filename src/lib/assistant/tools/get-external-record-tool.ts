@@ -16,13 +16,9 @@
  */
 
 import { z } from "zod";
-import {
-  getConnector,
-  buildRestConnectorForWorkspace,
-  pickConfiguredConnector,
-} from "@/lib/assistant/connectors";
 import type { Connector } from "@/lib/assistant/connectors";
 import { registerTool } from "./registry";
+import { resolveScopedConnector } from "./resolve-connector";
 import type { ToolDef, ToolResult } from "./types";
 import { withSourceFooter } from "./source-footer";
 import { maybePortalSource } from "./portal-link";
@@ -99,21 +95,10 @@ export const getExternalRecordTool: ToolDef<Params, ExternalRecordData> = {
        prefer that — its vendor preset includes the correct
        per-vendor REST URL paths. Falls back to the env-driven
        rest-default singleton when no DB row exists. */
-    let connector: Connector | null = null;
-    let resolvedConnectorName = params.connector;
-    if (params.connector === "rest-default") {
-      const workspaceId = ctx.workspaceId || "default";
-      const preferred = await pickConfiguredConnector(workspaceId);
-      if (preferred && preferred !== "rest-default") {
-        resolvedConnectorName = preferred;
-      }
-      connector = await buildRestConnectorForWorkspace(
-        workspaceId,
-        resolvedConnectorName,
-      );
-    } else {
-      connector = getConnector(params.connector);
-    }
+    const resolved = await resolveScopedConnector(ctx, params.connector);
+    if (!resolved.ok) return resolved.failure;
+    const connector: Connector | null = resolved.connector;
+    const resolvedConnectorName = resolved.resolvedConnectorName;
     if (!connector) {
       return {
         ok: false,

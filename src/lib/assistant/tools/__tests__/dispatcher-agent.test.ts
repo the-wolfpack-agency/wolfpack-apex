@@ -18,6 +18,11 @@ jest.mock("@/lib/ogiam/ledger", () => ({
 }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
 
+const mockNotify = jest.fn(
+  (..._a: unknown[]): Promise<{ id: string } | { deduped: true }> => Promise.resolve({ id: "n-1" }),
+);
+jest.mock("@/lib/notifications/in-app", () => ({ notify: (...a: unknown[]) => mockNotify(...a) }));
+
 import { z } from "zod";
 import { tryDispatchTool } from "@/lib/assistant/tools/dispatcher";
 import { registerTool, __resetRegistryForTests } from "@/lib/assistant/tools/registry";
@@ -47,6 +52,8 @@ const humanCtx: ToolContext = { userId: "u1", userRole: "cto", workspaceId: "ws-
 beforeEach(() => {
   __resetRegistryForTests();
   mockRecordDecision.mockClear();
+  mockNotify.mockClear();
+  mockNotify.mockResolvedValue({ id: "n-1" });
   tool("read_status", { match: "status" });
   tool("delete_everything", { mutation: true, match: "delete" });
 });
@@ -77,7 +84,24 @@ describe("agent enforcement", () => {
     }
   });
 
-  it("does NOT OGIAM-block the same mutation on the human path (monitor mode)", async () => {
+  it("HUMAN ALERTING: an enforce-mode agent block notifies the agent's owner, high priority, naming the agent + tool", async () => {
+    const res = await tryDispatchTool("delete the records", agentCtx);
+    expect(res?.result.ok).toBe(false);
+    expect(mockNotify).toHaveBeenCalledTimes(1);
+    expect(mockNotify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "owner-1",
+        priority: "high",
+        category: "security",
+        source: "agent_action_blocked",
+        title: expect.stringMatching(/blocked/i),
+        body: expect.stringContaining("delete_everything"),
+        metadata: expect.objectContaining({ agent_id: "agent-1", tool: "delete_everything" }),
+      }),
+    );
+  });
+
+  it("HUMAN ALERTING: a MONITOR-mode (human) block does NOT notify — a human in monitor mode is never spammed", async () => {
     const res = await tryDispatchTool("delete the records", humanCtx);
     // The human path runs OGIAM in monitor (no block); the mutation is instead
     // bounced by the legacy confirmation gate, a different code than the agent
@@ -88,6 +112,19 @@ describe("agent enforcement", () => {
     }
     const arg = mockRecordDecision.mock.calls[0][0] as { decision: { mode: string } };
     expect(arg.decision.mode).toBe("monitor");
+    expect(mockNotify).not.toHaveBeenCalled();
+  });
+
+  it("HUMAN ALERTING: a notify throw does not break the agent block (best effort)", async () => {
+    mockNotify.mockRejectedValue(new Error("notifications down"));
+    const res = await tryDispatchTool("delete the records", agentCtx);
+    // The block still stands with the same code despite the notify failure.
+    expect(res?.result.ok).toBe(false);
+    if (res && !res.result.ok) {
+      expect(res.result.code).toBe("capability");
+      expect(res.result.message).toMatch(/OGIAM/);
+    }
+    expect(mockNotify).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -135,6 +172,15 @@ describe("fail closed when a decision cannot be audited (enforce)", () => {
       "agent-1",
       "ops",
       expect.objectContaining({ tool: "read_status" }),
+    );
+    // HUMAN ALERTING: the owner is also notified of the fail-closed block.
+    expect(mockNotify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "owner-1",
+        priority: "high",
+        source: "agent_action_blocked",
+        metadata: expect.objectContaining({ agent_id: "agent-1", tool: "read_status" }),
+      }),
     );
   });
 

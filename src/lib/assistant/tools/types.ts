@@ -191,6 +191,12 @@ export interface ToolFailure {
     | "capability"
     | "no_match"
     | "needs_confirmation"
+    /**
+     * Least-privilege: an AGENT principal targeted a connector it is NOT bound
+     * to in instinct_agent_connections. The dispatch is refused before any
+     * connector is built. Never fires for the human assistant (no agentPrincipal).
+     */
+    | "connector_not_authorized"
     | "internal";
   message: string;
 }

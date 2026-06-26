@@ -11,7 +11,7 @@ import { getAgent } from "@/lib/agents/store";
 import { executeCreateExternalRecord } from "@/lib/assistant/tools/create-external-record-tool";
 import { executeUpdateExternalRecord } from "@/lib/assistant/tools/update-external-record-tool";
 
-type WriteCtx = { userId: string; userRole: string; workspaceId?: string };
+type WriteCtx = { userId: string; userRole: string; workspaceId?: string; agentId?: string };
 type WriteOutcome = { ok: boolean; [k: string]: unknown };
 
 /** The captured tool -> its real write executor. Only confirmation-gated CRM
@@ -88,7 +88,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!executor) return NextResponse.json({ error: `tool ${approval.tool} is not an approvable write` }, { status: 400 });
 
   const owner = await resolveOwner(approval.ownerUserId);
-  const ownerCtx: WriteCtx = { userId: approval.ownerUserId, userRole: owner?.role ?? "member", workspaceId };
+  /* The write runs AS the owner, but the connector it may touch is still gated by
+     the AGENT's binding (least-privilege): the agent proposed this write, so it
+     must not reach a connector it isn't bound to even after owner approval. */
+  const ownerCtx: WriteCtx = {
+    userId: approval.ownerUserId,
+    userRole: owner?.role ?? "member",
+    workspaceId,
+    agentId: approval.agentId,
+  };
 
   // Claim the approval atomically BEFORE executing so a concurrent approve cannot
   // run the write twice.

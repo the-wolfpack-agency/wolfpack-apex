@@ -5,6 +5,7 @@
     { "path": "/api/cron/principles-evaluate", "schedule": "15 */4 * * *" },
     { "path": "/api/cron/ogiam-checkpoint", "schedule": "0 * * * *" },
     { "path": "/api/cron/agent-drift", "schedule": "0 * * * *" },
-    { "path": "/api/cron/integration-health", "schedule": "30 6 * * *" }
+    { "path": "/api/cron/integration-health", "schedule": "30 6 * * *" },
+    { "path": "/api/cron/audit-log-verify", "schedule": "0 * * * *" }
   ]
 }

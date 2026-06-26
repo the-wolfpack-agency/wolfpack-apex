@@ -26,14 +26,10 @@
  */
 
 import { z } from "zod";
-import {
-  buildRestConnectorForWorkspace,
-  getConnector,
-  pickConfiguredConnector,
-} from "@/lib/assistant/connectors";
 import type { Connector } from "@/lib/assistant/connectors";
 import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
+import { resolveScopedConnector } from "./resolve-connector";
 import type { ToolDef, ToolResult } from "./types";
 import { withSourceFooter } from "./source-footer";
 import { maybePortalSource } from "./portal-link";
@@ -255,19 +251,15 @@ export const searchExternalRecordsTool: ToolDef<Params, SearchExternalRecordsDat
   matchIntent: matchSearchIntent,
   async handler(params, ctx): Promise<ToolResult<SearchExternalRecordsData>> {
     /* Same auto-routing as get_external_record: pick the workspace's
-       configured vendor connector when caller didn't name one. */
-    let connector: Connector | null = null;
-    let resolvedConnectorName = params.connector;
-    if (params.connector === "rest-default") {
-      const workspaceId = ctx.workspaceId || "default";
-      const preferred = await pickConfiguredConnector(workspaceId);
-      if (preferred && preferred !== "rest-default") {
-        resolvedConnectorName = preferred;
-      }
-      connector = await buildRestConnectorForWorkspace(workspaceId, resolvedConnectorName);
-    } else {
-      connector = getConnector(params.connector);
-    }
+       configured vendor connector when caller didn't name one. The resolver
+       also enforces agent↔connector scope (least-privilege): a real agent that
+       targets an unbound connector gets a typed connector_not_authorized
+       failure here, before any connector is built. The human assistant path
+       (no agentPrincipal) resolves exactly as before. */
+    const resolved = await resolveScopedConnector(ctx, params.connector);
+    if (!resolved.ok) return resolved.failure;
+    const connector: Connector | null = resolved.connector;
+    const resolvedConnectorName = resolved.resolvedConnectorName;
     if (!connector) {
       return {
         ok: false,

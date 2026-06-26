@@ -242,7 +242,9 @@ async function executeFormOnBehalf(args: {
     const res = await deps.executeForm(formKind, values, {
       origin: deps.resolveOrigin(),
       authHeader: `Bearer ${token}`,
-      extra: { workspaceId: owner.workspaceId },
+      /* agentId scopes the CRM-form connector resolution to the agent's bound
+         set (least-privilege): submitCrmRecord reads it from extra. */
+      extra: { workspaceId: owner.workspaceId, agentId: task.agentId },
     });
 
     if (res.status >= 200 && res.status < 300) {

@@ -134,7 +134,13 @@ export async function executeFormAction(
         typeof ctx.extra?.workspaceId === "string"
           ? (ctx.extra.workspaceId as string)
           : "default";
-      return submitCrmRecord(origin, authHeader, stringFields, workspaceId);
+      /* agentId (set by the agent on-behalf path) scopes the connector to the
+         agent's bound set. Absent on the human submit route → unchanged. */
+      const agentId =
+        typeof ctx.extra?.agentId === "string"
+          ? (ctx.extra.agentId as string)
+          : undefined;
+      return submitCrmRecord(origin, authHeader, stringFields, workspaceId, agentId);
     }
     default:
       return failure("internal", `Unrouted formKind: ${kind}`);
@@ -491,6 +497,7 @@ async function submitCrmRecord(
   authHeader: string | null,
   fields: Record<string, string>,
   workspaceId: string = "default",
+  agentId?: string,
 ): Promise<NextResponse> {
   /* The CRM form is vendor-aware: required fields vary by objectType.
      We validate per-type, then forward to the existing connector
@@ -564,8 +571,26 @@ async function submitCrmRecord(
      create_external_record tool uses). No HTTP hop because there's
      no public API endpoint for this; the assistant owns CRM writes
      server-side. */
-  const connectorName = (await pickConfiguredConnector(workspaceId)) ?? "rest-default";
-  const connector = await buildRestConnectorForWorkspace(workspaceId, connectorName);
+  /* Least-privilege: when this CRM write is driven by an agent (agentId set),
+     the pick + build are scoped to the agent's bound set. An unbound connector
+     surfaces as a scope failure rather than touching the credential. The human
+     submit route (no agentId) resolves byte-for-byte as before. */
+  const connectorName =
+    (agentId
+      ? await pickConfiguredConnector(workspaceId, agentId)
+      : await pickConfiguredConnector(workspaceId)) ?? "rest-default";
+  let connector: Awaited<ReturnType<typeof buildRestConnectorForWorkspace>>;
+  try {
+    connector = agentId
+      ? await buildRestConnectorForWorkspace(workspaceId, connectorName, agentId)
+      : await buildRestConnectorForWorkspace(workspaceId, connectorName);
+  } catch (err) {
+    return failure(
+      "scope",
+      (err as Error).message ||
+        "This agent is not authorized to use that CRM connector.",
+    );
+  }
   if (!connector.isConfigured()) {
     return failure(
       "validation",

@@ -9,6 +9,7 @@ const mockWriteQuery = jest.fn();
 const mockSafeQuery = jest.fn();
 const mockTrackEvent = jest.fn();
 const mockIngest = jest.fn();
+const mockNotify = jest.fn();
 
 jest.mock("@/lib/db", () => ({
   writeQuery: (...a: unknown[]) => mockWriteQuery(...a),
@@ -16,6 +17,7 @@ jest.mock("@/lib/db", () => ({
 }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrackEvent(...a) }));
 jest.mock("@/lib/platform-scan/brain-ingest", () => ({ ingestPlatformScanFinding: (...a: unknown[]) => mockIngest(...a) }));
+jest.mock("@/lib/notifications/in-app", () => ({ notify: (...a: unknown[]) => mockNotify(...a) }));
 
 import { recordScan, listFindings, triageFinding, summarizeFindings, listScans } from "@/lib/platform-scan/store";
 import type { PlatformScanResult } from "@/lib/platform-scan/types";
@@ -34,6 +36,7 @@ const RESULT: PlatformScanResult = {
 beforeEach(() => {
   jest.clearAllMocks();
   mockIngest.mockResolvedValue(undefined);
+  mockNotify.mockResolvedValue({ id: "n-1" });
 });
 
 it("recordScan writes the header + one row per finding, emits analytics, and feeds the Brain", async () => {
@@ -53,6 +56,54 @@ it("recordScan writes the header + one row per finding, emits analytics, and fee
   expect(mockTrackEvent).toHaveBeenCalledWith("platform.scan_completed", "admin-1", "admin", expect.objectContaining({ finding_count: 2, critical_count: 1 }));
   expect(mockIngest).toHaveBeenCalledTimes(2);
   expect(mockIngest).toHaveBeenCalledWith("wolfpack-auto", expect.objectContaining({ route: "/admin/leads" }));
+});
+
+it("HUMAN ALERTING: a critical finding notifies the admin who ran the scan, high priority, naming the platform + count", async () => {
+  mockWriteQuery
+    .mockResolvedValueOnce({ rows: [{ id: "scan-c" }] })
+    .mockResolvedValue({ rows: [] });
+
+  await recordScan({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin", result: RESULT });
+
+  expect(mockNotify).toHaveBeenCalledTimes(1);
+  expect(mockNotify).toHaveBeenCalledWith(
+    expect.objectContaining({
+      userId: "admin-1",
+      priority: "high",
+      category: "security",
+      source: "platform_scan",
+      sourceId: "scan-c",
+      actionUrl: "/admin/platform-scans",
+      title: expect.stringContaining("wolfpack-auto"),
+      metadata: expect.objectContaining({ platform: "wolfpack-auto", critical_count: 1, scan_id: "scan-c" }),
+    }),
+  );
+});
+
+it("HUMAN ALERTING: zero critical findings does NOT notify (no alert spam)", async () => {
+  mockWriteQuery
+    .mockResolvedValueOnce({ rows: [{ id: "scan-h" }] })
+    .mockResolvedValue({ rows: [] });
+  // A high finding but no critical → no alert.
+  await recordScan({
+    workspaceId: "ws-1",
+    actorId: "admin-1",
+    actorRole: "admin",
+    result: { ...RESULT, findings: [RESULT.findings[1]] },
+  });
+  expect(mockNotify).not.toHaveBeenCalled();
+});
+
+it("HUMAN ALERTING: a notify throw does not break recordScan (best effort)", async () => {
+  mockWriteQuery
+    .mockResolvedValueOnce({ rows: [{ id: "scan-e" }] })
+    .mockResolvedValue({ rows: [] });
+  mockNotify.mockRejectedValue(new Error("notifications down"));
+
+  const out = await recordScan({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin", result: RESULT });
+  // The scan + findings still persisted and the call returned normally.
+  expect(out).toEqual({ scanId: "scan-e", findingCount: 2, criticalCount: 1 });
+  expect(mockNotify).toHaveBeenCalledTimes(1);
 });
 
 it("recordScan with zero findings still records the run and emits completion", async () => {

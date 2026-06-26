@@ -22,6 +22,7 @@ import { authorize } from "@/lib/ogiam/authorize";
 import { recordActionOutcome } from "@/lib/ogiam/ledger";
 import { ingestAgentAction } from "@/lib/agents/audit/brain-ingest";
 import { createPendingApproval } from "@/lib/agents/approvals/store";
+import { notify } from "@/lib/notifications/in-app";
 import type { OgiamDecision } from "@/lib/ogiam/types";
 import { canInvokeTool } from "./gate";
 import { getTools } from "./registry";
@@ -187,12 +188,24 @@ async function runOneTool<P, R>(
         capability: tool.capability,
         ...(ctx.workflowId ? { workflow_id: ctx.workflowId } : {}),
       });
+      // HUMAN ALERTING: a fail-closed block is a security event the agent's owner
+      // must see (an agent tried an action that could not be audited). Best effort.
+      await alertAgentBlock(agent, tool.name, "action could not be audited (fail-closed)");
       return failure(
         "internal",
         "blocked: action could not be audited (fail-closed; no audit, no action)",
       );
     }
     if (agent && decision.enforced && decision.wouldBlock) {
+      // HUMAN ALERTING: the OGIAM gate refused an autonomous agent action in
+      // enforce mode. The owner must see the block, not just the ledger row.
+      // Only fires for an AGENT principal in ENFORCE mode (decision.enforced) —
+      // a human in monitor mode is never alerted. Best effort.
+      await alertAgentBlock(
+        agent,
+        tool.name,
+        `OGIAM ${decision.intendedOutcome}: ${decision.reason} (rule ${decision.ruleId})`,
+      );
       return failure(
         "capability",
         `OGIAM ${decision.intendedOutcome}: ${decision.reason} (rule ${decision.ruleId})`,
@@ -294,4 +307,39 @@ function failure(
   message: string,
 ): ToolFailure {
   return { ok: false, code, message };
+}
+
+/**
+ * HUMAN ALERTING: notify an agent's owner that an autonomous action was blocked
+ * by the OGIAM gate in enforce mode. Reuses the in-app notification path (same
+ * idiom as the drift store's auto-pause notify); the notification row IS the
+ * persisted learning signal (notify emits system.notification_created).
+ *
+ * Strictly best effort: a notify failure MUST NOT throw into dispatch and must
+ * never break the block (the action is already stopped). Only ever called from
+ * the AGENT enforce-block branches, so the gating (agent principal + enforce
+ * mode) is guaranteed at the call site.
+ */
+async function alertAgentBlock(
+  agent: NonNullable<ToolContext["agentPrincipal"]>,
+  toolName: string,
+  reason: string,
+): Promise<void> {
+  try {
+    await notify({
+      userId: agent.ownerUserId,
+      category: "security",
+      priority: "high",
+      title: "Agent action blocked by the governance gate",
+      body: `Agent ${agent.agentId} was blocked from running ${toolName}: ${reason}.`,
+      actionUrl: `/admin/agents/${agent.agentId}`,
+      actionLabel: "Review agent",
+      source: "agent_action_blocked",
+      sourceId: `${agent.agentId}:${toolName}`,
+      metadata: { agent_id: agent.agentId, tool: toolName, reason },
+      dedup: true,
+    });
+  } catch {
+    /* notification is best effort; the block already stands */
+  }
 }

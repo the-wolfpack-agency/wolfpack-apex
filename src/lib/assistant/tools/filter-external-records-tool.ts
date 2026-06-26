@@ -17,12 +17,9 @@
  */
 
 import { z } from "zod";
-import {
-  buildRestConnectorForWorkspace,
-  pickConfiguredConnector,
-} from "@/lib/assistant/connectors";
 import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
+import { resolveScopedConnector } from "./resolve-connector";
 import type { ToolDef, ToolResult } from "./types";
 import type { FilterSpec } from "@/lib/assistant/connectors/vendor-presets";
 import { withSourceFooter } from "./source-footer";
@@ -259,16 +256,17 @@ export const filterExternalRecordsTool: ToolDef<Params, FilterRecordsData> = {
   capability: "*",
   matchIntent: matchFilterIntent,
   async handler(params, ctx): Promise<ToolResult<FilterRecordsData>> {
-    let resolvedConnectorName = params.connector;
-    if (params.connector === "rest-default") {
-      const workspaceId = ctx.workspaceId || "default";
-      const preferred = await pickConfiguredConnector(workspaceId);
-      if (preferred && preferred !== "rest-default") resolvedConnectorName = preferred;
+    const resolved = await resolveScopedConnector(ctx, params.connector);
+    if (!resolved.ok) return resolved.failure;
+    const resolvedConnectorName = resolved.resolvedConnectorName;
+    const connector = resolved.connector;
+    if (!connector) {
+      return {
+        ok: false,
+        code: "internal",
+        message: `connector "${params.connector}" not registered`,
+      };
     }
-    const connector = await buildRestConnectorForWorkspace(
-      ctx.workspaceId || "default",
-      resolvedConnectorName,
-    );
     if (!connector.isConfigured()) {
       return {
         ok: true,
