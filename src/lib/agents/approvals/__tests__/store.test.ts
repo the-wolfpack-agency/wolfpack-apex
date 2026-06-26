@@ -63,6 +63,15 @@ it("lists only pending, non-expired approvals for the workspace", async () => {
   const list = await listPendingApprovals("ws-1");
   expect(list[0]).toMatchObject({ id: "ap-1", tool: "create_external_record", decisionSeq: 7 });
   expect(mockSafeQuery.mock.calls[0][0]).toMatch(/status = 'pending' AND expires_at > now\(\)/);
+  // No agentId -> the $2 guard is null so every agent's writes are returned.
+  expect(mockSafeQuery.mock.calls[0][1]).toEqual(["ws-1", null]);
+});
+
+it("narrows the queue to a single agent when agentId is given", async () => {
+  mockSafeQuery.mockResolvedValue({ rows: [ROW] });
+  await listPendingApprovals("ws-1", "agent-9");
+  expect(mockSafeQuery.mock.calls[0][0]).toMatch(/\$2::text IS NULL OR agent_id = \$2/);
+  expect(mockSafeQuery.mock.calls[0][1]).toEqual(["ws-1", "agent-9"]);
 });
 
 it("marks an approval executed and emits agent.write_executed", async () => {

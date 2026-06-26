@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useState, use } from "react";
 import Link from "next/link";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+import ApprovalList from "@/components/agents/ApprovalList";
 
 type AgentState = "invited" | "active" | "paused" | "revoked";
 
@@ -2053,6 +2054,47 @@ export default function AgentProfilePage({
             ))}
           </ul>
         )}
+      </div>
+
+      {/* Pending writes. When a task asks the agent to mutate a client system
+          (create/update a record), the OGIAM gate captures the exact validated
+          action and stops — it surfaces HERE for a human to approve. Approving
+          runs that captured action on the owner's behalf, re-gated + audited;
+          this is the other half of a "blocked" task. Scoped to this agent via
+          ?agentId; the whole-workspace view lives at /admin/agents/approvals. */}
+      <div
+        data-testid="agent-approvals-section"
+        style={{
+          marginBottom: "1.5rem",
+          padding: "1.1rem 1.2rem",
+          background: "var(--wp-dark-surface, #1f1f22)",
+          border: "1px solid var(--wp-dark-border, #333)",
+          borderRadius: "8px",
+        }}
+      >
+        <div
+          style={{
+            fontSize: "0.72rem",
+            color: "var(--wp-text-muted, #6b7280)",
+            textTransform: "uppercase",
+            letterSpacing: "0.03em",
+            marginBottom: "0.3rem",
+          }}
+        >
+          Human-in-the-loop
+        </div>
+        <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "var(--wp-text, #eee)" }}>
+          Pending writes
+        </h3>
+        <p style={{ margin: "0.35rem 0 0.9rem", fontSize: "0.82rem", lineHeight: 1.5, color: "var(--wp-text-muted, #6b7280)" }}>
+          Writes this agent proposed are held here until you approve them. Approving runs the exact captured action on the owner&apos;s behalf, re-gated and audited; rejecting drops it. The agent never mutates a client system on its own.
+        </p>
+        <ApprovalList
+          endpoint={`/api/admin/agents/approvals?agentId=${id}`}
+          showAgent={false}
+          testIdPrefix="agent-approvals"
+          emptyText="No pending writes. This agent has nothing awaiting approval."
+        />
       </div>
 
       {/* Behavior + drift. The gate keeps an agent in check across model changes

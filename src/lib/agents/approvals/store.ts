@@ -89,12 +89,18 @@ export async function getPendingApproval(id: string, workspaceId: string): Promi
   return rows[0] ? toApproval(rows[0]) : null;
 }
 
-export async function listPendingApprovals(workspaceId: string): Promise<PendingApproval[]> {
+export async function listPendingApprovals(
+  workspaceId: string,
+  agentId?: string,
+): Promise<PendingApproval[]> {
+  // Optional agentId narrows the queue to a single agent (the agent detail page
+  // surfaces just that agent's pending writes); omit it for the workspace queue.
   const { rows } = await safeQuery<Row>(
     `SELECT ${COLS} FROM instinct_agent_pending_approvals
        WHERE workspace_id = $1 AND status = 'pending' AND expires_at > now()
+         AND ($2::text IS NULL OR agent_id = $2)
        ORDER BY created_at DESC LIMIT 100`,
-    [workspaceId],
+    [workspaceId, agentId ?? null],
   );
   return rows.map(toApproval);
 }

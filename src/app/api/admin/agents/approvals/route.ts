@@ -12,6 +12,8 @@ export async function GET(req: NextRequest) {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
   const workspaceId = auth.user.workspaceId ?? "default";
-  const approvals = await listPendingApprovals(workspaceId);
+  // ?agentId scopes the queue to one agent (used by the agent detail page).
+  const agentId = req.nextUrl.searchParams.get("agentId") ?? undefined;
+  const approvals = await listPendingApprovals(workspaceId, agentId);
   return NextResponse.json({ approvals });
 }
