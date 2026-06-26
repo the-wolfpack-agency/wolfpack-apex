@@ -111,7 +111,12 @@ export default function AdminConnectorsPage() {
 
   const [vendor, setVendor] = useState("rest-default");
   const [baseUrl, setBaseUrl] = useState("");
+  const [authType, setAuthType] = useState<"static_bearer" | "username_password">("static_bearer");
   const [authHeader, setAuthHeader] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginPath, setLoginPath] = useState("");
+  const [sessionCookieName, setSessionCookieName] = useState("");
   const [objectMapText, setObjectMapText] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -234,15 +239,31 @@ export default function AdminConnectorsPage() {
         }
       }
 
+      const payload =
+        authType === "username_password"
+          ? {
+              connectorName: vendor,
+              baseUrl,
+              authType: "username_password" as const,
+              username,
+              password,
+              loginPath,
+              ...(sessionCookieName.trim().length > 0
+                ? { sessionCookieName: sessionCookieName.trim() }
+                : {}),
+              objectMap,
+            }
+          : {
+              connectorName: vendor,
+              baseUrl,
+              authHeader,
+              objectMap,
+            };
+
       const res = await fetchWithRefresh("/api/admin/connectors", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          connectorName: vendor,
-          baseUrl,
-          authHeader,
-          objectMap,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -251,6 +272,7 @@ export default function AdminConnectorsPage() {
       }
       setOkMessage(`Saved ${vendor}. Tools using this connector will pick up the new credentials immediately.`);
       setAuthHeader(""); // never keep plaintext in the form
+      setPassword(""); // never keep plaintext in the form
       await loadRows();
     } catch (e) {
       setError((e as Error).message || "Save failed");
@@ -388,21 +410,97 @@ export default function AdminConnectorsPage() {
               onChange={(e) => setBaseUrl(e.target.value)}
               style={inputStyle}
               required
+              data-testid="conn-base-url"
             />
           </label>
 
           <label style={labelStyle}>
-            Auth header
-            <input
-              type="password"
-              placeholder="Bearer <token>"
-              value={authHeader}
-              onChange={(e) => setAuthHeader(e.target.value)}
+            Auth type
+            <select
+              data-testid="conn-auth-type"
+              value={authType}
+              onChange={(e) => setAuthType(e.target.value as "static_bearer" | "username_password")}
               style={inputStyle}
-              required
-              autoComplete="off"
-            />
+            >
+              <option value="static_bearer">Bearer token</option>
+              <option value="username_password">Username &amp; password</option>
+            </select>
           </label>
+
+          {authType === "static_bearer" && (
+            <label style={labelStyle}>
+              Auth header
+              <input
+                type="password"
+                placeholder="Bearer <token>"
+                value={authHeader}
+                onChange={(e) => setAuthHeader(e.target.value)}
+                style={inputStyle}
+                required
+                autoComplete="off"
+                data-testid="conn-auth-header"
+              />
+            </label>
+          )}
+
+          {authType === "username_password" && (
+            <>
+              <p style={{ fontSize: 12, color: "var(--wp-text-dim,#a0a8b4)", marginTop: -4, marginBottom: 12 }}>
+                For client platforms that use form login (e.g. Beyond). We POST these
+                credentials to the login path and store the returned session cookie,
+                encrypted at rest.
+              </p>
+              <label style={labelStyle}>
+                Username or email
+                <input
+                  type="text"
+                  placeholder="admin@example.com"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  style={inputStyle}
+                  required
+                  autoComplete="off"
+                  data-testid="conn-username"
+                />
+              </label>
+              <label style={labelStyle}>
+                Password
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  style={inputStyle}
+                  required
+                  autoComplete="off"
+                  data-testid="conn-password"
+                />
+              </label>
+              <label style={labelStyle}>
+                Login path
+                <input
+                  type="text"
+                  placeholder="/api/auth/login"
+                  value={loginPath}
+                  onChange={(e) => setLoginPath(e.target.value)}
+                  style={inputStyle}
+                  required
+                  data-testid="conn-login-path"
+                />
+              </label>
+              <label style={labelStyle}>
+                Session cookie name (optional)
+                <input
+                  type="text"
+                  placeholder="session"
+                  value={sessionCookieName}
+                  onChange={(e) => setSessionCookieName(e.target.value)}
+                  style={inputStyle}
+                  data-testid="conn-session-cookie"
+                />
+              </label>
+            </>
+          )}
 
           <label style={labelStyle}>
             Object map (JSON, optional)
@@ -416,7 +514,14 @@ export default function AdminConnectorsPage() {
 
           <button
             type="submit"
-            disabled={submitting || !baseUrl || !authHeader}
+            data-testid="conn-submit"
+            disabled={
+              submitting ||
+              !baseUrl ||
+              (authType === "static_bearer"
+                ? !authHeader
+                : !username || !password || !loginPath)
+            }
             style={{
               padding: "8px 16px",
               background: "var(--wp-gold,#eab308)",

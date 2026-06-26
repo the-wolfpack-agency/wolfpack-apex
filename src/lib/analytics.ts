@@ -457,6 +457,9 @@ export type InstinctEventType =
   | "agent.activated"
   | "agent.lifecycle_changed"
   | "agent.token_issued"
+  // agent.invite_emailed   { agent_id }
+  //   an admin emailed the invitee the join link + one-time onboarding secret.
+  | "agent.invite_emailed"
   // agent.scan_completed  { agent_id, workspace_id, scan_version, tool_count,
   //                         allowed_tool_count, capability_count }
   //   the agent ran its self-onboarding scan and stored its system model.

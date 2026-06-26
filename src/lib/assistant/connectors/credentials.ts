@@ -31,11 +31,27 @@ export interface ConnectorCredentials {
   objectMap?: Record<string, string>;
   isActive: boolean;
   /** "static_bearer" for legacy / single-token rows, "oauth2" when the
-   *  row is managed by the OAuth orchestrator (migration 138). */
-  authType: "static_bearer" | "oauth2";
+   *  row is managed by the OAuth orchestrator (migration 138),
+   *  "username_password" for form-login platforms (migration 181). */
+  authType: AuthType;
   /** When the cached access token expires. Null for static_bearer. */
   accessTokenExpiresAt: string | null;
+  /** Form-login endpoint path. Only set for username_password rows. */
+  loginPath?: string;
+  /** Session cookie the platform sets on login. username_password only. */
+  sessionCookieName?: string;
+  /** Decoded username — server-side only, NEVER logged. Only present for
+   *  username_password rows (base64-decoded from the Basic auth header
+   *  in-memory). */
+  username?: string;
+  /** Decoded password — server-side only, NEVER logged. username_password
+   *  only. */
+  password?: string;
 }
+
+/** Supported connector auth flows. Mirrors the auth_type CHECK constraint
+ *  (migrations 138 + 181). */
+export type AuthType = "static_bearer" | "oauth2" | "username_password";
 
 export interface MaskedConnectorCredentials {
   workspaceId: string;
@@ -47,11 +63,17 @@ export interface MaskedConnectorCredentials {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
-  /** "static_bearer" or "oauth2" — drives the admin UI badge that
-   *  tells the operator whether refresh applies. */
-  authType: "static_bearer" | "oauth2";
+  /** "static_bearer", "oauth2", or "username_password" — drives the admin
+   *  UI badge that tells the operator which flow / whether refresh
+   *  applies. The password is NEVER surfaced (only authHeaderHint's
+   *  last-4 masking of the encoded Basic header). */
+  authType: AuthType;
   /** ISO timestamp when the cached access token expires (oauth2 only). */
   accessTokenExpiresAt: string | null;
+  /** Form-login endpoint path (username_password only). */
+  loginPath?: string;
+  /** Session cookie name the platform sets (username_password only). */
+  sessionCookieName?: string;
 }
 
 const DEFAULT_WORKSPACE = "default";
@@ -75,10 +97,13 @@ export async function loadConnectorCredentials(
       is_active: boolean;
       auth_type: string | null;
       access_token_expires_at: string | null;
+      login_path: string | null;
+      session_cookie_name: string | null;
     }>(
       `SELECT workspace_id, connector_name, base_url, auth_header_enc,
               object_map_json, is_active, auth_type,
-              access_token_expires_at::text AS access_token_expires_at
+              access_token_expires_at::text AS access_token_expires_at,
+              login_path, session_cookie_name
          FROM instinct_connector_credentials
         WHERE workspace_id = $1
           AND connector_name = $2
@@ -99,16 +124,30 @@ export async function loadConnectorCredentials(
       });
       return null;
     }
-    return {
+    const authType = normalizeAuthType(row.auth_type);
+    const result: ConnectorCredentials = {
       workspaceId: row.workspace_id,
       connectorName: row.connector_name,
       baseUrl: row.base_url,
       authHeader,
       objectMap: parseObjectMap(row.object_map_json),
       isActive: row.is_active,
-      authType: row.auth_type === "oauth2" ? "oauth2" : "static_bearer",
+      authType,
       accessTokenExpiresAt: row.access_token_expires_at ?? null,
+      loginPath: row.login_path ?? undefined,
+      sessionCookieName: row.session_cookie_name ?? undefined,
     };
+    if (authType === "username_password") {
+      /* Decode the "Basic <base64(user:pass)>" header in-memory so the
+         connector can replay the form login. These fields are
+         server-side only and MUST NOT be logged. */
+      const decoded = decodeBasicHeader(authHeader);
+      if (decoded) {
+        result.username = decoded.username;
+        result.password = decoded.password;
+      }
+    }
+    return result;
   } catch {
     return null;
   }
@@ -124,13 +163,48 @@ export async function saveConnectorCredentials(args: {
   workspaceId?: string;
   connectorName: string;
   baseUrl: string;
-  authHeader: string;
+  /** Required for static_bearer / oauth2. Ignored for username_password
+   *  (the Basic header is derived from username + password). */
+  authHeader?: string;
   objectMap?: Record<string, string>;
   createdBy?: string;
+  /** Defaults to "static_bearer" to preserve existing call sites. */
+  authType?: AuthType;
+  /** username_password only — required together with password + loginPath. */
+  username?: string;
+  password?: string;
+  loginPath?: string;
+  sessionCookieName?: string;
 }): Promise<MaskedConnectorCredentials | null> {
   if (!process.env.DATABASE_URL) return null;
   const workspaceId = args.workspaceId || DEFAULT_WORKSPACE;
-  const enc = encryptSecret(args.authHeader);
+  const authType: AuthType = args.authType ?? "static_bearer";
+
+  /* Resolve the plaintext Authorization header we encrypt at rest. For
+     username_password we encode "Basic base64(user:pass)" so the password
+     reuses the existing encrypted column and never lands in plaintext.
+     For every other flow, behave exactly as before. */
+  let plaintextHeader: string;
+  let loginPath: string | null = null;
+  let sessionCookieName: string | null = null;
+  if (authType === "username_password") {
+    if (!args.username || !args.password || !args.loginPath) {
+      /* Caller contract violation — the route validates this first, but
+         fail-closed here too so a bad direct call can't persist a
+         half-formed row. */
+      return null;
+    }
+    plaintextHeader =
+      "Basic " +
+      Buffer.from(`${args.username}:${args.password}`, "utf8").toString("base64");
+    loginPath = args.loginPath;
+    sessionCookieName = args.sessionCookieName ?? null;
+  } else {
+    if (!args.authHeader) return null;
+    plaintextHeader = args.authHeader;
+  }
+
+  const enc = encryptSecret(plaintextHeader);
   const objectMapJson = args.objectMap ? JSON.stringify(args.objectMap) : null;
   try {
     const r = await safeQuery<{
@@ -141,20 +215,28 @@ export async function saveConnectorCredentials(args: {
       is_active: boolean;
       created_at: string;
       updated_at: string;
+      auth_type: string | null;
+      login_path: string | null;
+      session_cookie_name: string | null;
     }>(
       `INSERT INTO instinct_connector_credentials
          (workspace_id, connector_name, base_url, auth_header_enc,
-          object_map_json, is_active, created_by)
-       VALUES ($1, $2, $3, $4, $5, TRUE, $6)
+          object_map_json, is_active, created_by,
+          auth_type, login_path, session_cookie_name)
+       VALUES ($1, $2, $3, $4, $5, TRUE, $6, $7, $8, $9)
        ON CONFLICT (workspace_id, connector_name)
        DO UPDATE SET
          base_url = EXCLUDED.base_url,
          auth_header_enc = EXCLUDED.auth_header_enc,
          object_map_json = EXCLUDED.object_map_json,
          is_active = TRUE,
+         auth_type = EXCLUDED.auth_type,
+         login_path = EXCLUDED.login_path,
+         session_cookie_name = EXCLUDED.session_cookie_name,
          updated_at = now()
        RETURNING workspace_id, connector_name, base_url, object_map_json,
-                 is_active, created_at::text, updated_at::text`,
+                 is_active, created_at::text, updated_at::text,
+                 auth_type, login_path, session_cookie_name`,
       [
         workspaceId,
         args.connectorName,
@@ -162,6 +244,9 @@ export async function saveConnectorCredentials(args: {
         enc,
         objectMapJson,
         args.createdBy ?? null,
+        authType,
+        loginPath,
+        sessionCookieName,
       ],
     );
     const row = r.rows[0];
@@ -174,18 +259,18 @@ export async function saveConnectorCredentials(args: {
       workspaceId: row.workspace_id,
       connectorName: row.connector_name,
       baseUrl: row.base_url,
-      authHeaderHint: maskHeader(args.authHeader),
+      /* Mask the header we actually persisted — for username_password
+         this is the "Basic ****<last4>" of the encoded credential, so
+         the password itself is never surfaced. */
+      authHeaderHint: maskHeader(plaintextHeader),
       objectMap: parseObjectMap(row.object_map_json),
       isActive: row.is_active,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      /* The static-bearer save path doesn't touch auth_type, so the
-         row keeps whatever value it had (defaults to 'static_bearer'
-         per migration 138). The DB-returned shape doesn't surface
-         these here; the next listConnectorCredentials() call picks
-         them up fresh. */
-      authType: "static_bearer",
+      authType: normalizeAuthType(row.auth_type),
       accessTokenExpiresAt: null,
+      loginPath: row.login_path ?? undefined,
+      sessionCookieName: row.session_cookie_name ?? undefined,
     };
   } catch {
     return null;
@@ -250,10 +335,13 @@ export async function listConnectorCredentials(
       updated_at: string;
       auth_type: string | null;
       access_token_expires_at: string | null;
+      login_path: string | null;
+      session_cookie_name: string | null;
     }>(
       `SELECT workspace_id, connector_name, base_url, auth_header_enc,
               object_map_json, is_active, created_at::text, updated_at::text,
-              auth_type, access_token_expires_at::text AS access_token_expires_at
+              auth_type, access_token_expires_at::text AS access_token_expires_at,
+              login_path, session_cookie_name
          FROM instinct_connector_credentials
         WHERE workspace_id = $1
         ORDER BY connector_name`,
@@ -270,12 +358,43 @@ export async function listConnectorCredentials(
         isActive: row.is_active,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
-        authType: row.auth_type === "oauth2" ? "oauth2" : "static_bearer",
+        authType: normalizeAuthType(row.auth_type),
         accessTokenExpiresAt: row.access_token_expires_at ?? null,
+        loginPath: row.login_path ?? undefined,
+        sessionCookieName: row.session_cookie_name ?? undefined,
       };
     });
   } catch {
     return [];
+  }
+}
+
+/** Coerce a raw DB auth_type string into the typed union. Unknown /
+ *  null values fall back to "static_bearer" (the historical default). */
+function normalizeAuthType(raw: string | null): AuthType {
+  if (raw === "oauth2") return "oauth2";
+  if (raw === "username_password") return "username_password";
+  return "static_bearer";
+}
+
+/** Decode a "Basic <base64(user:pass)>" header back into its parts.
+ *  Returns null when the header isn't a well-formed Basic credential.
+ *  In-memory only — callers must never log the result. */
+function decodeBasicHeader(
+  header: string,
+): { username: string; password: string } | null {
+  const m = /^Basic\s+(.+)$/.exec(header);
+  if (!m) return null;
+  try {
+    const decoded = Buffer.from(m[1], "base64").toString("utf8");
+    const idx = decoded.indexOf(":");
+    if (idx < 0) return null;
+    return {
+      username: decoded.slice(0, idx),
+      password: decoded.slice(idx + 1),
+    };
+  } catch {
+    return null;
   }
 }
 

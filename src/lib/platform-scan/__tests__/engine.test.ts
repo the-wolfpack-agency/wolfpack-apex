@@ -74,6 +74,23 @@ describe("classify", () => {
     });
   });
 
+  it("AUTHENTICATED crawl: a 200 on a protected route is healthy (NOT a security finding)", () => {
+    // The false-positive guard: with a session, behind-login 200s are expected.
+    expect(classify(REQ, { status: 200, durationMs: 10 }, SLOW, true)).toEqual([]);
+  });
+
+  it("AUTHENTICATED crawl: a bounce to login means the session was not honored (bug)", () => {
+    expect(classify(REQ, { status: 302, location: "/login", durationMs: 10 }, SLOW, true)[0]).toMatchObject({
+      severity: "high", category: "bug", title: "Authenticated request bounced to login",
+    });
+  });
+
+  it("AUTHENTICATED crawl: a 401 on a protected route means the session was rejected (bug)", () => {
+    expect(classify(REQ, { status: 401, durationMs: 10 }, SLOW, true)[0]).toMatchObject({
+      severity: "high", category: "bug",
+    });
+  });
+
   it("carries the raw signal as evidence for reviewer verification", () => {
     const f = classify(REQ, { status: 500, location: null, durationMs: 123.7 }, SLOW)[0];
     expect(f.evidence).toMatchObject({ status: 500, durationMs: 124, expectedAuth: "required" });

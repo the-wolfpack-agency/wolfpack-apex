@@ -4,7 +4,13 @@
  *   GET  → list active credentials for the caller's workspace (masked
  *          auth-header hints; plaintext never leaves the server).
  *   POST → upsert credentials for (workspace, connectorName). Body:
- *          { connectorName, baseUrl, authHeader, objectMap? }
+ *          static_bearer / oauth2:
+ *            { connectorName, baseUrl, authType?, authHeader, objectMap? }
+ *          username_password (form-login platforms, e.g. beyond's
+ *          POST /api/auth/login):
+ *            { connectorName, baseUrl, authType: "username_password",
+ *              username, password, loginPath, sessionCookieName?,
+ *              objectMap? }
  *
  * CTO/CEO only (settings.manage_team capability). Audit-log every
  * mutation. The workspaceId is resolved from the caller's session —
@@ -34,10 +40,17 @@ const SUPPORTED_CONNECTORS = new Set([
   "quickbooks",
 ]);
 
+type AuthType = "static_bearer" | "oauth2" | "username_password";
+
 interface PostBody {
   connectorName?: unknown;
   baseUrl?: unknown;
+  authType?: unknown;
   authHeader?: unknown;
+  username?: unknown;
+  password?: unknown;
+  loginPath?: unknown;
+  sessionCookieName?: unknown;
   objectMap?: unknown;
 }
 
@@ -94,12 +107,68 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const authHeader = typeof body.authHeader === "string" ? body.authHeader : "";
-  if (authHeader.length < 4 || authHeader.length > 4096) {
+  /* auth_type defaults to static_bearer so existing callers (authHeader
+     only) keep working unchanged. */
+  const rawAuthType = body.authType === undefined ? "static_bearer" : body.authType;
+  if (
+    rawAuthType !== "static_bearer" &&
+    rawAuthType !== "oauth2" &&
+    rawAuthType !== "username_password"
+  ) {
     return NextResponse.json(
-      { error: "authHeader must be 4–4096 chars" },
+      { error: "authType must be one of: static_bearer, oauth2, username_password" },
       { status: 400 },
     );
+  }
+  const authType: AuthType = rawAuthType;
+
+  /* --- Per-auth-type field validation --- */
+  let authHeader = "";
+  let username: string | undefined;
+  let password: string | undefined;
+  let loginPath: string | undefined;
+  let sessionCookieName: string | undefined;
+
+  if (authType === "username_password") {
+    username = typeof body.username === "string" ? body.username : "";
+    password = typeof body.password === "string" ? body.password : "";
+    loginPath = typeof body.loginPath === "string" ? body.loginPath.trim() : "";
+    if (!username || !password || !loginPath) {
+      return NextResponse.json(
+        {
+          error:
+            "username_password requires username, password, and loginPath",
+        },
+        { status: 400 },
+      );
+    }
+    if (!loginPath.startsWith("/")) {
+      return NextResponse.json(
+        { error: "loginPath must be a path starting with '/'" },
+        { status: 400 },
+      );
+    }
+    if (
+      body.sessionCookieName !== undefined &&
+      body.sessionCookieName !== null
+    ) {
+      if (typeof body.sessionCookieName !== "string") {
+        return NextResponse.json(
+          { error: "sessionCookieName must be a string" },
+          { status: 400 },
+        );
+      }
+      sessionCookieName = body.sessionCookieName.trim() || undefined;
+    }
+  } else {
+    /* static_bearer / oauth2: authHeader required, as before. */
+    authHeader = typeof body.authHeader === "string" ? body.authHeader : "";
+    if (authHeader.length < 4 || authHeader.length > 4096) {
+      return NextResponse.json(
+        { error: "authHeader must be 4–4096 chars" },
+        { status: 400 },
+      );
+    }
   }
 
   let objectMap: Record<string, string> | undefined;
@@ -131,7 +200,13 @@ export async function POST(req: NextRequest) {
     workspaceId,
     connectorName,
     baseUrl,
-    authHeader,
+    authType,
+    /* authHeader only carries a value for static_bearer / oauth2; for
+       username_password the lib derives the Basic header from
+       username + password. */
+    ...(authType === "username_password"
+      ? { username, password, loginPath, sessionCookieName }
+      : { authHeader }),
     objectMap,
     createdBy: user.id,
   });
@@ -153,8 +228,14 @@ export async function POST(req: NextRequest) {
       workspace_id: workspaceId,
       connector_name: connectorName,
       base_url: baseUrl,
+      auth_type: authType,
       auth_header_hint: saved.authHeaderHint,
       has_object_map: Boolean(objectMap),
+      /* Never audit the password — only the (non-secret) form-login path
+         + cookie name so an operator can see how the connector auths. */
+      ...(authType === "username_password"
+        ? { login_path: loginPath, session_cookie_name: sessionCookieName ?? null }
+        : {}),
     },
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,

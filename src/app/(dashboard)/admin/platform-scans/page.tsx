@@ -49,9 +49,11 @@ interface ScanTarget {
   platform: string;
   baseUrl: string;
   hasStatic: boolean;
+  hasApi: boolean;
+  hasLogin: boolean;
 }
 
-type ScanMode = "http" | "static";
+type ScanMode = "http" | "static" | "api";
 
 const SEVERITY_COLOR: Record<Severity, string> = {
   critical: "var(--wp-error, #ef4444)",
@@ -392,8 +394,9 @@ export default function PlatformScansPage() {
           title={selectedTarget?.hasStatic ? "How to scan" : "Source scan not configured for this platform"}
           style={ctrl}
         >
-          <option value="http">Live crawl (HTTP)</option>
+          <option value="http">Live crawl (HTTP){selectedTarget?.hasLogin ? " · authenticated" : ""}</option>
           <option value="static" disabled={!selectedTarget?.hasStatic}>Source scan</option>
+          <option value="api" disabled={!selectedTarget?.hasApi}>API contract</option>
         </select>
         <button
           type="button"

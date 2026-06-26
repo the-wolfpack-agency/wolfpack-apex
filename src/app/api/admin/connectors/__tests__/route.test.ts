@@ -178,6 +178,109 @@ describe("POST /api/admin/connectors", () => {
     );
   });
 
+  test("400 when authType is unrecognized", async () => {
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: ADMIN });
+    const res = await POST(
+      mkReq({
+        connectorName: "rest-default",
+        baseUrl: "https://x",
+        authType: "magic-link",
+        authHeader: "Bearer abcdef",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  test("400 when username_password body is missing the password", async () => {
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: ADMIN });
+    const res = await POST(
+      mkReq({
+        connectorName: "rest-default",
+        baseUrl: "https://beyond.example.com",
+        authType: "username_password",
+        username: "admin@beyond",
+        /* password omitted */
+        loginPath: "/api/auth/login",
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/username_password requires/);
+    /* Never reached the persistence layer. */
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  test("400 when username_password loginPath isn't a path", async () => {
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: ADMIN });
+    const res = await POST(
+      mkReq({
+        connectorName: "rest-default",
+        baseUrl: "https://beyond.example.com",
+        authType: "username_password",
+        username: "admin@beyond",
+        password: "s3cret-pw",
+        loginPath: "https://beyond.example.com/api/auth/login",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  test("200 username_password happy path: passes username/password to save + audits auth_type", async () => {
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: ADMIN });
+    mockSave.mockResolvedValueOnce({
+      workspaceId: "default",
+      connectorName: "rest-default",
+      baseUrl: "https://beyond.example.com",
+      authHeaderHint: "Basic ****Wxyz",
+      isActive: true,
+      createdAt: "x",
+      updatedAt: "y",
+      authType: "username_password",
+      loginPath: "/api/auth/login",
+      sessionCookieName: "session",
+    });
+    const res = await POST(
+      mkReq({
+        connectorName: "rest-default",
+        baseUrl: "https://beyond.example.com",
+        authType: "username_password",
+        username: "admin@beyond",
+        password: "s3cret-pw",
+        loginPath: "/api/auth/login",
+        sessionCookieName: "session",
+      }),
+    );
+    expect(res.status).toBe(200);
+
+    expect(mockSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "default",
+        connectorName: "rest-default",
+        authType: "username_password",
+        username: "admin@beyond",
+        password: "s3cret-pw",
+        loginPath: "/api/auth/login",
+        sessionCookieName: "session",
+        createdBy: "u1",
+      }),
+    );
+    /* authHeader must NOT be forwarded for the form-login flow. */
+    expect(mockSave.mock.calls[0][0]).not.toHaveProperty("authHeader");
+
+    /* Audit captures auth_type + login_path, never the password. */
+    const auditArg = mockAudit.mock.calls[0][0];
+    expect(auditArg.afterState).toEqual(
+      expect.objectContaining({
+        auth_type: "username_password",
+        login_path: "/api/auth/login",
+        session_cookie_name: "session",
+      }),
+    );
+    expect(JSON.stringify(auditArg)).not.toContain("s3cret-pw");
+  });
+
   test("500 when save fails", async () => {
     mockRequireCapability.mockResolvedValueOnce({ ok: true, user: ADMIN });
     mockSave.mockResolvedValueOnce(null);

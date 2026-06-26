@@ -36,13 +36,14 @@ const looksLikeLogin = (loc: string | null | undefined) =>
  * Classify one route's observation into zero or more findings. Pure: this is the
  * heart of the scan and every branch is unit-tested directly.
  */
-export function classify(spec: ScanRouteSpec, obs: RouteObservation, slowMs: number): ScanFinding[] {
+export function classify(spec: ScanRouteSpec, obs: RouteObservation, slowMs: number, authenticated = false): ScanFinding[] {
   const base = { route: spec.path };
   const evidence = {
     status: obs.status ?? null,
     location: obs.location ?? null,
     durationMs: Math.round(obs.durationMs),
     expectedAuth: spec.auth,
+    authenticated,
   } as Record<string, string | number | boolean | null>;
   const F = (severity: ScanFinding["severity"], category: ScanFinding["category"], title: string, detail: string): ScanFinding =>
     ({ ...base, severity, category, title, detail, evidence });
@@ -62,21 +63,33 @@ export function classify(spec: ScanRouteSpec, obs: RouteObservation, slowMs: num
     return [F("medium", "performance", "Rate limited (429)", `${spec.journey}: the route is rate limiting unauthenticated probes; verify thresholds are not too aggressive for real users.`)];
   }
   if (s === 401 || s === 403) {
-    if (spec.auth === "required") return []; // correct: auth enforced
+    if (spec.auth === "required") {
+      // Authenticated crawl: a 401/403 means our session was NOT honored — a bug.
+      return authenticated
+        ? [F("high", "bug", `Authenticated request rejected (${s})`, `${spec.journey}: returned ${s} despite a valid session — the session was not honored or the route is broken.`)]
+        : []; // unauthenticated: correct, auth enforced
+    }
     return [F("high", "bug", `Public route requires auth (${s})`, `${spec.journey}: a route expected to be public returned ${s}, so customers cannot reach it.`)];
   }
   if (isRedirect(s)) {
     if (spec.auth === "required") {
-      return looksLikeLogin(obs.location)
-        ? [] // correct: protected route bounces to login
-        : [F("low", "ux_gap", "Unexpected redirect on protected route", `${spec.journey}: redirected to ${obs.location ?? "an unknown location"} instead of the login page.`)];
+      if (looksLikeLogin(obs.location)) {
+        // Authenticated crawl bounced to login = session not honored (bug);
+        // unauthenticated bounce to login = correct enforcement.
+        return authenticated
+          ? [F("high", "bug", "Authenticated request bounced to login", `${spec.journey}: redirected to the login page despite a valid session — the session was not honored.`)]
+          : [];
+      }
+      return [F("low", "ux_gap", "Unexpected redirect on protected route", `${spec.journey}: redirected to ${obs.location ?? "an unknown location"} instead of the login page.`)];
     }
     return [F("low", "ux_gap", "Public route redirects", `${spec.journey}: a public route redirected to ${obs.location ?? "an unknown location"}; confirm this is the intended canonical destination.`)];
   }
   // 2xx (and any other 2xx-ish success).
   if (s >= 200 && s < 300) {
     const findings: ScanFinding[] = [];
-    if (spec.auth === "required") {
+    // A 200 on an auth-required route is an access-control gap ONLY when we did
+    // not send a session. Authenticated, a 200 is the expected healthy result.
+    if (spec.auth === "required" && !authenticated) {
       findings.push(F("critical", "security", "Protected route served content without auth", `${spec.journey}: returned ${s} to an UNauthenticated request. This route must redirect to login or 401 — serving it is an access-control gap.`));
     }
     if (obs.durationMs > slowMs) {
@@ -94,13 +107,14 @@ async function probe(
   spec: ScanRouteSpec,
   fetchImpl: typeof fetch,
   timeoutMs: number,
+  headers?: Record<string, string>,
 ): Promise<RouteObservation> {
   const url = `${baseUrl.replace(/\/$/, "")}${spec.path}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const startedAt = performance.now();
   try {
-    const res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: controller.signal });
+    const res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: controller.signal, headers });
     return {
       status: res.status,
       location: res.headers.get("location"),
@@ -125,8 +139,8 @@ export async function scanPlatform(input: PlatformScanInput): Promise<PlatformSc
 
   const perRoute = await Promise.all(
     input.routes.map(async (spec) => {
-      const obs = await probe(input.baseUrl, spec, fetchImpl, timeoutMs);
-      return classify(spec, obs, slowMs);
+      const obs = await probe(input.baseUrl, spec, fetchImpl, timeoutMs, input.headers);
+      return classify(spec, obs, slowMs, input.authenticated);
     }),
   );
 

@@ -18,7 +18,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { isTeamRole } from "@/lib/auth/role-capabilities";
 import { createAgent, listAgents } from "@/lib/agents/store";
+import { sendAgentInviteEmail } from "@/lib/agents/invite-email";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
+import { trackEvent } from "@/lib/analytics";
+
+/* Loose, defensive email shape check — we only gate "is this worth attempting
+   a send", not RFC-5322 validation. A bad address just means no email; it must
+   never fail agent creation. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/* Public base for the agent activation link. Mirrors the outbound-URL
+   convention used elsewhere (NEXT_PUBLIC_APP_URL), falling back to the live
+   prod alias. */
+const APP_URL_BASE =
+  process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ??
+  "https://wolfpack-instinct.vercel.app";
 
 const MAX_NAME_LENGTH = 120;
 const MAX_DESCRIPTION_LENGTH = 2000;
@@ -40,6 +54,7 @@ export async function POST(req: NextRequest) {
     role?: unknown;
     owner_user_id?: unknown;
     description?: unknown;
+    inviteEmail?: unknown;
   } = {};
   try {
     body = (await req.json()) as typeof body;
@@ -137,6 +152,33 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("[admin/agents POST audit]", (err as Error).message);
+  }
+
+  /* Optional email-invite path: when the admin supplies a valid-looking
+     inviteEmail, deliver the join link + one-time onboarding secret to the
+     invitee so an operator can be invited by email to join. This is an
+     ADDITION — the secret is still returned in the response below regardless.
+     Best-effort: a mail failure must never fail agent creation, so
+     sendAgentInviteEmail never throws and we only track on success. */
+  const inviteEmail =
+    typeof body.inviteEmail === "string" ? body.inviteEmail.trim() : "";
+  if (inviteEmail && EMAIL_RE.test(inviteEmail)) {
+    const activationUrl = `${APP_URL_BASE}/agents/activate?agent=${encodeURIComponent(
+      agent.id,
+    )}`;
+    const sent = await sendAgentInviteEmail({
+      to: inviteEmail,
+      agentName: agent.name,
+      agentId: agent.id,
+      onboardingSecret,
+      activationUrl,
+      invitedByRole: user.role,
+    });
+    if (sent.ok) {
+      trackEvent("agent.invite_emailed", user.id, user.role, {
+        agent_id: agent.id,
+      });
+    }
   }
 
   /* onboarding_secret is shown ONCE. The caller must capture it now; the store

@@ -27,6 +27,16 @@ jest.mock("@/lib/audit-log", () => ({
   extractRequestMetadata: () => ({}),
 }));
 
+const mockSendAgentInviteEmail = jest.fn();
+jest.mock("@/lib/agents/invite-email", () => ({
+  sendAgentInviteEmail: (...a: any[]) => mockSendAgentInviteEmail(...a),
+}));
+
+const mockTrackEvent = jest.fn();
+jest.mock("@/lib/analytics", () => ({
+  trackEvent: (...a: any[]) => mockTrackEvent(...a),
+}));
+
 const CTO = { id: "u_cto", email: "cto@x.com", role: "cto", workspaceId: "default" };
 const OPS = { id: "u_ops", email: "ops@x.com", role: "ops", workspaceId: "ws_1" };
 
@@ -59,6 +69,7 @@ const SAMPLE_AGENT = {
 beforeEach(() => {
   jest.clearAllMocks();
   mockRecordAudit.mockResolvedValue({ id: "audit_1", seq: 1, entryHash: "h" });
+  mockSendAgentInviteEmail.mockResolvedValue({ ok: true });
 });
 
 describe("POST /api/admin/agents", () => {
@@ -163,6 +174,96 @@ describe("POST /api/admin/agents", () => {
     const res = await POST(mkReq({ name: "Overlord", role: "cto" }));
     expect(res.status).toBe(201);
     expect(mockCreateAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it("with inviteEmail: sends the invite email, tracks agent.invite_emailed, and still returns the secret", async () => {
+    mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
+    mockCreateAgent.mockResolvedValue({
+      agent: SAMPLE_AGENT,
+      onboardingSecret: "deadbeef".repeat(8),
+    });
+    const { POST } = await import("@/app/api/admin/agents/route");
+    const res = await POST(
+      mkReq({
+        name: "Researcher",
+        role: "ops",
+        inviteEmail: "operator@thewolfpack.agency",
+      }),
+    );
+    expect(res.status).toBe(201);
+
+    // Creation still happened and the one-time secret is STILL returned —
+    // the email is an addition, not a replacement.
+    expect(mockCreateAgent).toHaveBeenCalledTimes(1);
+    const body = (await res.json()) as { onboarding_secret: string };
+    expect(body.onboarding_secret).toBe("deadbeef".repeat(8));
+
+    // The invite email was sent with the to-address, the secret, and an
+    // activation URL pointing at this agent.
+    expect(mockSendAgentInviteEmail).toHaveBeenCalledTimes(1);
+    const mail = mockSendAgentInviteEmail.mock.calls[0][0];
+    expect(mail.to).toBe("operator@thewolfpack.agency");
+    expect(mail.agentId).toBe("a_1");
+    expect(mail.onboardingSecret).toBe("deadbeef".repeat(8));
+    expect(mail.activationUrl).toContain("/agents/activate?agent=a_1");
+    expect(mail.invitedByRole).toBe("cto");
+
+    // On a successful send, the event fires.
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "agent.invite_emailed",
+      "u_cto",
+      "cto",
+      { agent_id: "a_1" },
+    );
+  });
+
+  it("does NOT track agent.invite_emailed when the email fails to send (creation still succeeds)", async () => {
+    mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
+    mockCreateAgent.mockResolvedValue({ agent: SAMPLE_AGENT, onboardingSecret: "x" });
+    mockSendAgentInviteEmail.mockResolvedValue({ ok: false });
+    const { POST } = await import("@/app/api/admin/agents/route");
+    const res = await POST(
+      mkReq({ name: "Researcher", role: "ops", inviteEmail: "operator@x.com" }),
+    );
+    expect(res.status).toBe(201);
+    expect(mockSendAgentInviteEmail).toHaveBeenCalledTimes(1);
+    expect(mockTrackEvent).not.toHaveBeenCalledWith(
+      "agent.invite_emailed",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("without inviteEmail: no email sent, no event, creation still succeeds (no regression)", async () => {
+    mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
+    mockCreateAgent.mockResolvedValue({
+      agent: SAMPLE_AGENT,
+      onboardingSecret: "deadbeef".repeat(8),
+    });
+    const { POST } = await import("@/app/api/admin/agents/route");
+    const res = await POST(mkReq({ name: "Researcher", role: "ops" }));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { onboarding_secret: string };
+    expect(body.onboarding_secret).toBe("deadbeef".repeat(8));
+    expect(mockSendAgentInviteEmail).not.toHaveBeenCalled();
+    expect(mockTrackEvent).not.toHaveBeenCalledWith(
+      "agent.invite_emailed",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("ignores a malformed inviteEmail (no send, no event, still 201)", async () => {
+    mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
+    mockCreateAgent.mockResolvedValue({ agent: SAMPLE_AGENT, onboardingSecret: "x" });
+    const { POST } = await import("@/app/api/admin/agents/route");
+    const res = await POST(
+      mkReq({ name: "Researcher", role: "ops", inviteEmail: "not-an-email" }),
+    );
+    expect(res.status).toBe(201);
+    expect(mockSendAgentInviteEmail).not.toHaveBeenCalled();
   });
 
   it("409 when the agent name is already taken in the workspace", async () => {

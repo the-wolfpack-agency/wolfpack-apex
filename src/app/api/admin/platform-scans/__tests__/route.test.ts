@@ -38,6 +38,12 @@ jest.mock("@/lib/platform-scan/discover", () => ({
   mergeManifest: (...a: unknown[]) => mockMerge(...a),
 }));
 jest.mock("@/lib/platform-scan/manifests", () => ({ getScanManifest: (...a: unknown[]) => mockGetManifest(...a) }));
+const mockLoadCreds = jest.fn();
+const mockEstablish = jest.fn();
+const mockProbeApi = jest.fn();
+jest.mock("@/lib/assistant/connectors/credentials", () => ({ loadConnectorCredentials: (...a: unknown[]) => mockLoadCreds(...a) }));
+jest.mock("@/lib/platform-scan/session", () => ({ establishSession: (...a: unknown[]) => mockEstablish(...a) }));
+jest.mock("@/lib/platform-scan/api-probe", () => ({ probeApi: (...a: unknown[]) => mockProbeApi(...a) }));
 jest.mock("@/lib/platform-scan/store", () => ({
   recordScan: (...a: unknown[]) => mockRecord(...a),
   listFindings: (...a: unknown[]) => mockList(...a),
@@ -88,6 +94,9 @@ beforeEach(() => {
   mockReadFile.mockReturnValue(async () => null);
   mockDiscoverFiles.mockResolvedValue([]); // no repo-tree files by default -> seed
   mockDiscover.mockResolvedValue([]); // no sitemap routes by default
+  mockLoadCreds.mockResolvedValue(null); // no connection -> unauthenticated by default
+  mockEstablish.mockResolvedValue(null);
+  mockProbeApi.mockResolvedValue([]);
   mockMerge.mockImplementation((seed) => seed); // merge returns the seed
   mockRecord.mockResolvedValue({ scanId: "scan-1", findingCount: 1, criticalCount: 1 });
   mockList.mockResolvedValue([{ id: "f-1", status: "open" }]);
@@ -104,7 +113,7 @@ describe("POST /api/admin/platform-scans (http mode)", () => {
 
     expect(mockDiscover).toHaveBeenCalledWith(MANIFEST.baseUrl);
     expect(mockMerge).toHaveBeenCalledWith(MANIFEST.routes, [{ path: "/extra", journey: "Extra", auth: "public" }]);
-    expect(mockScan).toHaveBeenCalledWith({ workspaceId: "ws-1", platform: "wolfpack-auto", baseUrl: MANIFEST.baseUrl, routes: MANIFEST.routes });
+    expect(mockScan).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "ws-1", platform: "wolfpack-auto", baseUrl: MANIFEST.baseUrl, routes: MANIFEST.routes, authenticated: false }));
     expect(mockRecord).toHaveBeenCalledWith({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin", result: RESULT });
     expect(mockTrack).toHaveBeenCalledWith("platform.scan_started", "admin-1", "admin",
       expect.objectContaining({ platform: "wolfpack-auto", mode: "http", discovered_count: 1 }));
@@ -161,6 +170,56 @@ describe("POST /api/admin/platform-scans (static mode)", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "no_static_target" });
     expect(mockScanSource).not.toHaveBeenCalled();
+  });
+});
+
+describe("authenticated scan (form-login connection)", () => {
+  const LOGIN_MANIFEST = {
+    baseUrl: "https://beyond.example",
+    routes: MANIFEST.routes,
+    login: { connectorName: "wolfpack-beyond", loginPath: "/api/auth/login", sessionCookieName: "session" },
+    apiEndpoints: [{ path: "/api/dashboard", method: "GET" as const, journey: "Dashboard", requiresAuth: true }],
+  };
+
+  it("http mode logs in and crawls AUTHENTICATED when a username/password connection exists", async () => {
+    mockGetManifest.mockReturnValue(LOGIN_MANIFEST);
+    mockLoadCreds.mockResolvedValue({ authType: "username_password", username: "u@e.com", password: "pw", loginPath: "/api/auth/login", sessionCookieName: "session" });
+    mockEstablish.mockResolvedValue({ cookie: "session=abc" });
+
+    await post({ platform: "wolfpack-beyond", mode: "http" });
+    expect(mockEstablish).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "https://beyond.example", username: "u@e.com", password: "pw" }));
+    expect(mockScan).toHaveBeenCalledWith(expect.objectContaining({ headers: { Cookie: "session=abc" }, authenticated: true }));
+    expect(mockTrack).toHaveBeenCalledWith("platform.scan_started", "admin-1", "admin", expect.objectContaining({ authenticated: true }));
+  });
+
+  it("falls back to UNauthenticated crawl when no connection is configured", async () => {
+    mockGetManifest.mockReturnValue(LOGIN_MANIFEST);
+    mockLoadCreds.mockResolvedValue(null);
+    await post({ platform: "wolfpack-beyond", mode: "http" });
+    expect(mockEstablish).not.toHaveBeenCalled();
+    expect(mockScan).toHaveBeenCalledWith(expect.objectContaining({ authenticated: false }));
+  });
+
+  it("api mode logs in then runs the gray-box probe and persists", async () => {
+    mockGetManifest.mockReturnValue(LOGIN_MANIFEST);
+    mockLoadCreds.mockResolvedValue({ authType: "username_password", username: "u@e.com", password: "pw", loginPath: "/api/auth/login", sessionCookieName: "session" });
+    mockEstablish.mockResolvedValue({ cookie: "session=abc" });
+    mockProbeApi.mockResolvedValue([{ route: "/api/dashboard", severity: "critical", category: "security", title: "x", detail: "y", evidence: {} }]);
+
+    const res = await post({ platform: "wolfpack-beyond", mode: "api" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ mode: "api", scanId: "scan-1" });
+    expect(mockProbeApi).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "https://beyond.example", cookie: "session=abc", endpoints: LOGIN_MANIFEST.apiEndpoints }));
+    expect(mockScan).not.toHaveBeenCalled(); // http engine not used in api mode
+    expect(mockRecord).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ findings: expect.any(Array) }) }));
+  });
+
+  it("400s api mode when the platform has no apiEndpoints", async () => {
+    mockGetManifest.mockReturnValue({ baseUrl: MANIFEST.baseUrl, routes: MANIFEST.routes }); // no apiEndpoints
+    const res = await post({ platform: "wolfpack-auto", mode: "api" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "no_api_endpoints" });
+    expect(mockProbeApi).not.toHaveBeenCalled();
   });
 });
 

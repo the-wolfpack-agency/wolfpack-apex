@@ -52,6 +52,13 @@ export interface PlatformScanInput {
   slowMs?: number;
   /** Per-request timeout. Default 10000ms. */
   timeoutMs?: number;
+  /** Extra request headers (e.g. an established session Cookie) so the crawl runs
+   *  AUTHENTICATED — surfacing behind-login pages instead of just login redirects. */
+  headers?: Record<string, string>;
+  /** True when the crawl carries an authenticated session. Flips the auth-required
+   *  semantics: a 200 is then EXPECTED (page reachable), while a bounce to login /
+   *  401 means the session was not honored (a bug), not correct enforcement. */
+  authenticated?: boolean;
 }
 
 export interface PlatformScanResult {
