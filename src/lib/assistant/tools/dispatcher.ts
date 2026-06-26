@@ -21,6 +21,7 @@ import { trackEvent } from "@/lib/analytics";
 import { authorize } from "@/lib/ogiam/authorize";
 import { recordActionOutcome } from "@/lib/ogiam/ledger";
 import { ingestAgentAction } from "@/lib/agents/audit/brain-ingest";
+import { createPendingApproval } from "@/lib/agents/approvals/store";
 import type { OgiamDecision } from "@/lib/ogiam/types";
 import { canInvokeTool } from "./gate";
 import { getTools } from "./registry";
@@ -216,6 +217,23 @@ async function runOneTool<P, R>(
         requiresConfirmation = true so we never silently mutate on
         the first turn. */
   if (tool.requiresConfirmation) {
+    /* For a governed AGENT, capture the proposed mutation as a pending approval
+       so an owner/admin can review and execute the EXACT action later. The OGIAM
+       gate has already allowed it; this is the human-in-the-loop confirmation.
+       Best-effort: if capture fails the action simply stays blocked (no mutation),
+       and the human path is unchanged (no capture, same needs_confirmation). */
+    const ap = ctx.agentPrincipal;
+    if (ap) {
+      await createPendingApproval({
+        workspaceId: ap.workspaceId,
+        agentId: ap.agentId,
+        ownerUserId: ap.ownerUserId,
+        tool: tool.name,
+        params: parsed.data as Record<string, unknown>,
+        capability: tool.capability,
+        decisionSeq: decision?.recordedSeq ?? null,
+      });
+    }
     return failure(
       "needs_confirmation",
       `tool ${tool.name} mutates state and needs explicit confirmation`,

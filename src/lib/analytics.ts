@@ -465,6 +465,12 @@ export type InstinctEventType =
   //   OGIAM enforce gate let it through.
   | "agent.scan_completed"
   | "agent.acted"
+  // Write approvals (human-in-the-loop): a mutation an agent proposed is captured
+  // pending approval, then approved/rejected by a human, then executed.
+  | "agent.write_pending_approval"
+  | "agent.write_approved"
+  | "agent.write_rejected"
+  | "agent.write_executed"
   // agent.task_assigned   { agent_id, task_id, workspace_id }
   //   a human assigned work to an agent.
   // agent.task_completed  { agent_id, task_id, status, step_count, ran_count, blocked }
