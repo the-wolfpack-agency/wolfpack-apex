@@ -19,6 +19,7 @@
 
 import { createHash } from "node:crypto";
 import { safeQuery } from "@/lib/db";
+import { trackEvent } from "@/lib/analytics";
 import { getConnectionStatus as getMsStatus, graphFetch, getValidToken } from "@/lib/microsoft-graph";
 import { getConnectionStatus as getQboStatus } from "@/lib/quickbooks";
 import { loadConnectorCredentials } from "@/lib/assistant/connectors/credentials";
@@ -561,4 +562,73 @@ export async function getLastKnownGoodHash(
   } catch {
     return null;
   }
+}
+
+/* The vendors + object types the nightly sweep covers. Mirrors DEFAULT_VENDORS
+ * in the read route (consolidate the two when that route is next touched). */
+const DEFAULT_PROBE_VENDORS: Array<{ vendor: string; objects: string[]; needsUserId: boolean }> = [
+  { vendor: "microsoft", objects: ["task", "event", "message"], needsUserId: true },
+  { vendor: "salesforce", objects: ["deal", "contact", "account"], needsUserId: false },
+  { vendor: "hubspot", objects: ["deal", "contact", "account"], needsUserId: false },
+  { vendor: "quickbooks", objects: [], needsUserId: false },
+];
+
+export interface WorkspaceSweepResult { vendors: number; probes: number; drifted: string[] }
+
+/**
+ * Probe every configured vendor for ONE workspace: a connectivity probe, then a
+ * schema probe per object type (only when connectivity is OK). Each result is
+ * persisted. SCHEMA DRIFT is the learning tie-in: when a fresh schema hash
+ * differs from the last-known-good for that (vendor, object), we emit
+ * integration.schema_drift so the loop sees a vendor field-set change BEFORE it
+ * silently breaks a user's workflow. Never throws (probes are best-effort).
+ */
+export async function sweepWorkspace(workspaceId: string, opts: { userId?: string } = {}): Promise<WorkspaceSweepResult> {
+  const drifted: string[] = [];
+  let probes = 0;
+  for (const v of DEFAULT_PROBE_VENDORS) {
+    const ctx: ProbeContext = { workspaceId, userId: v.needsUserId ? opts.userId : undefined };
+    const connectivity = await runProbe(v.vendor, "connectivity", ctx);
+    await persistProbeResult(workspaceId, connectivity);
+    probes++;
+    if (connectivity.ok && v.objects.length > 0) {
+      const schemaResults = await Promise.all(v.objects.map((o) => runProbe(v.vendor, "schema", ctx, o)));
+      for (const sr of schemaResults) {
+        // Compare to the last-known-good BEFORE persisting this run's row.
+        if (sr.ok && sr.schemaHash && sr.objectType) {
+          const last = await getLastKnownGoodHash(workspaceId, v.vendor, sr.objectType);
+          if (last && last !== sr.schemaHash) {
+            drifted.push(`${v.vendor}.${sr.objectType}`);
+            try {
+              trackEvent("integration.health_drift_detected", "system", "system", {
+                workspace_id: workspaceId, vendor: v.vendor, object_type: sr.objectType,
+              });
+            } catch { /* analytics is best-effort; the persisted row is the record */ }
+          }
+        }
+        await persistProbeResult(workspaceId, sr);
+        probes++;
+      }
+    }
+  }
+  return { vendors: DEFAULT_PROBE_VENDORS.length, probes, drifted };
+}
+
+/**
+ * Nightly orchestrator: sweep every workspace that has at least one active
+ * connector. CRM connectors use workspace-scoped creds, so the unattended sweep
+ * covers them; per-user vendors (Microsoft) are probed on their own user path.
+ */
+export async function sweepAllWorkspaces(): Promise<{ workspaces: number; probes: number; drifted: string[] }> {
+  const { rows } = await safeQuery<{ workspace_id: string }>(
+    `SELECT DISTINCT workspace_id FROM instinct_connector_credentials WHERE is_active = true`,
+  );
+  let probes = 0;
+  const drifted: string[] = [];
+  for (const r of rows) {
+    const res = await sweepWorkspace(r.workspace_id);
+    probes += res.probes;
+    drifted.push(...res.drifted);
+  }
+  return { workspaces: rows.length, probes, drifted };
 }
