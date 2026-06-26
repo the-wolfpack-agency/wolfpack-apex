@@ -126,6 +126,9 @@ export default function AgentsPage() {
   const [name, setName] = useState("");
   const [role, setRole] = useState<string>(ROLE_OPTIONS[5]); // dev by default
   const [description, setDescription] = useState("");
+  // Optional: email the invitee the join link + one-time secret (the backend
+  // sends it via Resend/Graph and emits agent.invite_emailed).
+  const [inviteEmail, setInviteEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   /* The one-time secret returned by a successful onboard. Held in state so the
@@ -179,6 +182,7 @@ export default function AgentsPage() {
           name: trimmed,
           role,
           ...(description.trim() ? { description: description.trim() } : {}),
+          ...(inviteEmail.trim() ? { inviteEmail: inviteEmail.trim() } : {}),
         }),
       });
       if (res.status === 409) {
@@ -200,6 +204,7 @@ export default function AgentsPage() {
       // Reset the form for the next onboard and refresh the roster.
       setName("");
       setDescription("");
+      setInviteEmail("");
       await load();
     } catch (e) {
       setFormError((e as Error).message || "Network error");
@@ -501,6 +506,26 @@ export default function AgentsPage() {
               borderRadius: "6px",
               resize: "vertical",
               fontFamily: "inherit",
+            }}
+          />
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: "0.3rem", marginBottom: "0.75rem" }}>
+          <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim, #aaa)" }}>
+            Invite by email (optional)
+          </span>
+          <input
+            data-testid="agent-onboard-invite-email"
+            type="email"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+            placeholder="teammate@company.com — emails the join link + one-time secret"
+            style={{
+              padding: "0.5rem 0.7rem",
+              fontSize: "0.88rem",
+              background: "var(--wp-dark-surface2, #1a1a1a)",
+              color: "var(--wp-text, #eee)",
+              border: "1px solid var(--wp-dark-border, #333)",
+              borderRadius: "6px",
             }}
           />
         </label>

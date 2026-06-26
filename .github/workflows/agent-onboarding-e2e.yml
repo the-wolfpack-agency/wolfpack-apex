@@ -1,0 +1,39 @@
+name: Agent Onboarding E2E (Live Target)
+
+# Drives the deployed Instinct admin through the FULL client-onboarding flow
+# (log in -> onboard an agent -> connect a target client platform -> run an
+# authenticated scan) against a live target, asserting it functions end-to-end.
+# Manual-trigger only; inert until the Instinct + target secrets are wired.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  onboarding-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run agent client-onboarding e2e
+        run: npx playwright test tests/e2e/agent-onboarding.spec.ts
+        env:
+          INSTINCT_BASE_URL: ${{ secrets.INSTINCT_BASE_URL }}
+          INSTINCT_ADMIN_EMAIL: ${{ secrets.INSTINCT_ADMIN_EMAIL }}
+          INSTINCT_ADMIN_PASSWORD: ${{ secrets.INSTINCT_ADMIN_PASSWORD }}
+          TARGET_NAME: ${{ secrets.TARGET_NAME }}
+          TARGET_BASE_URL: ${{ secrets.TARGET_BASE_URL }}
+          TARGET_LOGIN_PATH: ${{ secrets.TARGET_LOGIN_PATH }}
+          TARGET_USERNAME: ${{ secrets.TARGET_USERNAME }}
+          TARGET_PASSWORD: ${{ secrets.TARGET_PASSWORD }}
