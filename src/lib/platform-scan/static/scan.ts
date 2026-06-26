@@ -47,10 +47,14 @@ export async function scanSource(input: ScanSourceInput): Promise<PlatformScanRe
 }
 
 /**
- * Production readFile: fetch a single file from raw.githubusercontent.com.
- * Sends a Bearer token from GITHUB_TOKEN_WOLFPACK_AGENCY when set (private
- * repos). Returns the file text, or null on any non-200 / network error.
- * Never throws — a missing file is a normal outcome of scanning a path list.
+ * Production readFile: fetch a single file via the GitHub Contents API with the
+ * raw media type. The Contents API honors Bearer auth for BOTH public and
+ * private repos, so a private CLIENT repo's files are readable — unlike
+ * raw.githubusercontent.com, which ignores the Authorization header on private
+ * content and would silently 404 every file (a blank scan in prod). Token comes
+ * from GITHUB_TOKEN_WOLFPACK_AGENCY. Returns the file text, or null on any
+ * non-200 / network error. Never throws — a missing file is a normal outcome of
+ * scanning a path list.
  */
 export function defaultReadFile(
   owner: string,
@@ -61,8 +65,11 @@ export function defaultReadFile(
   const token = process.env.GITHUB_TOKEN_WOLFPACK_AGENCY;
 
   return async (path: string): Promise<string | null> => {
-    const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
-    const headers: Record<string, string> = {};
+    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`;
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github.raw",
+      "X-GitHub-Api-Version": "2022-11-28",
+    };
     if (token) headers.Authorization = `Bearer ${token}`;
 
     try {

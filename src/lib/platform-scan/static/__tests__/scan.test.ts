@@ -72,7 +72,7 @@ describe("defaultReadFile", () => {
     delete process.env.GITHUB_TOKEN_WOLFPACK_AGENCY;
   });
 
-  it("returns text on 200 and hits the raw.githubusercontent URL with ref", async () => {
+  it("returns text on 200 via the GitHub Contents API (raw media type) with ref", async () => {
     const fetchMock = jest.fn(async () => ({
       status: 200,
       text: async () => "file body",
@@ -82,10 +82,10 @@ describe("defaultReadFile", () => {
     const read = defaultReadFile("owner", "repo", "feature");
     const out = await read("src/x.ts");
     expect(out).toBe("file body");
-    const calledUrl = (fetchMock as unknown as jest.Mock).mock.calls[0][0];
-    expect(calledUrl).toBe(
-      "https://raw.githubusercontent.com/owner/repo/feature/src/x.ts",
-    );
+    const [calledUrl, opts] = (fetchMock as unknown as jest.Mock).mock.calls[0];
+    // Contents API (works for private repos too), raw media type, ref as query.
+    expect(calledUrl).toBe("https://api.github.com/repos/owner/repo/contents/src/x.ts?ref=feature");
+    expect(opts.headers.Accept).toBe("application/vnd.github.raw");
   });
 
   it("sends a Bearer header when GITHUB_TOKEN_WOLFPACK_AGENCY is set", async () => {
@@ -104,7 +104,7 @@ describe("defaultReadFile", () => {
 
     await defaultReadFile("o", "r")("p");
     const [url, opts] = (fetchMock as unknown as jest.Mock).mock.calls[0];
-    expect(url).toBe("https://raw.githubusercontent.com/o/r/main/p");
+    expect(url).toBe("https://api.github.com/repos/o/r/contents/p?ref=main");
     expect(opts.headers.Authorization).toBeUndefined();
   });
 
