@@ -84,7 +84,7 @@ describe("agent bound ONLY to salesforce", () => {
 
   it("DENIES an explicit unbound connector (jira) — no connector built, deny event fires", async () => {
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "Grimace", connector: "jira" },
+      { objectType: "contact", query: "Grimace", list: false, connector: "jira" },
       AGENT_CTX,
     );
     expect(r.ok).toBe(false);
@@ -105,7 +105,7 @@ describe("agent bound ONLY to salesforce", () => {
        salesforce → the agent-aware pick returns null → deny, nothing built. */
     mockPickConfigured.mockResolvedValue(null);
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "Grimace", connector: "rest-default" },
+      { objectType: "contact", query: "Grimace", list: false, connector: "rest-default" },
       AGENT_CTX,
     );
     expect(r.ok).toBe(false);
@@ -124,7 +124,7 @@ describe("agent bound ONLY to salesforce", () => {
   it("ALLOWS the bound connector (explicit salesforce) — connector built, search runs", async () => {
     mockGetConnector.mockReturnValue(okConnector());
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "Grimace", connector: "salesforce" },
+      { objectType: "contact", query: "Grimace", list: false, connector: "salesforce" },
       AGENT_CTX,
     );
     expect(r.ok).toBe(true);
@@ -145,7 +145,7 @@ describe("agent bound ONLY to salesforce", () => {
     mockPickConfigured.mockResolvedValue("salesforce");
     mockBuildRest.mockResolvedValue(okConnector());
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "Grimace", connector: "rest-default" },
+      { objectType: "contact", query: "Grimace", list: false, connector: "rest-default" },
       AGENT_CTX,
     );
     expect(r.ok).toBe(true);
@@ -160,7 +160,7 @@ describe("agent with NO bindings", () => {
 
   it("cannot use an explicit connector", async () => {
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "Grimace", connector: "salesforce" },
+      { objectType: "contact", query: "Grimace", list: false, connector: "salesforce" },
       AGENT_CTX,
     );
     expect(r.ok).toBe(false);
@@ -172,7 +172,7 @@ describe("agent with NO bindings", () => {
   it("cannot use the implicit pick", async () => {
     mockPickConfigured.mockResolvedValue(null);
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "Grimace", connector: "rest-default" },
+      { objectType: "contact", query: "Grimace", list: false, connector: "rest-default" },
       AGENT_CTX,
     );
     expect(r.ok).toBe(false);
@@ -186,7 +186,7 @@ describe("human assistant (no agentPrincipal) — UNCHANGED", () => {
     mockPickConfigured.mockResolvedValue("salesforce");
     mockBuildRest.mockResolvedValue(okConnector());
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "Grimace", connector: "rest-default" },
+      { objectType: "contact", query: "Grimace", list: false, connector: "rest-default" },
       HUMAN_CTX,
     );
     expect(r.ok).toBe(true);
@@ -208,7 +208,7 @@ describe("human assistant (no agentPrincipal) — UNCHANGED", () => {
   it("explicit connector on a human turn resolves via getConnector, no store lookup", async () => {
     mockGetConnector.mockReturnValue(okConnector());
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "Grimace", connector: "hubspot" },
+      { objectType: "contact", query: "Grimace", list: false, connector: "hubspot" },
       HUMAN_CTX,
     );
     expect(r.ok).toBe(true);

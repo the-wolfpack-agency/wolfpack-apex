@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
-import { listPendingApprovals } from "@/lib/agents/approvals/store";
+import { listPendingApprovals, listAgentApprovalHistory } from "@/lib/agents/approvals/store";
 
 /**
  * GET /api/admin/agents/approvals -> pending agent write approvals for the
@@ -15,5 +15,9 @@ export async function GET(req: NextRequest) {
   // ?agentId scopes the queue to one agent (used by the agent detail page).
   const agentId = req.nextUrl.searchParams.get("agentId") ?? undefined;
   const approvals = await listPendingApprovals(workspaceId, agentId);
-  return NextResponse.json({ approvals });
+  // ?history=1 (with agentId) also returns recent DECIDED approvals so the
+  // human-in-the-loop section shows real activity, not just the pending queue.
+  const wantsHistory = req.nextUrl.searchParams.get("history") === "1" && !!agentId;
+  const history = wantsHistory ? await listAgentApprovalHistory(workspaceId, agentId!) : undefined;
+  return NextResponse.json({ approvals, ...(history ? { history } : {}) });
 }

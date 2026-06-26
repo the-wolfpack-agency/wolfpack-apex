@@ -116,7 +116,16 @@ export class RestConnector implements Connector {
     if (!this.isConfigured()) {
       return notConfigured(this.name, "searchRecords");
     }
-    if (!query || query.trim().length < 2) {
+    /* Empty query is the LIST-ALL sentinel: the caller wants the top N
+       records of this object type with no name filter ("client list",
+       "pull the customer list"). The vendor preset's search.build turns
+       an empty query into a no-WHERE list query (Salesforce: SELECT …
+       FROM <SObject> LIMIT N; HubSpot: the bare list endpoint). A
+       NON-empty query still requires ≥2 chars so a stray single char
+       doesn't fan out an accidental list-all. */
+    const trimmed = (query ?? "").trim();
+    const isListAll = trimmed.length === 0;
+    if (!isListAll && trimmed.length < 2) {
       return {
         ok: false,
         code: "validation",
@@ -129,7 +138,7 @@ export class RestConnector implements Connector {
        `${path}?q=${q}&limit=${limit}` shape that suits a handful of
        small REST APIs. */
     if (this.vendorPreset?.search) {
-      const req = this.vendorPreset.search.build(objectType.toLowerCase(), query, limit);
+      const req = this.vendorPreset.search.build(objectType.toLowerCase(), trimmed, limit);
       const r = await this.request<unknown>(req.path.startsWith("/") ? req.path : `/${req.path}`);
       if (!r.ok) return r as ConnectorResult<Array<Record<string, unknown>>>;
       const records = req.extract(r.data);
@@ -137,7 +146,11 @@ export class RestConnector implements Connector {
     }
 
     const path = this.objectMap[objectType.toLowerCase()] ?? objectType.toLowerCase();
-    const url = `/${path}?q=${encodeURIComponent(query)}&limit=${limit}`;
+    /* List-all (empty query) drops the `q` param entirely so a generic
+       REST list endpoint returns the top N rows unfiltered. */
+    const url = isListAll
+      ? `/${path}?limit=${limit}`
+      : `/${path}?q=${encodeURIComponent(trimmed)}&limit=${limit}`;
     const r = await this.request<unknown>(url);
     if (!r.ok) {
       return r as ConnectorResult<Array<Record<string, unknown>>>;

@@ -10,7 +10,7 @@ jest.mock("@/lib/db", () => ({ query: (...a: unknown[]) => mockQuery(...a), safe
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrack(...a) }));
 
 import {
-  createPendingApproval, decidePendingApproval, listPendingApprovals, markApprovalExecuted,
+  createPendingApproval, decidePendingApproval, listPendingApprovals, listAgentApprovalHistory, markApprovalExecuted,
 } from "@/lib/agents/approvals/store";
 
 const ROW = {
@@ -72,6 +72,16 @@ it("narrows the queue to a single agent when agentId is given", async () => {
   await listPendingApprovals("ws-1", "agent-9");
   expect(mockSafeQuery.mock.calls[0][0]).toMatch(/\$2::text IS NULL OR agent_id = \$2/);
   expect(mockSafeQuery.mock.calls[0][1]).toEqual(["ws-1", "agent-9"]);
+});
+
+it("lists recent DECIDED approvals for an agent (history, excludes pending)", async () => {
+  mockSafeQuery.mockResolvedValue({ rows: [{ ...ROW, status: "executed", decided_at: "t2" }] });
+  const hist = await listAgentApprovalHistory("ws-1", "agent-9", 10);
+  expect(hist[0]).toMatchObject({ id: "ap-1", status: "executed" });
+  // Filters to this agent + non-pending, newest decision first, bounded limit.
+  expect(mockSafeQuery.mock.calls[0][0]).toMatch(/agent_id = \$2 AND status <> 'pending'/);
+  expect(mockSafeQuery.mock.calls[0][0]).toMatch(/ORDER BY COALESCE\(decided_at, created_at\) DESC/);
+  expect(mockSafeQuery.mock.calls[0][1]).toEqual(["ws-1", "agent-9", 10]);
 });
 
 it("marks an approval executed and emits agent.write_executed", async () => {

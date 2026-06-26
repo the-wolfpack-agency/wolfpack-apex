@@ -87,6 +87,24 @@ describe("Salesforce preset — search.build", () => {
     const soql = new URL("http://x" + r.path).searchParams.get("q") ?? "";
     expect(soql).toContain("FROM Contact");
   });
+
+  test("empty query = LIST-ALL → no-WHERE SOQL with a LIMIT", () => {
+    /* The "client list" / "pull the customer list" path: an empty query
+       must build a list-all (no WHERE filter) capped by the limit. */
+    const r = search.build("contact", "", 25);
+    const soql = new URL("http://x" + r.path).searchParams.get("q") ?? "";
+    expect(soql).toContain("FROM Contact");
+    expect(soql).toContain("LIMIT 25");
+    expect(soql).not.toContain("WHERE");
+    expect(soql).not.toContain("LIKE");
+  });
+
+  test("whitespace-only query is also treated as LIST-ALL", () => {
+    const r = search.build("account", "   ", 10);
+    const soql = new URL("http://x" + r.path).searchParams.get("q") ?? "";
+    expect(soql).toContain("FROM Account");
+    expect(soql).not.toContain("WHERE");
+  });
 });
 
 describe("HubSpot preset — search.build", () => {
@@ -112,6 +130,12 @@ describe("HubSpot preset — search.build", () => {
     });
     expect(extracted).toHaveLength(1);
     expect(extracted[0].id).toBe("123");
+  });
+
+  test("empty query = LIST-ALL → bare list endpoint, no q param", () => {
+    const r = search.build("contact", "", 25);
+    expect(r.path).toBe("/crm/v3/objects/contacts?limit=25");
+    expect(r.path).not.toContain("q=");
   });
 });
 

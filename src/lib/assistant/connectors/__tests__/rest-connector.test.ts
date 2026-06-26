@@ -196,6 +196,37 @@ describe("RestConnector — searchRecords", () => {
     expect(f.mock.calls[0][0]).toContain("q=Acme%20%26%20Sons");
     expect(f.mock.calls[0][0]).toContain("limit=5");
   });
+
+  test("empty query (LIST-ALL) is allowed: no q param, drops to bare list endpoint", async () => {
+    /* The "client list" path. An empty query must NOT be rejected as
+       too-short — it's the list-all sentinel. On a non-preset connector
+       it produces a `q`-less list URL. */
+    const f = jest.fn().mockResolvedValueOnce(fakeRes(200, [{ id: "1" }, { id: "2" }]));
+    const c = new RestConnector({
+      baseUrl: "https://x",
+      authHeader: "Bearer y",
+      fetchImpl: f as unknown as typeof fetch,
+    });
+    const r = await c.searchRecords("contact", "", 25);
+    expect(r.ok).toBe(true);
+    expect(r.data).toHaveLength(2);
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(f.mock.calls[0][0]).toContain("/contacts?limit=25");
+    expect(f.mock.calls[0][0]).not.toContain("q=");
+  });
+
+  test("single-char query is still rejected (only EMPTY means list-all)", async () => {
+    const f = jest.fn();
+    const c = new RestConnector({
+      baseUrl: "https://x",
+      authHeader: "Bearer y",
+      fetchImpl: f as unknown as typeof fetch,
+    });
+    const r = await c.searchRecords("contact", "a", 10);
+    expect(r.ok).toBe(false);
+    expect(r.code).toBe("validation");
+    expect(f).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

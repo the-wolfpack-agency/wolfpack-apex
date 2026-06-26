@@ -2017,3 +2017,95 @@ describe("/admin/agents/[id]: backup agent (failover for uptime)", () => {
     expect(screen.getByTestId("agent-name")).toBeInTheDocument();
   });
 });
+
+describe("/admin/agents/[id]: tabbed layout", () => {
+  // A scan + tasks + connections + drift + log fixture so every tab's primary
+  // section has rendered content (not just an empty state) to assert against.
+  function renderTabbed() {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({ scan: makeScan() }),
+        tasks: () => mkRes({ tasks: [makeTask({ id: "task-1" })] }),
+        connections: () => mkRes({ bound: [makeConnection({ connectorName: "acme-portal" })], available: [] }),
+        drift: () => mkRes({ baseline: makeBaseline(), events: [makeDriftEvent()], latest: makeDriftEvent() }),
+        log: () => mkRes({ entries: [makeLogEntry({ id: "log-1" })] }),
+      }),
+    );
+    return act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+  }
+
+  it("renders the tab bar with all four tabs, Overview active by default", async () => {
+    await renderTabbed();
+    await waitFor(() => expect(screen.getByTestId("agent-tabs")).toBeInTheDocument());
+
+    for (const key of ["overview", "work", "access", "activity"]) {
+      expect(screen.getByTestId(`agent-tab-${key}`)).toBeInTheDocument();
+    }
+    // Overview is the default active tab; the others are not.
+    expect(screen.getByTestId("agent-tab-overview")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("agent-tab-work")).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByTestId("agent-tab-access")).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByTestId("agent-tab-activity")).toHaveAttribute("aria-selected", "false");
+
+    // The sticky header keeps the name, state chip, and lifecycle reachable.
+    expect(screen.getByTestId("agent-header")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-name")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-state-chip")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-lifecycle")).toBeInTheDocument();
+  });
+
+  it("clicking a tab marks it active and deactivates the others", async () => {
+    await renderTabbed();
+    await waitFor(() => expect(screen.getByTestId("agent-tabs")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-tab-work"));
+    });
+    expect(screen.getByTestId("agent-tab-work")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("agent-tab-overview")).toHaveAttribute("aria-selected", "false");
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-tab-activity"));
+    });
+    expect(screen.getByTestId("agent-tab-activity")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("agent-tab-work")).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("keeps every section mounted across tabs so all testids stay in the DOM regardless of the active tab", async () => {
+    await renderTabbed();
+    // On the default Overview tab, every section from every other tab is still
+    // mounted (hidden, not unmounted) so its loaders ran and its testids exist.
+    await waitFor(() => expect(screen.getByTestId("agent-scan-summary")).toBeInTheDocument());
+
+    const sections = [
+      "agent-identity", // overview
+      "agent-scan-section", // overview
+      "agent-tasks-section", // work
+      "agent-approvals-section", // work
+      "agent-backup-section", // access
+      "agent-connections-section", // access
+      "agent-drift-section", // activity
+      "agent-log-section", // activity
+      "agent-activity-link",
+    ];
+    for (const s of sections) {
+      expect(screen.getByTestId(s)).toBeInTheDocument();
+    }
+    // Loaded content from non-active tabs is present too (panels are mounted).
+    expect(screen.getByTestId("agent-tasks-list")).toBeInTheDocument();
+    expect(screen.getByTestId("connection-row-acme-portal")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-drift-status")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-log-list")).toBeInTheDocument();
+
+    // Switching tabs does not unmount anything: the same testids remain.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-tab-access"));
+    });
+    for (const s of sections) {
+      expect(screen.getByTestId(s)).toBeInTheDocument();
+    }
+  });
+});

@@ -10,7 +10,11 @@ let mockAuth: () => Promise<unknown> = async () => ({
 });
 
 jest.mock("@/lib/auth/require-capability", () => ({ requireCapability: () => mockAuth() }));
-jest.mock("@/lib/agents/approvals/store", () => ({ listPendingApprovals: (...a: unknown[]) => mockList(...a) }));
+const mockHistory = jest.fn();
+jest.mock("@/lib/agents/approvals/store", () => ({
+  listPendingApprovals: (...a: unknown[]) => mockList(...a),
+  listAgentApprovalHistory: (...a: unknown[]) => mockHistory(...a),
+}));
 
 import { NextRequest } from "next/server";
 import { GET } from "@/app/api/admin/agents/approvals/route";
@@ -23,6 +27,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockAuth = async () => ({ ok: true, user: { id: "admin-1", role: "admin", workspaceId: "ws-1" } });
   mockList.mockResolvedValue([{ id: "ap-1" }]);
+  mockHistory.mockResolvedValue([{ id: "h-1", status: "executed" }]);
 });
 
 it("returns the workspace queue (no agentId) for an authorized admin", async () => {
@@ -36,6 +41,18 @@ it("returns the workspace queue (no agentId) for an authorized admin", async () 
 it("scopes the queue to one agent when ?agentId is given", async () => {
   await get("http://localhost/api/admin/agents/approvals?agentId=agent-9");
   expect(mockList).toHaveBeenCalledWith("ws-1", "agent-9");
+});
+
+it("includes decided history when ?history=1 with an agentId", async () => {
+  const res = await get("http://localhost/api/admin/agents/approvals?agentId=agent-9&history=1");
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ approvals: [{ id: "ap-1" }], history: [{ id: "h-1", status: "executed" }] });
+  expect(mockHistory).toHaveBeenCalledWith("ws-1", "agent-9");
+});
+
+it("does NOT include history without the flag (or without an agentId)", async () => {
+  await get("http://localhost/api/admin/agents/approvals?agentId=agent-9");
+  expect(mockHistory).not.toHaveBeenCalled();
 });
 
 it("401/403s when the capability gate fails (no list call)", async () => {

@@ -182,8 +182,15 @@ export const VENDOR_PRESETS: Record<string, VendorPreset> = {
            GET-based contact list with a `q` query string covers the
            common "look up someone by name/email" case. We use the GET
            shape for simplicity until per-property filter UX warrants
-           the POST upgrade. */
-        const path = `/crm/v3/objects/${objectType}s?q=${encodeURIComponent(query)}&limit=${limit}`;
+           the POST upgrade.
+
+           Empty query = LIST-ALL: drop the `q` param so the bare list
+           endpoint (GET /crm/v3/objects/contacts?limit=N) returns the
+           top N records unfiltered ("client list" / "customer list"). */
+        const isListAll = query.trim().length === 0;
+        const path = isListAll
+          ? `/crm/v3/objects/${objectType}s?limit=${limit}`
+          : `/crm/v3/objects/${objectType}s?q=${encodeURIComponent(query)}&limit=${limit}`;
         return {
           path,
           extract: (raw) => {
@@ -509,12 +516,21 @@ export const VENDOR_PRESETS: Record<string, VendorPreset> = {
             : sobject === "Opportunity"
             ? "Id,Name,StageName,Amount,CloseDate,AccountId"
             : "Id,Name,Phone,Website,Industry";
-        const escaped = sfSoqlEscape(query);
-        const where =
-          sobject === "Contact"
-            ? `Name LIKE '%${escaped}%' OR Email LIKE '%${escaped}%'`
-            : `Name LIKE '%${escaped}%'`;
-        const soql = `SELECT ${fields} FROM ${sobject} WHERE ${where} LIMIT ${limit}`;
+        /* Empty query = LIST-ALL: no WHERE clause, just the top N rows
+           of the SObject ("client list" / "pull the customer list").
+           A non-empty query keeps the Name/Email LIKE name search. */
+        const isListAll = query.trim().length === 0;
+        let soql: string;
+        if (isListAll) {
+          soql = `SELECT ${fields} FROM ${sobject} LIMIT ${limit}`;
+        } else {
+          const escaped = sfSoqlEscape(query);
+          const where =
+            sobject === "Contact"
+              ? `Name LIKE '%${escaped}%' OR Email LIKE '%${escaped}%'`
+              : `Name LIKE '%${escaped}%'`;
+          soql = `SELECT ${fields} FROM ${sobject} WHERE ${where} LIMIT ${limit}`;
+        }
         const path = `/services/data/v59.0/query?${sfEncode(soql)}`;
         return {
           path,

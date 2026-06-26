@@ -105,6 +105,26 @@ export async function listPendingApprovals(
   return rows.map(toApproval);
 }
 
+/**
+ * Recent DECIDED approvals for one agent (approved / rejected / executed /
+ * expired) — the human-in-the-loop HISTORY, so the agent's approval activity is
+ * visible even when nothing is pending right now. Newest decision first.
+ */
+export async function listAgentApprovalHistory(
+  workspaceId: string,
+  agentId: string,
+  limit = 15,
+): Promise<PendingApproval[]> {
+  const { rows } = await safeQuery<Row>(
+    `SELECT ${COLS} FROM instinct_agent_pending_approvals
+       WHERE workspace_id = $1 AND agent_id = $2 AND status <> 'pending'
+       ORDER BY COALESCE(decided_at, created_at) DESC
+       LIMIT $3`,
+    [workspaceId, agentId, Math.min(Math.max(limit, 1), 50)],
+  );
+  return rows.map(toApproval);
+}
+
 /** Atomically move a pending approval to approved/rejected. The WHERE status =
  *  'pending' guard makes double-decide (race / replay) impossible. Returns the
  *  updated row, or null if it was not pending (already decided / expired / gone). */

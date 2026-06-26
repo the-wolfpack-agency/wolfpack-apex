@@ -48,6 +48,44 @@ describe("matchIntent — TYPED-object searches (only kind this tool still claim
   });
 });
 
+describe("matchIntent — CRM LIST/CHECK intents (the 'check salesforce for client list' fix)", () => {
+  /* These are the phrasings the agent executor was returning no_match
+     for. They name a CRM object noun and/or a connector, so they're
+     unambiguously CRM and yield a LIST (empty query) intent. */
+  test.each([
+    ["check salesforce for client list", "contact"],
+    ["list the clients", "contact"],
+    ["list all customers", "contact"],
+    ["pull the customer list", "contact"],
+    ["show me contacts in salesforce", "contact"],
+    ["check the CRM for contacts", "contact"],
+    ["get the account list", "account"],
+    ["show me deals in salesforce", "deal"],
+    ["list the leads", "contact"],
+  ])("'%s' → objectType=%s, LIST (empty query)", (msg, objectType) => {
+    const p = searchExternalRecordsTool.matchIntent(msg);
+    expect(p).not.toBeNull();
+    expect(p?.objectType).toBe(objectType);
+    expect(p?.list).toBe(true);
+    expect(p?.query).toBe("");
+  });
+
+  test("a NAME inside a list-ish phrasing is a name search, not a list", () => {
+    /* "pull the customer named Acme Corp" carries a real name → name
+       search, not a list-all. */
+    const p = searchExternalRecordsTool.matchIntent("pull the customer named Acme Corp");
+    expect(p).not.toBeNull();
+    expect(p?.objectType).toBe("contact");
+    expect(p?.list).toBe(false);
+    expect(p?.query).toBe("Acme Corp");
+  });
+
+  test("'check the weather' / 'list my tasks' are NOT CRM (no object noun, no connector)", () => {
+    expect(searchExternalRecordsTool.matchIntent("check the weather")).toBeNull();
+    expect(searchExternalRecordsTool.matchIntent("list my tasks")).toBeNull();
+  });
+});
+
 describe("matchIntent — BARE phrasings now route to Universal Search (v2 2026-05-19)", () => {
   /* Previously this tool claimed "look up X" / "find X" / "search
      for X" via PATTERN 3 (generic free-text). v2 removed that
@@ -120,7 +158,7 @@ describe("handler — connector auto-routing", () => {
       }),
     });
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "Grimace", connector: "rest-default" },
+      { objectType: "contact", query: "Grimace", list: false, connector: "rest-default" },
       ctx,
     );
     expect(r.ok).toBe(true);
@@ -139,7 +177,7 @@ describe("handler — connector auto-routing", () => {
       searchRecords: async () => ({ ok: true, data: [], durationMs: 1 }),
     });
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "Grimace", connector: "rest-default" },
+      { objectType: "contact", query: "Grimace", list: false, connector: "rest-default" },
       ctx,
     );
     expect(r.ok).toBe(true);
@@ -159,7 +197,7 @@ describe("handler — disambiguation UX", () => {
   test("0 results → 'No contact matches found'", async () => {
     stubSearch([]);
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "Nobody", connector: "rest-default" },
+      { objectType: "contact", query: "Nobody", list: false, connector: "rest-default" },
       ctx,
     );
     expect(r.ok).toBe(true);
@@ -174,7 +212,7 @@ describe("handler — disambiguation UX", () => {
       { Id: "003a", Name: "Grimace Fromcdonalds", Email: "g@mc.com", Account: { Name: "Acme" } },
     ]);
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "Grimace", connector: "rest-default" },
+      { objectType: "contact", query: "Grimace", list: false, connector: "rest-default" },
       ctx,
     );
     expect(r.ok).toBe(true);
@@ -194,7 +232,7 @@ describe("handler — disambiguation UX", () => {
       { Id: "003", Name: "Grimace Three", Email: "3@x" },
     ]);
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "Grimace", connector: "rest-default" },
+      { objectType: "contact", query: "Grimace", list: false, connector: "rest-default" },
       ctx,
     );
     if (!r.ok) throw new Error("expected ok");
@@ -213,7 +251,7 @@ describe("handler — disambiguation UX", () => {
     }));
     stubSearch(records);
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "Grimace", connector: "rest-default" },
+      { objectType: "contact", query: "Grimace", list: false, connector: "rest-default" },
       ctx,
     );
     if (!r.ok) throw new Error("expected ok");
@@ -221,6 +259,60 @@ describe("handler — disambiguation UX", () => {
     /* Only first 5 are rendered. */
     expect(r.answer).toContain("Grimace 4");
     expect(r.answer).not.toContain("Grimace 5");
+  });
+});
+
+describe("handler — LIST intent (list-all, no name filter)", () => {
+  test("list intent calls the connector with an empty query + wider limit, renders a CRM list", async () => {
+    let calledWith: { objectType: string; query: string; limit: number } | null = null;
+    mockPickConfigured.mockResolvedValueOnce("salesforce");
+    mockBuildRest.mockResolvedValueOnce({
+      isConfigured: () => true,
+      searchRecords: async (objectType: string, query: string, limit: number) => {
+        calledWith = { objectType, query, limit };
+        return {
+          ok: true,
+          data: [
+            { Id: "003a", Name: "Client One", Email: "1@x.com" },
+            { Id: "003b", Name: "Client Two", Email: "2@x.com" },
+          ],
+          durationMs: 7,
+        };
+      },
+    });
+    const r = await searchExternalRecordsTool.handler(
+      { objectType: "contact", query: "", list: true, connector: "rest-default" },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    /* list-all is signaled to the connector by an empty query, and the
+       wider list limit (25) is requested. */
+    expect(calledWith).toEqual({ objectType: "contact", query: "", limit: 25 });
+    if (r.ok) {
+      expect(r.data.list).toBe(true);
+      expect(r.data.matchCount).toBe(2);
+      expect(r.answer).toContain("Found 2 contacts in the CRM");
+      expect(r.answer).toContain("Client One");
+      expect(r.answer).toContain("Client Two");
+    }
+  });
+
+  test("list intent with zero rows renders an explicit empty state (no 'matching' framing)", async () => {
+    mockPickConfigured.mockResolvedValueOnce("salesforce");
+    mockBuildRest.mockResolvedValueOnce({
+      isConfigured: () => true,
+      searchRecords: async () => ({ ok: true, data: [], durationMs: 1 }),
+    });
+    const r = await searchExternalRecordsTool.handler(
+      { objectType: "contact", query: "", list: true, connector: "rest-default" },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data.matchCount).toBe(0);
+      expect(r.answer).toContain("No contacts found in the configured CRM");
+      expect(r.answer).not.toContain("matching");
+    }
   });
 });
 
@@ -237,7 +329,7 @@ describe("handler — error mapping", () => {
       }),
     });
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "Grimace", connector: "rest-default" },
+      { objectType: "contact", query: "Grimace", list: false, connector: "rest-default" },
       ctx,
     );
     expect(r.ok).toBe(false);
@@ -256,7 +348,7 @@ describe("handler — error mapping", () => {
       }),
     });
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "x", connector: "rest-default" },
+      { objectType: "contact", query: "x", list: false, connector: "rest-default" },
       ctx,
     );
     expect(r.ok).toBe(false);
@@ -266,7 +358,7 @@ describe("handler — error mapping", () => {
   test("unregistered explicit connector → internal failure", async () => {
     mockGetConnector.mockReturnValueOnce(null);
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "contact", query: "x", connector: "ghost" },
+      { objectType: "contact", query: "x", list: false, connector: "ghost" },
       ctx,
     );
     expect(r.ok).toBe(false);
@@ -286,7 +378,7 @@ describe("handler — record formatting per object type", () => {
       }),
     });
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "deal", query: "Q3", connector: "rest-default" },
+      { objectType: "deal", query: "Q3", list: false, connector: "rest-default" },
       ctx,
     );
     if (!r.ok) throw new Error("expected ok");
@@ -306,7 +398,7 @@ describe("handler — record formatting per object type", () => {
       }),
     });
     const r = await searchExternalRecordsTool.handler(
-      { objectType: "account", query: "Acme", connector: "rest-default" },
+      { objectType: "account", query: "Acme", list: false, connector: "rest-default" },
       ctx,
     );
     if (!r.ok) throw new Error("expected ok");

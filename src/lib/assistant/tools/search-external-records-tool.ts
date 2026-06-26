@@ -38,20 +38,37 @@ import type { AssistantSourceRef } from "@/lib/assistant";
 const OBJECT_TYPES = ["contact", "deal", "company", "account"] as const;
 type ObjectType = (typeof OBJECT_TYPES)[number];
 
-const ParamSchema = z.object({
-  objectType: z.enum(OBJECT_TYPES).default("contact"),
-  query: z.string().min(2).max(200),
-  connector: z.string().min(1).max(40).default("rest-default"),
-});
+const ParamSchema = z
+  .object({
+    objectType: z.enum(OBJECT_TYPES).default("contact"),
+    /* Empty string is the LIST sentinel — when `list` is true the
+       connector runs a list-all (no WHERE filter) instead of a name
+       search. A name search still requires ≥2 chars (refinement below). */
+    query: z.string().max(200).default(""),
+    /* True for a "client list" / "pull the customer list" intent: no
+       name filter, return the top N records of the object type. */
+    list: z.boolean().default(false),
+    connector: z.string().min(1).max(40).default("rest-default"),
+  })
+  .refine((p) => p.list || p.query.trim().length >= 2, {
+    message: "query must be at least 2 characters unless list=true",
+    path: ["query"],
+  });
 type Params = z.infer<typeof ParamSchema>;
 
 interface SearchExternalRecordsData {
   connector: string;
   objectType: string;
   query: string;
+  list: boolean;
   matchCount: number;
   records: Array<Record<string, unknown>>;
 }
+
+/** How many records a LIST intent ("client list", "pull the customer
+ *  list") returns. Bounded so a list-all can't flood the chat — the
+ *  vendor presets cap their own LIMIT to this same value. */
+const LIST_LIMIT = 25;
 
 /* ---------------------------------------------------------------------
  * Intent matching
@@ -103,6 +120,15 @@ const OBJECT_ALIAS: Record<string, ObjectType> = {
   contacts: "contact",
   person: "contact",
   people: "contact",
+  /* No "lead" object type exists in our connector surface — leads and
+     clients/customers are all modeled as contacts. Map them so a
+     natural "client list" / "lead list" lands on the contact SObject. */
+  client: "contact",
+  clients: "contact",
+  customer: "contact",
+  customers: "contact",
+  lead: "contact",
+  leads: "contact",
   deal: "deal",
   deals: "deal",
   opportunity: "deal",
@@ -112,6 +138,13 @@ const OBJECT_ALIAS: Record<string, ObjectType> = {
   company: "company",
   companies: "company",
 };
+
+/* CRM object nouns recognized by the LIST/CHECK pattern. Kept in sync
+   with OBJECT_ALIAS keys, plus the connector-name tokens that also make
+   an instruction unambiguously CRM. */
+const CRM_OBJECT_NOUN =
+  /(?:contacts?|people|person|clients?|customers?|leads?|accounts?|compan(?:y|ies)|deals?|opportunit(?:y|ies))/i;
+const CRM_CONNECTOR_NOUN = /(?:salesforce|sf|hubspot|crm)/i;
 
 const PATTERNS: Array<{ re: RegExp; build(m: RegExpExecArray): Partial<Params> | null }> = [
   {
@@ -130,6 +163,63 @@ const PATTERNS: Array<{ re: RegExp; build(m: RegExpExecArray): Partial<Params> |
        email user@host". Always defaults to contact. */
     re: /\b(?:find|look\s+up|search\s+(?:for\s+)?|who\s+(?:is|owns))\s+(?:someone\s+with\s+email\s+)?([\w.+-]+@[\w-]+(?:\.[\w-]+)+)/i,
     build: (m) => ({ objectType: "contact", query: cleanQuery(m[1]) }),
+  },
+  {
+    /* CRM LIST / CHECK intent. Claims ONLY when the instruction is
+       unambiguously CRM — it names a CRM object noun (client / customer
+       / contact / account / company / deal / lead / people) AND/OR a
+       connector (salesforce / sf / hubspot / crm). Handles:
+         "check salesforce for client list"
+         "list the clients" / "list all customers"
+         "pull the customer list" / "get the account list"
+         "show me contacts in salesforce" / "check the CRM for contacts"
+       A NAME query is extracted when present ("... named/called/for
+       <name>"); otherwise the intent is a LIST (no name filter).
+
+       A generic bare-search with NEITHER a CRM object noun NOR a
+       connector mention ("search Acme", "look up Acme") does NOT match
+       here — the leading verbs are gated on a following CRM noun, and
+       the noun extraction below returns null when no CRM noun is found.
+       Those phrasings stay with Universal Search. */
+    re: /\b(?:check|list|pull|get|show\s+(?:me\s+)?|give\s+me|fetch)\b.*$/i,
+    build: (m) => {
+      const text = m[0];
+      /* ID-record lookups ("get the deal record for 7HJ-99", "... id
+         003abc") belong to get_external_record — bail so they fall
+         through. The "record for"/"id" idioms plus an ID-shaped token
+         are the tell. */
+      if (/\b(?:record\s+for|with\s+id|id)\s+\S+/i.test(text)) return null;
+      /* Gate: must mention a CRM object noun OR a connector name. A
+         pure "check the weather" / "list my tasks" never matches. */
+      const nounMatch = CRM_OBJECT_NOUN.exec(text);
+      const hasConnector = CRM_CONNECTOR_NOUN.test(text);
+      if (!nounMatch && !hasConnector) return null;
+      /* Object type: from the CRM noun when present, else default to
+         contact (the right surface for "check salesforce for the list"). */
+      const ot = nounMatch ? OBJECT_ALIAS[nounMatch[0].toLowerCase()] ?? "contact" : "contact";
+      /* Optional name filter: "... named/called/for <name>". When
+         present this is a name search, not a list. We reject an
+         id-shaped capture so it falls through to get_external_record. */
+      const nameRe = /\b(?:named|called|for)\s+(.{2,160})$/i;
+      const nameMatch = nameRe.exec(text);
+      if (nameMatch) {
+        const q = cleanQuery(nameMatch[1]);
+        /* "for <connector/list-noun>" is NOT a name — e.g. "check
+           salesforce for client list" captures "client list" which is a
+           list directive, not a person's name. Treat a capture that is
+           itself only CRM nouns / the word "list" / "all" as a LIST. */
+        const residual = q
+          .replace(CRM_OBJECT_NOUN, "")
+          .replace(/\b(?:list|all|the|a|records?|everyone|everything)\b/gi, "")
+          .replace(/\s+/g, "")
+          .trim();
+        if (residual.length >= 2 && !looksLikeIdNotName(q)) {
+          return { objectType: ot, query: q, list: false };
+        }
+      }
+      /* No usable name filter → LIST intent (empty query sentinel). */
+      return { objectType: ot, query: "", list: true };
+    },
   },
   /* Removed (2026-05-19): "Generic look up <free-text> / find
      <free-text> WITHOUT an object type" used to land here and route
@@ -155,10 +245,15 @@ function matchSearchIntent(message: string): Params | null {
     const m = re.exec(trimmed);
     if (!m) continue;
     const built = build(m);
-    if (!built || !built.query) continue;
+    if (!built) continue;
+    const list = built.list === true;
+    /* A name search still needs a query; a LIST intent legitimately
+       carries an empty query (the list-all sentinel). */
+    if (!list && !built.query) continue;
     return {
       objectType: built.objectType ?? "contact",
-      query: built.query,
+      query: built.query ?? "",
+      list,
       connector: built.connector ?? "rest-default",
     };
   }
@@ -219,7 +314,25 @@ function renderAnswer(
   query: string,
   objectType: string,
   records: Array<Record<string, unknown>>,
+  isList = false,
 ): string {
+  /* LIST intent ("client list" / "pull the customer list"): render a
+     plain top-N list with no "matching <query>" framing, since there is
+     no search term to echo. */
+  if (isList) {
+    if (records.length === 0) {
+      return `No ${objectType}s found in the configured CRM.`;
+    }
+    const shown = records.slice(0, LIST_LIMIT);
+    const head =
+      records.length > shown.length
+        ? `Showing ${shown.length} of ${records.length}+ ${objectType}s in the CRM:`
+        : `Found ${records.length} ${objectType}${records.length === 1 ? "" : "s"} in the CRM:`;
+    const list = shown
+      .map((r, i) => `${i + 1}. ${renderOneLine(r, objectType)}`)
+      .join("\n");
+    return `${head}\n\n${list}\n\nPaste an ID to drill into one.`;
+  }
   if (records.length === 0) {
     return `No ${objectType} matches found for "${query}" in the configured CRM.`;
   }
@@ -274,13 +387,17 @@ export const searchExternalRecordsTool: ToolDef<Params, SearchExternalRecordsDat
           connector: resolvedConnectorName,
           objectType: params.objectType,
           query: params.query,
+          list: params.list,
           matchCount: 0,
           records: [],
         },
         answer: `The "${resolvedConnectorName}" connector isn't configured yet. Connect Salesforce or HubSpot from /admin/connectors first.`,
       };
     }
-    const result = await connector.searchRecords(params.objectType, params.query, 10);
+    /* LIST intent runs a list-all (empty query) with a wider limit;
+       a name search keeps the focused top-10 behavior. */
+    const limit = params.list ? LIST_LIMIT : 10;
+    const result = await connector.searchRecords(params.objectType, params.query, limit);
     if (!result.ok) {
       return {
         ok: false,
@@ -299,6 +416,7 @@ export const searchExternalRecordsTool: ToolDef<Params, SearchExternalRecordsDat
       object_type: params.objectType,
       query_length: params.query.length,
       match_count: records.length,
+      list: params.list,
     });
     /* Salesforce matches get "Open in Wolfpack portal" source chips so
        users can drop straight into the portal drill-in. Top 5 matches
@@ -328,11 +446,12 @@ export const searchExternalRecordsTool: ToolDef<Params, SearchExternalRecordsDat
         connector: resolvedConnectorName,
         objectType: params.objectType,
         query: params.query,
+        list: params.list,
         matchCount: records.length,
         records,
       },
       answer: withSourceFooter(
-        renderAnswer(params.query, params.objectType, records),
+        renderAnswer(params.query, params.objectType, records, params.list),
         resolvedConnectorName,
       ),
       sources: portalSources.length > 0 ? portalSources : undefined,

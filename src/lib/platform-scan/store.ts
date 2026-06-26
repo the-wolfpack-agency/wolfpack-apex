@@ -74,10 +74,21 @@ export async function recordScan(
   const scanId = scanRes.rows[0].id;
 
   for (const f of result.findings) {
+    // Identity = (workspace, platform, route, title). A re-scan UPDATES the
+    // existing finding (refreshes severity/evidence + which scan last saw it)
+    // instead of inserting a duplicate; human triage (status/decided_*) and the
+    // original created_at are preserved. This is what stops the findings list
+    // from piling up across runs.
     await writeQuery(
       `INSERT INTO instinct_platform_scan_findings
          (scan_id, workspace_id, platform, route, severity, category, title, detail, evidence)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+       ON CONFLICT (workspace_id, platform, route, title) DO UPDATE SET
+         scan_id = EXCLUDED.scan_id,
+         severity = EXCLUDED.severity,
+         category = EXCLUDED.category,
+         detail = EXCLUDED.detail,
+         evidence = EXCLUDED.evidence`,
       [scanId, workspaceId, result.platform, f.route, f.severity, f.category, f.title, f.detail, JSON.stringify(f.evidence)],
     );
     trackEvent("platform.scan_finding_detected", actorId, actorRole, {

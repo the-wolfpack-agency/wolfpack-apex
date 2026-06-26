@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState, use } from "react";
 import Link from "next/link";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import ApprovalList from "@/components/agents/ApprovalList";
+import ApprovalHistory from "@/components/agents/ApprovalHistory";
 
 type AgentState = "invited" | "active" | "paused" | "revoked";
 
@@ -291,6 +292,20 @@ type ScanState =
   | { kind: "present"; scan: ScanRecord };
 
 type LifecycleAction = "pause" | "resume" | "revoke";
+
+/* The four content groups of the profile, surfaced as tabs so only one shows at
+   a time and the page no longer scrolls through every section stacked. The exact
+   grouping: Overview (identity + system model), Work (assigned work + pending
+   writes), Access (connected systems + backup), Activity (drift + agent log).
+   Every section lands in exactly one tab and every panel stays mounted. */
+type TabKey = "overview" | "work" | "access" | "activity";
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "overview", label: "Overview" },
+  { key: "work", label: "Work" },
+  { key: "access", label: "Access" },
+  { key: "activity", label: "Activity" },
+];
 
 function relativeTime(iso: string | null): string {
   if (!iso) return "never";
@@ -887,6 +902,10 @@ export default function AgentProfilePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  /* Tabbed layout. Every panel stays mounted (inactive ones hidden with CSS, not
+     unmounted) so all loaders/polling keep running and every section's testids
+     remain queryable; only the active tab is visible. Defaults to Overview. */
+  const [tab, setTab] = useState<TabKey>("overview");
   const [agent, setAgent] = useState<AgentRecord | null>(null);
   const [scan, setScan] = useState<ScanState>({ kind: "loading" });
   /* Manager-triggered self-onboarding scan. The scan is normally agent-initiated;
@@ -1612,6 +1631,15 @@ export default function AgentProfilePage({
     color: "var(--wp-text, #eee)",
   } as const;
 
+  /* A panel is the content for one tab. Inactive panels stay mounted but hidden
+     with display:none so their loaders keep running and their testids stay
+     queryable; only spacing differs. Constrained max-width for readability. */
+  const panelStyle = (key: TabKey) =>
+    ({
+      display: tab === key ? "block" : "none",
+      animation: tab === key ? "wpFadeIn 0.18s ease" : undefined,
+    }) as const;
+
   const backLink = (
     <Link
       href="/admin/agents"
@@ -1684,57 +1712,248 @@ export default function AgentProfilePage({
 
   return (
     <div data-testid="admin-agent-page" style={wrap}>
-      {backLink}
+      {/* A subtle fade keeps tab switches smooth without any layout shift. */}
+      <style>{"@keyframes wpFadeIn{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}"}</style>
 
+      {/* Sticky header. The primary controls (name, state chip, lifecycle
+          actions) stay reachable no matter which tab or how far the inner list
+          is scrolled, so the heavy single-column scroll never hides them. */}
       <div
+        data-testid="agent-header"
         style={{
-          marginTop: "1rem",
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: "0.5rem",
+          position: "sticky",
+          top: 0,
+          zIndex: 5,
+          margin: "0 -1.5rem",
+          padding: "1rem 1.5rem 0.75rem",
+          background: "var(--wp-dark, #0b0d11)",
+          borderBottom: "1px solid var(--wp-dark-border, #333)",
+          backdropFilter: "blur(6px)",
         }}
       >
-        <h1 data-testid="agent-name" style={{ margin: 0, fontSize: "1.5rem", color: "var(--wp-gold, #f1c233)" }}>
-          {agent.name}
-        </h1>
-        <span
-          data-testid="agent-state-chip"
-          style={{
-            padding: "0.15rem 0.6rem",
-            borderRadius: "10px",
-            fontSize: "0.75rem",
-            background: c.bg,
-            color: c.fg,
-            border: `1px solid ${c.fg}`,
-            textTransform: "capitalize",
-            fontWeight: 600,
-          }}
-        >
-          {agent.state}
-        </span>
-      </div>
-      <p style={{ color: "var(--wp-text-dim, #aaa)", margin: "0.4rem 0 1.5rem 0", fontSize: "0.9rem" }}>
-        An AI principal governed by OGIAM. Role <strong style={{ color: "var(--wp-text, #eee)", textTransform: "uppercase" }}>{agent.role}</strong>.
-      </p>
+        {backLink}
 
-      {error && (
         <div
-          data-testid="agent-action-error"
           style={{
-            padding: "0.6rem 0.9rem",
-            marginBottom: "1rem",
-            background: "rgba(239,68,68,0.08)",
-            color: "var(--wp-error, #ef4444)",
-            border: "1px solid var(--wp-error, #ef4444)",
-            borderRadius: "6px",
-            fontSize: "0.82rem",
+            marginTop: "0.7rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "0.6rem 1rem",
           }}
         >
-          {error}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.7rem", flexWrap: "wrap", minWidth: 0 }}>
+            <h1 data-testid="agent-name" style={{ margin: 0, fontSize: "1.4rem", color: "var(--wp-gold, #f1c233)", wordBreak: "break-word" }}>
+              {agent.name}
+            </h1>
+            <span
+              data-testid="agent-state-chip"
+              style={{
+                padding: "0.15rem 0.6rem",
+                borderRadius: "10px",
+                fontSize: "0.75rem",
+                background: c.bg,
+                color: c.fg,
+                border: `1px solid ${c.fg}`,
+                textTransform: "capitalize",
+                fontWeight: 600,
+              }}
+            >
+              {agent.state}
+            </span>
+          </div>
+
+          {/* Lifecycle controls live in the sticky header so pause/resume/revoke
+              are always reachable. Pause/resume are reversible; revoke arms an
+              inline confirm before the destructive PATCH. */}
+          <div
+            data-testid="agent-lifecycle"
+            style={{
+              display: "flex",
+              gap: "0.5rem",
+              flexWrap: "wrap",
+              alignItems: "center",
+              justifyContent: "flex-end",
+            }}
+          >
+            {agent.state === "active" && (
+              <button
+                type="button"
+                data-testid="agent-pause"
+                onClick={() => void runAction("pause")}
+                disabled={busy}
+                style={{
+                  padding: "0.45rem 0.9rem",
+                  borderRadius: "6px",
+                  fontSize: "0.82rem",
+                  fontWeight: 600,
+                  background: "var(--wp-dark-surface2, #1a1a1a)",
+                  color: "var(--wp-gold, #f1c233)",
+                  border: "1px solid var(--wp-gold, #f1c233)",
+                  cursor: busy ? "not-allowed" : "pointer",
+                }}
+              >
+                {busy ? "..." : "Pause"}
+              </button>
+            )}
+            {(agent.state === "paused" || agent.state === "invited") && (
+              <button
+                type="button"
+                data-testid="agent-resume"
+                onClick={() => void runAction("resume")}
+                disabled={busy}
+                style={{
+                  padding: "0.45rem 0.9rem",
+                  borderRadius: "6px",
+                  fontSize: "0.82rem",
+                  fontWeight: 600,
+                  background: "var(--wp-dark-surface2, #1a1a1a)",
+                  color: "var(--wp-success, #22c55e)",
+                  border: "1px solid var(--wp-success, #22c55e)",
+                  cursor: busy ? "not-allowed" : "pointer",
+                }}
+              >
+                {busy ? "..." : "Resume"}
+              </button>
+            )}
+            {!isRevoked && !confirmingRevoke && (
+              <button
+                type="button"
+                data-testid="agent-revoke"
+                onClick={() => setConfirmingRevoke(true)}
+                disabled={busy}
+                style={{
+                  padding: "0.45rem 0.9rem",
+                  borderRadius: "6px",
+                  fontSize: "0.82rem",
+                  fontWeight: 600,
+                  background: "transparent",
+                  color: "var(--wp-error, #ef4444)",
+                  border: "1px solid var(--wp-error, #ef4444)",
+                  cursor: busy ? "not-allowed" : "pointer",
+                }}
+              >
+                Revoke
+              </button>
+            )}
+            {!isRevoked && confirmingRevoke && (
+              <div
+                data-testid="agent-revoke-confirm"
+                style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}
+              >
+                <span style={{ fontSize: "0.8rem", color: "var(--wp-error, #ef4444)" }}>
+                  Revoke permanently? The agent loses its identity and cannot act again.
+                </span>
+                <button
+                  type="button"
+                  data-testid="agent-revoke-confirm-yes"
+                  onClick={() => void runAction("revoke")}
+                  disabled={busy}
+                  style={{
+                    padding: "0.4rem 0.85rem",
+                    borderRadius: "6px",
+                    fontSize: "0.8rem",
+                    fontWeight: 600,
+                    background: "var(--wp-error, #ef4444)",
+                    color: "#fff",
+                    border: "1px solid var(--wp-error, #ef4444)",
+                    cursor: busy ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {busy ? "Revoking..." : "Yes, revoke"}
+                </button>
+                <button
+                  type="button"
+                  data-testid="agent-revoke-confirm-cancel"
+                  onClick={() => setConfirmingRevoke(false)}
+                  disabled={busy}
+                  style={{
+                    padding: "0.4rem 0.85rem",
+                    borderRadius: "6px",
+                    fontSize: "0.8rem",
+                    background: "transparent",
+                    color: "var(--wp-text-dim, #aaa)",
+                    border: "1px solid var(--wp-dark-border, #333)",
+                    cursor: busy ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            {isRevoked && (
+              <span
+                data-testid="agent-revoked-note"
+                style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)" }}
+              >
+                Revoked {relativeTime(agent.revokedAt)}. This agent can no longer act.
+              </span>
+            )}
+          </div>
         </div>
-      )}
+
+        <p style={{ color: "var(--wp-text-dim, #aaa)", margin: "0.4rem 0 0.75rem 0", fontSize: "0.88rem" }}>
+          An AI principal governed by OGIAM. Role <strong style={{ color: "var(--wp-text, #eee)", textTransform: "uppercase" }}>{agent.role}</strong>.
+        </p>
+
+        {error && (
+          <div
+            data-testid="agent-action-error"
+            style={{
+              padding: "0.6rem 0.9rem",
+              marginBottom: "0.75rem",
+              background: "rgba(239,68,68,0.08)",
+              color: "var(--wp-error, #ef4444)",
+              border: "1px solid var(--wp-error, #ef4444)",
+              borderRadius: "6px",
+              fontSize: "0.82rem",
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        {/* Tab bar. Switching is instant (local state) with a smooth underline
+            transition; the active tab carries the gold accent. */}
+        <div
+          data-testid="agent-tabs"
+          role="tablist"
+          style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}
+        >
+          {TABS.map((t) => {
+            const active = tab === t.key;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                data-testid={`agent-tab-${t.key}`}
+                data-active={active ? "true" : "false"}
+                onClick={() => setTab(t.key)}
+                style={{
+                  padding: "0.5rem 0.95rem",
+                  background: "transparent",
+                  border: "none",
+                  borderBottom: `2px solid ${active ? "var(--wp-gold, #f1c233)" : "transparent"}`,
+                  color: active ? "var(--wp-gold, #f1c233)" : "var(--wp-text-dim, #aaa)",
+                  fontSize: "0.88rem",
+                  fontWeight: active ? 700 : 500,
+                  cursor: "pointer",
+                  transition: "color 0.15s, border-color 0.15s",
+                  marginBottom: "-1px",
+                }}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ---- OVERVIEW: identity + system model ---- */}
+      <div data-testid="agent-panel-overview" role="tabpanel" style={{ ...panelStyle("overview"), marginTop: "1.5rem" }}>
 
       {agent.description && (
         <div
@@ -1784,133 +2003,6 @@ export default function AgentProfilePage({
         <Field label="Created" value={relativeTime(agent.createdAt)} testid="agent-created" />
         <Field label="Activated" value={relativeTime(agent.activatedAt)} testid="agent-activated" />
         <Field label="Last seen" value={relativeTime(agent.lastSeenAt)} testid="agent-last-seen" />
-      </div>
-
-      {/* Lifecycle controls. Pause/resume are reversible; revoke is not, so it
-          arms an inline confirm before the destructive PATCH. */}
-      <div
-        data-testid="agent-lifecycle"
-        style={{
-          display: "flex",
-          gap: "0.6rem",
-          flexWrap: "wrap",
-          alignItems: "center",
-          marginBottom: "1.5rem",
-        }}
-      >
-        {agent.state === "active" && (
-          <button
-            type="button"
-            data-testid="agent-pause"
-            onClick={() => void runAction("pause")}
-            disabled={busy}
-            style={{
-              padding: "0.5rem 1rem",
-              borderRadius: "6px",
-              fontSize: "0.85rem",
-              fontWeight: 600,
-              background: "var(--wp-dark-surface2, #1a1a1a)",
-              color: "var(--wp-gold, #f1c233)",
-              border: "1px solid var(--wp-gold, #f1c233)",
-              cursor: busy ? "not-allowed" : "pointer",
-            }}
-          >
-            {busy ? "..." : "Pause"}
-          </button>
-        )}
-        {(agent.state === "paused" || agent.state === "invited") && (
-          <button
-            type="button"
-            data-testid="agent-resume"
-            onClick={() => void runAction("resume")}
-            disabled={busy}
-            style={{
-              padding: "0.5rem 1rem",
-              borderRadius: "6px",
-              fontSize: "0.85rem",
-              fontWeight: 600,
-              background: "var(--wp-dark-surface2, #1a1a1a)",
-              color: "var(--wp-success, #22c55e)",
-              border: "1px solid var(--wp-success, #22c55e)",
-              cursor: busy ? "not-allowed" : "pointer",
-            }}
-          >
-            {busy ? "..." : "Resume"}
-          </button>
-        )}
-        {!isRevoked && !confirmingRevoke && (
-          <button
-            type="button"
-            data-testid="agent-revoke"
-            onClick={() => setConfirmingRevoke(true)}
-            disabled={busy}
-            style={{
-              padding: "0.5rem 1rem",
-              borderRadius: "6px",
-              fontSize: "0.85rem",
-              fontWeight: 600,
-              background: "transparent",
-              color: "var(--wp-error, #ef4444)",
-              border: "1px solid var(--wp-error, #ef4444)",
-              cursor: busy ? "not-allowed" : "pointer",
-            }}
-          >
-            Revoke
-          </button>
-        )}
-        {!isRevoked && confirmingRevoke && (
-          <div
-            data-testid="agent-revoke-confirm"
-            style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}
-          >
-            <span style={{ fontSize: "0.82rem", color: "var(--wp-error, #ef4444)" }}>
-              Revoke permanently? The agent loses its identity and cannot act again.
-            </span>
-            <button
-              type="button"
-              data-testid="agent-revoke-confirm-yes"
-              onClick={() => void runAction("revoke")}
-              disabled={busy}
-              style={{
-                padding: "0.45rem 0.9rem",
-                borderRadius: "6px",
-                fontSize: "0.82rem",
-                fontWeight: 600,
-                background: "var(--wp-error, #ef4444)",
-                color: "#fff",
-                border: "1px solid var(--wp-error, #ef4444)",
-                cursor: busy ? "not-allowed" : "pointer",
-              }}
-            >
-              {busy ? "Revoking..." : "Yes, revoke"}
-            </button>
-            <button
-              type="button"
-              data-testid="agent-revoke-confirm-cancel"
-              onClick={() => setConfirmingRevoke(false)}
-              disabled={busy}
-              style={{
-                padding: "0.45rem 0.9rem",
-                borderRadius: "6px",
-                fontSize: "0.82rem",
-                background: "transparent",
-                color: "var(--wp-text-dim, #aaa)",
-                border: "1px solid var(--wp-dark-border, #333)",
-                cursor: busy ? "not-allowed" : "pointer",
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        )}
-        {isRevoked && (
-          <span
-            data-testid="agent-revoked-note"
-            style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #6b7280)" }}
-          >
-            Revoked {relativeTime(agent.revokedAt)}. This agent can no longer act.
-          </span>
-        )}
       </div>
 
       {/* System model: the self-onboarding scan the agent learned about its own
@@ -2128,6 +2220,10 @@ export default function AgentProfilePage({
           );
         })()}
       </div>
+
+      </div>
+      {/* ---- WORK: assigned work + pending writes ---- */}
+      <div data-testid="agent-panel-work" role="tabpanel" style={{ ...panelStyle("work"), marginTop: "1.5rem" }}>
 
       {/* Assigned work. A human assigns a goal; the agent runtime executes it as
           governed steps. This UI assigns and observes only: it never auto-runs a
@@ -2357,7 +2453,7 @@ export default function AgentProfilePage({
         )}
 
         {tasks.kind === "present" && tasks.tasks.length > 0 && (
-          <ul data-testid="agent-tasks-list" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          <ul data-testid="agent-tasks-list" style={{ listStyle: "none", padding: 0, margin: 0, maxHeight: "420px", overflowY: "auto" }}>
             {tasks.tasks.map((t) => (
               <TaskRow key={t.id} task={t} />
             ))}
@@ -2402,9 +2498,14 @@ export default function AgentProfilePage({
           endpoint={`/api/admin/agents/approvals?agentId=${id}`}
           showAgent={false}
           testIdPrefix="agent-approvals"
-          emptyText="No pending writes. This agent has nothing awaiting approval."
+          emptyText="Nothing awaiting approval right now."
         />
+        <ApprovalHistory agentId={id} />
       </div>
+
+      </div>
+      {/* ---- ACCESS: connected systems + backup ---- */}
+      <div data-testid="agent-panel-access" role="tabpanel" style={{ ...panelStyle("access"), marginTop: "1.5rem" }}>
 
       {/* Backup agent (failover for uptime). This agent can designate a backup;
           when it goes unhealthy (paused/revoked) or a task stalls, its queued
@@ -3038,6 +3139,10 @@ export default function AgentProfilePage({
         </form>
       </div>
 
+      </div>
+      {/* ---- ACTIVITY: behavior drift + agent log ---- */}
+      <div data-testid="agent-panel-activity" role="tabpanel" style={{ ...panelStyle("activity"), marginTop: "1.5rem" }}>
+
       {/* Behavior + drift. The gate keeps an agent in check across model changes
           by comparing recent behavior to a captured baseline; a shift past the
           threshold raises the drift score and, when critical, auto-pauses the
@@ -3447,6 +3552,7 @@ export default function AgentProfilePage({
         data-testid="agent-activity-link"
         style={{
           display: "inline-block",
+          marginTop: "1.25rem",
           padding: "0.6rem 1rem",
           borderRadius: "6px",
           fontSize: "0.85rem",
@@ -3459,6 +3565,7 @@ export default function AgentProfilePage({
       >
         View this agent&apos;s gated actions &rarr;
       </Link>
+      </div>
     </div>
   );
 }

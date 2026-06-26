@@ -51,6 +51,8 @@ it("recordScan writes the header + one row per finding, emits analytics, and fee
   expect(mockWriteQuery).toHaveBeenCalledTimes(3);
   expect(mockWriteQuery.mock.calls[0][0]).toMatch(/INSERT INTO instinct_platform_scans/);
   expect(mockWriteQuery.mock.calls[1][0]).toMatch(/INSERT INTO instinct_platform_scan_findings/);
+  // De-dup: a re-scan upserts on the finding identity instead of duplicating.
+  expect(mockWriteQuery.mock.calls[1][0]).toMatch(/ON CONFLICT \(workspace_id, platform, route, title\) DO UPDATE/);
   // Learning: a finding_detected per finding + a completed event + a Brain summary per finding.
   expect(mockTrackEvent).toHaveBeenCalledWith("platform.scan_finding_detected", "admin-1", "admin", expect.objectContaining({ route: "/admin/leads", severity: "critical" }));
   expect(mockTrackEvent).toHaveBeenCalledWith("platform.scan_completed", "admin-1", "admin", expect.objectContaining({ finding_count: 2, critical_count: 1 }));
