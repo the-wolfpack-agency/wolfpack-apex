@@ -520,6 +520,18 @@ export type InstinctEventType =
   // agent.delegated         { agent_id, task_id, status }
   //   a human delegated a task to an agent from the assistant chat.
   | "agent.delegated"
+  // Platform scan: an agent crawls a TARGET external platform's routes and
+  // classifies each into a finding (bug / ux gap / broken journey / security /
+  // performance). This is how an agent familiarizes with a client platform and
+  // surfaces use-case gaps + bugs across the journey.
+  // platform.scan_started          { platform, route_count }
+  // platform.scan_finding_detected { platform, route, severity, category }
+  // platform.scan_completed        { platform, route_count, finding_count, critical_count }
+  // platform.scan_finding_triaged  { platform, route, severity, status }
+  | "platform.scan_started"
+  | "platform.scan_finding_detected"
+  | "platform.scan_completed"
+  | "platform.scan_finding_triaged"
   // Universal-search assistant tool (`search`). Fired by the tool's
   // handler after runSearch returns successfully so the learning loop
   // sees parity with the /search page route's `insight.search.queried`

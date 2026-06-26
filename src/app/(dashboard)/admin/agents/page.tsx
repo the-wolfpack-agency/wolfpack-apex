@@ -262,6 +262,22 @@ export default function AgentsPage() {
             Write approvals
           </Link>
           <Link
+            href="/admin/platform-scans"
+            data-testid="agents-platform-scans-link"
+            title="Bugs and use-case gaps an agent found by scanning a target platform's journeys."
+            style={{
+              background: "var(--wp-dark-surface2, #1a1a1a)",
+              color: "var(--wp-gold, #f1c233)",
+              border: "1px solid var(--wp-gold, #f1c233)",
+              borderRadius: "6px",
+              padding: "0.4rem 0.9rem",
+              fontSize: "0.85rem",
+              textDecoration: "none",
+            }}
+          >
+            Platform scans
+          </Link>
+          <Link
             href="/admin/agents/memory"
             data-testid="agents-memory-link"
             title="What the agents have learned: the shared procedures one agent records and another inherits."
