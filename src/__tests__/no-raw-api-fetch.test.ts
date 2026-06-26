@@ -28,8 +28,10 @@ const EXCEPTIONS = [
   "src/app/accept-invite",   // pre-auth: invitee has no session yet
   "src/app/forgot-password", // pre-auth: no session by definition
   "src/app/reset-password",  // pre-auth: token-in-URL flow, no session
-  "src/lib/__tests__/",      // test files
-  "src/__tests__/",
+  "__tests__/",              // test files (any nested __tests__ dir) — fixtures
+                             //   may contain sample buggy `fetch("/api/…")`
+                             //   strings (e.g. platform-scan detector fixtures);
+                             //   tests are never shipped client code.
   "node_modules/",
   ".next/",
 ];

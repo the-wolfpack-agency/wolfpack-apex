@@ -1,0 +1,39 @@
+name: Platform Scan (Browser Journey)
+
+# The BROWSER layer of the platform-scan feature: a Playwright runner loads a
+# target platform's pages authenticated, classifies live console/CSP/failed-API/
+# blank-render signals, and POSTs them to the ingest endpoint, which writes into
+# the SAME findings store the HTTP route probe feeds. Manual-trigger only today.
+
+on:
+  workflow_dispatch:
+  # Uncomment to run nightly once the target + secrets are wired:
+  # schedule:
+  #   - cron: "0 6 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  browser-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run browser-journey scan
+        run: npx playwright test tests/e2e/platform-scan-browser.spec.ts
+        env:
+          TARGET_BASE_URL: ${{ secrets.TARGET_BASE_URL }}
+          TARGET_ADMIN_EMAIL: ${{ secrets.TARGET_ADMIN_EMAIL }}
+          TARGET_ADMIN_PASSWORD: ${{ secrets.TARGET_ADMIN_PASSWORD }}
+          INGEST_URL: ${{ secrets.INGEST_URL }}
+          INGEST_SECRET: ${{ secrets.INGEST_SECRET }}

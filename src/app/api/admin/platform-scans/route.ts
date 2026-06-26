@@ -3,7 +3,10 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import { trackEvent } from "@/lib/analytics";
 import { scanPlatform } from "@/lib/platform-scan/engine";
+import { scanSource, defaultReadFile } from "@/lib/platform-scan/static/scan";
+import { discoverRoutes, mergeManifest } from "@/lib/platform-scan/discover";
 import { getScanManifest } from "@/lib/platform-scan/manifests";
+import type { PlatformScanResult } from "@/lib/platform-scan/types";
 import {
   recordScan,
   listFindings,
@@ -22,30 +25,52 @@ export async function POST(req: NextRequest) {
   const { user } = auth;
   const workspaceId = user.workspaceId ?? "default";
 
-  let body: { platform?: string };
+  let body: { platform?: string; mode?: string };
   try {
-    body = (await req.json()) as { platform?: string };
+    body = (await req.json()) as { platform?: string; mode?: string };
   } catch {
     body = {};
   }
   const platform = body.platform ?? "wolfpack-auto";
+  const mode = body.mode === "static" ? "static" : "http";
 
   const manifest = getScanManifest(platform);
   if (!manifest) {
     return NextResponse.json({ error: "unknown_platform" }, { status: 404 });
   }
+  if (mode === "static" && !manifest.static) {
+    return NextResponse.json({ error: "no_static_target" }, { status: 400 });
+  }
 
-  trackEvent("platform.scan_started", user.id, user.role, {
-    platform,
-    route_count: manifest.routes.length,
-  });
-
-  const result = await scanPlatform({
-    workspaceId,
-    platform,
-    baseUrl: manifest.baseUrl,
-    routes: manifest.routes,
-  });
+  let result: PlatformScanResult;
+  if (mode === "static" && manifest.static) {
+    // White-box source scan: read the target repo's files + run the bug detectors.
+    trackEvent("platform.scan_started", user.id, user.role, {
+      platform,
+      mode,
+      route_count: manifest.static.paths.length,
+    });
+    result = await scanSource({
+      platform,
+      owner: manifest.static.owner,
+      repo: manifest.static.repo,
+      ref: manifest.static.ref,
+      paths: manifest.static.paths,
+      readFile: defaultReadFile(manifest.static.owner, manifest.static.repo, manifest.static.ref),
+    });
+  } else {
+    // Black-box HTTP crawl. Merge sitemap-discovered routes with the curated seed
+    // so the scan covers the real surface, not just the hardcoded list.
+    const discovered = await discoverRoutes(manifest.baseUrl);
+    const routes = mergeManifest(manifest.routes, discovered);
+    trackEvent("platform.scan_started", user.id, user.role, {
+      platform,
+      mode,
+      route_count: routes.length,
+      discovered_count: discovered.length,
+    });
+    result = await scanPlatform({ workspaceId, platform, baseUrl: manifest.baseUrl, routes });
+  }
 
   const { scanId, findingCount, criticalCount } = await recordScan({
     workspaceId,
@@ -68,6 +93,8 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
+    platform,
+    mode,
     scanId,
     findingCount,
     criticalCount,

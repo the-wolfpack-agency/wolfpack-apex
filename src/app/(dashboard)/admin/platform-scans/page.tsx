@@ -37,13 +37,21 @@ interface ScanFindingRow {
 
 interface RunScanResponse {
   ok: boolean;
+  platform: string;
+  mode: string;
   scanId: string;
   findingCount: number;
   criticalCount: number;
   findings: ScanFindingRow[];
 }
 
-const SCAN_PLATFORM = "wolfpack-auto";
+interface ScanTarget {
+  platform: string;
+  baseUrl: string;
+  hasStatic: boolean;
+}
+
+type ScanMode = "http" | "static";
 
 const SEVERITY_COLOR: Record<Severity, string> = {
   critical: "var(--wp-error, #ef4444)",
@@ -61,6 +69,8 @@ const CATEGORY_LABEL: Record<Category, string> = {
 };
 
 interface RunSummary {
+  platform: string;
+  mode: string;
   routes: number | null;
   findings: number;
   critical: number;
@@ -127,6 +137,13 @@ function FindingRow({
         <span style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--wp-text-muted, #6b7280)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
           {CATEGORY_LABEL[finding.category]}
         </span>
+        <span
+          data-testid={`finding-platform-${finding.id}`}
+          title="Platform this finding was scanned on"
+          style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--wp-gold, #f1c233)", border: "1px solid var(--wp-dark-border, #333)", borderRadius: "0.35rem", padding: "0.1rem 0.45rem" }}
+        >
+          {finding.platform}
+        </span>
         <code data-testid={`finding-route-${finding.id}`} style={{ fontFamily: "monospace", fontSize: "0.82rem", color: "var(--wp-text-dim, #aaa)" }}>
           {finding.route}
         </code>
@@ -177,12 +194,22 @@ export default function PlatformScansPage() {
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [summary, setSummary] = useState<RunSummary | null>(null);
+  // Which platform to scan + how (black-box HTTP vs white-box source), plus the
+  // platform filter for the findings list. An agent can scan many platforms, so
+  // the operator always picks one explicitly and every finding is labeled by it.
+  const [targets, setTargets] = useState<ScanTarget[]>([]);
+  const [selectedPlatform, setSelectedPlatform] = useState<string>("");
+  const [mode, setMode] = useState<ScanMode>("http");
+  const [filterPlatform, setFilterPlatform] = useState<string>("");
 
-  const load = useCallback(async () => {
+  const selectedTarget = targets.find((t) => t.platform === selectedPlatform) ?? null;
+
+  const load = useCallback(async (platform?: string) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchWithRefresh("/api/admin/platform-scans");
+      const qs = platform ? `?platform=${encodeURIComponent(platform)}` : "";
+      const res = await fetchWithRefresh(`/api/admin/platform-scans${qs}`);
       if (!res.ok) throw new Error(`Failed to load findings (HTTP ${res.status})`);
       const data = (await res.json()) as { findings?: ScanFindingRow[] };
       setFindings((data.findings ?? []).filter((f) => f.status === "open"));
@@ -193,18 +220,42 @@ export default function PlatformScansPage() {
     }
   }, []);
 
+  const loadTargets = useCallback(async () => {
+    try {
+      const res = await fetchWithRefresh("/api/admin/platform-scans/targets");
+      if (!res.ok) return;
+      const data = (await res.json()) as { targets?: ScanTarget[] };
+      const list = data.targets ?? [];
+      setTargets(list);
+      if (list.length > 0) setSelectedPlatform((p) => p || list[0].platform);
+    } catch {
+      /* targets are a convenience; a failure leaves the selector empty but the
+         page still loads findings. */
+    }
+  }, []);
+
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadTargets();
+  }, [loadTargets]);
+
+  // Load findings on mount and whenever the platform filter changes (filter ""
+  // means all platforms).
+  useEffect(() => {
+    void load(filterPlatform || undefined);
+  }, [filterPlatform, load]);
 
   const runScan = useCallback(async () => {
+    if (!selectedPlatform) {
+      setScanError("Pick a platform to scan.");
+      return;
+    }
     setScanning(true);
     setScanError(null);
     try {
       const res = await fetchWithRefresh("/api/admin/platform-scans", {
         method: "POST",
         headers: jsonHeaders(),
-        body: JSON.stringify({ platform: SCAN_PLATFORM }),
+        body: JSON.stringify({ platform: selectedPlatform, mode }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -216,14 +267,16 @@ export default function PlatformScansPage() {
         for (const f of data.findings ?? []) seen.add(f.route);
         return seen.size || null;
       })();
-      setSummary({ routes, findings: data.findingCount, critical: data.criticalCount });
-      await load();
+      setSummary({ platform: data.platform, mode: data.mode, routes, findings: data.findingCount, critical: data.criticalCount });
+      // Surface the just-scanned platform's findings.
+      setFilterPlatform(data.platform);
+      await load(data.platform);
     } catch (e) {
       setScanError((e as Error).message);
     } finally {
       setScanning(false);
     }
-  }, [load]);
+  }, [load, selectedPlatform, mode]);
 
   const decide = useCallback(async (id: string, status: "acknowledged" | "resolved") => {
     const res = await fetchWithRefresh(`/api/admin/platform-scans/findings/${id}`, {
@@ -252,27 +305,58 @@ export default function PlatformScansPage() {
         An agent crawls a target platform&apos;s journeys and surfaces bugs and use-case gaps; each finding is gated into the learning loop.
       </p>
 
-      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1.2rem" }}>
+      {(() => {
+        const ctrl = {
+          padding: "0.4rem 0.6rem", borderRadius: "0.4rem", fontSize: "0.85rem",
+          background: "var(--wp-dark-surface, #1f1f22)", color: "var(--wp-text, #eee)",
+          border: "1px solid var(--wp-dark-border, #333)",
+        } as const;
+        return (
+      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap", marginBottom: "1.2rem" }}>
+        <label htmlFor="platform-select" style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)" }}>Platform</label>
+        <select
+          id="platform-select"
+          data-testid="platform-select"
+          value={selectedPlatform}
+          onChange={(e) => { setSelectedPlatform(e.target.value); setMode("http"); }}
+          style={ctrl}
+        >
+          {targets.length === 0 && <option value="">(no targets)</option>}
+          {targets.map((t) => (
+            <option key={t.platform} value={t.platform}>{t.platform}</option>
+          ))}
+        </select>
+        <select
+          data-testid="mode-select"
+          value={mode}
+          onChange={(e) => setMode(e.target.value as ScanMode)}
+          title={selectedTarget?.hasStatic ? "How to scan" : "Source scan not configured for this platform"}
+          style={ctrl}
+        >
+          <option value="http">Live crawl (HTTP)</option>
+          <option value="static" disabled={!selectedTarget?.hasStatic}>Source scan</option>
+        </select>
         <button
           type="button"
           data-testid="run-scan"
-          disabled={scanning}
+          disabled={scanning || !selectedPlatform}
           onClick={() => void runScan()}
           style={{
             padding: "0.45rem 1rem",
             borderRadius: "0.4rem",
             border: "none",
-            cursor: scanning ? "default" : "pointer",
+            cursor: scanning || !selectedPlatform ? "default" : "pointer",
             fontWeight: 600,
             color: "#0b0b0c",
             background: "var(--wp-gold, #f1c233)",
-            opacity: scanning ? 0.6 : 1,
+            opacity: scanning || !selectedPlatform ? 0.6 : 1,
           }}
         >
-          {scanning ? "Scanning…" : "Run scan"}
+          {scanning ? `Scanning ${selectedPlatform}…` : "Run scan"}
         </button>
         {summary && (
           <span data-testid="scan-summary" style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}>
+            {summary.platform} ({summary.mode === "static" ? "source" : "HTTP"}):{" "}
             {summary.routes !== null ? `${summary.routes} route${summary.routes === 1 ? "" : "s"}, ` : ""}
             {summary.findings} finding{summary.findings === 1 ? "" : "s"}, {summary.critical} critical
           </span>
@@ -282,7 +366,27 @@ export default function PlatformScansPage() {
             {scanError}
           </span>
         )}
+        {targets.length > 1 && (
+          <>
+            <span style={{ flex: 1 }} />
+            <label htmlFor="filter-platform" style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)" }}>Showing</label>
+            <select
+              id="filter-platform"
+              data-testid="filter-platform"
+              value={filterPlatform}
+              onChange={(e) => setFilterPlatform(e.target.value)}
+              style={ctrl}
+            >
+              <option value="">All platforms</option>
+              {targets.map((t) => (
+                <option key={t.platform} value={t.platform}>{t.platform}</option>
+              ))}
+            </select>
+          </>
+        )}
       </div>
+        );
+      })()}
 
       {loading ? (
         <p data-testid="findings-loading" style={{ color: "var(--wp-text-dim, #aaa)" }}>Loading…</p>
