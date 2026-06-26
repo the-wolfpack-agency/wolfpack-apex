@@ -8,6 +8,10 @@ import {
   silentFetch,
   rawAuthedFetchInClient,
   hardcodedTenantId,
+  emptyCatch,
+  unvalidatedNumericInput,
+  dangerousInnerHtml,
+  suppressedTypecheck,
   runDetectors,
 } from "@/lib/platform-scan/static/detectors";
 
@@ -120,6 +124,165 @@ describe("hardcodedTenantId", () => {
   it("does NOT fire when DEALER_ID is absent", () => {
     const content = "const x = process.env.OTHER;";
     expect(hardcodedTenantId({ path: "app/page.tsx", content })).toHaveLength(0);
+  });
+});
+
+describe("emptyCatch", () => {
+  it("fires on a multi-line empty catch body", () => {
+    const content = [
+      "function risky() {",
+      "  try {",
+      "    doThing();",
+      "  } catch (e) {",
+      "  }",
+      "}",
+    ].join("\n");
+    const f = emptyCatch({ path: "app/page.tsx", content });
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({
+      severity: "medium",
+      category: "bug",
+      title: "error silently swallowed (empty catch)",
+      route: "app/page.tsx",
+    });
+    expect(f[0].evidence.line).toBe(4);
+  });
+
+  it("fires on a same-line empty catch (catch {})", () => {
+    const content = [
+      "function risky() {",
+      "  try { doThing(); } catch {}",
+      "}",
+    ].join("\n");
+    const f = emptyCatch({ path: "app/page.tsx", content });
+    expect(f).toHaveLength(1);
+    expect(f[0].evidence.line).toBe(2);
+  });
+
+  it("does NOT fire when the catch body has a statement", () => {
+    const content = [
+      "function risky() {",
+      "  try {",
+      "    doThing();",
+      "  } catch (e) {",
+      "    setError(e);",
+      "  }",
+      "}",
+    ].join("\n");
+    expect(emptyCatch({ path: "app/page.tsx", content })).toHaveLength(0);
+  });
+
+  it("does NOT fire when the catch rethrows on the same line", () => {
+    const content = [
+      "function risky() {",
+      "  try { doThing(); } catch (e) { throw e; }",
+      "}",
+    ].join("\n");
+    expect(emptyCatch({ path: "app/page.tsx", content })).toHaveLength(0);
+  });
+});
+
+describe("unvalidatedNumericInput", () => {
+  it("fires on a number input with no min attribute", () => {
+    const content = [
+      "export function PriceField() {",
+      '  return <input type="number" name="price" value={price} />;',
+      "}",
+    ].join("\n");
+    const f = unvalidatedNumericInput({ path: "components/price.tsx", content });
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({
+      severity: "medium",
+      category: "ux_gap",
+      title: "numeric input without a min/range guard (accepts invalid values)",
+      route: "components/price.tsx",
+    });
+    expect(f[0].evidence.line).toBe(2);
+  });
+
+  it("does NOT fire when min= is present on the input", () => {
+    const content = [
+      "export function PriceField() {",
+      '  return <input type="number" name="price" min={0} value={price} />;',
+      "}",
+    ].join("\n");
+    expect(
+      unvalidatedNumericInput({ path: "components/price.tsx", content }),
+    ).toHaveLength(0);
+  });
+
+  it("does NOT fire on a text input", () => {
+    const content = '  return <input type="text" name="title" />;';
+    expect(
+      unvalidatedNumericInput({ path: "components/title.tsx", content }),
+    ).toHaveLength(0);
+  });
+});
+
+describe("dangerousInnerHtml", () => {
+  it("fires on a dangerouslySetInnerHTML usage", () => {
+    const content = [
+      "export function Body({ html }) {",
+      "  return <div dangerouslySetInnerHTML={{ __html: html }} />;",
+      "}",
+    ].join("\n");
+    const f = dangerousInnerHtml({ path: "components/body.tsx", content });
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({
+      severity: "high",
+      category: "security",
+      title: "XSS risk: dangerouslySetInnerHTML",
+      route: "components/body.tsx",
+    });
+    expect(f[0].evidence.line).toBe(2);
+  });
+
+  it("does NOT fire on a plain div with sanitized text", () => {
+    const content = [
+      "export function Body({ text }) {",
+      "  return <div>{text}</div>;",
+      "}",
+    ].join("\n");
+    expect(
+      dangerousInnerHtml({ path: "components/body.tsx", content }),
+    ).toHaveLength(0);
+  });
+});
+
+describe("suppressedTypecheck", () => {
+  it("fires on a @ts-ignore line", () => {
+    const content = [
+      "function f() {",
+      "  // @ts-ignore the lib types are wrong",
+      "  return lib.thing();",
+      "}",
+    ].join("\n");
+    const f = suppressedTypecheck({ path: "lib/f.ts", content });
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({
+      severity: "medium",
+      category: "bug",
+      title: "type safety suppressed (@ts-ignore / @ts-nocheck)",
+      route: "lib/f.ts",
+    });
+    expect(f[0].evidence.line).toBe(2);
+  });
+
+  it("fires on a @ts-nocheck line", () => {
+    const content = ["// @ts-nocheck", "export const x = 1;"].join("\n");
+    const f = suppressedTypecheck({ path: "lib/f.ts", content });
+    expect(f).toHaveLength(1);
+    expect(f[0].evidence.line).toBe(1);
+  });
+
+  it("does NOT fire on @ts-expect-error", () => {
+    const content = [
+      "function f() {",
+      "  // @ts-expect-error intentional, checked by the compiler",
+      "  return lib.thing();",
+      "}",
+    ].join("\n");
+    expect(suppressedTypecheck({ path: "lib/f.ts", content })).toHaveLength(0);
   });
 });
 

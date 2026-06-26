@@ -137,11 +137,179 @@ export function hardcodedTenantId(file: SourceFile): ScanFinding[] {
   return findings;
 }
 
+// A catch clause whose body opens on the same line. Captures whatever sits
+// between the opening "{" and the end of the line so we can tell an empty body
+// ("catch {" / "catch (e) {" / "catch {}" / "catch (e) { }") apart from a body
+// that already does something on the same line.
+const EMPTY_CATCH = /\bcatch\s*(?:\([^)]*\))?\s*\{([^}]*)$/;
+const SAME_LINE_BRACE_CLOSE = /\bcatch\s*(?:\([^)]*\))?\s*\{([^}]*)\}/;
+
+/**
+ * emptyCatch: a catch block whose body is empty (whitespace only) before the
+ * closing brace. A swallowed error hides failures from users and logs. We look
+ * at the catch line itself: if there is a same-line close (`catch {}` /
+ * `catch (e) { }`) we check that inner text is blank; otherwise we scan forward
+ * to the first non-blank line and flag if it is the closing brace.
+ */
+export function emptyCatch(file: SourceFile): ScanFinding[] {
+  const lines = file.content.split("\n");
+  const findings: ScanFinding[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Case A: catch and its closing brace are on the same line.
+    const sameLine = SAME_LINE_BRACE_CLOSE.exec(line);
+    if (sameLine) {
+      if (sameLine[1].trim() === "") {
+        findings.push(makeEmptyCatchFinding(file, i, line));
+      }
+      continue;
+    }
+
+    // Case B: catch opens a block that continues on following lines.
+    const open = EMPTY_CATCH.exec(line);
+    if (!open) continue;
+    // Anything after the brace on the same line is a statement → not empty.
+    if (open[1].trim() !== "") continue;
+
+    // Scan forward to the first non-blank line.
+    let j = i + 1;
+    while (j < lines.length && lines[j].trim() === "") j++;
+    if (j < lines.length && lines[j].trim() === "}") {
+      findings.push(makeEmptyCatchFinding(file, i, line));
+    }
+  }
+
+  return findings;
+}
+
+function makeEmptyCatchFinding(
+  file: SourceFile,
+  index: number,
+  line: string,
+): ScanFinding {
+  return {
+    route: file.path,
+    severity: "medium",
+    category: "bug",
+    title: "error silently swallowed (empty catch)",
+    detail:
+      "A catch block has an empty body, so the error is swallowed with no log, " +
+      "no user-facing message, and no rethrow. Failures disappear silently.",
+    evidence: { line: index + 1, snippet: line.trim() },
+  };
+}
+
+// A number input tag. We match a single opening <input ...> tag's text (no
+// closing ">" inside) and require type="number" / type={'number'} on it.
+const NUMBER_INPUT = /<input\b[^>]*\btype\s*=\s*["'{]?\s*number\b[^>]*>/i;
+const HAS_MIN_ATTR = /\bmin\s*=/;
+
+/**
+ * unvalidatedNumericInput: a JSX <input type="number"> with no min= attribute
+ * on the same tag. Without a range guard the field accepts negative prices,
+ * zero terms, and negative down payments. We require the whole opening tag to
+ * be on one line (the common case) to avoid multi-line false positives.
+ */
+export function unvalidatedNumericInput(file: SourceFile): ScanFinding[] {
+  const lines = file.content.split("\n");
+  const findings: ScanFinding[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const m = NUMBER_INPUT.exec(line);
+    if (!m) continue;
+    // Only inspect the matched tag text for the min= guard.
+    if (HAS_MIN_ATTR.test(m[0])) continue;
+
+    findings.push({
+      route: file.path,
+      severity: "medium",
+      category: "ux_gap",
+      title: "numeric input without a min/range guard (accepts invalid values)",
+      detail:
+        "A <input type=\"number\"> has no min= attribute, so it accepts negative " +
+        "or zero values (negative price, zero term, negative down payment) that " +
+        "submit straight through to the backend.",
+      evidence: { line: i + 1, snippet: line.trim() },
+    });
+  }
+
+  return findings;
+}
+
+const DANGEROUS_INNER_HTML = /\bdangerouslySetInnerHTML\b/;
+
+/**
+ * dangerousInnerHtml: any use of dangerouslySetInnerHTML — a real XSS surface
+ * whenever the HTML is not provably sanitized. We flag every usage so a human
+ * confirms the source is trusted/sanitized.
+ */
+export function dangerousInnerHtml(file: SourceFile): ScanFinding[] {
+  const lines = file.content.split("\n");
+  const findings: ScanFinding[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!DANGEROUS_INNER_HTML.test(line)) continue;
+
+    findings.push({
+      route: file.path,
+      severity: "high",
+      category: "security",
+      title: "XSS risk: dangerouslySetInnerHTML",
+      detail:
+        "dangerouslySetInnerHTML injects raw HTML into the DOM. If the value is " +
+        "not provably sanitized, it is a stored/reflected XSS vector.",
+      evidence: { line: i + 1, snippet: line.trim() },
+    });
+  }
+
+  return findings;
+}
+
+// @ts-ignore or @ts-nocheck, but NOT @ts-expect-error (which is checked).
+const SUPPRESS_TS = /@ts-(ignore|nocheck)\b/;
+
+/**
+ * suppressedTypecheck: a line containing @ts-ignore or @ts-nocheck. These hide
+ * real type errors that surface as runtime bugs. @ts-expect-error is excluded —
+ * it is intentional and the compiler errors if the suppressed error disappears.
+ */
+export function suppressedTypecheck(file: SourceFile): ScanFinding[] {
+  const lines = file.content.split("\n");
+  const findings: ScanFinding[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!SUPPRESS_TS.test(line)) continue;
+
+    findings.push({
+      route: file.path,
+      severity: "medium",
+      category: "bug",
+      title: "type safety suppressed (@ts-ignore / @ts-nocheck)",
+      detail:
+        "A @ts-ignore / @ts-nocheck suppresses the type checker on this line. " +
+        "Unlike @ts-expect-error it does not fail when the underlying error goes " +
+        "away, so it silently hides real type errors that become runtime bugs.",
+      evidence: { line: i + 1, snippet: line.trim() },
+    });
+  }
+
+  return findings;
+}
+
 /** Compose every detector over one file. */
 export function runDetectors(file: SourceFile): ScanFinding[] {
   return [
     ...silentFetch(file),
     ...rawAuthedFetchInClient(file),
     ...hardcodedTenantId(file),
+    ...emptyCatch(file),
+    ...unvalidatedNumericInput(file),
+    ...dangerousInnerHtml(file),
+    ...suppressedTypecheck(file),
   ];
 }

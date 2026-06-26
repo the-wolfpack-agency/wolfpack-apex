@@ -76,6 +76,45 @@ interface RunSummary {
   critical: number;
 }
 
+interface FindingsSummary {
+  total: number;
+  bySeverity: Record<Severity, number>;
+  byCategory: Record<string, number>;
+}
+
+interface ScanHistoryRow {
+  id: string;
+  platform: string;
+  baseUrl: string;
+  routeCount: number;
+  findingCount: number;
+  criticalCount: number;
+  createdAt: string;
+}
+
+const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low"];
+
+const EMPTY_SUMMARY: FindingsSummary = {
+  total: 0,
+  bySeverity: { critical: 0, high: 0, medium: 0, low: 0 },
+  byCategory: {},
+};
+
+// "2026-06-26T..." -> a short relative-ish label, falling back to the raw value.
+function whenLabel(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  const diff = Date.now() - t;
+  const min = Math.round(diff / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  return new Date(t).toLocaleDateString();
+}
+
 function evidenceLine(evidence: Record<string, unknown>): string {
   const parts: string[] = [];
   if (evidence.status !== undefined && evidence.status !== null) parts.push(`status ${String(evidence.status)}`);
@@ -194,6 +233,8 @@ export default function PlatformScansPage() {
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [summary, setSummary] = useState<RunSummary | null>(null);
+  const [findingsSummary, setFindingsSummary] = useState<FindingsSummary>(EMPTY_SUMMARY);
+  const [scanHistory, setScanHistory] = useState<ScanHistoryRow[]>([]);
   // Which platform to scan + how (black-box HTTP vs white-box source), plus the
   // platform filter for the findings list. An agent can scan many platforms, so
   // the operator always picks one explicitly and every finding is labeled by it.
@@ -220,6 +261,21 @@ export default function PlatformScansPage() {
     }
   }, []);
 
+  // Severity / category rollup + scan history. A failure leaves the existing
+  // (or empty) rollup in place; it never blocks the findings list.
+  const loadSummary = useCallback(async (platform?: string) => {
+    try {
+      const qs = platform ? `?platform=${encodeURIComponent(platform)}` : "";
+      const res = await fetchWithRefresh(`/api/admin/platform-scans/summary${qs}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { summary?: FindingsSummary; scans?: ScanHistoryRow[] };
+      setFindingsSummary(data.summary ?? EMPTY_SUMMARY);
+      setScanHistory(data.scans ?? []);
+    } catch {
+      /* rollup is contextual; the findings list still renders without it. */
+    }
+  }, []);
+
   const loadTargets = useCallback(async () => {
     try {
       const res = await fetchWithRefresh("/api/admin/platform-scans/targets");
@@ -242,7 +298,8 @@ export default function PlatformScansPage() {
   // means all platforms).
   useEffect(() => {
     void load(filterPlatform || undefined);
-  }, [filterPlatform, load]);
+    void loadSummary(filterPlatform || undefined);
+  }, [filterPlatform, load, loadSummary]);
 
   const runScan = useCallback(async () => {
     if (!selectedPlatform) {
@@ -268,15 +325,15 @@ export default function PlatformScansPage() {
         return seen.size || null;
       })();
       setSummary({ platform: data.platform, mode: data.mode, routes, findings: data.findingCount, critical: data.criticalCount });
-      // Surface the just-scanned platform's findings.
+      // Surface the just-scanned platform's findings + refresh the rollup/history.
       setFilterPlatform(data.platform);
-      await load(data.platform);
+      await Promise.all([load(data.platform), loadSummary(data.platform)]);
     } catch (e) {
       setScanError((e as Error).message);
     } finally {
       setScanning(false);
     }
-  }, [load, selectedPlatform, mode]);
+  }, [load, loadSummary, selectedPlatform, mode]);
 
   const decide = useCallback(async (id: string, status: "acknowledged" | "resolved") => {
     const res = await fetchWithRefresh(`/api/admin/platform-scans/findings/${id}`, {
@@ -288,9 +345,11 @@ export default function PlatformScansPage() {
       const body = (await res.json().catch(() => ({}))) as { error?: string };
       throw new Error(body.error ?? `Action failed (HTTP ${res.status})`);
     }
-    // Decided findings leave the open list — drop them in place.
+    // Decided findings leave the open list — drop them in place + refresh the
+    // rollup so the severity/category counts track the open queue.
     setFindings((prev) => prev.filter((f) => f.id !== id));
-  }, []);
+    void loadSummary(filterPlatform || undefined);
+  }, [loadSummary, filterPlatform]);
 
   return (
     <div data-testid="platform-scans-page" style={{ padding: "1.5rem", maxWidth: 920, margin: "0 auto", color: "var(--wp-text, #eee)" }}>
@@ -388,6 +447,65 @@ export default function PlatformScansPage() {
         );
       })()}
 
+      {(() => {
+        const categoryLine = Object.entries(findingsSummary.byCategory)
+          .filter(([, n]) => n > 0)
+          .sort((a, b) => b[1] - a[1])
+          .map(([cat, n]) => `${CATEGORY_LABEL[cat as Category] ?? cat} ${n}`)
+          .join(" · ");
+        return (
+          <div
+            data-testid="findings-summary"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.6rem",
+              flexWrap: "wrap",
+              padding: "0.75rem 1rem",
+              marginBottom: "1rem",
+              background: "var(--wp-dark-surface, #1f1f22)",
+              border: "1px solid var(--wp-dark-border, #333)",
+              borderRadius: "0.5rem",
+            }}
+          >
+            {SEVERITY_ORDER.map((sev) => {
+              const count = findingsSummary.bySeverity[sev];
+              return (
+                <span
+                  key={sev}
+                  data-testid={`sev-count-${sev}`}
+                  title={`${count} open ${sev} finding${count === 1 ? "" : "s"}`}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.35rem",
+                    fontSize: "0.78rem",
+                    fontWeight: 700,
+                    padding: "0.2rem 0.6rem",
+                    borderRadius: "0.4rem",
+                    color: "#0b0b0c",
+                    background: SEVERITY_COLOR[sev],
+                    opacity: count === 0 ? 0.4 : 1,
+                  }}
+                >
+                  <span style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>{sev}</span>
+                  <span>{count}</span>
+                </span>
+              );
+            })}
+            <span style={{ flex: 1 }} />
+            {categoryLine && (
+              <span data-testid="category-breakdown" style={{ fontSize: "0.8rem", color: "var(--wp-text-dim, #aaa)" }}>
+                {categoryLine}
+              </span>
+            )}
+            <span data-testid="open-total" style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--wp-text-muted, #6b7280)" }}>
+              {findingsSummary.total} open
+            </span>
+          </div>
+        );
+      })()}
+
       {loading ? (
         <p data-testid="findings-loading" style={{ color: "var(--wp-text-dim, #aaa)" }}>Loading…</p>
       ) : error ? (
@@ -403,6 +521,50 @@ export default function PlatformScansPage() {
           ))}
         </div>
       )}
+
+      <div data-testid="scan-history" style={{ marginTop: "2rem" }}>
+        <h2 style={{ fontSize: "1rem", color: "var(--wp-gold, #f1c233)", marginBottom: "0.6rem" }}>Scan history</h2>
+        {scanHistory.length === 0 ? (
+          <p data-testid="scan-history-empty" style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}>
+            No scans yet.
+          </p>
+        ) : (
+          <div>
+            {scanHistory.map((s) => (
+              <div
+                key={s.id}
+                data-testid={`scan-history-row-${s.id}`}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.6rem",
+                  flexWrap: "wrap",
+                  padding: "0.55rem 0.85rem",
+                  marginBottom: "0.45rem",
+                  background: "var(--wp-dark-surface, #1f1f22)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  borderRadius: "0.45rem",
+                  fontSize: "0.82rem",
+                }}
+              >
+                <span style={{ fontWeight: 600, color: "var(--wp-gold, #f1c233)" }}>{s.platform}</span>
+                <span style={{ color: "var(--wp-text-dim, #aaa)" }}>
+                  {s.findingCount} finding{s.findingCount === 1 ? "" : "s"}
+                </span>
+                {s.criticalCount > 0 && (
+                  <span style={{ fontWeight: 600, color: "var(--wp-error, #ef4444)" }}>
+                    {s.criticalCount} critical
+                  </span>
+                )}
+                <span style={{ flex: 1 }} />
+                <time dateTime={s.createdAt} title={s.createdAt} style={{ color: "var(--wp-text-muted, #6b7280)" }}>
+                  {whenLabel(s.createdAt)}
+                </time>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

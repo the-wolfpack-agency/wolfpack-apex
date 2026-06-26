@@ -4,6 +4,7 @@ import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import { trackEvent } from "@/lib/analytics";
 import { scanPlatform } from "@/lib/platform-scan/engine";
 import { scanSource, defaultReadFile } from "@/lib/platform-scan/static/scan";
+import { discoverRepoFiles } from "@/lib/platform-scan/static/discover-files";
 import { discoverRoutes, mergeManifest } from "@/lib/platform-scan/discover";
 import { getScanManifest } from "@/lib/platform-scan/manifests";
 import type { PlatformScanResult } from "@/lib/platform-scan/types";
@@ -44,19 +45,28 @@ export async function POST(req: NextRequest) {
 
   let result: PlatformScanResult;
   if (mode === "static" && manifest.static) {
-    // White-box source scan: read the target repo's files + run the bug detectors.
+    // White-box source scan. Discover the target repo's whole page/route surface
+    // from its git tree and union with the curated seed (the seed guarantees the
+    // known high-risk pages are covered even if discovery is empty). The detectors
+    // then run over every file, not a hardcoded 9.
+    const { owner, repo, ref, paths: seed } = manifest.static;
+    const discovered = await discoverRepoFiles(owner, repo, ref);
+    const paths = discovered.length > 0
+      ? Array.from(new Set([...seed, ...discovered]))
+      : seed;
     trackEvent("platform.scan_started", user.id, user.role, {
       platform,
       mode,
-      route_count: manifest.static.paths.length,
+      route_count: paths.length,
+      discovered_count: discovered.length,
     });
     result = await scanSource({
       platform,
-      owner: manifest.static.owner,
-      repo: manifest.static.repo,
-      ref: manifest.static.ref,
-      paths: manifest.static.paths,
-      readFile: defaultReadFile(manifest.static.owner, manifest.static.repo, manifest.static.ref),
+      owner,
+      repo,
+      ref,
+      paths,
+      readFile: defaultReadFile(owner, repo, ref),
     });
   } else {
     // Black-box HTTP crawl. Merge sitemap-discovered routes with the curated seed

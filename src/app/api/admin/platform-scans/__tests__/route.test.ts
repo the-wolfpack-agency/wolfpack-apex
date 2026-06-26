@@ -29,6 +29,10 @@ jest.mock("@/lib/platform-scan/static/scan", () => ({
   scanSource: (...a: unknown[]) => mockScanSource(...a),
   defaultReadFile: (...a: unknown[]) => mockReadFile(...a),
 }));
+const mockDiscoverFiles = jest.fn();
+jest.mock("@/lib/platform-scan/static/discover-files", () => ({
+  discoverRepoFiles: (...a: unknown[]) => mockDiscoverFiles(...a),
+}));
 jest.mock("@/lib/platform-scan/discover", () => ({
   discoverRoutes: (...a: unknown[]) => mockDiscover(...a),
   mergeManifest: (...a: unknown[]) => mockMerge(...a),
@@ -82,6 +86,7 @@ beforeEach(() => {
   mockScan.mockResolvedValue({ ...RESULT });
   mockScanSource.mockResolvedValue({ ...RESULT });
   mockReadFile.mockReturnValue(async () => null);
+  mockDiscoverFiles.mockResolvedValue([]); // no repo-tree files by default -> seed
   mockDiscover.mockResolvedValue([]); // no sitemap routes by default
   mockMerge.mockImplementation((seed) => seed); // merge returns the seed
   mockRecord.mockResolvedValue({ scanId: "scan-1", findingCount: 1, criticalCount: 1 });
@@ -129,14 +134,25 @@ describe("POST /api/admin/platform-scans (http mode)", () => {
 });
 
 describe("POST /api/admin/platform-scans (static mode)", () => {
-  it("runs the source scan over the repo target and persists", async () => {
+  it("runs the source scan over the repo target and persists (seed only when discovery is empty)", async () => {
     const res = await post({ platform: "wolfpack-auto", mode: "static" });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ mode: "static", scanId: "scan-1" });
+    expect(mockDiscoverFiles).toHaveBeenCalledWith(STATIC.owner, STATIC.repo, STATIC.ref);
     expect(mockScanSource).toHaveBeenCalledWith(expect.objectContaining({ platform: "wolfpack-auto", owner: STATIC.owner, repo: STATIC.repo, paths: STATIC.paths }));
     expect(mockScan).not.toHaveBeenCalled(); // http engine not used
     expect(mockRecord).toHaveBeenCalled();
     expect(mockTrack).toHaveBeenCalledWith("platform.scan_started", "admin-1", "admin", expect.objectContaining({ mode: "static" }));
+  });
+
+  it("scans the WHOLE discovered surface (union of repo-tree files + seed)", async () => {
+    mockDiscoverFiles.mockResolvedValue(["src/app/admin/extra/page.tsx", "src/app/admin/leads/page.tsx"]);
+    await post({ platform: "wolfpack-auto", mode: "static" });
+    const arg = mockScanSource.mock.calls[0][0];
+    // seed ∪ discovered, de-duped.
+    expect(arg.paths).toEqual(expect.arrayContaining([...STATIC.paths, "src/app/admin/extra/page.tsx"]));
+    expect(new Set(arg.paths).size).toBe(arg.paths.length); // no dupes
+    expect(mockTrack).toHaveBeenCalledWith("platform.scan_started", "admin-1", "admin", expect.objectContaining({ mode: "static", discovered_count: 2 }));
   });
 
   it("400s static mode when the platform has no static target", async () => {

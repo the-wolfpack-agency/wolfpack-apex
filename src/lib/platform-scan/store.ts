@@ -121,6 +121,76 @@ export async function listFindings(
   return rows.map(toFinding);
 }
 
+export interface FindingsSummary {
+  total: number;
+  bySeverity: Record<ScanSeverity, number>;
+  byCategory: Record<string, number>;
+}
+
+/** Counts of OPEN findings for the workspace, broken out by severity + category.
+ *  Optional platform filter. Degrades to all-zero counts with no DB (safeQuery). */
+export async function summarizeFindings(
+  workspaceId: string,
+  platform?: string,
+): Promise<FindingsSummary> {
+  const { rows } = await safeQuery<DbRow>(
+    `SELECT severity, category, COUNT(*)::int AS n
+       FROM instinct_platform_scan_findings
+      WHERE workspace_id = $1
+        AND status = 'open'
+        AND ($2::text IS NULL OR platform = $2)
+      GROUP BY severity, category`,
+    [workspaceId, platform ?? null],
+  );
+  const bySeverity: Record<ScanSeverity, number> = { critical: 0, high: 0, medium: 0, low: 0 };
+  const byCategory: Record<string, number> = {};
+  let total = 0;
+  for (const r of rows) {
+    const n = Number(r.n) || 0;
+    const sev = String(r.severity) as ScanSeverity;
+    const cat = String(r.category);
+    if (sev in bySeverity) bySeverity[sev] += n;
+    byCategory[cat] = (byCategory[cat] ?? 0) + n;
+    total += n;
+  }
+  return { total, bySeverity, byCategory };
+}
+
+export interface ScanRow {
+  id: string;
+  platform: string;
+  baseUrl: string;
+  routeCount: number;
+  findingCount: number;
+  criticalCount: number;
+  createdAt: string;
+}
+
+/** Recent scan runs for the workspace, newest first. Default limit 10, cap 50. */
+export async function listScans(
+  workspaceId: string,
+  limit?: number,
+): Promise<ScanRow[]> {
+  const lim = Math.min(Math.max(limit ?? 10, 1), 50);
+  const { rows } = await safeQuery<DbRow>(
+    `SELECT id, platform, base_url, route_count, finding_count, critical_count, created_at
+       FROM instinct_platform_scans
+      WHERE workspace_id = $1
+      ORDER BY created_at DESC
+      LIMIT $2`,
+    [workspaceId, lim],
+  );
+  return rows.map((r) => ({
+    id: String(r.id),
+    platform: String(r.platform),
+    baseUrl: String(r.base_url ?? ""),
+    routeCount: Number(r.route_count) || 0,
+    findingCount: Number(r.finding_count) || 0,
+    criticalCount: Number(r.critical_count) || 0,
+    createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+  }));
+}
+
 /** Move a finding through the review workflow (acknowledge / resolve). Atomic;
  *  returns the updated row or null if not found. Emits a triage event. */
 export async function triageFinding(

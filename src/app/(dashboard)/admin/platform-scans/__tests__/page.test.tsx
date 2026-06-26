@@ -53,14 +53,29 @@ function mkFinding(over: Partial<Record<string, unknown>> = {}) {
 }
 
 const isTargets = (url: string) => url === "/api/admin/platform-scans/targets";
+const isSummary = (url: string) => url.startsWith("/api/admin/platform-scans/summary");
 const isList = (url: string, opts?: { method?: string }) =>
-  !opts && url.startsWith("/api/admin/platform-scans") && !url.includes("/findings/") && !isTargets(url);
+  !opts && url.startsWith("/api/admin/platform-scans") && !url.includes("/findings/") && !isSummary(url) && !isTargets(url);
+
+// Default rollup the dashboard reads on mount / after scan / after the filter
+// changes. Tests that care about specific counts override this per-call.
+const SUMMARY = {
+  total: 24,
+  bySeverity: { critical: 3, high: 6, medium: 10, low: 5 },
+  byCategory: { bug: 9, security: 13, ux_gap: 2 },
+};
+const SCANS = [
+  { id: "scan-9", platform: "wolfpack-auto", baseUrl: "https://wolfpack-auto.vercel.app", routeCount: 12, findingCount: 4, criticalCount: 1, createdAt: "2026-06-26T00:00:00.000Z" },
+];
+const summaryRes = (over: { summary?: unknown; scans?: unknown } = {}) =>
+  mkRes({ summary: over.summary ?? SUMMARY, scans: over.scans ?? SCANS });
 
 beforeEach(() => mockFetchWithRefresh.mockReset());
 
 it("populates the platform selector from targets and labels findings by platform", async () => {
   mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
     if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
     if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
     return Promise.resolve(mkRes({}));
   });
@@ -88,6 +103,7 @@ it("Run scan POSTs the SELECTED platform + mode, then the list reflects the refe
       scanned = true;
       return Promise.resolve(mkRes({ ok: true, platform: "wolfpack-auto", mode: "http", scanId: "scan-2", findingCount: 1, criticalCount: 1, findings: [after] }));
     }
+    if (isSummary(url)) return Promise.resolve(summaryRes());
     if (isList(url, opts)) return Promise.resolve(mkRes({ findings: scanned ? [after] : [before] }));
     return Promise.resolve(mkRes({}));
   });
@@ -113,6 +129,7 @@ it("scanning a different selected platform posts THAT platform", async () => {
     if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
     if (url === "/api/admin/platform-scans" && opts?.method === "POST")
       return Promise.resolve(mkRes({ ok: true, platform: "acme-crm", mode: "http", scanId: "s", findingCount: 0, criticalCount: 0, findings: [] }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
     if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
     return Promise.resolve(mkRes({}));
   });
@@ -132,6 +149,7 @@ it("scanning a different selected platform posts THAT platform", async () => {
 it("Acknowledge POSTs {status:'acknowledged'} to findings/{id} and drops the row", async () => {
   mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
     if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
     if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
     if (url.startsWith("/api/admin/platform-scans/findings/") && opts?.method === "POST") {
       return Promise.resolve(mkRes({ ok: true, finding: mkFinding({ status: "acknowledged" }) }));
@@ -154,9 +172,71 @@ it("Acknowledge POSTs {status:'acknowledged'} to findings/{id} and drops the row
 it("shows the empty state when the GET returns no findings", async () => {
   mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
     if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
     if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
     return Promise.resolve(mkRes({}));
   });
   render(<PlatformScansPage />);
   expect(await screen.findByTestId("findings-empty")).toBeInTheDocument();
+});
+
+it("renders the severity rollup, category breakdown, and open total from the summary", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  await screen.findByTestId("findings-summary");
+  expect(await screen.findByTestId("sev-count-critical")).toHaveTextContent("3");
+  expect(screen.getByTestId("sev-count-high")).toHaveTextContent("6");
+  expect(screen.getByTestId("sev-count-medium")).toHaveTextContent("10");
+  expect(screen.getByTestId("sev-count-low")).toHaveTextContent("5");
+  // Category breakdown uses the friendly labels, ordered by count.
+  expect(screen.getByTestId("category-breakdown")).toHaveTextContent("Security 13");
+  expect(screen.getByTestId("category-breakdown")).toHaveTextContent("Bug 9");
+  expect(screen.getByTestId("category-breakdown")).toHaveTextContent("UX gap 2");
+  expect(screen.getByTestId("open-total")).toHaveTextContent("24 open");
+});
+
+it("renders scan history rows from the mocked scans, with platform + counts", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  const row = await screen.findByTestId("scan-history-row-scan-9");
+  expect(row).toHaveTextContent("wolfpack-auto");
+  expect(row).toHaveTextContent("4 findings");
+  expect(row).toHaveTextContent("1 critical");
+});
+
+it("collapses scan history to 'No scans yet' when there are none", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes({ scans: [] }));
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+  expect(await screen.findByTestId("scan-history-empty")).toHaveTextContent("No scans yet");
+});
+
+it("dimmed-but-present pills render for zero counts", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes({ summary: { total: 0, bySeverity: { critical: 0, high: 0, medium: 0, low: 0 }, byCategory: {} } }));
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+  expect(await screen.findByTestId("sev-count-critical")).toHaveTextContent("0");
+  expect(screen.getByTestId("open-total")).toHaveTextContent("0 open");
+  // Category breakdown collapses out when nothing to show.
+  expect(screen.queryByTestId("category-breakdown")).not.toBeInTheDocument();
 });
