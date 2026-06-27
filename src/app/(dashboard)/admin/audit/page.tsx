@@ -64,6 +64,9 @@ export default function AuditLogPage() {
   const [nextCursor, setNextCursor] = useState<string | undefined>();
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [reanchorReason, setReanchorReason] = useState("known concurrent-append fork, pre-advisory-lock");
+  const [reanchoring, setReanchoring] = useState(false);
+  const [reanchorError, setReanchorError] = useState<string | null>(null);
 
   // Filters
   const [actorFilter, setActorFilter] = useState("");
@@ -123,9 +126,8 @@ export default function AuditLogPage() {
     if (user && isAdmin(user)) void load();
   }, [user, load]);
 
-  async function onVerify() {
+  async function runVerify(): Promise<VerifyResult> {
     setVerifying(true);
-    setVerifyResult(null);
     try {
       const res = await fetchWithRefresh("/api/admin/audit-log/verify", {
         method: "POST",
@@ -134,10 +136,56 @@ export default function AuditLogPage() {
       });
       const data: VerifyResult = await res.json();
       setVerifyResult(data);
+      return data;
     } catch (e) {
-      setVerifyResult({ valid: false, checkedCount: 0, reason: (e as Error).message });
+      const failed: VerifyResult = { valid: false, checkedCount: 0, reason: (e as Error).message };
+      setVerifyResult(failed);
+      return failed;
     } finally {
       setVerifying(false);
+    }
+  }
+
+  async function onVerify() {
+    setVerifyResult(null);
+    await runVerify();
+  }
+
+  // Acknowledge a known, non-tamper chain break (e.g. the seq-509 concurrency
+  // fork) without rewriting history, then re-verify so the UI reflects the
+  // now-passing chain. POSTs the brokenAt seq + reason to /reanchor.
+  async function onReanchor() {
+    if (!verifyResult || verifyResult.valid || verifyResult.brokenAt == null) return;
+    const reason = reanchorReason.trim();
+    if (reason.length === 0) {
+      setReanchorError("A reason is required to acknowledge a chain break.");
+      return;
+    }
+    setReanchoring(true);
+    setReanchorError(null);
+    try {
+      const res = await fetchWithRefresh("/api/admin/audit-log/reanchor", {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ seq: verifyResult.brokenAt, reason }),
+      });
+      if (!res.ok) {
+        let message = `Re-anchor failed: ${res.status}`;
+        try {
+          const body = await res.json();
+          if (body?.error) message = body.error;
+        } catch {
+          // ignore non-JSON error bodies
+        }
+        setReanchorError(message);
+        return;
+      }
+      // Re-run verify so the banner reflects the acknowledged (now-passing) chain.
+      await runVerify();
+    } catch (e) {
+      setReanchorError((e as Error).message);
+    } finally {
+      setReanchoring(false);
     }
   }
 
@@ -204,6 +252,46 @@ export default function AuditLogPage() {
           {verifyResult.valid
             ? `Chain valid — verified ${verifyResult.checkedCount} entries.`
             : `Tamper suspected at seq ${verifyResult.brokenAt ?? "?"} (${verifyResult.reason ?? "unknown"}).`}
+
+          {!verifyResult.valid && verifyResult.brokenAt != null && (
+            <div
+              className="mt-3 pt-3 flex flex-col gap-2"
+              style={{ borderTop: "1px solid rgba(239,68,68,0.4)" }}
+            >
+              <label className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                If this break is a known, non-tamper event, acknowledge it (re-anchor) to
+                stop verify failing on it without rewriting history.
+              </label>
+              <input
+                data-testid="audit-reanchor-reason"
+                value={reanchorReason}
+                onChange={(e) => setReanchorReason(e.target.value)}
+                placeholder="Reason for the known break"
+                className="px-2 py-1 rounded text-sm"
+                style={{
+                  background: "var(--wp-dark-elevated)",
+                  border: "1px solid var(--wp-dark-border)",
+                  color: "var(--wp-text)",
+                }}
+              />
+              <button
+                data-testid="audit-reanchor"
+                onClick={onReanchor}
+                disabled={reanchoring}
+                className="self-start px-3 py-2 rounded text-sm"
+                style={{ background: "var(--wp-gold)", color: "var(--wp-dark-base)" }}
+              >
+                {reanchoring
+                  ? "Re-anchoring…"
+                  : `Acknowledge break (re-anchor) at seq ${verifyResult.brokenAt}`}
+              </button>
+              {reanchorError && (
+                <div className="text-xs" style={{ color: "#ef4444" }}>
+                  {reanchorError}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

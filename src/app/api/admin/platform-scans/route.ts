@@ -60,6 +60,20 @@ import {
   listFindings,
   type ScanFindingRow,
 } from "@/lib/platform-scan/store";
+import type { ScanSeverity } from "@/lib/platform-scan/types";
+
+const VALID_SEVERITIES: ScanSeverity[] = ["critical", "high", "medium", "low"];
+
+/** Parse a `?severity=critical,high` csv into a validated severity subset.
+ *  Returns undefined when absent/empty so listFindings spans all severities. */
+function parseSeverities(raw: string | null): ScanSeverity[] | undefined {
+  if (!raw) return undefined;
+  const out = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s): s is ScanSeverity => (VALID_SEVERITIES as string[]).includes(s));
+  return out.length > 0 ? out : undefined;
+}
 
 /**
  * POST /api/admin/platform-scans -> run a black-box platform scan and persist
@@ -211,7 +225,8 @@ export async function GET(req: NextRequest) {
   const status =
     (params.get("status") as ScanFindingRow["status"] | null) ?? undefined;
   const platform = params.get("platform") ?? undefined;
+  const severities = parseSeverities(params.get("severity"));
 
-  const findings = await listFindings(workspaceId, { status, platform });
+  const findings = await listFindings(workspaceId, { status, platform, severities });
   return NextResponse.json({ findings });
 }

@@ -144,24 +144,29 @@ export async function recordScan(
   return { scanId, findingCount: result.findings.length, criticalCount };
 }
 
-/** Open (or any-status) findings for the workspace, worst severity first. */
+/** Open (or any-status) findings for the workspace, worst severity first.
+ *  `severities` narrows to a subset (e.g. ["critical","high"]) so the review UI
+ *  can default to the ACTIONABLE band without losing the lower-severity rows —
+ *  omit it (or pass empty) and every severity is returned, unchanged. */
 export async function listFindings(
   workspaceId: string,
-  opts?: { status?: ScanFindingRow["status"]; platform?: string; limit?: number },
+  opts?: { status?: ScanFindingRow["status"]; platform?: string; severities?: ScanSeverity[]; limit?: number },
 ): Promise<ScanFindingRow[]> {
   const limit = Math.min(Math.max(opts?.limit ?? 200, 1), 500);
+  const severities = opts?.severities && opts.severities.length > 0 ? opts.severities : null;
   const { rows } = await safeQuery<DbRow>(
     `SELECT id, scan_id, platform, route, severity, category, title, detail, evidence, status, created_at
        FROM instinct_platform_scan_findings
       WHERE workspace_id = $1
         AND ($2::text IS NULL OR status = $2)
         AND ($3::text IS NULL OR platform = $3)
+        AND ($4::text[] IS NULL OR severity = ANY($4))
       ORDER BY CASE severity
                  WHEN 'critical' THEN 0 WHEN 'high' THEN 1
                  WHEN 'medium' THEN 2 ELSE 3 END,
                created_at DESC
-      LIMIT $4`,
-    [workspaceId, opts?.status ?? null, opts?.platform ?? null, limit],
+      LIMIT $5`,
+    [workspaceId, opts?.status ?? null, opts?.platform ?? null, severities, limit],
   );
   return rows.map(toFinding);
 }
@@ -261,4 +266,40 @@ export async function triageFinding(
     status,
   });
   return finding;
+}
+
+/** Triage EVERY currently-open finding matching the active filter in a single
+ *  UPDATE — the bulk counterpart to triageFinding, backing the "Acknowledge /
+ *  Resolve all shown" actions. Only OPEN rows move (already-decided findings are
+ *  left untouched). `severities`/`platform` mirror the listFindings filter so the
+ *  action triages exactly what the reviewer is looking at, nothing hidden. Emits
+ *  ONE bulk event (not one per row) and returns how many findings moved. */
+export async function bulkTriageFindings(
+  workspaceId: string,
+  opts: { status: "acknowledged" | "resolved"; severities?: ScanSeverity[]; platform?: string },
+  decidedBy: string,
+  decidedByRole: string,
+): Promise<number> {
+  const severities = opts.severities && opts.severities.length > 0 ? opts.severities : null;
+  const { rows } = await writeQuery<DbRow>(
+    `UPDATE instinct_platform_scan_findings
+        SET status = $3, decided_by = $4, decided_at = now()
+      WHERE workspace_id = $1
+        AND status = 'open'
+        AND ($2::text IS NULL OR platform = $2)
+        AND ($5::text[] IS NULL OR severity = ANY($5))
+      RETURNING id`,
+    [workspaceId, opts.platform ?? null, opts.status, decidedBy, severities],
+  );
+  const count = rows.length;
+  // One aggregate learning signal for the whole batch — a per-row event would
+  // flood the stream and break the "one row per durable fact" idiom.
+  trackEvent("platform.scan_findings_bulk_triaged", decidedBy, decidedByRole, {
+    status: opts.status,
+    count,
+    // Analytics metadata is scalar-only — record the band as a stable csv.
+    severities: severities ? severities.join(",") : "all",
+    platform: opts.platform ?? "all",
+  });
+  return count;
 }

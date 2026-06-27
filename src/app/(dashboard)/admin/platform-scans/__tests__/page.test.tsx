@@ -227,6 +227,117 @@ it("collapses scan history to 'No scans yet' when there are none", async () => {
   expect(await screen.findByTestId("scan-history-empty")).toHaveTextContent("No scans yet");
 });
 
+it("defaults the list to the actionable band (critical+high) — GETs ?severity=critical,high", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+  await screen.findByTestId("finding-row-f-1");
+
+  // The findings GET carries the default actionable band so low smells never load.
+  await waitFor(() => {
+    const listCall = mockFetchWithRefresh.mock.calls.find(
+      (c) => isList(String(c[0]), c[1]) && String(c[0]).includes("severity="),
+    );
+    expect(listCall).toBeTruthy();
+    expect(String(listCall![0])).toContain("severity=critical%2Chigh");
+  });
+  // The actionable chip is the active one by default.
+  expect(screen.getByTestId("severity-chip-actionable")).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByTestId("severity-chip-all")).toHaveAttribute("aria-pressed", "false");
+});
+
+it("summary shows FULL counts even though the list is filtered, with a 'show all' for hidden lower-severity", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  // Rollup is unfiltered: medium 10 + low 5 still shown (once the summary loads).
+  await waitFor(() => expect(screen.getByTestId("sev-count-medium")).toHaveTextContent("10"));
+  expect(screen.getByTestId("sev-count-low")).toHaveTextContent("5");
+  // 10 medium + 5 low = 15 hidden by the actionable band -> surfaced as "show all".
+  expect(screen.getByTestId("show-all-severities")).toHaveTextContent("+15 lower-severity hidden");
+});
+
+it("'show all' widens the list to every severity — re-GETs without a severity param", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+  await screen.findByTestId("finding-row-f-1");
+
+  fireEvent.click(screen.getByTestId("show-all-severities"));
+
+  await waitFor(() => {
+    // After widening, the most recent list GET carries no severity filter.
+    const listCalls = mockFetchWithRefresh.mock.calls.filter((c) => isList(String(c[0]), c[1]));
+    const last = listCalls[listCalls.length - 1];
+    expect(String(last[0])).not.toContain("severity=");
+  });
+  expect(screen.getByTestId("severity-chip-all")).toHaveAttribute("aria-pressed", "true");
+  // Hidden affordance collapses once all severities are shown.
+  expect(screen.queryByTestId("show-all-severities")).not.toBeInTheDocument();
+});
+
+it("'Acknowledge all shown' POSTs the active severity filter to the bulk endpoint, then reloads", async () => {
+  let acked = false;
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (url === "/api/admin/platform-scans/findings/bulk" && opts?.method === "POST") {
+      acked = true;
+      return Promise.resolve(mkRes({ ok: true, count: 1 }));
+    }
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: acked ? [] : [mkFinding()] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+  await screen.findByTestId("finding-row-f-1");
+
+  fireEvent.click(screen.getByTestId("bulk-acknowledge"));
+
+  // Posted the ACTIVE band (default actionable critical+high).
+  await waitFor(() => {
+    const post = mockFetchWithRefresh.mock.calls.find(
+      (c) => c[0] === "/api/admin/platform-scans/findings/bulk" && c[1]?.method === "POST",
+    );
+    expect(post).toBeTruthy();
+    expect(JSON.parse(String(post![1].body))).toEqual({ status: "acknowledged", severity: "critical,high" });
+  });
+  // Reloaded -> the now-empty list shows the empty state.
+  await waitFor(() => expect(screen.queryByTestId("finding-row-f-1")).not.toBeInTheDocument());
+});
+
+it("'Resolve all shown' confirms before posting; cancelling makes no call", async () => {
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(false);
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+  await screen.findByTestId("finding-row-f-1");
+
+  fireEvent.click(screen.getByTestId("bulk-resolve"));
+  expect(confirmSpy).toHaveBeenCalled();
+  const post = mockFetchWithRefresh.mock.calls.find(
+    (c) => c[0] === "/api/admin/platform-scans/findings/bulk" && c[1]?.method === "POST",
+  );
+  expect(post).toBeUndefined();
+  confirmSpy.mockRestore();
+});
+
 it("dimmed-but-present pills render for zero counts", async () => {
   mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
     if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));

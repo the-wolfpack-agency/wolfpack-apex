@@ -251,12 +251,25 @@ describe("GET /api/admin/platform-scans", () => {
     const res = await get("http://localhost/api/admin/platform-scans");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ findings: [{ id: "f-1", status: "open" }] });
-    expect(mockList).toHaveBeenCalledWith("ws-1", { status: undefined, platform: undefined });
+    expect(mockList).toHaveBeenCalledWith("ws-1", { status: undefined, platform: undefined, severities: undefined });
   });
 
   it("passes ?status and ?platform through to listFindings", async () => {
     await get("http://localhost/api/admin/platform-scans?status=open&platform=wolfpack-auto");
-    expect(mockList).toHaveBeenCalledWith("ws-1", { status: "open", platform: "wolfpack-auto" });
+    expect(mockList).toHaveBeenCalledWith("ws-1", { status: "open", platform: "wolfpack-auto", severities: undefined });
+  });
+
+  it("parses ?severity=critical,high into a validated severity subset", async () => {
+    await get("http://localhost/api/admin/platform-scans?severity=critical,high");
+    expect(mockList).toHaveBeenCalledWith("ws-1", { status: undefined, platform: undefined, severities: ["critical", "high"] });
+  });
+
+  it("drops unknown severity tokens; an all-garbage list becomes undefined (all severities)", async () => {
+    await get("http://localhost/api/admin/platform-scans?severity=critical,bogus");
+    expect(mockList).toHaveBeenCalledWith("ws-1", expect.objectContaining({ severities: ["critical"] }));
+    mockList.mockClear();
+    await get("http://localhost/api/admin/platform-scans?severity=bogus");
+    expect(mockList).toHaveBeenCalledWith("ws-1", expect.objectContaining({ severities: undefined }));
   });
 
   it("403s when the capability gate fails (no list call)", async () => {

@@ -19,7 +19,7 @@ jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrack
 jest.mock("@/lib/platform-scan/brain-ingest", () => ({ ingestPlatformScanFinding: (...a: unknown[]) => mockIngest(...a) }));
 jest.mock("@/lib/notifications/in-app", () => ({ notify: (...a: unknown[]) => mockNotify(...a) }));
 
-import { recordScan, listFindings, triageFinding, summarizeFindings, listScans } from "@/lib/platform-scan/store";
+import { recordScan, listFindings, triageFinding, bulkTriageFindings, summarizeFindings, listScans } from "@/lib/platform-scan/store";
 import type { PlatformScanResult } from "@/lib/platform-scan/types";
 
 const RESULT: PlatformScanResult = {
@@ -122,7 +122,60 @@ it("listFindings filters by workspace + status, worst severity first", async () 
   const out = await listFindings("ws-1", { status: "open" });
   expect(out[0]).toMatchObject({ id: "f1", severity: "critical", status: "open" });
   expect(mockSafeQuery.mock.calls[0][0]).toMatch(/ORDER BY CASE severity/);
-  expect(mockSafeQuery.mock.calls[0][1]).toEqual(["ws-1", "open", null, 200]);
+  // severity param is null when no band is requested -> spans all severities.
+  expect(mockSafeQuery.mock.calls[0][1]).toEqual(["ws-1", "open", null, null, 200]);
+});
+
+it("listFindings narrows to a severity band via severity = ANY($N::text[])", async () => {
+  mockSafeQuery.mockResolvedValue({ rows: [] });
+  await listFindings("ws-1", { status: "open", severities: ["critical", "high"] });
+  // The SQL uses a nullable array predicate so absent = all, present = subset.
+  expect(mockSafeQuery.mock.calls[0][0]).toMatch(/\$4::text\[\] IS NULL OR severity = ANY\(\$4\)/);
+  expect(mockSafeQuery.mock.calls[0][1]).toEqual(["ws-1", "open", null, ["critical", "high"], 200]);
+});
+
+it("listFindings treats an EMPTY severities array as no filter (all severities)", async () => {
+  mockSafeQuery.mockResolvedValue({ rows: [] });
+  await listFindings("ws-1", { severities: [] });
+  expect(mockSafeQuery.mock.calls[0][1]).toEqual(["ws-1", null, null, null, 200]);
+});
+
+it("bulkTriageFindings UPDATEs every matching OPEN finding, returns the count, emits ONE bulk event", async () => {
+  mockWriteQuery.mockResolvedValue({ rows: [{ id: "a" }, { id: "b" }, { id: "c" }] });
+  const count = await bulkTriageFindings(
+    "ws-1",
+    { status: "acknowledged", severities: ["critical", "high"], platform: "acme-crm" },
+    "admin-1",
+    "admin",
+  );
+  expect(count).toBe(3);
+  const [sql, params] = mockWriteQuery.mock.calls[0];
+  // One UPDATE scoped to OPEN rows matching the active filter.
+  expect(sql).toMatch(/UPDATE instinct_platform_scan_findings/);
+  expect(sql).toMatch(/status = 'open'/);
+  expect(sql).toMatch(/\$5::text\[\] IS NULL OR severity = ANY\(\$5\)/);
+  expect(params).toEqual(["ws-1", "acme-crm", "acknowledged", "admin-1", ["critical", "high"]]);
+  // Exactly one aggregate learning signal (not one per row).
+  expect(mockTrackEvent).toHaveBeenCalledTimes(1);
+  expect(mockTrackEvent).toHaveBeenCalledWith(
+    "platform.scan_findings_bulk_triaged",
+    "admin-1",
+    "admin",
+    expect.objectContaining({ status: "acknowledged", count: 3, severities: "critical,high", platform: "acme-crm" }),
+  );
+});
+
+it("bulkTriageFindings with no filter passes null severities + null platform (all open)", async () => {
+  mockWriteQuery.mockResolvedValue({ rows: [] });
+  const count = await bulkTriageFindings("ws-1", { status: "resolved" }, "admin-1", "admin");
+  expect(count).toBe(0);
+  expect(mockWriteQuery.mock.calls[0][1]).toEqual(["ws-1", null, "resolved", "admin-1", null]);
+  expect(mockTrackEvent).toHaveBeenCalledWith(
+    "platform.scan_findings_bulk_triaged",
+    "admin-1",
+    "admin",
+    expect.objectContaining({ count: 0, severities: "all", platform: "all" }),
+  );
 });
 
 it("summarizeFindings reduces GROUP BY rows into severity + category counts", async () => {

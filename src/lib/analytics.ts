@@ -569,10 +569,12 @@ export type InstinctEventType =
   // platform.scan_finding_detected { platform, route, severity, category }
   // platform.scan_completed        { platform, route_count, finding_count, critical_count }
   // platform.scan_finding_triaged  { platform, route, severity, status }
+  // platform.scan_findings_bulk_triaged { status, count, severities, platform }
   | "platform.scan_started"
   | "platform.scan_finding_detected"
   | "platform.scan_completed"
   | "platform.scan_finding_triaged"
+  | "platform.scan_findings_bulk_triaged"
   // Demo-login canary: a continuous end-to-end proof that the scan tool still
   // logs into demo target platforms, runs a scan, and surfaces the expected
   // findings — catching a regression (login broke / scan broke / a known-buggy

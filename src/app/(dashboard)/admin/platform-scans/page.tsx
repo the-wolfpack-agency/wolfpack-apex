@@ -96,6 +96,12 @@ interface ScanHistoryRow {
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low"];
 
+// The findings list DEFAULTS to the actionable band so the ~73 LOW-severity
+// code-smells from a single static scan don't flood the queue. The summary
+// rollup still shows full counts (nothing hidden silently) and a chip widens the
+// list to every severity — no data is lost, low findings stay reachable.
+const ACTIONABLE_SEVERITIES: Severity[] = ["critical", "high"];
+
 const EMPTY_SUMMARY: FindingsSummary = {
   total: 0,
   bySeverity: { critical: 0, high: 0, medium: 0, low: 0 },
@@ -244,14 +250,22 @@ export default function PlatformScansPage() {
   const [selectedPlatform, setSelectedPlatform] = useState<string>("");
   const [mode, setMode] = useState<ScanMode>("http");
   const [filterPlatform, setFilterPlatform] = useState<string>("");
+  // Severity band the LIST is narrowed to (defaults to actionable). Empty = all.
+  const [severities, setSeverities] = useState<Severity[]>(ACTIONABLE_SEVERITIES);
+  const [bulkBusy, setBulkBusy] = useState<"acknowledged" | "resolved" | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
 
   const selectedTarget = targets.find((t) => t.platform === selectedPlatform) ?? null;
+  const allSeverities = severities.length === 0;
 
-  const load = useCallback(async (platform?: string) => {
+  const load = useCallback(async (platform?: string, sevs?: Severity[]) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = platform ? `?platform=${encodeURIComponent(platform)}` : "";
+      const params = new URLSearchParams();
+      if (platform) params.set("platform", platform);
+      if (sevs && sevs.length > 0) params.set("severity", sevs.join(","));
+      const qs = params.toString() ? `?${params.toString()}` : "";
       const res = await fetchWithRefresh(`/api/admin/platform-scans${qs}`);
       if (!res.ok) throw new Error(`Failed to load findings (HTTP ${res.status})`);
       const data = (await res.json()) as { findings?: ScanFindingRow[] };
@@ -296,12 +310,13 @@ export default function PlatformScansPage() {
     void loadTargets();
   }, [loadTargets]);
 
-  // Load findings on mount and whenever the platform filter changes (filter ""
-  // means all platforms).
+  // Load findings on mount and whenever the platform OR severity filter changes
+  // (filter "" means all platforms; empty severities means all severities). The
+  // summary always reloads with the FULL counts regardless of the list filter.
   useEffect(() => {
-    void load(filterPlatform || undefined);
+    void load(filterPlatform || undefined, severities);
     void loadSummary(filterPlatform || undefined);
-  }, [filterPlatform, load, loadSummary]);
+  }, [filterPlatform, severities, load, loadSummary]);
 
   const runScan = useCallback(async () => {
     if (!selectedPlatform) {
@@ -329,13 +344,13 @@ export default function PlatformScansPage() {
       setSummary({ platform: data.platform, mode: data.mode, routes, findings: data.findingCount, critical: data.criticalCount });
       // Surface the just-scanned platform's findings + refresh the rollup/history.
       setFilterPlatform(data.platform);
-      await Promise.all([load(data.platform), loadSummary(data.platform)]);
+      await Promise.all([load(data.platform, severities), loadSummary(data.platform)]);
     } catch (e) {
       setScanError((e as Error).message);
     } finally {
       setScanning(false);
     }
-  }, [load, loadSummary, selectedPlatform, mode]);
+  }, [load, loadSummary, selectedPlatform, mode, severities]);
 
   const decide = useCallback(async (id: string, status: "acknowledged" | "resolved") => {
     const res = await fetchWithRefresh(`/api/admin/platform-scans/findings/${id}`, {
@@ -352,6 +367,38 @@ export default function PlatformScansPage() {
     setFindings((prev) => prev.filter((f) => f.id !== id));
     void loadSummary(filterPlatform || undefined);
   }, [loadSummary, filterPlatform]);
+
+  // Bulk-triage every OPEN finding matching the ACTIVE severity + platform
+  // filter — what the operator currently sees, nothing hidden. Resolve is guarded
+  // by a confirm. After the batch, reload the list + rollup so counts track.
+  const bulkTriage = useCallback(async (status: "acknowledged" | "resolved") => {
+    if (status === "resolved" && typeof window !== "undefined") {
+      const ok = window.confirm("Resolve all findings shown by the current filter? This triages them in bulk.");
+      if (!ok) return;
+    }
+    setBulkBusy(status);
+    setBulkError(null);
+    try {
+      const res = await fetchWithRefresh("/api/admin/platform-scans/findings/bulk", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          status,
+          ...(severities.length > 0 ? { severity: severities.join(",") } : {}),
+          ...(filterPlatform ? { platform: filterPlatform } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Bulk action failed (HTTP ${res.status})`);
+      }
+      await Promise.all([load(filterPlatform || undefined, severities), loadSummary(filterPlatform || undefined)]);
+    } catch (e) {
+      setBulkError((e as Error).message);
+    } finally {
+      setBulkBusy(null);
+    }
+  }, [load, loadSummary, filterPlatform, severities]);
 
   return (
     <div data-testid="platform-scans-page" style={{ padding: "1.5rem", maxWidth: 920, margin: "0 auto", color: "var(--wp-text, #eee)" }}>
@@ -505,6 +552,99 @@ export default function PlatformScansPage() {
             <span data-testid="open-total" style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--wp-text-muted, #6b7280)" }}>
               {findingsSummary.total} open
             </span>
+          </div>
+        );
+      })()}
+
+      {(() => {
+        // Lower-severity findings hidden by the active band (medium + low when the
+        // default actionable band is on). Surfaced as a "show all" affordance so
+        // nothing is hidden silently — the data is one click away.
+        const hiddenCount = allSeverities
+          ? 0
+          : SEVERITY_ORDER.filter((s) => !severities.includes(s)).reduce(
+              (n, s) => n + findingsSummary.bySeverity[s],
+              0,
+            );
+        const chip = (active: boolean) =>
+          ({
+            padding: "0.3rem 0.7rem",
+            borderRadius: "0.4rem",
+            fontSize: "0.78rem",
+            fontWeight: 600,
+            cursor: "pointer",
+            color: active ? "#0b0b0c" : "var(--wp-text-dim, #aaa)",
+            background: active ? "var(--wp-gold, #f1c233)" : "transparent",
+            border: "1px solid var(--wp-dark-border, #333)",
+          }) as const;
+        return (
+          <div
+            data-testid="severity-filter"
+            style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}
+          >
+            <span style={{ fontSize: "0.78rem", color: "var(--wp-text-muted, #6b7280)" }}>Showing severity</span>
+            <button
+              type="button"
+              data-testid="severity-chip-actionable"
+              aria-pressed={!allSeverities}
+              onClick={() => setSeverities(ACTIONABLE_SEVERITIES)}
+              style={chip(!allSeverities)}
+            >
+              Actionable (critical + high)
+            </button>
+            <button
+              type="button"
+              data-testid="severity-chip-all"
+              aria-pressed={allSeverities}
+              onClick={() => setSeverities([])}
+              style={chip(allSeverities)}
+            >
+              All severities
+            </button>
+            {hiddenCount > 0 && (
+              <button
+                type="button"
+                data-testid="show-all-severities"
+                onClick={() => setSeverities([])}
+                style={{ fontSize: "0.78rem", color: "var(--wp-gold, #f1c233)", background: "transparent", border: "none", cursor: "pointer", padding: "0.3rem 0.2rem" }}
+              >
+                +{hiddenCount} lower-severity hidden — show all
+              </button>
+            )}
+            <span style={{ flex: 1 }} />
+            <button
+              type="button"
+              data-testid="bulk-acknowledge"
+              disabled={bulkBusy !== null || findings.length === 0}
+              onClick={() => void bulkTriage("acknowledged")}
+              style={{
+                padding: "0.35rem 0.8rem", borderRadius: "0.4rem", fontWeight: 600, fontSize: "0.78rem",
+                cursor: bulkBusy !== null || findings.length === 0 ? "default" : "pointer",
+                color: "var(--wp-gold, #f1c233)", background: "transparent", border: "1px solid var(--wp-gold, #f1c233)",
+                opacity: bulkBusy !== null || findings.length === 0 ? 0.5 : 1,
+              }}
+            >
+              {bulkBusy === "acknowledged" ? "Acknowledging…" : "Acknowledge all shown"}
+            </button>
+            <button
+              type="button"
+              data-testid="bulk-resolve"
+              disabled={bulkBusy !== null || findings.length === 0}
+              onClick={() => void bulkTriage("resolved")}
+              style={{
+                padding: "0.35rem 0.8rem", borderRadius: "0.4rem", border: "none", fontWeight: 600, fontSize: "0.78rem",
+                cursor: bulkBusy !== null || findings.length === 0 ? "default" : "pointer",
+                color: "#0b0b0c", background: "var(--wp-success, #22c55e)",
+                opacity: bulkBusy !== null || findings.length === 0 ? 0.5 : 1,
+              }}
+            >
+              {bulkBusy === "resolved" ? "Resolving…" : "Resolve all shown"}
+            </button>
+            {bulkError && (
+              <span data-testid="bulk-error" style={{ width: "100%", fontSize: "0.8rem", color: "var(--wp-error, #ef4444)" }}>
+                {bulkError}
+              </span>
+            )}
           </div>
         );
       })()}

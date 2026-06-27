@@ -1,0 +1,50 @@
+name: Verify Platform
+
+# Enforced platform gate while full verify is triaged to green: this job gates
+# ONLY the agent-platform surfaces (100% green today), so any regression there
+# blocks a merge now — unlike verify.yml, which is continue-on-error pending
+# resolution of ~86 pre-existing, unrelated failures.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-platform:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Setup Node
+        uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Jest (agent-platform surfaces only)
+        env:
+          CI: "true"
+        run: >-
+          npx jest
+          src/lib/ogiam
+          src/lib/agents
+          src/lib/platform-scan
+          src/lib/assistant/connectors
+          src/lib/assistant/tools
+          src/app/api/admin/agents
+          src/app/api/admin/platform-scans
+          src/app/api/cron
+          --ci
