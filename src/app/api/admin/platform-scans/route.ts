@@ -10,6 +10,7 @@ import { establishSession, establishOAuthPasswordSession } from "@/lib/platform-
 import { probeApi } from "@/lib/platform-scan/api-probe";
 import { loadConnectorCredentials } from "@/lib/assistant/connectors/credentials";
 import { resolveScanTarget, type ScanManifest } from "@/lib/platform-scan/manifests";
+import { assertScannableUrl, SsrfBlockedError } from "@/lib/platform-scan/ssrf-guard";
 import type { PlatformScanResult } from "@/lib/platform-scan/types";
 
 /**
@@ -113,6 +114,16 @@ export async function POST(req: NextRequest) {
     // Gray-box API contract probe: log in (if the platform needs it), then
     // exercise the target's API for auth-enforcement + input-validation bugs.
     const auth = await resolveAuth(workspaceId, manifest);
+    const apiBaseUrl = auth?.baseUrl ?? manifest.baseUrl;
+    // SSRF: never let a scan fetch an internal/loopback/metadata address.
+    try {
+      await assertScannableUrl(apiBaseUrl);
+    } catch (e) {
+      if (e instanceof SsrfBlockedError) {
+        return NextResponse.json({ error: "blocked_target", detail: e.message }, { status: 400 });
+      }
+      throw e;
+    }
     trackEvent("platform.scan_started", user.id, user.role, {
       platform,
       mode,
@@ -120,7 +131,7 @@ export async function POST(req: NextRequest) {
       authenticated: !!auth,
     });
     const findings = await probeApi({
-      baseUrl: auth?.baseUrl ?? manifest.baseUrl,
+      baseUrl: apiBaseUrl,
       authHeaders: auth?.headers,
       endpoints: manifest.apiEndpoints,
     });
@@ -166,6 +177,15 @@ export async function POST(req: NextRequest) {
     // AUTHENTICATED so behind-login pages are reached (not just login redirects).
     const auth = await resolveAuth(workspaceId, manifest);
     const scanBaseUrl = auth?.baseUrl ?? manifest.baseUrl;
+    // SSRF: never let a scan fetch an internal/loopback/metadata address.
+    try {
+      await assertScannableUrl(scanBaseUrl);
+    } catch (e) {
+      if (e instanceof SsrfBlockedError) {
+        return NextResponse.json({ error: "blocked_target", detail: e.message }, { status: 400 });
+      }
+      throw e;
+    }
     const discovered = await discoverRoutes(scanBaseUrl);
     const routes = mergeManifest(manifest.routes, discovered);
     trackEvent("platform.scan_started", user.id, user.role, {
