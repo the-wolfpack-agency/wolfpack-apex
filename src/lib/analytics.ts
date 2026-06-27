@@ -1205,6 +1205,11 @@ export type InstinctEventType =
   // seq-509 concurrency fork) at a specific seq, opening a new chain segment.
   // verifyChain honors anchored seqs; tamper at any other seq still fails.
   | "system.audit_log_reanchored"
+  // Cron self-heal: authentic legacy concurrency forks (rows valid against their
+  // own stored prev_hash, mis-linked by the old pre-advisory-lock race) were
+  // auto-reconciled in one pass. { reconciled, fork_count, checked_count }.
+  // Genuine tamper is NEVER auto-reconciled (refused -> audit_log_tamper_suspected).
+  | "system.audit_log_forks_reconciled"
   // Scheduled hash-chain verification (cron) — emitted on every run with
   // { valid, checked }. Distinct from audit_log_tamper_suspected (failure-only,
   // manual/admin path); this records that the unattended verifier ran at all.

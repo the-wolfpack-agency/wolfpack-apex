@@ -32,7 +32,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { safeQuery } from "@/lib/db";
-import { verifyChain } from "@/lib/audit-log";
+import { verifyChain, reconcileChain } from "@/lib/audit-log";
 import { trackEvent } from "@/lib/analytics";
 import {
   requireCapability,
@@ -85,7 +85,7 @@ async function alertAdminsChainBroken(detail: {
     const body =
       `The compliance audit hash chain failed verification at seq ` +
       `${detail.brokenAt} (${detail.reason}). ${detail.checkedCount} entries ` +
-      `were checked. This is a break-glass tamper signal — investigate now.`;
+      `were checked. This is a break-glass tamper signal: investigate now.`;
     for (const row of rows) {
       try {
         const member: TeamMember = {
@@ -133,6 +133,79 @@ async function alertAdminsChainBroken(detail: {
   return recipientCount;
 }
 
+/**
+ * Inform admins that legacy concurrency forks were auto-reconciled. HIGH, not
+ * critical: these are cryptographically authentic rows that were only mis-linked
+ * by the pre-advisory-lock race, now acknowledged + re-verified. Surfacing it
+ * (rather than silently healing) keeps a human in the loop without the alert
+ * fatigue that a critical-per-hour would cause. Same capability-resolved fanout
+ * as the tamper alert. Never throws into the cron path.
+ */
+async function alertAdminsForksReconciled(detail: {
+  reconciled: number;
+  forkSeqs: number[];
+  nowValid: boolean;
+}): Promise<number> {
+  let recipientCount = 0;
+  try {
+    const { rows } = await safeQuery<ActiveMemberRow>(
+      `SELECT id, email, name, role, workspace_id
+         FROM instinct_team_members
+        WHERE is_active = true`,
+    );
+    const preview = detail.forkSeqs.slice(0, 10).join(", ");
+    const more = detail.forkSeqs.length > 10 ? ` (+${detail.forkSeqs.length - 10} more)` : "";
+    const body =
+      `${detail.reconciled} legacy concurrency fork${detail.reconciled === 1 ? "" : "s"} ` +
+      `in the audit chain ${detail.reconciled === 1 ? "was" : "were"} auto-reconciled ` +
+      `(authentic rows mis-linked by the old pre-lock race, now acknowledged). ` +
+      `Seqs: ${preview}${more}. Chain re-verified ${detail.nowValid ? "VALID" : "still failing, review needed"}.`;
+    for (const row of rows) {
+      try {
+        const member: TeamMember = {
+          id: row.id,
+          email: row.email ?? "",
+          name: row.name ?? "",
+          role: (row.role as TeamMember["role"]) ?? "ops",
+          workspaceId: row.workspace_id ?? "",
+          created_at: "",
+        };
+        const { capabilities } = await effectiveCapabilitiesFor(member);
+        if (!capabilities.has(AUDIT_ADMIN_CAPABILITY)) continue;
+        await notify({
+          userId: row.id,
+          category: "security",
+          priority: "high",
+          title: "Audit chain: legacy forks auto-reconciled",
+          body,
+          actionUrl: "/admin/audit-log",
+          actionLabel: "Open audit log",
+          source: "audit-log-verify",
+          sourceId: `reconciled-${detail.forkSeqs[0] ?? 0}`,
+          metadata: {
+            reconciled: detail.reconciled,
+            fork_seqs: detail.forkSeqs.slice(0, 50),
+            now_valid: detail.nowValid,
+          },
+          dedup: true,
+        });
+        recipientCount += 1;
+      } catch (err) {
+        console.warn(
+          `[cron/audit-log-verify] reconcile-notify skip ${row.id}:`,
+          (err as Error).message,
+        );
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[cron/audit-log-verify] reconcile notify fanout failed:",
+      (err as Error).message,
+    );
+  }
+  return recipientCount;
+}
+
 async function runVerify(
   actorId: string,
   actorRole: string,
@@ -150,28 +223,62 @@ async function runVerify(
       return NextResponse.json({ ok: true, valid: true, checked: result.checkedCount });
     }
 
-    // INVALID is a real signal, not an error. Fire the existing tamper event,
-    // alert the admins at critical priority, and return the failure detail.
-    const brokenAt = result.brokenAt ?? -1;
-    const reason = result.reason ?? "unknown";
-    trackEvent("system.audit_log_tamper_suspected", actorId, actorRole, {
-      broken_at: brokenAt,
-      reason,
-      checked_count: result.checkedCount,
+    // INVALID. Before alerting, classify the WHOLE chain: authentic concurrency
+    // forks (pre-advisory-lock legacy races, cryptographically valid rows that
+    // were just mis-linked) self-heal; genuine content tampering does not.
+    const recon = await reconcileChain({ user_id: actorId, role: actorRole });
+
+    if (recon.refused) {
+      // Real tamper present (a rewritten row). NOTHING was anchored. This is the
+      // break-glass signal: critical alert, no self-heal.
+      const brokenAt = recon.tamperSeqs[0] ?? result.brokenAt ?? -1;
+      trackEvent("system.audit_log_tamper_suspected", actorId, actorRole, {
+        broken_at: brokenAt,
+        reason: "entry_hash_mismatch",
+        checked_count: recon.checkedCount,
+      });
+      const alerted = await alertAdminsChainBroken({
+        brokenAt,
+        reason: "entry_hash_mismatch (content tamper)",
+        checkedCount: recon.checkedCount,
+      });
+      return NextResponse.json({
+        ok: true,
+        valid: false,
+        brokenAt,
+        reason: "entry_hash_mismatch",
+        tamperSeqs: recon.tamperSeqs,
+        checked: recon.checkedCount,
+        alerted,
+      });
+    }
+
+    // Only authentic forks: they have now been acknowledged. Record the
+    // self-heal as a learning signal, notify admins at HIGH (not critical) so
+    // benign legacy forks no longer cause alert fatigue, and re-verify to
+    // confirm the chain reads clean.
+    trackEvent("system.audit_log_forks_reconciled", actorId, actorRole, {
+      reconciled: recon.reconciled,
+      fork_count: recon.forkSeqs.length,
+      checked_count: recon.checkedCount,
     });
-    const alerted = await alertAdminsChainBroken({
-      brokenAt,
-      reason,
-      checkedCount: result.checkedCount,
-    });
+    const reVerify = await verifyChain();
+    let notified = 0;
+    if (recon.reconciled > 0) {
+      notified = await alertAdminsForksReconciled({
+        reconciled: recon.reconciled,
+        forkSeqs: recon.forkSeqs,
+        nowValid: reVerify.valid,
+      });
+    }
 
     return NextResponse.json({
       ok: true,
-      valid: false,
-      brokenAt,
-      reason,
-      checked: result.checkedCount,
-      alerted,
+      valid: reVerify.valid,
+      reconciled: recon.reconciled,
+      forkSeqs: recon.forkSeqs,
+      checked: reVerify.checkedCount,
+      notified,
     });
   } catch (err) {
     // Recoverable conditions (no DB, transient query failure) must not flap the

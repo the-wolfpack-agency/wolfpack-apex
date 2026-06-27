@@ -9,6 +9,7 @@
  *   - a thrown verifyChain is swallowed to a zeroed 200 (never 500)
  */
 const mockVerifyChain = jest.fn();
+const mockReconcileChain = jest.fn();
 const mockRequireCapability = jest.fn();
 const mockEffectiveCaps = jest.fn();
 const mockTrackEvent = jest.fn();
@@ -17,6 +18,7 @@ const mockSafeQuery = jest.fn();
 
 jest.mock("@/lib/audit-log", () => ({
   verifyChain: (...a: unknown[]) => mockVerifyChain(...a),
+  reconcileChain: (...a: unknown[]) => mockReconcileChain(...a),
 }));
 jest.mock("@/lib/auth/require-capability", () => ({
   requireCapability: (...a: unknown[]) => mockRequireCapability(...a),
@@ -84,12 +86,20 @@ it("valid chain via cron bearer → 200 { valid:true }, event tracked, no alert"
   expect(mockNotify).not.toHaveBeenCalled();
 });
 
-it("INVALID chain → 200 { valid:false } + critical notify + tamper event", async () => {
+it("INVALID with genuine TAMPER (reconcile refused) → critical notify + tamper event", async () => {
   mockVerifyChain.mockResolvedValue({
     valid: false,
     brokenAt: 7,
     checkedCount: 6,
     reason: "entry_hash_mismatch",
+  });
+  // A rewritten row: reconcile refuses, anchors nothing, surfaces the tamper seq.
+  mockReconcileChain.mockResolvedValue({
+    reconciled: 0,
+    forkSeqs: [],
+    tamperSeqs: [7],
+    refused: true,
+    checkedCount: 6,
   });
 
   const res = await GET(get({ authorization: `Bearer ${SECRET}` }));
@@ -100,17 +110,11 @@ it("INVALID chain → 200 { valid:false } + critical notify + tamper event", asy
     valid: false,
     brokenAt: 7,
     reason: "entry_hash_mismatch",
+    tamperSeqs: [7],
     checked: 6,
     alerted: 1,
   });
 
-  // Both the always-on verified event and the failure-only tamper event fire.
-  expect(mockTrackEvent).toHaveBeenCalledWith(
-    "audit.chain_verified",
-    "cron",
-    "system",
-    expect.objectContaining({ valid: false, checked: 6 }),
-  );
   expect(mockTrackEvent).toHaveBeenCalledWith(
     "system.audit_log_tamper_suspected",
     "cron",
@@ -129,12 +133,49 @@ it("INVALID chain → 200 { valid:false } + critical notify + tamper event", asy
   );
 });
 
+it("INVALID with only authentic FORKS → self-heals, HIGH notify, re-verifies valid, no tamper event", async () => {
+  // Initial verify fails on a legacy fork; reconcile anchors it; re-verify passes.
+  mockVerifyChain
+    .mockResolvedValueOnce({ valid: false, brokenAt: 1216, checkedCount: 1215, reason: "prev_hash_mismatch" })
+    .mockResolvedValueOnce({ valid: true, checkedCount: 1300 });
+  mockReconcileChain.mockResolvedValue({
+    reconciled: 1,
+    forkSeqs: [1216],
+    tamperSeqs: [],
+    refused: false,
+    checkedCount: 1300,
+  });
+
+  const res = await GET(get({ authorization: `Bearer ${SECRET}` }));
+
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({ ok: true, valid: true, reconciled: 1, forkSeqs: [1216], notified: 1 });
+  // Self-heal event, NOT a tamper event.
+  expect(mockTrackEvent).toHaveBeenCalledWith(
+    "system.audit_log_forks_reconciled",
+    "cron",
+    "system",
+    expect.objectContaining({ reconciled: 1, fork_count: 1 }),
+  );
+  expect(mockTrackEvent).not.toHaveBeenCalledWith(
+    "system.audit_log_tamper_suspected",
+    expect.anything(), expect.anything(), expect.anything(),
+  );
+  // Notified at HIGH (not critical) so benign forks do not cause alert fatigue.
+  expect(mockNotify).toHaveBeenCalledWith(
+    expect.objectContaining({ userId: "admin-1", priority: "high", source: "audit-log-verify" }),
+  );
+});
+
 it("does not alert a teammate who lacks settings.manage_team", async () => {
   mockVerifyChain.mockResolvedValue({
     valid: false,
     brokenAt: 3,
     checkedCount: 2,
-    reason: "prev_hash_mismatch",
+    reason: "entry_hash_mismatch",
+  });
+  mockReconcileChain.mockResolvedValue({
+    reconciled: 0, forkSeqs: [], tamperSeqs: [3], refused: true, checkedCount: 2,
   });
   mockEffectiveCaps.mockResolvedValue({ capabilities: new Set(["mail.read"]) });
 

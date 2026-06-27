@@ -15,7 +15,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
-import { reanchorChain } from "@/lib/audit-log";
+import { reanchorChain, reconcileChain } from "@/lib/audit-log";
 
 export async function POST(req: NextRequest) {
   const auth = await requireCapability(req, "settings.manage_team");
@@ -24,7 +24,15 @@ export async function POST(req: NextRequest) {
 
   const body = await req
     .json()
-    .catch(() => ({} as { seq?: unknown; reason?: unknown }));
+    .catch(() => ({} as { seq?: unknown; reason?: unknown; mode?: unknown }));
+
+  // mode: "reconcile" drains the WHOLE backlog of authentic concurrency forks in
+  // one click (no per-seq whack-a-mole), refusing if any genuine tamper exists.
+  // Default (single seq) stays for explicit, one-off acknowledgements.
+  if ((body as { mode?: unknown }).mode === "reconcile") {
+    const recon = await reconcileChain({ user_id: user.id, role: user.role });
+    return NextResponse.json(recon, { status: recon.refused ? 409 : 200 });
+  }
 
   const seqRaw = (body as { seq?: unknown }).seq;
   const reasonRaw = (body as { reason?: unknown }).reason;

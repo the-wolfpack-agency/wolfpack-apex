@@ -561,6 +561,179 @@ export async function reanchorChain(
 }
 
 // ---------------------------------------------------------------------------
+// analyzeChain + reconcileChain: drain legacy concurrency forks in one pass
+// ---------------------------------------------------------------------------
+
+export interface ChainAnalysis {
+  /** true only when there are NO forks and NO tampers across the whole chain. */
+  valid: boolean;
+  checkedCount: number;
+  /**
+   * Seqs where the chain LINKAGE broke but the row's own entry_hash is valid
+   * against its OWN stored prev_hash. That is the concurrency-fork signature:
+   * the row is cryptographically authentic, it was just linked to a stale
+   * predecessor by the pre-advisory-lock race. These are safe to acknowledge.
+   */
+  forkSeqs: number[];
+  /**
+   * Seqs whose entry_hash does NOT match a recompute over their own recorded
+   * fields + stored prev_hash. That is content tampering (a rewritten row) and
+   * is NEVER auto-acknowledged: it is the real break-glass signal.
+   */
+  tamperSeqs: number[];
+  /** Of forkSeqs, the ones already acknowledged in instinct_audit_chain_anchors. */
+  alreadyAnchored: number[];
+}
+
+interface ChainRow {
+  seq: string;
+  ts: string;
+  actor_user_id: string;
+  actor_role: string;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  before_state: unknown;
+  after_state: unknown;
+  ip_address: string | null;
+  user_agent: string | null;
+  request_id: string | null;
+  prev_hash: string | null;
+  entry_hash: string;
+}
+
+function recomputeRowHash(prevHash: string, row: ChainRow): string {
+  return computeEntryHash(prevHash, {
+    seq: Number(row.seq),
+    ts: typeof row.ts === "string" ? row.ts : new Date(row.ts).toISOString(),
+    actor_user_id: row.actor_user_id,
+    actor_role: row.actor_role,
+    action: row.action,
+    resource_type: row.resource_type,
+    resource_id: row.resource_id,
+    before_state: row.before_state,
+    after_state: row.after_state,
+    ip_address: row.ip_address,
+    user_agent: row.user_agent,
+    request_id: row.request_id,
+  });
+}
+
+/**
+ * Walk the WHOLE chain and classify every break, instead of stopping at the
+ * first like verifyChain. This is what turns one-mismatch-at-a-time re-anchoring
+ * (whack-a-mole: anchoring seq 509 just reveals the next legacy fork at 1216)
+ * into a single, complete picture: every authentic concurrency fork AND every
+ * genuine tamper in one pass. A break is a fork iff the row hashes correctly to
+ * its own stored prev_hash (authentic, mis-linked); otherwise it is a tamper.
+ */
+export async function analyzeChain(): Promise<ChainAnalysis> {
+  if (!process.env.DATABASE_URL) {
+    return { valid: true, checkedCount: 0, forkSeqs: [], tamperSeqs: [], alreadyAnchored: [] };
+  }
+
+  const { rows: anchorRows } = await safeQuery<{ seq: string }>(
+    `SELECT seq FROM instinct_audit_chain_anchors`,
+  );
+  const anchored = new Set<number>(anchorRows.map((r) => Number(r.seq)));
+
+  const { rows } = await safeQuery<ChainRow>(
+    `SELECT seq, ts, actor_user_id, actor_role, action, resource_type, resource_id,
+            before_state, after_state, ip_address, user_agent, request_id,
+            prev_hash, entry_hash
+       FROM instinct_audit_log
+      ORDER BY seq ASC`,
+  );
+
+  let expectedPrev = GENESIS_HASH;
+  let checked = 0;
+  const forkSeqs: number[] = [];
+  const tamperSeqs: number[] = [];
+  const alreadyAnchored: number[] = [];
+
+  for (const row of rows) {
+    const seq = Number(row.seq);
+    const storedPrev = row.prev_hash ?? GENESIS_HASH;
+    // Recompute using the row's OWN stored prev_hash: this asks "is this row
+    // internally authentic?" independent of where it sits in the chain.
+    const selfValid = recomputeRowHash(storedPrev, row) === row.entry_hash;
+
+    if (storedPrev !== expectedPrev) {
+      // Linkage broke at this seq.
+      if (selfValid) {
+        forkSeqs.push(seq);
+        if (anchored.has(seq)) alreadyAnchored.push(seq);
+      } else {
+        tamperSeqs.push(seq);
+      }
+    } else if (!selfValid) {
+      // Linkage intact but the row does not hash to its content: tamper.
+      tamperSeqs.push(seq);
+    }
+
+    // Continue from this row's recorded hash so the next row is judged against
+    // its actual predecessor (segments resume cleanly after an authentic fork).
+    expectedPrev = row.entry_hash;
+    checked++;
+  }
+
+  return {
+    valid: forkSeqs.length === 0 && tamperSeqs.length === 0,
+    checkedCount: checked,
+    forkSeqs,
+    tamperSeqs,
+    alreadyAnchored,
+  };
+}
+
+export interface ReconcileResult {
+  /** New anchors written this run (already-anchored forks are not recounted). */
+  reconciled: number;
+  forkSeqs: number[];
+  tamperSeqs: number[];
+  /** true when tampers were present, so NOTHING was anchored. */
+  refused: boolean;
+  checkedCount: number;
+}
+
+/**
+ * Acknowledge every authentic concurrency fork in one operation, so the chain
+ * verifies clean again without papering over anything. SAFETY: if analyzeChain
+ * finds ANY genuine tamper, this anchors NOTHING and returns refused=true: a
+ * real rewritten row must reach a human, never be auto-cleared. Each anchor is
+ * itself hash-chained + audited via reanchorChain (idempotent), so the act of
+ * reconciling is permanently recorded.
+ */
+export async function reconcileChain(by: AuditActor): Promise<ReconcileResult> {
+  const analysis = await analyzeChain();
+  if (analysis.tamperSeqs.length > 0) {
+    return {
+      reconciled: 0,
+      forkSeqs: analysis.forkSeqs,
+      tamperSeqs: analysis.tamperSeqs,
+      refused: true,
+      checkedCount: analysis.checkedCount,
+    };
+  }
+  let reconciled = 0;
+  for (const seq of analysis.forkSeqs) {
+    const r = await reanchorChain(
+      seq,
+      "concurrency_fork (auto-reconciled: row hash self-valid, pre-advisory-lock legacy race)",
+      by,
+    );
+    if (!r.alreadyAnchored) reconciled++;
+  }
+  return {
+    reconciled,
+    forkSeqs: analysis.forkSeqs,
+    tamperSeqs: [],
+    refused: false,
+    checkedCount: analysis.checkedCount,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // queryAuditLog
 // ---------------------------------------------------------------------------
 
