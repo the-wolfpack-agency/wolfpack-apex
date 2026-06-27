@@ -63,6 +63,14 @@ describe("validateScanTargetInput (pure)", () => {
     });
   });
 
+  it("rejects an internal/loopback/metadata IP literal with baseUrl_private", () => {
+    for (const baseUrl of ["http://169.254.169.254/", "http://127.0.0.1:8080/", "http://10.1.2.3/"]) {
+      expect(validateScanTargetInput({ baseUrl, routes: [] })).toEqual({ ok: false, error: "baseUrl_private" });
+    }
+    // a public host is still accepted (DNS-resolving private IPs are caught at execution by the SSRF guard)
+    expect(validateScanTargetInput({ baseUrl: "https://acme.example.com", routes: [] }).ok).toBe(true);
+  });
+
   it("rejects a non-http(s) scheme with baseUrl_scheme", () => {
     expect(validateScanTargetInput({ baseUrl: "ftp://x", routes: [] })).toEqual({
       ok: false,

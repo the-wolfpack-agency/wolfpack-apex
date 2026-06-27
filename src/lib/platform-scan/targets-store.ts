@@ -6,7 +6,9 @@
  * every capability (scan / profile / recommend / report / pentest) works against
  * an onboarded client with no code change.
  */
+import net from "node:net";
 import { safeQuery, writeQuery } from "@/lib/db";
+import { isPrivateIp } from "./ssrf-guard";
 import type { ScanManifest } from "./manifests";
 
 export interface ValidatedTarget {
@@ -33,6 +35,11 @@ export function validateScanTargetInput(input: unknown): ValidatedTarget | Inval
     return { ok: false, error: "baseUrl_invalid" };
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") return { ok: false, error: "baseUrl_scheme" };
+  // Reject an obvious internal/loopback/metadata IP literal at registration time
+  // (defense in depth: the SSRF guard also blocks it at scan/probe execution,
+  // incl. hostnames that resolve to a private IP, but failing fast here is clearer).
+  const hostLiteral = url.hostname.toLowerCase();
+  if (net.isIP(hostLiteral) && isPrivateIp(hostLiteral)) return { ok: false, error: "baseUrl_private" };
 
   // routes: array of { path, journey, auth }
   const routes = Array.isArray(x.routes) ? x.routes : [];
