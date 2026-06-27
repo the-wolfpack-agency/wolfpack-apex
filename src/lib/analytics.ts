@@ -601,6 +601,10 @@ export type InstinctEventType =
   | "pentest.info_disclosure_completed"
   // pentest.engagement_run { platform, casesRun, confirmed }
   | "pentest.engagement_run"
+  // pentest.auth_bypass_completed { platform, cases, confirmed }
+  | "pentest.auth_bypass_completed"
+  // pentest.injection_completed { platform, cases, confirmed }
+  | "pentest.injection_completed"
   | "platform.scan_started"
   | "platform.scan_finding_detected"
   | "platform.scan_completed"
