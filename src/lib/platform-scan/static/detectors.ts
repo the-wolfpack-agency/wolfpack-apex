@@ -24,7 +24,11 @@ interface SourceFile {
 
 const FETCH_OPEN = /\bfetch\s*\(/;
 const CONSUME = /\.(json|text)\s*\(/;
-const GUARD = /(\.ok\b|\.status\b|res\.ok|response\.ok|if\s*\(\s*!)/;
+// A response is NOT silently consumed as data when the code checks ok/status,
+// reads it as headers/blob/text, or branches on `if (!...)`. (Reading headers /
+// blob / text means the caller deliberately handles the raw response, e.g. an
+// auth route reading set-cookie — not the .json()-as-data silent-blank pattern.)
+const GUARD = /(\.ok\b|\.status\b|res\.ok|response\.ok|\.headers\b|\.blob\s*\(|\.text\s*\(|if\s*\(\s*!)/;
 
 /**
  * silentFetch: a fetch(...) whose response is consumed via .json()/.text()
