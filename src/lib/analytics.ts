@@ -579,6 +579,8 @@ export type InstinctEventType =
   | "platform.recommendation_triaged"
   // platform.engagement_run { platform, findings, criticals, auto_resolved, recommendations }
   | "platform.engagement_run"
+  // platform.remediation_pr_opened { platform, key, pr_url, gate_outcome }
+  | "platform.remediation_pr_opened"
   | "platform.scan_started"
   | "platform.scan_finding_detected"
   | "platform.scan_completed"

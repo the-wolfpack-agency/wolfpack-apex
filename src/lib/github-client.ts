@@ -99,14 +99,18 @@ export async function putFile(
   path: string,
   content: string | Buffer,
   message: string,
+  branch?: string,
 ): Promise<void> {
-  // Need to look up existing sha so we don't 422 on overwrite.
+  // Need to look up existing sha so we don't 422 on overwrite. Scope the lookup
+  // to the target branch so a file that exists on the base but not the new branch
+  // is created, not 422'd.
   let sha: string | undefined;
   try {
+    const q = branch ? `?ref=${encodeURIComponent(branch)}` : "";
     const existing = await gh<{ sha: string }>(
       client,
       "GET",
-      `/repos/${repoFullName}/contents/${path}`,
+      `/repos/${repoFullName}/contents/${path}${q}`,
     );
     sha = existing.sha;
   } catch {
@@ -119,6 +123,50 @@ export async function putFile(
     message,
     content: base64,
     sha,
+    ...(branch ? { branch } : {}),
+  });
+}
+
+/** Create a new branch off `fromBranch` (defaults to the repo's default branch).
+ *  Idempotent-ish: a 422 (ref exists) is swallowed so a retried remediation reuses
+ *  the branch instead of failing. */
+export async function createBranch(
+  client: GithubClient,
+  repoFullName: string,
+  newBranch: string,
+  fromBranch?: string,
+): Promise<void> {
+  const base = fromBranch ?? (await gh<{ default_branch: string }>(client, "GET", `/repos/${repoFullName}`)).default_branch;
+  const ref = await gh<{ object: { sha: string } }>(client, "GET", `/repos/${repoFullName}/git/ref/heads/${encodeURIComponent(base)}`);
+  try {
+    await gh(client, "POST", `/repos/${repoFullName}/git/refs`, {
+      ref: `refs/heads/${newBranch}`,
+      sha: ref.object.sha,
+    });
+  } catch (err) {
+    if (!/422/.test((err as Error).message)) throw err; // ref already exists -> reuse
+  }
+}
+
+export interface OpenedPullRequest {
+  html_url: string;
+  number: number;
+}
+
+/** Open a pull request. NEVER merges: a PR is the human-review checkpoint. */
+export async function openPullRequest(
+  client: GithubClient,
+  repoFullName: string,
+  head: string,
+  base: string,
+  title: string,
+  body: string,
+): Promise<OpenedPullRequest> {
+  return gh<OpenedPullRequest>(client, "POST", `/repos/${repoFullName}/pulls`, {
+    title,
+    head,
+    base,
+    body,
   });
 }
 

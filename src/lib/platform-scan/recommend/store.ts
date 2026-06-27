@@ -13,6 +13,8 @@ export interface RecommendationRow extends AutomationRecommendation {
   platform: string;
   status: RecStatus;
   createdAt: string;
+  /** The review-gated remediation PR opened for this recommendation, if any. */
+  prUrl?: string | null;
 }
 
 export async function saveRecommendations(
@@ -52,6 +54,7 @@ interface DbRow {
   evidence: Record<string, string | number | boolean | null> | string;
   status: string;
   created_at: string | Date;
+  pr_url?: string | null;
 }
 
 function toRow(r: DbRow): RecommendationRow {
@@ -68,6 +71,7 @@ function toRow(r: DbRow): RecommendationRow {
     evidence: typeof r.evidence === "string" ? JSON.parse(r.evidence) : r.evidence,
     status: String(r.status) as RecStatus,
     createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+    prUrl: r.pr_url ?? null,
   };
 }
 
@@ -76,7 +80,7 @@ export async function listRecommendations(
   opts?: { platform?: string; status?: RecStatus },
 ): Promise<RecommendationRow[]> {
   const { rows } = await safeQuery<DbRow>(
-    `SELECT id, platform, key, category, priority, title, rationale, suggested_action, source, evidence, status, created_at
+    `SELECT id, platform, key, category, priority, title, rationale, suggested_action, source, evidence, status, created_at, pr_url
        FROM instinct_automation_recommendations
       WHERE workspace_id = $1
         AND ($2::text IS NULL OR platform = $2)
@@ -86,6 +90,35 @@ export async function listRecommendations(
     [workspaceId, opts?.platform ?? null, opts?.status ?? null],
   );
   return rows.map(toRow);
+}
+
+/** Fetch one recommendation by id (for the remediation flow). */
+export async function getRecommendationById(workspaceId: string, id: string): Promise<RecommendationRow | null> {
+  const { rows } = await safeQuery<DbRow>(
+    `SELECT id, platform, key, category, priority, title, rationale, suggested_action, source, evidence, status, created_at, pr_url
+       FROM instinct_automation_recommendations
+      WHERE workspace_id = $1 AND id = $2
+      LIMIT 1`,
+    [workspaceId, id],
+  );
+  return rows[0] ? toRow(rows[0]) : null;
+}
+
+/** Record the remediation PR opened for a recommendation; marks it accepted. */
+export async function setRecommendationPr(
+  workspaceId: string,
+  id: string,
+  prUrl: string,
+  decidedBy: string,
+): Promise<RecommendationRow | null> {
+  const { rows } = await writeQuery<DbRow>(
+    `UPDATE instinct_automation_recommendations
+        SET pr_url = $3, pr_opened_at = NOW(), status = 'accepted', decided_by = $4, decided_at = NOW()
+      WHERE workspace_id = $1 AND id = $2
+      RETURNING id, platform, key, category, priority, title, rationale, suggested_action, source, evidence, status, created_at, pr_url`,
+    [workspaceId, id, prUrl, decidedBy],
+  );
+  return rows[0] ? toRow(rows[0]) : null;
 }
 
 export async function triageRecommendation(
