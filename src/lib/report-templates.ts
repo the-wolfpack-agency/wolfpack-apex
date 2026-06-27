@@ -12,6 +12,14 @@ import * as path from "path";
 import { safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { saveDocument } from "@/lib/doc-generator";
+import {
+  genEngagementSummary,
+  genSecurityFindings as genEngSecurityFindings,
+  genDiagnosedIssues as genEngDiagnosedIssues,
+  genWorkPerformed as genEngWorkPerformed,
+  genScanCoverage as genEngScanCoverage,
+  genRecommendations as genEngRecommendations,
+} from "@/lib/report-sections-engagement";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,6 +35,9 @@ export interface ReportContext {
   repoPath?: string;
   userId?: string;
   userRole?: string;
+  /** Workspace whose platform-scan findings / scans / audit the data-backed
+   *  engagement sections read. Defaults to "default" when unset. */
+  workspaceId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -956,6 +967,21 @@ async function genRecommendations(ctx: ReportContext): Promise<string> {
 // ---------------------------------------------------------------------------
 
 const TEMPLATES: ReportTemplate[] = [
+  {
+    id: "security_engagement",
+    name: "Security Engagement Report",
+    description: "Client-engineer deliverable: posture grade, security findings, diagnosed issues, audited work performed, scan coverage, and prioritized recommendations. Every section is data-backed from the live scan + audit stores.",
+    category: "client",
+    sections: [
+      { id: "engagement_summary", title: "Executive Summary", description: "Posture grade + open-finding counts + coverage", dataSource: "database", generator: genEngagementSummary },
+      { id: "security_findings", title: "Security Findings (Critical + High)", description: "Open critical/high security findings with remediation", dataSource: "database", generator: genEngSecurityFindings },
+      { id: "diagnosed_issues", title: "Diagnosed Issues", description: "Open functional, performance, and UX findings", dataSource: "database", generator: genEngDiagnosedIssues },
+      { id: "work_performed", title: "Work Performed", description: "Audited actions from the hash-chained log", dataSource: "database", generator: genEngWorkPerformed },
+      { id: "scan_coverage", title: "Scan Coverage", description: "Platforms, routes, and findings per scan run", dataSource: "database", generator: genEngScanCoverage },
+      { id: "engagement_recommendations", title: "Recommendations", description: "Prioritized next steps derived from findings", dataSource: "database", generator: genEngRecommendations },
+    ],
+    defaultIncluded: ["engagement_summary", "security_findings", "diagnosed_issues", "work_performed", "scan_coverage", "engagement_recommendations"],
+  },
   {
     id: "platform_capabilities",
     name: "Platform Capabilities",

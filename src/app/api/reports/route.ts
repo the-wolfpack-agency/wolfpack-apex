@@ -140,6 +140,9 @@ export async function POST(req: NextRequest) {
       repoPath: (context?.repoPath as string) || undefined,
       userId: user.id,
       userRole: user.role,
+      // Scope the data-backed engagement sections to the caller's workspace
+      // (the generators fall back to "default" when this is absent).
+      workspaceId: (user as { workspaceId?: string }).workspaceId ?? undefined,
     };
 
     const report = await generateReport(templateId, sections, reportContext);

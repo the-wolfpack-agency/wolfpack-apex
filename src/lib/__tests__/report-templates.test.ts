@@ -112,10 +112,15 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("getTemplates", () => {
-  test("returns all 7 templates (6 built-in + Create Your Own)", () => {
+  test("returns all 8 templates (7 built-in + Create Your Own)", () => {
     const templates = getTemplates();
-    expect(templates).toHaveLength(7);
+    expect(templates).toHaveLength(8);
     expect(templates.find((t) => t.id === "custom")).toBeTruthy();
+    // The client Security Engagement deliverable is registered + fully data-backed.
+    const eng = templates.find((t) => t.id === "security_engagement");
+    expect(eng).toBeTruthy();
+    expect(eng?.category).toBe("client");
+    expect(eng?.sections.every((s) => s.dataSource === "database")).toBe(true);
   });
 
   test("all templates have required fields", () => {
