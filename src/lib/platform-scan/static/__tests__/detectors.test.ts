@@ -55,6 +55,33 @@ describe("silentFetch", () => {
     ].join("\n");
     expect(silentFetch({ path: "app/page.tsx", content })).toHaveLength(0);
   });
+
+  it("does NOT fire for the read-body-then-check idiom even with a long request body", () => {
+    // A long POST body pushes .json() to the fetch-window edge and the
+    // `if (!res.ok)` guard one line past it. The consumption-relative guard
+    // window must still recognize the guard (this is the real credit/pull shape).
+    const content = [
+      "async function submit() {",
+      "  const res = await fetch('/api/admin/credit/pull', {",
+      "    method: 'POST',",
+      "    headers: { 'Content-Type': 'application/json' },",
+      "    body: JSON.stringify({",
+      "      applicant_name: name,",
+      "      bureau: bureau,",
+      "      pull_type: pullType,",
+      "      lead_id: leadId,",
+      "      consent_obtained: consent,",
+      "    }),",
+      "  });",
+      "  const data = (await res.json()) as { error?: string };",
+      "  if (!res.ok) {",
+      "    setError(data.error ?? 'failed');",
+      "    return;",
+      "  }",
+      "}",
+    ].join("\n");
+    expect(silentFetch({ path: "app/admin/credit/page.tsx", content })).toHaveLength(0);
+  });
 });
 
 // rawAuthedFetchInClient was REMOVED (apex-specific convention, redundant with

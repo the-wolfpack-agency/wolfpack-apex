@@ -27,7 +27,7 @@ const CONSUME = /\.(json|text)\s*\(/;
 // A response is NOT silently consumed as data when the code checks ok/status,
 // reads it as headers/blob/text, or branches on `if (!...)`. (Reading headers /
 // blob / text means the caller deliberately handles the raw response, e.g. an
-// auth route reading set-cookie — not the .json()-as-data silent-blank pattern.)
+// auth route reading set-cookie, not the .json()-as-data silent-blank pattern.)
 const GUARD = /(\.ok\b|\.status\b|res\.ok|response\.ok|\.headers\b|\.blob\s*\(|\.text\s*\(|if\s*\(\s*!)/;
 
 /**
@@ -51,13 +51,20 @@ export function silentFetch(file: SourceFile): ScanFinding[] {
     // Examine the fetch line plus the next WINDOW lines.
     const end = Math.min(lines.length, i + 1 + WINDOW);
     const window = lines.slice(i, end);
-    const windowText = window.join("\n");
 
-    const consumes = window.some((l) => CONSUME.test(l));
-    if (!consumes) continue;
+    const consumeIdx = window.findIndex((l) => CONSUME.test(l));
+    if (consumeIdx === -1) continue;
 
-    // If anything in the window guards the response, it is not silent.
-    if (GUARD.test(windowText)) continue;
+    // Guard search window is the UNION of two spans, so it never covers less
+    // than before: the original fetch+WINDOW span, AND 2 lines past the
+    // consumption line. The latter recognizes the common safe idiom
+    // `const data = await res.json(); if (!res.ok) {...}` (read the body first to
+    // surface the error message, then check ok on the next line) even when a long
+    // request body pushes that pair to the edge of the fetch window. Taking the
+    // max keeps every guard the fetch+WINDOW span already caught.
+    const guardEnd = Math.min(lines.length, Math.max(i + 1 + WINDOW, i + consumeIdx + 3));
+    const guardText = lines.slice(i, guardEnd).join("\n");
+    if (GUARD.test(guardText)) continue;
 
     findings.push({
       route: file.path,
