@@ -67,6 +67,8 @@ export default function AuditLogPage() {
   const [reanchorReason, setReanchorReason] = useState("known concurrent-append fork, pre-advisory-lock");
   const [reanchoring, setReanchoring] = useState(false);
   const [reanchorError, setReanchorError] = useState<string | null>(null);
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileMsg, setReconcileMsg] = useState<string | null>(null);
 
   // Filters
   const [actorFilter, setActorFilter] = useState("");
@@ -189,6 +191,44 @@ export default function AuditLogPage() {
     }
   }
 
+  // Drain the WHOLE backlog of authentic concurrency forks in one click. The
+  // server anchors every self-valid fork at once and refuses (409) if any genuine
+  // tamper is present, so this can never paper over a rewritten row. Re-verifies
+  // after so the banner reflects the now-clean chain.
+  async function onReconcile() {
+    setReconciling(true);
+    setReanchorError(null);
+    setReconcileMsg(null);
+    try {
+      const res = await fetchWithRefresh("/api/admin/audit-log/reanchor", {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "reconcile" }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 409 || body?.refused) {
+        setReanchorError(
+          `Reconcile refused: genuine tamper at seq ${(body?.tamperSeqs ?? []).join(", ") || "?"}. This is a real break-glass signal, not a concurrency fork. Investigate before anchoring.`,
+        );
+        return;
+      }
+      if (!res.ok) {
+        setReanchorError(body?.error ? String(body.error) : `Reconcile failed: ${res.status}`);
+        return;
+      }
+      setReconcileMsg(
+        `Reconciled ${body.reconciled ?? 0} legacy concurrency fork(s)${
+          Array.isArray(body.forkSeqs) && body.forkSeqs.length > 0 ? ` at seq ${body.forkSeqs.join(", ")}` : ""
+        }.`,
+      );
+      await runVerify();
+    } catch (e) {
+      setReanchorError((e as Error).message);
+    } finally {
+      setReconciling(false);
+    }
+  }
+
   async function onExport() {
     const res = await fetchWithRefresh("/api/admin/audit-log/export", { headers: authHeaders() });
     if (!res.ok) {
@@ -274,20 +314,37 @@ export default function AuditLogPage() {
                   color: "var(--wp-text)",
                 }}
               />
-              <button
-                data-testid="audit-reanchor"
-                onClick={onReanchor}
-                disabled={reanchoring}
-                className="self-start px-3 py-2 rounded text-sm"
-                style={{ background: "var(--wp-gold)", color: "var(--wp-dark-base)" }}
-              >
-                {reanchoring
-                  ? "Re-anchoring…"
-                  : `Acknowledge break (re-anchor) at seq ${verifyResult.brokenAt}`}
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  data-testid="audit-reanchor"
+                  onClick={onReanchor}
+                  disabled={reanchoring || reconciling}
+                  className="self-start px-3 py-2 rounded text-sm"
+                  style={{ background: "var(--wp-gold)", color: "var(--wp-dark-base)" }}
+                >
+                  {reanchoring
+                    ? "Re-anchoring…"
+                    : `Acknowledge break (re-anchor) at seq ${verifyResult.brokenAt}`}
+                </button>
+                <button
+                  data-testid="audit-reconcile"
+                  onClick={onReconcile}
+                  disabled={reanchoring || reconciling}
+                  className="self-start px-3 py-2 rounded text-sm"
+                  style={{ background: "var(--wp-dark-elevated)", border: "1px solid var(--wp-gold)", color: "var(--wp-gold)" }}
+                  title="Acknowledge ALL authentic concurrency forks at once; refuses if any genuine tamper is present."
+                >
+                  {reconciling ? "Reconciling…" : "Reconcile all forks"}
+                </button>
+              </div>
               {reanchorError && (
                 <div className="text-xs" style={{ color: "#ef4444" }}>
                   {reanchorError}
+                </div>
+              )}
+              {reconcileMsg && (
+                <div className="text-xs" style={{ color: "#22c55e" }}>
+                  {reconcileMsg}
                 </div>
               )}
             </div>
