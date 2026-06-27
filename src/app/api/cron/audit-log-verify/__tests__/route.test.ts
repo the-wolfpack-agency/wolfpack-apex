@@ -141,6 +141,7 @@ it("INVALID with only authentic FORKS → self-heals, HIGH notify, re-verifies v
   mockReconcileChain.mockResolvedValue({
     reconciled: 1,
     forkSeqs: [1216],
+    newlyReconciledSeqs: [1216],
     tamperSeqs: [],
     refused: false,
     checkedCount: 1300,

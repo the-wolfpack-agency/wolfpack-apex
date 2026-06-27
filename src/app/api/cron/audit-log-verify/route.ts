@@ -267,7 +267,9 @@ async function runVerify(
     if (recon.reconciled > 0) {
       notified = await alertAdminsForksReconciled({
         reconciled: recon.reconciled,
-        forkSeqs: recon.forkSeqs,
+        // List the seqs newly anchored THIS run, so the listed seqs match the
+        // reported count (forkSeqs also includes already-acknowledged forks).
+        forkSeqs: recon.newlyReconciledSeqs,
         nowValid: reVerify.valid,
       });
     }
@@ -276,7 +278,7 @@ async function runVerify(
       ok: true,
       valid: reVerify.valid,
       reconciled: recon.reconciled,
-      forkSeqs: recon.forkSeqs,
+      forkSeqs: recon.newlyReconciledSeqs,
       checked: reVerify.checkedCount,
       notified,
     });

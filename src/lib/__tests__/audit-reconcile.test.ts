@@ -149,6 +149,7 @@ describe("reconcileChain", () => {
     expect(r.refused).toBe(false);
     expect(r.forkSeqs).toEqual([3]);
     expect(r.reconciled).toBe(1);
+    expect(r.newlyReconciledSeqs).toEqual([3]);
     // The anchor INSERT carried the concurrency-fork reason.
     const insertCall = mockQuery.mock.calls.find((c) => String(c[0]).includes("instinct_audit_chain_anchors") && String(c[0]).includes("INSERT"));
     expect(insertCall).toBeTruthy();

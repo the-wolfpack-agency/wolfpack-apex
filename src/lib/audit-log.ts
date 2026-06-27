@@ -689,7 +689,11 @@ export async function analyzeChain(): Promise<ChainAnalysis> {
 export interface ReconcileResult {
   /** New anchors written this run (already-anchored forks are not recounted). */
   reconciled: number;
+  /** Every authentic fork seq found (incl. ones already anchored before this run). */
   forkSeqs: number[];
+  /** Only the seqs newly anchored this run. Matches `reconciled`; use this for
+   *  user-facing messaging so the listed seqs equal the reported count. */
+  newlyReconciledSeqs: number[];
   tamperSeqs: number[];
   /** true when tampers were present, so NOTHING was anchored. */
   refused: boolean;
@@ -710,23 +714,25 @@ export async function reconcileChain(by: AuditActor): Promise<ReconcileResult> {
     return {
       reconciled: 0,
       forkSeqs: analysis.forkSeqs,
+      newlyReconciledSeqs: [],
       tamperSeqs: analysis.tamperSeqs,
       refused: true,
       checkedCount: analysis.checkedCount,
     };
   }
-  let reconciled = 0;
+  const newlyReconciledSeqs: number[] = [];
   for (const seq of analysis.forkSeqs) {
     const r = await reanchorChain(
       seq,
       "concurrency_fork (auto-reconciled: row hash self-valid, pre-advisory-lock legacy race)",
       by,
     );
-    if (!r.alreadyAnchored) reconciled++;
+    if (!r.alreadyAnchored) newlyReconciledSeqs.push(seq);
   }
   return {
-    reconciled,
+    reconciled: newlyReconciledSeqs.length,
     forkSeqs: analysis.forkSeqs,
+    newlyReconciledSeqs,
     tamperSeqs: [],
     refused: false,
     checkedCount: analysis.checkedCount,
