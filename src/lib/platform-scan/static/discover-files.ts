@@ -7,11 +7,20 @@
  * page, route, layout, and client component in the repo, not a static seed.
  *
  * Like defaultReadFile in scan.ts, fetch is injectable (tests pass a stub) and
- * Bearer auth is only attached when GITHUB_TOKEN_WOLFPACK_AGENCY is set, so a
- * private CLIENT repo's tree is readable. NEVER throws — non-200, network error,
- * abort, or malformed JSON all yield `[]`, because an empty discovery is a normal
- * (degraded) outcome that should fall back to the seed, not crash the scan.
+ * Bearer auth is only attached when a token resolves, so a private CLIENT repo's
+ * tree is readable. NEVER throws - non-200, network error, abort, or malformed
+ * JSON all yield `[]`, because an empty discovery is a normal (degraded) outcome
+ * that should fall back to the seed, not crash the scan.
+ *
+ * AUTH: when a `workspaceId` is supplied the token is resolved through the
+ * GitHub App layer (resolveGithubToken) - a per-client installation token when
+ * that client has linked the App, otherwise the existing
+ * GITHUB_TOKEN_WOLFPACK_AGENCY PAT. When no `workspaceId` is supplied the PAT is
+ * used directly, so existing call sites that don't pass one behave EXACTLY as
+ * before (zero regression for our own curated repos).
  */
+
+import { resolveGithubToken } from "@/lib/github-app";
 
 /** Default include patterns: page/route/layout files, app-dir source, and client components. */
 const DEFAULT_INCLUDE: RegExp[] = [
@@ -43,6 +52,11 @@ export interface DiscoverOpts {
   include?: RegExp[];
   max?: number;
   fetchImpl?: typeof fetch;
+  /** When set, the GitHub token is resolved per-client through the GitHub App
+   *  layer (installation token if linked, else the PAT). Absent → PAT only. */
+  workspaceId?: string | null;
+  /** Injectable token resolver for tests. Defaults to resolveGithubToken. */
+  resolveToken?: (workspaceId: string | null | undefined) => Promise<string>;
 }
 
 export async function discoverRepoFiles(
@@ -55,7 +69,17 @@ export async function discoverRepoFiles(
   const include = opts?.include ?? DEFAULT_INCLUDE;
   const max = opts?.max ?? 300;
   const doFetch = opts?.fetchImpl ?? fetch;
-  const token = process.env.GITHUB_TOKEN_WOLFPACK_AGENCY;
+  /* Resolve the token per-client when a workspaceId is supplied (installation
+     token if the client linked the App, else the PAT). With no workspaceId we
+     read the PAT directly - identical to the pre-App behaviour. Resolution
+     never throws; if it ever did we degrade to no auth (public repos only). */
+  let token: string | undefined;
+  if (opts?.workspaceId) {
+    const resolve = opts.resolveToken ?? resolveGithubToken;
+    token = await resolve(opts.workspaceId).catch(() => undefined);
+  } else {
+    token = process.env.GITHUB_TOKEN_WOLFPACK_AGENCY;
+  }
 
   const url = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
   const headers: Record<string, string> = {

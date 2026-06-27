@@ -134,6 +134,81 @@ describe("GET /api/usage", () => {
     expect(body.lifetime.cache_hits).toBe(20 + 7);
   });
 
+  it("over_budget=true when the workspace blew its monthly cap", async () => {
+    mockGetUser.mockReturnValue({ ...USER, workspaceId: "ws_client" });
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM instinct_messages")) {
+        return { rows: [{ total: "0", ai_calls: "0", cache_hits: "0" }] };
+      }
+      if (sql.includes("FROM instinct_events")) {
+        return {
+          rows: [{ prompt: "0", completion: "0", ai_calls: "0", cache_hits: "0" }],
+        };
+      }
+      if (sql.includes("workspace_ai_policy")) {
+        return {
+          rows: [
+            {
+              workspace_id: "ws_client",
+              max_tier: null,
+              provider_override: null,
+              monthly_budget_usd: 100,
+            },
+          ],
+        };
+      }
+      if (sql.includes("v_ai_cost_daily")) {
+        return { rows: [{ month_spend_usd: "150" }] };
+      }
+      return { rows: [] };
+    });
+
+    const { GET } = await import("@/app/api/usage/route");
+    const res = await GET(mkReq("Bearer t"));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.over_budget).toBe(true);
+  });
+
+  it("over_budget=false when spend is under the cap", async () => {
+    mockGetUser.mockReturnValue({ ...USER, workspaceId: "ws_client" });
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("workspace_ai_policy")) {
+        return {
+          rows: [
+            {
+              workspace_id: "ws_client",
+              max_tier: null,
+              provider_override: null,
+              monthly_budget_usd: 100,
+            },
+          ],
+        };
+      }
+      if (sql.includes("v_ai_cost_daily")) {
+        return { rows: [{ month_spend_usd: "20" }] };
+      }
+      return { rows: [{ total: "0", ai_calls: "0", cache_hits: "0", prompt: "0", completion: "0" }] };
+    });
+
+    const { GET } = await import("@/app/api/usage/route");
+    const res = await GET(mkReq("Bearer t"));
+    const body = await res.json();
+    expect(body.over_budget).toBe(false);
+  });
+
+  it("over_budget=false when no budget policy is set (fails open)", async () => {
+    mockGetUser.mockReturnValue({ ...USER, workspaceId: "ws_client" });
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("workspace_ai_policy")) return { rows: [] };
+      return { rows: [{ total: "0", ai_calls: "0", cache_hits: "0", prompt: "0", completion: "0" }] };
+    });
+    const { GET } = await import("@/app/api/usage/route");
+    const res = await GET(mkReq("Bearer t"));
+    const body = await res.json();
+    expect(body.over_budget).toBe(false);
+  });
+
   it("returns zeroes when DATABASE_URL is not set (shadow / preview)", async () => {
     delete process.env.DATABASE_URL;
     mockGetUser.mockReturnValue(USER);

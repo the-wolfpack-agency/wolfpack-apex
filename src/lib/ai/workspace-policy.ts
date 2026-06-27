@@ -149,6 +149,86 @@ export function isOverBudget(
 }
 
 // ---------------------------------------------------------------------------
+// monthSpendUsd
+// ---------------------------------------------------------------------------
+
+/**
+ * Sum the current calendar month's AI spend (USD) for a workspace.
+ *
+ * Reads `v_ai_cost_daily` (migration 166), the chargeback view aggregated
+ * over the append-only `ai.completion` event stream. One column per day, so
+ * we restrict to rows whose `day` falls in the current calendar month and
+ * SUM(cost_usd). Calendar month (date_trunc('month', now())) rather than a
+ * rolling 30-day window so the cap resets on the 1st, matching how a CFO
+ * reads "monthly budget".
+ *
+ * Injectable queryFn keeps the helper unit-testable without a live DB and
+ * mirrors loadWorkspacePolicy's dependency-injection shape.
+ *
+ * Returns 0 (never throws, never blocks the gateway) when:
+ *   - workspaceId is empty / whitespace
+ *   - no DATABASE_URL (shadow / preview) AND no queryFn was injected
+ *   - the view is missing / the query throws
+ *   - no rows for the workspace this month
+ *
+ * Returning 0 on any failure is deliberate: an unreadable cost view must
+ * fail OPEN (let the call through) rather than wedge every AI call when the
+ * analytics store hiccups. The hard block only fires on a *confirmed*
+ * over-budget read.
+ */
+export async function monthSpendUsd(
+  workspaceId: string,
+  deps?: {
+    queryFn?: (
+      sql: string,
+      params: unknown[],
+    ) => Promise<{ rows: Array<{ month_spend_usd: number | string | null }> }>;
+  },
+): Promise<number> {
+  if (!workspaceId || workspaceId.trim() === "") {
+    return 0;
+  }
+
+  const queryFn = deps?.queryFn ?? (await defaultQueryFn());
+  if (!queryFn) {
+    return 0;
+  }
+
+  try {
+    const result = await queryFn(
+      `SELECT COALESCE(SUM(cost_usd), 0) AS month_spend_usd
+         FROM v_ai_cost_daily
+        WHERE workspace_id = $1
+          AND day >= date_trunc('month', now())::date`,
+      [workspaceId],
+    );
+    const raw = result.rows[0]?.month_spend_usd ?? 0;
+    const spend = typeof raw === "string" ? Number(raw) : (raw ?? 0);
+    return Number.isFinite(spend) && spend > 0 ? spend : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Lazily resolve the real db query() helper. Only loaded when no queryFn is
+ * injected and DATABASE_URL is present, so the pure tests never touch pg and
+ * shadow/preview environments short-circuit to 0 spend.
+ */
+async function defaultQueryFn(): Promise<
+  | ((
+      sql: string,
+      params: unknown[],
+    ) => Promise<{ rows: Array<{ month_spend_usd: number | string | null }> }>)
+  | null
+> {
+  if (!process.env.DATABASE_URL) return null;
+  const { query } = await import("@/lib/db");
+  return (sql, params) =>
+    query<{ month_spend_usd: number | string | null }>(sql, params);
+}
+
+// ---------------------------------------------------------------------------
 // buildPolicyEventMetadata
 // ---------------------------------------------------------------------------
 

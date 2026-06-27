@@ -69,6 +69,31 @@ export class NoProviderAvailableError extends Error {
   }
 }
 
+/**
+ * Thrown by the router when a request's workspace has exceeded its
+ * monthly_budget_usd cap. This is a GRACEFUL refusal, not a 5xx: the router
+ * never dispatched to a provider, so no model was charged. Distinct
+ * name + status (402 Payment Required) let call sites translate it into a
+ * clear "AI budget exceeded for this workspace" message instead of a generic
+ * 500. Carries the numbers behind the decision for surfacing + auditing.
+ */
+export class BudgetExceededError extends Error {
+  readonly name = "BudgetExceededError";
+  /** HTTP-shaped hint so route handlers map this to 402, not 500. */
+  readonly status = 402;
+  constructor(
+    message: string,
+    public readonly details: {
+      workspace_id: string;
+      month_spend_usd: number;
+      budget_usd: number;
+      feature: string;
+    },
+  ) {
+    super(message);
+  }
+}
+
 export class NotImplementedError extends Error {
   constructor(message: string) {
     super(message);

@@ -144,4 +144,48 @@ describe("discoverRepoFiles", () => {
     });
     expect(result).toEqual([]);
   });
+
+  /* --- Per-client GitHub App token resolution (migration 195) ---------- */
+
+  it("resolves the token through resolveGithubToken when workspaceId is set", async () => {
+    /* With a workspaceId, the token must come from the App resolver (an
+       installation token for a linked client), NOT the raw PAT env. */
+    process.env[ENV_KEY] = "pat-should-not-be-used";
+    const resolveToken = jest.fn(async () => "ghs_installation_token");
+    const fetchImpl = jest.fn(async () =>
+      jsonResponse({ truncated: false, tree: [] }),
+    );
+    await discoverRepoFiles("acme", "app", "main", {
+      workspaceId: "ws_client",
+      resolveToken,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(resolveToken).toHaveBeenCalledWith("ws_client");
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [
+      string,
+      { headers: Record<string, string> },
+    ];
+    expect(init.headers.Authorization).toBe("Bearer ghs_installation_token");
+  });
+
+  it("uses the PAT directly when no workspaceId is supplied (zero regression)", async () => {
+    /* The pre-App behaviour: no workspaceId → the raw PAT, resolver untouched. */
+    process.env[ENV_KEY] = "pat-direct";
+    const resolveToken = jest.fn();
+    const fetchImpl = jest.fn(async () =>
+      jsonResponse({ truncated: false, tree: [] }),
+    );
+    await discoverRepoFiles("acme", "app", "main", {
+      resolveToken: resolveToken as unknown as (
+        w: string | null | undefined,
+      ) => Promise<string>,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(resolveToken).not.toHaveBeenCalled();
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [
+      string,
+      { headers: Record<string, string> },
+    ];
+    expect(init.headers.Authorization).toBe("Bearer pat-direct");
+  });
 });

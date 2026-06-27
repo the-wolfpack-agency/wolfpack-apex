@@ -2476,7 +2476,18 @@ export type InstinctEventType =
   //     Lets dashboards count graceful degradations independently of
   //     the headline selection event.
   | "ai.model_selected"
-  | "ai.model_fallback";
+  | "ai.model_fallback"
+  // Workspace AI budget enforcement: a call refused because the workspace is over
+  // its monthly_budget_usd cap (the cap was defined but previously unenforced).
+  // { workspace_id, month_spend_usd, budget_usd, feature }
+  | "ai.request_blocked_over_budget"
+  // Per-client GitHub App credential resolution (replaces the shared PAT for
+  // client repos). { workspace_id, installation_id } / removed { workspace_id }
+  | "platform.github_installation_linked"
+  | "platform.github_installation_removed"
+  // Client offboarding: full data purge across Postgres + Qdrant + Neo4j.
+  // { workspace_id, purged_findings, purged_scans, purged_targets, purged_credentials }
+  | "platform.workspace_offboarded";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

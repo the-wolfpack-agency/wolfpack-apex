@@ -39,7 +39,13 @@ import type {
   AICompleteResponse,
   AIProvider,
 } from "./types";
-import { NoProviderAvailableError } from "./types";
+import { BudgetExceededError, NoProviderAvailableError } from "./types";
+import {
+  isOverBudget,
+  loadWorkspacePolicy,
+  monthSpendUsd,
+  type WorkspaceAIPolicy,
+} from "./workspace-policy";
 
 interface ProviderRegistry {
   anthropic: AIProvider;
@@ -121,10 +127,107 @@ function isRetryableError(err: unknown): boolean {
   return false;
 }
 
+/**
+ * Budget-enforcement dependencies, injected so the unit tests can drive the
+ * gate without a live Postgres. In production these default to the real
+ * loader + cost view (see buildRegistry / getAIClient call site below).
+ */
+interface BudgetDeps {
+  loadPolicy: (workspaceId: string) => Promise<WorkspaceAIPolicy | null>;
+  monthSpend: (workspaceId: string) => Promise<number>;
+}
+
+/**
+ * Real-DB budget deps. Lazily imports db so the pure router tests that never
+ * set DATABASE_URL don't pull in pg; loadWorkspacePolicy + monthSpendUsd both
+ * fail OPEN (return null / 0) when the DB is unreachable, so a flaky cost view
+ * never wedges live AI traffic.
+ */
+function defaultBudgetDeps(): BudgetDeps {
+  return {
+    loadPolicy: async (workspaceId) => {
+      if (!process.env.DATABASE_URL) return null;
+      const { query } = await import("@/lib/db");
+      return loadWorkspacePolicy(workspaceId, async (sql, params) => {
+        const r = await query(sql, params);
+        return { rows: r.rows as unknown as WorkspaceAIPolicy[] };
+      });
+    },
+    monthSpend: (workspaceId) => monthSpendUsd(workspaceId),
+  };
+}
+
+/**
+ * Enforcement-point design (see CTO directive - never escalate, fail cheap):
+ *
+ *   1. Per-call HARD block at the chokepoint (chosen). Before any provider
+ *      dispatch, if the workspace is confirmed over its monthly_budget_usd we
+ *      refuse the call entirely. This is the only option that makes runaway
+ *      spend impossible: spend cannot exceed budget + one in-flight call.
+ *   2. Soft-degrade to a cheaper tier. Rejected here: it only slows the
+ *      bleed, it does not stop it. Tier clamping is already resolvePolicy's
+ *      job (a separate, additive cost lever) and stays untouched.
+ *   3. Async alert-only. Rejected: alerts notify a human after the money is
+ *      already spent; useless as a hard cost ceiling for a client account.
+ *
+ * The hard block lives at the single AI chokepoint (router.complete) so every
+ * feature inherits it for free, and it fails OPEN on any read error so the
+ * analytics store hiccupping can never take down all AI traffic. resolvePolicy
+ * continues to own tier clamping; this gate only owns the absolute ceiling.
+ */
+async function checkBudget(
+  req: AICompleteRequest,
+  deps: BudgetDeps,
+): Promise<void> {
+  const workspaceId = req.metadata?.workspace_id;
+  // No workspace attribution -> behave exactly as before (no enforcement).
+  if (!workspaceId || workspaceId.trim() === "") return;
+
+  const policy = await deps.loadPolicy(workspaceId);
+  // No policy or no budget set -> no enforcement, no regression.
+  if (!policy || policy.monthly_budget_usd === null) return;
+
+  const spend = await deps.monthSpend(workspaceId);
+  if (!isOverBudget(policy, spend)) return;
+
+  const feature = req.metadata?.feature ?? "unknown";
+  // Tie into the registered analytics event so the learning loop + cost
+  // dashboard see every block (fire-and-forget, never blocks the refusal).
+  trackEvent(
+    "ai.request_blocked_over_budget",
+    req.metadata?.user_id ?? "system",
+    req.metadata?.user_role ?? "system",
+    {
+      workspace_id: workspaceId,
+      month_spend_usd: spend,
+      budget_usd: policy.monthly_budget_usd,
+      feature,
+    },
+  );
+
+  throw new BudgetExceededError(
+    `Workspace ${workspaceId} is over its monthly AI budget ($${spend.toFixed(2)} of $${policy.monthly_budget_usd}).`,
+    {
+      workspace_id: workspaceId,
+      month_spend_usd: spend,
+      budget_usd: policy.monthly_budget_usd,
+      feature,
+    },
+  );
+}
+
 class RouterClient implements AIClient {
-  constructor(private readonly registry: ProviderRegistry) {}
+  constructor(
+    private readonly registry: ProviderRegistry,
+    private readonly budgetDeps: BudgetDeps = defaultBudgetDeps(),
+  ) {}
 
   async complete(req: AICompleteRequest): Promise<AICompleteResponse> {
+    // Hard budget gate BEFORE any provider dispatch. Throws
+    // BudgetExceededError (a graceful, typed refusal - no model is charged)
+    // when the workspace is confirmed over budget.
+    await checkBudget(req, this.budgetDeps);
+
     const primary = pickPrimary(req, this.registry);
     const obs = getObsClient();
     let response: AICompleteResponse;
@@ -239,4 +342,17 @@ export function _resetAIClientForTests(client: AIClient | null = null): void {
   cachedClient = client;
 }
 
-export { NoProviderAvailableError };
+/**
+ * Test-only: build a RouterClient with injected budget deps so the budget
+ * gate can be driven without a live Postgres. Also caches it as the singleton
+ * so getAIClient() returns the same instance for the rest of the test.
+ */
+export function _buildAIClientWithBudgetDepsForTests(deps: {
+  loadPolicy: (workspaceId: string) => Promise<WorkspaceAIPolicy | null>;
+  monthSpend: (workspaceId: string) => Promise<number>;
+}): AIClient {
+  cachedClient = new RouterClient(buildRegistry(), deps);
+  return cachedClient;
+}
+
+export { BudgetExceededError, NoProviderAvailableError };

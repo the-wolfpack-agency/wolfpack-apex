@@ -39,6 +39,7 @@ import {
   loadWorkspacePolicy,
   isOverBudget,
   buildPolicyEventMetadata,
+  monthSpendUsd,
 } from "../workspace-policy";
 import type { WorkspaceAIPolicy, ModelTier } from "../workspace-policy";
 
@@ -231,5 +232,80 @@ describe("buildPolicyEventMetadata", () => {
     const meta = buildPolicyEventMetadata(resolved, "ws_ops");
     expect(meta.capped).toBe(true);
     expect(meta.tier).toBe("standard");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// monthSpendUsd
+// ---------------------------------------------------------------------------
+
+describe("monthSpendUsd", () => {
+  test("24. sums cost_usd from injected rows", async () => {
+    const queryFn = jest
+      .fn()
+      .mockResolvedValue({ rows: [{ month_spend_usd: 123.45 }] });
+    const spend = await monthSpendUsd("ws_finance", { queryFn });
+    expect(spend).toBe(123.45);
+  });
+
+  test("25. queries v_ai_cost_daily scoped to current calendar month", async () => {
+    const queryFn = jest
+      .fn()
+      .mockResolvedValue({ rows: [{ month_spend_usd: 10 }] });
+    await monthSpendUsd("ws_x", { queryFn });
+    const [sql, params] = queryFn.mock.calls[0];
+    expect(sql).toContain("v_ai_cost_daily");
+    // current calendar month, not a rolling 30-day window
+    expect(sql).toContain("date_trunc('month', now())");
+    expect(params).toEqual(["ws_x"]);
+  });
+
+  test("26. coerces numeric string spend to a number", async () => {
+    const queryFn = jest
+      .fn()
+      .mockResolvedValue({ rows: [{ month_spend_usd: "42.50" }] });
+    expect(await monthSpendUsd("ws_x", { queryFn })).toBe(42.5);
+  });
+
+  test("27. empty workspaceId -> 0, queryFn never called", async () => {
+    const queryFn = jest.fn();
+    expect(await monthSpendUsd("", { queryFn })).toBe(0);
+    expect(queryFn).not.toHaveBeenCalled();
+  });
+
+  test("28. whitespace-only workspaceId -> 0, queryFn never called", async () => {
+    const queryFn = jest.fn();
+    expect(await monthSpendUsd("   ", { queryFn })).toBe(0);
+    expect(queryFn).not.toHaveBeenCalled();
+  });
+
+  test("29. no rows -> 0", async () => {
+    const queryFn = jest.fn().mockResolvedValue({ rows: [] });
+    expect(await monthSpendUsd("ws_x", { queryFn })).toBe(0);
+  });
+
+  test("30. null sum (no spend this month) -> 0", async () => {
+    const queryFn = jest
+      .fn()
+      .mockResolvedValue({ rows: [{ month_spend_usd: null }] });
+    expect(await monthSpendUsd("ws_x", { queryFn })).toBe(0);
+  });
+
+  test("31. queryFn throws -> 0 (fails open, never re-throws)", async () => {
+    const queryFn = jest
+      .fn()
+      .mockRejectedValue(new Error("relation v_ai_cost_daily does not exist"));
+    await expect(monthSpendUsd("ws_x", { queryFn })).resolves.toBe(0);
+  });
+
+  test("32. no DATABASE_URL + no injected queryFn -> 0, never touches db", async () => {
+    const original = process.env.DATABASE_URL;
+    delete process.env.DATABASE_URL;
+    try {
+      expect(await monthSpendUsd("ws_x")).toBe(0);
+    } finally {
+      if (original === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = original;
+    }
   });
 });

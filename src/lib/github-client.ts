@@ -16,6 +16,8 @@
  * /api/sites/* must be checked before any function here is called.
  */
 
+import { resolveGithubToken } from "@/lib/github-app";
+
 export interface GithubClient {
   token: string;
   fetch: typeof fetch;
@@ -23,6 +25,25 @@ export interface GithubClient {
 
 export function defaultGithubClient(): GithubClient {
   const token = process.env.GITHUB_TOKEN_WOLFPACK_AGENCY ?? "";
+  return { token, fetch: globalThis.fetch };
+}
+
+/**
+ * Per-workspace GitHub client.
+ *
+ * Identical to defaultGithubClient() EXCEPT the token is resolved through the
+ * GitHub App layer: when the App is configured and the workspace has a linked
+ * installation, this is a short-lived installation token scoped to JUST that
+ * client's repos; otherwise it falls back to the same PAT defaultGithubClient()
+ * uses today (resolveGithubToken's fallback guarantee). Use this for any
+ * scan / remediation-PR operation done ON BEHALF OF a specific client so a
+ * single shared PAT is not the only key in play. Async because minting the
+ * installation token is a network round trip (cached ~1h). NEVER throws.
+ */
+export async function workspaceGithubClient(
+  workspaceId: string | null | undefined,
+): Promise<GithubClient> {
+  const token = await resolveGithubToken(workspaceId);
   return { token, fetch: globalThis.fetch };
 }
 

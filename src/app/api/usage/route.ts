@@ -26,6 +26,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { query } from "@/lib/db";
+import {
+  isOverBudget,
+  loadWorkspacePolicy,
+  monthSpendUsd,
+  type WorkspaceAIPolicy,
+} from "@/lib/ai/workspace-policy";
 
 interface UsageWindow {
   prompt_tokens: number;
@@ -39,7 +45,32 @@ interface UsageResponse {
   user_id_hint: string;
   lifetime: UsageWindow;
   last_30_days: UsageWindow;
+  /** True when the caller's workspace has blown its monthly_budget_usd cap.
+   *  Lets the Settings card warn ("AI budget exceeded") BEFORE the next call
+   *  is hard-refused at the router chokepoint. Defaults false (fails open) so
+   *  a missing policy / cost view never shows a scary banner. */
+  over_budget: boolean;
   generated_at: string;
+}
+
+/**
+ * Read the caller's workspace over-budget state. Mirrors the router gate
+ * (loadWorkspacePolicy + monthSpendUsd + isOverBudget) so the dashboard warns
+ * with the SAME logic that enforces. Never throws; fails open to false.
+ */
+async function readOverBudget(workspaceId: string | undefined): Promise<boolean> {
+  if (!process.env.DATABASE_URL || !workspaceId) return false;
+  try {
+    const policy = await loadWorkspacePolicy(workspaceId, async (sql, params) => {
+      const r = await query(sql, params);
+      return { rows: r.rows as unknown as WorkspaceAIPolicy[] };
+    });
+    if (!policy || policy.monthly_budget_usd === null) return false;
+    const spend = await monthSpendUsd(workspaceId);
+    return isOverBudget(policy, spend);
+  } catch {
+    return false;
+  }
 }
 
 const ZERO: UsageWindow = {
@@ -142,15 +173,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const [lifetime, last30] = await Promise.all([
+  const [lifetime, last30, overBudget] = await Promise.all([
     readWindow(user.id, null),
     readWindow(user.id, 30),
+    readOverBudget(user.workspaceId),
   ]);
 
   const body: UsageResponse = {
     user_id_hint: user.id.slice(0, 8),
     lifetime,
     last_30_days: last30,
+    over_budget: overBudget,
     generated_at: new Date().toISOString(),
   };
   return NextResponse.json(body);
