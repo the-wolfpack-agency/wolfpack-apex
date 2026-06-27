@@ -115,16 +115,91 @@ async function probe(
   const startedAt = performance.now();
   try {
     const res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: controller.signal, headers });
+    const hdrs: Record<string, string> = {};
+    // Real fetch Headers always expose forEach; guard so an exotic/mocked headers
+    // object without it degrades to "no headers" rather than failing the probe.
+    if (typeof res.headers?.forEach === "function") {
+      res.headers.forEach((value, key) => {
+        hdrs[key.toLowerCase()] = value;
+      });
+    }
     return {
       status: res.status,
       location: res.headers.get("location"),
       durationMs: performance.now() - startedAt,
+      headers: hdrs,
     };
   } catch {
     return { networkError: true, durationMs: performance.now() - startedAt };
   } finally {
     clearTimeout(timer);
   }
+}
+
+function hdr(obs: RouteObservation, name: string): string | undefined {
+  return obs.headers?.[name.toLowerCase()];
+}
+
+/**
+ * Global response-header hardening, checked ONCE on a representative successful
+ * response. These headers are set by middleware / the CDN identically on every
+ * route, so a per-route check would just emit N duplicates of the same gap.
+ * Each missing header maps to a concrete attack: no CSP (XSS), no nosniff (MIME
+ * confusion), no frame protection (clickjacking), no HSTS (TLS downgrade).
+ */
+export function missingHeaderFindings(routePath: string, obs: RouteObservation, isHttps: boolean): ScanFinding[] {
+  const out: ScanFinding[] = [];
+  const F = (severity: ScanFinding["severity"], title: string, detail: string): ScanFinding => ({
+    route: routePath, severity, category: "security", title, detail, evidence: { status: obs.status ?? 0 },
+  });
+  const csp = hdr(obs, "content-security-policy");
+  if (!csp) {
+    out.push(F("medium", "Missing Content-Security-Policy", "No CSP header. A CSP is the primary defense-in-depth against XSS and injection; without it an injected script runs unrestricted."));
+  }
+  if ((hdr(obs, "x-content-type-options") ?? "").toLowerCase() !== "nosniff") {
+    out.push(F("low", "Missing X-Content-Type-Options: nosniff", "Responses can be MIME-sniffed by the browser, enabling content-type confusion. Set X-Content-Type-Options: nosniff."));
+  }
+  const cspFrames = csp ? /frame-ancestors/i.test(csp) : false;
+  if (!hdr(obs, "x-frame-options") && !cspFrames) {
+    out.push(F("medium", "Missing clickjacking protection", "Neither X-Frame-Options nor CSP frame-ancestors is set, so this page can be framed by any site (clickjacking). Set frame-ancestors 'none'/'self' or X-Frame-Options: DENY."));
+  }
+  if (isHttps && !hdr(obs, "strict-transport-security")) {
+    out.push(F("medium", "Missing Strict-Transport-Security (HSTS)", "No HSTS on an HTTPS response. A network attacker can downgrade the first request to HTTP. Set Strict-Transport-Security with a long max-age."));
+  }
+  return out;
+}
+
+/**
+ * Per-response cookie + CORS hardening. These DO vary by route (a login route
+ * sets the session cookie; an API route sets CORS), so they are checked on every
+ * response and de-duplicated by route+title upstream.
+ */
+export function cookieAndCorsFindings(routePath: string, obs: RouteObservation, isHttps: boolean): ScanFinding[] {
+  const out: ScanFinding[] = [];
+  const F = (severity: ScanFinding["severity"], title: string, detail: string): ScanFinding => ({
+    route: routePath, severity, category: "security", title, detail, evidence: { status: obs.status ?? 0 },
+  });
+  const setCookie = hdr(obs, "set-cookie");
+  if (setCookie) {
+    const missing: string[] = [];
+    if (!/;\s*httponly/i.test(setCookie)) missing.push("HttpOnly");
+    if (isHttps && !/;\s*secure/i.test(setCookie)) missing.push("Secure");
+    if (!/;\s*samesite/i.test(setCookie)) missing.push("SameSite");
+    if (missing.length > 0) {
+      const sev = missing.includes("HttpOnly") || missing.includes("Secure") ? "high" : "medium";
+      out.push(F(sev, `Insecure Set-Cookie (missing ${missing.join(", ")})`, `A cookie is set without ${missing.join(", ")}. Missing HttpOnly exposes it to XSS theft, missing Secure allows interception over HTTP, missing SameSite enables CSRF. Set all three on session cookies.`));
+    }
+  }
+  const acao = hdr(obs, "access-control-allow-origin");
+  if (acao === "*") {
+    const creds = (hdr(obs, "access-control-allow-credentials") ?? "").toLowerCase() === "true";
+    if (creds) {
+      out.push(F("critical", "CORS wildcard with credentials", "Access-Control-Allow-Origin: * together with Allow-Credentials: true lets ANY website read authenticated responses. Echo a specific allowed origin instead of '*' for credentialed endpoints."));
+    } else {
+      out.push(F("medium", "CORS allows any origin (ACAO: *)", "Access-Control-Allow-Origin: * exposes this response to any site. Restrict to an explicit allowlist if it returns non-public data."));
+    }
+  }
+  return out;
 }
 
 /**
@@ -140,12 +215,30 @@ export async function scanPlatform(input: PlatformScanInput): Promise<PlatformSc
   const perRoute = await Promise.all(
     input.routes.map(async (spec) => {
       const obs = await probe(input.baseUrl, spec, fetchImpl, timeoutMs, input.headers);
-      return classify(spec, obs, slowMs, input.authenticated);
+      return { spec, obs, findings: classify(spec, obs, slowMs, input.authenticated) };
     }),
   );
 
-  const findings = perRoute.flat();
-  const routesWithFindings = perRoute.filter((f) => f.length > 0).length;
+  const findings = perRoute.flatMap((r) => r.findings);
+  const isHttps = input.baseUrl.startsWith("https:");
+
+  // Global headers: once, on a representative successful response (avoids N dupes).
+  const rep = perRoute.find((r) => r.obs.headers && (r.obs.status ?? 0) >= 200 && (r.obs.status ?? 0) < 400);
+  if (rep) findings.push(...missingHeaderFindings(rep.spec.path, rep.obs, isHttps));
+
+  // Cookie + CORS: per response, de-duplicated by route+title.
+  const seen = new Set<string>();
+  for (const r of perRoute) {
+    if (!r.obs.headers) continue;
+    for (const f of cookieAndCorsFindings(r.spec.path, r.obs, isHttps)) {
+      const key = `${f.route}|${f.title}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      findings.push(f);
+    }
+  }
+
+  const routesWithFindings = perRoute.filter((r) => r.findings.length > 0).length;
   return {
     platform: input.platform,
     baseUrl: input.baseUrl,

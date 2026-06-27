@@ -83,4 +83,7 @@ export interface RouteObservation {
   location?: string | null;
   durationMs: number;
   networkError?: boolean;
+  /** Response headers, lower-cased keys. Drives the security-header / cookie /
+   *  CORS checks. Set-Cookie is the combined value. Absent on a network error. */
+  headers?: Record<string, string>;
 }

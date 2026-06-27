@@ -112,10 +112,24 @@ function hasSessionCookie(init?: RequestInit): boolean {
   return typeof cookie === "string" && cookie.includes(SESSION_COOKIE);
 }
 
+// A well-configured target sends these on every response. Merging them in keeps
+// the auth-focused assertions clean (the new security-header checks stay silent),
+// while still letting a test override or null a header to exercise a gap.
+const SECURE_BASE: Record<string, string> = {
+  "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "strict-transport-security": "max-age=63072000",
+};
+
 function headersWith(map: Record<string, string | null>) {
+  const merged: Record<string, string | null> = { ...SECURE_BASE, ...map };
   return {
-    get: (h: string) => map[h.toLowerCase()] ?? null,
-    getSetCookie: () => (map["set-cookie"] ? [map["set-cookie"]] : []),
+    get: (h: string) => merged[h.toLowerCase()] ?? null,
+    getSetCookie: () => (merged["set-cookie"] ? [merged["set-cookie"] as string] : []),
+    forEach: (cb: (value: string, key: string) => void) => {
+      for (const [k, v] of Object.entries(merged)) if (v != null) cb(v, k);
+    },
   };
 }
 

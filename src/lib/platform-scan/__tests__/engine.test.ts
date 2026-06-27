@@ -3,8 +3,8 @@
  * crawl aggregation. classify() is pure, so every branch is asserted directly;
  * scanPlatform() is exercised with an injected fetch (no network).
  */
-import { classify, scanPlatform } from "@/lib/platform-scan/engine";
-import type { ScanRouteSpec } from "@/lib/platform-scan/types";
+import { classify, scanPlatform, missingHeaderFindings, cookieAndCorsFindings } from "@/lib/platform-scan/engine";
+import type { ScanRouteSpec, RouteObservation } from "@/lib/platform-scan/types";
 
 const REQ: ScanRouteSpec = { path: "/admin/leads", journey: "Lead inbox", auth: "required" };
 const PUB: ScanRouteSpec = { path: "/inventory", journey: "Public inventory", auth: "public" };
@@ -98,8 +98,19 @@ describe("classify", () => {
 });
 
 describe("scanPlatform", () => {
-  function mkRes(status: number, location?: string) {
-    return { status, headers: { get: (h: string) => (h.toLowerCase() === "location" ? location ?? null : null) } } as unknown as Response;
+  // Default to a fully-hardened header set so the header checks stay silent and
+  // these tests stay focused on classify(); the security-header tests below pass
+  // an insecure header set explicitly.
+  const SECURE_HEADERS: Record<string, string> = {
+    "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "strict-transport-security": "max-age=63072000",
+  };
+  function mkRes(status: number, location?: string, headers: Record<string, string> = SECURE_HEADERS) {
+    const h = new Headers(headers);
+    if (location) h.set("location", location);
+    return { status, headers: h } as unknown as Response;
   }
 
   it("crawls every route, aggregates findings, and counts healthy routes", async () => {
@@ -132,5 +143,91 @@ describe("scanPlatform", () => {
     // baseUrl + path, redirects NOT followed (so 3xx is observable).
     expect(String((fetchImpl as jest.Mock).mock.calls[0][0])).toBe("https://demo.example.com/inventory");
     expect((fetchImpl as jest.Mock).mock.calls[0][1]).toMatchObject({ redirect: "manual" });
+  });
+
+  it("flags missing security headers once, and insecure cookies/CORS per response", async () => {
+    const fetchImpl = jest.fn(async () =>
+      mkRes(200, undefined, {
+        // no CSP, no nosniff, no frame protection, no HSTS
+        "set-cookie": "session=abc; Path=/",
+        "access-control-allow-origin": "*",
+        "access-control-allow-credentials": "true",
+      }),
+    ) as unknown as typeof fetch;
+
+    const res = await scanPlatform({
+      workspaceId: "ws-1",
+      platform: "t",
+      baseUrl: "https://demo.example.com",
+      fetchImpl,
+      routes: [
+        { path: "/", journey: "Home", auth: "public" },
+        { path: "/app", journey: "App", auth: "public" },
+      ],
+    });
+
+    const titles = res.findings.map((f) => f.title);
+    // Global header findings appear ONCE despite two routes.
+    expect(titles.filter((t) => t === "Missing Content-Security-Policy")).toHaveLength(1);
+    expect(titles.filter((t) => t === "Missing Strict-Transport-Security (HSTS)")).toHaveLength(1);
+    expect(titles).toContain("Missing clickjacking protection");
+    // Cookie + CORS are critical/high security findings.
+    expect(res.findings.some((f) => f.severity === "critical" && f.title === "CORS wildcard with credentials")).toBe(true);
+    expect(res.findings.some((f) => f.severity === "high" && /Insecure Set-Cookie/.test(f.title))).toBe(true);
+  });
+});
+
+describe("missingHeaderFindings", () => {
+  const obs = (headers: Record<string, string>): RouteObservation => ({ status: 200, durationMs: 1, headers });
+
+  it("flags all four when the response has no hardening (https)", () => {
+    const f = missingHeaderFindings("/", obs({}), true);
+    const titles = f.map((x) => x.title);
+    expect(titles).toEqual([
+      "Missing Content-Security-Policy",
+      "Missing X-Content-Type-Options: nosniff",
+      "Missing clickjacking protection",
+      "Missing Strict-Transport-Security (HSTS)",
+    ]);
+    expect(f.every((x) => x.category === "security")).toBe(true);
+  });
+
+  it("does NOT flag HSTS on a non-https origin", () => {
+    const f = missingHeaderFindings("/", obs({}), false);
+    expect(f.map((x) => x.title)).not.toContain("Missing Strict-Transport-Security (HSTS)");
+  });
+
+  it("accepts CSP frame-ancestors as clickjacking protection and stays silent when hardened", () => {
+    const f = missingHeaderFindings("/", obs({
+      "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
+      "x-content-type-options": "nosniff",
+      "strict-transport-security": "max-age=63072000",
+    }), true);
+    expect(f).toHaveLength(0);
+  });
+});
+
+describe("cookieAndCorsFindings", () => {
+  const obs = (headers: Record<string, string>): RouteObservation => ({ status: 200, durationMs: 1, headers });
+
+  it("flags a session cookie missing HttpOnly/Secure/SameSite as high", () => {
+    const f = cookieAndCorsFindings("/login", obs({ "set-cookie": "sid=x; Path=/" }), true);
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBe("high");
+    expect(f[0].title).toContain("HttpOnly");
+    expect(f[0].title).toContain("Secure");
+    expect(f[0].title).toContain("SameSite");
+  });
+
+  it("stays silent on a fully-flagged cookie", () => {
+    const f = cookieAndCorsFindings("/login", obs({ "set-cookie": "sid=x; Path=/; HttpOnly; Secure; SameSite=Lax" }), true);
+    expect(f).toHaveLength(0);
+  });
+
+  it("flags ACAO:* with credentials as critical, ACAO:* alone as medium", () => {
+    const crit = cookieAndCorsFindings("/api", obs({ "access-control-allow-origin": "*", "access-control-allow-credentials": "true" }), true);
+    expect(crit[0]).toMatchObject({ severity: "critical", title: "CORS wildcard with credentials" });
+    const med = cookieAndCorsFindings("/api", obs({ "access-control-allow-origin": "*" }), true);
+    expect(med[0]).toMatchObject({ severity: "medium", title: "CORS allows any origin (ACAO: *)" });
   });
 });
