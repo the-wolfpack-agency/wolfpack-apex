@@ -20,6 +20,7 @@ import { ChatActionForm } from "@/components/ChatActionForm";
 import { ChatWidget } from "@/components/ChatWidget";
 import type { FormSpec } from "@/lib/assistant/forms/types";
 import type { WidgetSpec } from "@/lib/assistant/widgets/types";
+import { mergeRefreshedMessages } from "@/lib/assistant/merge-refreshed-messages";
 import { AssistantStarterPrompts } from "@/components/AssistantStarterPrompts";
 import { AssistantSuggestionsOverlay } from "@/components/AssistantSuggestionsOverlay";
 import { AssistantHistoryOverlay } from "@/components/AssistantHistoryOverlay";
@@ -582,41 +583,11 @@ export default function InstinctChat({
          * pending assistant message + its widget. Instead, APPEND the
          * server-side rows we don't have locally and PRESERVE any
          * local-only (no id) optimistic messages. */
-        setMessages((prev) => {
-          const remoteById = new Map(
-            remote.filter((m) => m.id).map((m) => [m.id as string, m]),
-          );
-          const localOnly = prev.filter((m) => !m.id);
-          const remoteRows = remote;
-          // Order: server rows first (chronological from server), then
-          // any local-only optimistic message still in flight.
-          const merged = [...remoteRows];
-          for (const localMsg of localOnly) {
-            // Skip optimistic local message if the server now has a
-            // matching one (best-effort match on role + content).
-            const matched = remoteRows.find(
-              (r) =>
-                r.role === localMsg.role &&
-                r.content === localMsg.content,
-            );
-            if (!matched) merged.push(localMsg);
-          }
-          // Preserve any locally-set widget on identified rows when
-          // the server snapshot would otherwise drop it.
-          return merged.map((m) => {
-            if (m.role !== "assistant" || !m.id) return m;
-            const local = prev.find((p) => p.id === m.id);
-            if (local?.widget && !m.widget) {
-              return { ...m, widget: local.widget };
-            }
-            // Keep the local widget if remote message lacks it AND
-            // remote metadata lacks it (shouldn't happen but defensive).
-            return m;
-          });
-          // remoteById intentionally retained for potential future use
-          // (e.g. preferring server fields on a known id).
-          void remoteById;
-        });
+        /* Race-safe merge (see mergeRefreshedMessages): preserves any local
+         * row the snapshot does not yet represent, by id OR role+content, so
+         * an optimistic assistant reply carrying a server messageId is not
+         * dropped when a refresh races the server's assistant-message save. */
+        setMessages((prev) => mergeRefreshedMessages(prev, remote));
         void fetchWithRefresh("/api/analytics", {
           method: "POST",
           headers: canonicalJsonHeaders(),
