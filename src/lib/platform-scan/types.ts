@@ -59,6 +59,47 @@ export interface PlatformScanInput {
    *  semantics: a 200 is then EXPECTED (page reachable), while a bounce to login /
    *  401 means the session was not honored (a bug), not correct enforcement. */
   authenticated?: boolean;
+  /**
+   * Politeness knobs for the shared per-host limiter (see
+   * `src/lib/platform-scan/http/polite-fetch.ts`). All optional with safe
+   * defaults; a scan is a guest on a client's prod system, so the defaults are
+   * deliberately gentle (small concurrency, paced, capped backoff). Setting
+   * `politeness: false` is NOT offered - politeness is non-negotiable; tune the
+   * numbers instead.
+   */
+  politeness?: PolitenessOptions;
+  /**
+   * Who is running the scan, used to attribute the platform.scan_throttled
+   * analytics event when a probe backs off. Optional: absent, the engine
+   * attributes throttling to a "system" actor so the politeness data still
+   * reaches the learning loop even for unattended (canary / sweep) scans.
+   */
+  actor?: { id: string; role: string };
+}
+
+/**
+ * Tunables for the per-host politeness layer. Mirrors the configurable fields of
+ * PoliteFetchOptions but without the injected I/O seams (those are for tests).
+ */
+export interface PolitenessOptions {
+  /** Max simultaneous in-flight requests to ONE host. Default 4. */
+  perHostConcurrency?: number;
+  /** Minimum gap between the start of two requests to the same host (ms). Default 150. */
+  minGapMs?: number;
+  /** Max retries on a 429/503 before giving up politely. Default 3. */
+  maxRetries?: number;
+  /** Base for exponential backoff when no Retry-After is given (ms). Default 500. */
+  baseBackoffMs?: number;
+  /** Absolute ceiling for any single backoff wait (ms). Default 30000. */
+  maxBackoffMs?: number;
+  /** Injected clock for tests; defaults to Date.now. */
+  now?: () => number;
+  /** Injected sleep for tests; defaults to a real setTimeout. */
+  sleep?: (ms: number) => Promise<void>;
+  /** Best-effort hook fired when a probe backs off, so the engine can emit
+   *  platform.scan_throttled. Receives the host, the wait it is about to take,
+   *  the triggering status, and the 1-based attempt number. */
+  onThrottle?: (info: { host: string; retryAfterMs: number; reason: string; attempt: number }) => void;
 }
 
 /**

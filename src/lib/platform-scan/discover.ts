@@ -17,6 +17,8 @@
  */
 
 import type { ScanRouteSpec } from "./types";
+import type { PolitenessOptions } from "./types";
+import { PoliteFetcher } from "./http/polite-fetch";
 
 /** Hard ceiling so a huge sitemap can't blow up a scan. */
 const MAX_ROUTES = 100;
@@ -131,12 +133,32 @@ export function parseSitemap(xml: string, baseUrl: string): ScanRouteSpec[] {
  * Never throws: non-200, network error, timeout, or empty body all yield `[]`
  * so the caller falls back to the seed manifest. Uses an 8s AbortController
  * timeout. `fetchImpl` is injectable for tests; defaults to global `fetch`.
+ *
+ * POLITENESS: the sitemap fetch is a request to the CLIENT'S host, so it goes
+ * through the same shared per-host politeness layer as the route probes (see
+ * ./http/polite-fetch.ts). For a single discovery request the concurrency cap is
+ * moot, but the 429/503 Retry-After backoff matters - if a client's host is
+ * already throttling, discovery must back off too, not hammer it. `politeness`
+ * is optional; its onThrottle hook lets the caller emit platform.scan_throttled.
  */
 export async function discoverRoutes(
   baseUrl: string,
   fetchImpl?: typeof fetch,
+  politeness?: PolitenessOptions,
 ): Promise<ScanRouteSpec[]> {
-  const doFetch = fetchImpl ?? fetch;
+  const p = politeness ?? {};
+  const fetcher = new PoliteFetcher({
+    fetchImpl: fetchImpl ?? fetch,
+    perHostConcurrency: p.perHostConcurrency,
+    minGapMs: p.minGapMs,
+    maxRetries: p.maxRetries,
+    baseBackoffMs: p.baseBackoffMs,
+    maxBackoffMs: p.maxBackoffMs,
+    now: p.now,
+    sleep: p.sleep,
+    onThrottle: p.onThrottle,
+  });
+  const doFetch = (url: string, init: RequestInit) => fetcher.fetch(url, init);
 
   let origin: string;
   try {

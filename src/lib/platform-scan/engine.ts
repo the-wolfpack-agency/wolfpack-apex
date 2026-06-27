@@ -25,6 +25,8 @@ import type {
   ScanFinding,
   ScanRouteSpec,
 } from "./types";
+import { PoliteFetcher } from "./http/polite-fetch";
+import { trackEvent } from "../analytics";
 
 const DEFAULT_SLOW_MS = 2500;
 const DEFAULT_TIMEOUT_MS = 10000;
@@ -102,11 +104,22 @@ export function classify(spec: ScanRouteSpec, obs: RouteObservation, slowMs: num
   return [F("medium", "bug", `Unexpected status (${s})`, `${spec.journey}: returned an unexpected ${s}.`)];
 }
 
-/** Probe one route once. Never throws — a failure becomes a networkError observation. */
+/**
+ * Probe one route once. Never throws - a failure becomes a networkError
+ * observation.
+ *
+ * `doFetch` is the POLITE fetch entry point (PoliteFetcher.fetch): it applies the
+ * per-host concurrency cap, the inter-request pacing, and the 429/503 backoff
+ * BEFORE the request leaves, then returns the final Response. This function is
+ * otherwise unchanged from the pre-politeness version: it still owns the
+ * per-request timeout, the redirect:manual + no-credentials posture, and the
+ * RouteObservation it builds, so the observation handed to classify() - and thus
+ * finding detection - is identical to before.
+ */
 async function probe(
   baseUrl: string,
   spec: ScanRouteSpec,
-  fetchImpl: typeof fetch,
+  doFetch: (url: string, init: RequestInit) => Promise<Response>,
   timeoutMs: number,
   headers?: Record<string, string>,
 ): Promise<RouteObservation> {
@@ -115,7 +128,7 @@ async function probe(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const startedAt = performance.now();
   try {
-    const res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: controller.signal, headers });
+    const res = await doFetch(url, { method: "GET", redirect: "manual", signal: controller.signal, headers });
     const hdrs: Record<string, string> = {};
     // Real fetch Headers always expose forEach; guard so an exotic/mocked headers
     // object without it degrades to "no headers" rather than failing the probe.
@@ -260,17 +273,53 @@ export function computeCoverage(
 
 /**
  * Scan a platform: probe every route in the manifest and collect findings.
- * Routes are probed concurrently (bounded by the manifest size — manifests are
- * curated, not unbounded crawls).
+ *
+ * POLITENESS: routes are still enqueued together, but every probe flows through a
+ * single per-run PoliteFetcher (see ./http/polite-fetch.ts). That bounds the
+ * ACTUAL in-flight requests to any one host (default 4), paces them (default
+ * 150ms gap), and backs off on 429/503 honoring Retry-After - so a large manifest
+ * can never open one connection per route at once and knock over a client's prod
+ * system. Finding detection is unchanged: the same RouteObservation reaches
+ * classify() as before; only the timing + throttle-retry behavior differs.
  */
 export async function scanPlatform(input: PlatformScanInput): Promise<PlatformScanResult> {
   const fetchImpl = input.fetchImpl ?? fetch;
   const slowMs = input.slowMs ?? DEFAULT_SLOW_MS;
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const p = input.politeness ?? {};
+
+  // Default throttle handler: fire the (already-registered) platform.scan_throttled
+  // analytics event so every back-off feeds the learning loop on which client
+  // hosts are sensitive to scan load. trackEvent is fire-and-forget + never throws.
+  // A caller-supplied onThrottle wins (e.g. tests capture instead of persist).
+  const actor = input.actor ?? { id: "system", role: "system" };
+  const onThrottle =
+    p.onThrottle ??
+    ((info: { host: string; retryAfterMs: number; reason: string; attempt: number }) => {
+      trackEvent("platform.scan_throttled", actor.id, actor.role, {
+        platform: input.platform,
+        host: info.host,
+        retry_after_ms: info.retryAfterMs,
+        reason: info.reason,
+      });
+    });
+
+  const fetcher = new PoliteFetcher({
+    fetchImpl,
+    perHostConcurrency: p.perHostConcurrency,
+    minGapMs: p.minGapMs,
+    maxRetries: p.maxRetries,
+    baseBackoffMs: p.baseBackoffMs,
+    maxBackoffMs: p.maxBackoffMs,
+    now: p.now,
+    sleep: p.sleep,
+    onThrottle,
+  });
+  const doFetch = (url: string, init: RequestInit) => fetcher.fetch(url, init);
 
   const perRoute = await Promise.all(
     input.routes.map(async (spec) => {
-      const obs = await probe(input.baseUrl, spec, fetchImpl, timeoutMs, input.headers);
+      const obs = await probe(input.baseUrl, spec, doFetch, timeoutMs, input.headers);
       return { spec, obs, findings: classify(spec, obs, slowMs, input.authenticated) };
     }),
   );

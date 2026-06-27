@@ -586,6 +586,13 @@ export type InstinctEventType =
   | "platform.remediation_pr_opened"
   // platform.preflight_run { platform, ok, checks, failed }: onboarding readiness check
   | "platform.preflight_run"
+  // Scan politeness: a probe backed off to avoid overwhelming a client system.
+  // { platform, host, retry_after_ms, reason }
+  | "platform.scan_throttled"
+  // Continuous sweep observability: a sweep run finished / failed, so a silently
+  // broken sweep (stale client posture) is visible. { kind, targets, succeeded, failed }
+  | "platform.sweep_completed"
+  | "platform.sweep_failed"
   // Target authorization: a target must be proven client-owned (well-known token
   // or DNS TXT) before any scan/pentest runs. Fail-closed at the target level.
   // platform.target_verification_requested { platform, method }
