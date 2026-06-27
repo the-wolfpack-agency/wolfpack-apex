@@ -19,6 +19,7 @@ import {
   type FindingsSummary,
 } from "@/lib/platform-scan/store";
 import { queryAuditLog } from "@/lib/audit-log";
+import { listSystemProfiles } from "@/lib/platform-scan/profile/store";
 
 const ws = (ctx: ReportContext): string => ctx.workspaceId ?? "default";
 
@@ -54,6 +55,57 @@ export async function genEngagementSummary(ctx: ReportContext): Promise<string> 
     ``,
     `Scans run this engagement: ${scans.length}. Platforms covered: ${platforms.join(", ") || "none recorded"}.`,
   ].join("\n");
+}
+
+const EMPTY_SYSTEM_MAP =
+  "No system profile has been generated yet; run the profiler against a connected platform.";
+
+/** System Map: the discovered surface, data model, and integrations of each
+ *  profiled target. Reads the persisted SystemProfile snapshots (one per
+ *  workspace+platform). Never throws: any store hiccup degrades to the
+ *  explicit empty-state line so the report always renders. */
+export async function genSystemMap(ctx: ReportContext): Promise<string> {
+  const out = [`## System Map`, ``];
+  try {
+    const profiles = await listSystemProfiles(ws(ctx));
+    if (profiles.length === 0) {
+      out.push(EMPTY_SYSTEM_MAP);
+      return out.join("\n");
+    }
+    for (const row of profiles) {
+      const p = row.profile;
+      const s = p.surface;
+      out.push(
+        `### ${p.platform}`,
+        ``,
+        `| Surface | Count |`,
+        `|---------|-------|`,
+        `| Pages | ${s.pages} |`,
+        `| API routes | ${s.apiRoutes} |`,
+        `| Lib modules | ${s.libModules} |`,
+        `| Migrations | ${s.migrations} |`,
+        `| Tests | ${s.tests} |`,
+        `| Total files | ${s.totalFiles} |`,
+        ``,
+      );
+      const integrations =
+        p.integrations.length > 0
+          ? p.integrations.map((i) => `${i.name} (${i.category})`).join(", ")
+          : "none detected";
+      out.push(`**Integrations**: ${integrations}`, ``);
+      const names = p.entities.slice(0, 30);
+      const more = p.entities.length > names.length ? `, +${p.entities.length - names.length} more` : "";
+      const entityList = names.length > 0 ? `${names.join(", ")}${more}` : "none discovered";
+      out.push(`**Data model**: ${p.entities.length} entities (${entityList})`, ``);
+      out.push(
+        `**Auth**: ${p.authModel.protectedRoutes} protected, ${p.authModel.publicRoutes} public routes`,
+        ``,
+      );
+    }
+    return out.join("\n");
+  } catch {
+    return [`## System Map`, ``, EMPTY_SYSTEM_MAP].join("\n");
+  }
 }
 
 const REMEDIATION: Record<string, string> = {

@@ -14,6 +14,7 @@ import { trackEvent } from "@/lib/analytics";
 import { saveDocument } from "@/lib/doc-generator";
 import {
   genEngagementSummary,
+  genSystemMap as genEngSystemMap,
   genSecurityFindings as genEngSecurityFindings,
   genDiagnosedIssues as genEngDiagnosedIssues,
   genWorkPerformed as genEngWorkPerformed,
@@ -974,13 +975,14 @@ const TEMPLATES: ReportTemplate[] = [
     category: "client",
     sections: [
       { id: "engagement_summary", title: "Executive Summary", description: "Posture grade + open-finding counts + coverage", dataSource: "database", generator: genEngagementSummary },
+      { id: "system_map", title: "System Map", description: "Discovered surface, data model, and integrations of the target", dataSource: "database", generator: genEngSystemMap },
       { id: "security_findings", title: "Security Findings (Critical + High)", description: "Open critical/high security findings with remediation", dataSource: "database", generator: genEngSecurityFindings },
       { id: "diagnosed_issues", title: "Diagnosed Issues", description: "Open functional, performance, and UX findings", dataSource: "database", generator: genEngDiagnosedIssues },
       { id: "work_performed", title: "Work Performed", description: "Audited actions from the hash-chained log", dataSource: "database", generator: genEngWorkPerformed },
       { id: "scan_coverage", title: "Scan Coverage", description: "Platforms, routes, and findings per scan run", dataSource: "database", generator: genEngScanCoverage },
       { id: "engagement_recommendations", title: "Recommendations", description: "Prioritized next steps derived from findings", dataSource: "database", generator: genEngRecommendations },
     ],
-    defaultIncluded: ["engagement_summary", "security_findings", "diagnosed_issues", "work_performed", "scan_coverage", "engagement_recommendations"],
+    defaultIncluded: ["engagement_summary", "system_map", "security_findings", "diagnosed_issues", "work_performed", "scan_coverage", "engagement_recommendations"],
   },
   {
     id: "platform_capabilities",
