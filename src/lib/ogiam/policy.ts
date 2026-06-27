@@ -103,6 +103,22 @@ function evaluateRules(action: OgiamAction, tier: OgiamRiskTier): RuleHit {
     };
   }
 
+  // Active penetration testing is explicitly allowed at the gate because by the
+  // time it reaches here the pentest harness has already verified an admin-issued
+  // scope token (the human authorization-to-test), the request budget, the kill
+  // switch, the allowed host + technique, and the SSRF floor. The gate still
+  // RECORDS every pentest decision to the ledger. A secret in params (above) still
+  // denies and a strong injection signal (above) still escalates, so those wider
+  // protections are unaffected. This explicit rule keeps the outcome intentional
+  // even if the high-risk fragment list later changes.
+  if (action.capability === "platform.pentest") {
+    return {
+      ruleId: "R-PENTEST-SCOPED-ALLOW",
+      reason: "authorized active pentest, bounded by an issued scope token + the harness",
+      intendedOutcome: "allow",
+    };
+  }
+
   // PII heading outbound is redacted (transformed), not blocked.
   if (
     action.signals.piiDetected &&

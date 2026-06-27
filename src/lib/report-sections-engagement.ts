@@ -21,6 +21,7 @@ import {
 import { queryAuditLog } from "@/lib/audit-log";
 import { listSystemProfiles } from "@/lib/platform-scan/profile/store";
 import { listRecommendations } from "@/lib/platform-scan/recommend/store";
+import { pentestFindings } from "@/lib/platform-scan/pentest/findings";
 
 const ws = (ctx: ReportContext): string => ctx.workspaceId ?? "default";
 
@@ -135,6 +136,37 @@ export async function genSecurityFindings(ctx: ReportContext): Promise<string> {
   }
   out.push(``, `**Remediation guidance**: ${REMEDIATION.security}`);
   return out.join("\n");
+}
+
+const EMPTY_PENTEST =
+  "No active penetration tests have confirmed a finding (or none have been run).";
+
+/** Penetration Testing: the findings the ACTIVE probes confirmed by exercising
+ *  the running app (IDOR, missing rate limit, info disclosure), as opposed to the
+ *  passive analysis surfaced in Security Findings. Single source of truth for what
+ *  counts as actively-confirmed is pentestFindings(). Never throws: any store
+ *  hiccup degrades to the explicit empty-state line so the report always renders. */
+export async function genPentestFindings(ctx: ReportContext): Promise<string> {
+  const out = [`## Penetration Testing`, ``];
+  try {
+    const rows = await listFindings(ws(ctx), { status: "open", limit: 300 });
+    const pt = pentestFindings(rows);
+    out.push(
+      `Findings confirmed by ACTIVE probes (the agent exercised the running app), distinct from passive analysis.`,
+      ``,
+    );
+    if (pt.length === 0) {
+      out.push(EMPTY_PENTEST);
+      return out.join("\n");
+    }
+    out.push(`| Severity | Location | Finding |`, `|----------|----------|---------|`);
+    for (const f of pt) {
+      out.push(`| ${f.severity} | \`${f.route}\` | ${f.title} |`);
+    }
+    return out.join("\n");
+  } catch {
+    return [`## Penetration Testing`, ``, EMPTY_PENTEST].join("\n");
+  }
 }
 
 export async function genDiagnosedIssues(ctx: ReportContext): Promise<string> {

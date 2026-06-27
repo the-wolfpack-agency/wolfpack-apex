@@ -87,6 +87,25 @@ describe("decide: rules and outcomes", () => {
     expect(d.intendedOutcome).toBe("escalate");
   });
 
+  it("R-PENTEST-SCOPED-ALLOW for an authorized active pentest (scope token + harness)", () => {
+    const d = decide(
+      action({ isMutation: true, tool: "pentest.probe", capability: "platform.pentest" }),
+      { mode: "enforce" },
+    );
+    expect(d.ruleId).toBe("R-PENTEST-SCOPED-ALLOW");
+    expect(d.intendedOutcome).toBe("allow");
+    expect(d.effectiveOutcome).toBe("allow"); // enforce mode -> the guard proceeds
+  });
+
+  it("a secret in pentest params still DENIES (wider protection wins over the pentest allow)", () => {
+    const d = decide(
+      action({ isMutation: true, tool: "pentest.probe", capability: "platform.pentest", signals: { secretDetected: true } }),
+      { mode: "enforce" },
+    );
+    expect(d.ruleId).toBe("R-SECRET-DENY");
+    expect(d.intendedOutcome).toBe("deny");
+  });
+
   it("R-MUTATION-ALLOW for an ordinary mutation (authorized by the role gate)", () => {
     const d = decide(action({ isMutation: true, tool: "create_note" }), { mode: "enforce" });
     expect(d.ruleId).toBe("R-MUTATION-ALLOW");
