@@ -6,9 +6,18 @@
  */
 const mockLoad = jest.fn();
 const mockList = jest.fn();
+const mockGetStored = jest.fn();
+const mockListStored = jest.fn();
 jest.mock("@/lib/assistant/connectors/credentials", () => ({
   loadConnectorCredentials: (...a: unknown[]) => mockLoad(...a),
   listConnectorCredentials: (...a: unknown[]) => mockList(...a),
+}));
+// resolveScanTarget/listScanTargets now consult the stored-target registry, which
+// imports @/lib/db. Mock the registry so the curated/connector tests stay isolated
+// from the DB (default: no stored targets).
+jest.mock("@/lib/platform-scan/targets-store", () => ({
+  getStoredScanTarget: (...a: unknown[]) => mockGetStored(...a),
+  listStoredTargets: (...a: unknown[]) => mockListStored(...a),
 }));
 
 import { resolveScanTarget, listScanTargets } from "@/lib/platform-scan/manifests";
@@ -17,6 +26,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockLoad.mockResolvedValue(null);
   mockList.mockResolvedValue([]);
+  mockGetStored.mockResolvedValue(null);
+  mockListStored.mockResolvedValue([]);
 });
 
 describe("resolveScanTarget", () => {
@@ -24,6 +35,31 @@ describe("resolveScanTarget", () => {
     const m = await resolveScanTarget("ws-1", "wolfpack-beyond");
     expect(m?.baseUrl).toBe("https://beyond-sku.vercel.app");
     expect(m?.login?.loginPath).toBe("/api/auth/login");
+  });
+
+  it("returns a STORED onboarded target and does NOT fall through to the connector", async () => {
+    const stored = {
+      baseUrl: "https://onboarded.client.com",
+      routes: [{ path: "/admin", journey: "Admin", auth: "required" as const }],
+      static: { owner: "o", repo: "r", ref: "main", paths: ["a"] },
+    };
+    mockGetStored.mockResolvedValue(stored);
+    const m = await resolveScanTarget("ws-1", "onboarded-acme");
+    expect(mockGetStored).toHaveBeenCalledWith("ws-1", "onboarded-acme");
+    expect(m).toBe(stored);
+    expect(mockLoad).not.toHaveBeenCalled(); // no connector fallthrough
+  });
+
+  it("falls through to the connector when no stored target exists", async () => {
+    mockGetStored.mockResolvedValue(null);
+    mockLoad.mockResolvedValue({
+      baseUrl: "https://app.client.com", authType: "username_password",
+      username: "u", password: "p", loginPath: "/auth/login", sessionCookieName: "sid",
+    });
+    const m = await resolveScanTarget("ws-1", "acme-portal");
+    expect(mockGetStored).toHaveBeenCalledWith("ws-1", "acme-portal");
+    expect(mockLoad).toHaveBeenCalledWith("ws-1", "acme-portal");
+    expect(m?.baseUrl).toBe("https://app.client.com");
   });
 
   it("builds an ad-hoc manifest from a saved username/password connection", async () => {

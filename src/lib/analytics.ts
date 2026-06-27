@@ -573,6 +573,9 @@ export type InstinctEventType =
   // platform.scan_findings_auto_resolved { platform, count, scan_id }
   // platform.system_profiled { platform, entities, integrations, routes, criticals }
   | "platform.system_profiled"
+  // platform.target_onboarded { platform, has_static, has_api } / target_offboarded { platform }
+  | "platform.target_onboarded"
+  | "platform.target_offboarded"
   // platform.recommendations_generated { platform, count, criticals }
   | "platform.recommendations_generated"
   // platform.recommendation_triaged { status, key }

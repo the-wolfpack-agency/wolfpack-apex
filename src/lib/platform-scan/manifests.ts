@@ -17,6 +17,7 @@
 import type { ScanRouteSpec } from "./types";
 import type { ApiEndpointSpec } from "./api-probe";
 import { loadConnectorCredentials, listConnectorCredentials } from "@/lib/assistant/connectors/credentials";
+import { getStoredScanTarget, listStoredTargets } from "./targets-store";
 
 /** A static-source-scan target: which repo + which source files to read and run
  *  the bug detectors over (the white-box layer that catches client-side defects
@@ -152,6 +153,11 @@ export async function resolveScanTarget(workspaceId: string, platform: string): 
   const curated = SCAN_MANIFESTS[platform];
   if (curated) return curated;
 
+  // Onboarded client targets: a full stored ScanManifest (deployed URL, repo,
+  // routes, API endpoints, login) registered without a code change.
+  const stored = await getStoredScanTarget(workspaceId, platform);
+  if (stored) return stored;
+
   const creds = await loadConnectorCredentials(workspaceId, platform);
   if (!creds || !creds.baseUrl) return null;
 
@@ -198,6 +204,18 @@ export async function listScanTargets(
   }));
   const seen = new Set(curated.map((t) => t.platform));
 
+  // Onboarded client targets (stored full manifests).
+  const stored = (await listStoredTargets(workspaceId))
+    .filter((t) => !seen.has(t.platform))
+    .map((t) => ({
+      platform: t.platform,
+      baseUrl: t.manifest.baseUrl,
+      hasStatic: !!t.manifest.static,
+      hasApi: !!t.manifest.apiEndpoints?.length,
+      hasLogin: !!t.manifest.login,
+    }));
+  stored.forEach((t) => seen.add(t.platform));
+
   const connections = (await listConnectorCredentials(workspaceId))
     .filter((c) => c.isActive && c.baseUrl && !seen.has(c.connectorName))
     .map((c) => ({
@@ -208,5 +226,5 @@ export async function listScanTargets(
       hasLogin: c.authType === "username_password",
     }));
 
-  return [...curated, ...connections];
+  return [...curated, ...stored, ...connections];
 }
