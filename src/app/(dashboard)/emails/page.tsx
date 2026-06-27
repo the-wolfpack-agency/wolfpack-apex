@@ -1178,14 +1178,17 @@ export default function EmailsPage() {
   const showInboxOnMobile = !isMobile || rightPaneState === "empty";
   const showRightOnMobile = !isMobile || rightPaneState !== "empty";
 
-  /* Compose mode takes over the surface — when the composer is open,
-     hide the inbox list so the composer gets the entire remaining
-     width. The nav rail stays (already collapsible) for switching
-     folders mid-compose. Discard or Send returns to the normal
-     3-pane shell. The Recipient-context drawer is conditionally
-     hidden inside ComposerPane itself via the same flag. */
-  const isComposing = rightPaneState === "composer";
-  const showInbox = showInboxOnMobile && !isComposing;
+  /* Compose mode keeps the 3-pane shell. On desktop the inbox stays
+     mounted but auto-collapses to its minimum width (see
+     `effectiveInboxWidth`) so the composer gets the bulk of the space
+     while the user can still click another thread - which routes
+     through the unsaved-draft guard. On mobile `showInboxOnMobile`
+     already hides the inbox during compose so the composer is
+     full-screen. The earlier `&& !isComposing` fully unmounted the
+     inbox on desktop too, which silently dropped the auto-collapse
+     width behaviour and made the unsaved-draft-on-thread-switch
+     dialog unreachable. */
+  const showInbox = showInboxOnMobile;
 
   // The 3-column shell stays mounted at all times. The reader does
   // NOT replace the page — it's rendered inside the right pane,
@@ -1767,10 +1770,25 @@ function ComposerPane({
         </div>
       </section>
 
-      {/* Recipient context drawer removed from compose view — the
-          composer needs the full remaining width to be actually
-          usable. Recipient context is still available from the inbox
-          reader where it has room to render. */}
+      {/* Recipient context drawer - hidden entirely on mobile (the
+          composer is full-screen there). On desktop it is a collapsible
+          drawer: open as a 280px panel or collapsed to a 36px "Context"
+          strip, so the composer keeps the bulk of the width while the
+          recipient-insights learning surface (recent threads, last
+          meeting, AI summary) stays reachable. Removing this render
+          (#64) silently dropped a populated learning surface - the
+          insights pipeline kept fetching but nothing displayed it. */}
+      {!isMobile ? (
+        <RecipientContextDrawer
+          open={contextOpen}
+          onToggle={onToggleContext}
+          recipients={recipients}
+          insightsCache={insightsCache}
+          expandedRecipients={expandedRecipients}
+          onToggleRecipientCard={onToggleRecipientCard}
+          calendarEvents={calendarEvents}
+        />
+      ) : null}
     </div>
   );
 }

@@ -1341,11 +1341,12 @@ describe("regression 2026-04-30 — callAI routes through AI router", () => {
 // fallbackChips field is the UI's gate.
 //
 // Acceptance rules being asserted here:
-//   1. Bare-fallback path (no AI provider) carries 3 role-tailored chips
+//   1. Bare-fallback path (no AI provider) carries the role-tailored chip
+//      kit (size owned by welcome-prompts.ts; 3-6 per the coverage guard)
 //   2. Successful tool / knowledge / RAG hits do NOT carry chips
 //   3. Chip text reflects the user role passed into chat()
 //   4. assistant.fallback_chips_offered analytics event fires once per
-//      fallback response with { role, chip_count: 3, source }
+//      fallback response with { role, chip_count: <kit size>, source }
 // ---------------------------------------------------------------------------
 
 describe("fallback chips", () => {
@@ -1356,13 +1357,18 @@ describe("fallback chips", () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { welcomePromptTextsForRole } = require("@/lib/assistant/welcome-prompts");
 
-  test("bare fallback path (no AI provider) carries 3 role-tailored chips", async () => {
+  test("bare fallback path (no AI provider) carries the role-tailored chip kit", async () => {
     const result = await chat("Unknown question with no keywords", "u1", "cto");
 
+    const ctoKit = welcomePromptTextsForRole("cto");
     expect(result.source).toBe("fallback");
     expect(result.fallbackChips).toBeDefined();
-    expect(result.fallbackChips).toHaveLength(3);
-    expect(result.fallbackChips).toEqual(welcomePromptTextsForRole("cto"));
+    /* Kit size is owned by welcome-prompts.ts (3-6, per the welcome-
+       prompts-coverage guard). Assert against the source-of-truth kit,
+       not a hard-coded count, so a deliberate kit resize doesn't break
+       the wiring test. */
+    expect(result.fallbackChips!.length).toBe(ctoKit.length);
+    expect(result.fallbackChips).toEqual(ctoKit);
   });
 
   test("fallback prose appends 'Try one of these instead:' lead-in", async () => {
@@ -1384,23 +1390,30 @@ describe("fallback chips", () => {
     expect(ctoResult.fallbackChips).not.toEqual(pmResult.fallbackChips);
   });
 
-  test("unknown role still gets a 3-prompt generic kit", async () => {
+  test("unknown role still gets the generic kit", async () => {
     const result = await chat("Unknown question no keywords", "u1", "intern-not-in-roster");
 
+    const genericKit = welcomePromptTextsForRole("intern-not-in-roster");
     expect(result.fallbackChips).toBeDefined();
-    expect(result.fallbackChips).toHaveLength(3);
+    /* Generic-kit size is owned by welcome-prompts.ts; assert parity
+       with the source kit rather than a hard-coded count. */
+    expect(result.fallbackChips).toEqual(genericKit);
+    expect(genericKit.length).toBeGreaterThanOrEqual(3);
+    expect(genericKit.length).toBeLessThanOrEqual(6);
   });
 
   test("fires assistant.fallback_chips_offered analytics with role + count + source", async () => {
     await chat("Unknown question no keywords", "u1", "cto");
 
+    const ctoKit = welcomePromptTextsForRole("cto");
     expect(mockTrackEvent).toHaveBeenCalledWith(
       "assistant.fallback_chips_offered",
       "u1",
       "cto",
       expect.objectContaining({
         role: "cto",
-        chip_count: 3,
+        /* chip_count mirrors the kit size owned by welcome-prompts.ts. */
+        chip_count: ctoKit.length,
         source: "fallback",
       }),
     );

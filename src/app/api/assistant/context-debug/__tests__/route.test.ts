@@ -19,6 +19,7 @@ export {};
 
 const mockTrack = jest.fn();
 const mockGetValidToken = jest.fn();
+const mockGetAppOnlyToken = jest.fn();
 const mockSearchSharePoint = jest.fn();
 const mockSearchProjectTasks = jest.fn();
 const mockTrackSpFail = jest.fn();
@@ -33,6 +34,11 @@ jest.mock("@/lib/analytics", () => ({
 
 jest.mock("@/lib/microsoft-graph", () => ({
   getValidToken: (...args: any[]) => mockGetValidToken(...args),
+  // context-resolver (called by the route) imports BOTH getValidToken and
+  // getAppOnlyToken from this module (it uses the app-only token for the
+  // SharePoint Sites.Read.All path, 2026-05-20). The mock must provide
+  // both or the resolver throws "getAppOnlyToken is not a function".
+  getAppOnlyToken: (...args: any[]) => mockGetAppOnlyToken(...args),
 }));
 
 jest.mock("@/lib/integrations/microsoft-sharepoint", () => ({
@@ -83,6 +89,9 @@ beforeEach(() => {
   });
   mockLoadUserOverrides.mockResolvedValue(null);
   mockGetValidToken.mockResolvedValue({ accessToken: "tok-abc", userEmail: "n@x.co" });
+  // No app-only token in tests → resolver falls back to the user's
+  // delegated token for SharePoint, matching the existing search mocks.
+  mockGetAppOnlyToken.mockResolvedValue(null);
   mockSearchMeetingTranscripts.mockResolvedValue([]);
   mockSearchSharePoint.mockResolvedValue({
     ok: true,

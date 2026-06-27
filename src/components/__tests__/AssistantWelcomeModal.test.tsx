@@ -122,7 +122,12 @@ describe("AssistantWelcomeModal — role-tailored prompts", () => {
     render(
       <AssistantWelcomeModal userRole="ceo" onPickPrompt={() => undefined} />,
     );
-    expect(screen.getByText("top 3 deals")).toBeInTheDocument();
+    /* Curated prompt library (ee0fad85) replaced the old "top 3 deals"
+     * chip with the more specific high-value-pipeline prompt. Assert the
+     * current real deal-flow chip so the test tracks the shipped copy. */
+    expect(
+      screen.getByText("deals over $50k closing this month"),
+    ).toBeInTheDocument();
     /* PM-specific prompt should NOT appear for ceo. */
     expect(screen.queryByText(/create task to/)).not.toBeInTheDocument();
   });

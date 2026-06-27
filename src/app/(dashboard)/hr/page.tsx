@@ -349,7 +349,18 @@ export default function HrPage() {
       </div>
 
       {tab === "overview" && <OverviewTab />}
-      {tab === "employees" && <EmployeesTab />}
+      {/* EmployeesTab renders the count header + Invite / Add-employee
+          controls; EmployeeEditor renders the single canonical employee
+          list with inline edit/delete. The earlier double-list bug
+          (a56b5950) was EmployeesTab ALSO rendering a read-only list -
+          that list has been removed there, so there is exactly one list
+          and the edit/delete CRUD surface is reachable again. */}
+      {tab === "employees" && (
+        <>
+          <EmployeesTab />
+          <EmployeeEditor />
+        </>
+      )}
       {tab === "onboarding" && <OnboardingTab />}
       {tab === "benefits" && <BenefitsTab />}
       {tab === "documents" && <DocumentsTab />}

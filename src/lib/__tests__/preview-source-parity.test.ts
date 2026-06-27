@@ -30,7 +30,11 @@ function read(p: string): string {
 describe("preview-source parity — detail page and edit page match", () => {
   const DETAIL_PAGE = "src/app/(dashboard)/sites/[id]/page.tsx";
   const EDIT_PAGE = "src/app/(dashboard)/sites/[id]/edit/page.tsx";
-  const INTERNAL_PREVIEW_PATTERN = /\/sites\/\$\{\s*id\s*\}\/preview/;
+  /* Both pages template the site id into the path; the detail page uses
+     `${id}` and the edit page uses `${args.siteId}` (the pure URL selector
+     receives the id as `siteId`). Accept either id binding - the contract
+     is the route shape (/sites/<id>/preview), not the variable name. */
+  const INTERNAL_PREVIEW_PATTERN = /\/sites\/\$\{\s*(?:args\.)?(?:site)?[iI]d\s*\}\/preview/;
 
   it("detail page PreviewIframe src points at /sites/{id}/preview", () => {
     const src = read(DETAIL_PAGE);

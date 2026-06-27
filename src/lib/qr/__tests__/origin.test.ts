@@ -113,12 +113,12 @@ describe("resolveInternalOrigin (server self-calls — never trusts the request)
   });
 
   test("falls back to localhost in dev when no env is configured", () => {
-    process.env.NODE_ENV = "development";
+    (process.env as Record<string, string>).NODE_ENV = "development";
     expect(resolveInternalOrigin()).toBe("http://localhost:3000");
   });
 
   test("throws in production when no trusted origin is configured (refuses to call an untrusted host)", () => {
-    process.env.NODE_ENV = "production";
+    (process.env as Record<string, string>).NODE_ENV = "production";
     expect(() => resolveInternalOrigin()).toThrow(/internal origin/i);
   });
 });

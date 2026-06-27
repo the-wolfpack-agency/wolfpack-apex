@@ -170,7 +170,13 @@ describe("required-tools coverage — every shipped tool is advertised somewhere
     "search_github_issues",
     "recent_workflow_runs",
     "create_task_form",
-    "create_email_form",
+    /* `create_email_form` is intentionally NOT advertised by a starter
+     *  chip. The "create email" chip was hidden 2026-05-20 (see
+     *  AssistantStarterPrompts.tsx "Create something") because the
+     *  compose surface isn't hardened yet (no send confirmation, no
+     *  attachments, thin rate-limit handling). The tool still claims
+     *  typed phrasings ("draft an email to a@b.com") when a user types
+     *  them directly; re-add it here once the chip comes back. */
     "create_message_form",
     "create_calendar_event_form",
     "create_feature_form",

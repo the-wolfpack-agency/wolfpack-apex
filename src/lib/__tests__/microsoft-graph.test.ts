@@ -131,16 +131,23 @@ describe("OAuth2 URL Generation", () => {
     expect(url).toContain("callback");
   });
 
-  test("auth URL includes prompt=consent (forces re-consent when scopes change)", () => {
-    // Regression: without prompt=consent, Azure silently reuses the
-    // user's prior consent set when they reconnect MS. Newly-added
-    // scopes (e.g. Channel.ReadBasic.All on 2026-04-24) never make
-    // it into the issued token, and Graph then returns 200 with empty
-    // results for the new endpoints — looks like "no data" but is
-    // really "missing scope". This caused hours of dead-end debugging.
-    // Lock the parameter in.
+  test("auth URL uses prompt=select_account (not consent) on OAuth start", () => {
+    // History: prompt=consent was added 2026-04-24 to force scope refresh
+    // after adding new scopes. It was deliberately REVERTED to
+    // select_account on 2026-05-21 (commit 4bc68ac5, PR #99, the "Ashley
+    // incident"): prompt=consent makes Azure bypass cached tenant-wide
+    // admin consent on every sign-in, which lands non-admin teammates on
+    // "Need admin approval" for admin-only scopes (Files.ReadWrite.All,
+    // Team.ReadBasic.All, ...) even when tenant admin consent is granted.
+    // select_account keeps the account-picker UX without forcing the
+    // consent screen, so admin-granted scopes flow through silently.
+    // Scope refresh after future scope-list changes is handled by an
+    // explicit "Reconnect (refresh permissions)" button that overrides
+    // with prompt=consent for THAT call only. Lock select_account in for
+    // the default /authorize start.
     const url = ms.getAuthUrl("user-1");
-    expect(url).toMatch(/[?&]prompt=consent\b/);
+    expect(url).toMatch(/[?&]prompt=select_account\b/);
+    expect(url).not.toMatch(/[?&]prompt=consent\b/);
   });
 
   test("auth URL includes a signed state parameter (not raw userId)", () => {

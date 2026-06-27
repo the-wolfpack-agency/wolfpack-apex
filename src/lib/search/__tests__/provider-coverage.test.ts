@@ -90,6 +90,8 @@ export const SEARCH_PROVIDER_EXEMPT_TOOLS: Record<string, string> = {
     "synthesis tool — generates a per-meeting brief from cross-source data, not itself a searchable index",
   "portal-link.ts":
     "shared helper module (not a tool) — produces portal-link source refs for other tools",
+  "resolve-connector.ts":
+    "shared helper module (not a tool): scope-enforcing connector resolver used by the connector-backed tools, nothing searchable",
   "email-thread-widget-tool.ts":
     "widget rendering one specific thread; email search lives in the emails provider",
   "filter-external-records-tool.ts":

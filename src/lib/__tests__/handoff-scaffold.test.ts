@@ -65,9 +65,14 @@ describe("handoff-scaffold.mjs", () => {
 
   test("the script refuses to overwrite an existing handoff (refuses, doesn't error)", () => {
     const source = readFileSync(SCRIPT_PATH, "utf-8");
-    // Look for the refusal logic
+    // Look for the refusal message shown on the no-clobber path.
     expect(source).toContain("Refusing to overwrite");
-    expect(source).toContain("existsSync(targetPath)");
+    /* No-clobber is enforced atomically via the `wx` write flag (CodeQL
+       js/file-system-race): writeFileSync throws EEXIST if the file is
+       already present, instead of the old TOCTOU existsSync-then-write.
+       Assert the hardened mechanism, not the removed existsSync probe. */
+    expect(source).toMatch(/flag:\s*["']wx["']/);
+    expect(source).toContain('code === "EEXIST"');
   });
 
   test("npm run handoff is wired up in package.json", () => {

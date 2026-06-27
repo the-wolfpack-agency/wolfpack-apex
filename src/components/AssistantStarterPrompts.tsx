@@ -236,16 +236,16 @@ function buildStarterCategories(): StarterCategory[] {
           description: "Open pull requests across the repos you have access to.",
         },
         {
-          text: "open issues",
-          description: "Currently open issues across your repos, newest first.",
+          text: "open github issues in wolfpack-apex",
+          description: "Currently open issues in the wolfpack-apex repo, newest first.",
         },
         {
-          text: "recent workflow runs",
-          description: "Latest GitHub Actions runs (pass + fail) across your repos.",
+          text: "recent workflow runs in wolfpack-apex",
+          description: "Latest GitHub Actions runs (pass + fail) in the wolfpack-apex repo.",
         },
         {
-          text: "failed CI runs",
-          description: "Most recent failing GitHub Actions runs across your repos.",
+          text: "failed CI runs in wolfpack-apex",
+          description: "Most recent failing GitHub Actions runs in the wolfpack-apex repo.",
         },
       ],
       requires: { any: ["github"] },

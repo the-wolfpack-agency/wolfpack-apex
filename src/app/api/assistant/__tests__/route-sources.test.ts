@@ -90,7 +90,10 @@ describe("POST /api/assistant — sources + relatedPages", () => {
     // scrolled off-screen. The original sentence must still be there
     // verbatim at the start.
     expect(body.response).toMatch(/^You have 2 meetings today\./);
-    expect(body.response).toMatch(/See more: \[[^\]]+\]\(\/[a-z]+\)/);
+    /* Footer route may be multi-segment (e.g. /meetings/feeds - the
+       meetings domain lands on its first tab), so allow path separators,
+       not just a single lowercase segment. */
+    expect(body.response).toMatch(/See more: \[[^\]]+\]\(\/[a-z][a-z/-]*\)/);
     expect(Array.isArray(body.sources)).toBe(true);
     expect(body.sources.length).toBe(1);
     expect(body.sources[0].type).toBe("tool");

@@ -174,10 +174,17 @@ describe("GET /changes", () => {
     ]);
     const r = await changesGET(req("GET", "http://x/changes"), PARAMS_PORSCHE);
     expect(r.status).toBe(200);
-    const body = (await r.json()) as { classes: { class_key: string }[]; window: { min: number } };
+    const body = (await r.json()) as {
+      classes: { class_key: string }[];
+      window: { min: number; max: number };
+    };
     expect(body.classes).toHaveLength(1);
     expect(body.classes[0].class_key).toBe("BA101|2026-04-13|Hilton Hotel");
-    expect(body.window.min).toBe(-7);
+    // Mirrors the real porsche-classes active_window_days (widened from
+    // -7/+60 to -30/+365 in commit 82d10245). The route echoes the
+    // automation definition's window verbatim.
+    expect(body.window.min).toBe(-30);
+    expect(body.window.max).toBe(365);
   });
 });
 

@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   const q = url.searchParams.get("q");
   const popular = url.searchParams.get("popular");
   const gaps = url.searchParams.get("gaps");
-  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 50), 1), 200);
+  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 50), 1), 100);
   const offset = Math.max(Number(url.searchParams.get("offset") ?? 0), 0);
 
   trackEvent("system.search_performed", user.id, user.role, { module: "knowledge" });

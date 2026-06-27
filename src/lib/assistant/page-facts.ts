@@ -662,6 +662,24 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["sites", "analytics", "messages"],
   },
+  surveys: {
+    domain: "surveys",
+    route: "/surveys",
+    title: "Surveys",
+    purpose: "Build short surveys in-house, publish them to a public link, and read the aggregated results.",
+    what_you_can_do: [
+      "Build a survey from a handful of question types (single choice, multiple choice, rating, short text, long text).",
+      "Publish each survey to a public responder link so anyone can answer without signing in.",
+      "Link a QR code to a published survey so a printed asset points straight at it.",
+      "Read aggregated results per survey to see how people responded.",
+    ],
+    how_to: [
+      "Open Surveys from the left nav.",
+      "Add your questions, pick a type for each, and mark the required ones.",
+      "Publish the survey, then share the public link or its QR code.",
+    ],
+    related_pages: ["sites", "analytics", "messages"],
+  },
   search: {
     domain: "search",
     route: "/search",

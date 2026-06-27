@@ -105,23 +105,13 @@ export function EmployeesTab() {
         </form>
       )}
 
-      {employees.length === 0 ? (
-        <div style={{ padding: "2rem", textAlign: "center", border: "1px dashed var(--wp-border)", borderRadius: "8px", color: "var(--wp-text-dim)", fontSize: "0.85rem" }}>
-          No employees yet.
-        </div>
-      ) : (
-        <ul style={{ listStyle: "none", padding: 0, fontSize: "0.85rem" }}>
-          {employees.map((e) => (
-            <li key={e.id} style={{ padding: "0.6rem 0", borderBottom: "1px solid var(--wp-border)" }}>
-              <strong>{e.full_name}</strong>{" "}
-              <span style={{ color: "var(--wp-text-dim)" }}>
-                {e.role_title && `— ${e.role_title}`} {e.department && `(${e.department})`}{" "}
-                {e.email && `· ${e.email}`}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {/* The employee list itself is rendered by <EmployeeEditor /> (which
+          adds inline edit/delete) immediately below this header on the
+          /hr employees tab. This component intentionally no longer renders
+          its own read-only list - that duplication was the double-list bug
+          fixed in a56b5950. We keep the count header + Invite / Add
+          controls here so the page has a single source of truth for the
+          list while the edit/delete CRUD surface stays reachable. */}
     </div>
   );
 }

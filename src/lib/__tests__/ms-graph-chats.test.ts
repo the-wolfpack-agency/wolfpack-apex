@@ -234,8 +234,15 @@ describe("sanitizeComposeHtml", () => {
   });
   it("neutralizes javascript: URLs", () => {
     const out = sanitizeComposeHtml(`<a href="javascript:alert(1)">x</a>`);
+    // Security contract: the dangerous scheme must be gone entirely.
     expect(out).not.toContain("javascript:");
-    expect(out).toContain(`href="#"`);
+    // The DOMPurify-backed sanitizer (see ms-graph-chats.ts:642 - it
+    // replaced the old regex strip CodeQL flagged) DROPS the unsafe href
+    // attribute rather than rewriting it to "#". Either is safe; assert on
+    // the actual, more-secure behaviour: no live href survives, link text
+    // is preserved.
+    expect(out).not.toMatch(/href\s*=/i);
+    expect(out).toContain("x");
   });
   it("strips <iframe>", () => {
     const out = sanitizeComposeHtml(`hello<iframe src="//evil"></iframe>!`);

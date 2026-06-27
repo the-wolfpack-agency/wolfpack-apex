@@ -96,23 +96,26 @@ test("Clicking a generator card opens the generate form with that doc type pre-s
   expect(select).toBeInTheDocument();
 });
 
-test("`/docs?generate=1` deep-link opens the generate form on mount and clears the param", async () => {
+test("`/docs?generate=1` is ignored (no URL-controlled auto-open) - secure-by-default", async () => {
+  /* The `?generate=1` deep-link was removed in the CodeQL hardening pass
+   * (7de8a1dc) - branching control flow on user-controlled URL input was
+   * flagged as js/user-controlled-bypass. The Generate panel must NOT
+   * auto-open from the URL; it is only reachable via the in-page button.
+   * Re-adding the deep-link would re-open the security finding, so this
+   * test locks the secure behaviour instead. */
   setLocation("http://localhost/docs?generate=1");
-  const replaceState = jest.fn();
-  Object.defineProperty(window.history, "replaceState", {
-    value: replaceState,
-    writable: true,
-  });
-
   await renderPage();
   await waitFor(() => {
-    // Form panel is open thanks to the deep-link.
-    expect(screen.getByTestId("docs-generate-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("docs-empty-state")).toBeInTheDocument();
   });
-  // URL param was stripped.
-  expect(replaceState).toHaveBeenCalled();
-  const replacedUrl = replaceState.mock.calls[0][2] as string;
-  expect(replacedUrl).not.toContain("generate=1");
+  // The generate panel stays closed despite the URL param.
+  expect(screen.queryByTestId("docs-generate-panel")).not.toBeInTheDocument();
+
+  // It opens only via the explicit in-page control.
+  await act(async () => {
+    fireEvent.click(screen.getByTestId("docs-empty-card-release_notes"));
+  });
+  expect(screen.getByTestId("docs-generate-panel")).toBeInTheDocument();
 });
 
 test("`/docs` with no params does NOT auto-open the generate form", async () => {

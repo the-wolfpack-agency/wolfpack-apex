@@ -60,7 +60,25 @@ const SAMPLE = {
 
 beforeEach(() => {
   mockFetchWithRefresh.mockReset();
+  // Reset the URL so the calendar anchors on "today" by default. Grid
+  // tests below override this with a ?date= in the sample event's week.
+  try {
+    window.history.replaceState({}, "", "/calendar");
+  } catch {
+    /* noop */
+  }
 });
+
+/**
+ * Anchor the week grid on a deterministic date so the SAMPLE event
+ * (which is fixed at 2026-04-21) lands inside the rendered week
+ * regardless of what "today" is when the suite runs. The page reads
+ * `?date=YYYY-MM-DD` to set its week anchor; without this the grid
+ * anchors on the real current week and the April event is filtered out.
+ */
+function anchorOn(dateIso: string) {
+  window.history.replaceState({}, "", `/calendar?date=${dateIso}`);
+}
 
 describe("CalendarPage", () => {
   test("loads week view on mount + renders insights + suggestions", async () => {
@@ -134,6 +152,7 @@ describe("CalendarPage", () => {
 
 describe("CalendarPage — week grid integration", () => {
   test("week view renders the grid above the analytics dashboard with the sample event", async () => {
+    anchorOn("2026-04-21");
     mockRange({
       ...SAMPLE,
       events: [
@@ -162,6 +181,7 @@ describe("CalendarPage — week grid integration", () => {
     // rAF callback doesn't throw.
     (Element.prototype as any).scrollIntoView = () => {};
 
+    anchorOn("2026-04-21");
     mockRange({
       ...SAMPLE,
       events: [

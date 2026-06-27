@@ -41,6 +41,60 @@ describe("getAnalysesByMessageIds", () => {
     expect(out.get("m1")?.topics[0].topic).toBe("pricing");
   });
 
+  it("does not throw on a null/missing analyzed_at (guards Invalid time value)", async () => {
+    // Production reality: an errored / pending analysis row is persisted
+    // before it is analyzed, so analyzed_at is null. The old code did
+    // `new Date(null).toISOString()` which threw RangeError and 500'd the
+    // whole read. The repo must fall back to created_at, then null.
+    mockQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "a1",
+          message_id: "m1",
+          summary: "Pending",
+          decisions: [],
+          action_items: [],
+          topics: [],
+          attendees: [],
+          blockers: [],
+          next_steps: [],
+          analyzed_at: null,
+          created_at: "2026-04-15T00:00:00Z",
+        },
+      ],
+    });
+    const out = await getAnalysesByMessageIds(["m1"]);
+    const rec = out.get("m1");
+    expect(rec).toBeDefined();
+    // public (types.ts) shape only carries created_at - it falls through
+    // unchanged because it was a valid date.
+    expect(rec?.created_at).toBe("2026-04-15T00:00:00Z");
+  });
+
+  it("yields null timestamps when BOTH analyzed_at and created_at are missing", async () => {
+    mockQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "a1",
+          message_id: "m1",
+          summary: "No dates",
+          decisions: [],
+          action_items: [],
+          topics: [],
+          attendees: [],
+          blockers: [],
+          next_steps: [],
+          analyzed_at: null,
+          created_at: null,
+        },
+      ],
+    });
+    const out = await getAnalysesByMessageIds(["m1"]);
+    const rec = out.get("m1");
+    expect(rec).toBeDefined();
+    expect(rec?.created_at).toBeNull();
+  });
+
   it("returns empty map when the table doesn't exist (42P01)", async () => {
     const err: Error & { code?: string } = new Error("relation does not exist");
     err.code = "42P01";

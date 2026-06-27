@@ -25,7 +25,11 @@ export interface MeetingAnalysisRecord {
   id: string;
   message_id: string;
   analyzer_version: string;
-  analyzed_at: string;
+  /* ISO-8601, or null when the row carried no usable timestamp (an
+     errored / pending analysis persisted before it was analyzed).
+     Callers must treat null as "unknown time", never feed it to
+     `new Date(...)` blindly. */
+  analyzed_at: string | null;
   /* Convenience one-line summary the assembler uses in the brief
      panel. The Phase 2 LLM prompt doesn't currently produce it, so
      we synthesize from the first decision (or topic) at read time —
@@ -44,14 +48,16 @@ export interface MeetingAnalysisRecord {
   tokens_used: number | null;
   status: MeetingAnalysisStatus;
   error_detail: string | null;
-  created_at: string;
+  created_at: string | null;
 }
 
 interface AnalysisRow extends Record<string, unknown> {
   id: string;
   message_id: string;
   analyzer_version: string;
-  analyzed_at: string;
+  // May be null in practice: an errored / pending analysis is persisted
+  // before it is analyzed. Typed nullable so call sites must guard.
+  analyzed_at: string | null;
   decisions: unknown;
   action_items: unknown;
   topics: string[] | null;
@@ -63,12 +69,45 @@ interface AnalysisRow extends Record<string, unknown> {
   tokens_used: number | null;
   status: MeetingAnalysisStatus;
   error_detail: string | null;
-  created_at: string;
+  created_at: string | null;
 }
 
 /* ------------------------------------------------------------------ */
 /* Mappers                                                             */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Coerce a DB timestamp value to an ISO-8601 string, tolerating null /
+ * undefined / invalid input WITHOUT throwing.
+ *
+ * Production reality: a row can carry a null `analyzed_at` (an analysis
+ * that errored or is still pending was persisted before it was ever
+ * analyzed) or a non-string value the driver hands back. The previous
+ * code did `new Date(row.analyzed_at).toISOString()` unconditionally,
+ * which throws `RangeError: Invalid time value` for null/garbage and
+ * 500'd the whole read path. We fall back to the supplied `fallback`
+ * timestamp (the sibling column) and finally to null.
+ */
+function toIsoOrNull(
+  value: unknown,
+  fallback: string | null = null,
+): string | null {
+  if (typeof value === "string" && value.length > 0) {
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) return value;
+  } else if (value instanceof Date) {
+    if (!Number.isNaN(value.getTime())) return value.toISOString();
+  } else if (typeof value === "number" && Number.isFinite(value)) {
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) return d.toISOString();
+  }
+  // Invalid / missing - use the fallback if it is itself valid.
+  if (typeof fallback === "string" && fallback.length > 0) {
+    const d = new Date(fallback);
+    if (!Number.isNaN(d.getTime())) return fallback;
+  }
+  return null;
+}
 
 function rowToAnalysis(row: AnalysisRow): MeetingAnalysisRecord {
   // jsonb columns come back from `pg` as parsed objects; older drivers
@@ -87,16 +126,25 @@ function rowToAnalysis(row: AnalysisRow): MeetingAnalysisRecord {
 
   const decisions = parseJson<MeetingAnalysis["decisions"]>(row.decisions, []);
   const topics = row.topics ?? [];
-  /* Synthesize a one-line summary for callers (Phase 4 brief panel)
-     that expect it. Prefer the first decision (analyzer puts it in
-     `summary`; the simulated row uses `description` — accept either);
-     fall back to a comma-joined preview of the top topics; null when
-     we have neither. */
+  /* Summary precedence for the Phase 4 brief panel:
+       1. An explicit `summary` value stored on the row (the analyzer
+          may persist one; the Phase 4/5 read path treats it as
+          authoritative). The type-unification refactor (82c4cc3e)
+          accidentally dropped this preference and always synthesized
+          from decisions - that regressed the stored-summary path.
+       2. Else synthesize from the first decision (analyzer puts the
+          text in `summary`; the simulated row uses `description` -
+          accept either).
+       3. Else a comma-joined preview of the top topics.
+       4. Else null. */
+  const storedSummary =
+    typeof row.summary === "string" ? row.summary.trim() : "";
   const firstDec = decisions[0] as
     | { summary?: string; description?: string }
     | undefined;
   const firstDecText = (firstDec?.summary || firstDec?.description || "").trim();
   const summary =
+    storedSummary ||
     firstDecText ||
     (topics.length > 0 ? topics.slice(0, 3).join(" · ") : null);
 
@@ -104,10 +152,13 @@ function rowToAnalysis(row: AnalysisRow): MeetingAnalysisRecord {
     id: row.id,
     message_id: row.message_id,
     analyzer_version: row.analyzer_version,
-    analyzed_at:
-      typeof row.analyzed_at === "string"
-        ? row.analyzed_at
-        : new Date(row.analyzed_at).toISOString(),
+    // Tolerate null / invalid timestamps (errored or pending analyses
+    // persisted before analysis ran). Prefer analyzed_at; fall back to
+    // created_at; null when neither is a usable date - never throw.
+    analyzed_at: toIsoOrNull(
+      row.analyzed_at,
+      typeof row.created_at === "string" ? row.created_at : null,
+    ),
     summary,
     decisions,
     action_items: parseJson<MeetingAnalysis["action_items"]>(
@@ -123,10 +174,10 @@ function rowToAnalysis(row: AnalysisRow): MeetingAnalysisRecord {
     tokens_used: row.tokens_used,
     status: row.status,
     error_detail: row.error_detail,
-    created_at:
-      typeof row.created_at === "string"
-        ? row.created_at
-        : new Date(row.created_at).toISOString(),
+    created_at: toIsoOrNull(
+      row.created_at,
+      typeof row.analyzed_at === "string" ? row.analyzed_at : null,
+    ),
   };
 }
 

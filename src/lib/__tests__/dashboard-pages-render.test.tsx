@@ -157,4 +157,29 @@ describe("Dashboard pages render without throwing", () => {
       errSpy.mockRestore();
     });
   }
+
+  // Regression guard for the "Cannot read total_tokens of undefined"
+  // crash: when /api/usage returns a malformed/partial body (the
+  // generic mock above has no `lifetime` / `last_30_days` windows), the
+  // Settings Token-usage card must render its explicit empty state
+  // instead of throwing and blanking the whole page. The fix guards the
+  // source (settings page validates the usage shape before setState),
+  // so this asserts the user-visible degradation, not just no-throw.
+  it("/settings renders the usage empty state on a malformed /api/usage body (no crash)", async () => {
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    const mod = await import("@/app/(dashboard)/settings/page");
+    const Page = mod.default;
+    const rendered = render(<Page />);
+    await waitFor(
+      () => {
+        expect(
+          rendered.getByText(/Usage data unavailable\./i),
+        ).toBeInTheDocument();
+      },
+      { timeout: 1000 },
+    );
+    // The well-formed usage card must NOT have rendered from bad data.
+    expect(rendered.queryByTestId("settings-usage")).toBeNull();
+    errSpy.mockRestore();
+  });
 });

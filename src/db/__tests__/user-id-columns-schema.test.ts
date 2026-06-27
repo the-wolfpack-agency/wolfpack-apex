@@ -74,6 +74,56 @@ interface Finding {
   statement: string;
 }
 
+function migrationNumber(file: string): number | null {
+  const match = file.match(/^(\d{3})/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+/**
+ * Collect, per column name, the set of migration numbers that widen that
+ * column to TEXT via `ALTER COLUMN <col> TYPE TEXT`. We can't bind the
+ * ALTER to a specific table cheaply with a line scan (the ALTER and the
+ * table name may sit on different lines, or be built with format()), so
+ * we track resolution at the (column, migration-number) granularity:
+ * a UUID CREATE-TABLE finding for <col> in migration N is considered
+ * RESOLVED if some migration M > N contains an `ALTER COLUMN <col> TYPE
+ * TEXT` for the same column name. This mirrors how migration 040 resolves
+ * the historical 035/038 offenders and migration 144/192 resolve the
+ * later ones - the invariant the test pins is "every UUID user-id column
+ * has a later widening migration", not "no landed migration ever spelled
+ * the column UUID" (we never rewrite landed migrations).
+ */
+function collectTextWidenings(): Map<string, number[]> {
+  const byCol = new Map<string, number[]>();
+  const files = readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+
+  for (const file of files) {
+    const num = migrationNumber(file);
+    if (num === null) continue;
+    const text = readFileSync(join(MIGRATIONS_DIR, file), "utf-8");
+    for (const col of USER_ID_COLUMN_NAMES) {
+      // ALTER COLUMN <col> TYPE TEXT  - tolerant of the IF wrapper and
+      // the literal-vs-format() spelling (format() emits %I but the
+      // column name still appears in the pairs array literal alongside a
+      // "TYPE TEXT" cast in the same file).
+      const direct = new RegExp(
+        `ALTER\\s+COLUMN\\s+${col}\\s+TYPE\\s+TEXT`,
+        "i",
+      );
+      const viaPairs =
+        new RegExp(`['\"]${col}['\"]`).test(text) && /TYPE\s+TEXT/i.test(text);
+      if (direct.test(text) || viaPairs) {
+        const arr = byCol.get(col) ?? [];
+        arr.push(num);
+        byCol.set(col, arr);
+      }
+    }
+  }
+  return byCol;
+}
+
 function scanMigrations(): Finding[] {
   const findings: Finding[] = [];
   const files = readdirSync(MIGRATIONS_DIR)
@@ -111,40 +161,45 @@ function scanMigrations(): Finding[] {
   return findings;
 }
 
+/**
+ * A UUID user-id finding is UNRESOLVED when no later-numbered migration
+ * widens that column to TEXT. Those are the genuine regressions.
+ */
+function unresolvedFindings(): Finding[] {
+  const findings = scanMigrations();
+  const widenings = collectTextWidenings();
+  return findings.filter((f) => {
+    const num = migrationNumber(f.file);
+    if (num === null) return false;
+    const fixers = widenings.get(f.column) ?? [];
+    const hasLaterFix = fixers.some((m) => m > num);
+    return !hasLaterFix;
+  });
+}
+
 describe("Schema invariant: user-identity columns are TEXT, not UUID", () => {
-  it("no migration declares a user-id column as UUID", () => {
-    const findings = scanMigrations();
+  it("every UUID user-id column has a later widening to TEXT", () => {
+    // The HISTORICAL CREATE TABLE statements (035/038 widened by 040,
+    // 143 by 144, 153/154/155/158 by 192) still spell the column `UUID`
+    // because we never rewrite landed migrations. The invariant pinned
+    // here is therefore "every UUID user-id finding is accompanied by a
+    // later-numbered ALTER ... TYPE TEXT migration." A new migration that
+    // introduces a UUID user-id column with NO later widening is the
+    // regression this test catches.
+    const unresolved = unresolvedFindings();
 
-    // After migration 040 applies, every offending column has been
-    // widened to TEXT in the running DB. But the HISTORICAL CREATE
-    // TABLE statements in 035 + 038 still say `UUID` because we don't
-    // rewrite landed migrations. So findings will be non-empty.
-    //
-    // The rule is: findings MUST all be in files <= 038 AND must be
-    // accompanied by a later-numbered ALTER TABLE ... TYPE TEXT in
-    // a subsequent migration. If a new migration introduces a
-    // user-id column as UUID, this test must catch it — so we look
-    // for findings in files NEWER than 038 and fail if any exist.
-    const unresolvedFindings = findings.filter((f) => {
-      const match = f.file.match(/^(\d{3})/);
-      if (!match) return false;
-      const num = parseInt(match[1], 10);
-      // Any migration AFTER 038 (the last offender) reintroducing a
-      // UUID user-id column is a regression.
-      return num > 38;
-    });
-
-    if (unresolvedFindings.length > 0) {
-      const msg = unresolvedFindings
+    if (unresolved.length > 0) {
+      const msg = unresolved
         .map((f) => `  ${f.file}:${f.line} — ${f.column} typed as UUID\n    ${f.statement}`)
         .join("\n");
       throw new Error(
         `Migration(s) introduced a user-identity column as UUID.\n` +
           `User ids in this codebase are stable string identifiers (e.g. "demo-cto"), not UUIDs.\n` +
-          `Columns must be TEXT. Fix before merging.\n\n${msg}`,
+          `Columns must be TEXT - either declare TEXT in the CREATE TABLE or add a\n` +
+          `later numbered migration that ALTERs the column to TEXT. Fix before merging.\n\n${msg}`,
       );
     }
-    expect(unresolvedFindings).toEqual([]);
+    expect(unresolved).toEqual([]);
   });
 
   it("migration 040 exists and widens both known offenders", () => {

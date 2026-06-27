@@ -54,6 +54,34 @@ interface UsageResponse {
   generated_at: string;
 }
 
+/**
+ * Defensive shape check for the /api/usage body. The Token-usage card
+ * reads `usage.last_30_days.total_tokens` / `usage.lifetime.total_tokens`
+ * directly, so a malformed or partial 200 (error envelope, missing
+ * window, etc.) would throw "Cannot read total_tokens of undefined" and
+ * blank the entire Settings page - the blank-dashboard class of bug this
+ * team treats as a prod incident. We validate both windows before
+ * committing the response to state; anything malformed leaves `usage`
+ * null so the explicit "Usage data unavailable." empty state renders.
+ */
+function isUsageWindow(w: unknown): w is UsageWindow {
+  if (!w || typeof w !== "object") return false;
+  const o = w as Record<string, unknown>;
+  return (
+    typeof o.total_tokens === "number" &&
+    typeof o.prompt_tokens === "number" &&
+    typeof o.completion_tokens === "number" &&
+    typeof o.cache_hits === "number" &&
+    typeof o.ai_calls === "number"
+  );
+}
+
+function isUsageResponse(data: unknown): data is UsageResponse {
+  if (!data || typeof data !== "object") return false;
+  const o = data as Record<string, unknown>;
+  return isUsageWindow(o.lifetime) && isUsageWindow(o.last_30_days);
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -1009,8 +1037,11 @@ export default function SettingsPage() {
     try {
       const res = await fetchWithRefresh("/api/usage", { headers: authHeaders() });
       if (res.ok) {
-        const data = (await res.json()) as UsageResponse;
-        setUsage(data);
+        const data: unknown = await res.json();
+        // Only commit a well-formed payload; otherwise leave `usage`
+        // null so the card shows "Usage data unavailable." instead of
+        // crashing the page on a missing window.
+        setUsage(isUsageResponse(data) ? data : null);
       }
     } catch {
       /* non-fatal */
@@ -1296,15 +1327,16 @@ export default function SettingsPage() {
         <ChangePasswordCard />
       </SectionCard>
 
-      {/* Email signatures — hidden 2026-05-20 along with the email
-          compose surface. No reason to surface signature management
-          when there's no inline email feature to use them in.
-          Re-enable when /emails ships production-ready. */}
-      {process.env.NEXT_PUBLIC_ENABLE_EMAIL_FEATURES === "1" && (
-        <SectionCard title="Email signatures" id="email-signatures">
-          <EmailSignaturesCard />
-        </SectionCard>
-      )}
+      {/* Email signatures - re-enabled now that /emails has shipped the
+          production composer. The composer's "Manage signatures →" link
+          (signature-menu-manage) deep-links here to /settings#email-signatures,
+          and the composer loads + inserts these signatures, so the
+          management surface must render. The previous env-flag gate
+          (hidden 2026-05-20 "until /emails ships") left that link a
+          dead end. */}
+      <SectionCard title="Email signatures" id="email-signatures">
+        <EmailSignaturesCard />
+      </SectionCard>
 
       {/* Microsoft 365 Integration */}
       <SectionCard title="Microsoft 365">

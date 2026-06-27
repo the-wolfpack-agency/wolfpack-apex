@@ -211,6 +211,17 @@ function mockSafeQueryHandler(text: string, params?: unknown[]): Promise<{ rows:
 
   // --- SELECT ---
   if (text.trim().toUpperCase().startsWith("SELECT")) {
+    /* Org-wide Q/A cache lookup (findOrgQACacheHit): a JOIN LATERAL over
+       instinct_messages that pairs a user message with the assistant
+       reply that follows it. This naive parser can't model the LATERAL
+       join, and a fresh test DB has no prior identical question that was
+       answered with tokens > 0 anyway, so the correct result is an empty
+       set. Returning [] here lets the intended downstream path
+       (knowledge cache / page facts / AI) run, instead of a false
+       cache hit on the just-inserted user row. */
+    if (/JOIN\s+LATERAL/i.test(text)) {
+      return Promise.resolve({ rows: [], fromCache: false });
+    }
     // Determine table from FROM clause
     const fromMatch = text.match(/FROM\s+(\w+)/i);
     if (fromMatch) {
@@ -390,6 +401,40 @@ jest.mock("@/lib/triple-write", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// AI router mock -- callAI() calls getAIClient().complete(), NOT a direct
+// fetch to api.anthropic.com (the prod path is the provider-agnostic AI
+// router so Azure-only deployments work). Tests that exercise an AI
+// completion set mockAIComplete's resolved value; the default throws
+// NoProviderAvailableError so the bare-fallback path is the default,
+// matching the canonical pattern in assistant.test.ts.
+// ---------------------------------------------------------------------------
+
+const mockAIComplete = jest.fn();
+class TestNoProviderError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NoProviderAvailableError";
+  }
+}
+
+jest.mock("@/lib/ai", () => ({
+  getAIClient: () => ({ complete: (...args: any[]) => (mockAIComplete as any)(...args) }),
+  NoProviderAvailableError: TestNoProviderError,
+}));
+
+// ---------------------------------------------------------------------------
+// Context-resolver mock -- callAI() best-effort grounds answers via the
+// user's Graph token. In unit tests there's no Graph; return an empty
+// bundle so grounding is a no-op (same default as assistant.test.ts).
+// ---------------------------------------------------------------------------
+
+const mockGetRelevantContext = jest.fn();
+
+jest.mock("@/lib/assistant/context-resolver", () => ({
+  getRelevantContext: (...args: any[]) => (mockGetRelevantContext as any)(...args),
+}));
+
+// ---------------------------------------------------------------------------
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
@@ -422,6 +467,25 @@ beforeEach(() => {
   mockSearchKnowledge.mockResolvedValue([]);
 
   mockSaveAnswer.mockResolvedValue(null);
+
+  /* Default AI client: no provider configured, so chat() takes the
+     bare-fallback path. AI-completion tests override this per-test. */
+  mockAIComplete.mockReset();
+  mockAIComplete.mockRejectedValue(new TestNoProviderError("no providers configured"));
+
+  /* Default grounding bundle: empty, so callAI's best-effort Graph
+     grounding is a no-op in unit tests. */
+  mockGetRelevantContext.mockReset();
+  mockGetRelevantContext.mockResolvedValue({
+    question: "",
+    surface: "assistant_support",
+    sharepoint_hits: [],
+    project_tasks: [],
+    meeting_notes: [],
+    rendered_prompt_block: "",
+    total_chars: 0,
+    took_ms: 1,
+  });
 });
 
 afterEach(() => {
@@ -474,9 +538,13 @@ describe("Full Message Flow", () => {
   test("searchKnowledge is called for zero-token attempt", async () => {
     await chat("How does the pricing engine work?", "u1", "dev");
 
+    /* tryKnowledgeBase requests the top 5 matches (it walks them so a
+       slightly different phrasing still lands on a good entry - see
+       assistant.ts, "stop filtering unrated knowledge entries out of
+       retrieval"). */
     expect(mockSearchKnowledge).toHaveBeenCalledWith(
       "How does the pricing engine work?",
-      1,
+      5,
     );
   });
 
@@ -555,14 +623,13 @@ describe("Full Message Flow", () => {
   });
 
   test("AI response saves with source=ai and correct token count", async () => {
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        content: [{ text: "The pricing engine uses ML models." }],
-        usage: { input_tokens: 200, output_tokens: 100 },
-      }),
-    }) as any;
+    mockAIComplete.mockResolvedValue({
+      content: "The pricing engine uses ML models.",
+      model_used: "test-model",
+      provider_used: "test-provider",
+      input_tokens: 200,
+      output_tokens: 100,
+    });
 
     const result = await chat("Explain quantum computing", "u1", "dev");
 
@@ -629,21 +696,29 @@ describe("Conversation Persistence", () => {
     expect(conv!.last_message_at).toBeTruthy();
   });
 
-  test("conversation auto-resume: same user, recent conversation reused", async () => {
-    // First message creates a conversation
+  test("no conversationId always starts a new conversation (auto-resume removed 2026-05-23)", async () => {
+    /* Server-side auto-resume of the most-recent active conversation was
+       removed (assistant.ts: "remove server-side auto-resume of
+       most-recent conversation"). It used to silently attach a message
+       with no conversationId to the user's most-recent conversation,
+       which made "start a new chat" land in the wrong place. Contract
+       now: no conversationId means a brand-new conversation, period. */
     const r1 = await chat("First question", "u1", "dev");
     const convId1 = r1.conversationId;
 
-    // Update last_message_at to be recent (already set by the first call)
+    // Keep it recent - under the old TTL this would have been reused.
     const conv = mockDb.selectAll("instinct_conversations").find((c) => c.id === convId1);
     if (conv) {
       conv.last_message_at = new Date().toISOString();
     }
 
-    // Second message without explicit conversationId should find the recent one
+    // Second message without an explicit conversationId: new conversation.
     const r2 = await chat("Second question", "u1", "dev");
+    expect(r2.conversationId).not.toBe(convId1);
 
-    expect(r2.conversationId).toBe(convId1);
+    // Passing the id explicitly continues the original conversation.
+    const r3 = await chat("Third question", "u1", "dev", convId1);
+    expect(r3.conversationId).toBe(convId1);
   });
 
   test("new conversation created when last message is >2 hours old", async () => {
@@ -887,14 +962,13 @@ describe("Rating Flow", () => {
 
 describe("Triple-Write Verification", () => {
   test("AI response triggers saveAnswer which would triple-write", async () => {
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        content: [{ text: "The pricing engine uses regression." }],
-        usage: { input_tokens: 100, output_tokens: 50 },
-      }),
-    }) as any;
+    mockAIComplete.mockResolvedValue({
+      content: "The pricing engine uses regression.",
+      model_used: "test-model",
+      provider_used: "test-provider",
+      input_tokens: 100,
+      output_tokens: 50,
+    });
 
     await chat("How does pricing work?", "u1", "dev");
 
@@ -972,14 +1046,13 @@ describe("Triple-Write Verification", () => {
     mockUpsertKnowledgePoint.mockRejectedValueOnce(new Error("Qdrant down"));
 
     // Neo4j should still work
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        content: [{ text: "Answer" }],
-        usage: { input_tokens: 10, output_tokens: 5 },
-      }),
-    }) as any;
+    mockAIComplete.mockResolvedValue({
+      content: "Answer",
+      model_used: "test-model",
+      provider_used: "test-provider",
+      input_tokens: 10,
+      output_tokens: 5,
+    });
 
     // Should not throw
     const result = await chat("Test question", "u1", "dev");
@@ -1006,14 +1079,13 @@ describe("Triple-Write Verification", () => {
   });
 
   test("analytics event includes source and tokens_used for AI responses", async () => {
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        content: [{ text: "AI answer" }],
-        usage: { input_tokens: 50, output_tokens: 25 },
-      }),
-    }) as any;
+    mockAIComplete.mockResolvedValue({
+      content: "AI answer",
+      model_used: "test-model",
+      provider_used: "test-provider",
+      input_tokens: 50,
+      output_tokens: 25,
+    });
 
     await chat("Generic question", "u1", "dev");
 
@@ -1061,14 +1133,13 @@ describe("Analytics Pipeline Integrity", () => {
   });
 
   test("AI call fires system.ai_call_made", async () => {
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        content: [{ text: "Answer" }],
-        usage: { input_tokens: 10, output_tokens: 5 },
-      }),
-    }) as any;
+    mockAIComplete.mockResolvedValue({
+      content: "Answer",
+      model_used: "test-model",
+      provider_used: "test-provider",
+      input_tokens: 10,
+      output_tokens: 5,
+    });
 
     await chat("Random question no keywords", "u1", "dev");
 

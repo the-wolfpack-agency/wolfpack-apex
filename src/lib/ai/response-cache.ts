@@ -112,7 +112,14 @@ export interface CacheResponseResult {
    they're compiled once. Order matters: emails before UUIDs before
    ISO timestamps + names (those run before lowercasing) before phones
    + clock times (those run after), since some patterns can overlap. */
-const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+/* ReDoS-hardened (CodeQL js/polynomial-redos). The unbounded `+`
+   quantifiers in `[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}` make this
+   polynomial: on a long run with no `@`, the engine rescans the local
+   part from every start position (O(n^2)). RFC 5321 already bounds the
+   local part to 64 chars and a domain to 255, so cap the quantifiers -
+   real addresses still match, adversarial digit/letter runs can't drive
+   the engine past a fixed per-position bound. */
+const EMAIL_RE = /[A-Z0-9._%+-]{1,64}@[A-Z0-9.-]{1,255}\.[A-Z]{2,24}/gi;
 const UUID_RE =
   /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const ISO_TIMESTAMP_RE =
@@ -123,12 +130,23 @@ const ISO_TIMESTAMP_RE =
    pipeline anyway). The single allowed separator class `[\s.()-]` is
    non-overlapping with the digit class, keeping the matcher linear and
    defeating polynomial backtracking on adversarial digit-heavy input. */
-/* The area code is an alternation (\(\d{3}\)|\d{3}) so the optional country
-   code cannot eat the first digits of a bare 10-digit number; the earlier
-   \b...\b form matched nothing for "(555) 867-5309" and leaked the number.
+/* ReDoS-hardened (CodeQL js/polynomial-redos). The prior form
+   `(?:\+?\d{1,3}[\s.()-]{0,2})?(?:\(\d{3}\)|\d{3})[\s.()-]{0,2}\d{3}...`
+   let the optional bare-digit country code AND the bare area code both
+   compete for the leading digits of a long all-digit run, with optional
+   `{0,2}` separators between every group - polynomial backtracking that
+   burned ~800ms on 16 KiB of digits. Two changes linearise it without
+   losing the real shapes:
+     1. The optional country code now REQUIRES a leading `+` and a
+        following separator, so a bare digit run can't be parsed as one.
+     2. A bare (non-parenthesised) area code now REQUIRES a following
+        separator; only the `(NNN)` form may abut the next group. This
+        breaks the all-digit chain so the engine can't try N partitions.
+   Real shapes "(555) 123-4567" and "+1 555-987-6543" still normalise
+   identically (see response-cache.test.ts "strips phone numbers").
    Left boundary is a negative lookbehind (?<!\d) because \b fails before "(". */
 const PHONE_RE =
-  /(?<!\d)(?:\+?\d{1,3}[\s.()-]{0,2})?(?:\(\d{3}\)|\d{3})[\s.()-]{0,2}\d{3}[\s.()-]{0,2}\d{4}(?!\d)/g;
+  /(?<!\d)(?:\+\d{1,3}[\s.()-]{1,2})?(?:\(\d{3}\)[\s.()-]{0,2}|\d{3}[\s.()-]{1,2})\d{3}[\s.()-]{1,2}\d{4}(?!\d)/g;
 /* Person-name heuristic: strip standalone capitalized tokens (Title-
    case, not all-caps acronyms like CEO/MFA/AADSTS). This must run
    before lowercasing. Imperfect by design — false positives just

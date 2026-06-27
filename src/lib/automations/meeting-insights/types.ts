@@ -150,7 +150,10 @@ export interface MeetingAnalysisRecord {
   attendees: Attendee[];
   blockers: string[];
   next_steps: string[];
-  created_at: string;
+  /** ISO-8601, or null when the analysis row carried no usable
+      timestamp (errored / pending analysis persisted pre-analysis).
+      Consumers must not feed null straight into `new Date(...)`. */
+  created_at: string | null;
 }
 
 /* ------------------------------------------------------------------ */

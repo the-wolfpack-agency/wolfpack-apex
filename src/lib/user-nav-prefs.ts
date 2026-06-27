@@ -61,6 +61,7 @@ export const KNOWN_NAV_HREFS: readonly string[] = [
   "/sites",
   "/hr",
   "/admin/agents",
+  "/admin/site-analytics",
   "/financials",
   "/analytics",
   "/tools",
