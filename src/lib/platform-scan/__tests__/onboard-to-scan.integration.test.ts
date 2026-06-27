@@ -93,6 +93,12 @@ jest.mock("@/lib/analytics", () => ({
   },
 }));
 
+// The onboarded Salesforce target is verified for this flow, so the fail-closed
+// ownership gate passes (the gate itself is covered in the scan route test).
+jest.mock("@/lib/platform-scan/authorization", () => ({
+  isTargetVerified: () => Promise.resolve(true),
+}));
+
 // 5. Brain learning ingest: no-op, captured (also keeps the real ingest tree out).
 const ingestCalls: unknown[][] = [];
 jest.mock("@/lib/platform-scan/brain-ingest", () => ({

@@ -12,6 +12,7 @@
     "handoff": "node scripts/handoff-scaffold.mjs",
     "proof:agents": "node scripts/agent-workforce-proof.mjs",
     "verify": "bash scripts/verify.sh",
+    "verify:prod-env": "bash scripts/verify-prod-env.sh",
     "test:e2e:smoke": "playwright test tests/e2e/smoke.spec.ts --config=playwright.config.ts",
     "test:e2e:prod": "PROD_URL=${PROD_URL:-https://wolfpack-instinct.vercel.app} playwright test tests/e2e/ --config=playwright.config.ts",
     "test:e2e:reality": "playwright test tests/e2e/sites-preview-reality-check.spec.ts tests/e2e/sites-upload-reality-check.spec.ts tests/e2e/sites-designer-journey.spec.ts --config=playwright.config.ts",

@@ -66,6 +66,12 @@ jest.mock("@/lib/analytics", () => ({
   },
 }));
 
+// Ownership gate: this flow targets a verified onboarded connection, so the
+// fail-closed verification check passes (the gate itself is tested in route.test.ts).
+jest.mock("@/lib/platform-scan/authorization", () => ({
+  isTargetVerified: () => Promise.resolve(true),
+}));
+
 // 5. Brain learning ingest: no-op, captured. (Mocking the module also keeps the
 //    real @/lib/brain/ingest dependency tree out of the test.)
 const ingestCalls: unknown[][] = [];

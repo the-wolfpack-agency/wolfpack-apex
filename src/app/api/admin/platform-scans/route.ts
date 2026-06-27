@@ -9,7 +9,8 @@ import { discoverRoutes, mergeManifest } from "@/lib/platform-scan/discover";
 import { establishSession, establishOAuthPasswordSession } from "@/lib/platform-scan/session";
 import { probeApi } from "@/lib/platform-scan/api-probe";
 import { loadConnectorCredentials } from "@/lib/assistant/connectors/credentials";
-import { resolveScanTarget, type ScanManifest } from "@/lib/platform-scan/manifests";
+import { resolveScanTarget, isCuratedTarget, type ScanManifest } from "@/lib/platform-scan/manifests";
+import { isTargetVerified } from "@/lib/platform-scan/authorization";
 import { assertScannableUrl, SsrfBlockedError } from "@/lib/platform-scan/ssrf-guard";
 import type { PlatformScanResult } from "@/lib/platform-scan/types";
 
@@ -107,6 +108,30 @@ export async function POST(req: NextRequest) {
   }
   if (mode === "api" && (!manifest.apiEndpoints || manifest.apiEndpoints.length === 0)) {
     return NextResponse.json({ error: "no_api_endpoints" }, { status: 400 });
+  }
+
+  // Fail-closed ownership gate: an onboarded client target must be proven
+  // client-owned (well-known token / DNS TXT) before we scan it. Our own
+  // curated internal targets are exempt. This stops an operator typo or a
+  // mis-pointed target from scanning a system the client never authorized.
+  if (!isCuratedTarget(platform) && !(await isTargetVerified(workspaceId, platform))) {
+    trackEvent("platform.scan_blocked_unverified", user.id, user.role, { platform, action: mode });
+    const blockMeta = extractRequestMetadata(req);
+    await recordAudit({
+      actor: { user_id: user.id, role: user.role },
+      action: "platform.scan_blocked_unverified",
+      resourceType: "platform_scan",
+      resourceId: platform,
+      ipAddress: blockMeta.ipAddress, userAgent: blockMeta.userAgent, requestId: blockMeta.requestId,
+      afterState: { reason: "unverified_target", mode },
+    }).catch((e) => console.warn("[audit]", (e as Error).message));
+    return NextResponse.json(
+      {
+        error: "unverified_target",
+        detail: "Target ownership is not verified. Verify domain ownership in onboarding before scanning.",
+      },
+      { status: 403 },
+    );
   }
 
   let result: PlatformScanResult;

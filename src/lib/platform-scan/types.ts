@@ -61,6 +61,33 @@ export interface PlatformScanInput {
   authenticated?: boolean;
 }
 
+/**
+ * How much of the target a scan actually reached. The danger this guards: a scan
+ * whose session expired or whose routes half-errored returns "0 findings" that is
+ * visually identical to a clean bill. Coverage makes the difference explicit so a
+ * degraded scan is NEVER reported as clean.
+ *
+ *  - attempted        routes probed this run.
+ *  - succeeded        routes that returned a usable HTTP response (status < 500).
+ *  - errored          routes that did NOT (network error / timeout / 5xx before
+ *                     we could classify auth) - the scan could not see these.
+ *  - authRequired     the manifest contains at least one login-gated route, so an
+ *                     authenticated session matters for honest coverage.
+ *  - authEstablished  the authenticated session was actually honored. False when
+ *                     auth was required but no session headers were supplied, OR
+ *                     an authenticated crawl was bounced to login / 401 on a
+ *                     protected route (the session was not established/honored).
+ *  - coverageRatio    succeeded / attempted (0 when nothing was attempted).
+ */
+export interface ScanCoverage {
+  attempted: number;
+  succeeded: number;
+  errored: number;
+  authRequired: boolean;
+  authEstablished: boolean;
+  coverageRatio: number;
+}
+
 export interface PlatformScanResult {
   platform: string;
   baseUrl: string;
@@ -75,6 +102,12 @@ export interface PlatformScanResult {
    * we must not resolve what we don't know was re-checked.
    */
   scannedRoutes?: string[];
+  /**
+   * Per-run coverage accounting (see ScanCoverage). Optional for back-compat with
+   * external-ingest results that did not probe routes themselves; the engine
+   * always populates it.
+   */
+  coverage?: ScanCoverage;
 }
 
 /** A single route's observed response, the pure input to classification. */

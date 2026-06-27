@@ -19,8 +19,11 @@ jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrack
 jest.mock("@/lib/platform-scan/brain-ingest", () => ({ ingestPlatformScanFinding: (...a: unknown[]) => mockIngest(...a) }));
 jest.mock("@/lib/notifications/in-app", () => ({ notify: (...a: unknown[]) => mockNotify(...a) }));
 
-import { recordScan, listFindings, triageFinding, bulkTriageFindings, summarizeFindings, listScans } from "@/lib/platform-scan/store";
-import type { PlatformScanResult } from "@/lib/platform-scan/types";
+import { recordScan, listFindings, triageFinding, bulkTriageFindings, summarizeFindings, listScans, isCoverageDegraded } from "@/lib/platform-scan/store";
+import type { PlatformScanResult, ScanCoverage } from "@/lib/platform-scan/types";
+
+const cleanCoverage: ScanCoverage = { attempted: 5, succeeded: 5, errored: 0, authRequired: true, authEstablished: true, coverageRatio: 1 };
+const degradedCoverage: ScanCoverage = { attempted: 5, succeeded: 3, errored: 2, authRequired: true, authEstablished: false, coverageRatio: 0.6 };
 
 const RESULT: PlatformScanResult = {
   platform: "wolfpack-auto",
@@ -161,6 +164,87 @@ it("recordScan with zero findings still records the run and emits completion", a
   expect(mockIngest).not.toHaveBeenCalled();
 });
 
+describe("isCoverageDegraded rule", () => {
+  it("clean, fully-covered, auth-established coverage is NOT degraded", () => {
+    expect(isCoverageDegraded(cleanCoverage)).toBe(false);
+  });
+  it("any errored route makes it degraded", () => {
+    expect(isCoverageDegraded({ ...cleanCoverage, errored: 1 })).toBe(true);
+  });
+  it("auth required but not established makes it degraded", () => {
+    expect(isCoverageDegraded({ ...cleanCoverage, authEstablished: false })).toBe(true);
+  });
+  it("coverage ratio below the trust threshold makes it degraded", () => {
+    expect(isCoverageDegraded({ ...cleanCoverage, coverageRatio: 0.79 })).toBe(true);
+    expect(isCoverageDegraded({ ...cleanCoverage, coverageRatio: 0.8 })).toBe(false);
+  });
+  it("auth NOT required + no auth established flag is irrelevant (not degraded on auth axis)", () => {
+    expect(isCoverageDegraded({ attempted: 3, succeeded: 3, errored: 0, authRequired: false, authEstablished: true, coverageRatio: 1 })).toBe(false);
+  });
+});
+
+it("recordScan persists coverage on the header row", async () => {
+  mockWriteQuery
+    .mockResolvedValueOnce({ rows: [{ id: "scan-cov" }] })
+    .mockResolvedValue({ rows: [] });
+  await recordScan({
+    workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin",
+    result: { ...RESULT, findings: [], coverage: cleanCoverage },
+  });
+  const headerCall = mockWriteQuery.mock.calls[0];
+  expect(headerCall[0]).toMatch(/attempted_routes, succeeded_routes, errored_routes, auth_established, coverage_ratio/);
+  // params tail: attempted, succeeded, errored, auth_established, coverage_ratio
+  const params = headerCall[1] as unknown[];
+  expect(params.slice(-5)).toEqual([5, 5, 0, true, 1]);
+});
+
+it("recordScan with NO coverage persists zeros + nulls (never implies full coverage)", async () => {
+  mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "scan-noc" }] }).mockResolvedValue({ rows: [] });
+  await recordScan({ workspaceId: "ws-1", actorId: "a", actorRole: "admin", result: { ...RESULT, findings: [] } });
+  const params = mockWriteQuery.mock.calls[0][1] as unknown[];
+  expect(params.slice(-5)).toEqual([0, 0, 0, null, null]);
+  expect(mockTrackEvent).not.toHaveBeenCalledWith("platform.scan_coverage_degraded", expect.anything(), expect.anything(), expect.anything());
+});
+
+it("recordScan fires platform.scan_coverage_degraded ONLY when coverage is degraded", async () => {
+  mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "scan-deg" }] }).mockResolvedValue({ rows: [] });
+  await recordScan({
+    workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin",
+    result: { ...RESULT, findings: [], coverage: degradedCoverage },
+  });
+  expect(mockTrackEvent).toHaveBeenCalledWith("platform.scan_coverage_degraded", "admin-1", "admin", {
+    platform: "wolfpack-auto", attempted: 5, succeeded: 3, errored: 2, auth_ok: false,
+  });
+});
+
+it("recordScan does NOT fire the degraded event for a clean, fully-covered scan", async () => {
+  mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "scan-clean" }] }).mockResolvedValue({ rows: [] });
+  await recordScan({
+    workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin",
+    result: { ...RESULT, findings: [], coverage: cleanCoverage },
+  });
+  expect(mockTrackEvent).not.toHaveBeenCalledWith("platform.scan_coverage_degraded", expect.anything(), expect.anything(), expect.anything());
+});
+
+it("listScans reconstructs coverage + degraded flag from the persisted columns", async () => {
+  mockSafeQuery.mockResolvedValue({
+    rows: [
+      { id: "s-deg", platform: "p", base_url: "b", route_count: 5, finding_count: 0, critical_count: 0, created_at: "t",
+        attempted_routes: 5, succeeded_routes: 3, errored_routes: 2, auth_established: false, coverage_ratio: 0.6 },
+      { id: "s-clean", platform: "p", base_url: "b", route_count: 4, finding_count: 0, critical_count: 0, created_at: "t",
+        attempted_routes: 4, succeeded_routes: 4, errored_routes: 0, auth_established: true, coverage_ratio: 1 },
+      { id: "s-old", platform: "p", base_url: "b", route_count: 0, finding_count: 0, critical_count: 0, created_at: "t",
+        attempted_routes: 0, succeeded_routes: 0, errored_routes: 0, auth_established: null, coverage_ratio: null },
+    ],
+  });
+  const out = await listScans("ws-1");
+  expect(out[0]).toMatchObject({ id: "s-deg", degraded: true });
+  expect(out[0].coverage).toMatchObject({ attempted: 5, succeeded: 3, errored: 2, coverageRatio: 0.6, authEstablished: false });
+  expect(out[1]).toMatchObject({ id: "s-clean", degraded: false });
+  expect(out[2]).toMatchObject({ id: "s-old", coverage: null, degraded: null });
+  expect(mockSafeQuery.mock.calls[0][0]).toMatch(/attempted_routes, succeeded_routes, errored_routes, auth_established, coverage_ratio/);
+});
+
 it("listFindings filters by workspace + status, worst severity first", async () => {
   mockSafeQuery.mockResolvedValue({ rows: [{ id: "f1", scan_id: "s1", platform: "wolfpack-auto", route: "/x", severity: "critical", category: "bug", title: "t", detail: "d", evidence: { status: 500 }, status: "open", created_at: "t" }] });
   const out = await listFindings("ws-1", { status: "open" });
@@ -252,7 +336,9 @@ it("listScans returns recent runs newest-first, default limit 10, cap 50", async
     rows: [{ id: "scan-1", platform: "wolfpack-auto", base_url: "https://t.example", route_count: 12, finding_count: 4, critical_count: 1, created_at: "2026-06-26T00:00:00.000Z" }],
   });
   const out = await listScans("ws-1");
-  expect(out[0]).toEqual({ id: "scan-1", platform: "wolfpack-auto", baseUrl: "https://t.example", routeCount: 12, findingCount: 4, criticalCount: 1, createdAt: "2026-06-26T00:00:00.000Z" });
+  expect(out[0]).toMatchObject({ id: "scan-1", platform: "wolfpack-auto", baseUrl: "https://t.example", routeCount: 12, findingCount: 4, criticalCount: 1, createdAt: "2026-06-26T00:00:00.000Z" });
+  // No coverage columns in this fixture row -> coverage unknown, degraded null.
+  expect(out[0]).toMatchObject({ coverage: null, degraded: null });
   expect(mockSafeQuery.mock.calls[0][0]).toMatch(/ORDER BY created_at DESC/);
   expect(mockSafeQuery.mock.calls[0][1]).toEqual(["ws-1", 10]);
 

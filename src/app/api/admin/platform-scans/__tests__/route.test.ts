@@ -37,7 +37,15 @@ jest.mock("@/lib/platform-scan/discover", () => ({
   discoverRoutes: (...a: unknown[]) => mockDiscover(...a),
   mergeManifest: (...a: unknown[]) => mockMerge(...a),
 }));
-jest.mock("@/lib/platform-scan/manifests", () => ({ resolveScanTarget: (...a: unknown[]) => mockResolveTarget(...a) }));
+const mockIsCurated = jest.fn(() => true);
+const mockIsVerified = jest.fn(async () => true);
+jest.mock("@/lib/platform-scan/manifests", () => ({
+  resolveScanTarget: (...a: unknown[]) => mockResolveTarget(...a),
+  isCuratedTarget: (...a: unknown[]) => mockIsCurated(...(a as [])),
+}));
+jest.mock("@/lib/platform-scan/authorization", () => ({
+  isTargetVerified: (...a: unknown[]) => mockIsVerified(...(a as [])),
+}));
 const mockLoadCreds = jest.fn();
 const mockEstablish = jest.fn();
 const mockProbeApi = jest.fn();
@@ -102,6 +110,8 @@ beforeEach(() => {
   mockMerge.mockImplementation((seed) => seed); // merge returns the seed
   mockRecord.mockResolvedValue({ scanId: "scan-1", findingCount: 1, criticalCount: 1 });
   mockList.mockResolvedValue([{ id: "f-1", status: "open" }]);
+  mockIsCurated.mockReturnValue(true); // default: curated/internal target (exempt)
+  mockIsVerified.mockResolvedValue(true);
 });
 
 describe("POST /api/admin/platform-scans (http mode)", () => {
@@ -141,6 +151,30 @@ describe("POST /api/admin/platform-scans (http mode)", () => {
     expect(res.status).toBe(403);
     expect(mockResolveTarget).not.toHaveBeenCalled();
     expect(mockScan).not.toHaveBeenCalled();
+  });
+
+  it("403s an onboarded target whose ownership is NOT verified (fail-closed), never runs the engine", async () => {
+    mockIsCurated.mockReturnValue(false); // onboarded client target, not curated/internal
+    mockIsVerified.mockResolvedValue(false); // ownership not proven
+    const res = await post({ platform: "acme-crm" });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "unverified_target" });
+    expect(mockScan).not.toHaveBeenCalled();
+    expect(mockRecord).not.toHaveBeenCalled();
+    expect(mockTrack).toHaveBeenCalledWith(
+      "platform.scan_blocked_unverified",
+      "admin-1",
+      "admin",
+      expect.objectContaining({ platform: "acme-crm" }),
+    );
+  });
+
+  it("proceeds for an onboarded target once ownership IS verified", async () => {
+    mockIsCurated.mockReturnValue(false);
+    mockIsVerified.mockResolvedValue(true);
+    const res = await post({ platform: "acme-crm" });
+    expect(res.status).toBe(200);
+    expect(mockScan).toHaveBeenCalled();
   });
 });
 

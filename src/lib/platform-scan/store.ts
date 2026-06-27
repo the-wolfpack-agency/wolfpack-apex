@@ -15,7 +15,27 @@ import { safeQuery, writeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { notify } from "@/lib/notifications/in-app";
 import { ingestPlatformScanFinding } from "./brain-ingest";
-import type { PlatformScanResult, ScanSeverity, ScanCategory } from "./types";
+import type { PlatformScanResult, ScanCoverage, ScanSeverity, ScanCategory } from "./types";
+
+/** Coverage at or above this ratio is "thorough enough" to trust a clean result.
+ *  Below it, too much of the target went unscanned to call 0 findings clean. */
+export const MIN_TRUSTWORTHY_COVERAGE = 0.8;
+
+/**
+ * A scan is DEGRADED - and a 0-findings result therefore NOT a clean bill - when:
+ *   - any route errored (network/timeout/5xx: we never saw its behavior), OR
+ *   - auth was required but the session was not established (login-gated routes
+ *     unreachable), OR
+ *   - the fraction of routes we actually reached fell below the trust threshold.
+ * Pure + exported so the rule is unit-testable and reused by the UI shape.
+ */
+export function isCoverageDegraded(c: ScanCoverage): boolean {
+  return (
+    c.errored > 0 ||
+    (c.authRequired && !c.authEstablished) ||
+    c.coverageRatio < MIN_TRUSTWORTHY_COVERAGE
+  );
+}
 
 export interface ScanFindingRow {
   id: string;
@@ -63,13 +83,24 @@ export async function recordScan(
 ): Promise<{ scanId: string; findingCount: number; criticalCount: number; autoResolvedCount: number }> {
   const { workspaceId, actorId, actorRole, result } = input;
   const criticalCount = result.findings.filter((f) => f.severity === "critical").length;
+  // Coverage may be absent on external-ingest results (no routes probed). Persist
+  // NULLs in that case so a missing signal is never mistaken for "fully covered".
+  const cov = result.coverage;
 
   const scanRes = await writeQuery<{ id: string }>(
     `INSERT INTO instinct_platform_scans
-       (workspace_id, platform, base_url, route_count, finding_count, critical_count, triggered_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (workspace_id, platform, base_url, route_count, finding_count, critical_count, triggered_by,
+        attempted_routes, succeeded_routes, errored_routes, auth_established, coverage_ratio)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      RETURNING id`,
-    [workspaceId, result.platform, result.baseUrl, result.routeCount, result.findings.length, criticalCount, actorId],
+    [
+      workspaceId, result.platform, result.baseUrl, result.routeCount, result.findings.length, criticalCount, actorId,
+      cov ? cov.attempted : 0,
+      cov ? cov.succeeded : 0,
+      cov ? cov.errored : 0,
+      cov ? cov.authEstablished : null,
+      cov ? cov.coverageRatio : null,
+    ],
   );
   const scanId = scanRes.rows[0].id;
 
@@ -143,6 +174,22 @@ export async function recordScan(
     finding_count: result.findings.length,
     critical_count: criticalCount,
   });
+
+  // COVERAGE LEARNING SIGNAL: when the scan could not fully cover the target, a
+  // 0-findings result is NOT a clean bill. Fire the degraded event so the learning
+  // loop records flaky/unscannable targets and the report can warn instead of
+  // claiming "secure". No data lost: every degraded run is captured, not silently
+  // dropped. Only fires when coverage exists (the engine probed routes) AND the
+  // degraded rule trips - a fully-covered scan stays silent.
+  if (cov && isCoverageDegraded(cov)) {
+    trackEvent("platform.scan_coverage_degraded", actorId, actorRole, {
+      platform: result.platform,
+      attempted: cov.attempted,
+      succeeded: cov.succeeded,
+      errored: cov.errored,
+      auth_ok: cov.authEstablished,
+    });
+  }
 
   // HUMAN ALERTING: a critical finding is a security event a human must see, not
   // an analytics row nobody watches. Notify the workspace admin/owner who ran the
@@ -250,6 +297,13 @@ export interface ScanRow {
   findingCount: number;
   criticalCount: number;
   createdAt: string;
+  /** Per-run coverage. Null when the run predates coverage accounting OR was an
+   *  external ingest that did not probe routes - the UI treats "unknown" as a
+   *  reason NOT to claim a clean bill, never as "fully covered". */
+  coverage: ScanCoverage | null;
+  /** Convenience: did this run fail the trust threshold? Null when coverage is
+   *  unknown. Computed server-side so every consumer applies the SAME rule. */
+  degraded: boolean | null;
 }
 
 /** Recent scan runs for the workspace, newest first. Default limit 10, cap 50. */
@@ -259,22 +313,50 @@ export async function listScans(
 ): Promise<ScanRow[]> {
   const lim = Math.min(Math.max(limit ?? 10, 1), 50);
   const { rows } = await safeQuery<DbRow>(
-    `SELECT id, platform, base_url, route_count, finding_count, critical_count, created_at
+    `SELECT id, platform, base_url, route_count, finding_count, critical_count, created_at,
+            attempted_routes, succeeded_routes, errored_routes, auth_established, coverage_ratio
        FROM instinct_platform_scans
       WHERE workspace_id = $1
       ORDER BY created_at DESC
       LIMIT $2`,
     [workspaceId, lim],
   );
-  return rows.map((r) => ({
-    id: String(r.id),
-    platform: String(r.platform),
-    baseUrl: String(r.base_url ?? ""),
-    routeCount: Number(r.route_count) || 0,
-    findingCount: Number(r.finding_count) || 0,
-    criticalCount: Number(r.critical_count) || 0,
-    createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
-  }));
+  return rows.map((r) => {
+    // Coverage is "known" only when the run recorded an attempt count (>0). A run
+    // that predates coverage accounting (NULL ratio) or probed nothing reads as
+    // unknown - never as fully covered.
+    const attempted = Number(r.attempted_routes) || 0;
+    const known = r.coverage_ratio !== null && r.coverage_ratio !== undefined && attempted > 0;
+    // We persist auth_established (true/false) but not auth_required as its own
+    // column. The only auth-driven degradation is "auth was required but NOT
+    // established", which is exactly auth_established === false. So derive
+    // authRequired := (auth_established === false): when established is false the
+    // run had a gated target it could not reach; when true/null there is nothing
+    // to warn about on the auth axis. This keeps isCoverageDegraded faithful
+    // without a second column.
+    const authEstablished = r.auth_established !== false;
+    const coverage: ScanCoverage | null = known
+      ? {
+          attempted,
+          succeeded: Number(r.succeeded_routes) || 0,
+          errored: Number(r.errored_routes) || 0,
+          authRequired: r.auth_established === false,
+          authEstablished,
+          coverageRatio: Number(r.coverage_ratio) || 0,
+        }
+      : null;
+    return {
+      id: String(r.id),
+      platform: String(r.platform),
+      baseUrl: String(r.base_url ?? ""),
+      routeCount: Number(r.route_count) || 0,
+      findingCount: Number(r.finding_count) || 0,
+      criticalCount: Number(r.critical_count) || 0,
+      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+      coverage,
+      degraded: coverage ? isCoverageDegraded(coverage) : null,
+    };
+  });
 }
 
 /** Move a finding through the review workflow (acknowledge / resolve). Atomic;

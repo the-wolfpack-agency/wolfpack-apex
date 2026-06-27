@@ -21,6 +21,7 @@ import type {
   PlatformScanInput,
   PlatformScanResult,
   RouteObservation,
+  ScanCoverage,
   ScanFinding,
   ScanRouteSpec,
 } from "./types";
@@ -203,6 +204,61 @@ export function cookieAndCorsFindings(routePath: string, obs: RouteObservation, 
 }
 
 /**
+ * A route "responded usably" when it returned a real HTTP status below 500. A
+ * network error, a timeout (observed as networkError), or a 5xx means the scanner
+ * could not actually see that route's behavior - coverage must NOT count it.
+ */
+function responded(obs: RouteObservation): boolean {
+  return !obs.networkError && obs.status !== undefined && obs.status < 500;
+}
+
+/** A 3xx whose Location points at a login/auth page (session not honored). */
+function bouncedToLogin(obs: RouteObservation): boolean {
+  return !!obs.status && isRedirect(obs.status) && looksLikeLogin(obs.location);
+}
+
+/**
+ * Pure coverage accounting over the probed routes. Separated from finding
+ * detection so a "0 findings" result carries an explicit, testable trustworthiness
+ * signal instead of looking identical to a silently-degraded scan.
+ *
+ * `authProvided` is whether the crawl actually carried session headers, and
+ * `authenticatedIntent` is whether the run was MEANT to be authenticated. We only
+ * claim authEstablished when auth was required, the run intended to authenticate,
+ * headers were supplied, AND no auth-required route was rejected/bounced (a
+ * rejection means the session was not honored, i.e. not truly established).
+ */
+export function computeCoverage(
+  perRoute: { spec: ScanRouteSpec; obs: RouteObservation }[],
+  opts: { authProvided: boolean; authenticatedIntent: boolean },
+): ScanCoverage {
+  const attempted = perRoute.length;
+  const succeeded = perRoute.filter((r) => responded(r.obs)).length;
+  const errored = attempted - succeeded;
+  const authRequired = perRoute.some((r) => r.spec.auth === "required");
+
+  // Did any protected route reject our supposed session? A 401/403 or a bounce to
+  // login on an auth-required route means the session was not honored.
+  const authRejected = perRoute.some(
+    (r) =>
+      r.spec.auth === "required" &&
+      (r.obs.status === 401 || r.obs.status === 403 || bouncedToLogin(r.obs)),
+  );
+
+  // authEstablished is only meaningful when auth is required. When it is: the run
+  // must have intended to authenticate, actually carried headers, and not been
+  // rejected on any protected route. When no auth is required, an authenticated
+  // session is irrelevant - report it as established (nothing was gated).
+  const authEstablished = !authRequired
+    ? true
+    : opts.authenticatedIntent && opts.authProvided && !authRejected;
+
+  const coverageRatio = attempted === 0 ? 0 : succeeded / attempted;
+
+  return { attempted, succeeded, errored, authRequired, authEstablished, coverageRatio };
+}
+
+/**
  * Scan a platform: probe every route in the manifest and collect findings.
  * Routes are probed concurrently (bounded by the manifest size — manifests are
  * curated, not unbounded crawls).
@@ -239,6 +295,18 @@ export async function scanPlatform(input: PlatformScanInput): Promise<PlatformSc
   }
 
   const routesWithFindings = perRoute.filter((r) => r.findings.length > 0).length;
+
+  // Coverage accounting (does NOT alter finding detection above). A session was
+  // "provided" when the crawl carried any request headers; intent comes from the
+  // authenticated flag the POST route sets when it established a session.
+  const coverage = computeCoverage(
+    perRoute.map((r) => ({ spec: r.spec, obs: r.obs })),
+    {
+      authProvided: !!input.headers && Object.keys(input.headers).length > 0,
+      authenticatedIntent: !!input.authenticated,
+    },
+  );
+
   return {
     platform: input.platform,
     baseUrl: input.baseUrl,
@@ -248,5 +316,6 @@ export async function scanPlatform(input: PlatformScanInput): Promise<PlatformSc
     // Every probed route is "covered", letting recordScan auto-resolve findings on
     // these routes that are no longer detected (matches ScanFinding.route = spec.path).
     scannedRoutes: input.routes.map((s) => s.path),
+    coverage,
   };
 }

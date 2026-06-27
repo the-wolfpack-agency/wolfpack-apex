@@ -586,6 +586,24 @@ export type InstinctEventType =
   | "platform.remediation_pr_opened"
   // platform.preflight_run { platform, ok, checks, failed }: onboarding readiness check
   | "platform.preflight_run"
+  // Target authorization: a target must be proven client-owned (well-known token
+  // or DNS TXT) before any scan/pentest runs. Fail-closed at the target level.
+  // platform.target_verification_requested { platform, method }
+  | "platform.target_verification_requested"
+  // platform.target_verified { platform, method }
+  | "platform.target_verified"
+  // platform.target_verification_failed { platform, method, reason }
+  | "platform.target_verification_failed"
+  // platform.scan_blocked_unverified { platform, action }: a scan/pentest was
+  // refused because the target is not verified as client-owned.
+  | "platform.scan_blocked_unverified"
+  // platform.deployment_readiness_checked { ok, checks, failed }: env blockers +
+  // backing-service reachability gate before a client deployment goes live.
+  | "platform.deployment_readiness_checked"
+  // platform.scan_coverage_degraded { platform, attempted, succeeded, errored,
+  // auth_ok }: a scan that could not fully cover the target (so a 0-findings
+  // result is NOT a clean bill). Feeds the learning loop on flaky targets.
+  | "platform.scan_coverage_degraded"
   // Active-pentest safety harness: scope tokens (rules of engagement) + guard.
   // pentest.scope_issued { platform, techniques, max_requests, ttl_minutes }
   | "pentest.scope_issued"

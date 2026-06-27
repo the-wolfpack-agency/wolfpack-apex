@@ -216,6 +216,60 @@ it("renders scan history rows from the mocked scans, with platform + counts", as
   expect(row).toHaveTextContent("1 critical");
 });
 
+it("renders a clean coverage health line for a fully-covered latest scan", async () => {
+  const cleanScans = [
+    { ...SCANS[0], id: "scan-clean", coverage: { attempted: 18, succeeded: 18, errored: 0, authRequired: true, authEstablished: true, coverageRatio: 1 }, degraded: false },
+  ];
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes({ scans: cleanScans }));
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+  const health = await screen.findByTestId("coverage-health");
+  expect(health).toHaveAttribute("data-degraded", "false");
+  expect(health).toHaveTextContent("Coverage: 18/18 routes, auth established");
+  expect(health).toHaveTextContent("fully covered");
+});
+
+it("renders a loud incomplete-scan warning when the latest scan is degraded", async () => {
+  const degradedScans = [
+    { ...SCANS[0], id: "scan-deg", coverage: { attempted: 20, succeeded: 12, errored: 8, authRequired: true, authEstablished: false, coverageRatio: 0.6 }, degraded: true },
+  ];
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes({ scans: degradedScans }));
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+  const health = await screen.findByTestId("coverage-health");
+  expect(health).toHaveAttribute("data-degraded", "true");
+  expect(health).toHaveAttribute("role", "alert");
+  // The warning names WHY and refuses to call it clean.
+  expect(health).toHaveTextContent("Scan was incomplete");
+  expect(health).toHaveTextContent("8 routes errored");
+  expect(health).toHaveTextContent("auth not established");
+  expect(health).toHaveTextContent("NOT a clean result");
+  // The degraded run is badged in the history too.
+  expect(await screen.findByTestId("scan-degraded-scan-deg")).toHaveTextContent("incomplete");
+});
+
+it("says coverage is unknown (never 'clean') for a legacy scan without coverage", async () => {
+  const legacyScans = [{ ...SCANS[0], id: "scan-old", coverage: null, degraded: null }];
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes({ scans: legacyScans }));
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+  const health = await screen.findByTestId("coverage-health");
+  expect(health).toHaveAttribute("data-degraded", "unknown");
+  expect(health).toHaveTextContent("Coverage unknown");
+});
+
 it("collapses scan history to 'No scans yet' when there are none", async () => {
   mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
     if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));

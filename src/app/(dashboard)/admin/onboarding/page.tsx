@@ -40,6 +40,22 @@ interface PreflightResult {
   checks: PreflightCheck[];
 }
 
+interface VerificationInstruction {
+  method: "http_well_known" | "dns_txt";
+  summary: string;
+  location: string;
+  value: string;
+}
+
+interface VerifyState {
+  token: string;
+  status: "pending" | "verified" | "failed";
+  verifiedAt: string | null;
+  instructions: VerificationInstruction[];
+  reason?: string;
+  lastMethod?: "http_well_known" | "dns_txt";
+}
+
 const inputStyle = { background: "var(--wp-dark-base)", border: "1px solid var(--wp-dark-border)", color: "var(--wp-text)" };
 
 export default function OnboardingPage() {
@@ -69,6 +85,12 @@ export default function OnboardingPage() {
   const [preflighting, setPreflighting] = useState(false);
   const [preflight, setPreflight] = useState<PreflightResult | null>(null);
   const [preflightError, setPreflightError] = useState<string | null>(null);
+
+  // Ownership verification, keyed by platform
+  const [verifyFor, setVerifyFor] = useState<string | null>(null);
+  const [verify, setVerify] = useState<VerifyState | null>(null);
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
 
   useEffect(() => {
     const u = getInstinctUser<UserInfo>();
@@ -196,6 +218,64 @@ export default function OnboardingPage() {
     else setError(`Offboard failed: ${res.status}`);
   }
 
+  async function onIssueVerification(p: string) {
+    setVerifyFor(p);
+    setVerifyBusy(true);
+    setVerifyError(null);
+    setVerify(null);
+    try {
+      const res = await fetchWithRefresh("/api/admin/platform-scans/verify-target", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ platform: p, action: "issue" }),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        setVerifyError(b?.error ? String(b.error) : `Issue token failed: ${res.status}`);
+        return;
+      }
+      const data = (await res.json()) as VerifyState;
+      setVerify(data);
+    } catch (e) {
+      setVerifyError((e as Error).message);
+    } finally {
+      setVerifyBusy(false);
+    }
+  }
+
+  async function onCheckVerification(p: string, method: "http_well_known" | "dns_txt") {
+    setVerifyBusy(true);
+    setVerifyError(null);
+    try {
+      const res = await fetchWithRefresh("/api/admin/platform-scans/verify-target", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ platform: p, action: "check", method }),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        setVerifyError(b?.error ? String(b.error) : `Check failed: ${res.status}`);
+        return;
+      }
+      const data = (await res.json()) as {
+        ok: boolean;
+        status: VerifyState["status"];
+        verifiedAt: string | null;
+        method: VerifyState["lastMethod"];
+        reason?: string;
+      };
+      setVerify((prev) =>
+        prev
+          ? { ...prev, status: data.status, verifiedAt: data.verifiedAt, reason: data.reason, lastMethod: data.method }
+          : prev,
+      );
+    } catch (e) {
+      setVerifyError((e as Error).message);
+    } finally {
+      setVerifyBusy(false);
+    }
+  }
+
   if (!user) return null;
   if (!isAdmin(user)) {
     return <div className="p-6 text-sm" style={{ color: "var(--wp-text-dim)" }}>{error ?? "Admin access required."}</div>;
@@ -269,6 +349,9 @@ export default function OnboardingPage() {
                       <button data-testid="onboard-test-connection" onClick={() => onTestConnection(t.platform)} disabled={preflighting && preflightFor === t.platform} className="px-2 py-1 rounded text-xs" style={{ background: "var(--wp-dark-base)", border: "1px solid var(--wp-dark-border)", color: "var(--wp-text)" }}>
                         {preflighting && preflightFor === t.platform ? "Testing…" : "Test connection"}
                       </button>
+                      <button data-testid="onboard-verify-ownership" onClick={() => onIssueVerification(t.platform)} disabled={verifyBusy && verifyFor === t.platform} className="px-2 py-1 rounded text-xs" style={{ background: "var(--wp-dark-base)", border: "1px solid var(--wp-gold)", color: "var(--wp-gold)" }}>
+                        {verifyBusy && verifyFor === t.platform && !verify ? "Issuing…" : "Verify ownership"}
+                      </button>
                       <button data-testid="onboard-offboard" onClick={() => onOffboard(t.platform)} className="px-2 py-1 rounded text-xs" style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.5)", color: "#ef4444" }}>Offboard</button>
                     </div>
                   </td>
@@ -310,6 +393,67 @@ export default function OnboardingPage() {
                       <span className="font-medium">{c.name}</span>
                       {c.detail ? <span style={{ color: "var(--wp-text-dim)" }}>: {c.detail}</span> : null}
                     </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Ownership verification */}
+      {verifyFor && (verifyBusy || verify || verifyError) && (
+        <div data-testid="onboard-verify" className="mt-6 rounded-lg p-4" style={{ background: "var(--wp-dark-elevated)", border: "1px solid var(--wp-dark-border)" }}>
+          <div className="text-sm font-medium" style={{ color: "var(--wp-text)" }}>Prove ownership of {verifyFor}</div>
+          <p className="mt-1 text-xs" style={{ color: "var(--wp-text-dim)" }}>
+            We never scan or pentest a target until ownership is proven. Place the token below using either method, then click Check.
+          </p>
+
+          {verifyError && (
+            <div data-testid="onboard-verify-error" className="mt-2 rounded p-3 text-sm" style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.6)", color: "#ef4444" }}>
+              {verifyError}
+            </div>
+          )}
+
+          {verify && (
+            <div className="mt-3">
+              {verify.status === "verified" ? (
+                <div data-testid="onboard-verify-banner-verified" className="rounded p-3 text-sm font-medium" style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.6)", color: "#22c55e" }}>
+                  Verified{verify.verifiedAt ? ` at ${new Date(verify.verifiedAt).toLocaleString()}` : ""}. Scanning and pentesting are now permitted.
+                </div>
+              ) : (
+                <div data-testid="onboard-verify-banner-pending" className="rounded p-3 text-sm font-medium" style={{ background: "rgba(234,179,8,0.1)", border: "1px solid rgba(234,179,8,0.6)", color: "var(--wp-gold)" }}>
+                  Not yet verified{verify.reason ? ` (${verify.reason})` : ""}. Place the token and click Check.
+                </div>
+              )}
+
+              <div className="mt-3">
+                <div className="text-xs font-medium" style={{ color: "var(--wp-text-dim)" }}>Verification token</div>
+                <code data-testid="onboard-verify-token" className="mt-1 block break-all rounded px-2 py-1.5 text-xs" style={{ background: "var(--wp-dark-base)", border: "1px solid var(--wp-dark-border)", color: "var(--wp-text)" }}>
+                  {verify.token}
+                </code>
+              </div>
+
+              <ul className="mt-3 space-y-3">
+                {verify.instructions.map((ins) => (
+                  <li data-testid="onboard-verify-instruction" key={ins.method} className="rounded p-3 text-sm" style={{ background: "var(--wp-dark-base)", border: "1px solid var(--wp-dark-border)", color: "var(--wp-text)" }}>
+                    <div className="font-medium">
+                      {ins.method === "http_well_known" ? "Option A - HTTP file" : "Option B - DNS TXT record"}
+                    </div>
+                    <div className="mt-1 text-xs" style={{ color: "var(--wp-text-dim)" }}>{ins.summary}</div>
+                    <div className="mt-1 text-xs" style={{ color: "var(--wp-text-dim)" }}>Location:</div>
+                    <code className="block break-all text-xs" style={{ color: "var(--wp-text)" }}>{ins.location}</code>
+                    <div className="mt-1 text-xs" style={{ color: "var(--wp-text-dim)" }}>Value:</div>
+                    <code className="block break-all text-xs" style={{ color: "var(--wp-text)" }}>{ins.value}</code>
+                    <button
+                      data-testid={`onboard-verify-check-${ins.method}`}
+                      onClick={() => onCheckVerification(verifyFor, ins.method)}
+                      disabled={verifyBusy}
+                      className="mt-2 px-3 py-1.5 rounded text-xs"
+                      style={{ background: "var(--wp-gold)", color: "var(--wp-dark-base)" }}
+                    >
+                      {verifyBusy ? "Checking…" : "Check"}
+                    </button>
                   </li>
                 ))}
               </ul>

@@ -84,6 +84,15 @@ interface FindingsSummary {
   byCategory: Record<string, number>;
 }
 
+interface ScanCoverage {
+  attempted: number;
+  succeeded: number;
+  errored: number;
+  authRequired: boolean;
+  authEstablished: boolean;
+  coverageRatio: number;
+}
+
 interface ScanHistoryRow {
   id: string;
   platform: string;
@@ -92,6 +101,11 @@ interface ScanHistoryRow {
   findingCount: number;
   criticalCount: number;
   createdAt: string;
+  // Per-run coverage + the server-computed degraded flag. Null = unknown (older
+  // run / external ingest); the UI treats unknown as "cannot claim clean", never
+  // as fully covered.
+  coverage?: ScanCoverage | null;
+  degraded?: boolean | null;
 }
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low"];
@@ -121,6 +135,91 @@ function whenLabel(iso: string): string {
   const day = Math.round(hr / 24);
   if (day < 30) return `${day}d ago`;
   return new Date(t).toLocaleDateString();
+}
+
+// Build the scan-coverage health line / warning for the most recent run. Returns
+// null when there is no run to describe. A degraded run renders a loud warning so
+// a "0 findings" result is NEVER mistaken for a clean bill; a clean, fully-covered
+// run renders a quiet confirmation; an unknown-coverage run says so explicitly.
+function CoverageHealth({ scan }: { scan: ScanHistoryRow }) {
+  const cov = scan.coverage ?? null;
+
+  // Unknown coverage (older run / external ingest): say so - do NOT imply clean.
+  if (!cov) {
+    return (
+      <div
+        data-testid="coverage-health"
+        data-degraded="unknown"
+        style={{
+          padding: "0.7rem 1rem",
+          marginBottom: "1rem",
+          borderRadius: "0.5rem",
+          fontSize: "0.85rem",
+          color: "var(--wp-text-dim, #aaa)",
+          background: "var(--wp-dark-surface, #1f1f22)",
+          border: "1px solid var(--wp-dark-border, #333)",
+        }}
+      >
+        Coverage unknown for the latest scan of {scan.platform} - cannot confirm a clean result.
+      </div>
+    );
+  }
+
+  const degraded = scan.degraded === true;
+  const authNote = cov.authRequired
+    ? cov.authEstablished
+      ? "auth established"
+      : "auth NOT established"
+    : null;
+  const coverageText = `Coverage: ${cov.succeeded}/${cov.attempted} routes${authNote ? `, ${authNote}` : ""}`;
+
+  if (!degraded) {
+    return (
+      <div
+        data-testid="coverage-health"
+        data-degraded="false"
+        style={{
+          padding: "0.7rem 1rem",
+          marginBottom: "1rem",
+          borderRadius: "0.5rem",
+          fontSize: "0.85rem",
+          fontWeight: 600,
+          color: "var(--wp-success, #22c55e)",
+          background: "var(--wp-dark-surface, #1f1f22)",
+          border: "1px solid var(--wp-dark-border, #333)",
+        }}
+      >
+        {coverageText}. This scan fully covered the target.
+      </div>
+    );
+  }
+
+  // Degraded: spell out WHY so the operator never reads 0 findings as "secure".
+  const reasons: string[] = [];
+  if (cov.errored > 0) reasons.push(`${cov.errored} route${cov.errored === 1 ? "" : "s"} errored`);
+  if (cov.authRequired && !cov.authEstablished) reasons.push("auth not established");
+  if (cov.attempted > 0 && cov.succeeded / cov.attempted < 0.8) reasons.push("less than 80% of routes reached");
+  const why = reasons.join(", ");
+
+  return (
+    <div
+      data-testid="coverage-health"
+      data-degraded="true"
+      role="alert"
+      style={{
+        padding: "0.85rem 1rem",
+        marginBottom: "1rem",
+        borderRadius: "0.5rem",
+        fontSize: "0.85rem",
+        color: "var(--wp-text, #eee)",
+        background: "rgba(239, 68, 68, 0.12)",
+        border: "1px solid var(--wp-error, #ef4444)",
+      }}
+    >
+      <strong style={{ color: "var(--wp-error, #ef4444)" }}>Scan was incomplete{why ? ` (${why})` : ""}.</strong>{" "}
+      {coverageText}. This is NOT a clean result - a low-finding count here may reflect what the scan could not reach, not a healthy target.
+    </div>
+  );
 }
 
 function evidenceLine(evidence: Record<string, unknown>): string {
@@ -497,6 +596,8 @@ export default function PlatformScansPage() {
         );
       })()}
 
+      {scanHistory.length > 0 && <CoverageHealth scan={scanHistory[0]} />}
+
       {(() => {
         const categoryLine = Object.entries(findingsSummary.byCategory)
           .filter(([, n]) => n > 0)
@@ -697,6 +798,24 @@ export default function PlatformScansPage() {
                 {s.criticalCount > 0 && (
                   <span style={{ fontWeight: 600, color: "var(--wp-error, #ef4444)" }}>
                     {s.criticalCount} critical
+                  </span>
+                )}
+                {s.degraded === true && (
+                  <span
+                    data-testid={`scan-degraded-${s.id}`}
+                    title="This scan was incomplete - its result is not a clean bill"
+                    style={{
+                      fontWeight: 700,
+                      fontSize: "0.7rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.04em",
+                      padding: "0.1rem 0.45rem",
+                      borderRadius: "0.35rem",
+                      color: "var(--wp-error, #ef4444)",
+                      border: "1px solid var(--wp-error, #ef4444)",
+                    }}
+                  >
+                    incomplete
                   </span>
                 )}
                 <span style={{ flex: 1 }} />

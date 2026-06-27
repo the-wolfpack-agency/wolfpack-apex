@@ -54,6 +54,23 @@ it("passes ?platform through to summarizeFindings", async () => {
   expect(mockSummarize).toHaveBeenCalledWith("ws-1", "acme-crm");
 });
 
+it("includes per-scan coverage + degraded flag in the response so the report can render health", async () => {
+  const SCANS_WITH_COVERAGE = [
+    {
+      id: "scan-deg", platform: "wolfpack-auto", baseUrl: "https://t.example",
+      routeCount: 5, findingCount: 0, criticalCount: 0, createdAt: "2026-06-26T00:00:00.000Z",
+      coverage: { attempted: 5, succeeded: 3, errored: 2, authRequired: true, authEstablished: false, coverageRatio: 0.6 },
+      degraded: true,
+    },
+  ];
+  mockListScans.mockResolvedValue(SCANS_WITH_COVERAGE);
+  const res = await get("http://localhost/api/admin/platform-scans/summary");
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { scans: typeof SCANS_WITH_COVERAGE };
+  expect(body.scans[0].degraded).toBe(true);
+  expect(body.scans[0].coverage).toMatchObject({ succeeded: 3, attempted: 5, errored: 2, authEstablished: false });
+});
+
 it("403s when the capability gate fails (no store calls)", async () => {
   mockAuth = async () => ({ ok: false, response: new Response(null, { status: 403 }) });
   const res = await get("http://localhost/api/admin/platform-scans/summary");

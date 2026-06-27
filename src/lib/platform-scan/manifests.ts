@@ -149,6 +149,16 @@ const DEFAULT_CONNECTION_ROUTES: ScanRouteSpec[] = [
  * platform an operator connects with a username/password is scannable, not just
  * our hardcoded platforms). Returns null if neither exists.
  */
+/**
+ * True when `platform` is one of our own curated, hardcoded targets (the systems
+ * we operate). Curated targets are exempt from client-ownership verification: we
+ * own them. Any other (onboarded / connector) target is a client system and must
+ * prove ownership before it can be scanned or pentested.
+ */
+export function isCuratedTarget(platform: string): boolean {
+  return Object.prototype.hasOwnProperty.call(SCAN_MANIFESTS, platform);
+}
+
 export async function resolveScanTarget(workspaceId: string, platform: string): Promise<ScanManifest | null> {
   const curated = SCAN_MANIFESTS[platform];
   if (curated) return curated;

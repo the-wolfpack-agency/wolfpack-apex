@@ -3,7 +3,7 @@
  * crawl aggregation. classify() is pure, so every branch is asserted directly;
  * scanPlatform() is exercised with an injected fetch (no network).
  */
-import { classify, scanPlatform, missingHeaderFindings, cookieAndCorsFindings } from "@/lib/platform-scan/engine";
+import { classify, scanPlatform, missingHeaderFindings, cookieAndCorsFindings, computeCoverage } from "@/lib/platform-scan/engine";
 import type { ScanRouteSpec, RouteObservation } from "@/lib/platform-scan/types";
 
 const REQ: ScanRouteSpec = { path: "/admin/leads", journey: "Lead inbox", auth: "required" };
@@ -204,6 +204,108 @@ describe("missingHeaderFindings", () => {
       "strict-transport-security": "max-age=63072000",
     }), true);
     expect(f).toHaveLength(0);
+  });
+});
+
+describe("computeCoverage", () => {
+  const ok = (path: string, auth: ScanRouteSpec["auth"], status = 200): { spec: ScanRouteSpec; obs: RouteObservation } => ({
+    spec: { path, journey: path, auth },
+    obs: { status, durationMs: 1 },
+  });
+  const netErr = (path: string, auth: ScanRouteSpec["auth"]): { spec: ScanRouteSpec; obs: RouteObservation } => ({
+    spec: { path, journey: path, auth },
+    obs: { networkError: true, durationMs: 1 },
+  });
+
+  it("all routes responded -> ratio 1, no errors, public-only auth established", () => {
+    const c = computeCoverage([ok("/a", "public"), ok("/b", "public")], { authProvided: false, authenticatedIntent: false });
+    expect(c).toEqual({ attempted: 2, succeeded: 2, errored: 0, authRequired: false, authEstablished: true, coverageRatio: 1 });
+  });
+
+  it("a network error and a 5xx both count as errored (scanner never saw the route)", () => {
+    const c = computeCoverage(
+      [ok("/a", "public"), netErr("/b", "public"), ok("/c", "public", 503)],
+      { authProvided: false, authenticatedIntent: false },
+    );
+    expect(c.attempted).toBe(3);
+    expect(c.succeeded).toBe(1);
+    expect(c.errored).toBe(2);
+    expect(c.coverageRatio).toBeCloseTo(1 / 3);
+  });
+
+  it("auth required + authenticated session honored -> authEstablished true", () => {
+    const c = computeCoverage([ok("/admin", "required", 200)], { authProvided: true, authenticatedIntent: true });
+    expect(c.authRequired).toBe(true);
+    expect(c.authEstablished).toBe(true);
+  });
+
+  it("auth required but NO session headers supplied -> authEstablished false", () => {
+    const c = computeCoverage([ok("/admin", "required", 200)], { authProvided: false, authenticatedIntent: false });
+    expect(c.authRequired).toBe(true);
+    expect(c.authEstablished).toBe(false);
+  });
+
+  it("auth required, authenticated crawl but protected route 401'd -> session not honored -> authEstablished false", () => {
+    const c = computeCoverage([ok("/admin", "required", 401)], { authProvided: true, authenticatedIntent: true });
+    expect(c.authEstablished).toBe(false);
+  });
+
+  it("auth required, authenticated crawl but protected route bounced to login -> authEstablished false", () => {
+    const c = computeCoverage(
+      [{ spec: { path: "/admin", journey: "x", auth: "required" }, obs: { status: 302, location: "/login", durationMs: 1 } }],
+      { authProvided: true, authenticatedIntent: true },
+    );
+    expect(c.authEstablished).toBe(false);
+  });
+
+  it("nothing attempted -> ratio 0, not NaN", () => {
+    expect(computeCoverage([], { authProvided: false, authenticatedIntent: false }).coverageRatio).toBe(0);
+  });
+});
+
+describe("scanPlatform coverage", () => {
+  const SECURE: Record<string, string> = {
+    "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "strict-transport-security": "max-age=63072000",
+  };
+  const mkRes = (status: number, location?: string) => {
+    const h = new Headers(SECURE);
+    if (location) h.set("location", location);
+    return { status, headers: h } as unknown as Response;
+  };
+
+  it("a fully-reachable scan reports ratio 1 and no errored routes", async () => {
+    const fetchImpl = jest.fn(async () => mkRes(200)) as unknown as typeof fetch;
+    const res = await scanPlatform({
+      workspaceId: "ws-1", platform: "t", baseUrl: "https://demo.example.com", fetchImpl,
+      routes: [{ path: "/a", journey: "A", auth: "public" }, { path: "/b", journey: "B", auth: "public" }],
+    });
+    expect(res.coverage).toMatchObject({ attempted: 2, succeeded: 2, errored: 0, coverageRatio: 1 });
+  });
+
+  it("an unreachable route degrades coverage below 1", async () => {
+    const fetchImpl = jest.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/b")) throw new Error("network");
+      return mkRes(200);
+    }) as unknown as typeof fetch;
+    const res = await scanPlatform({
+      workspaceId: "ws-1", platform: "t", baseUrl: "https://demo.example.com", fetchImpl,
+      routes: [{ path: "/a", journey: "A", auth: "public" }, { path: "/b", journey: "B", auth: "public" }],
+    });
+    expect(res.coverage!.errored).toBe(1);
+    expect(res.coverage!.coverageRatio).toBe(0.5);
+  });
+
+  it("authenticated crawl with headers honored marks authEstablished true", async () => {
+    const fetchImpl = jest.fn(async () => mkRes(200)) as unknown as typeof fetch;
+    const res = await scanPlatform({
+      workspaceId: "ws-1", platform: "t", baseUrl: "https://demo.example.com", fetchImpl,
+      authenticated: true, headers: { cookie: "session=x" },
+      routes: [{ path: "/admin", journey: "Admin", auth: "required" }],
+    });
+    expect(res.coverage).toMatchObject({ authRequired: true, authEstablished: true });
   });
 });
 
