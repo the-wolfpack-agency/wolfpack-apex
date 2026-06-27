@@ -309,6 +309,82 @@ export function suppressedTypecheck(file: SourceFile): ScanFinding[] {
   return findings;
 }
 
+// Provider-specific committed-credential signatures. Each entry is a label +
+// the regex whose first whole match IS the secret value (so we can redact it).
+// PROVIDER-SIGNATURE secrets only. These are unambiguous, structurally distinct
+// token formats: a match is a real credential with near-zero false-positive rate.
+// We deliberately do NOT use a generic `name = "literal"` heuristic: on real code
+// it fires on placeholders ("SHADOW_MODE_SECRET"), demo seeds ("whsec_demo_..."),
+// mocks ("mock-link-token") and display keys, which buries the true positives in
+// noise (see the precision discussion). Broader, dataflow-aware secret + taint
+// detection (generic high-entropy keys, SQLi, SSRF) is a job for a real SAST
+// (Semgrep / gitleaks), recommended as the next tier rather than reimplemented
+// imprecisely here.
+const SECRET_PROVIDERS: ReadonlyArray<{ provider: string; re: RegExp }> = [
+  { provider: "AWS access key id", re: /\bAKIA[0-9A-Z]{16}\b/ },
+  { provider: "Stripe live secret", re: /\b(?:sk|rk)_live_[0-9a-zA-Z]{16,}/ },
+  { provider: "GitHub token", re: /\b(?:ghp|gho|ghu|ghs|ghr)_[0-9A-Za-z]{36,}\b/ },
+  { provider: "GitHub token", re: /\bgithub_pat_[0-9A-Za-z_]{22,}\b/ },
+  { provider: "Google API key", re: /\bAIza[0-9A-Za-z_\-]{35}\b/ },
+  { provider: "Slack token", re: /\bxox[baprs]-[0-9A-Za-z-]{10,}/ },
+  { provider: "OpenAI key", re: /\bsk-(?:proj-)?[A-Za-z0-9_-]{32,}\b/ },
+  { provider: "Anthropic key", re: /\bsk-ant-[A-Za-z0-9_-]{24,}\b/ },
+  { provider: "SendGrid key", re: /\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b/ },
+  { provider: "Twilio account SID", re: /\bAC[0-9a-f]{32}\b/ },
+  { provider: "npm token", re: /\bnpm_[A-Za-z0-9]{36}\b/ },
+  { provider: "Private key (PEM)", re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/ },
+];
+
+/** Replace the first occurrence of `secret` in `line` with a redaction marker so
+ *  we never persist the credential itself in a finding. */
+function redact(line: string, secret: string): string {
+  return line.replace(secret, "***REDACTED***").trim();
+}
+
+/**
+ * hardcodedSecret: a committed credential in source, matched ONLY by unambiguous
+ * provider token signatures (AWS / Stripe / GitHub / Google / Slack / OpenAI /
+ * Anthropic / SendGrid / Twilio / npm / PEM private key). Severity critical. A
+ * match is structurally a real key, so the false-positive rate is near zero. The
+ * secret value is ALWAYS redacted in the evidence snippet, so scanning for
+ * secrets never itself stores one.
+ *
+ * We intentionally dropped the generic `sensitiveName = "literal"` heuristic: on
+ * real code it flagged placeholders, demo seeds and display keys, producing the
+ * exact false-positive noise that makes a scanner untrustworthy. Generic /
+ * high-entropy secret detection and taint classes (SQLi, SSRF) belong to a
+ * dataflow-aware SAST (Semgrep / gitleaks), recommended as the next tier.
+ */
+export function hardcodedSecret(file: SourceFile): ScanFinding[] {
+  const lines = file.content.split("\n");
+  const findings: ScanFinding[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // A line can carry several distinct providers; flag each once per line.
+    const seen = new Set<string>();
+    for (const { provider, re } of SECRET_PROVIDERS) {
+      const m = re.exec(line);
+      if (!m) continue;
+      if (seen.has(provider)) continue;
+      seen.add(provider);
+      findings.push({
+        route: file.path,
+        severity: "critical",
+        category: "security",
+        title: `Hardcoded secret (${provider})`,
+        detail:
+          "A live credential is committed to source. It must be rotated " +
+          "immediately (treat it as already leaked) and moved into an env var " +
+          "or a secret manager, never stored in the repository.",
+        evidence: { line: i + 1, snippet: redact(line, m[0]) },
+      });
+    }
+  }
+
+  return findings;
+}
+
 /** Compose every detector over one file. */
 export function runDetectors(file: SourceFile): ScanFinding[] {
   return [
@@ -318,5 +394,6 @@ export function runDetectors(file: SourceFile): ScanFinding[] {
     ...unvalidatedNumericInput(file),
     ...dangerousInnerHtml(file),
     ...suppressedTypecheck(file),
+    ...hardcodedSecret(file),
   ];
 }

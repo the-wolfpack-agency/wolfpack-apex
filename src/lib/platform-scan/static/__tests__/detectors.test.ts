@@ -11,6 +11,7 @@ import {
   unvalidatedNumericInput,
   dangerousInnerHtml,
   suppressedTypecheck,
+  hardcodedSecret,
   runDetectors,
 } from "@/lib/platform-scan/static/detectors";
 
@@ -298,6 +299,86 @@ describe("suppressedTypecheck", () => {
       "}",
     ].join("\n");
     expect(suppressedTypecheck({ path: "lib/f.ts", content })).toHaveLength(0);
+  });
+});
+
+describe("hardcodedSecret", () => {
+  it("fires (critical) on an AWS access key id and redacts it", () => {
+    const secret = "AKIAIOSFODNN7EXAMPLE0".slice(0, 4) + "ABCDEFGHIJKLMNOP";
+    const content = [
+      "const config = {",
+      `  awsKeyId: "${secret}",`,
+      "};",
+    ].join("\n");
+    const f = hardcodedSecret({ path: "lib/config.ts", content });
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({
+      severity: "critical",
+      category: "security",
+      title: "Hardcoded secret (AWS access key id)",
+      route: "lib/config.ts",
+    });
+    expect(f[0].evidence.line).toBe(2);
+    expect(f[0].evidence.snippet).not.toContain(secret);
+    expect(f[0].evidence.snippet).toContain("***REDACTED***");
+  });
+
+  it("fires (critical) on a Stripe live secret", () => {
+    const secret = "sk_live_" + "ABCDEFGHIJKLMNOP1234";
+    const content = `const stripe = "${secret}";`;
+    const f = hardcodedSecret({ path: "lib/pay.ts", content });
+    expect(f).toHaveLength(1);
+    expect(f[0].title).toBe("Hardcoded secret (Stripe live secret)");
+    expect(f[0].severity).toBe("critical");
+    expect(f[0].evidence.snippet).not.toContain(secret);
+  });
+
+  it("fires (critical) on a GitHub token", () => {
+    const secret = "ghp_" + "a".repeat(36);
+    const content = `const gh = "${secret}";`;
+    const f = hardcodedSecret({ path: "lib/gh.ts", content });
+    expect(f.some((x) => x.title === "Hardcoded secret (GitHub token)")).toBe(true);
+    expect(f.find((x) => x.severity === "critical")?.evidence.snippet).not.toContain(secret);
+  });
+
+  it("fires (critical) on a Google API key", () => {
+    const secret = "AIza" + "A".repeat(35);
+    const content = `const g = "${secret}";`;
+    const f = hardcodedSecret({ path: "lib/g.ts", content });
+    expect(f.some((x) => x.title === "Hardcoded secret (Google API key)")).toBe(true);
+  });
+
+  it("fires (critical) on a PEM private key header", () => {
+    const content = '"-----BEGIN RSA PRIVATE KEY-----"';
+    const f = hardcodedSecret({ path: "lib/key.ts", content });
+    expect(f).toHaveLength(1);
+    expect(f[0].title).toBe("Hardcoded secret (Private key (PEM))");
+  });
+
+  it("fires (critical) on an OpenAI key", () => {
+    const secret = "sk-" + "A".repeat(40);
+    const content = `const ai = "${secret}";`;
+    const f = hardcodedSecret({ path: "lib/ai.ts", content });
+    expect(f.some((x) => x.title === "Hardcoded secret (OpenAI key)")).toBe(true);
+    expect(f.find((x) => x.severity === "critical")?.evidence.snippet).not.toContain(secret);
+  });
+
+  // PRECISION: provider-signature only. A credential-NAMED variable holding a
+  // non-provider literal (placeholder, demo seed, mock, display value) must NOT
+  // fire. The generic name-based heuristic was removed because on real code it
+  // flagged "SHADOW_MODE_SECRET" / "whsec_demo_..." / "mock-link-token" and
+  // buried true positives. (gitleaks/Semgrep cover generic/high-entropy keys.)
+  it("does NOT fire on a credential-named NON-provider literal (no generic noise)", () => {
+    for (const content of [
+      'const API_KEY = "supersecretvalue123";',
+      'const secret = "SHADOW_MODE_SECRET";',
+      'const webhook = { secret: "whsec_demo_abcdef123456" };',
+      'const linkToken = "mock-link-token-NOT-REAL";',
+      'const API_KEY = process.env.API_KEY || "fallbackvalue";',
+      'const API_KEY = "your-key-here-please";',
+    ]) {
+      expect(hardcodedSecret({ path: "lib/x.ts", content })).toHaveLength(0);
+    }
   });
 });
 
