@@ -596,6 +596,8 @@ export type InstinctEventType =
   | "pentest.rate_limit_completed"
   // pentest.info_disclosure_completed { platform, cases, confirmed }
   | "pentest.info_disclosure_completed"
+  // pentest.engagement_run { platform, casesRun, confirmed }
+  | "pentest.engagement_run"
   | "platform.scan_started"
   | "platform.scan_finding_detected"
   | "platform.scan_completed"
