@@ -43,6 +43,9 @@ export async function scanSource(input: ScanSourceInput): Promise<PlatformScanRe
     routeCount: paths.length,
     okCount,
     findings,
+    // Every analyzed file is "covered", letting recordScan auto-resolve findings on
+    // these files that the detectors no longer flag (matches ScanFinding.route = file path).
+    scannedRoutes: paths,
   };
 }
 

@@ -46,7 +46,8 @@ it("recordScan writes the header + one row per finding, emits analytics, and fee
 
   const out = await recordScan({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin", result: RESULT });
 
-  expect(out).toEqual({ scanId: "scan-1", findingCount: 2, criticalCount: 1 });
+  expect(out).toEqual({ scanId: "scan-1", findingCount: 2, criticalCount: 1, autoResolvedCount: 0 });
+  // No scannedRoutes on this RESULT -> auto-resolve is skipped: header + 2 findings only, no UPDATE.
   // 1 header insert + 2 finding inserts.
   expect(mockWriteQuery).toHaveBeenCalledTimes(3);
   expect(mockWriteQuery.mock.calls[0][0]).toMatch(/INSERT INTO instinct_platform_scans/);
@@ -104,14 +105,57 @@ it("HUMAN ALERTING: a notify throw does not break recordScan (best effort)", asy
 
   const out = await recordScan({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin", result: RESULT });
   // The scan + findings still persisted and the call returned normally.
-  expect(out).toEqual({ scanId: "scan-e", findingCount: 2, criticalCount: 1 });
+  expect(out).toEqual({ scanId: "scan-e", findingCount: 2, criticalCount: 1, autoResolvedCount: 0 });
   expect(mockNotify).toHaveBeenCalledTimes(1);
+});
+
+it("AUTO-RESOLVE: a covered route with no current finding resolves its stale open findings", async () => {
+  // The scan covered two routes; only one still has a finding. The other route's
+  // previously-open finding (the bug was fixed) must be auto-resolved.
+  const resultWithCoverage: PlatformScanResult = {
+    ...RESULT,
+    findings: [
+      { route: "/admin/leads", severity: "critical", category: "bug", title: "Server error (500)", detail: "boom", evidence: { status: 500 } },
+    ],
+    scannedRoutes: ["/admin/leads", "/admin/fixed"],
+  };
+  mockWriteQuery
+    .mockResolvedValueOnce({ rows: [{ id: "scan-AR" }] }) // header
+    .mockResolvedValueOnce({ rows: [] })                  // finding upsert
+    .mockResolvedValueOnce({ rows: [{ id: "stale-1" }, { id: "stale-2" }] }); // auto-resolve UPDATE
+
+  const out = await recordScan({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin", result: resultWithCoverage });
+
+  expect(out.autoResolvedCount).toBe(2);
+  // header + 1 finding upsert + 1 auto-resolve UPDATE
+  expect(mockWriteQuery).toHaveBeenCalledTimes(3);
+  const updateCall = mockWriteQuery.mock.calls[2];
+  expect(updateCall[0]).toMatch(/UPDATE instinct_platform_scan_findings/);
+  expect(updateCall[0]).toMatch(/status = 'resolved'/);
+  expect(updateCall[0]).toMatch(/route = ANY\(\$3::text\[\]\)/);
+  // Scoped to covered routes; decided_by marks it as automatic.
+  expect(updateCall[1]).toEqual(["ws-1", "wolfpack-auto", ["/admin/leads", "/admin/fixed"], "auto:rescan", "\x1f", ["/admin/leads\x1fServer error (500)"]]);
+  // Aggregate learning signal.
+  expect(mockTrackEvent).toHaveBeenCalledWith("platform.scan_findings_auto_resolved", "admin-1", "admin", expect.objectContaining({ platform: "wolfpack-auto", count: 2 }));
+});
+
+it("AUTO-RESOLVE: no event/UPDATE when nothing was stale (UPDATE returns 0 rows)", async () => {
+  mockWriteQuery
+    .mockResolvedValueOnce({ rows: [{ id: "scan-AR2" }] })
+    .mockResolvedValueOnce({ rows: [] })
+    .mockResolvedValueOnce({ rows: [] }); // UPDATE resolves nothing
+  const out = await recordScan({
+    workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin",
+    result: { ...RESULT, findings: [RESULT.findings[0]], scannedRoutes: ["/admin/leads"] },
+  });
+  expect(out.autoResolvedCount).toBe(0);
+  expect(mockTrackEvent).not.toHaveBeenCalledWith("platform.scan_findings_auto_resolved", expect.anything(), expect.anything(), expect.anything());
 });
 
 it("recordScan with zero findings still records the run and emits completion", async () => {
   mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "scan-2" }] });
   const out = await recordScan({ workspaceId: "ws-1", actorId: "a", actorRole: "admin", result: { ...RESULT, findings: [] } });
-  expect(out).toEqual({ scanId: "scan-2", findingCount: 0, criticalCount: 0 });
+  expect(out).toEqual({ scanId: "scan-2", findingCount: 0, criticalCount: 0, autoResolvedCount: 0 });
   expect(mockWriteQuery).toHaveBeenCalledTimes(1); // header only
   expect(mockTrackEvent).toHaveBeenCalledWith("platform.scan_completed", "a", "admin", expect.objectContaining({ finding_count: 0 }));
   expect(mockIngest).not.toHaveBeenCalled();

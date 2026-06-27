@@ -131,6 +131,9 @@ export async function POST(req: NextRequest) {
       routeCount: manifest.apiEndpoints.length,
       okCount: manifest.apiEndpoints.length - flagged,
       findings,
+      // Covered endpoints (matches ScanFinding.route = ep.path) so a re-probe
+      // auto-resolves endpoints that are now correctly gated/validated.
+      scannedRoutes: manifest.apiEndpoints.map((e) => e.path),
     };
   } else if (mode === "static" && manifest.static) {
     // White-box source scan. Discover the target repo's whole page/route surface
@@ -182,7 +185,7 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const { scanId, findingCount, criticalCount } = await recordScan({
+  const { scanId, findingCount, criticalCount, autoResolvedCount } = await recordScan({
     workspaceId,
     actorId: user.id,
     actorRole: user.role,
@@ -208,6 +211,7 @@ export async function POST(req: NextRequest) {
     scanId,
     findingCount,
     criticalCount,
+    autoResolvedCount,
     findings: result.findings,
   });
 }

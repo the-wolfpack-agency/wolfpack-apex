@@ -152,5 +152,8 @@ export async function scanPlatform(input: PlatformScanInput): Promise<PlatformSc
     routeCount: input.routes.length,
     okCount: input.routes.length - routesWithFindings,
     findings,
+    // Every probed route is "covered", letting recordScan auto-resolve findings on
+    // these routes that are no longer detected (matches ScanFinding.route = spec.path).
+    scannedRoutes: input.routes.map((s) => s.path),
   };
 }

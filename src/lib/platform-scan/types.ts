@@ -67,6 +67,14 @@ export interface PlatformScanResult {
   routeCount: number;
   okCount: number;
   findings: ScanFinding[];
+  /**
+   * Identifiers (route paths / file paths) this scan actually COVERED, the same
+   * identifier space as `ScanFinding.route`. recordScan() uses this to
+   * auto-resolve open findings on a covered route the scan no longer detects
+   * (the bug was fixed). Omit it (e.g. external ingest) to skip auto-resolve:
+   * we must not resolve what we don't know was re-checked.
+   */
+  scannedRoutes?: string[];
 }
 
 /** A single route's observed response, the pure input to classification. */

@@ -60,7 +60,7 @@ export interface RecordScanInput {
  *  Returns the scan id and counts. */
 export async function recordScan(
   input: RecordScanInput,
-): Promise<{ scanId: string; findingCount: number; criticalCount: number }> {
+): Promise<{ scanId: string; findingCount: number; criticalCount: number; autoResolvedCount: number }> {
   const { workspaceId, actorId, actorRole, result } = input;
   const criticalCount = result.findings.filter((f) => f.severity === "critical").length;
 
@@ -99,6 +99,42 @@ export async function recordScan(
     });
     // Learning: feed a human-readable summary into the Brain (best effort).
     await ingestPlatformScanFinding(result.platform, f);
+  }
+
+  // AUTO-RESOLVE: close the find -> fix -> re-scan loop. When a scan covers a
+  // route (scannedRoutes) but no longer reports a finding it previously had open
+  // on that route, the underlying bug was fixed: mark it resolved. Without this,
+  // every fixed bug lingers as a stale "open" row and the findings list never
+  // shrinks even as the target improves. Scoping by `route = ANY(scannedRoutes)`
+  // keeps modalities from stepping on each other: an HTTP scan (route = URL path)
+  // never touches a static finding (route = file path) because the identifier
+  // spaces don't overlap. Omitting scannedRoutes (external ingest) skips this:
+  // we must not resolve findings the run didn't actually re-check.
+  let autoResolvedCount = 0;
+  if (result.scannedRoutes && result.scannedRoutes.length > 0) {
+    const SEP = ""; // unit separator, safe: never appears in a route/title
+    const foundKeys = result.findings.map((f) => `${f.route}${SEP}${f.title}`);
+    const resolved = await writeQuery<{ id: string }>(
+      `UPDATE instinct_platform_scan_findings
+          SET status = 'resolved', decided_by = $4, decided_at = now()
+        WHERE workspace_id = $1
+          AND platform = $2
+          AND status = 'open'
+          AND route = ANY($3::text[])
+          AND (route || $5 || title) <> ALL($6::text[])
+        RETURNING id`,
+      [workspaceId, result.platform, result.scannedRoutes, "auto:rescan", SEP, foundKeys],
+    );
+    autoResolvedCount = resolved.rows.length;
+    if (autoResolvedCount > 0) {
+      // One aggregate signal, not per-row: a per-row event would flood the
+      // stream and break the "one row per durable fact" idiom (mirrors bulkTriageFindings).
+      trackEvent("platform.scan_findings_auto_resolved", actorId, actorRole, {
+        platform: result.platform,
+        count: autoResolvedCount,
+        scan_id: scanId,
+      });
+    }
   }
 
   trackEvent("platform.scan_completed", actorId, actorRole, {
@@ -141,7 +177,7 @@ export async function recordScan(
     }
   }
 
-  return { scanId, findingCount: result.findings.length, criticalCount };
+  return { scanId, findingCount: result.findings.length, criticalCount, autoResolvedCount };
 }
 
 /** Open (or any-status) findings for the workspace, worst severity first.
