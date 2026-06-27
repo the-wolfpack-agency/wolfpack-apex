@@ -590,6 +590,8 @@ export type InstinctEventType =
   | "pentest.probe_authorized"
   // pentest.probe_blocked { platform, technique, reason }
   | "pentest.probe_blocked"
+  // pentest.idor_completed { platform, cases, confirmed }
+  | "pentest.idor_completed"
   | "platform.scan_started"
   | "platform.scan_finding_detected"
   | "platform.scan_completed"
