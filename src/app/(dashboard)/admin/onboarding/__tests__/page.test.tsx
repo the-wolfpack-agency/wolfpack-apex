@@ -37,7 +37,7 @@ jest.mock("@/lib/client-auth", () => ({
   getInstinctUser: () => mockGetInstinctUser(),
 }));
 
-// Stable router reference — returning a fresh object each render would change
+// Stable router reference: returning a fresh object each render would change
 // the `[router]` dep of the page's mount effect and loop infinitely.
 const stableRouter = { push: jest.fn() };
 jest.mock("next/navigation", () => ({
@@ -77,6 +77,10 @@ let targetsBody: { targets: unknown[] } = { targets: [] };
 let scanBody: { findingCount?: number; criticalCount?: number } = {};
 let recsBody: { count?: number } = {};
 let targetsGetCount = 0; // counts targets GETs (mount load + reloads)
+// Preflight fixtures. `preflightReject` forces the fetch to reject so the error
+// state can be asserted without re-implementing the router.
+let preflightBody: unknown = { platform: "acme", ok: true, checks: [] };
+let preflightReject = false;
 
 // Single shared router. Order matters: match method-specific mutations first,
 // then the GET surface.
@@ -97,6 +101,10 @@ function routeFetch(url: string, init?: RequestInit) {
   if (url === "/api/admin/platform-scans/recommendations" && method === "POST") {
     return jsonResponse(recsBody);
   }
+  if (url.startsWith("/api/admin/platform-scans/preflight")) {
+    if (preflightReject) return Promise.reject(new Error("network down"));
+    return jsonResponse(preflightBody);
+  }
   // GET /api/admin/platform-scans/targets (mount load + reload after mutations).
   if (url.startsWith("/api/admin/platform-scans/targets")) {
     targetsGetCount += 1;
@@ -113,6 +121,8 @@ beforeEach(() => {
   scanBody = {};
   recsBody = {};
   targetsGetCount = 0;
+  preflightBody = { platform: "acme", ok: true, checks: [] };
+  preflightReject = false;
   mockFetchWithRefresh.mockImplementation((url: string, init?: RequestInit) => routeFetch(url, init));
 });
 
@@ -316,4 +326,78 @@ test("offboard DELETEs ?platform=acme and reloads the list", async () => {
   });
 
   await waitFor(() => expect(targetsGetCount).toBe(2));
+});
+
+test("test connection renders each check and the Ready banner when ok:true", async () => {
+  targetsBody = { targets: [ACME_TARGET] };
+  preflightBody = {
+    platform: "acme",
+    ok: true,
+    checks: [
+      { name: "Target reachable", pass: true, detail: "HTTP 200", critical: true },
+      { name: "Login route", pass: false, detail: "no login configured", critical: false },
+    ],
+  };
+
+  await renderPage();
+
+  await waitFor(() => expect(screen.getByTestId("onboard-test-connection")).toBeInTheDocument());
+
+  await act(async () => {
+    fireEvent.click(screen.getByTestId("onboard-test-connection"));
+  });
+
+  await waitFor(() => expect(screen.getByTestId("onboard-preflight-banner")).toBeInTheDocument());
+
+  const get = mockFetchWithRefresh.mock.calls.find(([u]) =>
+    (u as string).startsWith("/api/admin/platform-scans/preflight?platform=acme"),
+  );
+  expect(get).toBeTruthy();
+
+  expect(screen.getByTestId("onboard-preflight-banner")).toHaveTextContent("Ready");
+
+  const checks = screen.getAllByTestId("onboard-preflight-check");
+  expect(checks).toHaveLength(2);
+  expect(checks[0]).toHaveTextContent("Target reachable");
+  expect(checks[0]).toHaveTextContent("HTTP 200");
+  expect(checks[1]).toHaveTextContent("Login route");
+  expect(checks[1]).toHaveTextContent("no login configured");
+});
+
+test("test connection shows the Not ready banner when ok:false", async () => {
+  targetsBody = { targets: [ACME_TARGET] };
+  preflightBody = {
+    platform: "acme",
+    ok: false,
+    checks: [{ name: "Target reachable", pass: false, detail: "connection refused", critical: true }],
+  };
+
+  await renderPage();
+
+  await waitFor(() => expect(screen.getByTestId("onboard-test-connection")).toBeInTheDocument());
+
+  await act(async () => {
+    fireEvent.click(screen.getByTestId("onboard-test-connection"));
+  });
+
+  await waitFor(() => expect(screen.getByTestId("onboard-preflight-banner")).toBeInTheDocument());
+  expect(screen.getByTestId("onboard-preflight-banner")).toHaveTextContent("Not ready");
+  expect(screen.getByTestId("onboard-preflight-check")).toHaveTextContent("connection refused");
+});
+
+test("test connection shows an error state when the fetch rejects", async () => {
+  targetsBody = { targets: [ACME_TARGET] };
+  preflightReject = true;
+
+  await renderPage();
+
+  await waitFor(() => expect(screen.getByTestId("onboard-test-connection")).toBeInTheDocument());
+
+  await act(async () => {
+    fireEvent.click(screen.getByTestId("onboard-test-connection"));
+  });
+
+  await waitFor(() => expect(screen.getByTestId("onboard-preflight-error")).toBeInTheDocument());
+  expect(screen.getByTestId("onboard-preflight-error")).toHaveTextContent("network down");
+  expect(screen.queryByTestId("onboard-preflight-banner")).not.toBeInTheDocument();
 });

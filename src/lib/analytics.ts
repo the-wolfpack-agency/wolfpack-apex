@@ -584,6 +584,8 @@ export type InstinctEventType =
   | "platform.engagement_run"
   // platform.remediation_pr_opened { platform, key, pr_url, gate_outcome }
   | "platform.remediation_pr_opened"
+  // platform.preflight_run { platform, ok, checks, failed }: onboarding readiness check
+  | "platform.preflight_run"
   // Active-pentest safety harness: scope tokens (rules of engagement) + guard.
   // pentest.scope_issued { platform, techniques, max_requests, ttl_minutes }
   | "pentest.scope_issued"

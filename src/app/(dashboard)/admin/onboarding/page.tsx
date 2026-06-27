@@ -27,6 +27,19 @@ interface BaselineResult {
   profiled: boolean;
 }
 
+interface PreflightCheck {
+  name: string;
+  pass: boolean;
+  detail: string;
+  critical: boolean;
+}
+
+interface PreflightResult {
+  platform: string;
+  ok: boolean;
+  checks: PreflightCheck[];
+}
+
 const inputStyle = { background: "var(--wp-dark-base)", border: "1px solid var(--wp-dark-border)", color: "var(--wp-text)" };
 
 export default function OnboardingPage() {
@@ -50,6 +63,12 @@ export default function OnboardingPage() {
   // Baseline
   const [running, setRunning] = useState(false);
   const [baseline, setBaseline] = useState<BaselineResult | null>(null);
+
+  // Preflight (test connection), keyed by platform
+  const [preflightFor, setPreflightFor] = useState<string | null>(null);
+  const [preflighting, setPreflighting] = useState(false);
+  const [preflight, setPreflight] = useState<PreflightResult | null>(null);
+  const [preflightError, setPreflightError] = useState<string | null>(null);
 
   useEffect(() => {
     const u = getInstinctUser<UserInfo>();
@@ -148,6 +167,27 @@ export default function OnboardingPage() {
     }
   }
 
+  async function onTestConnection(p: string) {
+    setPreflightFor(p);
+    setPreflighting(true);
+    setPreflight(null);
+    setPreflightError(null);
+    try {
+      const res = await fetchWithRefresh(`/api/admin/platform-scans/preflight?platform=${encodeURIComponent(p)}`);
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        setPreflightError(b?.error ? String(b.error) : `Test connection failed: ${res.status}`);
+        return;
+      }
+      const data = (await res.json()) as PreflightResult;
+      setPreflight(data);
+    } catch (e) {
+      setPreflightError((e as Error).message);
+    } finally {
+      setPreflighting(false);
+    }
+  }
+
   async function onOffboard(p: string) {
     const res = await fetchWithRefresh(`/api/admin/platform-scans/targets?platform=${encodeURIComponent(p)}`, {
       method: "DELETE", headers: jsonHeaders(),
@@ -225,12 +265,56 @@ export default function OnboardingPage() {
                   <td className="px-3 py-2 text-xs">{t.hasApi ? "yes" : "no"}</td>
                   <td className="px-3 py-2 text-xs">{t.hasLogin ? "yes" : "no"}</td>
                   <td className="px-3 py-2">
-                    <button data-testid="onboard-offboard" onClick={() => onOffboard(t.platform)} className="px-2 py-1 rounded text-xs" style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.5)", color: "#ef4444" }}>Offboard</button>
+                    <div className="flex gap-2">
+                      <button data-testid="onboard-test-connection" onClick={() => onTestConnection(t.platform)} disabled={preflighting && preflightFor === t.platform} className="px-2 py-1 rounded text-xs" style={{ background: "var(--wp-dark-base)", border: "1px solid var(--wp-dark-border)", color: "var(--wp-text)" }}>
+                        {preflighting && preflightFor === t.platform ? "Testing…" : "Test connection"}
+                      </button>
+                      <button data-testid="onboard-offboard" onClick={() => onOffboard(t.platform)} className="px-2 py-1 rounded text-xs" style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.5)", color: "#ef4444" }}>Offboard</button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Preflight (test connection) result */}
+      {preflightFor && (preflighting || preflight || preflightError) && (
+        <div data-testid="onboard-preflight" className="mt-6 rounded-lg p-4" style={{ background: "var(--wp-dark-elevated)", border: "1px solid var(--wp-dark-border)" }}>
+          <div className="text-sm font-medium" style={{ color: "var(--wp-text)" }}>Connection test for {preflightFor}</div>
+          {preflighting && (
+            <div data-testid="onboard-preflight-loading" className="mt-2 text-sm" style={{ color: "var(--wp-text-dim)" }}>Running readiness checks…</div>
+          )}
+          {!preflighting && preflightError && (
+            <div data-testid="onboard-preflight-error" className="mt-2 rounded p-3 text-sm" style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.6)", color: "#ef4444" }}>
+              {preflightError}
+            </div>
+          )}
+          {!preflighting && !preflightError && preflight && (
+            <div className="mt-2">
+              <div
+                data-testid="onboard-preflight-banner"
+                className="rounded p-3 text-sm font-medium"
+                style={preflight.ok
+                  ? { background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.6)", color: "#22c55e" }
+                  : { background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.6)", color: "#ef4444" }}
+              >
+                {preflight.ok ? "Ready" : "Not ready"}
+              </div>
+              <ul className="mt-3 space-y-1">
+                {preflight.checks.map((c) => (
+                  <li data-testid="onboard-preflight-check" key={c.name} className="flex items-start gap-2 text-sm" style={{ color: "var(--wp-text)" }}>
+                    <span aria-hidden style={{ color: c.pass ? "#22c55e" : "#ef4444" }}>{c.pass ? "✓" : "✗"}</span>
+                    <span>
+                      <span className="font-medium">{c.name}</span>
+                      {c.detail ? <span style={{ color: "var(--wp-text-dim)" }}>: {c.detail}</span> : null}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>
