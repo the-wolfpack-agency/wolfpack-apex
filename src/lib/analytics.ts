@@ -573,6 +573,10 @@ export type InstinctEventType =
   // platform.scan_findings_auto_resolved { platform, count, scan_id }
   // platform.system_profiled { platform, entities, integrations, routes, criticals }
   | "platform.system_profiled"
+  // platform.recommendations_generated { platform, count, criticals }
+  | "platform.recommendations_generated"
+  // platform.recommendation_triaged { status, key }
+  | "platform.recommendation_triaged"
   | "platform.scan_started"
   | "platform.scan_finding_detected"
   | "platform.scan_completed"

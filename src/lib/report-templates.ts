@@ -20,6 +20,7 @@ import {
   genWorkPerformed as genEngWorkPerformed,
   genScanCoverage as genEngScanCoverage,
   genRecommendations as genEngRecommendations,
+  genRecommendedAutomations as genEngRecommendedAutomations,
 } from "@/lib/report-sections-engagement";
 
 // ---------------------------------------------------------------------------
@@ -981,8 +982,9 @@ const TEMPLATES: ReportTemplate[] = [
       { id: "work_performed", title: "Work Performed", description: "Audited actions from the hash-chained log", dataSource: "database", generator: genEngWorkPerformed },
       { id: "scan_coverage", title: "Scan Coverage", description: "Platforms, routes, and findings per scan run", dataSource: "database", generator: genEngScanCoverage },
       { id: "engagement_recommendations", title: "Recommendations", description: "Prioritized next steps derived from findings", dataSource: "database", generator: genEngRecommendations },
+      { id: "recommended_automations", title: "Recommended Automations", description: "Gate-governed automation proposals from the profile + findings", dataSource: "database", generator: genEngRecommendedAutomations },
     ],
-    defaultIncluded: ["engagement_summary", "system_map", "security_findings", "diagnosed_issues", "work_performed", "scan_coverage", "engagement_recommendations"],
+    defaultIncluded: ["engagement_summary", "system_map", "security_findings", "diagnosed_issues", "work_performed", "scan_coverage", "engagement_recommendations", "recommended_automations"],
   },
   {
     id: "platform_capabilities",

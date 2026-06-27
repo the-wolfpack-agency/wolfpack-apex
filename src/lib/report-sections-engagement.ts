@@ -20,6 +20,7 @@ import {
 } from "@/lib/platform-scan/store";
 import { queryAuditLog } from "@/lib/audit-log";
 import { listSystemProfiles } from "@/lib/platform-scan/profile/store";
+import { listRecommendations } from "@/lib/platform-scan/recommend/store";
 
 const ws = (ctx: ReportContext): string => ctx.workspaceId ?? "default";
 
@@ -189,6 +190,35 @@ export async function genScanCoverage(ctx: ReportContext): Promise<string> {
     out.push(`| ${s.platform} | ${s.routeCount} | ${s.findingCount} | ${s.criticalCount} | ${s.createdAt.slice(0, 16).replace("T", " ")} |`);
   }
   return out.join("\n");
+}
+
+const EMPTY_RECOMMENDED_AUTOMATIONS =
+  "No automation recommendations yet; profile a platform and run the recommender.";
+
+/** Recommended Automations: the gate-governed automation PROPOSALS the engine
+ *  derived from the profile + open findings. Reads the persisted recommendations
+ *  (one row per workspace+platform+key), drops any the operator dismissed, and
+ *  renders them as a prioritized table. Never throws: any store hiccup degrades
+ *  to the explicit empty-state line so the report always renders. */
+export async function genRecommendedAutomations(ctx: ReportContext): Promise<string> {
+  const out = [`## Recommended Automations`, ``];
+  try {
+    const rows = (await listRecommendations(ws(ctx))).filter((r) => r.status !== "dismissed");
+    if (rows.length === 0) {
+      out.push(EMPTY_RECOMMENDED_AUTOMATIONS);
+      return out.join("\n");
+    }
+    out.push(
+      `| Priority | Category | Recommendation | Suggested action |`,
+      `|----------|----------|----------------|------------------|`,
+    );
+    for (const r of rows) {
+      out.push(`| ${r.priority} | ${r.category} | ${r.title} | ${r.suggestedAction} |`);
+    }
+    return out.join("\n");
+  } catch {
+    return [`## Recommended Automations`, ``, EMPTY_RECOMMENDED_AUTOMATIONS].join("\n");
+  }
 }
 
 export async function genRecommendations(ctx: ReportContext): Promise<string> {
