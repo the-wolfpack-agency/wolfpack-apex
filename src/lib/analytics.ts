@@ -581,6 +581,15 @@ export type InstinctEventType =
   | "platform.engagement_run"
   // platform.remediation_pr_opened { platform, key, pr_url, gate_outcome }
   | "platform.remediation_pr_opened"
+  // Active-pentest safety harness: scope tokens (rules of engagement) + guard.
+  // pentest.scope_issued { platform, techniques, max_requests, ttl_minutes }
+  | "pentest.scope_issued"
+  // pentest.scope_revoked { platform, scope_id, all }
+  | "pentest.scope_revoked"
+  // pentest.probe_authorized { platform, technique, scope_id }
+  | "pentest.probe_authorized"
+  // pentest.probe_blocked { platform, technique, reason }
+  | "pentest.probe_blocked"
   | "platform.scan_started"
   | "platform.scan_finding_detected"
   | "platform.scan_completed"
