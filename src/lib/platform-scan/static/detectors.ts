@@ -35,7 +35,11 @@ const GUARD = /(\.ok\b|\.status\b|res\.ok|response\.ok|if\s*\(\s*!)/;
 export function silentFetch(file: SourceFile): ScanFinding[] {
   const lines = file.content.split("\n");
   const findings: ScanFinding[] = [];
-  const WINDOW = 6;
+  // 12 lines: a multi-line POST fetch (method + headers + body object) can push
+  // the `.json()` and its `if (!res.ok)` guard well past the fetch line; a 6-line
+  // window missed the guard and false-flagged guarded calls. 12 covers the common
+  // fetch->guard->json span without reaching into an unrelated later statement.
+  const WINDOW = 12;
 
   for (let i = 0; i < lines.length; i++) {
     if (!FETCH_OPEN.test(lines[i])) continue;
