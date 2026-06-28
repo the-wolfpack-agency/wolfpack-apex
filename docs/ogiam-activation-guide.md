@@ -57,7 +57,21 @@ place a verification token, and provide SaaS (e.g. Salesforce) API credentials.
 
 ## Phase 1: Platform infrastructure (one time)
 
-### 1.1 Collect the backing-service connection values
+> START HERE FIRST. Is the production app ALREADY RUNNING (you can load
+> https://wolfpack-instinct.vercel.app and log in)? If yes, then every env var in
+> this phase is ALREADY set in Vercel and working. DO NOT re-collect or
+> regenerate anything. Skip straight to 1.5 (open /admin/deployment, confirm the
+> Critical checks are green) and then go to Phase 2 (GitHub App), which is the
+> first genuinely new step. Only do 1.1 to 1.4 when standing up a brand-new,
+> separate deployment.
+>
+> Note on secrets you cannot re-view: Neon shows DATABASE_URL any time, but
+> Qdrant and Neo4j show their API key / password only ONCE at creation. If you
+> did not save them, you cannot view them again, BUT you also do not need to:
+> they are already in Vercel for a running deployment. Creating a NEW Qdrant key
+> does not revoke existing keys (safe), but only do that for a fresh deployment.
+
+### 1.1 Collect the backing-service connection values (NEW deployment only)
 
 - DATABASE_URL (Neon): https://console.neon.tech -> your project -> Dashboard ->
   "Connection string" -> copy the POOLED connection string.
