@@ -20,7 +20,55 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { buildRestConnectorForWorkspace } from "@/lib/assistant/connectors";
+import { loadConnectorCredentials } from "@/lib/assistant/connectors/credentials";
+import { establishSession, establishOAuthPasswordSession } from "@/lib/platform-scan/session";
 import { trackEvent } from "@/lib/analytics";
+
+/**
+ * Verify a form-login (username_password) or OAuth-password connector by
+ * performing the ACTUAL login the scanner would, not a REST search. A bearer
+ * search probe sends the stored credential as a header to a form-login app,
+ * which returns its HTML page (non-JSON) and looks like a failure even when the
+ * credentials are correct. This mirrors resolveAuth so Verify tells the truth.
+ * Returns null for static_bearer / oauth2 so the caller falls through to the
+ * REST probe.
+ */
+async function verifyLoginConnector(
+  workspaceId: string,
+  connectorName: string,
+): Promise<{ ok: boolean; code: string; message: string } | null> {
+  const creds = await loadConnectorCredentials(workspaceId, connectorName).catch(() => null);
+  if (!creds) return null;
+  if (creds.authType === "username_password" && creds.username && creds.password) {
+    const session = await establishSession({
+      baseUrl: creds.baseUrl,
+      loginPath: creds.loginPath ?? "/api/auth/login",
+      username: creds.username,
+      password: creds.password,
+      sessionCookieName: creds.sessionCookieName,
+    });
+    return session
+      ? { ok: true, code: "ok", message: "Form login succeeded; session established." }
+      : { ok: false, code: "auth_failed", message: "Form login failed (check username/password, login path, and session cookie name)." };
+  }
+  if (
+    creds.authType === "oauth_password" &&
+    creds.clientId && creds.clientSecret && creds.username && creds.password
+  ) {
+    const session = await establishOAuthPasswordSession({
+      baseUrl: creds.baseUrl,
+      loginPath: creds.loginPath ?? "/services/oauth2/token",
+      clientId: creds.clientId,
+      clientSecret: creds.clientSecret,
+      username: creds.username,
+      password: creds.password,
+    });
+    return session
+      ? { ok: true, code: "ok", message: "OAuth password grant succeeded." }
+      : { ok: false, code: "auth_failed", message: "OAuth password grant failed (check client id/secret, username/password, token path)." };
+  }
+  return null; // static_bearer / oauth2 -> use the REST probe below
+}
 
 export async function POST(
   req: NextRequest,
@@ -37,6 +85,24 @@ export async function POST(
 
   const workspaceId = auth.user.workspaceId;
   const t0 = Date.now();
+
+  // Form-login / oauth-password connectors verify by actually logging in.
+  const loginResult = await verifyLoginConnector(workspaceId, connectorName);
+  if (loginResult) {
+    const tookMs = Date.now() - t0;
+    trackEvent("assistant.connector_verified", auth.user.id, auth.user.role, {
+      connector: connectorName,
+      workspace_id: workspaceId,
+      ok: loginResult.ok,
+      duration_ms: tookMs,
+      code: loginResult.code,
+    });
+    return NextResponse.json(
+      { ok: loginResult.ok, code: loginResult.code, message: loginResult.message, duration_ms: tookMs },
+      { status: loginResult.ok ? 200 : 401 },
+    );
+  }
+
   const connector = await buildRestConnectorForWorkspace(workspaceId, connectorName);
   if (!connector.isConfigured()) {
     return NextResponse.json(

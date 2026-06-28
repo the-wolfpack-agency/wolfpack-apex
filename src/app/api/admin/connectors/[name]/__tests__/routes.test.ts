@@ -18,6 +18,16 @@ jest.mock("@/lib/db", () => ({
 jest.mock("@/lib/assistant/connectors", () => ({
   buildRestConnectorForWorkspace: (...a: any[]) => mockBuildRest(...a),
 }));
+const mockLoadCreds = jest.fn().mockResolvedValue(null);
+jest.mock("@/lib/assistant/connectors/credentials", () => ({
+  loadConnectorCredentials: (...a: any[]) => mockLoadCreds(...a),
+}));
+const mockEstablishSession = jest.fn();
+const mockEstablishOAuth = jest.fn();
+jest.mock("@/lib/platform-scan/session", () => ({
+  establishSession: (...a: any[]) => mockEstablishSession(...a),
+  establishOAuthPasswordSession: (...a: any[]) => mockEstablishOAuth(...a),
+}));
 jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: any[]) => mockTrackEvent(...a),
 }));
@@ -185,5 +195,49 @@ describe("POST /api/admin/connectors/[name]/verify", () => {
     });
     const res = await verifyPOST(req(), { params: Promise.resolve({ name: "salesforce" }) });
     expect(res.status).toBe(502);
+  });
+
+  test("username_password connector: verifies by FORM LOGIN, not a REST probe (200 on success)", async () => {
+    mockRequireCapability.mockResolvedValueOnce(ADMIN);
+    mockLoadCreds.mockResolvedValueOnce({
+      authType: "username_password",
+      baseUrl: "https://beyond-sku.vercel.app",
+      loginPath: "/api/auth/login",
+      sessionCookieName: "session",
+      username: "admin@acme.com",
+      password: "s3cret",
+    });
+    mockEstablishSession.mockResolvedValueOnce({ cookie: "session=abc" });
+    const res = await verifyPOST(req(), { params: Promise.resolve({ name: "wolfpack-beyond" }) });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    // It logged in; it did NOT fall through to the REST search probe.
+    expect(mockEstablishSession).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: "https://beyond-sku.vercel.app", loginPath: "/api/auth/login" }),
+    );
+    expect(mockBuildRest).not.toHaveBeenCalled();
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "assistant.connector_verified", "u-cto", "cto",
+      expect.objectContaining({ connector: "wolfpack-beyond", ok: true }),
+    );
+  });
+
+  test("username_password connector: failed login maps to 401 auth_failed (no REST fallback)", async () => {
+    mockRequireCapability.mockResolvedValueOnce(ADMIN);
+    mockLoadCreds.mockResolvedValueOnce({
+      authType: "username_password",
+      baseUrl: "https://beyond-sku.vercel.app",
+      loginPath: "/api/auth/login",
+      sessionCookieName: "session",
+      username: "admin@acme.com",
+      password: "wrong",
+    });
+    mockEstablishSession.mockResolvedValueOnce(null);
+    const res = await verifyPOST(req(), { params: Promise.resolve({ name: "wolfpack-beyond" }) });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.code).toBe("auth_failed");
+    expect(mockBuildRest).not.toHaveBeenCalled();
   });
 });
