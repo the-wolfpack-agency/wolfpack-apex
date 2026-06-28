@@ -165,6 +165,75 @@ describe("emptyCatch", () => {
     expect(emptyCatch({ path: "app/page.tsx", content })).toHaveLength(0);
   });
 
+  // Precision: best-effort fire-and-forget (telemetry / audit / cleanup) wrapped in
+  // an empty catch is the intended idiom, NOT a swallowed bug. These are the dominant
+  // empty-catch false positives in real code; the detector must not flag them.
+  it("does NOT fire on a best-effort telemetry one-liner", () => {
+    const content = [
+      "async function h() {",
+      "  try { await trackAccounting('sale.logged', dealerId, { gross }); } catch {}",
+      "}",
+    ].join("\n");
+    expect(emptyCatch({ path: "app/api/x/route.ts", content })).toHaveLength(0);
+  });
+
+  it("does NOT fire on telemetry loaded via dynamic import (the `= await import()` case)", () => {
+    const content = [
+      "async function h() {",
+      "  try {",
+      "    const { trackKnowledge } = await import('@/lib/analytics-hooks');",
+      "    trackKnowledge('knowledge.queried', dealerId, { limit });",
+      "  } catch {}",
+      "}",
+    ].join("\n");
+    expect(emptyCatch({ path: "app/api/x/route.ts", content })).toHaveLength(0);
+  });
+
+  it("does NOT fire on the transaction ROLLBACK cleanup idiom", () => {
+    const content = [
+      "async function h() {",
+      "  try { await client.query('ROLLBACK'); } catch {}",
+      "  throw err;",
+      "}",
+    ].join("\n");
+    expect(emptyCatch({ path: "app/api/x/route.ts", content })).toHaveLength(0);
+  });
+
+  it("does NOT fire on a best-effort audit_log write", () => {
+    const content = [
+      "async function h() {",
+      "  try {",
+      "    await client.query(`INSERT INTO audit_log (dealer_id, action) VALUES ($1,$2)`, [d, a]);",
+      "  } catch {}",
+      "}",
+    ].join("\n");
+    expect(emptyCatch({ path: "app/api/x/route.ts", content })).toHaveLength(0);
+  });
+
+  it("STILL fires on a genuine swallow: a fetch + state update with no error handling", () => {
+    const content = [
+      "async function handleDelete(id) {",
+      "  try {",
+      "    await fetch(`/api/x/${id}`, { method: 'DELETE' });",
+      "    setItems((p) => p.filter((i) => i.id !== id));",
+      "  } catch {}",
+      "}",
+    ].join("\n");
+    expect(emptyCatch({ path: "app/page.tsx", content })).toHaveLength(1);
+  });
+
+  it("STILL fires when a consequential op sits alongside telemetry (the save failure is hidden)", () => {
+    const content = [
+      "async function h() {",
+      "  try {",
+      "    await saveOrder(data);",
+      "    trackEvent('order.saved');",
+      "  } catch {}",
+      "}",
+    ].join("\n");
+    expect(emptyCatch({ path: "app/api/x/route.ts", content })).toHaveLength(1);
+  });
+
   it("does NOT fire when the catch body has a statement", () => {
     const content = [
       "async function load() {",

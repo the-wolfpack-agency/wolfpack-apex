@@ -146,6 +146,33 @@ function swallowsAsync(lines: string[], catchIndex: number): boolean {
   return lines.slice(from, catchIndex + 1).some((l) => ASYNC_OP.test(l));
 }
 
+/** Best-effort fire-and-forget operations whose failure is INTENTIONALLY ignored:
+ *  telemetry / analytics / logging. Wrapping these in `try { ... } catch {}` so a
+ *  metrics hiccup never breaks the request is a correct, deliberate idiom, not a
+ *  swallowed bug. (This is the dominant empty-catch false positive in real code.) */
+const BEST_EFFORT_OP =
+  /\b(track\w*|analytics\w*|telemetry|captureException|gtag|posthog|mixpanel|amplitude|datadog|beacon|metric\w*|recordAudit|trackEvent)\s*\(|\b(console|logger)\s*\.\s*\w+\s*\(|rollback|\b(release|abort|disconnect|teardown|dispose|cleanup|revert)\s*\(|audit_log|audit_trail/i;
+/** A consequential op whose failure leaves a write/user-state inconsistent: the
+ *  case an empty catch genuinely hides. If the try body has one of these, the
+ *  catch is NOT mere best-effort even if it also emits telemetry. */
+const CONSEQUENTIAL_OP =
+  /=\s*await\b(?!\s*import\b)|\breturn\b|\b(save|insert|update|delete|create|write|upsert|commit|send|charge|fetch|mutate|persist|setState|redirect|revalidate)\w*\s*\(/i;
+
+/** True when the try body guarded by this catch is purely best-effort telemetry/
+ *  logging (and has no consequential op), so an empty catch around it is the
+ *  intended fire-and-forget idiom, not a silently-swallowed failure worth flagging. */
+function tryBodyBestEffort(lines: string[], catchIndex: number): boolean {
+  // Walk back to the nearest `try` opener (bounded) to bound the body precisely;
+  // fall back to the same 12-line window swallowsAsync uses.
+  let start = catchIndex;
+  for (let k = catchIndex; k >= Math.max(0, catchIndex - 40); k--) {
+    if (/\btry\b\s*\{?/.test(lines[k])) { start = k; break; }
+    start = Math.max(0, catchIndex - 12);
+  }
+  const body = lines.slice(start, catchIndex + 1).join("\n");
+  return BEST_EFFORT_OP.test(body) && !CONSEQUENTIAL_OP.test(body);
+}
+
 export function emptyCatch(file: SourceFile): ScanFinding[] {
   const lines = file.content.split("\n");
   const findings: ScanFinding[] = [];
@@ -158,7 +185,12 @@ export function emptyCatch(file: SourceFile): ScanFinding[] {
     if (sameLine) {
       // `catch {} finally { ... }` is the intentional best-effort idiom: the
       // error is deliberately ignored because cleanup runs in finally. Not a bug.
-      if (sameLine[1].trim() === "" && !/\}\s*finally\b/.test(line) && swallowsAsync(lines, i)) {
+      if (
+        sameLine[1].trim() === "" &&
+        !/\}\s*finally\b/.test(line) &&
+        swallowsAsync(lines, i) &&
+        !tryBodyBestEffort(lines, i)
+      ) {
         findings.push(makeEmptyCatchFinding(file, i, line));
       }
       continue;
@@ -174,7 +206,13 @@ export function emptyCatch(file: SourceFile): ScanFinding[] {
     let j = i + 1;
     while (j < lines.length && lines[j].trim() === "") j++;
     // Empty body, NOT followed by finally, and wraps an async op.
-    if (j < lines.length && lines[j].trim() === "}" && !/^\}\s*finally\b/.test(lines[j + 1]?.trim() ?? "") && swallowsAsync(lines, i)) {
+    if (
+      j < lines.length &&
+      lines[j].trim() === "}" &&
+      !/^\}\s*finally\b/.test(lines[j + 1]?.trim() ?? "") &&
+      swallowsAsync(lines, i) &&
+      !tryBodyBestEffort(lines, i)
+    ) {
       findings.push(makeEmptyCatchFinding(file, i, line));
     }
   }
