@@ -349,9 +349,14 @@ export const BENCHMARK_CORPUS: BenchmarkTarget[] = [
   },
 ];
 
-/** Lower-case + strip a trailing slash so name/URL lookups are stable. */
+/** Lower-case + strip trailing slashes so name/URL lookups are stable. Uses a
+ * linear scan rather than a /\/+$/ regex, which CodeQL flags as polynomial ReDoS
+ * (the engine backtracks O(n^2) on inputs with many '/'). */
 function normalize(value: string): string {
-  return value.trim().toLowerCase().replace(/\/+$/, "");
+  const lower = value.trim().toLowerCase();
+  let end = lower.length;
+  while (end > 0 && lower.charCodeAt(end - 1) === 47 /* "/" */) end--;
+  return lower.slice(0, end);
 }
 
 /**
