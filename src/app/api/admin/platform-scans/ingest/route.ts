@@ -21,6 +21,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import { recordScan } from "@/lib/platform-scan/store";
+import { classifyPage, type PageObservation } from "@/lib/platform-scan/browser/classify";
 import type { PlatformScanResult, ScanFinding } from "@/lib/platform-scan/types";
 
 function isAuthorizedCron(req: NextRequest): boolean {
@@ -34,6 +35,14 @@ interface IngestBody {
   baseUrl?: unknown;
   routeCount?: unknown;
   findings?: unknown;
+  /**
+   * Optional RAW page observations. When present, apex classifies them
+   * SERVER-SIDE via classifyPage so the UX detectors live and improve centrally
+   * here and the external browser-scan runner can stay dumb (it ships raw signals
+   * rather than pre-classified findings). The classified findings flow through the
+   * SAME recordScan path as directly-supplied findings[] - no data lost.
+   */
+  observations?: unknown;
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -61,17 +70,38 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const platform = typeof body.platform === "string" ? body.platform.trim() : "";
   const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
-  const findings = body.findings;
-  if (!platform || !baseUrl || !Array.isArray(findings)) {
+  // Either source may drive the scan; at least one must be present.
+  const directFindings = Array.isArray(body.findings)
+    ? (body.findings as ScanFinding[])
+    : null;
+  const observations = Array.isArray(body.observations)
+    ? (body.observations as PageObservation[])
+    : null;
+  if (!platform || !baseUrl || (!directFindings && !observations)) {
     return NextResponse.json(
-      { ok: false, error: "platform, baseUrl and findings[] are required" },
+      {
+        ok: false,
+        error: "platform, baseUrl and at least one of findings[] or observations[] are required",
+      },
       { status: 400 },
     );
   }
 
-  const typedFindings = findings as ScanFinding[];
+  // Classify any raw observations SERVER-SIDE (classifyPage is pure), then merge
+  // with directly-supplied findings. Both sources feed the SAME scan so they flow
+  // through the identical recordScan path (dedup, auto-resolve, Brain, analytics).
+  const classifiedFindings = (observations ?? []).flatMap((obs) => classifyPage(obs));
+  const typedFindings: ScanFinding[] = [...(directFindings ?? []), ...classifiedFindings];
+
+  // routeCount defaults to observations.length when observations drive the
+  // request; otherwise it falls back to the merged finding count (today's
+  // behavior for a findings[]-only request).
   const routeCount =
-    typeof body.routeCount === "number" ? body.routeCount : typedFindings.length;
+    typeof body.routeCount === "number"
+      ? body.routeCount
+      : observations
+        ? observations.length
+        : typedFindings.length;
 
   const result: PlatformScanResult = {
     platform,

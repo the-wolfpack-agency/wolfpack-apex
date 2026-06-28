@@ -27,6 +27,11 @@ export interface AuditAllowlistEntry {
 }
 
 export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
+  // Delegated auditing
+  {
+    route: "src/app/api/admin/platform-scans/browser/authorize/route.ts",
+    reason: "authorization-query endpoint; the gate (authorizeBrowserAction) writes the hash-chained audit for every allow/deny decision, so the route delegates rather than double-auditing",
+  },
   // High-volume observability
   {
     route: "src/app/api/analytics/route.ts",

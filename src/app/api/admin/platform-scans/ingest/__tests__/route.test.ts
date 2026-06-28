@@ -21,6 +21,9 @@ jest.mock("@/lib/auth/require-capability", () => ({
 }));
 jest.mock("@/lib/platform-scan/store", () => ({ recordScan: (...a: unknown[]) => mockRecord(...a) }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrack(...a) }));
+// classifyPage is left REAL (it is a pure function) so these tests prove the
+// end-to-end classify-then-persist path: raw observations in, classified
+// findings landing in recordScan.
 
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/admin/platform-scans/ingest/route";
@@ -125,4 +128,107 @@ it("never 500s: a store throw returns a zeroed 200", async () => {
   const res = await post(VALID, { authorization: "Bearer s3cret" });
   expect(res.status).toBe(200);
   expect(await res.json()).toEqual({ ok: true, scanId: null, findingCount: 0 });
+});
+
+// --- Raw-observations path (apex classifies SERVER-SIDE via classifyPage) ---
+
+/** A page whose only flaw is an icon-only interactive control with no
+ *  accessible name and no text - the classic ux_gap the UX detectors catch. */
+const UX_OBSERVATION = {
+  route: "/dash",
+  journey: "dashboard",
+  status: 200,
+  consoleErrors: [],
+  cspViolations: [],
+  failedRequests: [],
+  renderedContent: true,
+  durationMs: 120,
+  elements: [{ tag: "button", role: "button", interactive: true }],
+};
+
+/** A clean page: 200, content rendered, no error/CSP/failed signals, no flagged
+ *  elements -> classifyPage yields []. */
+const HEALTHY_OBSERVATION = {
+  route: "/ok",
+  journey: "home",
+  status: 200,
+  consoleErrors: [],
+  cspViolations: [],
+  failedRequests: [],
+  renderedContent: true,
+  durationMs: 80,
+  elements: [{ tag: "button", role: "button", interactive: true, accessibleName: "Save" }],
+};
+
+it("observations[] are classified SERVER-SIDE and the findings land in recordScan", async () => {
+  const res = await post(
+    { platform: "acme", baseUrl: "https://acme.test", observations: [UX_OBSERVATION] },
+    { authorization: "Bearer s3cret" },
+  );
+  expect(res.status).toBe(200);
+  // routeCount defaults to observations.length when observations drive the request.
+  const call = mockRecord.mock.calls[0][0];
+  expect(call.result.routeCount).toBe(1);
+  // The classifier (REAL, pure) produced the ux_gap finding; assert it landed.
+  expect(call.result.findings).toEqual([
+    expect.objectContaining({
+      route: "/dash",
+      category: "ux_gap",
+      severity: "medium",
+      title: "Interactive control has no accessible name",
+    }),
+  ]);
+});
+
+it("a healthy observation classifies to 0 findings", async () => {
+  await post(
+    { platform: "acme", baseUrl: "https://acme.test", observations: [HEALTHY_OBSERVATION] },
+    { authorization: "Bearer s3cret" },
+  );
+  const call = mockRecord.mock.calls[0][0];
+  expect(call.result.findings).toEqual([]);
+  expect(call.result.routeCount).toBe(1);
+});
+
+it("mixed observations[] + findings[]: both sources land in the same scan", async () => {
+  const res = await post(
+    {
+      platform: "acme",
+      baseUrl: "https://acme.test",
+      findings: VALID.findings,
+      observations: [UX_OBSERVATION],
+    },
+    { authorization: "Bearer s3cret" },
+  );
+  expect(res.status).toBe(200);
+  const call = mockRecord.mock.calls[0][0];
+  // Direct finding first, then classified finding from the observation.
+  expect(call.result.findings).toEqual([
+    expect.objectContaining({ route: "/x", category: "bug" }),
+    expect.objectContaining({ route: "/dash", category: "ux_gap" }),
+  ]);
+  // observations drive routeCount even when findings[] are also present.
+  expect(call.result.routeCount).toBe(1);
+});
+
+it("400 when neither findings[] nor observations[] is provided", async () => {
+  const res = await post(
+    { platform: "acme", baseUrl: "https://acme.test" },
+    { authorization: "Bearer s3cret" },
+  );
+  expect(res.status).toBe(400);
+  expect(mockRecord).not.toHaveBeenCalled();
+});
+
+it("observations[]-only request works under the capability (user) auth path", async () => {
+  const res = await post({
+    platform: "acme",
+    baseUrl: "https://acme.test",
+    observations: [UX_OBSERVATION],
+  }); // no bearer -> capability path
+  expect(res.status).toBe(200);
+  expect(mockAuthFn).toHaveBeenCalled();
+  expect(mockRecord).toHaveBeenCalledWith(
+    expect.objectContaining({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin" }),
+  );
 });
