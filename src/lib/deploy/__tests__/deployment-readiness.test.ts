@@ -92,13 +92,41 @@ describe("runDeploymentReadiness", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("missing INSTINCT_JWT_SECRET -> presence fails; length check is not added", async () => {
+  it("neither INSTINCT_JWT_SECRET nor legacy APEX_JWT_SECRET -> presence fails; no length check", async () => {
     const env = { ...FULL_ENV };
     delete (env as Record<string, string | undefined>).INSTINCT_JWT_SECRET;
+    delete (env as Record<string, string | undefined>).APEX_JWT_SECRET;
     const result = await runDeploymentReadiness(allUpDeps(env));
     expect(check(result, "env:INSTINCT_JWT_SECRET")).toMatchObject({ pass: false, critical: true });
     expect(check(result, "env:INSTINCT_JWT_SECRET_length")).toBeUndefined();
     expect(result.ok).toBe(false);
+  });
+
+  it("legacy APEX_JWT_SECRET only -> READY (mirrors sign.ts fallback) + a soft migrate advisory", async () => {
+    const env = { ...FULL_ENV };
+    delete (env as Record<string, string | undefined>).INSTINCT_JWT_SECRET;
+    (env as Record<string, string | undefined>).APEX_JWT_SECRET = LONG_SECRET;
+    const result = await runDeploymentReadiness(allUpDeps(env));
+    expect(check(result, "env:INSTINCT_JWT_SECRET")).toMatchObject({ pass: true, critical: true });
+    expect(check(result, "env:INSTINCT_JWT_SECRET_length")).toMatchObject({ pass: true });
+    // The legacy-name nudge is advisory (does not block readiness).
+    expect(check(result, "env:jwt_secret_legacy_name")).toMatchObject({ pass: false, critical: false });
+    expect(result.ok).toBe(true);
+  });
+
+  it("legacy APEX_JWT_SECRET but too short -> length check fails critical, ok:false", async () => {
+    const env = { ...FULL_ENV };
+    delete (env as Record<string, string | undefined>).INSTINCT_JWT_SECRET;
+    (env as Record<string, string | undefined>).APEX_JWT_SECRET = "short";
+    const result = await runDeploymentReadiness(allUpDeps(env));
+    expect(check(result, "env:INSTINCT_JWT_SECRET_length")).toMatchObject({ pass: false, critical: true });
+    expect(result.ok).toBe(false);
+  });
+
+  it("new INSTINCT_JWT_SECRET set -> no legacy advisory", async () => {
+    const result = await runDeploymentReadiness(allUpDeps({ ...FULL_ENV }));
+    expect(check(result, "env:INSTINCT_JWT_SECRET")).toMatchObject({ pass: true });
+    expect(check(result, "env:jwt_secret_legacy_name")).toBeUndefined();
   });
 
   it("CRITICAL service down (Postgres) -> ok:false", async () => {

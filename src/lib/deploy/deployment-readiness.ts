@@ -95,8 +95,8 @@ const MIN_JWT_SECRET_LEN = 32;
 const REQUIRED_ENV: Array<{ name: string; critical: boolean }> = [
   // Source of truth - absence => every query throws => crash loop.
   { name: "DATABASE_URL", critical: true },
-  // Auth - code throws in prod without it (see .ai/client-context.md).
-  { name: "INSTINCT_JWT_SECRET", critical: true },
+  // NOTE: the auth secret is checked separately below (it has a legacy-name
+  // fallback the app honors), so it is intentionally NOT in this generic loop.
   // Scheduled jobs (refresh, ingest) authenticate with this; absent => cron 401s.
   { name: "CRON_SECRET", critical: true },
   // Triple-write SECONDARY store - degrades gracefully, so ADVISORY.
@@ -145,19 +145,46 @@ export async function runDeploymentReadiness(
     );
   }
 
-  // INSTINCT_JWT_SECRET has a length floor on top of presence. A short secret is
-  // present-but-unsafe; the app boots, then auth is brute-forceable. Only assert
-  // length when it is present (the presence check above already covers absence).
-  const jwt = env.INSTINCT_JWT_SECRET;
-  if (typeof jwt === "string" && jwt.trim().length > 0) {
-    const longEnough = jwt.length >= MIN_JWT_SECRET_LEN;
+  // Auth secret. The app (src/lib/crypto/sign.ts) reads INSTINCT_JWT_SECRET and
+  // FALLS BACK to the legacy APEX_JWT_SECRET (the pre-rename name). Mirror that
+  // exactly so the check matches reality: ready when EITHER is set. Checking only
+  // the new name reported a false NOT READY on deployments still on the legacy var.
+  const newSecret = (env.INSTINCT_JWT_SECRET ?? "").trim();
+  const legacySecret = (env.APEX_JWT_SECRET ?? "").trim();
+  const effectiveSecret = newSecret || legacySecret;
+  const jwtPresent = effectiveSecret.length > 0;
+  const onLegacyOnly = newSecret.length === 0 && legacySecret.length > 0;
+  add(
+    "env:INSTINCT_JWT_SECRET",
+    jwtPresent,
+    jwtPresent
+      ? onLegacyOnly
+        ? "Auth secret is set via the legacy APEX_JWT_SECRET (works; see the advisory to migrate)."
+        : "INSTINCT_JWT_SECRET is set."
+      : "INSTINCT_JWT_SECRET (or legacy APEX_JWT_SECRET) is missing. App will not start correctly without it.",
+    true,
+  );
+  // Length floor on top of presence: a short secret boots then is brute-forceable.
+  if (jwtPresent) {
+    const longEnough = effectiveSecret.length >= MIN_JWT_SECRET_LEN;
     add(
       "env:INSTINCT_JWT_SECRET_length",
       longEnough,
       longEnough
-        ? `INSTINCT_JWT_SECRET meets the ${MIN_JWT_SECRET_LEN}-char minimum.`
-        : `INSTINCT_JWT_SECRET is too short (needs >= ${MIN_JWT_SECRET_LEN} chars).`,
+        ? `Auth secret meets the ${MIN_JWT_SECRET_LEN}-char minimum.`
+        : `Auth secret is too short (needs >= ${MIN_JWT_SECRET_LEN} chars).`,
       true,
+    );
+  }
+  // Advisory: nudge migrating off the legacy name. Set INSTINCT_JWT_SECRET to the
+  // SAME value as APEX_JWT_SECRET (a different value invalidates every live session),
+  // then remove the legacy var. Advisory, so it never blocks readiness.
+  if (onLegacyOnly) {
+    add(
+      "env:jwt_secret_legacy_name",
+      false,
+      "Using the legacy APEX_JWT_SECRET. Set INSTINCT_JWT_SECRET to the SAME value, then remove the legacy var.",
+      false,
     );
   }
 
