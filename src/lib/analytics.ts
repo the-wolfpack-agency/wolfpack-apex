@@ -602,6 +602,11 @@ export type InstinctEventType =
   // UX/accessibility posture grade for a target, trended over time like the
   // security posture. { platform, grade, ux, a11y, total }
   | "platform.ux_posture_scored"
+  // Bring-your-own-agent gate API: an EXTERNAL agent (any model/framework) asked the
+  // OGIAM gate to authorize an action via an API key. Every external decision is a
+  // learning surface. authorized { agent, tool, outcome } / blocked { reason }
+  | "platform.gate_api_authorized"
+  | "platform.gate_api_blocked"
   // Tier-2 agentic journey-friction: a gated journey attempt was evaluated for
   // excessive steps / dead-ends. { platform, journey, steps, expected, friction }
   | "platform.journey_evaluated"

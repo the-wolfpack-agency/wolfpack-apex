@@ -32,6 +32,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/admin/platform-scans/browser/authorize/route.ts",
     reason: "authorization-query endpoint; the gate (authorizeBrowserAction) writes the hash-chained audit for every allow/deny decision, so the route delegates rather than double-auditing",
   },
+  {
+    route: "src/app/api/gate/authorize/route.ts",
+    reason: "bring-your-own-agent gate-as-a-service authorization query; authorize() in src/lib/ogiam/authorize.ts records every external decision to the tamper-evident hash-chained ledger (and fails closed on an unauditable decision in enforce mode), so the route delegates rather than double-auditing",
+  },
   // High-volume observability
   {
     route: "src/app/api/analytics/route.ts",
