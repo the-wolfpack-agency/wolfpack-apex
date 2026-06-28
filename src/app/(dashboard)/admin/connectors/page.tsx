@@ -110,6 +110,13 @@ export default function AdminConnectorsPage() {
   const [verifyState, setVerifyState] = useState<Record<string, string | null>>({});
 
   const [vendor, setVendor] = useState("rest-default");
+  /* Custom connector name for manual (form-login / oauth-password) connections.
+     The scanner resolves credentials by the EXACT connector name a scan target
+     expects (a curated manifest's login.connectorName, or a client's platform id
+     like "wolfpack-beyond" / "acme-crm"), so the operator must be able to name it
+     to match. The vendor dropdown only offers "rest-default", which never matches
+     a target. Empty falls back to the vendor value (static_bearer keeps using it). */
+  const [connectorNameInput, setConnectorNameInput] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [authType, setAuthType] = useState<"static_bearer" | "username_password" | "oauth_password">("static_bearer");
   const [authHeader, setAuthHeader] = useState("");
@@ -244,10 +251,21 @@ export default function AdminConnectorsPage() {
         }
       }
 
+      // Manual (form-login / oauth-password) connections must be named to match
+      // the scan target the scanner resolves credentials by. static_bearer keeps
+      // using the vendor preset name.
+      const isManual = authType === "username_password" || authType === "oauth_password";
+      const effectiveName = isManual ? connectorNameInput.trim() : vendor;
+      if (isManual && effectiveName.length === 0) {
+        setError("Connector name is required and must match the scan target id (e.g. wolfpack-beyond).");
+        setSubmitting(false);
+        return;
+      }
+
       let payload: Record<string, unknown>;
       if (authType === "oauth_password") {
         payload = {
-          connectorName: vendor,
+          connectorName: effectiveName,
           baseUrl,
           authType: "oauth_password" as const,
           clientId,
@@ -259,7 +277,7 @@ export default function AdminConnectorsPage() {
         };
       } else if (authType === "username_password") {
         payload = {
-          connectorName: vendor,
+          connectorName: effectiveName,
           baseUrl,
           authType: "username_password" as const,
           username,
@@ -272,7 +290,7 @@ export default function AdminConnectorsPage() {
         };
       } else {
         payload = {
-          connectorName: vendor,
+          connectorName: effectiveName,
           baseUrl,
           authHeader,
           objectMap,
@@ -289,7 +307,7 @@ export default function AdminConnectorsPage() {
         setError(body?.error || `HTTP ${res.status}`);
         return;
       }
-      setOkMessage(`Saved ${vendor}. Tools using this connector will pick up the new credentials immediately.`);
+      setOkMessage(`Saved ${effectiveName}. Tools using this connector will pick up the new credentials immediately.`);
       setAuthHeader(""); // never keep plaintext in the form
       setPassword(""); // never keep plaintext in the form
       setClientSecret(""); // never keep plaintext in the form
@@ -456,6 +474,25 @@ export default function AdminConnectorsPage() {
               <option value="oauth_password">OAuth password (Salesforce)</option>
             </select>
           </label>
+
+          {(authType === "username_password" || authType === "oauth_password") && (
+            <label style={labelStyle}>
+              Connector name
+              <input
+                type="text"
+                placeholder="wolfpack-beyond (must match the scan target id)"
+                value={connectorNameInput}
+                onChange={(e) => setConnectorNameInput(e.target.value)}
+                style={inputStyle}
+                autoComplete="off"
+                data-testid="conn-name"
+              />
+              <span style={{ fontSize: 12, color: "var(--wp-text-dim,#a0a8b4)" }}>
+                Must exactly match the target the scanner authenticates (a curated
+                manifest connector name, or the onboarded platform id).
+              </span>
+            </label>
+          )}
 
           {authType === "static_bearer" && (
             <label style={labelStyle}>

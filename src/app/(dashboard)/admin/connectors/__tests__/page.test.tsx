@@ -105,6 +105,10 @@ it("username/password create POSTs the username_password body", async () => {
   fireEvent.change(screen.getByTestId("conn-auth-type"), {
     target: { value: "username_password" },
   });
+  // Manual types require a connector name that matches the scan target.
+  fireEvent.change(screen.getByTestId("conn-name"), {
+    target: { value: "wolfpack-beyond" },
+  });
   fireEvent.change(screen.getByTestId("conn-username"), {
     target: { value: "admin@acme.com" },
   });
@@ -122,7 +126,7 @@ it("username/password create POSTs the username_password body", async () => {
   await waitFor(() => expect(createPost()).toBeTruthy());
   const body = JSON.parse(String(createPost()![1].body));
   expect(body).toMatchObject({
-    connectorName: "rest-default",
+    connectorName: "wolfpack-beyond",
     authType: "username_password",
     username: "admin@acme.com",
     password: "s3cret",
@@ -131,6 +135,36 @@ it("username/password create POSTs the username_password body", async () => {
   });
   // bearer field must not be sent in this mode
   expect(body.authHeader).toBeUndefined();
+});
+
+it("username_password without a connector name shows an error and does NOT POST a create", async () => {
+  routeOk();
+  render(<AdminConnectorsPage />);
+  await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalled());
+
+  fireEvent.change(screen.getByTestId("conn-base-url"), {
+    target: { value: "https://beyond.example.com" },
+  });
+  fireEvent.change(screen.getByTestId("conn-auth-type"), {
+    target: { value: "username_password" },
+  });
+  fireEvent.change(screen.getByTestId("conn-username"), {
+    target: { value: "admin@acme.com" },
+  });
+  fireEvent.change(screen.getByTestId("conn-password"), {
+    target: { value: "s3cret" },
+  });
+  fireEvent.change(screen.getByTestId("conn-login-path"), {
+    target: { value: "/api/auth/login" },
+  });
+  // No conn-name typed (it is the only empty field, and it is not HTML-required
+  // so the JS guard runs).
+  fireEvent.click(screen.getByTestId("conn-submit"));
+
+  await waitFor(() =>
+    expect(screen.getByText(/Connector name is required/i)).toBeInTheDocument(),
+  );
+  expect(createPost()).toBeUndefined();
 });
 
 it("selecting 'OAuth password' reveals the client-id/secret fields", async () => {
@@ -166,6 +200,9 @@ it("oauth-password create POSTs the oauth_password body", async () => {
   fireEvent.change(screen.getByTestId("conn-auth-type"), {
     target: { value: "oauth_password" },
   });
+  fireEvent.change(screen.getByTestId("conn-name"), {
+    target: { value: "acme-salesforce" },
+  });
   fireEvent.change(screen.getByTestId("conn-client-id"), {
     target: { value: "3MVG9consumerkey" },
   });
@@ -183,7 +220,7 @@ it("oauth-password create POSTs the oauth_password body", async () => {
   await waitFor(() => expect(createPost()).toBeTruthy());
   const body = JSON.parse(String(createPost()![1].body));
   expect(body).toMatchObject({
-    connectorName: "rest-default",
+    connectorName: "acme-salesforce",
     baseUrl: "https://test.salesforce.com",
     authType: "oauth_password",
     clientId: "3MVG9consumerkey",
