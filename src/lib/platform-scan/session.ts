@@ -57,6 +57,86 @@ export interface EstablishSessionInput {
 }
 
 /**
+ * Input for a NextAuth.js / Auth.js Credentials provider login. These apps
+ * don't take a simple JSON `{ email, password }` POST; they require a two-step
+ * CSRF-protected flow: fetch a CSRF token (which also sets a CSRF cookie), then
+ * POST the credentials as a urlencoded form (carrying that CSRF cookie + token)
+ * to the credentials callback, which on success sets a session-token cookie.
+ */
+export interface EstablishNextAuthSessionInput {
+  /** Target origin, e.g. "https://app.example.com". */
+  baseUrl: string;
+  /** Credentials callback path. Default "/api/auth/callback/credentials". */
+  loginPath?: string;
+  /** CSRF token path. Default "/api/auth/csrf". */
+  csrfPath?: string;
+  username: string;
+  password: string;
+  /** Unused by the NextAuth flow (the session cookie name is fixed by the
+   *  framework and matched by pattern), accepted for call-site symmetry with
+   *  the other establishers. */
+  sessionCookieName?: string;
+  /** Injectable for tests; defaults to global fetch. */
+  fetchImpl?: typeof fetch;
+  /** Login request timeout. Default 8000ms. */
+  timeoutMs?: number;
+}
+
+/** NextAuth/Auth.js CSRF cookie name across versions + prefixes. */
+const NEXTAUTH_CSRF_COOKIE = /^(__Host-|__Secure-)?(next-auth|authjs)\.csrf-token$/;
+/** NextAuth/Auth.js session-token cookie name across versions + prefixes. */
+const NEXTAUTH_SESSION_COOKIE = /^(__Secure-)?(next-auth|authjs)\.session-token$/;
+
+const DEFAULT_NEXTAUTH_CSRF_PATH = "/api/auth/csrf";
+const DEFAULT_NEXTAUTH_LOGIN_PATH = "/api/auth/callback/credentials";
+
+/**
+ * Pull the first `name=value` pair off a list of raw Set-Cookie strings whose
+ * cookie name matches a pattern. Mirrors extractCookiePair but matches by
+ * regex (NextAuth cookie names vary by version / Secure prefix). Returns the
+ * matched `{ name, pair }` or null.
+ */
+function extractCookieByPattern(
+  setCookies: string[],
+  pattern: RegExp,
+): { name: string; pair: string } | null {
+  for (const raw of setCookies) {
+    if (!raw) continue;
+    for (const part of raw.split(/,(?=\s*[^;,\s]+=)/)) {
+      const first = part.split(";")[0]?.trim();
+      if (!first) continue;
+      const eq = first.indexOf("=");
+      if (eq <= 0) continue;
+      const cookieName = first.slice(0, eq).trim();
+      if (!pattern.test(cookieName)) continue;
+      const cookieValue = first.slice(eq + 1).trim();
+      return { name: cookieName, pair: `${cookieName}=${cookieValue}` };
+    }
+  }
+  return null;
+}
+
+/**
+ * Collect every `name=value` pair from a list of raw Set-Cookie strings,
+ * dropping cookie attributes (Path, HttpOnly, …). Returns them joined as a
+ * single `name=value; name=value` string ready for a Cookie request header.
+ */
+function collectAllCookiePairs(setCookies: string[]): string {
+  const pairs: string[] = [];
+  for (const raw of setCookies) {
+    if (!raw) continue;
+    for (const part of raw.split(/,(?=\s*[^;,\s]+=)/)) {
+      const first = part.split(";")[0]?.trim();
+      if (!first) continue;
+      const eq = first.indexOf("=");
+      if (eq <= 0) continue;
+      pairs.push(first);
+    }
+  }
+  return pairs.join("; ");
+}
+
+/**
  * Pull the value of a named cookie out of a list of raw `Set-Cookie` strings.
  *
  * Each Set-Cookie looks like `name=value; HttpOnly; Path=/; ...`. We take the
@@ -195,7 +275,98 @@ export async function establishOAuthPasswordSession(
 
     return { authHeader: `Bearer ${accessToken}`, instanceUrl };
   } catch {
-    // Network error, abort/timeout, or invalid JSON — degrade to null.
+    // Network error, abort/timeout, or invalid JSON - degrade to null.
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Log into a NextAuth.js / Auth.js app that uses the Credentials provider and
+ * return its full set of session cookies as a `name=value; name=value` string
+ * for a Cookie request header, or null on any failure.
+ *
+ * The flow (a CSRF-protected double-submit, exactly as the framework expects):
+ *   1. GET `${baseUrl}${csrfPath}` → JSON `{ csrfToken }`, and capture the CSRF
+ *      cookie it sets (name matches NEXTAUTH_CSRF_COOKIE).
+ *   2. POST `${baseUrl}${loginPath}` as application/x-www-form-urlencoded,
+ *      replaying the CSRF cookie and sending `csrfToken`, `callbackUrl`,
+ *      `json=true`, plus the credentials. Credential field names vary by
+ *      provider, so the stored username is sent under BOTH `email` and
+ *      `username` along with `password`.
+ *   3. Success = the callback response sets a session-token cookie (name matches
+ *      NEXTAUTH_SESSION_COOKIE). We return ALL the callback's Set-Cookie pairs
+ *      joined, so both the session token and any refreshed CSRF cookie ride
+ *      along on subsequent authenticated requests.
+ *
+ * Like the other establishers, this is a credential-bearing call against an
+ * EXTERNAL target and degrades gracefully in every failure mode: a missing
+ * csrfToken, a non-2xx callback with no session cookie, no session-token in the
+ * response, a network error, or a timeout all yield `null`. It NEVER throws,
+ * and it NEVER logs the credentials or the cookies.
+ */
+export async function establishNextAuthSession(
+  input: EstablishNextAuthSessionInput,
+): Promise<{ cookie: string } | null> {
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const timeoutMs = input.timeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS;
+  const csrfPath = input.csrfPath ?? DEFAULT_NEXTAUTH_CSRF_PATH;
+  const loginPath = input.loginPath ?? DEFAULT_NEXTAUTH_LOGIN_PATH;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    // Step 1 - CSRF token + cookie.
+    const csrfRes = await fetchImpl(`${input.baseUrl}${csrfPath}`, {
+      method: "GET",
+      signal: controller.signal,
+      redirect: "manual",
+    });
+    if (csrfRes.status < 200 || csrfRes.status >= 300) return null;
+
+    const csrfData = (await csrfRes.json()) as { csrfToken?: unknown };
+    const csrfToken = csrfData?.csrfToken;
+    if (typeof csrfToken !== "string" || csrfToken.length === 0) return null;
+
+    const csrfCookie = extractCookieByPattern(
+      readSetCookies(csrfRes.headers),
+      NEXTAUTH_CSRF_COOKIE,
+    );
+    if (!csrfCookie) return null;
+
+    // Step 2 - credentials callback. Send the username under both common
+    // credential field names so the flow is robust to the provider's config.
+    const body = new URLSearchParams({
+      csrfToken,
+      callbackUrl: input.baseUrl,
+      json: "true",
+      email: input.username,
+      username: input.username,
+      password: input.password,
+    });
+
+    const callbackRes = await fetchImpl(`${input.baseUrl}${loginPath}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: csrfCookie.pair,
+      },
+      body: body.toString(),
+      signal: controller.signal,
+      redirect: "manual",
+    });
+
+    // Step 3 - success is determined by the presence of a session-token cookie,
+    // not the status code (NextAuth often 302s or 200s on a successful login).
+    const setCookies = readSetCookies(callbackRes.headers);
+    const session = extractCookieByPattern(setCookies, NEXTAUTH_SESSION_COOKIE);
+    if (!session) return null;
+
+    return { cookie: collectAllCookiePairs(setCookies) };
+  } catch {
+    // Network error, abort/timeout, or invalid JSON - degrade to null.
     return null;
   } finally {
     clearTimeout(timer);

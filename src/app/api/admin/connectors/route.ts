@@ -17,6 +17,12 @@
  *            { connectorName, baseUrl, authType: "oauth_password",
  *              clientId, clientSecret, username, password, loginPath,
  *              objectMap? }
+ *          nextauth_credentials (NextAuth.js / Auth.js Credentials provider,
+ *          e.g. wolfpack-auto - loginPath defaults to the credentials
+ *          callback /api/auth/callback/credentials):
+ *            { connectorName, baseUrl, authType: "nextauth_credentials",
+ *              username, password, loginPath, sessionCookieName?,
+ *              objectMap? }
  *
  * CTO/CEO only (settings.manage_team capability). Audit-log every
  * mutation. The workspaceId is resolved from the caller's session —
@@ -50,7 +56,8 @@ type AuthType =
   | "static_bearer"
   | "oauth2"
   | "username_password"
-  | "oauth_password";
+  | "oauth_password"
+  | "nextauth_credentials";
 
 interface PostBody {
   connectorName?: unknown;
@@ -100,12 +107,13 @@ export async function POST(req: NextRequest) {
     rawAuthType !== "static_bearer" &&
     rawAuthType !== "oauth2" &&
     rawAuthType !== "username_password" &&
-    rawAuthType !== "oauth_password"
+    rawAuthType !== "oauth_password" &&
+    rawAuthType !== "nextauth_credentials"
   ) {
     return NextResponse.json(
       {
         error:
-          "authType must be one of: static_bearer, oauth2, username_password, oauth_password",
+          "authType must be one of: static_bearer, oauth2, username_password, oauth_password, nextauth_credentials",
       },
       { status: 400 },
     );
@@ -115,7 +123,11 @@ export async function POST(req: NextRequest) {
   // platform, so any url-safe slug is allowed (this is what lets an operator
   // connect a client system an agent was invited to, not just our preset
   // vendors).
-  if (rawAuthType === "username_password" || rawAuthType === "oauth_password") {
+  if (
+    rawAuthType === "username_password" ||
+    rawAuthType === "oauth_password" ||
+    rawAuthType === "nextauth_credentials"
+  ) {
     if (!/^[a-z0-9][a-z0-9-]{1,48}$/.test(connectorName)) {
       return NextResponse.json(
         { error: "connectorName must be a url-safe slug (a-z, 0-9, dash; 2-49 chars)" },
@@ -181,15 +193,21 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-  } else if (authType === "username_password") {
+  } else if (
+    authType === "username_password" ||
+    authType === "nextauth_credentials"
+  ) {
+    /* Form-login flows (a simple JSON login for username_password, the
+       CSRF + credentials-callback flow for nextauth_credentials) take the
+       same stored fields: username + password + loginPath (+ optional
+       session cookie name). Only the login FLOW the scanner replays differs. */
     username = typeof body.username === "string" ? body.username : "";
     password = typeof body.password === "string" ? body.password : "";
     loginPath = typeof body.loginPath === "string" ? body.loginPath.trim() : "";
     if (!username || !password || !loginPath) {
       return NextResponse.json(
         {
-          error:
-            "username_password requires username, password, and loginPath",
+          error: `${authType} requires username, password, and loginPath`,
         },
         { status: 400 },
       );
@@ -259,7 +277,7 @@ export async function POST(req: NextRequest) {
        blob of the clientId/clientSecret/username/password quad. */
     ...(authType === "oauth_password"
       ? { clientId, clientSecret, username, password, loginPath }
-      : authType === "username_password"
+      : authType === "username_password" || authType === "nextauth_credentials"
         ? { username, password, loginPath, sessionCookieName }
         : { authHeader }),
     objectMap,
@@ -289,7 +307,7 @@ export async function POST(req: NextRequest) {
       /* Never audit secrets (password / clientSecret) — only the
          (non-secret) auth-endpoint path (+ cookie name for form login) so
          an operator can see how the connector auths. */
-      ...(authType === "username_password"
+      ...(authType === "username_password" || authType === "nextauth_credentials"
         ? { login_path: loginPath, session_cookie_name: sessionCookieName ?? null }
         : authType === "oauth_password"
           ? { login_path: loginPath }

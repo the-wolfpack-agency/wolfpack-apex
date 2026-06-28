@@ -100,6 +100,38 @@ describe("loadConnectorCredentials", () => {
     expect(r?.sessionCookieName).toBe("session");
   });
 
+  test("nextauth_credentials: decodes username/password back + surfaces loginPath / cookie", async () => {
+    const basic =
+      "Basic " + Buffer.from("admin@auto:s3cret-pw", "utf8").toString("base64");
+    const enc = encryptSecret(basic);
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          workspace_id: "default",
+          connector_name: "wolfpack-auto",
+          base_url: "https://auto.example.com",
+          auth_header_enc: enc,
+          object_map_json: null,
+          is_active: true,
+          auth_type: "nextauth_credentials",
+          access_token_expires_at: null,
+          login_path: "/api/auth/callback/credentials",
+          session_cookie_name: null,
+        },
+      ],
+    });
+    const r = await loadConnectorCredentials("default", "wolfpack-auto");
+    expect(r).not.toBeNull();
+    expect(r?.authType).toBe("nextauth_credentials");
+    /* Stored the same way as username_password (Basic header); the loader
+       exposes the decoded pair so the connector can replay the CSRF +
+       credentials-callback flow. */
+    expect(r?.authHeader).toBe(basic);
+    expect(r?.username).toBe("admin@auto");
+    expect(r?.password).toBe("s3cret-pw");
+    expect(r?.loginPath).toBe("/api/auth/callback/credentials");
+  });
+
   test("oauth_password: JSON-decodes the credential quad + surfaces loginPath", async () => {
     const blob = JSON.stringify({
       clientId: "3MVG9_cid",
@@ -271,7 +303,7 @@ describe("saveConnectorCredentials", () => {
     expect(r?.sessionCookieName).toBe("session");
 
     /* The stored auth_header (param index 3) must be the ENCRYPTED Basic
-       header — not plaintext, and never the raw password. */
+       header - not plaintext, and never the raw password. */
     const params = mockSafeQuery.mock.calls[0][1] as string[];
     const storedEnc = params[3];
     expect(storedEnc).toMatch(/^v1\./);
@@ -290,6 +322,69 @@ describe("saveConnectorCredentials", () => {
     /* The masked hint must NOT leak the password. */
     expect(r?.authHeaderHint).toMatch(/^Basic \*\*\*\*/);
     expect(JSON.stringify(r)).not.toContain("s3cret-pw");
+  });
+
+  test("nextauth_credentials: stores an ENCRYPTED Basic header + persists login_path (round-trips like username_password)", async () => {
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          workspace_id: "ws1",
+          connector_name: "wolfpack-auto",
+          base_url: "https://auto.example.com",
+          object_map_json: null,
+          is_active: true,
+          created_at: "2026-06-19T12:00:00",
+          updated_at: "2026-06-19T12:00:00",
+          auth_type: "nextauth_credentials",
+          login_path: "/api/auth/callback/credentials",
+          session_cookie_name: null,
+        },
+      ],
+    });
+    const r = await saveConnectorCredentials({
+      workspaceId: "ws1",
+      connectorName: "wolfpack-auto",
+      baseUrl: "https://auto.example.com",
+      authType: "nextauth_credentials",
+      username: "admin@auto",
+      password: "s3cret-pw",
+      loginPath: "/api/auth/callback/credentials",
+      createdBy: "u1",
+    });
+    expect(r).not.toBeNull();
+    expect(r?.authType).toBe("nextauth_credentials");
+    expect(r?.loginPath).toBe("/api/auth/callback/credentials");
+
+    /* The stored auth_header (param index 3) must be the ENCRYPTED Basic
+       header - not plaintext, and never the raw password. */
+    const params = mockSafeQuery.mock.calls[0][1] as string[];
+    const storedEnc = params[3];
+    expect(storedEnc).toMatch(/^v1\./);
+    expect(storedEnc).not.toContain("s3cret-pw");
+    expect(storedEnc).not.toContain("admin@auto");
+    const expectedHeader =
+      "Basic " + Buffer.from("admin@auto:s3cret-pw", "utf8").toString("base64");
+    expect(decryptSecret(storedEnc)).toBe(expectedHeader);
+
+    /* auth_type / login_path bound to the insert. */
+    expect(params[6]).toBe("nextauth_credentials");
+    expect(params[7]).toBe("/api/auth/callback/credentials");
+
+    /* The masked hint + serialized result must NOT leak the password. */
+    expect(r?.authHeaderHint).toMatch(/^Basic \*\*\*\*/);
+    expect(JSON.stringify(r)).not.toContain("s3cret-pw");
+  });
+
+  test("nextauth_credentials: returns null when password is missing (fail-closed)", async () => {
+    const r = await saveConnectorCredentials({
+      connectorName: "wolfpack-auto",
+      baseUrl: "https://auto.example.com",
+      authType: "nextauth_credentials",
+      username: "admin@auto",
+      loginPath: "/api/auth/callback/credentials",
+    });
+    expect(r).toBeNull();
+    expect(mockSafeQuery).not.toHaveBeenCalled();
   });
 
   test("oauth_password: stores an ENCRYPTED JSON blob of the quad + persists login_path", async () => {

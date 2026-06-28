@@ -6,7 +6,11 @@ import { scanPlatform } from "@/lib/platform-scan/engine";
 import { scanSource, defaultReadFile } from "@/lib/platform-scan/static/scan";
 import { discoverRepoFiles } from "@/lib/platform-scan/static/discover-files";
 import { discoverRoutes, mergeManifest } from "@/lib/platform-scan/discover";
-import { establishSession, establishOAuthPasswordSession } from "@/lib/platform-scan/session";
+import {
+  establishSession,
+  establishOAuthPasswordSession,
+  establishNextAuthSession,
+} from "@/lib/platform-scan/session";
 import { probeApi } from "@/lib/platform-scan/api-probe";
 import { loadConnectorCredentials } from "@/lib/assistant/connectors/credentials";
 import { resolveScanTarget, isCuratedTarget, type ScanManifest } from "@/lib/platform-scan/manifests";
@@ -18,8 +22,9 @@ import type { PlatformScanResult } from "@/lib/platform-scan/types";
  * Establish an authenticated session for a platform that needs login, returning
  * the auth headers to send AND the base URL to scan against (oauth providers like
  * Salesforce return a per-org instance_url that differs from the login host).
- *   - username_password -> form login -> { Cookie }, base = manifest.baseUrl
- *   - oauth_password    -> token exchange -> { Authorization: Bearer }, base = instance_url
+ *   - username_password    -> JSON form login -> { Cookie }, base = manifest.baseUrl
+ *   - nextauth_credentials -> CSRF + credentials callback -> { Cookie }, base = manifest.baseUrl
+ *   - oauth_password       -> token exchange -> { Authorization: Bearer }, base = instance_url
  * Returns null when there's no login config / no connection / login fails (the
  * scan then runs unauthenticated — still valid, just shallower).
  */
@@ -33,6 +38,17 @@ async function resolveAuth(
 
   if (creds.authType === "username_password" && creds.username && creds.password) {
     const session = await establishSession({
+      baseUrl: manifest.baseUrl,
+      loginPath: creds.loginPath ?? manifest.login.loginPath,
+      username: creds.username,
+      password: creds.password,
+      sessionCookieName: creds.sessionCookieName ?? manifest.login.sessionCookieName,
+    });
+    return session ? { headers: { Cookie: session.cookie }, baseUrl: manifest.baseUrl } : null;
+  }
+
+  if (creds.authType === "nextauth_credentials" && creds.username && creds.password) {
+    const session = await establishNextAuthSession({
       baseUrl: manifest.baseUrl,
       loginPath: creds.loginPath ?? manifest.login.loginPath,
       username: creds.username,

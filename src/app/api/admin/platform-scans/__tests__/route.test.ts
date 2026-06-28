@@ -51,7 +51,8 @@ const mockEstablish = jest.fn();
 const mockProbeApi = jest.fn();
 jest.mock("@/lib/assistant/connectors/credentials", () => ({ loadConnectorCredentials: (...a: unknown[]) => mockLoadCreds(...a) }));
 const mockEstablishOAuth = jest.fn();
-jest.mock("@/lib/platform-scan/session", () => ({ establishSession: (...a: unknown[]) => mockEstablish(...a), establishOAuthPasswordSession: (...a: unknown[]) => mockEstablishOAuth(...a) }));
+const mockEstablishNextAuth = jest.fn();
+jest.mock("@/lib/platform-scan/session", () => ({ establishSession: (...a: unknown[]) => mockEstablish(...a), establishOAuthPasswordSession: (...a: unknown[]) => mockEstablishOAuth(...a), establishNextAuthSession: (...a: unknown[]) => mockEstablishNextAuth(...a) }));
 jest.mock("@/lib/platform-scan/api-probe", () => ({ probeApi: (...a: unknown[]) => mockProbeApi(...a) }));
 jest.mock("@/lib/platform-scan/store", () => ({
   recordScan: (...a: unknown[]) => mockRecord(...a),
@@ -268,6 +269,26 @@ describe("authenticated scan (form-login connection)", () => {
     expect(mockEstablish).not.toHaveBeenCalled(); // not the cookie path
     // Probes the per-org INSTANCE url with the bearer (not the login host).
     expect(mockProbeApi).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "https://acme.my.salesforce.com", authHeaders: { Authorization: "Bearer 00Dxx!AR" } }));
+    expect(mockTrack).toHaveBeenCalledWith("platform.scan_started", "admin-1", "admin", expect.objectContaining({ authenticated: true }));
+  });
+
+  it("nextauth_credentials: runs the CSRF + credentials-callback login and crawls AUTHENTICATED with the cookie", async () => {
+    const NA_MANIFEST = {
+      baseUrl: "https://auto.example",
+      routes: MANIFEST.routes,
+      login: { connectorName: "wolfpack-auto", loginPath: "/api/auth/callback/credentials", sessionCookieName: "" },
+      apiEndpoints: [{ path: "/api/dashboard", method: "GET" as const, journey: "Dashboard", requiresAuth: true }],
+    };
+    mockResolveTarget.mockResolvedValue(NA_MANIFEST);
+    mockLoadCreds.mockResolvedValue({ authType: "nextauth_credentials", username: "u@e.com", password: "pw", loginPath: "/api/auth/callback/credentials" });
+    mockEstablishNextAuth.mockResolvedValue({ cookie: "next-auth.session-token=abc" });
+
+    await post({ platform: "wolfpack-auto", mode: "http" });
+    expect(mockEstablishNextAuth).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "https://auto.example", loginPath: "/api/auth/callback/credentials", username: "u@e.com", password: "pw" }));
+    // Cookie path (not the bearer / oauth path).
+    expect(mockEstablish).not.toHaveBeenCalled();
+    expect(mockEstablishOAuth).not.toHaveBeenCalled();
+    expect(mockScan).toHaveBeenCalledWith(expect.objectContaining({ headers: { Cookie: "next-auth.session-token=abc" }, authenticated: true }));
     expect(mockTrack).toHaveBeenCalledWith("platform.scan_started", "admin-1", "admin", expect.objectContaining({ authenticated: true }));
   });
 

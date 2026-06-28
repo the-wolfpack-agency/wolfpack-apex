@@ -118,7 +118,7 @@ export default function AdminConnectorsPage() {
      a target. Empty falls back to the vendor value (static_bearer keeps using it). */
   const [connectorNameInput, setConnectorNameInput] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
-  const [authType, setAuthType] = useState<"static_bearer" | "username_password" | "oauth_password">("static_bearer");
+  const [authType, setAuthType] = useState<"static_bearer" | "username_password" | "oauth_password" | "nextauth_credentials">("static_bearer");
   const [authHeader, setAuthHeader] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -254,7 +254,10 @@ export default function AdminConnectorsPage() {
       // Manual (form-login / oauth-password) connections must be named to match
       // the scan target the scanner resolves credentials by. static_bearer keeps
       // using the vendor preset name.
-      const isManual = authType === "username_password" || authType === "oauth_password";
+      const isManual =
+        authType === "username_password" ||
+        authType === "oauth_password" ||
+        authType === "nextauth_credentials";
       const effectiveName = isManual ? connectorNameInput.trim() : vendor;
       if (isManual && effectiveName.length === 0) {
         setError("Connector name is required and must match the scan target id (e.g. wolfpack-beyond).");
@@ -275,11 +278,14 @@ export default function AdminConnectorsPage() {
           loginPath,
           objectMap,
         };
-      } else if (authType === "username_password") {
+      } else if (
+        authType === "username_password" ||
+        authType === "nextauth_credentials"
+      ) {
         payload = {
           connectorName: effectiveName,
           baseUrl,
-          authType: "username_password" as const,
+          authType,
           username,
           password,
           loginPath,
@@ -445,13 +451,17 @@ export default function AdminConnectorsPage() {
               data-testid="conn-auth-type"
               value={authType}
               onChange={(e) => {
-                const next = e.target.value as "static_bearer" | "username_password" | "oauth_password";
+                const next = e.target.value as "static_bearer" | "username_password" | "oauth_password" | "nextauth_credentials";
                 setAuthType(next);
-                /* OAuth password defaults the token path to Salesforce's, so the
-                   operator only types it to override; clear it leaving the other
-                   modes so a stale Salesforce path is not posted. */
+                /* OAuth password defaults the token path to Salesforce's, and
+                   NextAuth defaults the credentials-callback path, so the
+                   operator only types it to override; leaving the other modes
+                   alone so a stale default path is not posted. */
                 if (next === "oauth_password" && loginPath.trim().length === 0) {
                   setLoginPath("/services/oauth2/token");
+                }
+                if (next === "nextauth_credentials" && loginPath.trim().length === 0) {
+                  setLoginPath("/api/auth/callback/credentials");
                 }
               }}
               style={inputStyle}
@@ -459,10 +469,13 @@ export default function AdminConnectorsPage() {
               <option value="static_bearer">Bearer token</option>
               <option value="username_password">Username &amp; password</option>
               <option value="oauth_password">OAuth password (Salesforce)</option>
+              <option value="nextauth_credentials">NextAuth / Auth.js (credentials)</option>
             </select>
           </label>
 
-          {(authType === "username_password" || authType === "oauth_password") && (
+          {(authType === "username_password" ||
+            authType === "oauth_password" ||
+            authType === "nextauth_credentials") && (
             <label style={labelStyle}>
               Connector name
               <input
@@ -510,12 +523,12 @@ export default function AdminConnectorsPage() {
             </label>
           )}
 
-          {authType === "username_password" && (
+          {(authType === "username_password" || authType === "nextauth_credentials") && (
             <>
               <p style={{ fontSize: 12, color: "var(--wp-text-dim,#a0a8b4)", marginTop: -4, marginBottom: 12 }}>
-                For client platforms that use form login (e.g. Beyond). We POST these
-                credentials to the login path and store the returned session cookie,
-                encrypted at rest.
+                {authType === "nextauth_credentials"
+                  ? "For client platforms built on NextAuth.js / Auth.js (e.g. wolfpack-auto). We fetch a CSRF token, then POST these credentials to the credentials callback and store the returned session cookie, encrypted at rest."
+                  : "For client platforms that use form login (e.g. Beyond). We POST these credentials to the login path and store the returned session cookie, encrypted at rest."}
               </p>
               <label style={labelStyle}>
                 Username or email

@@ -64,7 +64,8 @@ export type AuthType =
   | "static_bearer"
   | "oauth2"
   | "username_password"
-  | "oauth_password";
+  | "oauth_password"
+  | "nextauth_credentials";
 
 export interface MaskedConnectorCredentials {
   workspaceId: string;
@@ -151,10 +152,12 @@ export async function loadConnectorCredentials(
       loginPath: row.login_path ?? undefined,
       sessionCookieName: row.session_cookie_name ?? undefined,
     };
-    if (authType === "username_password") {
+    if (authType === "username_password" || authType === "nextauth_credentials") {
       /* Decode the "Basic <base64(user:pass)>" header in-memory so the
-         connector can replay the form login. These fields are
-         server-side only and MUST NOT be logged. */
+         connector can replay the login (a simple JSON form login for
+         username_password, or the CSRF + credentials-callback flow for
+         nextauth_credentials). These fields are server-side only and MUST
+         NOT be logged. */
       const decoded = decodeBasicHeader(authHeader);
       if (decoded) {
         result.username = decoded.username;
@@ -218,11 +221,13 @@ export async function saveConnectorCredentials(args: {
   let plaintextHeader: string;
   let loginPath: string | null = null;
   let sessionCookieName: string | null = null;
-  if (authType === "username_password") {
+  if (authType === "username_password" || authType === "nextauth_credentials") {
     if (!args.username || !args.password || !args.loginPath) {
       /* Caller contract violation — the route validates this first, but
          fail-closed here too so a bad direct call can't persist a
-         half-formed row. */
+         half-formed row. nextauth_credentials stores the credential pair the
+         same way (Basic header) so the password reuses the encrypted column;
+         the only difference is the login FLOW the connector replays. */
       return null;
     }
     plaintextHeader =
@@ -449,6 +454,7 @@ function normalizeAuthType(raw: string | null): AuthType {
   if (raw === "oauth2") return "oauth2";
   if (raw === "username_password") return "username_password";
   if (raw === "oauth_password") return "oauth_password";
+  if (raw === "nextauth_credentials") return "nextauth_credentials";
   return "static_bearer";
 }
 

@@ -281,6 +281,73 @@ describe("POST /api/admin/connectors", () => {
     expect(JSON.stringify(auditArg)).not.toContain("s3cret-pw");
   });
 
+  test("400 when nextauth_credentials body is missing the password", async () => {
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: ADMIN });
+    const res = await POST(
+      mkReq({
+        connectorName: "wolfpack-auto",
+        baseUrl: "https://auto.example.com",
+        authType: "nextauth_credentials",
+        username: "admin@auto",
+        /* password omitted */
+        loginPath: "/api/auth/callback/credentials",
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/nextauth_credentials requires/);
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  test("200 nextauth_credentials happy path: forwards form-login fields to save + audits auth_type", async () => {
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: ADMIN });
+    mockSave.mockResolvedValueOnce({
+      workspaceId: "default",
+      connectorName: "wolfpack-auto",
+      baseUrl: "https://auto.example.com",
+      authHeaderHint: "Basic ****Wxyz",
+      isActive: true,
+      createdAt: "x",
+      updatedAt: "y",
+      authType: "nextauth_credentials",
+      loginPath: "/api/auth/callback/credentials",
+    });
+    const res = await POST(
+      mkReq({
+        connectorName: "wolfpack-auto",
+        baseUrl: "https://auto.example.com",
+        authType: "nextauth_credentials",
+        username: "admin@auto",
+        password: "s3cret-pw",
+        loginPath: "/api/auth/callback/credentials",
+      }),
+    );
+    expect(res.status).toBe(200);
+
+    expect(mockSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "default",
+        connectorName: "wolfpack-auto",
+        authType: "nextauth_credentials",
+        username: "admin@auto",
+        password: "s3cret-pw",
+        loginPath: "/api/auth/callback/credentials",
+        createdBy: "u1",
+      }),
+    );
+    /* authHeader must NOT be forwarded for the form-login flow. */
+    expect(mockSave.mock.calls[0][0]).not.toHaveProperty("authHeader");
+
+    const auditArg = mockAudit.mock.calls[0][0];
+    expect(auditArg.afterState).toEqual(
+      expect.objectContaining({
+        auth_type: "nextauth_credentials",
+        login_path: "/api/auth/callback/credentials",
+      }),
+    );
+    expect(JSON.stringify(auditArg)).not.toContain("s3cret-pw");
+  });
+
   test("400 when oauth_password body is missing the clientSecret", async () => {
     mockRequireCapability.mockResolvedValueOnce({ ok: true, user: ADMIN });
     const res = await POST(

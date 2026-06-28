@@ -7,7 +7,11 @@
  * paths assert the function never throws.
  */
 
-import { establishSession, establishOAuthPasswordSession } from "../session";
+import {
+  establishSession,
+  establishOAuthPasswordSession,
+  establishNextAuthSession,
+} from "../session";
 
 const BASE = "https://target.example.com";
 const LOGIN = "/api/auth/login";
@@ -207,6 +211,229 @@ it("returns null on an invalid JSON body (json() throws)", async () => {
   } as unknown as Response);
   const out = await establishOAuthPasswordSession({
     ...oauthInput,
+    fetchImpl: fetchImpl as unknown as typeof fetch,
+  });
+  expect(out).toBeNull();
+});
+
+/**
+ * Tests for the NextAuth.js / Auth.js Credentials provider login. The two-step
+ * flow (CSRF fetch → credentials callback) is mocked via an injected fetch.
+ * Covers the happy path (CSRF token + cookie → callback sets a session-token
+ * cookie → combined Cookie header), the exact form-urlencoded body shape, every
+ * failure mode that must degrade to null, and cookie-name variants (next-auth vs
+ * authjs, __Secure- / __Host- prefixes). All paths assert the function never
+ * throws and never leaks the password.
+ */
+
+const NA_BASE = "https://app.example.com";
+
+/** A CSRF GET response: JSON body + a Set-Cookie carrying the CSRF cookie. */
+function csrfRes(
+  status: number,
+  body: unknown,
+  setCookies: string[] = [],
+): Response {
+  const headers = new Headers();
+  for (const c of setCookies) headers.append("set-cookie", c);
+  return { status, headers, json: async () => body } as unknown as Response;
+}
+
+/** A credentials-callback response carrying Set-Cookie(s). */
+function callbackRes(status: number, setCookies: string[] = []): Response {
+  const headers = new Headers();
+  for (const c of setCookies) headers.append("set-cookie", c);
+  return { status, headers } as unknown as Response;
+}
+
+const naInput = {
+  baseUrl: NA_BASE,
+  username: "ops@example.com",
+  password: "hunter2",
+};
+
+it("returns the combined Cookie header when the callback sets a session-token cookie", async () => {
+  const fetchImpl = jest
+    .fn()
+    .mockResolvedValueOnce(
+      csrfRes(200, { csrfToken: "csrf-abc" }, ["next-auth.csrf-token=csrf-abc%7Chash; Path=/; HttpOnly"]),
+    )
+    .mockResolvedValueOnce(
+      callbackRes(200, [
+        "next-auth.session-token=sess-xyz; Path=/; HttpOnly",
+        "next-auth.csrf-token=csrf-abc%7Chash; Path=/; HttpOnly",
+      ]),
+    );
+  const out = await establishNextAuthSession({
+    ...naInput,
+    fetchImpl: fetchImpl as unknown as typeof fetch,
+  });
+  expect(out).toEqual({
+    cookie: "next-auth.session-token=sess-xyz; next-auth.csrf-token=csrf-abc%7Chash",
+  });
+});
+
+it("GETs the csrf endpoint then POSTs a form-urlencoded callback carrying the csrf cookie", async () => {
+  const fetchImpl = jest
+    .fn()
+    .mockResolvedValueOnce(
+      csrfRes(200, { csrfToken: "csrf-abc" }, ["next-auth.csrf-token=csrf-abc%7Chash; Path=/"]),
+    )
+    .mockResolvedValueOnce(
+      callbackRes(200, ["next-auth.session-token=sess-xyz; Path=/"]),
+    );
+  await establishNextAuthSession({
+    ...naInput,
+    fetchImpl: fetchImpl as unknown as typeof fetch,
+  });
+
+  // Step 1: GET the default csrf path.
+  expect(fetchImpl.mock.calls[0][0]).toBe(`${NA_BASE}/api/auth/csrf`);
+  expect(fetchImpl.mock.calls[0][1]).toEqual(
+    expect.objectContaining({ method: "GET" }),
+  );
+
+  // Step 2: POST the default credentials callback, form-urlencoded, with the
+  // csrf cookie replayed.
+  expect(fetchImpl.mock.calls[1][0]).toBe(`${NA_BASE}/api/auth/callback/credentials`);
+  const callbackOpts = fetchImpl.mock.calls[1][1] as {
+    method: string;
+    headers: Record<string, string>;
+    body: string;
+  };
+  expect(callbackOpts.method).toBe("POST");
+  expect(callbackOpts.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
+  expect(callbackOpts.headers.Cookie).toBe("next-auth.csrf-token=csrf-abc%7Chash");
+
+  // Body carries csrfToken + callbackUrl + json=true + email + username + password.
+  const params = new URLSearchParams(callbackOpts.body);
+  expect(params.get("csrfToken")).toBe("csrf-abc");
+  expect(params.get("callbackUrl")).toBe(NA_BASE);
+  expect(params.get("json")).toBe("true");
+  expect(params.get("email")).toBe("ops@example.com");
+  expect(params.get("username")).toBe("ops@example.com");
+  expect(params.get("password")).toBe("hunter2");
+});
+
+it("honors custom csrfPath + loginPath", async () => {
+  const fetchImpl = jest
+    .fn()
+    .mockResolvedValueOnce(
+      csrfRes(200, { csrfToken: "t" }, ["authjs.csrf-token=t%7Ch; Path=/"]),
+    )
+    .mockResolvedValueOnce(
+      callbackRes(200, ["authjs.session-token=s; Path=/"]),
+    );
+  await establishNextAuthSession({
+    ...naInput,
+    csrfPath: "/auth/csrf",
+    loginPath: "/auth/callback/credentials",
+    fetchImpl: fetchImpl as unknown as typeof fetch,
+  });
+  expect(fetchImpl.mock.calls[0][0]).toBe(`${NA_BASE}/auth/csrf`);
+  expect(fetchImpl.mock.calls[1][0]).toBe(`${NA_BASE}/auth/callback/credentials`);
+});
+
+it("matches authjs.* cookie names (Auth.js v5 rename)", async () => {
+  const fetchImpl = jest
+    .fn()
+    .mockResolvedValueOnce(
+      csrfRes(200, { csrfToken: "t" }, ["authjs.csrf-token=t%7Ch; Path=/"]),
+    )
+    .mockResolvedValueOnce(
+      callbackRes(200, ["authjs.session-token=sess-aj; Path=/; HttpOnly"]),
+    );
+  const out = await establishNextAuthSession({
+    ...naInput,
+    fetchImpl: fetchImpl as unknown as typeof fetch,
+  });
+  expect(out).toEqual({ cookie: "authjs.session-token=sess-aj" });
+});
+
+it("matches __Secure- / __Host- prefixed cookies (HTTPS deployments)", async () => {
+  const fetchImpl = jest
+    .fn()
+    .mockResolvedValueOnce(
+      csrfRes(200, { csrfToken: "t" }, ["__Host-next-auth.csrf-token=t%7Ch; Path=/; Secure"]),
+    )
+    .mockResolvedValueOnce(
+      callbackRes(200, ["__Secure-next-auth.session-token=sess-secure; Path=/; Secure; HttpOnly"]),
+    );
+  const out = await establishNextAuthSession({
+    ...naInput,
+    fetchImpl: fetchImpl as unknown as typeof fetch,
+  });
+  expect(out).toEqual({ cookie: "__Secure-next-auth.session-token=sess-secure" });
+});
+
+it("returns null when the csrf response omits csrfToken", async () => {
+  const fetchImpl = jest
+    .fn()
+    .mockResolvedValueOnce(csrfRes(200, {}, ["next-auth.csrf-token=t%7Ch; Path=/"]));
+  const out = await establishNextAuthSession({
+    ...naInput,
+    fetchImpl: fetchImpl as unknown as typeof fetch,
+  });
+  expect(out).toBeNull();
+  // Never attempted the callback POST without a token.
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
+it("returns null when no csrf cookie is set", async () => {
+  const fetchImpl = jest
+    .fn()
+    .mockResolvedValueOnce(csrfRes(200, { csrfToken: "t" }, []));
+  const out = await establishNextAuthSession({
+    ...naInput,
+    fetchImpl: fetchImpl as unknown as typeof fetch,
+  });
+  expect(out).toBeNull();
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
+it("returns null when the callback sets no session-token cookie", async () => {
+  const fetchImpl = jest
+    .fn()
+    .mockResolvedValueOnce(
+      csrfRes(200, { csrfToken: "t" }, ["next-auth.csrf-token=t%7Ch; Path=/"]),
+    )
+    .mockResolvedValueOnce(
+      callbackRes(200, ["next-auth.csrf-token=t%7Ch; Path=/"]),
+    );
+  const out = await establishNextAuthSession({
+    ...naInput,
+    fetchImpl: fetchImpl as unknown as typeof fetch,
+  });
+  expect(out).toBeNull();
+});
+
+it("returns null on a non-2xx csrf response", async () => {
+  const fetchImpl = jest.fn().mockResolvedValueOnce(csrfRes(500, {}, []));
+  const out = await establishNextAuthSession({
+    ...naInput,
+    fetchImpl: fetchImpl as unknown as typeof fetch,
+  });
+  expect(out).toBeNull();
+});
+
+it("returns null on a non-2xx callback with no session cookie (bad credentials)", async () => {
+  const fetchImpl = jest
+    .fn()
+    .mockResolvedValueOnce(
+      csrfRes(200, { csrfToken: "t" }, ["next-auth.csrf-token=t%7Ch; Path=/"]),
+    )
+    .mockResolvedValueOnce(callbackRes(401, []));
+  const out = await establishNextAuthSession({
+    ...naInput,
+    fetchImpl: fetchImpl as unknown as typeof fetch,
+  });
+  expect(out).toBeNull();
+});
+
+it("returns null on a network throw (never throws)", async () => {
+  const fetchImpl = jest.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+  const out = await establishNextAuthSession({
+    ...naInput,
     fetchImpl: fetchImpl as unknown as typeof fetch,
   });
   expect(out).toBeNull();

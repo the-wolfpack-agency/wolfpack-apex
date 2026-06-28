@@ -21,7 +21,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { buildRestConnectorForWorkspace } from "@/lib/assistant/connectors";
 import { loadConnectorCredentials } from "@/lib/assistant/connectors/credentials";
-import { establishSession, establishOAuthPasswordSession } from "@/lib/platform-scan/session";
+import {
+  establishSession,
+  establishOAuthPasswordSession,
+  establishNextAuthSession,
+} from "@/lib/platform-scan/session";
 import { trackEvent } from "@/lib/analytics";
 
 /**
@@ -50,6 +54,18 @@ async function verifyLoginConnector(
     return session
       ? { ok: true, code: "ok", message: "Form login succeeded; session established." }
       : { ok: false, code: "auth_failed", message: "Form login failed (check username/password, login path, and session cookie name)." };
+  }
+  if (creds.authType === "nextauth_credentials" && creds.username && creds.password) {
+    const session = await establishNextAuthSession({
+      baseUrl: creds.baseUrl,
+      loginPath: creds.loginPath ?? "/api/auth/callback/credentials",
+      username: creds.username,
+      password: creds.password,
+      sessionCookieName: creds.sessionCookieName,
+    });
+    return session
+      ? { ok: true, code: "ok", message: "NextAuth credentials login succeeded; session established." }
+      : { ok: false, code: "auth_failed", message: "NextAuth credentials login failed (check username/password and login path)." };
   }
   if (
     creds.authType === "oauth_password" &&

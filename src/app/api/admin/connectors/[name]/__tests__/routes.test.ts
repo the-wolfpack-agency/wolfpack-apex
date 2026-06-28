@@ -24,9 +24,11 @@ jest.mock("@/lib/assistant/connectors/credentials", () => ({
 }));
 const mockEstablishSession = jest.fn();
 const mockEstablishOAuth = jest.fn();
+const mockEstablishNextAuth = jest.fn();
 jest.mock("@/lib/platform-scan/session", () => ({
   establishSession: (...a: any[]) => mockEstablishSession(...a),
   establishOAuthPasswordSession: (...a: any[]) => mockEstablishOAuth(...a),
+  establishNextAuthSession: (...a: any[]) => mockEstablishNextAuth(...a),
 }));
 jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: any[]) => mockTrackEvent(...a),
@@ -235,6 +237,57 @@ describe("POST /api/admin/connectors/[name]/verify", () => {
     });
     mockEstablishSession.mockResolvedValueOnce(null);
     const res = await verifyPOST(req(), { params: Promise.resolve({ name: "wolfpack-beyond" }) });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.code).toBe("auth_failed");
+    expect(mockBuildRest).not.toHaveBeenCalled();
+  });
+
+  test("nextauth_credentials connector: verifies by NextAuth login → 200 on success", async () => {
+    mockRequireCapability.mockResolvedValueOnce(ADMIN);
+    mockLoadCreds.mockResolvedValueOnce({
+      authType: "nextauth_credentials",
+      baseUrl: "https://auto.example.com",
+      loginPath: "/api/auth/callback/credentials",
+      username: "admin@acme.com",
+      password: "s3cret",
+    });
+    mockEstablishNextAuth.mockResolvedValueOnce({
+      cookie: "next-auth.session-token=abc",
+    });
+    const res = await verifyPOST(req(), { params: Promise.resolve({ name: "wolfpack-auto" }) });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    // It ran the NextAuth flow; it did NOT fall back to the REST probe or the
+    // other establishers.
+    expect(mockEstablishNextAuth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseUrl: "https://auto.example.com",
+        loginPath: "/api/auth/callback/credentials",
+        username: "admin@acme.com",
+      }),
+    );
+    expect(mockEstablishSession).not.toHaveBeenCalled();
+    expect(mockEstablishOAuth).not.toHaveBeenCalled();
+    expect(mockBuildRest).not.toHaveBeenCalled();
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "assistant.connector_verified", "u-cto", "cto",
+      expect.objectContaining({ connector: "wolfpack-auto", ok: true }),
+    );
+  });
+
+  test("nextauth_credentials connector: failed login maps to 401 auth_failed (no REST fallback)", async () => {
+    mockRequireCapability.mockResolvedValueOnce(ADMIN);
+    mockLoadCreds.mockResolvedValueOnce({
+      authType: "nextauth_credentials",
+      baseUrl: "https://auto.example.com",
+      loginPath: "/api/auth/callback/credentials",
+      username: "admin@acme.com",
+      password: "wrong",
+    });
+    mockEstablishNextAuth.mockResolvedValueOnce(null);
+    const res = await verifyPOST(req(), { params: Promise.resolve({ name: "wolfpack-auto" }) });
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.code).toBe("auth_failed");

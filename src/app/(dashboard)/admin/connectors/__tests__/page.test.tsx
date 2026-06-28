@@ -234,6 +234,91 @@ it("oauth-password create POSTs the oauth_password body", async () => {
   expect(body.sessionCookieName).toBeUndefined();
 });
 
+it("selecting 'NextAuth / Auth.js' reveals the form-login fields + defaults the login path", async () => {
+  routeOk();
+  render(<AdminConnectorsPage />);
+  await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalled());
+
+  expect(screen.queryByTestId("conn-name")).not.toBeInTheDocument();
+
+  fireEvent.change(screen.getByTestId("conn-auth-type"), {
+    target: { value: "nextauth_credentials" },
+  });
+
+  // Connector name + form-login fields appear, login path defaults to the
+  // credentials callback.
+  expect(screen.getByTestId("conn-name")).toBeInTheDocument();
+  expect(screen.getByTestId("conn-username")).toBeInTheDocument();
+  expect(screen.getByTestId("conn-password")).toBeInTheDocument();
+  expect(screen.getByTestId("conn-login-path")).toHaveValue("/api/auth/callback/credentials");
+  // bearer + oauth-password-only fields are hidden in this mode
+  expect(screen.queryByTestId("conn-auth-header")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("conn-client-id")).not.toBeInTheDocument();
+});
+
+it("nextauth create POSTs the nextauth_credentials body with the typed connector name", async () => {
+  routeOk();
+  render(<AdminConnectorsPage />);
+  await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalled());
+
+  fireEvent.change(screen.getByTestId("conn-base-url"), {
+    target: { value: "https://auto.example.com" },
+  });
+  fireEvent.change(screen.getByTestId("conn-auth-type"), {
+    target: { value: "nextauth_credentials" },
+  });
+  fireEvent.change(screen.getByTestId("conn-name"), {
+    target: { value: "wolfpack-auto" },
+  });
+  fireEvent.change(screen.getByTestId("conn-username"), {
+    target: { value: "admin@acme.com" },
+  });
+  fireEvent.change(screen.getByTestId("conn-password"), {
+    target: { value: "s3cret" },
+  });
+  // login path already defaulted to /api/auth/callback/credentials
+  fireEvent.click(screen.getByTestId("conn-submit"));
+
+  await waitFor(() => expect(createPost()).toBeTruthy());
+  const body = JSON.parse(String(createPost()![1].body));
+  expect(body).toMatchObject({
+    connectorName: "wolfpack-auto",
+    baseUrl: "https://auto.example.com",
+    authType: "nextauth_credentials",
+    username: "admin@acme.com",
+    password: "s3cret",
+    loginPath: "/api/auth/callback/credentials",
+  });
+  // bearer field must not be sent in this mode
+  expect(body.authHeader).toBeUndefined();
+});
+
+it("nextauth_credentials without a connector name shows an error and does NOT POST a create", async () => {
+  routeOk();
+  render(<AdminConnectorsPage />);
+  await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalled());
+
+  fireEvent.change(screen.getByTestId("conn-base-url"), {
+    target: { value: "https://auto.example.com" },
+  });
+  fireEvent.change(screen.getByTestId("conn-auth-type"), {
+    target: { value: "nextauth_credentials" },
+  });
+  fireEvent.change(screen.getByTestId("conn-username"), {
+    target: { value: "admin@acme.com" },
+  });
+  fireEvent.change(screen.getByTestId("conn-password"), {
+    target: { value: "s3cret" },
+  });
+  // No conn-name typed.
+  fireEvent.click(screen.getByTestId("conn-submit"));
+
+  await waitFor(() =>
+    expect(screen.getByText(/Connector name is required/i)).toBeInTheDocument(),
+  );
+  expect(createPost()).toBeUndefined();
+});
+
 it("surfaces an error when the create response fails", async () => {
   mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
     if (url === "/api/admin/connectors" && opts?.method === "POST") {
