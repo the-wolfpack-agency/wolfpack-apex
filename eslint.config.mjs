@@ -1,6 +1,11 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
+// eslint-config-next registers @next/next + react-hooks but NOT the `react`
+// namespace, yet baselineOverrides sets react/* rules. Without this the whole
+// flat config crashes ("could not find plugin react") and eslint lints nothing,
+// which continue-on-error then hid. Register the installed plugin so lint runs.
+import reactPlugin from "eslint-plugin-react";
 
 /**
  * Baseline-restore overrides.
@@ -23,6 +28,7 @@ import nextTs from "eslint-config-next/typescript";
  *     experimental, not stable yet
  */
 const baselineOverrides = {
+  plugins: { react: reactPlugin },
   rules: {
     // Bulk-suppress systemic patterns the codebase relies on:
     "@typescript-eslint/no-require-imports": "off",

@@ -65,6 +65,16 @@ const ESM_PACKAGES = [
 const config: Config = {
   testEnvironment: "node",
   preset: "ts-jest",
+  // Recycle a worker once its heap crosses 512MB. The ~13k-test suite leaks
+  // heap across files inside a long-lived worker; on a loaded CI runner that
+  // bloat starves the worker and triggers GC stalls that blow the 5s default
+  // timeout on otherwise-deterministic tests (ms-graph-chats,
+  // email-signatures-detect, engine-politeness, export-pdf flaked in CI but
+  // pass 3/3 locally). Recycling the worker before the bloat lands fixes the
+  // root cause. We do NOT set a global testTimeout: a longer timeout would
+  // only mask slowness instead of removing it, and would let a genuinely slow
+  // test sail through. workerIdleMemoryLimit is a native Jest knob - no dep.
+  workerIdleMemoryLimit: "512MB",
   testMatch: ["<rootDir>/src/**/__tests__/**/*.test.{ts,tsx}"],
   // ts-jest's preset omits mjs/cjs; some allowlisted ESM deps resolve to
   // .mjs via package "exports", so Jest must know to look for them.

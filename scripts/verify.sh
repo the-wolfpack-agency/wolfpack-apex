@@ -4,11 +4,47 @@
 # a final "verify summary" block lists the per-stage status.
 #
 # Env knobs:
-#   VERIFY_SKIP_BUILD=1  — skip `next build` (fast inner loop)
-#   VERIFY_SKIP_E2E=1    — skip the e2e-smoke stage explicitly
-#   CI=true              — e2e-smoke only runs in CI; skipped locally otherwise
+#   VERIFY_SKIP_BUILD=1   - skip `next build` (fast inner loop)
+#   VERIFY_SKIP_E2E=1     - skip the e2e-smoke + qr-download stages explicitly
+#   CI=true               - e2e-smoke only runs in CI; skipped locally otherwise
+#
+#   VERIFY_STAGES=<csv>   - select which stage GROUPS run. Default (unset) runs
+#                           every stage exactly as before, so a plain
+#                           `npm run verify` is byte-for-byte unchanged. CI fans
+#                           the work across parallel jobs by setting this:
+#                             typecheck  -> tsc
+#                             lint       -> eslint
+#                             unit       -> jest (the heavy stage; shardable)
+#                             e2e        -> qr-download + next-build + e2e-smoke
+#                           Comma-combine freely, e.g. "typecheck,lint".
+#   JEST_SHARD=<i/n>      - when set, the unit jest run adds --shard=$JEST_SHARD
+#                           so CI can split the ~13k-test suite across runners.
+#   JEST_WORKERS=<spec>   - maxWorkers for jest. Default 50%: the documented CI
+#                           sweet spot - enough parallelism to be fast, few
+#                           enough workers that they don't thrash a 2-core
+#                           runner. (Local default also 50%, harmless.)
+#   JEST_JSON=<path>      - where to write jest's machine-readable run summary
+#                           (default jest-results.json). Uses jest's BUILT-IN
+#                           --json reporter; no extra dependency.
+#   VERIFY_DRY_RUN=1      - print the resolved plan (ordered stages + shard +
+#                           workers) and exit 0 without running anything. Lets
+#                           the stage/shard logic be unit-tested cheaply.
 set -u
 cd "$(dirname "$0")/.."
+
+# --- resolve the plan -------------------------------------------------------
+JEST_WORKERS="${JEST_WORKERS:-50%}"
+JEST_JSON="${JEST_JSON:-jest-results.json}"
+
+# stage_enabled <group>: true when VERIFY_STAGES is unset (run all) or lists it.
+stage_enabled() {
+  local group="$1"
+  [ -z "${VERIFY_STAGES:-}" ] && return 0
+  case ",${VERIFY_STAGES}," in
+    *",${group},"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 declare -a STAGES
 declare -a STATUSES
@@ -33,37 +69,80 @@ skip_stage() {
   echo "[SKIP] $name ($reason)"
 }
 
+# The unit jest invocation, built once so the dry-run plan and the real run
+# can never drift. --workerIdleMemoryLimit recycles bloated workers (the
+# GC-stall flake fix, mirrored in jest.config.ts). --json + --outputFile use
+# jest's built-in reporter for artifact capture (no dependency).
+build_jest_cmd() {
+  JEST_CMD=(npx jest --silent
+    --maxWorkers="${JEST_WORKERS}"
+    --workerIdleMemoryLimit=512MB
+    --json --outputFile="${JEST_JSON}")
+  if [ -n "${JEST_SHARD:-}" ]; then
+    JEST_CMD+=(--shard="${JEST_SHARD}")
+  fi
+}
+build_jest_cmd
+
+run_unit_tests() { "${JEST_CMD[@]}"; }
+
 # `--experimental-vm-modules` lets the export-pdf renderer's lazy
 # dynamic import of @react-pdf/renderer (ESM-only) load inside Jest's
-# sandboxed VM. Production (Node 20 on Vercel) doesn't need this flag —
+# sandboxed VM. Production (Node 20 on Vercel) doesn't need this flag -
 # only Jest's module registry does.
 export NODE_OPTIONS="${NODE_OPTIONS:-} --experimental-vm-modules"
 
-run_stage "lint"       npm run lint
-run_stage "typecheck"  npx tsc --noEmit
-run_stage "unit-tests" npx jest --silent
+# --- dry run: print the plan and exit --------------------------------------
+if [ "${VERIFY_DRY_RUN:-0}" = "1" ]; then
+  echo "=== verify plan ==="
+  echo "  jest-workers: ${JEST_WORKERS}"
+  echo "  jest-shard:   ${JEST_SHARD:-none}"
+  echo "  jest-json:    ${JEST_JSON}"
+  echo "  stages-filter: ${VERIFY_STAGES:-all}"
+  echo "  ordered-stages:"
+  stage_enabled lint      && echo "    - lint"
+  stage_enabled typecheck && echo "    - typecheck"
+  stage_enabled unit      && echo "    - unit-tests (${JEST_CMD[*]})"
+  if [ "${VERIFY_SKIP_E2E:-0}" != "1" ]; then
+    stage_enabled e2e && echo "    - qr-download-decode"
+  fi
+  if [ "${VERIFY_SKIP_BUILD:-0}" != "1" ]; then
+    stage_enabled e2e && echo "    - next-build"
+  fi
+  if [ "${VERIFY_SKIP_E2E:-0}" != "1" ] && [ "${CI:-}" = "true" ]; then
+    stage_enabled e2e && echo "    - e2e-smoke"
+  fi
+  exit 0
+fi
+
+# --- run the selected stages -----------------------------------------------
+stage_enabled lint      && run_stage "lint"       npm run lint
+stage_enabled typecheck && run_stage "typecheck"  npx tsc --noEmit
+stage_enabled unit      && run_stage "unit-tests" run_unit_tests
 
 # Real-browser guard for the QR download rasterizer (no dev server/DB).
 # Catches the "svg image decode failed" duplicate-attribute regression
-# that jsdom cannot — SVG <img> decode + canvas.toBlob need a real engine.
-if [ "${VERIFY_SKIP_E2E:-0}" = "1" ]; then
-  skip_stage "qr-download-decode" "VERIFY_SKIP_E2E=1"
-else
-  run_stage "qr-download-decode" npm run test:qr-download
-fi
+# that jsdom cannot - SVG <img> decode + canvas.toBlob need a real engine.
+if stage_enabled e2e; then
+  if [ "${VERIFY_SKIP_E2E:-0}" = "1" ]; then
+    skip_stage "qr-download-decode" "VERIFY_SKIP_E2E=1"
+  else
+    run_stage "qr-download-decode" npm run test:qr-download
+  fi
 
-if [ "${VERIFY_SKIP_BUILD:-0}" = "1" ]; then
-  skip_stage "next-build" "VERIFY_SKIP_BUILD=1"
-else
-  run_stage "next-build" npx next build
-fi
+  if [ "${VERIFY_SKIP_BUILD:-0}" = "1" ]; then
+    skip_stage "next-build" "VERIFY_SKIP_BUILD=1"
+  else
+    run_stage "next-build" npx next build
+  fi
 
-if [ "${VERIFY_SKIP_E2E:-0}" = "1" ]; then
-  skip_stage "e2e-smoke" "VERIFY_SKIP_E2E=1"
-elif [ "${CI:-}" != "true" ]; then
-  skip_stage "e2e-smoke" "local run — CI only"
-else
-  run_stage "e2e-smoke" npm run test:e2e:smoke
+  if [ "${VERIFY_SKIP_E2E:-0}" = "1" ]; then
+    skip_stage "e2e-smoke" "VERIFY_SKIP_E2E=1"
+  elif [ "${CI:-}" != "true" ]; then
+    skip_stage "e2e-smoke" "local run - CI only"
+  else
+    run_stage "e2e-smoke" npm run test:e2e:smoke
+  fi
 fi
 
 echo ""

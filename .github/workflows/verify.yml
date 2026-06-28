@@ -1,11 +1,26 @@
 name: Verify
 
-# Local `npm run verify` gate, hoisted into CI.
+# Local `npm run verify` gate, hoisted into CI and FANNED OUT for honesty +
+# speed. The canonical logic lives in scripts/verify.sh; every job below just
+# invokes `npm run verify` with VERIFY_STAGES (and JEST_SHARD) set, so the CI
+# behavior can never drift from the local gate. Do NOT re-implement verify
+# logic in YAML.
 #
-# Required secrets (set in repo → Settings → Secrets):
-#   PROD_URL              — deployed Instinct URL for the E2E smoke
-#   SMOKE_TEST_EMAIL      — sign-in email for the smoke account
-#   SMOKE_TEST_PASSWORD   — sign-in password for the smoke account
+# Why the fan-out:
+#   - lint-types: tsc + eslint, no jest, no playwright install (fast, cheap).
+#   - unit: the ~13k-test jest suite split into 4 shards (matrix), each with
+#     --workerIdleMemoryLimit=512MB + --maxWorkers=50%. The memory limit
+#     recycles bloated workers so GC stalls stop blowing the 5s default
+#     timeout on deterministic tests (the CI-only flake we are fixing); the
+#     shards keep each runner's wall-time and memory footprint low.
+#   - e2e: the only job that installs Playwright browsers.
+#   - verify: a no-op gate that needs all of the above, preserving a single
+#     "verify" status context for branch protection.
+#
+# Required secrets (set in repo -> Settings -> Secrets):
+#   PROD_URL              - deployed Instinct URL for the E2E smoke
+#   SMOKE_TEST_EMAIL      - sign-in email for the smoke account
+#   SMOKE_TEST_PASSWORD   - sign-in password for the smoke account
 #
 # If any are missing, the e2e-smoke stage inside verify.sh auto-skips
 # (resolveSmokeTarget + test.skip), so CI stays green for forks/PRs
@@ -25,35 +40,76 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
+  lint-types:
     runs-on: ubuntu-latest
-    # TODO(nhomyk): flip to required = true once every pre-existing lint/tsc
-    # finding is resolved. Tracked in handoff 2026-04-15.
-    continue-on-error: true
-
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
-
       - name: Setup Node
         uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.4
         with:
           node-version: 20
           cache: "npm"
-
       - name: Install deps
         run: npm ci
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
-
-      - name: Run verify
+      - name: Run verify (typecheck + lint)
         env:
           CI: "true"
+          VERIFY_STAGES: "typecheck,lint"
+        run: npm run verify
+
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/4", "2/4", "3/4", "4/4"]
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - name: Setup Node
+        uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.4
+        with:
+          node-version: 20
+          cache: "npm"
+      - name: Install deps
+        run: npm ci
+      - name: Run verify (unit shard ${{ matrix.shard }})
+        env:
+          CI: "true"
+          VERIFY_STAGES: "unit"
+          JEST_SHARD: ${{ matrix.shard }}
+          # Per-shard artifact filename so the matrix legs don't clobber.
+          JEST_JSON: "jest-results-${{ strategy.job-index }}.json"
+        run: npm run verify
+      - name: Upload jest results
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: jest-results-shard-${{ strategy.job-index }}
+          path: jest-results-${{ strategy.job-index }}.json
+          retention-days: 7
+          if-no-files-found: warn
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - name: Setup Node
+        uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.4
+        with:
+          node-version: 20
+          cache: "npm"
+      - name: Install deps
+        run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Run verify (e2e)
+        env:
+          CI: "true"
+          VERIFY_STAGES: "e2e"
           PROD_URL: ${{ secrets.PROD_URL }}
           SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
         run: npm run verify
-
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
@@ -62,3 +118,19 @@ jobs:
           path: playwright-report/
           retention-days: 7
           if-no-files-found: ignore
+      - name: Upload Playwright test-results
+        if: failure()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: playwright-test-results-apex
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # Single aggregate status context: green only when every leg above passed.
+  verify:
+    runs-on: ubuntu-latest
+    needs: [lint-types, unit, e2e]
+    steps:
+      - name: All verify legs passed
+        run: echo "lint-types + unit (4 shards) + e2e all succeeded"
