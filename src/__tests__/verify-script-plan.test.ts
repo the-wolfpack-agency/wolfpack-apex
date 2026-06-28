@@ -17,9 +17,29 @@ import { resolve, join } from "node:path";
 const REPO_ROOT = resolve(__dirname, "..", "..");
 const SCRIPT = join(REPO_ROOT, "scripts", "verify.sh");
 
+// Strip any verify-control vars the CI unit job sets at the job level
+// (VERIFY_STAGES=unit, JEST_SHARD, ...). Without this they leak into the
+// spawned verify.sh and the "default plans every stage" assertion fails in CI.
+// Each test then sets exactly the env it intends via extraEnv.
+function cleanEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const k of [
+    "VERIFY_STAGES",
+    "JEST_SHARD",
+    "JEST_WORKERS",
+    "JEST_JSON",
+    "VERIFY_DRY_RUN",
+    "VERIFY_SKIP_E2E",
+    "VERIFY_SKIP_BUILD",
+  ]) {
+    delete env[k];
+  }
+  return env;
+}
+
 function plan(extraEnv: Record<string, string> = {}) {
   const res = spawnSync("bash", [SCRIPT], {
-    env: { ...process.env, VERIFY_DRY_RUN: "1", ...extraEnv },
+    env: { ...cleanEnv(), VERIFY_DRY_RUN: "1", ...extraEnv },
     encoding: "utf-8",
   });
   return res;

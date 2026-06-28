@@ -26,7 +26,9 @@ const target = resolveSmokeTarget();
 // signed-in dashboard shell; the landing route works unauthenticated.
 const PROBES: SmokeProbe[] = [
   { path: "/", expectText: "Instinct" },
-  { path: "/setup", expectText: "Setup" },
+  // The page h1 is "Set up your workspace" (two words); the old "Setup" probe
+  // never matched and was hidden by verify.yml continue-on-error.
+  { path: "/setup", expectText: "Set up" },
   { path: "/tasks", expectText: "Task" },
   { path: "/notifications", expectText: "Notification" },
   { path: "/settings", expectText: "Setting" },

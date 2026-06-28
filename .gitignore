@@ -50,3 +50,6 @@ tests/e2e/screenshots/
 __pycache__/
 *.pyc
 .claude/worktrees/
+
+# jest machine-readable run summary (written by scripts/verify.sh --json)
+jest-results*.json
