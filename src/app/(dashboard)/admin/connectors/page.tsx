@@ -440,19 +440,6 @@ export default function AdminConnectorsPage() {
           </p>
 
           <label style={labelStyle}>
-            Base URL
-            <input
-              type="url"
-              placeholder="https://api.example.com/v1"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              style={inputStyle}
-              required
-              data-testid="conn-base-url"
-            />
-          </label>
-
-          <label style={labelStyle}>
             Auth type
             <select
               data-testid="conn-auth-type"
@@ -493,6 +480,19 @@ export default function AdminConnectorsPage() {
               </span>
             </label>
           )}
+
+          <label style={labelStyle}>
+            Base URL
+            <input
+              type="url"
+              placeholder="https://api.example.com/v1"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              style={inputStyle}
+              required
+              data-testid="conn-base-url"
+            />
+          </label>
 
           {authType === "static_bearer" && (
             <label style={labelStyle}>
