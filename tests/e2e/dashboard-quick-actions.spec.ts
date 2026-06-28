@@ -19,6 +19,7 @@
  */
 import { test, expect, type Request } from "@playwright/test";
 import { resolveSmokeTarget, signInIfPossible } from "./helpers/smoke-helpers";
+import { waitForAppReady } from "./helpers/app-ready";
 
 const target = resolveSmokeTarget();
 
@@ -28,6 +29,15 @@ async function settle(page: import("@playwright/test").Page) {
 }
 
 test.describe("dashboard quick actions (real browser)", () => {
+  // Run once before the suite: don't let the first sign-in race a cold
+  // preview boot. The earlier "element(s) not found" flake here was the
+  // dashboard probe hitting a deployment that wasn't serving yet, not a
+  // missing tile. Gating readiness removes the race; it does NOT weaken
+  // any of the tile assertions below.
+  test.beforeAll(async () => {
+    await waitForAppReady(target.baseUrl);
+  });
+
   test.beforeEach(async ({ page }) => {
     if (!target.email || !target.password) {
       test.skip(true, "SMOKE_TEST_EMAIL / SMOKE_TEST_PASSWORD not set; skipping");

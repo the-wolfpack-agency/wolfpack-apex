@@ -18,6 +18,7 @@ import {
   signInIfPossible,
   type SmokeProbe,
 } from "./helpers/smoke-helpers";
+import { waitForAppReady } from "./helpers/app-ready";
 
 const target = resolveSmokeTarget();
 
@@ -43,6 +44,11 @@ test.describe("verify smoke", () => {
       // Local fallback is fine, just surface it.
       console.log(`[smoke] PROD_URL not set; using ${target.baseUrl}`);
     }
+    // Wait for the target to actually be up before probing. A cold preview
+    // returns 502/503 for the first few seconds; without this gate the first
+    // probe races the boot and fails on readiness, not on a real bug. This
+    // does NOT change what any probe asserts.
+    await waitForAppReady(target.baseUrl);
   });
 
   test("authenticated routes render cleanly", async ({ page }) => {
