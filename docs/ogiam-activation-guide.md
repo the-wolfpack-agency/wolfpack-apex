@@ -1,170 +1,243 @@
-# OGIAM Activation and Client Deployment Guide
+# OGIAM Complete Installation and Operations Manual
 
-Status: authoritative "how to go live" guide. This is the single place that lists
-every OWNER/OPERATOR action needed to activate the platform and deploy it to a
-real client. It covers the one-time platform setup (env + GitHub App), the
-per-client onboarding, and the per-client config (budgets). For the detailed
-per-step operational flow with verify-as-you-go gates, this guide references
-[ogiam-onboarding-runbook.md](./ogiam-onboarding-runbook.md).
+Status: the authoritative, click-level "how to go live" manual. It lists every
+owner/operator action across every tool (Vercel, GitHub, Neon, Qdrant, Neo4j,
+Salesforce, your DNS provider, and the OGIAM admin UI) to activate the platform
+and deploy it to a real client. External-tool labels can drift over time; the
+navigation paths below are the stable anchors. For the detailed verify-as-you-go
+operational flow see [ogiam-onboarding-runbook.md](./ogiam-onboarding-runbook.md).
 
-Public product name is Wolfpack Instinct / OGIAM. Deployed at
-https://wolfpack-instinct.vercel.app . Admin routes require an account with the
-`settings.manage_team` capability.
+Product: Wolfpack Instinct / OGIAM. Production URL: https://wolfpack-instinct.vercel.app
+Admin routes require an account with the `settings.manage_team` capability.
 
----
-
-## Part A: One-time platform activation (do once)
-
-### A1. Required environment variables (Vercel)
-
-These are deployment blockers. A missing critical value crash-loops the app.
-Full table: `.ai/client-context.md`. The critical set:
-
-| Env var | Purpose |
-|---|---|
-| `DATABASE_URL` | Neon Postgres (source of truth) |
-| `INSTINCT_JWT_SECRET` | Auth (>=32 chars) |
-| `CRON_SECRET` | Authorizes the continuous sweeps |
-| `GITHUB_TOKEN_WOLFPACK_AGENCY` | Fallback GitHub PAT (our own repos) |
-| `QDRANT_URL` / `QDRANT_API_KEY` | Vector store (advisory) |
-| `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | Graph store (advisory) |
-| `PENTEST_KILL_SWITCH` | Leave unset; set to `on` to instantly halt all active probing |
-
-GitHub App (Part A2) adds two more:
-
-| Env var | Purpose |
-|---|---|
-| `GITHUB_APP_ID` | The numeric App ID from the GitHub App registration |
-| `GITHUB_APP_PRIVATE_KEY` | The App private key PEM (Vercel-escaped `\n` is handled) |
-
-### A2. Verify the deployment is ready (BEFORE serving any client)
-
-Two equivalent ways:
-
-- CLI / CI: `npm run verify:prod-env` (exits non-zero if a critical check fails).
-- UI: open `/admin/deployment`. Every check shows Ready / Not ready, split into
-  Critical (Postgres + GitHub reachable, required env present) and Advisory
-  (Qdrant/Neo4j). Do not onboard a client until Critical is all green.
-
-### A3. Register the GitHub App (unlocks per-client repo access)
-
-Until this is done, static scanning and remediation PRs fall back to the shared
-PAT (`GITHUB_TOKEN_WOLFPACK_AGENCY`), which only reaches OUR repos. The App is
-what gives per-client repo access without a blast-radius token.
-
-1. GitHub -> Settings -> Developer settings -> GitHub Apps -> New GitHub App.
-2. Name (e.g. "OGIAM Security"), Homepage URL = https://wolfpack-instinct.vercel.app .
-3. Setup URL (post-install redirect):
-   `https://wolfpack-instinct.vercel.app/api/admin/connectors/github-app/install-callback`
-   and check "Redirect on update". This is what records each client's
-   installation against their workspace automatically after they install.
-4. Webhook: uncheck Active (we poll; no webhook needed).
-5. Repository permissions (least privilege for what we use):
-   - Metadata: Read-only (mandatory).
-   - Contents: Read and write (Read powers static scanning; Write powers the
-     remediation-PR branch + file commit).
-   - Pull requests: Read and write (open the review-gated remediation PRs).
-   Request NOTHING else.
-6. "Where can this GitHub App be installed?": Any account (so clients can install
-   on their own org).
-7. Create the App. Note the App ID. Generate a private key and download the .pem.
-8. Set `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` (paste the full PEM) in Vercel,
-   then redeploy so the env is live.
-
-Per-client install happens in Part B (step B1b).
+Conventions in this doc: "OGIAM admin" = pages under the production URL (e.g.
+`/admin/deployment`). "Vercel", "GitHub", "Neon", etc. = those external consoles.
 
 ---
 
-## Part B: Onboard a client (repeat per client)
+## Phase 0: Access checklist (gather before you start)
 
-The detailed, verify-as-you-go version of B2-B6 is in the onboarding runbook;
-this is the checklist with the exact surfaces.
+You (or whoever runs this) need:
+- [ ] Vercel access to the `wolfpack-instinct` project (env vars + redeploy).
+- [ ] GitHub org Owner access (to create + install the GitHub App).
+- [ ] Neon access (the Postgres `DATABASE_URL` and the SQL Editor).
+- [ ] Qdrant Cloud and Neo4j Aura console access (or the existing connection values).
+- [ ] An OGIAM admin login with `settings.manage_team`.
+- [ ] A terminal with the repo checked out (to run `npm run verify:prod-env`).
+Per client (Phase 3) you also need their cooperation: install the GitHub App,
+place a verification token, and provide SaaS (e.g. Salesforce) API credentials.
 
-### B1. Connect the client's systems
+---
 
-- B1a. SaaS platform (e.g. Salesforce): `/admin/connectors` -> connect via OAuth
-  or store the OAuth username-password credentials. Verify with the connector's
-  Verify action.
-- B1b. GitHub (their repos): have the client install the OGIAM GitHub App on the
-  repos in scope. GitHub redirects to the install-callback, which links their
-  `installation_id` to the workspace. Confirm on `/admin/connectors/github-app`
-  (it shows linked vs PAT-fallback). Least privilege: ask them to grant only the
-  repos in scope.
+## Phase 1: Platform infrastructure (one time)
 
-### B2. Register the target
+### 1.1 Collect the backing-service connection values
 
-`/admin/onboarding` -> add the target: `platform` id, public `baseUrl`, optional
-`static` (owner/repo/ref/paths) for source scanning, optional `login` (links to
-the connector). Stored in the target registry.
+- DATABASE_URL (Neon): https://console.neon.tech -> your project -> Dashboard ->
+  "Connection string" -> copy the POOLED connection string.
+- QDRANT_URL + QDRANT_API_KEY (Qdrant Cloud): https://cloud.qdrant.io -> your
+  cluster -> the cluster URL is QDRANT_URL; Data Access / API Keys -> create or
+  copy a key for QDRANT_API_KEY.
+- NEO4J_URI + NEO4J_USER + NEO4J_PASSWORD (Neo4j Aura):
+  https://console.neo4j.io -> your instance -> Connect; the `neo4j+s://...` URI is
+  NEO4J_URI, user is usually `neo4j`, password was shown at instance creation
+  (reset it there if lost).
 
-### B3. Prove ownership (REQUIRED before any scan or pentest)
+### 1.2 Generate the two secrets
 
-On the target's row in `/admin/onboarding`, use "Verify ownership". The platform
-issues a token; the client proves control by EITHER:
-- placing it at `https://<target>/.well-known/ogiam-site-verification.txt`, OR
-- adding a DNS TXT record `ogiam-site-verification=<token>`.
+In a terminal:
+```
+openssl rand -base64 48     # use the output as INSTINCT_JWT_SECRET (>=32 chars)
+openssl rand -base64 48     # use the output as CRON_SECRET
+```
 
-Click Check until it reads Verified. The scan and pentest paths are fail-closed:
-an unverified onboarded target is refused (curated internal targets are exempt).
+### 1.3 Set the env vars in Vercel
 
-### B4. Preflight
+Vercel -> the `wolfpack-instinct` project -> Settings -> Environment Variables.
+For each row below: enter the Name, paste the Value, set Environment = Production
+(add Preview too if you test there), click Save.
 
-The "Test connection" button on the target row (`/admin/onboarding`). It confirms
-the target resolves, the URL is public and reachable, the repo is readable (if
-static), and connector credentials exist (if login). Do not proceed until Ready.
+Critical (app crash-loops without these):
+- `DATABASE_URL`, `INSTINCT_JWT_SECRET`, `CRON_SECRET`, `GITHUB_TOKEN_WOLFPACK_AGENCY`
+Backing stores (advisory; triple-write degrades gracefully if absent):
+- `QDRANT_URL`, `QDRANT_API_KEY`, `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`
+Leave unset in normal operation:
+- `PENTEST_KILL_SWITCH` (set its value to `on` only to instantly stop all active probing)
 
-### B5. Run the baseline (read-only) and deliver the report
+(`GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are added in Phase 2.)
 
-`/admin/platform-scans` for the target's platform id:
-1. Scan (security + quality). 2. System profile (the map). 3. Recommendations
-(automation mapping). 4. Summary (the report view). The report renders findings
-by severity + profile + recommendations + a coverage banner. A degraded scan is
-flagged "NOT a clean result" so a low finding count is never mistaken for clean.
-Deliver the Security Engagement Report; every finding traces to a stored id and
-the audit trail covers the engagement.
+### 1.4 Redeploy so the env takes effect
 
-### B6. Set the client's AI budget (cost safety)
+Vercel -> Deployments -> the latest deployment -> "..." menu -> Redeploy (or push
+any commit to `main`). Migrations run automatically during the build.
 
-No admin UI yet; set it via SQL against the workspace (replace values):
+### 1.5 Verify the platform is ready (do NOT skip)
 
+Either:
+- Terminal: `npm run verify:prod-env` (exits non-zero if any Critical check fails), OR
+- OGIAM admin: open `/admin/deployment`. Each check shows Ready/Not ready, grouped
+  into Critical (Postgres + GitHub reachable, required env present) and Advisory
+  (Qdrant/Neo4j). Do not onboard a client until every Critical check is green.
+  See the Troubleshooting appendix for any red check.
+
+---
+
+## Phase 2: Register the GitHub App (one time, unlocks per-client repo access)
+
+Until this is done, static (source) scanning and remediation PRs use the shared
+PAT `GITHUB_TOKEN_WOLFPACK_AGENCY`, which only reaches your own repos. The App is
+what lets you scan + open PRs on a client's repos without a broad token.
+
+### 2.1 Create the App
+GitHub -> your profile/org -> Settings -> Developer settings (bottom left) ->
+GitHub Apps -> New GitHub App.
+- GitHub App name: e.g. "OGIAM Security".
+- Homepage URL: `https://wolfpack-instinct.vercel.app`
+- Setup URL: `https://wolfpack-instinct.vercel.app/api/admin/connectors/github-app/install-callback`
+  and tick "Redirect on update". (This is what records each client's installation
+  against their workspace automatically right after they install.)
+- Webhook: UNTICK "Active" (we poll; no webhook needed).
+
+### 2.2 Permissions (least privilege; request nothing else)
+Under "Repository permissions":
+- Metadata: Read-only (mandatory, auto-selected).
+- Contents: Read and write (Read = static scan; Write = remediation-PR commits).
+- Pull requests: Read and write (open the review-gated PRs).
+
+### 2.3 Installability + create
+- "Where can this GitHub App be installed?": Any account.
+- Click "Create GitHub App".
+
+### 2.4 Get the credentials
+- On the App's General page, note the "App ID" (a number).
+- Scroll to "Private keys" -> Generate a private key -> a `.pem` file downloads.
+
+### 2.5 Put them in Vercel
+Vercel -> project -> Settings -> Environment Variables:
+- `GITHUB_APP_ID` = the App ID number.
+- `GITHUB_APP_PRIVATE_KEY` = the FULL contents of the .pem (including the
+  `-----BEGIN RSA PRIVATE KEY-----` / `-----END...-----` lines). Paste it as-is;
+  the app handles Vercel's newline escaping.
+Redeploy (Phase 1.4) so the App config is live.
+
+Clients install the App during Phase 3.3.
+
+---
+
+## Phase 3: Onboard a client (repeat per client)
+
+### 3.1 Create the client's workspace
+Each client is a workspace. If this is the primary/only tenant, the workspace id
+is `default`. For a separate client tenant, create the workspace via the OGIAM
+setup flow (the new-workspace path that the setup wizard drives off
+`/api/workspace`), then find the workspace id under OGIAM admin -> Team
+(`/admin/team`). You will need this `workspace_id` for the budget step (3.8).
+
+### 3.2 Connect the client's SaaS system (example: Salesforce)
+First, in Salesforce, create a Connected App to get OAuth credentials:
+- Salesforce -> Setup (gear icon) -> in Quick Find type "App Manager" -> App
+  Manager -> New Connected App.
+- Enable OAuth Settings; set a callback URL (any https you control is fine for the
+  password grant); select scopes (at least "Manage user data via APIs (api)").
+- Save; open the new app -> copy the Consumer Key (= clientId) and Consumer Secret
+  (= clientSecret). Use an integration user's username + password (+ security token
+  appended to the password if required by your org).
+Then, in OGIAM admin -> Connectors (`/admin/connectors`), add the connection:
+- connectorName: a stable id you will reuse as the target's login connector.
+- authType: oauth_password.
+- baseUrl: the login URL, e.g. `https://login.salesforce.com` (or
+  `https://test.salesforce.com` for a sandbox).
+- loginPath: `/services/oauth2/token`.
+- clientId, clientSecret, username, password: from above.
+- Save, then use the connector's Verify action to confirm it authenticates.
+(For form-login platforms use authType `username_password` with username,
+password, loginPath, sessionCookieName instead.)
+
+### 3.3 Have the client install the GitHub App on their repos
+Send the client your App's public install page (GitHub -> your App -> Public page,
+or share the install URL). They click Install, choose "Only select repositories",
+pick the in-scope repos, and confirm. GitHub redirects to the install-callback,
+which links their installation to the workspace. Confirm in OGIAM admin ->
+Connectors -> GitHub App (`/admin/connectors/github-app`): it shows "linked" vs
+"PAT fallback". Least privilege: ask them to grant ONLY the repos in scope.
+
+### 3.4 Register the target
+OGIAM admin -> Onboarding (`/admin/onboarding`) -> add a target:
+- platform: the id you will reference everywhere after this (e.g. `acme-crm`).
+- baseUrl: the public URL of the running system.
+- (optional) repo owner / repo name / ref (default `main`): to enable source
+  scanning via the GitHub App.
+- (optional) login connector: the connectorName from 3.2 so scans run authenticated.
+Save; the target appears in the Targets table.
+
+### 3.5 Prove the client owns the target (REQUIRED before any scan/pentest)
+On the target's row, click "Verify ownership". OGIAM issues a token and shows two
+ways to prove control; the client does EITHER one:
+- HTTP file: host the token at
+  `https://<target-domain>/.well-known/ogiam-site-verification.txt` (a plain text
+  file whose only content is the token). How depends on the client's stack (drop a
+  static file at that path / add a route returning it).
+- DNS TXT: in the domain's DNS provider (e.g. Cloudflare -> the domain -> DNS ->
+  Records -> Add record; or GoDaddy/Namecheap -> Manage DNS -> Add), add a TXT
+  record. Host/Name: `@` (or the subdomain); Value: `ogiam-site-verification=<token>`.
+  Allow a few minutes for propagation.
+Back in OGIAM, click "Check" until it reads Verified. Scans and pentests are
+fail-closed: an unverified onboarded target is refused.
+
+### 3.6 Preflight (test connection)
+On the target's row, click "Test connection". It checks the target resolves, the
+URL is public + reachable, the repo is readable (if static), and connector creds
+exist (if login). Fix anything that is Not ready (see Troubleshooting) before
+proceeding.
+
+### 3.7 Run the baseline and deliver the report (read-only)
+OGIAM admin -> Platform Scans (`/admin/platform-scans`) for the target's platform:
+1. Run Scan (security + quality). 2. View System Profile (the map). 3. View
+Recommendations (automation mapping). 4. View Summary (the report). The report
+shows findings by severity + the profile + recommendations + a Coverage banner; a
+degraded scan is flagged "NOT a clean result" so a low finding count is never
+mistaken for clean. Deliver this as the Security Engagement Report.
+
+### 3.8 Set the client's monthly AI budget (cost safety)
+There is no admin UI for this yet; set it with SQL. Neon -> your project -> SQL
+Editor -> run (replace the id and amount):
 ```sql
 INSERT INTO workspace_ai_policy (workspace_id, monthly_budget_usd)
 VALUES ('<client_workspace_id>', 500)
 ON CONFLICT (workspace_id)
 DO UPDATE SET monthly_budget_usd = EXCLUDED.monthly_budget_usd, updated_at = now();
 ```
-
-Over-budget AI calls are then refused at the router (the dashboard shows
-`over_budget` via `/api/usage`). Optionally also set `max_tier` to cap model tier.
+Over-budget AI calls are then refused at the router; `/api/usage` exposes an
+`over_budget` flag the dashboard surfaces. (Optional: also set `max_tier` to
+`'cheap' | 'standard' | 'premium'` to cap model tier.)
 
 ---
 
-## Part C: Authorized active pen testing (only after a signed RoE)
+## Phase 4: Authorized active pen testing (ONLY after a signed rules-of-engagement)
 
-`/admin/pentest`. Do NOT run active probes without a signed rules-of-engagement.
-
+OGIAM admin -> Pentest (`/admin/pentest`). Never run active probes without a
+signed RoE from the client.
 1. Issue a scope token: allowed host(s), allowed techniques, request budget, TTL.
    This is the technical form of the signed authorization; the harness is
-   fail-closed (no scope = no probing) and also requires the target be verified
-   (Part B3).
-2. Run individual probes or the full engagement. Confirmed findings appear in the
-   console. 3. Kill switch: the console button, or `PENTEST_KILL_SWITCH=on`,
-   halts all active probing instantly.
+   fail-closed (no scope = no probing) and the target must already be Verified (3.5).
+2. Run individual probes or the full engagement; confirmed findings show in the console.
+3. Kill switch: the console button, or set Vercel env `PENTEST_KILL_SWITCH=on`,
+   stops all active probing instantly.
 
 ---
 
-## Part D: Remediation, continuous, offboarding
+## Phase 5: Ongoing operations
 
-- Remediation: from a recommendation, open a review-gated PR (never auto-merged).
-  Requires the GitHub App (or PAT) to have Contents + Pull requests write on the
-  repo. A merged fix auto-resolves on the next scan.
-- Continuous: the cron sweeps re-run the baseline (and, where a valid scope
-  exists, active testing) on a schedule, authorized by `CRON_SECRET`. A failing
-  sweep now alerts the operator (it is no longer silent) and records a run in the
-  sweep-runs ledger.
-- Offboarding: `/admin/offboarding` purges ALL of a client's data across Postgres
-  + Qdrant + Neo4j. Destructive: requires `settings.manage_team` AND typing the
-  workspace id to confirm. Every purge is audited and logged with counts.
+- Remediation: in Platform Scans / Recommendations, open a review-gated PR from a
+  recommendation (never auto-merged). Needs the GitHub App (or PAT) to have
+  Contents + Pull requests write on the repo. A merged fix auto-resolves next scan.
+- Continuous: the cron sweeps re-run the baseline (and active testing where a valid
+  scope exists) on a schedule, authorized by `CRON_SECRET`. A failing sweep now
+  alerts the operator and records a run in the sweep-runs ledger (no longer silent).
+- Offboarding: OGIAM admin -> Offboarding (`/admin/offboarding`) purges ALL of a
+  client's data across Postgres + Qdrant + Neo4j. Destructive: requires
+  `settings.manage_team` AND typing the workspace id to confirm; every purge is
+  audited and logged with counts.
 
 ---
 
@@ -172,31 +245,54 @@ Over-budget AI calls are then refused at the router (the dashboard shows
 
 ```
 PLATFORM (once):
-[ ] Critical env vars set in Vercel                         (A1)
-[ ] npm run verify:prod-env green / /admin/deployment Ready (A2)
-[ ] GitHub App registered + GITHUB_APP_ID/PRIVATE_KEY set   (A3)
+[ ] 1.1 backing-service values collected (Neon/Qdrant/Neo4j)
+[ ] 1.2 INSTINCT_JWT_SECRET + CRON_SECRET generated
+[ ] 1.3 all env vars set in Vercel
+[ ] 1.4 redeployed
+[ ] 1.5 verify:prod-env / /admin/deployment all Critical green
+[ ] 2.x GitHub App created + GITHUB_APP_ID/PRIVATE_KEY set + redeployed
 
 PER CLIENT:
-[ ] SaaS connector connected + verified                     (B1a)
-[ ] Client installed the GitHub App on in-scope repos       (B1b)
-[ ] Target registered                                       (B2)
-[ ] Ownership Verified (well-known or DNS TXT)              (B3)
-[ ] Preflight Ready                                         (B4)
-[ ] Baseline run + report delivered                         (B5)
-[ ] monthly_budget_usd set                                  (B6)
+[ ] 3.1 workspace created + workspace_id noted
+[ ] 3.2 SaaS connector connected + Verify passes
+[ ] 3.3 client installed the GitHub App on in-scope repos (shows "linked")
+[ ] 3.4 target registered
+[ ] 3.5 ownership Verified (well-known file or DNS TXT)
+[ ] 3.6 preflight Ready
+[ ] 3.7 baseline run + report delivered
+[ ] 3.8 monthly_budget_usd set
 --- only after signed rules of engagement ---
-[ ] Scope token issued + active engagement run              (C)
-[ ] Remediation PRs opened (review-gated)                   (D)
-[ ] Continuous sweeps confirmed + alerting verified         (D)
+[ ] 4. scope token issued + engagement run
+[ ] 5. remediation PRs opened, sweeps + alerting confirmed
 ```
+
+---
+
+## Troubleshooting (common red checks)
+
+- /admin/deployment Postgres red: DATABASE_URL wrong/paused -> re-copy the pooled
+  Neon string; un-pause the Neon branch.
+- GitHub red / GitHub App "PAT fallback" unexpectedly: GITHUB_APP_ID or
+  GITHUB_APP_PRIVATE_KEY missing/malformed (re-paste the full PEM) OR the client
+  has not installed the App on the workspace yet.
+- Preflight "base_url_public" fails: the URL resolves to a private/internal
+  address (blocked by design) -> use the public URL.
+- Preflight "base_url_reachable" fails: the target is down or blocking us -> confirm
+  it is live and not firewalling the scanner.
+- Preflight "repo_accessible" fails: the App lacks access to that repo, or the
+  owner/repo/ref is wrong -> fix the install scope or the target's repo fields.
+- Verify ownership stuck on Not verified: token not yet placed, wrong path/record,
+  or DNS not propagated -> re-check the exact file path / TXT value and wait.
+- Scan refused "unverified_target": complete Phase 3.5 first.
+- AI calls refused: the workspace is over `monthly_budget_usd` -> raise it (3.8).
 
 ---
 
 ## Related
 
 - [ogiam-onboarding-runbook.md](./ogiam-onboarding-runbook.md): the detailed
-  verify-as-you-go operational flow (the source of truth for B2-B6 + C).
+  verify-as-you-go operational flow.
 - [ogiam-client-deployment-plan.md](./ogiam-client-deployment-plan.md): the
-  risk-sequenced go-to-market (read-only first, earn active testing).
-- `.ai/client-context.md`: full env var list and deployment blockers.
-- [docs/tenant-isolation.md](./tenant-isolation.md): the isolation posture.
+  risk-sequenced go-to-market (read-only first; earn active testing).
+- `.ai/client-context.md`: the full env var reference.
+- [docs/tenant-isolation.md](./tenant-isolation.md): the data-isolation posture.
