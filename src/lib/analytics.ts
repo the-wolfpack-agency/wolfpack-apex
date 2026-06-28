@@ -486,6 +486,14 @@ export type InstinctEventType =
   //   ledger is the IAM audit trail and the same data the drift detector and
   //   procedure-learning loop consume, so a review is itself a learning signal.
   | "agent.log_viewed"
+  // agent.fleet_viewed { total, active, paused, invited, connected }: a manager
+  // opened the agent fleet console. Engagement signal for the learning loop.
+  | "agent.fleet_viewed"
+  // agent.detail_opened { agent_id, state }: drilled into a single agent.
+  | "agent.detail_opened"
+  // agent.command_view_viewed { agent_id, decision_count, run_count }: opened the
+  // single-agent command view.
+  | "agent.command_view_viewed"
   // agent.execution_grounded { agent_id, task_id, inherited, brain_hits,
   //                            brain_grounded, model_id?, est_cost_usd? }
   //   one row per agent run capturing the maturation / familiarity curve:
@@ -624,6 +632,31 @@ export type InstinctEventType =
   // detect (coverage gap) or a class firing far above truth (noise candidate).
   // { kind: "coverage_gap" | "noise_candidate", finding_class, detail }
   | "platform.learning_signal_detected"
+  // Competitive benchmark: a third-party scanner (zap, nuclei, semgrep, trivy) was
+  // scored against the SAME consent corpus + ground truth as us, head to head.
+  // { tool, target, recall, precision, findings }
+  | "platform.competitor_benchmark_run"
+  // A class a competitor detected that we missed on the same target: a prioritized
+  // coverage gap with a named rival. { tool, target, finding_class, expected_severity }
+  | "platform.competitor_gap_detected"
+  // We matched or beat every competitor on a target (no rival-only class): proof
+  // signal for client-facing parity claims. { target, tools_compared }
+  | "platform.competitive_parity_confirmed"
+  // Cross-scan correlation: findings from DIFFERENT modalities (frontend, backend,
+  // db, security, ux) or executions were linked into one higher-order insight no
+  // single-layer scanner can see. { insight_kind, severity, modalities, member_count, platform }
+  | "platform.cross_scan_insight_generated"
+  // A compound-risk correlation: independent findings that chain into an exploit
+  // path greater than their parts. { platform, chain_length, peak_severity, route? }
+  | "platform.cross_scan_correlation_detected"
+  // A previously-resolved finding reappeared in a later scan (regression). Fed back
+  // to learning + surfaced to the client. { platform, finding_class, route?, gap_days }
+  | "platform.cross_scan_regression_detected"
+  // Client engagement with the redesigned consoles: results actually viewed. These
+  // close the learning loop on what clients look at. { open_total, critical, high, targets }
+  | "platform.results_viewed"
+  // { band, platform } a severity filter was toggled on the scan console.
+  | "platform.severity_filter_toggled"
   // Target authorization: a target must be proven client-owned (well-known token
   // or DNS TXT) before any scan/pentest runs. Fail-closed at the target level.
   // platform.target_verification_requested { platform, method }

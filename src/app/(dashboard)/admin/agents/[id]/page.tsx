@@ -13,11 +13,19 @@
  * Auth: every fetch goes through fetchWithRefresh.
  */
 
-import { useCallback, useEffect, useState, use } from "react";
+import { useCallback, useEffect, useMemo, useState, use } from "react";
 import Link from "next/link";
-import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+import { useRouter } from "next/navigation";
+import { fetchWithRefresh, jsonHeaders, getInstinctUser } from "@/lib/client-auth";
 import ApprovalList from "@/components/agents/ApprovalList";
 import ApprovalHistory from "@/components/agents/ApprovalHistory";
+import {
+  GlassPanel,
+  MetricTile,
+  StatusPill,
+  Sparkline,
+  ConsoleGrid,
+} from "@/components/console";
 
 type AgentState = "invited" | "active" | "paused" | "revoked";
 
@@ -319,19 +327,6 @@ function relativeTime(iso: string | null): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.round(hours / 24);
   return `${days}d ago`;
-}
-
-function stateColor(state: AgentState): { fg: string; bg: string } {
-  switch (state) {
-    case "active":
-      return { fg: "var(--wp-success, #22c55e)", bg: "rgba(34,197,94,0.12)" };
-    case "paused":
-      return { fg: "var(--wp-gold, #f1c233)", bg: "rgba(241,194,51,0.12)" };
-    case "revoked":
-      return { fg: "var(--wp-error, #ef4444)", bg: "rgba(239,68,68,0.12)" };
-    default:
-      return { fg: "var(--wp-text-dim, #aaa)", bg: "rgba(160,160,160,0.12)" };
-  }
 }
 
 function taskStatusColor(status: TaskStatus): { fg: string; bg: string } {
@@ -902,6 +897,7 @@ export default function AgentProfilePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router = useRouter();
   /* Tabbed layout. Every panel stays mounted (inactive ones hidden with CSS, not
      unmounted) so all loaders/polling keep running and every section's testids
      remain queryable; only the active tab is visible. Defaults to Overview. */
@@ -1175,7 +1171,19 @@ export default function AgentProfilePage({
   }, [id]);
 
   useEffect(() => {
+    /* Redirect unauthenticated users; never render a blank state. A missing
+       session would otherwise let every authenticated fetch 401 and paint an
+       empty command view (the April-16 blank-dashboard class of bug). */
+    const u = getInstinctUser<{ role: string }>();
+    if (!u) {
+      router.push(`/login?next=/admin/agents/${id}`);
+      return;
+    }
     void load();
+    // load is stable (useCallback keyed on id); router/id are read, not deps, to
+    // avoid re-running the guard on every render (the mock returns a fresh router
+    // object each render, which would otherwise re-trigger the load loop).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
 
   useEffect(() => {
@@ -1211,6 +1219,45 @@ export default function AgentProfilePage({
      currently has an in-flight task so it (re)arms when assigning new work and
      tears down once everything settles. */
   const tasksInFlight = tasks.kind === "present" && hasInFlightTask(tasks.tasks);
+
+  /* Command-view metrics: derived purely from the data the page already fetched
+     (the decision ledger, the assigned-work list, the agent record). No new
+     fetch, no new endpoint: the same data, surfaced as the hero numbers a
+     client scans first. The decision activity series drives the sparkline; the
+     ledger is capped at MAX_LOG_ROWS so the counts read "recent governed
+     actions" rather than an unbounded lifetime total. */
+  const metrics = useMemo(() => {
+    const entries = log.kind === "present" ? log.entries : [];
+    const decisions = entries.length;
+    /* The gate's verdict per governed action: an allow is the effective outcome
+       resolving to "allow"; everything else (deny / escalate / transform /
+       monitor) is the gate intervening. */
+    const allowed = entries.filter((e) => e.effective_outcome === "allow").length;
+    const denied = decisions - allowed;
+    /* Gate enforcement: the share of governed actions where the gate would have
+       blocked the agent (the value of the control plane, made legible). */
+    const enforced = entries.filter((e) => e.would_block).length;
+    const enforcementPct = decisions > 0 ? Math.round((enforced / decisions) * 100) : 0;
+
+    const taskList = tasks.kind === "present" ? tasks.tasks : [];
+    const runs = taskList.length;
+
+    /* Decision-activity sparkline: bucket the (newest-first) ledger into a
+       coarse oldest-to-newest series so the trend reads left-to-right. A short
+       ledger still produces a sensible flat/rising line via the Sparkline's own
+       1-and-n-point handling. */
+    const buckets = 12;
+    const series: number[] = [];
+    if (decisions > 0) {
+      const chrono = [...entries].reverse();
+      const size = Math.max(1, Math.ceil(chrono.length / buckets));
+      for (let i = 0; i < chrono.length; i += size) {
+        series.push(chrono.slice(i, i + size).length);
+      }
+    }
+
+    return { decisions, allowed, denied, enforcementPct, runs, series };
+  }, [log, tasks]);
   useEffect(() => {
     if (!tasksInFlight) return;
     let polls = 0;
@@ -1707,7 +1754,6 @@ export default function AgentProfilePage({
 
   if (!agent) return <div data-testid="admin-agent-page" style={wrap}>{backLink}</div>;
 
-  const c = stateColor(agent.state);
   const isRevoked = agent.state === "revoked";
 
   return (
@@ -1743,25 +1789,29 @@ export default function AgentProfilePage({
             gap: "0.6rem 1rem",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "0.7rem", flexWrap: "wrap", minWidth: 0 }}>
-            <h1 data-testid="agent-name" style={{ margin: 0, fontSize: "1.4rem", color: "var(--wp-gold, #f1c233)", wordBreak: "break-word" }}>
-              {agent.name}
-            </h1>
-            <span
-              data-testid="agent-state-chip"
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem", minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.7rem", flexWrap: "wrap", minWidth: 0 }}>
+              <h1 data-testid="agent-name" style={{ margin: 0, fontSize: "1.4rem", color: "var(--wp-gold, #f1c233)", wordBreak: "break-word" }}>
+                {agent.name}
+              </h1>
+              <StatusPill
+                testId="agent-state-chip"
+                status={agent.state}
+                size="md"
+              />
+            </div>
+            <code
+              data-testid="agent-id-mono"
+              title={agent.id}
               style={{
-                padding: "0.15rem 0.6rem",
-                borderRadius: "10px",
-                fontSize: "0.75rem",
-                background: c.bg,
-                color: c.fg,
-                border: `1px solid ${c.fg}`,
-                textTransform: "capitalize",
-                fontWeight: 600,
+                fontFamily: "var(--wp-mono, monospace)",
+                fontSize: "0.74rem",
+                color: "var(--wp-text-muted, #6b7280)",
+                wordBreak: "break-all",
               }}
             >
-              {agent.state}
-            </span>
+              {agent.id}
+            </code>
           </div>
 
           {/* Lifecycle controls live in the sticky header so pause/resume/revoke
@@ -1952,6 +2002,72 @@ export default function AgentProfilePage({
         </div>
       </div>
 
+      {/* ---- COMMAND METRICS: the hero numbers a client scans first ----
+          Derived entirely from data the page already fetched (the decision
+          ledger, the assigned-work list, the agent record). The decision
+          activity series drives the sparkline. Always mounted (across every
+          tab) so the trust surface is visible the moment the page loads. */}
+      <div data-testid="agent-metrics" style={{ marginTop: "1.5rem" }}>
+        <GlassPanel testId="agent-metrics-panel" glow="blue" padded>
+          <ConsoleGrid minColWidth={170} gap={18} testId="agent-metrics-grid">
+            <MetricTile
+              testId="metric-decisions"
+              value={metrics.decisions}
+              label="Recent decisions"
+              kicker="Governed actions"
+              accent="var(--wp-text, #e9edf4)"
+              sparkline={
+                metrics.series.length > 0 ? (
+                  <Sparkline
+                    data={metrics.series}
+                    accent="var(--wp-info, #3b82f6)"
+                    area
+                    ariaLabel="decision activity trend"
+                    testId="metric-decisions-spark"
+                  />
+                ) : undefined
+              }
+            />
+            <MetricTile
+              testId="metric-allowed"
+              value={metrics.allowed}
+              label="Allowed"
+              kicker="Gate verdict"
+              accent="var(--wp-success, #22c55e)"
+            />
+            <MetricTile
+              testId="metric-denied"
+              value={metrics.denied}
+              label="Denied or escalated"
+              kicker="Gate verdict"
+              accent="var(--wp-error, #ef4444)"
+            />
+            <MetricTile
+              testId="metric-enforcement"
+              value={metrics.enforcementPct}
+              display={`${metrics.enforcementPct}%`}
+              label="Gate enforcement"
+              kicker="Would-block share"
+              accent="var(--wp-gold, #e8b528)"
+            />
+            <MetricTile
+              testId="metric-runs"
+              value={metrics.runs}
+              label="Assigned runs"
+              kicker="Work items"
+              accent="var(--wp-text, #e9edf4)"
+            />
+            <MetricTile
+              testId="metric-last-active"
+              display={relativeTime(agent.lastSeenAt)}
+              label="Last active"
+              kicker="Identity"
+              accent="var(--wp-text, #e9edf4)"
+            />
+          </ConsoleGrid>
+        </GlassPanel>
+      </div>
+
       {/* ---- OVERVIEW: identity + system model ---- */}
       <div data-testid="agent-panel-overview" role="tabpanel" style={{ ...panelStyle("overview"), marginTop: "1.5rem" }}>
 
@@ -1975,15 +2091,13 @@ export default function AgentProfilePage({
 
       <div
         data-testid="agent-identity"
+        className="wp-glass"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
           gap: "1rem",
           padding: "1.1rem 1.2rem",
           marginBottom: "1.25rem",
-          background: "var(--wp-dark-surface, #1f1f22)",
-          border: "1px solid var(--wp-dark-border, #333)",
-          borderRadius: "8px",
         }}
       >
         <Field label="Agent id" value={agent.id} testid="agent-id" />
@@ -2011,12 +2125,10 @@ export default function AgentProfilePage({
           default, capped to a scrollable list so the section stays compact. */}
       <div
         data-testid="agent-scan-section"
+        className="wp-glass"
         style={{
           marginBottom: "1.5rem",
           padding: "1.1rem 1.2rem",
-          background: "var(--wp-dark-surface, #1f1f22)",
-          border: "1px solid var(--wp-dark-border, #333)",
-          borderRadius: "8px",
         }}
       >
         <div
@@ -2231,12 +2343,10 @@ export default function AgentProfilePage({
           the owner to approve, which is the governance working as intended. */}
       <div
         data-testid="agent-tasks-section"
+        className="wp-glass"
         style={{
           marginBottom: "1.5rem",
           padding: "1.1rem 1.2rem",
-          background: "var(--wp-dark-surface, #1f1f22)",
-          border: "1px solid var(--wp-dark-border, #333)",
-          borderRadius: "8px",
         }}
       >
         <div
@@ -2469,12 +2579,10 @@ export default function AgentProfilePage({
           ?agentId; the whole-workspace view lives at /admin/agents/approvals. */}
       <div
         data-testid="agent-approvals-section"
+        className="wp-glass"
         style={{
           marginBottom: "1.5rem",
           padding: "1.1rem 1.2rem",
-          background: "var(--wp-dark-surface, #1f1f22)",
-          border: "1px solid var(--wp-dark-border, #333)",
-          borderRadius: "8px",
         }}
       >
         <div
@@ -2515,12 +2623,10 @@ export default function AgentProfilePage({
           this agent's connections, enforced server-side). */}
       <div
         data-testid="agent-backup-section"
+        className="wp-glass"
         style={{
           marginBottom: "1.5rem",
           padding: "1.1rem 1.2rem",
-          background: "var(--wp-dark-surface, #1f1f22)",
-          border: "1px solid var(--wp-dark-border, #333)",
-          borderRadius: "8px",
         }}
       >
         <div
@@ -2629,12 +2735,10 @@ export default function AgentProfilePage({
           failure never blanks the profile. */}
       <div
         data-testid="agent-connections-section"
+        className="wp-glass"
         style={{
           marginBottom: "1.5rem",
           padding: "1.1rem 1.2rem",
-          background: "var(--wp-dark-surface, #1f1f22)",
-          border: "1px solid var(--wp-dark-border, #333)",
-          borderRadius: "8px",
         }}
       >
         <div
@@ -3151,12 +3255,10 @@ export default function AgentProfilePage({
           a drift failure never blanks the profile. */}
       <div
         data-testid="agent-drift-section"
+        className="wp-glass"
         style={{
           marginBottom: "1.5rem",
           padding: "1.1rem 1.2rem",
-          background: "var(--wp-dark-surface, #1f1f22)",
-          border: "1px solid var(--wp-dark-border, #333)",
-          borderRadius: "8px",
         }}
       >
         <div
@@ -3425,12 +3527,10 @@ export default function AgentProfilePage({
           lost. Loads independently so a log failure never blanks the profile. */}
       <div
         data-testid="agent-log-section"
+        className="wp-glass"
         style={{
           marginBottom: "1.5rem",
           padding: "1.1rem 1.2rem",
-          background: "var(--wp-dark-surface, #1f1f22)",
-          border: "1px solid var(--wp-dark-border, #333)",
-          borderRadius: "8px",
         }}
       >
         <div
