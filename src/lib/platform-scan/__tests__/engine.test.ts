@@ -326,10 +326,34 @@ describe("cookieAndCorsFindings", () => {
     expect(f).toHaveLength(0);
   });
 
-  it("flags ACAO:* with credentials as critical, ACAO:* alone as medium", () => {
-    const crit = cookieAndCorsFindings("/api", obs({ "access-control-allow-origin": "*", "access-control-allow-credentials": "true" }), true);
+  it("flags ACAO:* + Allow-Credentials:true as critical (the only real cross-origin leak)", () => {
+    const crit = cookieAndCorsFindings(
+      "/api",
+      obs({ "access-control-allow-origin": "*", "access-control-allow-credentials": "true" }),
+      true,
+    );
     expect(crit[0]).toMatchObject({ severity: "critical", title: "CORS wildcard with credentials" });
-    const med = cookieAndCorsFindings("/api", obs({ "access-control-allow-origin": "*" }), true);
-    expect(med[0]).toMatchObject({ severity: "medium", title: "CORS allows any origin (ACAO: *)" });
+  });
+
+  it("rates ACAO:* (no credentials) by response type: medium for data, low for HTML/document", () => {
+    // JSON data response -> medium (a site can read this data cross-origin).
+    const dataF = cookieAndCorsFindings(
+      "/api/items",
+      obs({ "access-control-allow-origin": "*", "content-type": "application/json; charset=utf-8" }),
+      true,
+    );
+    expect(dataF[0]).toMatchObject({ severity: "medium", title: "CORS allows any origin on a data response (ACAO: *)" });
+
+    // HTML page (the Vercel/CDN static default) -> low, not medium noise.
+    const htmlF = cookieAndCorsFindings(
+      "/dashboard",
+      obs({ "access-control-allow-origin": "*", "content-type": "text/html; charset=utf-8" }),
+      true,
+    );
+    expect(htmlF[0]).toMatchObject({ severity: "low", title: "CORS wildcard on a non-data response (ACAO: *)" });
+
+    // Unknown/absent content-type -> treated as non-data (low), never assumed sensitive.
+    const unknownF = cookieAndCorsFindings("/x", obs({ "access-control-allow-origin": "*" }), true);
+    expect(unknownF[0]).toMatchObject({ severity: "low" });
   });
 });

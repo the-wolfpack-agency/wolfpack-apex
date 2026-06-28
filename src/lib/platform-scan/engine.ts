@@ -207,10 +207,23 @@ export function cookieAndCorsFindings(routePath: string, obs: RouteObservation, 
   const acao = hdr(obs, "access-control-allow-origin");
   if (acao === "*") {
     const creds = (hdr(obs, "access-control-allow-credentials") ?? "").toLowerCase() === "true";
+    const contentType = (hdr(obs, "content-type") ?? "").toLowerCase();
+    // A cross-origin site can only READ a response when the browser exposes it.
+    // ACAO:* WITH Allow-Credentials:true is the genuinely dangerous case (any site
+    // reads authenticated responses). ACAO:* WITHOUT credentials cannot leak a
+    // credentialed response at all: the browser rejects the '*'+credentials combo
+    // and never sends cookies to a '*' origin, so an authenticated page/endpoint is
+    // not exposed. Precision-first: only the credentialed combo is critical; a bare
+    // ACAO:* on a DATA response is a medium (it may serve non-public data to any
+    // site), and on an HTML/document response it is the common CDN/static default
+    // (e.g. Vercel serves static pages with ACAO:*) and is low-signal, not a leak.
+    const isDataResponse = /\b(application\/json|application\/.*\+json|text\/csv|application\/xml|text\/xml|application\/javascript)\b/.test(contentType);
     if (creds) {
       out.push(F("critical", "CORS wildcard with credentials", "Access-Control-Allow-Origin: * together with Allow-Credentials: true lets ANY website read authenticated responses. Echo a specific allowed origin instead of '*' for credentialed endpoints."));
+    } else if (isDataResponse) {
+      out.push(F("medium", "CORS allows any origin on a data response (ACAO: *)", "Access-Control-Allow-Origin: * on a data endpoint lets any site read this response. Restrict to an explicit allowlist if it returns non-public data."));
     } else {
-      out.push(F("medium", "CORS allows any origin (ACAO: *)", "Access-Control-Allow-Origin: * exposes this response to any site. Restrict to an explicit allowlist if it returns non-public data."));
+      out.push(F("low", "CORS wildcard on a non-data response (ACAO: *)", "Access-Control-Allow-Origin: * on an HTML/document response (commonly a CDN default on static pages, e.g. Vercel). Without Allow-Credentials it cannot leak an authenticated response, so this is low-signal; set an explicit origin only if you serve sensitive cross-origin documents."));
     }
   }
   return out;
