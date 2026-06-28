@@ -106,6 +106,14 @@ export const SCAN_MANIFESTS: Record<string, ScanManifest> = {
   "wolfpack-auto": {
     baseUrl: "https://wolfpack-auto.vercel.app",
     routes: WOLFPACK_AUTO,
+    // wolfpack-auto authenticates via NextAuth.js (credentials provider). Configure
+    // a connector named "wolfpack-auto" with authType nextauth_credentials; the
+    // scanner runs the CSRF -> callback/credentials flow and crawls authenticated.
+    login: {
+      connectorName: "wolfpack-auto",
+      loginPath: "/api/auth/callback/credentials",
+      sessionCookieName: "next-auth.session-token",
+    },
     // White-box source scan: the high-risk admin pages flagged during platform
     // mapping (fetch-without-res.ok silent blanks, hardcoded tenant id). A seed
     // path set; repo-tree discovery is the next layer and extends this list.
