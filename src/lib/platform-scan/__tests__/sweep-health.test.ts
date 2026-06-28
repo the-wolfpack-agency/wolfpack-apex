@@ -160,6 +160,78 @@ describe("recordSweepRun", () => {
     expect(events[0].event).toBe("platform.sweep_failed");
   });
 
+  it("a 'ux'-kind run records, derives status, and alerts exactly like the security kinds", async () => {
+    // Continuous UX sweep shares the SAME ledger + alerting path (migration 200
+    // widened the kind CHECK; SweepKind gained 'ux'). An all-ok ux run fires
+    // sweep_completed with no alert...
+    const okDeps = makeDeps();
+    const ok = await recordSweepRun(
+      {
+        kind: "ux",
+        actor,
+        startedAt: started,
+        outcomes: [
+          { target: "/", ok: true },
+          { target: "/dashboard", ok: true },
+        ],
+      },
+      okDeps.deps,
+    );
+    expect(ok.status).toBe("ok");
+    expect(ok.alerted).toBe(false);
+    expect(okDeps.notifies).toHaveLength(0);
+    expect(okDeps.inserted[0]).toMatchObject({ kind: "ux", status: "ok", targetsSucceeded: 2 });
+    expect(okDeps.events[0].event).toBe("platform.sweep_completed");
+    expect(okDeps.events[0].meta).toMatchObject({ kind: "ux", targets: 2, succeeded: 2 });
+
+    // ...and a failing ux target alerts + fires sweep_failed, with a kind-derived
+    // label ("ux sweep", not the old pentest fallback).
+    const badDeps = makeDeps();
+    const bad = await recordSweepRun(
+      {
+        kind: "ux",
+        actor,
+        startedAt: started,
+        outcomes: [
+          { target: "/", ok: true },
+          { target: "/login", ok: false, reason: "error:blank render" },
+        ],
+      },
+      badDeps.deps,
+    );
+    expect(bad.status).toBe("partial");
+    expect(bad.alerted).toBe(true);
+    expect(badDeps.notifies).toHaveLength(1);
+    expect(badDeps.notifies[0]).toMatchObject({
+      category: "security",
+      source: "sweep_health",
+      sourceId: "ux:partial",
+    });
+    expect(badDeps.notifies[0]).toMatchObject({ title: expect.stringContaining("ux sweep") });
+    expect(badDeps.events[0].event).toBe("platform.sweep_failed");
+    expect(badDeps.inserted[0].outcomes).toEqual(
+      expect.arrayContaining([{ target: "/login", ok: false, reason: "error:blank render" }]),
+    );
+  });
+
+  it("status-change dedup applies to 'ux' too: a still-broken ux sweep does NOT re-alert", async () => {
+    const { deps, notifies, events, setPrevious } = makeDeps();
+    setPrevious("failed");
+    const res = await recordSweepRun(
+      {
+        kind: "ux",
+        actor,
+        startedAt: started,
+        outcomes: [{ target: "/", ok: false, reason: "error:csp" }],
+      },
+      deps,
+    );
+    expect(res.status).toBe("failed");
+    expect(res.alerted).toBe(false);
+    expect(notifies).toHaveLength(0);
+    expect(events[0].event).toBe("platform.sweep_failed");
+  });
+
   it("status-change dedup: a still-broken sweep does NOT re-alert, but still records + fires analytics", async () => {
     const { deps, notifies, events, setPrevious } = makeDeps();
     setPrevious("failed"); // previous tick was already failed

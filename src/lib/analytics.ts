@@ -599,6 +599,12 @@ export type InstinctEventType =
   // broken sweep (stale client posture) is visible. { kind, targets, succeeded, failed }
   | "platform.sweep_completed"
   | "platform.sweep_failed"
+  // UX/accessibility posture grade for a target, trended over time like the
+  // security posture. { platform, grade, ux, a11y, total }
+  | "platform.ux_posture_scored"
+  // Tier-2 agentic journey-friction: a gated journey attempt was evaluated for
+  // excessive steps / dead-ends. { platform, journey, steps, expected, friction }
+  | "platform.journey_evaluated"
   // Target authorization: a target must be proven client-owned (well-known token
   // or DNS TXT) before any scan/pentest runs. Fail-closed at the target level.
   // platform.target_verification_requested { platform, method }

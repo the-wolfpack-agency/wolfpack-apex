@@ -22,6 +22,7 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import { recordScan } from "@/lib/platform-scan/store";
 import { classifyPage, type PageObservation } from "@/lib/platform-scan/browser/classify";
+import { classifyJourney, type JourneyTrace } from "@/lib/platform-scan/browser/journey";
 import type { PlatformScanResult, ScanFinding } from "@/lib/platform-scan/types";
 
 function isAuthorizedCron(req: NextRequest): boolean {
@@ -43,6 +44,14 @@ interface IngestBody {
    * SAME recordScan path as directly-supplied findings[] - no data lost.
    */
   observations?: unknown;
+  /**
+   * Optional tier-2 JOURNEY TRACES. Each trace is one full agent attempt at a
+   * goal (the ordered gated actions). When present, apex runs classifyJourney
+   * SERVER-SIDE (pure) and the friction findings flow through the SAME recordScan
+   * path as findings[]/observations[]. Additive: absent, behavior is unchanged.
+   * This is the ingest side of the openclaw driver contract (see browser/journey.ts).
+   */
+  traces?: unknown;
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -77,30 +86,42 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const observations = Array.isArray(body.observations)
     ? (body.observations as PageObservation[])
     : null;
-  if (!platform || !baseUrl || (!directFindings && !observations)) {
+  const traces = Array.isArray(body.traces)
+    ? (body.traces as JourneyTrace[])
+    : null;
+  if (!platform || !baseUrl || (!directFindings && !observations && !traces)) {
     return NextResponse.json(
       {
         ok: false,
-        error: "platform, baseUrl and at least one of findings[] or observations[] are required",
+        error:
+          "platform, baseUrl and at least one of findings[], observations[] or traces[] are required",
       },
       { status: 400 },
     );
   }
 
-  // Classify any raw observations SERVER-SIDE (classifyPage is pure), then merge
-  // with directly-supplied findings. Both sources feed the SAME scan so they flow
-  // through the identical recordScan path (dedup, auto-resolve, Brain, analytics).
+  // Classify any raw observations and journey traces SERVER-SIDE (classifyPage
+  // and classifyJourney are pure), then merge with directly-supplied findings.
+  // All sources feed the SAME scan so they flow through the identical recordScan
+  // path (dedup, auto-resolve, Brain, analytics) - no data lost.
   const classifiedFindings = (observations ?? []).flatMap((obs) => classifyPage(obs));
-  const typedFindings: ScanFinding[] = [...(directFindings ?? []), ...classifiedFindings];
+  const journeyFindings = (traces ?? []).flatMap((trace) => classifyJourney(trace));
+  const typedFindings: ScanFinding[] = [
+    ...(directFindings ?? []),
+    ...classifiedFindings,
+    ...journeyFindings,
+  ];
 
-  // routeCount defaults to observations.length when observations drive the
-  // request; otherwise it falls back to the merged finding count (today's
-  // behavior for a findings[]-only request).
+  // routeCount defaults to the count of probed units when observations and/or
+  // traces drive the request (each is one route/journey the runner covered);
+  // otherwise it falls back to the merged finding count (today's behavior for a
+  // findings[]-only request). Explicit body.routeCount always wins.
+  const probedUnits = (observations?.length ?? 0) + (traces?.length ?? 0);
   const routeCount =
     typeof body.routeCount === "number"
       ? body.routeCount
-      : observations
-        ? observations.length
+      : probedUnits > 0
+        ? probedUnits
         : typedFindings.length;
 
   const result: PlatformScanResult = {

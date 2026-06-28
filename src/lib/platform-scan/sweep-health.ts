@@ -54,7 +54,7 @@ import { safeQuery } from "@/lib/db";
 import { notify } from "@/lib/notifications/in-app";
 import { trackEvent, type InstinctEventType } from "@/lib/analytics";
 
-export type SweepKind = "engagement" | "pentest";
+export type SweepKind = "engagement" | "pentest" | "ux";
 export type SweepStatus = "ok" | "partial" | "failed";
 
 /** Outcome of one target within a sweep. `reason` is set only on failure. */
@@ -300,7 +300,9 @@ async function sendSweepAlert(
     .filter((o) => !o.ok)
     .map((o) => o.target)
     .slice(0, 5);
-  const label = record.kind === "engagement" ? "engagement sweep" : "pentest sweep";
+  // Label derives from the kind so a new kind (e.g. "ux") reads correctly
+  // without a hardcoded 2-way branch that would mislabel it.
+  const label = `${record.kind} sweep`;
   const body =
     record.status === "failed"
       ? record.error

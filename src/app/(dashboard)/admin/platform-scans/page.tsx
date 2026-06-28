@@ -84,6 +84,39 @@ interface FindingsSummary {
   byCategory: Record<string, number>;
 }
 
+type UxGrade = "A" | "B" | "C" | "D" | "F";
+
+// The UX/accessibility posture grade the summary route computes from open ux_gap
+// findings. Mirrors the security posture grade: one at-a-glance letter that trends
+// over time. Optional on the wire so an older summary response (pre-uxPosture)
+// renders the explicit "No UX scan yet" empty state, never a blank.
+interface UxPosture {
+  grade: UxGrade;
+  ux: number;
+  a11y: number;
+  total: number;
+  bySeverity: { high: number; medium: number; low: number };
+  score: number;
+}
+
+// Grade -> chip color. A green, B/C gold, D amber, F red - same token vocabulary
+// the severity chips already use, so the headline reads consistently.
+const UX_GRADE_COLOR: Record<UxGrade, string> = {
+  A: "var(--wp-success, #22c55e)",
+  B: "var(--wp-gold, #f1c233)",
+  C: "var(--wp-gold, #f1c233)",
+  D: "#f59e0b",
+  F: "var(--wp-error, #ef4444)",
+};
+
+const UX_GRADE_LABEL: Record<UxGrade, string> = {
+  A: "No UX or accessibility gaps",
+  B: "Minor usability nits",
+  C: "Usability gaps to address",
+  D: "A blocking UX/a11y gap present",
+  F: "Multiple blocking UX/a11y gaps",
+};
+
 interface ScanCoverage {
   attempted: number;
   succeeded: number;
@@ -333,6 +366,80 @@ function FindingRow({
   );
 }
 
+// At-a-glance UX/accessibility posture headline. Renders the graded chip + the
+// ux/a11y split, or an explicit empty state when no UX posture has been computed
+// (absent on the wire / no findings yet) - never a blank.
+function UxPostureBadge({ posture }: { posture: UxPosture | null }) {
+  if (!posture) {
+    return (
+      <div
+        data-testid="ux-posture-empty"
+        style={{
+          padding: "0.7rem 1rem",
+          marginBottom: "1rem",
+          borderRadius: "0.5rem",
+          fontSize: "0.85rem",
+          color: "var(--wp-text-dim, #aaa)",
+          background: "var(--wp-dark-surface, #1f1f22)",
+          border: "1px solid var(--wp-dark-border, #333)",
+        }}
+      >
+        No UX scan yet - run a scan to grade this platform&apos;s usability and accessibility.
+      </div>
+    );
+  }
+
+  const color = UX_GRADE_COLOR[posture.grade];
+  return (
+    <div
+      data-testid="ux-posture"
+      data-grade={posture.grade}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "0.75rem",
+        flexWrap: "wrap",
+        padding: "0.75rem 1rem",
+        marginBottom: "1rem",
+        background: "var(--wp-dark-surface, #1f1f22)",
+        border: "1px solid var(--wp-dark-border, #333)",
+        borderRadius: "0.5rem",
+      }}
+    >
+      <span
+        data-testid="ux-posture-grade"
+        title={`UX/accessibility posture grade: ${posture.grade}`}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "2rem",
+          height: "2rem",
+          fontSize: "1.05rem",
+          fontWeight: 800,
+          borderRadius: "0.45rem",
+          color: "#0b0b0c",
+          background: color,
+        }}
+      >
+        {posture.grade}
+      </span>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+        <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
+          UX posture: {posture.grade}
+        </span>
+        <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim, #aaa)" }}>
+          {UX_GRADE_LABEL[posture.grade]}
+        </span>
+      </div>
+      <span style={{ flex: 1 }} />
+      <span data-testid="ux-posture-split" style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)" }}>
+        {posture.ux} UX · {posture.a11y} accessibility · {posture.total} total
+      </span>
+    </div>
+  );
+}
+
 export default function PlatformScansPage() {
   const [findings, setFindings] = useState<ScanFindingRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -342,6 +449,7 @@ export default function PlatformScansPage() {
   const [summary, setSummary] = useState<RunSummary | null>(null);
   const [findingsSummary, setFindingsSummary] = useState<FindingsSummary>(EMPTY_SUMMARY);
   const [scanHistory, setScanHistory] = useState<ScanHistoryRow[]>([]);
+  const [uxPosture, setUxPosture] = useState<UxPosture | null>(null);
   // Which platform to scan + how (black-box HTTP vs white-box source), plus the
   // platform filter for the findings list. An agent can scan many platforms, so
   // the operator always picks one explicitly and every finding is labeled by it.
@@ -383,9 +491,12 @@ export default function PlatformScansPage() {
       const qs = platform ? `?platform=${encodeURIComponent(platform)}` : "";
       const res = await fetchWithRefresh(`/api/admin/platform-scans/summary${qs}`);
       if (!res.ok) return;
-      const data = (await res.json()) as { summary?: FindingsSummary; scans?: ScanHistoryRow[] };
+      const data = (await res.json()) as { summary?: FindingsSummary; scans?: ScanHistoryRow[]; uxPosture?: UxPosture };
       setFindingsSummary(data.summary ?? EMPTY_SUMMARY);
       setScanHistory(data.scans ?? []);
+      // null when the route omits it (older deploy) so the badge shows its empty
+      // state rather than a stale/blank grade.
+      setUxPosture(data.uxPosture ?? null);
     } catch {
       /* rollup is contextual; the findings list still renders without it. */
     }
@@ -595,6 +706,8 @@ export default function PlatformScansPage() {
       </div>
         );
       })()}
+
+      <UxPostureBadge posture={uxPosture} />
 
       {scanHistory.length > 0 && <CoverageHealth scan={scanHistory[0]} />}
 

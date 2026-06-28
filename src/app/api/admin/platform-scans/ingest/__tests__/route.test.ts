@@ -232,3 +232,103 @@ it("observations[]-only request works under the capability (user) auth path", as
     expect.objectContaining({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin" }),
   );
 });
+
+// --- Tier-2 journey-traces path (apex classifies SERVER-SIDE via classifyJourney) ---
+
+/** A dead-end journey: the agent could not complete the goal -> high ux_gap. */
+const DEADEND_TRACE = {
+  route: "/billing",
+  journey: "billing",
+  goal: "create an invoice",
+  completed: false,
+  steps: [
+    { action: "navigate", ok: true },
+    { action: "click", ok: true },
+  ],
+};
+
+/** A clean, completed, optimal journey -> classifyJourney yields []. */
+const HEALTHY_TRACE = {
+  route: "/ok",
+  journey: "home",
+  goal: "open the home page",
+  completed: true,
+  steps: [
+    { action: "navigate", ok: true },
+    { action: "observe", ok: true },
+  ],
+};
+
+it("traces[] are classified SERVER-SIDE and the friction findings land in recordScan", async () => {
+  const res = await post(
+    { platform: "acme", baseUrl: "https://acme.test", traces: [DEADEND_TRACE] },
+    { authorization: "Bearer s3cret" },
+  );
+  expect(res.status).toBe(200);
+  const call = mockRecord.mock.calls[0][0];
+  // traces drive routeCount (one journey covered).
+  expect(call.result.routeCount).toBe(1);
+  // The classifier (REAL, pure) produced the dead-end finding; assert it landed.
+  expect(call.result.findings).toEqual([
+    expect.objectContaining({
+      route: "/billing",
+      category: "ux_gap",
+      severity: "high",
+      title: "Journey could not be completed",
+    }),
+  ]);
+});
+
+it("a healthy trace classifies to 0 findings", async () => {
+  await post(
+    { platform: "acme", baseUrl: "https://acme.test", traces: [HEALTHY_TRACE] },
+    { authorization: "Bearer s3cret" },
+  );
+  const call = mockRecord.mock.calls[0][0];
+  expect(call.result.findings).toEqual([]);
+  expect(call.result.routeCount).toBe(1);
+});
+
+it("findings[] + observations[] + traces[] all land in the same scan, in source order", async () => {
+  const res = await post(
+    {
+      platform: "acme",
+      baseUrl: "https://acme.test",
+      findings: VALID.findings,
+      observations: [UX_OBSERVATION],
+      traces: [DEADEND_TRACE],
+    },
+    { authorization: "Bearer s3cret" },
+  );
+  expect(res.status).toBe(200);
+  const call = mockRecord.mock.calls[0][0];
+  expect(call.result.findings).toEqual([
+    expect.objectContaining({ route: "/x", category: "bug" }),
+    expect.objectContaining({ route: "/dash", category: "ux_gap" }),
+    expect.objectContaining({ route: "/billing", title: "Journey could not be completed" }),
+  ]);
+  // observations.length (1) + traces.length (1) = 2 probed units.
+  expect(call.result.routeCount).toBe(2);
+});
+
+it("traces[]-only request works under the capability (user) auth path", async () => {
+  const res = await post({
+    platform: "acme",
+    baseUrl: "https://acme.test",
+    traces: [DEADEND_TRACE],
+  }); // no bearer -> capability path
+  expect(res.status).toBe(200);
+  expect(mockAuthFn).toHaveBeenCalled();
+  expect(mockRecord).toHaveBeenCalledWith(
+    expect.objectContaining({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin" }),
+  );
+});
+
+it("400 when none of findings[]/observations[]/traces[] is provided", async () => {
+  const res = await post(
+    { platform: "acme", baseUrl: "https://acme.test" },
+    { authorization: "Bearer s3cret" },
+  );
+  expect(res.status).toBe(400);
+  expect(mockRecord).not.toHaveBeenCalled();
+});

@@ -1,0 +1,67 @@
+name: UX Scan Sweep (Browser, Continuous)
+
+# CONTINUOUS tier-1 browser UX / a11y sweep. Mirrors the engagement + pentest
+# cron sweeps, but runs HERE (scheduled GitHub Actions) instead of Vercel Cron
+# because the scan needs a REAL chromium (axe-core injected into a live page) that
+# the Vercel cron runtime cannot run. Each tick:
+#   - spins up chromium, loads each target route read-only (GET/HEAD floor),
+#   - captures console/CSP/failed-API/blank-render + axe a11y observations,
+#   - POSTs the RAW observations to apex's ingest endpoint, which classifies them
+#     server-side (classifyPage) and recordScan()s them into the SAME findings
+#     store the HTTP probe + browser-journey scans feed.
+# Because the ingest re-classifies on every pass, an issue that was fixed since the
+# last run auto-resolves; the run's own health is recorded in the sweep-health
+# ledger (instinct_sweep_runs, kind = 'ux', migration 200) like the other sweeps.
+#
+# Auth: identical scheme to platform-scan-browser.yml - the ingest endpoint takes
+# Authorization: Bearer ${CRON_SECRET}. We pass INGEST_SECRET into the script's
+# CRON_SECRET env so the POST authenticates. No new secrets scheme invented.
+#
+# Targets: configured here via env / workflow_dispatch input for now (a single
+# base URL + route list). Registry-driven fan-out over every client target is a
+# follow-up; this lands the cadence + ledger wiring first.
+
+on:
+  schedule:
+    # Daily at 05:00 UTC - posture-staleness cadence matching the security sweeps.
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Target base URL (defaults to the TARGET_BASE_URL secret)"
+        required: false
+        default: ""
+      routes:
+        description: 'Comma list of "path|journey" (defaults to the script default set)'
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  ux-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run continuous UX sweep
+        run: node scripts/ux-scan.mjs
+        env:
+          # The script reads BASE_URL / INGEST_URL / CRON_SECRET / ROUTES (argv
+          # overrides env). We map the existing browser-scan secret names onto
+          # those so the secrets scheme stays shared with platform-scan-browser.yml.
+          BASE_URL: ${{ github.event.inputs.base != '' && github.event.inputs.base || secrets.TARGET_BASE_URL }}
+          INGEST_URL: ${{ secrets.INGEST_URL }}
+          CRON_SECRET: ${{ secrets.INGEST_SECRET }}
+          TARGET_PLATFORM: ${{ vars.UX_SCAN_PLATFORM || 'self' }}
+          ROUTES: ${{ github.event.inputs.routes }}

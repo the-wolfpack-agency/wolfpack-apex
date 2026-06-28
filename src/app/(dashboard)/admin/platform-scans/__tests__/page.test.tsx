@@ -405,3 +405,37 @@ it("dimmed-but-present pills render for zero counts", async () => {
   // Category breakdown collapses out when nothing to show.
   expect(screen.queryByTestId("category-breakdown")).not.toBeInTheDocument();
 });
+
+it("renders the UX posture grade chip from the summary's uxPosture", async () => {
+  const UX_POSTURE = { grade: "D", ux: 1, a11y: 2, total: 3, bySeverity: { high: 1, medium: 0, low: 2 }, score: 12 };
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(mkRes({ summary: SUMMARY, scans: SCANS, uxPosture: UX_POSTURE }));
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  const badge = await screen.findByTestId("ux-posture");
+  expect(badge).toHaveAttribute("data-grade", "D");
+  expect(screen.getByTestId("ux-posture-grade")).toHaveTextContent("D");
+  expect(screen.getByTestId("ux-posture-split")).toHaveTextContent("1 UX");
+  expect(screen.getByTestId("ux-posture-split")).toHaveTextContent("2 accessibility");
+  expect(screen.getByTestId("ux-posture-split")).toHaveTextContent("3 total");
+  // Empty state is NOT shown when a grade exists.
+  expect(screen.queryByTestId("ux-posture-empty")).not.toBeInTheDocument();
+});
+
+it("shows the 'No UX scan yet' empty state when uxPosture is absent (never blank)", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    // Older summary response: no uxPosture field.
+    if (isSummary(url)) return Promise.resolve(mkRes({ summary: SUMMARY, scans: SCANS }));
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  expect(await screen.findByTestId("ux-posture-empty")).toBeInTheDocument();
+  expect(screen.queryByTestId("ux-posture")).not.toBeInTheDocument();
+});
