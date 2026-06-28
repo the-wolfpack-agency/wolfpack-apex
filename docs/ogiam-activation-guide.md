@@ -15,6 +15,32 @@ Conventions in this doc: "OGIAM admin" = pages under the production URL (e.g.
 
 ---
 
+## Quick links (click these)
+
+OGIAM admin (exact pages):
+- Deployment readiness: https://wolfpack-instinct.vercel.app/admin/deployment
+- Connectors: https://wolfpack-instinct.vercel.app/admin/connectors
+- GitHub App status: https://wolfpack-instinct.vercel.app/admin/connectors/github-app
+- Onboarding (targets, verify, preflight): https://wolfpack-instinct.vercel.app/admin/onboarding
+- Platform Scans (baseline + report): https://wolfpack-instinct.vercel.app/admin/platform-scans
+- Pentest console: https://wolfpack-instinct.vercel.app/admin/pentest
+- Offboarding: https://wolfpack-instinct.vercel.app/admin/offboarding
+- Team (find workspace_id): https://wolfpack-instinct.vercel.app/admin/team
+
+External consoles:
+- Vercel project env vars: https://vercel.com/dashboard -> wolfpack-instinct -> Settings -> Environment Variables
+- Neon (use the `wolfpack-apex-db` project): https://console.neon.tech ; its SQL Editor is the "SQL Editor" tab inside that project
+- GitHub App, create for the org (direct): https://github.com/organizations/the-wolfpack-agency/settings/apps/new
+- GitHub Apps list (manage/keys/install): https://github.com/settings/apps
+- Qdrant Cloud: https://cloud.qdrant.io
+- Neo4j Aura: https://console.neo4j.io
+
+The right Neon project is `wolfpack-apex-db` (it matches the repo, holds the
+production data, and is the one the live app uses). Confirm by checking the
+`DATABASE_URL` host in Vercel matches this project's endpoint.
+
+---
+
 ## Phase 0: Access checklist (gather before you start)
 
 You (or whoever runs this) need:
