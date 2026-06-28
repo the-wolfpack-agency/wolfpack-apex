@@ -51,6 +51,30 @@ export interface UiElement {
   textContent?: string;
 }
 
+/**
+ * One axe-core accessibility violation, distilled to the few fields the
+ * classifier needs. The browser runner captures the RAW axe result via
+ * window.axe.run() and maps each violation to this shape (one entry per RULE,
+ * not per node; nodeCount conveys breadth). The classifier stays pure: no
+ * axe-core import, no browser - it consumes these plain records server-side.
+ *
+ * We reuse axe-core (the WCAG gold-standard engine) rather than rebuilding
+ * thousands of a11y rules ourselves. axe runs in the page; only this distilled
+ * record crosses back to the pure layer, so the classifier never depends on axe.
+ */
+export interface AxeViolation {
+  /** The axe rule id, e.g. "color-contrast", "button-name", "label". */
+  id: string;
+  /** axe's impact rating; drives our severity mapping. */
+  impact: "critical" | "serious" | "moderate" | "minor";
+  /** Human-readable summary of the rule, e.g. "Buttons must have discernible text". */
+  help: string;
+  /** Deep link to the axe rule docs, when axe supplies one. */
+  helpUrl?: string;
+  /** How many DOM nodes violated this rule on the page (breadth signal). */
+  nodeCount: number;
+}
+
 /** The raw, browser-observed signals for one page load. Pure input to
  *  classifyPage — no Playwright types leak in, so it is trivially testable. */
 export interface PageObservation {
@@ -71,6 +95,13 @@ export interface PageObservation {
    * plus computed styles; the classifier never touches a browser.
    */
   elements?: UiElement[];
+  /**
+   * Optional RAW axe-core violations for this page. Additive: when absent or
+   * empty, classifyPage behaves exactly as before. When present, classifyAxe
+   * turns them into ScanFindings. The runner captures these via window.axe.run();
+   * the classifier never imports axe.
+   */
+  axeViolations?: AxeViolation[];
 }
 
 /** Treat an element as interactive when explicitly flagged OR when its role is
@@ -194,6 +225,80 @@ export function dialogNoAccessibleName(
 }
 
 /**
+ * Map an axe impact rating to our ScanSeverity. axe has four impact levels; we
+ * collapse them onto our four-level scale: critical -> high (the worst we model
+ * for an a11y issue; a hard server error stays the only "critical"), serious ->
+ * medium, moderate/minor -> low. An unrecognized impact returns null so the
+ * caller skips it (precision-first: never guess a severity for an unknown rating).
+ */
+function axeImpactToSeverity(
+  impact: AxeViolation["impact"],
+): ScanFinding["severity"] | null {
+  switch (impact) {
+    case "critical":
+      return "high";
+    case "serious":
+      return "medium";
+    case "moderate":
+      return "low";
+    case "minor":
+      return "low";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Classify RAW axe-core violations into ScanFindings.
+ *
+ * WHY category "ux_gap" and not a new "accessibility" category: an accessibility
+ * defect IS a usability gap - a control no screen reader can announce, a contrast
+ * ratio no low-vision user can read. It belongs in the same review bucket as the
+ * hand-written UX detectors above, flows through the same recordScan -> learning
+ * pipeline, and needs no new ScanCategory (which would ripple through types.ts,
+ * the store, and the gate - all of which we deliberately do NOT touch). The
+ * "Accessibility:" title prefix distinguishes a11y findings in the report.
+ *
+ * Dedupe by axe rule id: axe reports one violation object per rule with N nodes;
+ * we emit exactly ONE finding per rule and carry nodeCount as the breadth signal,
+ * so a rule failing on 40 nodes is one reviewable finding, not 40. If the same id
+ * appears twice (defensive - axe shouldn't), the first wins.
+ *
+ * Pure: same violations in, same findings out. No browser, no axe import.
+ */
+export function classifyAxe(
+  violations: AxeViolation[],
+  route: string,
+  journey: string,
+): ScanFinding[] {
+  const findings: ScanFinding[] = [];
+  const seen = new Set<string>();
+  for (const v of violations) {
+    if (seen.has(v.id)) continue;
+    const severity = axeImpactToSeverity(v.impact);
+    // Unknown/missing impact: skip (precision-first).
+    if (severity === null) continue;
+    seen.add(v.id);
+    const helpUrlSuffix = v.helpUrl ? ` See ${v.helpUrl}` : "";
+    findings.push({
+      route,
+      severity,
+      category: "ux_gap",
+      title: `Accessibility: ${v.help}`,
+      detail: `axe-core rule "${v.id}" (impact: ${v.impact}) failed on ${v.nodeCount} element(s) on the "${journey}" journey.${helpUrlSuffix}`,
+      evidence: {
+        axe_id: v.id,
+        impact: v.impact,
+        nodes: v.nodeCount,
+        journey,
+        helpUrl: v.helpUrl ?? null,
+      },
+    });
+  }
+  return findings;
+}
+
+/**
  * Classify one page observation into zero or more findings. A healthy page
  * (200, no console/CSP/failed/blank signals) yields []. A single page can yield
  * multiple findings (e.g. console errors AND a failed request AND a blank body).
@@ -310,6 +415,14 @@ export function classifyPage(obs: PageObservation): ScanFinding[] {
         if (f) findings.push(f);
       }
     }
+  }
+
+  // Deterministic accessibility findings from axe-core. Additive: only runs when
+  // the runner supplied a non-empty axeViolations array. When absent or empty,
+  // output is byte-identical to before (back-compat). The a11y findings flow
+  // through the same recordScan -> learning pipeline as every other finding.
+  if (obs.axeViolations && obs.axeViolations.length > 0) {
+    findings.push(...classifyAxe(obs.axeViolations, route, journey));
   }
 
   return findings;

@@ -4,10 +4,12 @@
  */
 import {
   classifyPage,
+  classifyAxe,
   iconOnlyControlNoName,
   disabledControlNoExplanation,
   tinyTapTarget,
   dialogNoAccessibleName,
+  type AxeViolation,
   type PageObservation,
   type UiElement,
 } from "../classify";
@@ -314,6 +316,124 @@ describe("dialogNoAccessibleName", () => {
 
   it("guard: missing isDialog field -> no finding", () => {
     expect(dialogNoAccessibleName(el({ tag: "div" }), R, J)).toBeNull();
+  });
+});
+
+// --- Accessibility (axe-core) classification --------------------------------
+
+function av(overrides: Partial<AxeViolation> = {}): AxeViolation {
+  return {
+    id: "color-contrast",
+    impact: "serious",
+    help: "Elements must have sufficient color contrast",
+    helpUrl: "https://dequeuniversity.com/rules/axe/4.11/color-contrast",
+    nodeCount: 3,
+    ...overrides,
+  };
+}
+
+describe("classifyAxe", () => {
+  it("empty violations -> []", () => {
+    expect(classifyAxe([], R, J)).toEqual([]);
+  });
+
+  it.each([
+    ["critical", "high"],
+    ["serious", "medium"],
+    ["moderate", "low"],
+    ["minor", "low"],
+  ] as const)("impact %s -> severity %s, ux_gap, Accessibility: title", (impact, severity) => {
+    const [f] = classifyAxe([av({ impact })], R, J);
+    expect(f).toMatchObject({
+      route: R,
+      severity,
+      category: "ux_gap",
+    });
+    expect(f.title.startsWith("Accessibility:")).toBe(true);
+    expect(f.title).toBe("Accessibility: Elements must have sufficient color contrast");
+  });
+
+  it("evidence carries axe_id, impact, nodes, journey, helpUrl", () => {
+    const [f] = classifyAxe([av({ id: "button-name", nodeCount: 7 })], R, J);
+    expect(f.evidence).toMatchObject({
+      axe_id: "button-name",
+      impact: "serious",
+      nodes: 7,
+      journey: J,
+    });
+    expect(f.evidence.helpUrl).toContain("color-contrast");
+  });
+
+  it("detail includes the rule id, node count, and helpUrl", () => {
+    const [f] = classifyAxe([av({ id: "label", nodeCount: 2 })], R, J);
+    expect(f.detail).toContain('"label"');
+    expect(f.detail).toContain("2 element(s)");
+    expect(f.detail).toContain("https://dequeuniversity.com");
+  });
+
+  it("missing helpUrl -> evidence.helpUrl null, detail omits the See clause", () => {
+    const [f] = classifyAxe([av({ helpUrl: undefined })], R, J);
+    expect(f.evidence.helpUrl).toBeNull();
+    expect(f.detail).not.toContain("See ");
+  });
+
+  it("unknown/missing impact -> skipped", () => {
+    // Cast through unknown to simulate an axe rule with an unexpected impact.
+    const bogus = av({ impact: "weird" as unknown as AxeViolation["impact"] });
+    expect(classifyAxe([bogus], R, J)).toEqual([]);
+  });
+
+  it("dedupes by axe id: one finding per rule even with repeated ids", () => {
+    const out = classifyAxe(
+      [av({ id: "color-contrast", nodeCount: 3 }), av({ id: "color-contrast", nodeCount: 9 })],
+      R,
+      J,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].evidence.nodes).toBe(3); // first wins
+  });
+
+  it("distinct ids each produce a finding", () => {
+    const out = classifyAxe(
+      [av({ id: "color-contrast" }), av({ id: "button-name", impact: "critical" })],
+      R,
+      J,
+    );
+    expect(out.map((f) => f.evidence.axe_id).sort()).toEqual(["button-name", "color-contrast"]);
+  });
+
+  it("every finding carries route + journey", () => {
+    const [f] = classifyAxe([av()], "/x", "jx");
+    expect(f.route).toBe("/x");
+    expect(f.evidence.journey).toBe("jx");
+  });
+});
+
+describe("classifyPage with axeViolations (aggregation + back-compat)", () => {
+  it("no axeViolations field -> identical output to before (back-compat)", () => {
+    const base = obs({ consoleErrors: ["boom"] });
+    const out = classifyPage(base);
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toBe("Console errors on page");
+    expect(classifyPage(obs())).toEqual([]);
+  });
+
+  it("empty axeViolations array on a healthy page -> still no findings", () => {
+    expect(classifyPage(obs({ axeViolations: [] }))).toEqual([]);
+  });
+
+  it("a11y findings appear alongside element + page findings", () => {
+    const out = classifyPage(
+      obs({
+        consoleErrors: ["boom"],
+        elements: [el({ interactive: true })], // icon-only no name
+        axeViolations: [av({ id: "color-contrast", impact: "serious" })],
+      }),
+    );
+    const titles = out.map((f) => f.title);
+    expect(titles).toContain("Console errors on page");
+    expect(titles).toContain("Interactive control has no accessible name");
+    expect(titles).toContain("Accessibility: Elements must have sufficient color contrast");
   });
 });
 

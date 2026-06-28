@@ -82,6 +82,28 @@ it("N routes -> N observations -> ingest called once with all observations", asy
   expect(observations[0].status).toBe(200);
 });
 
+it("forwards the runAxe dep into capturePage so axe violations land on the observation", async () => {
+  const browser: ScanBrowser = { newPage: async () => makePage().page };
+  const runAxe = jest.fn(async () => [
+    { id: "color-contrast", impact: "serious" as const, help: "Elements must have sufficient color contrast", nodeCount: 3 },
+  ]);
+
+  const { observations } = await runUxScan(
+    {
+      baseUrl: "https://target.test",
+      routes: [{ path: "/", journey: "landing" }],
+      ingest: async () => {},
+      runAxe,
+    },
+    browser,
+  );
+
+  expect(runAxe).toHaveBeenCalledTimes(1); // threaded through to capturePage
+  expect(observations[0].axeViolations).toEqual([
+    { id: "color-contrast", impact: "serious", help: expect.any(String), nodeCount: 3 },
+  ]);
+});
+
 it("installs the read-only floor on every page before capture", async () => {
   const flooredPerPage: (() => string[])[] = [];
   const browser: ScanBrowser = {

@@ -26,7 +26,7 @@
  * before it leaves the browser, so a scan can never mutate the target client.
  */
 
-import type { PageObservation, UiElement } from "./classify";
+import type { AxeViolation, PageObservation, UiElement } from "./classify";
 
 /**
  * The minimal subset of a Playwright Page this core depends on. The real
@@ -271,9 +271,19 @@ export function collectUiElements(): UiElement[] {
   return out;
 }
 
-/** Injectable seams for deterministic tests (clock). */
+/** Injectable seams for deterministic tests (clock) and the optional axe runner. */
 export interface CaptureDeps {
   now?: () => number;
+  /**
+   * Optional accessibility runner. When provided, capturePage calls it with the
+   * page and stores the result on observation.axeViolations. Injected (not
+   * imported) so this core stays Playwright-free AND axe-free: the live CLI
+   * supplies the concrete runner that injects axe-core into the page and calls
+   * window.axe.run(). When absent, behavior is unchanged (axeViolations stays
+   * undefined). Kept robust: a runner that throws is swallowed (no axe data
+   * rather than a failed capture), mirroring the other best-effort evaluates.
+   */
+  runAxe?: (page: ScanPage) => Promise<AxeViolation[]>;
 }
 
 /**
@@ -355,6 +365,19 @@ export async function capturePage(
     renderedContent = false;
   }
 
+  // Optional accessibility pass. Only runs when a runAxe dep is injected; when
+  // absent, axeViolations stays undefined and classifyPage behaves as before.
+  // Best-effort: a runner failure leaves axeViolations undefined rather than
+  // failing the whole capture (the page is still worth recording).
+  let axeViolations: AxeViolation[] | undefined;
+  if (deps.runAxe) {
+    try {
+      axeViolations = await deps.runAxe(page);
+    } catch {
+      axeViolations = undefined;
+    }
+  }
+
   return {
     route: input.route,
     journey: input.journey,
@@ -365,5 +388,6 @@ export async function capturePage(
     renderedContent,
     durationMs,
     elements,
+    axeViolations,
   };
 }

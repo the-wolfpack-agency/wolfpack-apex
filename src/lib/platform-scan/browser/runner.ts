@@ -14,7 +14,7 @@
  * continues, so partial coverage is still ingested rather than lost entirely.
  */
 
-import type { PageObservation } from "./classify";
+import type { PageObservation, AxeViolation } from "./classify";
 import {
   capturePage,
   installReadOnlyFloor,
@@ -36,6 +36,10 @@ export interface RunUxScanInput {
   ingest: (observations: PageObservation[]) => Promise<void>;
   /** Injectable clock, threaded into capturePage for deterministic durationMs. */
   now?: () => number;
+  /** Optional accessibility runner (axe-core), threaded into capturePage so each
+   *  observation carries axe violations the server classifies. The live CLI
+   *  supplies it; tests/unit runs omit it. Keeps capture.ts axe-free. */
+  runAxe?: (page: ScanPage) => Promise<AxeViolation[]>;
   /** Best-effort sink for per-route failures, so a crashed page is observable in
    *  the learning loop instead of silently dropped. Optional. */
   onRouteError?: (info: { path: string; journey: string; error: Error }) => void;
@@ -65,7 +69,7 @@ export async function runUxScan(
       const obs = await capturePage(
         page,
         { route: url, journey: route.journey },
-        { now: input.now },
+        { now: input.now, runAxe: input.runAxe },
       );
       // Preserve the human-facing path on the observation's route so findings are
       // attributed to the route the operator configured, not the resolved URL.

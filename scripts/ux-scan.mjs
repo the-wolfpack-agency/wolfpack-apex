@@ -8,14 +8,20 @@
  *   1. spin up a REAL chromium browser (Playwright, dev/CI dependency),
  *   2. adapt each real Playwright Page to the minimal `ScanPage` shape the core
  *      expects (it is structurally compatible already, so this is near-identity),
- *   3. run `runUxScan` with an `ingest` sink that POSTs the RAW observations to
- *      apex's ingest endpoint, which classifies them server-side.
+ *   3. call the core `runUxScan`, threading a `runAxe` dep that injects the axe-core
+ *      engine into each page and runs window.axe.run(), then POST the RAW
+ *      observations to apex's ingest endpoint (it classifies server-side via the
+ *      SAME classifyPage, including the axe -> ScanFinding mapping).
+ *
+ * The scan loop lives in ONE place (runUxScan: read-only floor + capture + per-route
+ * isolation + single ingest); the CLI only supplies the concrete browser, the axe
+ * runner, and the network sink. No duplicated loop or safety logic.
  *
  * The core imports NO Playwright and NO fetch, so it stays pure and testable; the
  * concrete browser + network live here at the edge.
  *
- * Safety: runUxScan installs the read-only network floor on every page, so only
- * GET/HEAD ever reach the target. A scan can never mutate a client's system.
+ * Safety: installReadOnlyFloor is installed on every page before navigation, so
+ * only GET/HEAD ever reach the target. A scan can never mutate a client's system.
  *
  * Config (argv overrides env):
  *   --base / BASE_URL            target base URL (required)
@@ -44,8 +50,44 @@ require("ts-node").register({
   compilerOptions: { module: "commonjs", moduleResolution: "node", esModuleInterop: true },
 });
 
-const { runUxScan } = require(join(ROOT, "src/lib/platform-scan/browser/runner.ts"));
+const { runUxScan } = require(
+  join(ROOT, "src/lib/platform-scan/browser/runner.ts"),
+);
 const { chromium } = require("@playwright/test");
+
+// Resolve the axe-core engine source once. axe-core is a DEV/CI dependency: it is
+// the WCAG gold-standard engine, so we reuse it rather than rebuild thousands of
+// a11y rules. It is injected into the scanned page below, never into apex's bundle.
+const fs = require("node:fs");
+const AXE_SOURCE = fs.readFileSync(require.resolve("axe-core"), "utf8");
+
+/**
+ * Build the runAxe dep for a given Playwright page. Injects the axe-core engine
+ * source into the page, runs window.axe.run(), and distills each violation to the
+ * AxeViolation shape (one entry per RULE; nodeCount conveys breadth). Best-effort:
+ * any failure returns [] so a page is still captured. The classifier maps these
+ * to ScanFindings server-side - the script stays thin and ships only raw data.
+ */
+async function runAxe(page) {
+  try {
+    // Inject the engine, then run it. addScriptTag evaluates the source in-page,
+    // defining window.axe; we then call axe.run() and map the violations.
+    await page.addScriptTag({ content: AXE_SOURCE });
+    const violations = await page.evaluate(async () => {
+      const r = await window.axe.run();
+      return r.violations.map((v) => ({
+        id: v.id,
+        impact: v.impact,
+        help: v.help,
+        helpUrl: v.helpUrl,
+        nodeCount: v.nodes.length,
+      }));
+    });
+    return violations;
+  } catch {
+    return [];
+  }
+}
 
 function argOf(flag, envKey, fallback) {
   const i = process.argv.indexOf(flag);
@@ -135,11 +177,15 @@ async function main() {
   }
 
   try {
+    // Single source of the scan loop: runUxScan installs the read-only floor on
+    // every page, captures, isolates per-route failures, and ingests once. We thread
+    // the axe-core runner through its runAxe dep (no duplicated loop or safety logic).
     await runUxScan(
       {
         baseUrl,
         routes,
         ingest,
+        runAxe,
         onRouteError: ({ path, error }) =>
           console.warn(`[ux-scan] route ${path} failed: ${error.message}`),
       },

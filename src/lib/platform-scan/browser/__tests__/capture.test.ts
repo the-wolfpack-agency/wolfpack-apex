@@ -13,7 +13,7 @@ import {
   type ScanConsoleMessage,
   type ScanResponse,
 } from "../capture";
-import type { UiElement } from "../classify";
+import type { AxeViolation, UiElement } from "../classify";
 
 function mockRoute(method: string): {
   route: ScanRoute;
@@ -168,5 +168,46 @@ describe("capturePage", () => {
     const obs = await capturePage(page, { route: "/boom", journey: "boom" });
     expect(obs.status).toBeUndefined();
     expect(obs.renderedContent).toBe(false);
+  });
+
+  it("no runAxe dep -> axeViolations is undefined (back-compat, unchanged)", async () => {
+    const page = makeMockPage({ status: 200, rendered: true });
+    const obs = await capturePage(page, { route: "/x", journey: "ux" });
+    expect(obs.axeViolations).toBeUndefined();
+  });
+
+  it("with a runAxe dep -> observation.axeViolations is populated from the runner", async () => {
+    const canned: AxeViolation[] = [
+      { id: "color-contrast", impact: "serious", help: "contrast", helpUrl: "u", nodeCount: 4 },
+    ];
+    let calledWith: unknown = null;
+    const page = makeMockPage({ status: 200, rendered: true });
+    const obs = await capturePage(
+      page,
+      { route: "/x", journey: "ux" },
+      {
+        runAxe: async (p) => {
+          calledWith = p;
+          return canned;
+        },
+      },
+    );
+    expect(obs.axeViolations).toEqual(canned);
+    expect(calledWith).toBe(page); // the page is threaded into the runner
+  });
+
+  it("a runAxe dep that throws is swallowed (axeViolations undefined, capture still succeeds)", async () => {
+    const page = makeMockPage({ status: 200, rendered: true });
+    const obs = await capturePage(
+      page,
+      { route: "/x", journey: "ux" },
+      {
+        runAxe: async () => {
+          throw new Error("axe injection failed");
+        },
+      },
+    );
+    expect(obs.axeViolations).toBeUndefined();
+    expect(obs.status).toBe(200); // rest of the capture is intact
   });
 });
