@@ -86,6 +86,91 @@ describe("BENCHMARK_CORPUS shape + invariants", () => {
   });
 });
 
+describe("adjacent self-hosted labeled targets (owasp-benchmark, vampi, nodegoat)", () => {
+  const NEW_TARGET_NAMES = ["owasp-benchmark", "vampi", "nodegoat"] as const;
+  const VALID_SEVERITIES = ["critical", "high", "medium", "low"];
+  const VALID_MODALITIES = ["http", "static", "browser"];
+
+  it("includes each new target in BENCHMARK_CORPUS", () => {
+    for (const name of NEW_TARGET_NAMES) {
+      const t = BENCHMARK_CORPUS.find((e) => e.name === name);
+      expect(t).toBeDefined();
+      expect(t!.provenance).toBe("self-hosted-benchmark");
+      expect(t!.activeAllowed).toBe(true);
+      expect(t!.modality.length).toBeGreaterThan(0);
+      t!.modality.forEach((m) => expect(VALID_MODALITIES).toContain(m));
+      expect(t!.consentNote.trim().length).toBeGreaterThan(10);
+    }
+  });
+
+  it("the three new target names are unique within the corpus", () => {
+    for (const name of NEW_TARGET_NAMES) {
+      const count = BENCHMARK_CORPUS.filter((e) => e.name === name).length;
+      expect(count).toBe(1);
+    }
+    // and unique relative to each other
+    expect(new Set(NEW_TARGET_NAMES).size).toBe(NEW_TARGET_NAMES.length);
+  });
+
+  it("getBenchmarkTarget finds each new target by name", () => {
+    for (const name of NEW_TARGET_NAMES) {
+      expect(getBenchmarkTarget(name)?.name).toBe(name);
+    }
+  });
+
+  it("vampi is the api-modality fixture (http only, not browser)", () => {
+    const vampi = getBenchmarkTarget("vampi")!;
+    expect(vampi.modality).toEqual(["http"]);
+  });
+
+  it("every groundTruth findingClass is a non-empty string and severity (if set) is valid", () => {
+    for (const name of NEW_TARGET_NAMES) {
+      const t = getBenchmarkTarget(name)!;
+      expect(t.groundTruth?.length).toBeGreaterThan(0);
+      t.groundTruth!.forEach((g) => {
+        expect(typeof g.findingClass).toBe("string");
+        expect(g.findingClass.trim().length).toBeGreaterThan(0);
+        // findingClass must follow the scorer's `${category}:${title}` convention.
+        expect(g.findingClass).toMatch(/^[a-z]+:.+/);
+        if (g.expectedSeverity !== undefined) {
+          expect(VALID_SEVERITIES).toContain(g.expectedSeverity);
+        }
+      });
+    }
+  });
+
+  it("assertBenchmarkConsent allows read-only for each new target", () => {
+    for (const name of NEW_TARGET_NAMES) {
+      expect(() => assertBenchmarkConsent(name, "read-only")).not.toThrow();
+    }
+  });
+
+  it("assertBenchmarkConsent allows active for each new target (activeAllowed self-hosted)", () => {
+    for (const name of NEW_TARGET_NAMES) {
+      expect(() => assertBenchmarkConsent(name, "active")).not.toThrow();
+    }
+  });
+
+  it("each new target's baseUrl is env-guarded: unset falls back to an inert loopback placeholder", () => {
+    // Mirrors the juice-shop pattern: with the env var unset (the CI case), the
+    // baseUrl is a localhost placeholder the SSRF floor refuses, so the target is
+    // inert and cannot be probed by accident.
+    const envByName: Record<string, string | undefined> = {
+      "owasp-benchmark": process.env.BENCHMARK_OWASP_URL,
+      vampi: process.env.BENCHMARK_VAMPI_URL,
+      nodegoat: process.env.BENCHMARK_NODEGOAT_URL,
+    };
+    for (const name of NEW_TARGET_NAMES) {
+      const t = getBenchmarkTarget(name)!;
+      if (envByName[name] === undefined) {
+        expect(new URL(t.baseUrl).hostname).toBe("localhost");
+      } else {
+        expect(t.baseUrl).toBe(envByName[name]);
+      }
+    }
+  });
+});
+
 describe("isBenchmarkTarget / getBenchmarkTarget", () => {
   it("isBenchmarkTarget is true for a corpus name and false for a random URL", () => {
     expect(isBenchmarkTarget("wolfpack-instinct")).toBe(true);

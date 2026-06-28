@@ -107,3 +107,133 @@ projects; that is a third-party system and is off-limits.
    `assertPentestAuthorized` guard), which checks the active/unexpired/in-scope
    token, the SSRF floor, and the OGIAM enforce-mode gate. The benchmark corpus
    does not, and must not, auto-promote an opt-in target to active.
+
+## Running the continuous benchmark sweep
+
+The continuous benchmark sweep is the always-on learning loop that replaces slow
+manual testing. It is a scheduled GitHub Actions workflow,
+`.github/workflows/benchmark-sweep.yml`, driving the thin orchestrator
+`scripts/benchmark-sweep.mjs`. Each tick:
+
+1. **Selects targets.** It walks `BENCHMARK_CORPUS` and keeps every entry that
+   passes `assertBenchmarkConsent(target, "read-only")`
+   (`src/lib/platform-scan/benchmark/sweep-targets.ts`, unit-tested in
+   `__tests__/sweep-targets.test.ts`). Anything not in the corpus is refused and
+   skipped; the open internet is never swept.
+2. **Scans READ-ONLY.** For each selected target it spins up a real chromium browser
+   and runs the SAME `runUxScan` core the live UX scan uses
+   (`src/lib/platform-scan/browser/runner.ts`), which installs the read-only network
+   floor on every page (only GET/HEAD ever leaves the browser) and isolates per-route
+   failures. axe-core is injected per page for a11y observations.
+3. **Ingests.** It POSTs the raw observations to
+   `${BASE}/api/admin/platform-scans/ingest` as
+   `{ platform: target.name, baseUrl: target.baseUrl, observations }`
+   (Authorization: `Bearer CRON_SECRET`). Apex classifies them server-side via the
+   same `classifyPage` and `recordScan`s them into the shared findings store.
+4. **Triggers scoring.** After all targets are scanned and ingested, it POSTs
+   `${BASE}/api/admin/platform-scans/benchmark` (`Bearer CRON_SECRET`) once to run
+   server-side scoring, refreshing the recall / coverage / noise-candidate learning
+   signals, and logs the returned counts.
+
+Per-target isolation: one target failing (scan crash or a non-2xx ingest) is logged
+and the sweep continues; the scoring trigger still fires for whatever ingested.
+
+**This sweep is READ-ONLY, always.** Active recall - probing the planted vulns on a
+self-hosted labeled target - is a SEPARATE, explicitly-authorized pentest run gated
+by a pentest scope token (see the opt-in active-testing section above). The sweep
+never mutates a target and never triggers active probing.
+
+### Cadence
+
+Weekly (Monday 06:00 UTC) plus `workflow_dispatch` for an on-demand run. The corpus
+is small and stable, so a weekly pass keeps the signals fresh without redundant
+daily runs. Adjust the `cron` in the workflow if the corpus grows.
+
+### Secrets it needs
+
+Set these as repository / environment secrets (same scheme as `ux-scan-sweep.yml`):
+
+| Secret | Purpose |
+|---|---|
+| `TARGET_BASE_URL` | Apex base URL where the ingest + benchmark endpoints live. |
+| `INGEST_SECRET` | Bearer secret for both endpoints (mapped to the script's `CRON_SECRET`). |
+| `BENCHMARK_JUICE_SHOP_URL` | OPTIONAL. URL of a self-hosted labeled target on our infra (see below). Read-only here. |
+
+Run it locally (dry run without a secret just logs what it would POST):
+
+```sh
+node scripts/benchmark-sweep.mjs \
+  --base https://wolfpack-instinct.vercel.app --secret "$CRON_SECRET"
+```
+
+## Self-hosting a labeled target
+
+To get true recall numbers the sweep needs at least one target with labeled ground
+truth. Stand up an intentionally-vulnerable app ON OUR INFRA so we both own the
+deployment and know the planted vulns. Never scan a public demo instance; that is a
+third-party system and is off-limits.
+
+1. **Deploy it.** OWASP Juice Shop is the seed fixture (`self-hosted-juice-shop` in
+   `BENCHMARK_CORPUS`). Run it on a Wolfpack-owned host:
+
+   ```sh
+   docker run -d -p 3000:3000 bkimminich/juice-shop
+   ```
+
+   Do not expose it publicly without auth. A private host, internal network, or a
+   gated Fly/Vercel deployment is fine.
+2. **Point the corpus at it.** Set `BENCHMARK_JUICE_SHOP_URL` to the deployment's URL
+   in the workflow's environment (and locally when running the script). The corpus
+   entry reads its `baseUrl` from this env var; it is never a hardcoded remote demo.
+3. **Fill in ground truth.** The seed entry already lists a few planted Juice Shop
+   classes. For full recall scoring, extend its `groundTruth` array in
+   `corpus.ts` with a `findingClass` + `expectedSeverity` for each planted vuln (and
+   known-good baselines). The scorer reads these to compute recall (planted vulns
+   found) and noise candidates (classes reported that match no label).
+4. **The sweep treats it READ-ONLY.** Once `BENCHMARK_JUICE_SHOP_URL` is set, the
+   continuous sweep scans it read-only like any other corpus target.
+
+   **Active recall against it needs a separate authorized run.** Probing the planted
+   vulns (the part that actually exercises recall on the injectable endpoints) is
+   active testing. Even though the entry is `activeAllowed: true`, the continuous
+   sweep never does it. Run active recall as a separate, explicitly-authorized
+   pentest pass gated by a pentest scope token (`src/lib/platform-scan/pentest/`),
+   not from this workflow.
+
+## Adjacent labeled targets
+
+Beyond Juice Shop, the corpus carries three more self-hosted, labeled fixtures so
+recall/precision are measured across more modalities (web, api) and against an app
+that mirrors our own Node/Express stack. Each reads its `baseUrl` from an env var
+(same env-guarded pattern as Juice Shop); with the var unset the entry falls back
+to an inert loopback placeholder the SSRF floor refuses, so nothing is probed by
+accident. All are `provenance: "self-hosted-benchmark"`, `activeAllowed: true`, and
+carry a modest, honest ground-truth set (a handful of well-documented classes each,
+not exhaustive guesses) so the scorer's recall signal stays clean.
+
+| Target | Env var | Modality | Why chosen |
+|---|---|---|---|
+| `owasp-benchmark` | `BENCHMARK_OWASP_URL` | http, browser | Industry-standard scored benchmark; the precision/recall reference for injection + crypto classes (sqli, cmdi, xpathi, ldapi, weak crypto, trust boundary, xss). |
+| `vampi` | `BENCHMARK_VAMPI_URL` | http (api) | Vulnerable REST API for the api modality; covers OWASP API Top 10 classes (BOLA/IDOR, mass assignment, broken auth, excessive data exposure, sqli). |
+| `nodegoat` | `BENCHMARK_NODEGOAT_URL` | http, browser | OWASP Node/Express target; matches OUR stack, so its recall signal is the closest proxy for our codebase (injection, broken access control, sensitive data exposure, security misconfig, weak crypto, ssrf). |
+
+Self-host each on a Wolfpack-owned host (never scan a public demo instance), then
+set its env var:
+
+```sh
+# OWASP Benchmark (BenchmarkJava) - build + run the scored app, then:
+docker run -d -p 8443:8443 owasp/benchmark   # set BENCHMARK_OWASP_URL
+
+# VAmPI (vulnerable REST API)
+docker run -d -p 5000:5000 erev0s/vampi      # set BENCHMARK_VAMPI_URL
+
+# OWASP NodeGoat (Node/Express) - docker compose, or npm:
+docker compose -f docker-compose.yml up -d   # or: npm install && npm start ; set BENCHMARK_NODEGOAT_URL
+```
+
+**Rejected alternatives.** DVWA, bWAPP, and Mutillidae were skipped as redundant
+PHP targets (Juice Shop already covers the web/JS modality and they add no class we
+do not already label). WebGoat is lesson-gated (its vulns sit behind interactive
+lesson state, awkward to scan headlessly). crAPI is heavier to stand up than VAmPI
+for the same API modality. Google Gruyere is a hosted app, not cleanly self-hostable
+on our infra, so it violates the own-the-deployment rule.

@@ -108,6 +108,36 @@ const SELF_HOSTED_JUICE_SHOP_URL =
   process.env.BENCHMARK_JUICE_SHOP_URL ?? "http://localhost:3000";
 
 /**
+ * OWASP Benchmark (github.com/OWASP-Benchmark/BenchmarkJava): a large
+ * industry-standard set of labeled true/false-positive test cases for measuring
+ * static-analysis-style precision/recall across injection + crypto classes.
+ * Same env-driven pattern: configured per-environment, absent in CI. The unset
+ * localhost placeholder is inert (the SSRF floor on the live scan path refuses
+ * loopback), so it can never be probed by accident.
+ */
+const SELF_HOSTED_OWASP_BENCHMARK_URL =
+  process.env.BENCHMARK_OWASP_URL ?? "http://localhost:8443";
+
+/**
+ * VAmPI (github.com/erev0s/VAmPI): a deliberately-vulnerable REST API used as
+ * the API-modality recall fixture (BOLA/IDOR, mass assignment, broken auth,
+ * excessive data exposure, SQLi). Env-driven; unset falls back to an inert
+ * localhost placeholder the SSRF floor refuses.
+ */
+const SELF_HOSTED_VAMPI_URL =
+  process.env.BENCHMARK_VAMPI_URL ?? "http://localhost:5000";
+
+/**
+ * OWASP NodeGoat (github.com/OWASP/NodeGoat): an intentionally-vulnerable
+ * Node/Express app demonstrating the OWASP Top 10. Chosen because it matches our
+ * OWN stack (Node/Express server surface), making its recall signal the closest
+ * proxy for our codebase. Env-driven; unset falls back to an inert localhost
+ * placeholder the SSRF floor refuses.
+ */
+const SELF_HOSTED_NODEGOAT_URL =
+  process.env.BENCHMARK_NODEGOAT_URL ?? "http://localhost:4000";
+
+/**
  * THE ALLOWLIST. Every entry is authorized; nothing outside this array is
  * benchmarkable. Our OWN apps are read-only by default; the one
  * self-hosted-benchmark entry demonstrates the activeAllowed + groundTruth recall
@@ -178,6 +208,142 @@ export const BENCHMARK_CORPUS: BenchmarkTarget[] = [
         findingClass: "security:CORS wildcard with credentials",
         expectedSeverity: "medium",
         note: "Access-Control-Allow-Origin: * with credentials on the REST API.",
+      },
+    ],
+  },
+  {
+    // OWASP Benchmark (BenchmarkJava): an industry-standard, fully-scored corpus
+    // of labeled vulnerable + benign test cases. We self-host it on our infra
+    // (set BENCHMARK_OWASP_URL); it is the precision/recall reference for the
+    // injection + crypto detector classes. Ground truth lists a modest set of
+    // the well-documented categories it plants, not every one of its thousands
+    // of cases - the scorer measures recall over labeled items only.
+    name: "owasp-benchmark",
+    baseUrl: SELF_HOSTED_OWASP_BENCHMARK_URL,
+    provenance: "self-hosted-benchmark",
+    activeAllowed: true,
+    modality: ["http", "browser"],
+    consentNote:
+      "Industry-standard scored OWASP Benchmark deployed on Wolfpack-owned infra (set BENCHMARK_OWASP_URL). We own the deployment AND the labeled answer key; active probing authorized.",
+    groundTruth: [
+      {
+        findingClass: "security:SQL injection",
+        expectedSeverity: "high",
+        note: "OWASP Benchmark sqli test cases reflect tainted input into SQL.",
+      },
+      {
+        findingClass: "security:Command injection",
+        expectedSeverity: "critical",
+        note: "cmdi test cases pass tainted input to a shell/exec.",
+      },
+      {
+        findingClass: "security:XPath injection",
+        expectedSeverity: "high",
+        note: "xpathi test cases build XPath queries from tainted input.",
+      },
+      {
+        findingClass: "security:LDAP injection",
+        expectedSeverity: "high",
+        note: "ldapi test cases concatenate tainted input into an LDAP filter.",
+      },
+      {
+        findingClass: "security:Weak cryptography",
+        expectedSeverity: "medium",
+        note: "crypto/hash test cases use broken algorithms (DES, MD5, etc.).",
+      },
+      {
+        findingClass: "security:Trust boundary violation",
+        expectedSeverity: "medium",
+        note: "trustbound test cases store tainted data across a trust boundary (e.g. session).",
+      },
+      {
+        findingClass: "security:Reflected XSS",
+        expectedSeverity: "high",
+        note: "xss test cases reflect tainted input into the HTTP response unescaped.",
+      },
+    ],
+  },
+  {
+    // VAmPI (Vulnerable API): a deliberately-vulnerable REST API. The api-modality
+    // recall fixture - the classes here are API-specific (OWASP API Top 10) rather
+    // than browser/DOM. Self-hosted on our infra (set BENCHMARK_VAMPI_URL).
+    name: "vampi",
+    baseUrl: SELF_HOSTED_VAMPI_URL,
+    provenance: "self-hosted-benchmark",
+    activeAllowed: true,
+    modality: ["http"],
+    consentNote:
+      "Self-hosted vulnerable REST API (VAmPI) on Wolfpack-owned infra for the api modality (set BENCHMARK_VAMPI_URL). We own the deployment AND know the planted flaws; active probing authorized.",
+    groundTruth: [
+      {
+        findingClass: "security:Broken object level authorization (IDOR)",
+        expectedSeverity: "high",
+        note: "GET /users/v1/{username} and book endpoints leak other users' objects (BOLA/IDOR).",
+      },
+      {
+        findingClass: "security:Mass assignment",
+        expectedSeverity: "high",
+        note: "User registration accepts an admin flag in the body (mass assignment to privileged field).",
+      },
+      {
+        findingClass: "security:Broken authentication",
+        expectedSeverity: "high",
+        note: "Weak/forgeable JWT handling and unauthenticated sensitive routes.",
+      },
+      {
+        findingClass: "security:Excessive data exposure",
+        expectedSeverity: "medium",
+        note: "User listing endpoint returns password fields and other sensitive attributes.",
+      },
+      {
+        findingClass: "security:SQL injection",
+        expectedSeverity: "high",
+        note: "Debug/user lookup endpoints concatenate input into SQL.",
+      },
+    ],
+  },
+  {
+    // OWASP NodeGoat: an intentionally-vulnerable Node/Express OWASP Top 10
+    // teaching app. Chosen because it matches OUR stack (Node/Express), so its
+    // recall signal is the closest proxy for our own codebase. Self-hosted on our
+    // infra (set BENCHMARK_NODEGOAT_URL).
+    name: "nodegoat",
+    baseUrl: SELF_HOSTED_NODEGOAT_URL,
+    provenance: "self-hosted-benchmark",
+    activeAllowed: true,
+    modality: ["http", "browser"],
+    consentNote:
+      "OWASP NodeGoat (Node/Express OWASP Top 10 target) on Wolfpack-owned infra (set BENCHMARK_NODEGOAT_URL); matches our own stack. We own the deployment AND know the planted vulns; active probing authorized.",
+    groundTruth: [
+      {
+        findingClass: "security:Injection",
+        expectedSeverity: "high",
+        note: "Allocations/contributions pages evaluate tainted input (NoSQL / server-side code injection).",
+      },
+      {
+        findingClass: "security:Broken access control",
+        expectedSeverity: "high",
+        note: "Missing authorization checks allow horizontal/vertical privilege escalation between users.",
+      },
+      {
+        findingClass: "security:Sensitive data exposure",
+        expectedSeverity: "medium",
+        note: "Profile/SSN fields stored and returned without adequate protection.",
+      },
+      {
+        findingClass: "security:Security misconfiguration",
+        expectedSeverity: "medium",
+        note: "Missing security headers / unsafe Express configuration.",
+      },
+      {
+        findingClass: "security:Weak cryptography",
+        expectedSeverity: "medium",
+        note: "Passwords hashed with a weak/unsalted scheme.",
+      },
+      {
+        findingClass: "security:SSRF",
+        expectedSeverity: "high",
+        note: "Profile page fetches a user-supplied URL server-side (server-side request forgery).",
       },
     ],
   },
