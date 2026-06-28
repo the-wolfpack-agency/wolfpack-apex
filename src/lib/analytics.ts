@@ -616,6 +616,14 @@ export type InstinctEventType =
   // Gate self-verification: a batch of decisions was run to PROVE the gate is correct,
   // fast, and auditable. { correct, total, p50_ms, p95_ms, chain_verified }
   | "platform.gate_selftest_run"
+  // Active-learning benchmark: the scanner ran against the consent-to-test corpus
+  // (self-hosted vulnerable apps + our own) and was scored vs ground truth.
+  // { targets, recall, precision, coverage_classes, errored }
+  | "platform.benchmark_run"
+  // A learning signal mined from the benchmark: a ground-truth class we failed to
+  // detect (coverage gap) or a class firing far above truth (noise candidate).
+  // { kind: "coverage_gap" | "noise_candidate", finding_class, detail }
+  | "platform.learning_signal_detected"
   // Target authorization: a target must be proven client-owned (well-known token
   // or DNS TXT) before any scan/pentest runs. Fail-closed at the target level.
   // platform.target_verification_requested { platform, method }
