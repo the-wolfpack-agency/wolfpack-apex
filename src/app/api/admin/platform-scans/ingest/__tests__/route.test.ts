@@ -8,6 +8,7 @@
 const mockRecord = jest.fn();
 const mockTrack = jest.fn();
 const mockAuthFn = jest.fn();
+const mockRateLimit = jest.fn();
 let mockAuth: () => Promise<unknown> = async () => ({
   ok: true,
   user: { id: "admin-1", role: "admin", workspaceId: "ws-1" },
@@ -21,6 +22,12 @@ jest.mock("@/lib/auth/require-capability", () => ({
 }));
 jest.mock("@/lib/platform-scan/store", () => ({ recordScan: (...a: unknown[]) => mockRecord(...a) }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrack(...a) }));
+// The per-caller limiter is REUSED from gate-rate-limit.ts (no duplicate counter
+// is built). It is mocked here so no DB is touched; the real lib is unit-tested
+// in its own suite.
+jest.mock("@/lib/ogiam/gate-rate-limit", () => ({
+  checkRateLimit: (...a: unknown[]) => mockRateLimit(...a),
+}));
 // classifyPage is left REAL (it is a pure function) so these tests prove the
 // end-to-end classify-then-persist path: raw observations in, classified
 // findings landing in recordScan.
@@ -58,6 +65,8 @@ beforeEach(() => {
   process.env.CRON_SECRET = "s3cret";
   mockAuth = async () => ({ ok: true, user: { id: "admin-1", role: "admin", workspaceId: "ws-1" } });
   mockRecord.mockResolvedValue({ scanId: "scan-1", findingCount: 1, criticalCount: 0 });
+  // Default: under the limit so existing behavior is unchanged.
+  mockRateLimit.mockResolvedValue({ ok: true, remaining: 119 });
 });
 
 it("200 via bearer CRON_SECRET (CI path), records as the browser-scan agent into default ws", async () => {
@@ -331,4 +340,131 @@ it("400 when none of findings[]/observations[]/traces[] is provided", async () =
   );
   expect(res.status).toBe(400);
   expect(mockRecord).not.toHaveBeenCalled();
+});
+
+// --- Abuse hardening: rate limit + payload caps (auth -> rate -> cap -> work) ---
+
+const finding = (i: number) => ({
+  route: `/r${i}`,
+  severity: "low",
+  category: "bug",
+  title: "t",
+  detail: "d",
+  evidence: { i },
+});
+
+it("REGRESSION: a normal request (within caps, under limit) is unchanged 200 + records", async () => {
+  const res = await post(VALID, { authorization: "Bearer s3cret" });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ ok: true, scanId: "scan-1", findingCount: 1 });
+  // Rate limit consulted, keyed by workspace; recordScan still called.
+  expect(mockRateLimit).toHaveBeenCalledWith("ingest:default");
+  expect(mockRecord).toHaveBeenCalledTimes(1);
+  // No reject analytics fired for a legitimate request.
+  expect(mockTrack).not.toHaveBeenCalledWith(
+    "platform.scan_ingest_rejected",
+    expect.anything(),
+    expect.anything(),
+    expect.anything(),
+  );
+});
+
+it("rate-limit consults the limiter keyed by the user's workspace (capability path)", async () => {
+  await post(VALID); // capability path -> ws-1
+  expect(mockRateLimit).toHaveBeenCalledWith("ingest:ws-1");
+});
+
+it("429 + Retry-After + reject analytics + no record when rate-limited", async () => {
+  mockRateLimit.mockResolvedValue({ ok: false, remaining: 0 });
+  const res = await post(VALID, { authorization: "Bearer s3cret" });
+  expect(res.status).toBe(429);
+  expect(res.headers.get("Retry-After")).toBe("60");
+  expect(await res.json()).toEqual({ ok: false, error: "rate_limited" });
+  expect(mockRecord).not.toHaveBeenCalled();
+  expect(mockTrack).toHaveBeenCalledWith(
+    "platform.scan_ingest_rejected",
+    "browser-scan",
+    "agent",
+    { reason: "rate_limited", workspace_id: "default" },
+  );
+});
+
+it("rate-limit ok -> proceeds to recordScan", async () => {
+  mockRateLimit.mockResolvedValue({ ok: true, remaining: 5 });
+  const res = await post(VALID, { authorization: "Bearer s3cret" });
+  expect(res.status).toBe(200);
+  expect(mockRecord).toHaveBeenCalledTimes(1);
+});
+
+it("413 + reject analytics + no record when total items exceed the cap", async () => {
+  const findings = Array.from({ length: 1001 }, (_, i) => finding(i));
+  const res = await post(
+    { platform: "acme", baseUrl: "https://acme.test", findings },
+    { authorization: "Bearer s3cret" },
+  );
+  expect(res.status).toBe(413);
+  expect(await res.json()).toEqual({ ok: false, error: "payload_too_large" });
+  expect(mockRecord).not.toHaveBeenCalled();
+  expect(mockTrack).toHaveBeenCalledWith(
+    "platform.scan_ingest_rejected",
+    "browser-scan",
+    "agent",
+    { reason: "payload_too_large", workspace_id: "default" },
+  );
+});
+
+it("413 when the combined total across arrays exceeds the cap (each array under per-array cap)", async () => {
+  // 600 + 600 = 1200 total > 1000, but each array (600) is under the 1000 per-array cap.
+  const findings = Array.from({ length: 600 }, (_, i) => finding(i));
+  const traces = Array.from({ length: 600 }, (_, i) => ({
+    route: `/t${i}`,
+    journey: "j",
+    goal: "g",
+    completed: true,
+    steps: [{ action: "navigate", ok: true }],
+  }));
+  const res = await post(
+    { platform: "acme", baseUrl: "https://acme.test", findings, traces },
+    { authorization: "Bearer s3cret" },
+  );
+  expect(res.status).toBe(413);
+  expect(mockRecord).not.toHaveBeenCalled();
+});
+
+it("413 when a single item is absurdly large (per-item byte guard)", async () => {
+  const huge = { ...finding(0), detail: "x".repeat(70 * 1024) };
+  const res = await post(
+    { platform: "acme", baseUrl: "https://acme.test", findings: [huge] },
+    { authorization: "Bearer s3cret" },
+  );
+  expect(res.status).toBe(413);
+  expect(mockRecord).not.toHaveBeenCalled();
+  expect(mockTrack).toHaveBeenCalledWith(
+    "platform.scan_ingest_rejected",
+    "browser-scan",
+    "agent",
+    { reason: "payload_too_large", workspace_id: "default" },
+  );
+});
+
+it("exactly at the cap (1000 items) is allowed (boundary, generous limit)", async () => {
+  const findings = Array.from({ length: 1000 }, (_, i) => finding(i));
+  const res = await post(
+    { platform: "acme", baseUrl: "https://acme.test", findings },
+    { authorization: "Bearer s3cret" },
+  );
+  expect(res.status).toBe(200);
+  expect(mockRecord).toHaveBeenCalledTimes(1);
+});
+
+it("auth is enforced FIRST: unauth -> 401 before any rate-limit or cap check", async () => {
+  process.env.CRON_SECRET = ""; // cron path disabled
+  mockAuth = async () => ({ ok: false, response: new Response(null, { status: 401 }) });
+  // Even an over-cap payload must be rejected by auth first.
+  const findings = Array.from({ length: 5000 }, (_, i) => finding(i));
+  const res = await post({ platform: "acme", baseUrl: "https://acme.test", findings });
+  expect(res.status).toBe(401);
+  expect(mockRateLimit).not.toHaveBeenCalled();
+  expect(mockRecord).not.toHaveBeenCalled();
+  expect(mockTrack).not.toHaveBeenCalled();
 });

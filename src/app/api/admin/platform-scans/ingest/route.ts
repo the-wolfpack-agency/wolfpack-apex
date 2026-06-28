@@ -24,11 +24,80 @@ import { recordScan } from "@/lib/platform-scan/store";
 import { classifyPage, type PageObservation } from "@/lib/platform-scan/browser/classify";
 import { classifyJourney, type JourneyTrace } from "@/lib/platform-scan/browser/journey";
 import type { PlatformScanResult, ScanFinding } from "@/lib/platform-scan/types";
+import { trackEvent } from "@/lib/analytics";
+import { checkRateLimit } from "@/lib/ogiam/gate-rate-limit";
+
+/**
+ * ABUSE HARDENING (added when external runners/agents began POSTing here).
+ *
+ * Now that out-of-process runners and bring-your-own agents can hit this seam,
+ * an unthrottled or oversized POST is a DoS + cost vector: each item drives
+ * server-side classify work, then recordScan fans every finding out through the
+ * triple-write + Brain + audit path. We cap two independent axes, fail CLOSED,
+ * and keep legitimate scans byte-identical (see "WHY THESE LIMITS").
+ */
+
+/**
+ * Per-array cap. No single source array (findings/observations/traces) may
+ * exceed this. Catches the "one giant array" abuse shape that a total-only cap
+ * would let a single field reach.
+ */
+const MAX_INGEST_ITEMS_PER_ARRAY = 1000;
+/**
+ * Total cap across findings[] + observations[] + traces[]. Catches the
+ * "spread the load across all three arrays" shape that a per-array-only cap
+ * would miss.
+ */
+const MAX_INGEST_ITEMS_TOTAL = 1000;
+/**
+ * Per-item size guard. A single absurdly large item (megabytes of nested junk)
+ * is cheap to reject by serialized length and stops a low-count / high-bytes
+ * payload from slipping past the count caps and blowing up classify/recordScan.
+ * 64 KB per item is generous: a real ScanFinding / PageObservation / JourneyTrace
+ * is well under 10 KB even with full evidence + step traces.
+ */
+const MAX_INGEST_ITEM_BYTES = 64 * 1024;
+
+/**
+ * WHY THESE LIMITS (compared + justified):
+ *
+ *  - A real browser scan covers tens to low-hundreds of routes/journeys; a
+ *    findings[]-only post mirrors that count. 1000 items is several times the
+ *    largest legitimate scan we have observed, so a normal scan is NEVER
+ *    affected by the caps. Generous on purpose: fail-closed must not break the
+ *    honest CI runner.
+ *  - Rate limit: the shared DB fixed-window limiter (gate-rate-limit.ts) defaults
+ *    to 120 requests / 60s per key. A CI scan posts ONCE per run (occasionally a
+ *    handful for retries), so 120/min per workspace is far above legitimate use
+ *    while still capping a runaway loop / cost-bomb caller. We deliberately
+ *    REUSE that limiter (one limiter, one store, no duplicate counter) keyed by
+ *    workspace so a noisy workspace cannot starve others.
+ *  - We considered a byte-cap on the whole body instead of per-item; per-item is
+ *    strictly cheaper (short-circuits on the first oversized item) and composes
+ *    with the count caps. Next.js already bounds the raw body, so per-item is the
+ *    meaningful additional guard at the application layer.
+ */
 
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
   return (req.headers.get("authorization") ?? "") === `Bearer ${secret}`;
+}
+
+/** True if any element of `arr` serializes to more than MAX_INGEST_ITEM_BYTES. */
+function hasOversizedItem(arr: unknown[] | null): boolean {
+  if (!arr) return false;
+  for (const item of arr) {
+    let bytes: number;
+    try {
+      bytes = JSON.stringify(item)?.length ?? 0;
+    } catch {
+      // Unserializable (circular) -> treat as oversized/abusive, reject.
+      return true;
+    }
+    if (bytes > MAX_INGEST_ITEM_BYTES) return true;
+  }
+  return false;
 }
 
 interface IngestBody {
@@ -97,6 +166,53 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           "platform, baseUrl and at least one of findings[], observations[] or traces[] are required",
       },
       { status: 400 },
+    );
+  }
+
+  // --- ABUSE GUARDS (ordering: auth -> rate limit -> payload caps -> work) ---
+  // Auth + workspace resolution already happened above. We rate-limit BEFORE the
+  // (potentially large) payload-cap scan and BEFORE the expensive classify /
+  // recordScan work, so a caller in a tight loop is throttled cheaply. Both
+  // guards reject before any server-side classification runs, so no abusive
+  // payload reaches the cost-bearing path. Legitimate scans pass both untouched.
+
+  // RATE LIMIT: per-workspace fixed-window budget via the SHARED limiter (reused,
+  // not duplicated). Keyed by workspace so one noisy tenant cannot starve others.
+  // Fails closed: on a DB error the limiter returns { ok: false } and we 429.
+  const rl = await checkRateLimit(`ingest:${workspaceId}`);
+  if (!rl.ok) {
+    trackEvent("platform.scan_ingest_rejected", actorId, actorRole, {
+      reason: "rate_limited",
+      workspace_id: workspaceId,
+    });
+    return NextResponse.json(
+      { ok: false, error: "rate_limited" },
+      { status: 429, headers: { "Retry-After": "60" } },
+    );
+  }
+
+  // PAYLOAD CAPS: reject oversized payloads with 413 before any classify work.
+  const findingsLen = directFindings?.length ?? 0;
+  const observationsLen = observations?.length ?? 0;
+  const tracesLen = traces?.length ?? 0;
+  const totalItems = findingsLen + observationsLen + tracesLen;
+  const tooManyItems =
+    totalItems > MAX_INGEST_ITEMS_TOTAL ||
+    findingsLen > MAX_INGEST_ITEMS_PER_ARRAY ||
+    observationsLen > MAX_INGEST_ITEMS_PER_ARRAY ||
+    tracesLen > MAX_INGEST_ITEMS_PER_ARRAY;
+  const tooLargeItem =
+    hasOversizedItem(directFindings) ||
+    hasOversizedItem(observations) ||
+    hasOversizedItem(traces);
+  if (tooManyItems || tooLargeItem) {
+    trackEvent("platform.scan_ingest_rejected", actorId, actorRole, {
+      reason: "payload_too_large",
+      workspace_id: workspaceId,
+    });
+    return NextResponse.json(
+      { ok: false, error: "payload_too_large" },
+      { status: 413 },
     );
   }
 

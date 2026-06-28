@@ -610,6 +610,12 @@ export type InstinctEventType =
   // Tier-2 agentic journey-friction: a gated journey attempt was evaluated for
   // excessive steps / dead-ends. { platform, journey, steps, expected, friction }
   | "platform.journey_evaluated"
+  // Ingest abuse protection: an observation/findings/traces ingest was refused for
+  // exceeding a rate or payload cap. { reason, workspace_id }
+  | "platform.scan_ingest_rejected"
+  // Gate self-verification: a batch of decisions was run to PROVE the gate is correct,
+  // fast, and auditable. { correct, total, p50_ms, p95_ms, chain_verified }
+  | "platform.gate_selftest_run"
   // Target authorization: a target must be proven client-owned (well-known token
   // or DNS TXT) before any scan/pentest runs. Fail-closed at the target level.
   // platform.target_verification_requested { platform, method }
