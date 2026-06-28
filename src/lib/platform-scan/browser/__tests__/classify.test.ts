@@ -2,7 +2,15 @@
  * Unit tests for classifyPage — the pure core of the browser-journey scanner.
  * Every rule branch is exercised, plus a multi-finding page and a healthy page.
  */
-import { classifyPage, type PageObservation } from "../classify";
+import {
+  classifyPage,
+  iconOnlyControlNoName,
+  disabledControlNoExplanation,
+  tinyTapTarget,
+  dialogNoAccessibleName,
+  type PageObservation,
+  type UiElement,
+} from "../classify";
 
 function obs(overrides: Partial<PageObservation> = {}): PageObservation {
   return {
@@ -114,4 +122,257 @@ it("every finding carries the route + journey", () => {
   const out = classifyPage(obs({ route: "/x", journey: "jx", consoleErrors: ["e"] }));
   expect(out[0].route).toBe("/x");
   expect(out[0].evidence.journey).toBe("jx");
+});
+
+// --- Granular usability / UX detectors -------------------------------------
+
+const R = "/dashboard";
+const J = "dashboard";
+
+function el(overrides: Partial<UiElement> = {}): UiElement {
+  return { tag: "button", ...overrides };
+}
+
+describe("iconOnlyControlNoName", () => {
+  it("true positive: interactive control with no name + no text -> ux_gap/medium", () => {
+    const f = iconOnlyControlNoName(el({ role: "button", interactive: true }), R, J);
+    expect(f).toMatchObject({
+      route: R,
+      severity: "medium",
+      category: "ux_gap",
+      title: "Interactive control has no accessible name",
+    });
+    expect(f!.evidence.journey).toBe(J);
+    expect(f!.evidence.tag).toBe("button");
+  });
+
+  it("fires for an interactive role even without interactive===true", () => {
+    expect(iconOnlyControlNoName(el({ tag: "a", role: "link" }), R, J)).not.toBeNull();
+  });
+
+  it("guard: named icon button is NOT flagged", () => {
+    expect(
+      iconOnlyControlNoName(el({ interactive: true, accessibleName: "Close" }), R, J),
+    ).toBeNull();
+  });
+
+  it("guard: control with text content is NOT flagged", () => {
+    expect(
+      iconOnlyControlNoName(el({ interactive: true, textContent: "Save" }), R, J),
+    ).toBeNull();
+  });
+
+  it("guard: non-interactive element with no name is NOT flagged", () => {
+    expect(iconOnlyControlNoName(el({ tag: "div", role: "img" }), R, J)).toBeNull();
+  });
+
+  it("guard: whitespace-only name/text is treated as empty (still skipped only if both empty)", () => {
+    expect(
+      iconOnlyControlNoName(
+        el({ interactive: true, accessibleName: "   ", textContent: "  " }),
+        R,
+        J,
+      ),
+    ).not.toBeNull();
+  });
+});
+
+describe("disabledControlNoExplanation", () => {
+  it("true positive: disabled interactive control, no explanation -> ux_gap/low", () => {
+    const f = disabledControlNoExplanation(
+      el({ interactive: true, disabled: true }),
+      R,
+      J,
+    );
+    expect(f).toMatchObject({
+      severity: "low",
+      category: "ux_gap",
+      title: "Disabled control with no explanation",
+    });
+    expect(f!.evidence.journey).toBe(J);
+  });
+
+  it("guard: disabled WITH title/explanation is NOT flagged", () => {
+    expect(
+      disabledControlNoExplanation(
+        el({ interactive: true, disabled: true, hasExplanation: true }),
+        R,
+        J,
+      ),
+    ).toBeNull();
+  });
+
+  it("guard: enabled control is NOT flagged", () => {
+    expect(
+      disabledControlNoExplanation(el({ interactive: true, disabled: false }), R, J),
+    ).toBeNull();
+  });
+
+  it("guard: missing disabled field -> no finding", () => {
+    expect(
+      disabledControlNoExplanation(el({ interactive: true }), R, J),
+    ).toBeNull();
+  });
+
+  it("guard: disabled but non-interactive is NOT flagged", () => {
+    expect(
+      disabledControlNoExplanation(el({ tag: "div", disabled: true }), R, J),
+    ).toBeNull();
+  });
+});
+
+describe("tinyTapTarget", () => {
+  it("true positive: interactive 20x20 box -> ux_gap/low with dimensions", () => {
+    const f = tinyTapTarget(el({ interactive: true, box: { w: 20, h: 20 } }), R, J);
+    expect(f).toMatchObject({
+      severity: "low",
+      category: "ux_gap",
+      title: "Tap target smaller than 44px",
+    });
+    expect(f!.evidence.w).toBe(20);
+    expect(f!.evidence.h).toBe(20);
+  });
+
+  it("fires when only one axis is below 44", () => {
+    expect(
+      tinyTapTarget(el({ interactive: true, box: { w: 100, h: 30 } }), R, J),
+    ).not.toBeNull();
+  });
+
+  it("guard: 48x48 target is NOT flagged", () => {
+    expect(
+      tinyTapTarget(el({ interactive: true, box: { w: 48, h: 48 } }), R, J),
+    ).toBeNull();
+  });
+
+  it("guard: exactly 44x44 is NOT flagged (boundary)", () => {
+    expect(
+      tinyTapTarget(el({ interactive: true, box: { w: 44, h: 44 } }), R, J),
+    ).toBeNull();
+  });
+
+  it("guard: missing box -> no finding", () => {
+    expect(tinyTapTarget(el({ interactive: true }), R, J)).toBeNull();
+  });
+
+  it("guard: zero-area (unmeasured) box -> no finding", () => {
+    expect(
+      tinyTapTarget(el({ interactive: true, box: { w: 0, h: 0 } }), R, J),
+    ).toBeNull();
+  });
+
+  it("guard: non-interactive tiny element is NOT flagged", () => {
+    expect(tinyTapTarget(el({ tag: "span", box: { w: 10, h: 10 } }), R, J)).toBeNull();
+  });
+});
+
+describe("dialogNoAccessibleName", () => {
+  it("true positive: dialog with wrong role -> ux_gap/medium", () => {
+    const f = dialogNoAccessibleName(
+      el({ tag: "div", isDialog: true, role: "region", accessibleName: "Settings" }),
+      R,
+      J,
+    );
+    expect(f).toMatchObject({
+      severity: "medium",
+      category: "ux_gap",
+      title: "Modal/dialog missing role or accessible name",
+    });
+  });
+
+  it("true positive: role=dialog but NO accessible name -> flagged", () => {
+    expect(
+      dialogNoAccessibleName(el({ tag: "div", isDialog: true, role: "dialog" }), R, J),
+    ).not.toBeNull();
+  });
+
+  it("guard: properly-labelled role=dialog is NOT flagged", () => {
+    expect(
+      dialogNoAccessibleName(
+        el({ tag: "div", isDialog: true, role: "dialog", accessibleName: "Confirm" }),
+        R,
+        J,
+      ),
+    ).toBeNull();
+  });
+
+  it("guard: properly-labelled role=alertdialog is NOT flagged", () => {
+    expect(
+      dialogNoAccessibleName(
+        el({ tag: "div", isDialog: true, role: "alertdialog", accessibleName: "Warning" }),
+        R,
+        J,
+      ),
+    ).toBeNull();
+  });
+
+  it("guard: element that is not a dialog -> no finding", () => {
+    expect(
+      dialogNoAccessibleName(el({ tag: "div", role: "dialog" }), R, J),
+    ).toBeNull();
+  });
+
+  it("guard: missing isDialog field -> no finding", () => {
+    expect(dialogNoAccessibleName(el({ tag: "div" }), R, J)).toBeNull();
+  });
+});
+
+describe("classifyPage with elements (aggregation + back-compat)", () => {
+  it("no elements field -> identical output to before (back-compat)", () => {
+    const base = obs({ consoleErrors: ["boom"] });
+    const withUndefined = classifyPage(base);
+    expect(withUndefined).toHaveLength(1);
+    expect(withUndefined[0].title).toBe("Console errors on page");
+    // And a healthy page with no elements still yields nothing.
+    expect(classifyPage(obs())).toEqual([]);
+  });
+
+  it("empty elements array on a healthy page -> still no findings", () => {
+    expect(classifyPage(obs({ elements: [] }))).toEqual([]);
+  });
+
+  it("aggregates UX findings from elements alongside page-level findings", () => {
+    const out = classifyPage(
+      obs({
+        consoleErrors: ["boom"],
+        elements: [
+          el({ interactive: true }), // icon-only no name
+          el({ interactive: true, disabled: true }), // disabled no explanation
+          el({ interactive: true, accessibleName: "OK", box: { w: 10, h: 10 } }), // tiny
+          el({ tag: "div", isDialog: true, role: "region" }), // dialog no role/name
+        ],
+      }),
+    );
+    const titles = out.map((f) => f.title);
+    expect(titles).toContain("Console errors on page");
+    expect(titles).toContain("Interactive control has no accessible name");
+    expect(titles).toContain("Disabled control with no explanation");
+    expect(titles).toContain("Tap target smaller than 44px");
+    expect(titles).toContain("Modal/dialog missing role or accessible name");
+  });
+
+  it("a clean element set adds no findings", () => {
+    const out = classifyPage(
+      obs({
+        elements: [
+          el({ interactive: true, accessibleName: "Save", box: { w: 48, h: 48 } }),
+          el({
+            tag: "div",
+            isDialog: true,
+            role: "dialog",
+            accessibleName: "Confirm",
+          }),
+        ],
+      }),
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("every UX finding carries route + journey from the observation", () => {
+    const out = classifyPage(
+      obs({ route: "/x", journey: "jx", elements: [el({ interactive: true })] }),
+    );
+    expect(out[0].route).toBe("/x");
+    expect(out[0].evidence.journey).toBe("jx");
+  });
 });

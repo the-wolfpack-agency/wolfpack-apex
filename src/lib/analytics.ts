@@ -589,6 +589,12 @@ export type InstinctEventType =
   // Scan politeness: a probe backed off to avoid overwhelming a client system.
   // { platform, host, retry_after_ms, reason }
   | "platform.scan_throttled"
+  // Gate-governed browser automation: every action an AI driver (openclaw or any
+  // framework) wants to take is authorized by the OGIAM gate first. Read-only
+  // observe/navigate is allowed on a verified target; a mutating action is denied
+  // unless an active ui_probe scope authorizes it. { platform, action, reason }
+  | "platform.browser_action_allowed"
+  | "platform.browser_action_blocked"
   // Continuous sweep observability: a sweep run finished / failed, so a silently
   // broken sweep (stale client posture) is visible. { kind, targets, succeeded, failed }
   | "platform.sweep_completed"

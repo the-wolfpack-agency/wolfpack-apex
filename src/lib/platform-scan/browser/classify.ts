@@ -19,6 +19,38 @@
 
 import type { ScanFinding } from "../types";
 
+/**
+ * One observed UI element, distilled from a Playwright role-snapshot plus
+ * computed styles. The openclaw runner populates these; the classifier stays
+ * pure (no Playwright types leak in). Every field is the SIGNAL a snapshot can
+ * cheaply provide, deliberately small so a detector can reason about it without
+ * a live page. Fields are optional so a runner that cannot determine a signal
+ * leaves it undefined, and detectors that need it simply skip the element
+ * (precision-first: never guess on missing data).
+ */
+export interface UiElement {
+  /** The lowercase HTML tag name, e.g. "button", "a", "div". */
+  tag: string;
+  /** The computed/explicit ARIA role, e.g. "button", "link", "dialog". */
+  role?: string;
+  /** The accessible name (aria-label, aria-labelledby text, or label assoc). */
+  accessibleName?: string;
+  /** True when the element is operable (clickable/focusable control). */
+  interactive?: boolean;
+  /** True when the control is disabled (disabled attr or aria-disabled). */
+  disabled?: boolean;
+  /** True when an explanation is present (title or aria-describedby resolves). */
+  hasExplanation?: boolean;
+  /** The rendered bounding box in CSS pixels. Absent when not measurable. */
+  box?: { w: number; h: number };
+  /** True when the element is a descendant of a dialog/alertdialog. */
+  inDialog?: boolean;
+  /** True when the element itself is the dialog/modal container. */
+  isDialog?: boolean;
+  /** The visible text content of the element, trimmed. */
+  textContent?: string;
+}
+
 /** The raw, browser-observed signals for one page load. Pure input to
  *  classifyPage — no Playwright types leak in, so it is trivially testable. */
 export interface PageObservation {
@@ -32,6 +64,133 @@ export interface PageObservation {
   /** True when document.body had visible text after load. */
   renderedContent: boolean;
   durationMs: number;
+  /**
+   * Optional per-element snapshot for the granular usability/UX detectors.
+   * Additive: when absent, classifyPage behaves exactly as before. When present,
+   * the UX detectors run over it. The runner populates this from a role-snapshot
+   * plus computed styles; the classifier never touches a browser.
+   */
+  elements?: UiElement[];
+}
+
+/** Treat an element as interactive when explicitly flagged OR when its role is
+ *  one of the unambiguous interactive roles. Conservative on purpose: we never
+ *  infer interactivity from tag alone. */
+function isInteractive(el: UiElement): boolean {
+  if (el.interactive === true) return true;
+  return (
+    el.role === "button" ||
+    el.role === "link" ||
+    el.role === "menuitem" ||
+    el.role === "tab"
+  );
+}
+
+/**
+ * a. An interactive control with NO accessible name AND no text content is an
+ * unlabeled control (the classic icon-only button) - invisible to a screen
+ * reader and ambiguous to sighted users. Fires ux_gap/medium. Precision guard:
+ * only fires when the element is clearly interactive; an element with EITHER an
+ * accessible name OR text content is fine and is skipped.
+ */
+export function iconOnlyControlNoName(
+  el: UiElement,
+  route: string,
+  journey: string,
+): ScanFinding | null {
+  if (!isInteractive(el)) return null;
+  const hasName = !!el.accessibleName && el.accessibleName.trim().length > 0;
+  const hasText = !!el.textContent && el.textContent.trim().length > 0;
+  if (hasName || hasText) return null;
+  return {
+    route,
+    severity: "medium",
+    category: "ux_gap",
+    title: "Interactive control has no accessible name",
+    detail: `An interactive ${el.role ?? el.tag} on the "${journey}" journey has no accessible name and no text, so it is unclear to screen readers and ambiguous as an icon-only control.`,
+    evidence: { journey, tag: el.tag, role: el.role ?? null },
+  };
+}
+
+/**
+ * b. A disabled interactive control with no explanation leaves the user stuck:
+ * the control is dead and nothing tells them why or how to enable it. Fires
+ * ux_gap/low. Precision guard: requires disabled === true AND interactive AND
+ * hasExplanation !== true; a disabled control WITH a title/aria-describedby is
+ * fine and is skipped.
+ */
+export function disabledControlNoExplanation(
+  el: UiElement,
+  route: string,
+  journey: string,
+): ScanFinding | null {
+  if (el.disabled !== true) return null;
+  if (!isInteractive(el)) return null;
+  if (el.hasExplanation === true) return null;
+  return {
+    route,
+    severity: "low",
+    category: "ux_gap",
+    title: "Disabled control with no explanation",
+    detail: `A disabled ${el.role ?? el.tag} on the "${journey}" journey gives no explanation (no title / aria-describedby), so the user cannot tell why it is unavailable.`,
+    evidence: { journey, tag: el.tag, role: el.role ?? null },
+  };
+}
+
+/**
+ * c. A tap target smaller than 44px on either axis is below the WCAG 2.5.5 /
+ * Apple HIG minimum touch-target size (44x44 CSS px), so it is hard to hit on
+ * touch devices. Fires ux_gap/low. Precision guard: requires a real measured
+ * box (w>0 AND h>0) so an unmeasured (0x0 / undefined) element never fires a
+ * false positive; only an interactive element with a genuinely tiny box flags.
+ */
+export function tinyTapTarget(
+  el: UiElement,
+  route: string,
+  journey: string,
+): ScanFinding | null {
+  if (!isInteractive(el)) return null;
+  if (!el.box) return null;
+  const { w, h } = el.box;
+  if (!(w > 0 && h > 0)) return null;
+  // 44 CSS px is the WCAG 2.5.5 (AAA) / Apple HIG / Material minimum.
+  const MIN = 44;
+  if (w >= MIN && h >= MIN) return null;
+  return {
+    route,
+    severity: "low",
+    category: "ux_gap",
+    title: "Tap target smaller than 44px",
+    detail: `An interactive ${el.role ?? el.tag} on the "${journey}" journey is ${w}x${h}px, below the 44x44px minimum touch-target size.`,
+    evidence: { journey, tag: el.tag, role: el.role ?? null, w, h },
+  };
+}
+
+/**
+ * d. A dialog/modal must announce itself: it needs role="dialog"/"alertdialog"
+ * AND an accessible name, or assistive tech presents an anonymous, unannounced
+ * overlay. Fires ux_gap/medium when the element is the dialog but is missing the
+ * right role OR a name. Precision guard: only fires when isDialog === true. NOTE:
+ * focus-trap and Escape-to-close checks are v2 - they require interaction, which
+ * a static snapshot cannot observe.
+ */
+export function dialogNoAccessibleName(
+  el: UiElement,
+  route: string,
+  journey: string,
+): ScanFinding | null {
+  if (el.isDialog !== true) return null;
+  const roleOk = el.role === "dialog" || el.role === "alertdialog";
+  const hasName = !!el.accessibleName && el.accessibleName.trim().length > 0;
+  if (roleOk && hasName) return null;
+  return {
+    route,
+    severity: "medium",
+    category: "ux_gap",
+    title: "Modal/dialog missing role or accessible name",
+    detail: `A modal/dialog on the "${journey}" journey ${roleOk ? "has no accessible name" : `uses role "${el.role ?? "(none)"}" instead of dialog/alertdialog`}, so assistive tech cannot announce it.`,
+    evidence: { journey, tag: el.tag, role: el.role ?? null },
+  };
 }
 
 /**
@@ -133,6 +292,24 @@ export function classifyPage(obs: PageObservation): ScanFinding[] {
         durationMs: obs.durationMs,
       },
     });
+  }
+
+  // Granular usability / UX detectors. Additive: only run when the runner
+  // supplied a per-element snapshot. When obs.elements is absent, behavior is
+  // identical to before. Each detector is precision-first and skips elements
+  // missing the data it needs, so no false positives from undefined.
+  if (obs.elements) {
+    for (const el of obs.elements) {
+      for (const detector of [
+        iconOnlyControlNoName,
+        disabledControlNoExplanation,
+        tinyTapTarget,
+        dialogNoAccessibleName,
+      ]) {
+        const f = detector(el, route, journey);
+        if (f) findings.push(f);
+      }
+    }
   }
 
   return findings;
