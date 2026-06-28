@@ -21,7 +21,7 @@
  * redirected to /login (never a blank surface).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { fetchWithRefresh, getInstinctToken, jsonHeaders } from "@/lib/client-auth";
 import {
@@ -511,8 +511,46 @@ export default function PlatformScansPage() {
   const [bulkBusy, setBulkBusy] = useState<"acknowledged" | "resolved" | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
 
+  // Fire-once guard for the "results viewed" engagement event: the summary
+  // reloads on every filter change, so a ref keeps the view event to a single
+  // emission per mount (re-renders / re-fetches never double-fire). Never set
+  // before the auth-redirect guard passes, so a logged-out visitor emits nothing.
+  const resultsViewedRef = useRef(false);
+  // Latest onboarded-target count, mirrored into a ref so the results-viewed
+  // event can read it without making loadSummary depend on (and re-fire with)
+  // the targets state.
+  const targetsCountRef = useRef(0);
+
   const selectedTarget = targets.find((t) => t.platform === selectedPlatform) ?? null;
   const allSeverities = severities.length === 0;
+
+  // Best-effort engagement analytics: a viewed/toggle event is a learning signal
+  // (the same loop drift + procedure learning consume). A failure must never
+  // break the surface, so the POST is fire-and-forget. /api/analytics is the
+  // observability beacon; fetchWithRefresh is the repo's client analytics path.
+  const trackEngagement = useCallback(
+    (event: string, metadata: Record<string, unknown>) => {
+      void fetchWithRefresh("/api/analytics", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ event, metadata }),
+      }).catch(() => undefined);
+    },
+    [],
+  );
+
+  // Toggle the severity band the LIST is narrowed to and record the toggle as an
+  // engagement signal. "actionable" = critical+high; "all" = every severity.
+  const setSeverityBand = useCallback(
+    (band: "actionable" | "all") => {
+      setSeverities(band === "actionable" ? ACTIONABLE_SEVERITIES : []);
+      trackEngagement("platform.severity_filter_toggled", {
+        band,
+        platform: filterPlatform || "all",
+      });
+    },
+    [trackEngagement, filterPlatform],
+  );
 
   useEffect(() => {
     const token = getInstinctToken();
@@ -553,15 +591,28 @@ export default function PlatformScansPage() {
       const res = await fetchWithRefresh(`/api/admin/platform-scans/summary${qs}`);
       if (!res.ok) return;
       const data = (await res.json()) as { summary?: FindingsSummary; scans?: ScanHistoryRow[]; uxPosture?: UxPosture };
-      setFindingsSummary(data.summary ?? EMPTY_SUMMARY);
+      const loadedSummary = data.summary ?? EMPTY_SUMMARY;
+      setFindingsSummary(loadedSummary);
       setScanHistory(data.scans ?? []);
       // null when the route omits it (older deploy) so the badge shows its empty
       // state rather than a stale/blank grade.
       setUxPosture(data.uxPosture ?? null);
+      // Fire the "results viewed" engagement event ONCE, after the first
+      // successful summary load, with the loaded rollup. The ref keeps re-fetches
+      // (filter changes, post-scan reloads) from re-firing it.
+      if (!resultsViewedRef.current) {
+        resultsViewedRef.current = true;
+        trackEngagement("platform.results_viewed", {
+          open_total: loadedSummary.total,
+          critical: loadedSummary.bySeverity.critical,
+          high: loadedSummary.bySeverity.high,
+          targets: targetsCountRef.current,
+        });
+      }
     } catch {
       /* rollup is contextual; the findings list still renders without it. */
     }
-  }, []);
+  }, [trackEngagement]);
 
   const loadTargets = useCallback(async () => {
     try {
@@ -570,6 +621,7 @@ export default function PlatformScansPage() {
       const data = (await res.json()) as { targets?: ScanTarget[] };
       const list = data.targets ?? [];
       setTargets(list);
+      targetsCountRef.current = list.length;
       if (list.length > 0) setSelectedPlatform((p) => p || list[0].platform);
     } catch {
       /* targets are a convenience; a failure leaves the selector empty but the
@@ -932,7 +984,7 @@ export default function PlatformScansPage() {
               type="button"
               data-testid="severity-chip-actionable"
               aria-pressed={!allSeverities}
-              onClick={() => setSeverities(ACTIONABLE_SEVERITIES)}
+              onClick={() => setSeverityBand("actionable")}
               style={chipStyle(!allSeverities)}
             >
               Actionable (critical + high)
@@ -941,7 +993,7 @@ export default function PlatformScansPage() {
               type="button"
               data-testid="severity-chip-all"
               aria-pressed={allSeverities}
-              onClick={() => setSeverities([])}
+              onClick={() => setSeverityBand("all")}
               style={chipStyle(allSeverities)}
             >
               All severities
@@ -950,7 +1002,7 @@ export default function PlatformScansPage() {
               <button
                 type="button"
                 data-testid="show-all-severities"
-                onClick={() => setSeverities([])}
+                onClick={() => setSeverityBand("all")}
                 style={{ fontSize: "0.78rem", color: "var(--wp-gold, #f1c233)", background: "transparent", border: "none", cursor: "pointer", padding: "0.3rem 0.2rem" }}
               >
                 +{hiddenCount} lower-severity hidden — show all

@@ -545,6 +545,92 @@ it("redirects an unauthenticated visitor to /login (never renders the command ce
   expect(mockFetchWithRefresh).not.toHaveBeenCalled();
 });
 
+// --- Engagement analytics: the learning-loop wiring ---
+
+// Every analytics POST the page fires through fetchWithRefresh -> /api/analytics.
+const analyticsPosts = () =>
+  mockFetchWithRefresh.mock.calls.filter(
+    (c) => String(c[0]) === "/api/analytics" && (c[1] as { method?: string } | undefined)?.method === "POST",
+  );
+const analyticsBodies = () => analyticsPosts().map((c) => JSON.parse(String((c[1] as { body: string }).body)));
+
+it("fires platform.results_viewed ONCE on authed mount with the loaded summary + target counts", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  // One results_viewed event fires after the first successful summary load.
+  await waitFor(() =>
+    expect(analyticsBodies().filter((b) => b.event === "platform.results_viewed").length).toBe(1),
+  );
+  const viewed = analyticsBodies().find((b) => b.event === "platform.results_viewed");
+  // open_total + critical + high from the rollup; targets from the loaded targets.
+  expect(viewed.metadata).toEqual({ open_total: 24, critical: 3, high: 6, targets: 2 });
+});
+
+it("does NOT re-fire platform.results_viewed when the summary reloads (severity toggle)", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+  await waitFor(() =>
+    expect(analyticsBodies().filter((b) => b.event === "platform.results_viewed").length).toBe(1),
+  );
+
+  // Toggling the band reloads the summary; results_viewed must stay at exactly one.
+  fireEvent.click(screen.getByTestId("severity-chip-all"));
+  await waitFor(() =>
+    expect(analyticsBodies().some((b) => b.event === "platform.severity_filter_toggled")).toBe(true),
+  );
+  expect(analyticsBodies().filter((b) => b.event === "platform.results_viewed").length).toBe(1);
+});
+
+it("fires platform.severity_filter_toggled with the band on each chip", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+  await screen.findByTestId("finding-row-f-1");
+
+  // "All severities" chip -> band: "all".
+  fireEvent.click(screen.getByTestId("severity-chip-all"));
+  await waitFor(() => {
+    const all = analyticsBodies().find(
+      (b) => b.event === "platform.severity_filter_toggled" && b.metadata.band === "all",
+    );
+    expect(all).toBeTruthy();
+    expect(all.metadata.platform).toBe("all");
+  });
+
+  // "Actionable" chip -> band: "actionable".
+  fireEvent.click(screen.getByTestId("severity-chip-actionable"));
+  await waitFor(() =>
+    expect(
+      analyticsBodies().some(
+        (b) => b.event === "platform.severity_filter_toggled" && b.metadata.band === "actionable",
+      ),
+    ).toBe(true),
+  );
+});
+
+it("fires NO analytics on the auth-redirect (logged-out) path", async () => {
+  mockGetInstinctToken.mockReturnValue(null);
+  render(<PlatformScansPage />);
+  expect(screen.getByTestId("platform-scans-auth-pending")).toBeInTheDocument();
+  // The auth guard returns before any fetch, so no analytics (or data) call fires.
+  expect(mockFetchWithRefresh).not.toHaveBeenCalled();
+});
+
 it("renders the findings error state when the list GET fails", async () => {
   mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
     if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));

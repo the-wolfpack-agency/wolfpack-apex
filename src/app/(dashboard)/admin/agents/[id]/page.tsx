@@ -13,7 +13,7 @@
  * Auth: every fetch goes through fetchWithRefresh.
  */
 
-import { useCallback, useEffect, useMemo, useState, use } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { fetchWithRefresh, jsonHeaders, getInstinctUser } from "@/lib/client-auth";
@@ -903,6 +903,11 @@ export default function AgentProfilePage({
      remain queryable; only the active tab is visible. Defaults to Overview. */
   const [tab, setTab] = useState<TabKey>("overview");
   const [agent, setAgent] = useState<AgentRecord | null>(null);
+  /* Fire-once guard for the "command view viewed" engagement event: the agent
+     can be refetched (lifecycle PATCH, drift-check), so a ref keeps the view
+     event to a single emission per mount. Never set before the auth guard
+     passes, so a logged-out visitor emits nothing. */
+  const commandViewViewedRef = useRef(false);
   const [scan, setScan] = useState<ScanState>({ kind: "loading" });
   /* Manager-triggered self-onboarding scan. The scan is normally agent-initiated;
      this control lets a manager kick it from the dashboard and watch the System
@@ -1258,6 +1263,32 @@ export default function AgentProfilePage({
 
     return { decisions, allowed, denied, enforcementPct, runs, series };
   }, [log, tasks]);
+
+  /* Fire the "command view viewed" engagement event ONCE, after a successful
+     agent load. A view is itself a learning signal (the same ledger drift +
+     procedure learning consume). The decision_count / run_count mirror the
+     metric tiles (metrics.decisions / metrics.runs), defaulting to 0 when the
+     log / tasks have not loaded yet. The ref keeps refetches (PATCH, drift
+     check) from re-firing it; the analytics POST is best effort and never
+     blanks the page. Guarded on agent presence so a logged-out visitor (no
+     agent, redirected) emits nothing. */
+  useEffect(() => {
+    if (!agent || commandViewViewedRef.current) return;
+    commandViewViewedRef.current = true;
+    void fetchWithRefresh("/api/analytics", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        event: "agent.command_view_viewed",
+        metadata: {
+          agent_id: id,
+          decision_count: metrics.decisions,
+          run_count: metrics.runs,
+        },
+      }),
+    }).catch(() => undefined);
+  }, [agent, id, metrics.decisions, metrics.runs]);
+
   useEffect(() => {
     if (!tasksInFlight) return;
     let polls = 0;

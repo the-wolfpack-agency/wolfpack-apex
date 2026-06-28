@@ -1212,6 +1212,100 @@ describe("/admin/agents/[id]: behavior and drift", () => {
   });
 });
 
+describe("/admin/agents/[id]: command-view engagement analytics", () => {
+  // Analytics POSTs the page fires through fetchWithRefresh -> /api/analytics.
+  const analyticsBodies = () =>
+    mockFetchWithRefresh.mock.calls
+      .filter(
+        (c) =>
+          String(c[0]).includes("/api/analytics") &&
+          (c[1] as { method?: string } | undefined)?.method === "POST",
+      )
+      .map((c) => JSON.parse(String((c[1] as { body: string }).body)));
+
+  it("fires agent.command_view_viewed ONCE after a successful agent load with the metric-tile counts", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        // Two ledger entries -> decision_count 2; one task -> run_count 1.
+        log: () => mkRes({ entries: [makeLogEntry({ id: "c-1" }), makeLogEntry({ id: "c-2" })] }),
+        tasks: () => mkRes({ tasks: [makeTask({ id: "t-1" })] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() =>
+      expect(
+        analyticsBodies().filter((b) => b.event === "agent.command_view_viewed").length,
+      ).toBe(1),
+    );
+    const viewed = analyticsBodies().find((b) => b.event === "agent.command_view_viewed");
+    expect(viewed.metadata.agent_id).toBe("ag-1");
+    expect(viewed.metadata.decision_count).toBe(2);
+    expect(viewed.metadata.run_count).toBe(1);
+  });
+
+  it("command_view_viewed stays at exactly one even after a lifecycle PATCH refetches the agent", async () => {
+    const active = makeAgent({ state: "active" });
+    const paused = makeAgent({ state: "paused" });
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: active }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        onPatch: () => mkRes({ agent: paused }),
+        log: () => mkRes({ entries: [] }),
+        tasks: () => mkRes({ tasks: [] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() =>
+      expect(
+        analyticsBodies().filter((b) => b.event === "agent.command_view_viewed").length,
+      ).toBe(1),
+    );
+
+    // Pause the agent: the PATCH refetches/updates the agent record.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-pause"));
+    });
+    await waitFor(() =>
+      expect(
+        mockFetchWithRefresh.mock.calls.some((c) => (c[1] as any)?.method === "PATCH"),
+      ).toBe(true),
+    );
+    expect(
+      analyticsBodies().filter((b) => b.event === "agent.command_view_viewed").length,
+    ).toBe(1);
+  });
+
+  it("fires NO analytics on the auth-redirect (logged-out) path", async () => {
+    mockUser = null;
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    expect(mockPush).toHaveBeenCalledWith("/login?next=/admin/agents/ag-1");
+    // The guard returns before any load, so no command-view analytics fires.
+    expect(
+      analyticsBodies().some((b) => b.event === "agent.command_view_viewed"),
+    ).toBe(false);
+  });
+});
+
 describe("/admin/agents/[id]: agent log (granular audit trail)", () => {
   it("loads entries from the granular endpoint and renders summary rows with the right outcome pill colors", async () => {
     const allow = makeLogEntry({
@@ -1457,20 +1551,16 @@ describe("/admin/agents/[id]: agent log (granular audit trail)", () => {
 
     await waitFor(() => expect(screen.getByTestId("agent-log-list")).toBeInTheDocument());
 
-    // One analytics POST fired with the view event and the rendered entry count.
-    await waitFor(() => {
-      const post = mockFetchWithRefresh.mock.calls.find(
-        (c) =>
-          (c[1] as { method?: string } | undefined)?.method === "POST" &&
-          String(c[0]).includes("/api/analytics"),
-      );
-      expect(post).toBeTruthy();
-    });
-    const post = mockFetchWithRefresh.mock.calls.find(
-      (c) =>
-        (c[1] as { method?: string } | undefined)?.method === "POST" &&
-        String(c[0]).includes("/api/analytics"),
-    );
+    // The log-view analytics POST fired with the rendered entry count. (The page
+    // also fires a command-view event; scope the lookup to agent.log_viewed.)
+    const findLogViewed = () =>
+      mockFetchWithRefresh.mock.calls.find((c) => {
+        if ((c[1] as { method?: string } | undefined)?.method !== "POST") return false;
+        if (!String(c[0]).includes("/api/analytics")) return false;
+        return JSON.parse(String((c[1] as { body: string }).body)).event === "agent.log_viewed";
+      });
+    await waitFor(() => expect(findLogViewed()).toBeTruthy());
+    const post = findLogViewed();
     const body = JSON.parse((post?.[1] as { body: string }).body);
     expect(body.event).toBe("agent.log_viewed");
     expect(body.metadata.agent_id).toBe("ag-1");
@@ -1497,13 +1587,15 @@ describe("/admin/agents/[id]: agent log (granular audit trail)", () => {
     expect(screen.getByTestId("agent-name")).toBeInTheDocument();
     expect(screen.getByTestId("agent-drift-baseline")).toBeInTheDocument();
     expect(screen.queryByTestId("agent-log-list")).not.toBeInTheDocument();
-    // No view analytics fires on a failed load.
-    const post = mockFetchWithRefresh.mock.calls.find(
-      (c) =>
-        (c[1] as { method?: string } | undefined)?.method === "POST" &&
-        String(c[0]).includes("/api/analytics"),
-    );
-    expect(post).toBeFalsy();
+    // No LOG view analytics fires on a failed log load. (The command-view event
+    // is independent of the log: it fires on the successful agent load and is
+    // asserted in its own describe.)
+    const logPost = mockFetchWithRefresh.mock.calls.find((c) => {
+      if ((c[1] as { method?: string } | undefined)?.method !== "POST") return false;
+      if (!String(c[0]).includes("/api/analytics")) return false;
+      return JSON.parse(String((c[1] as { body: string }).body)).event === "agent.log_viewed";
+    });
+    expect(logPost).toBeFalsy();
   });
 
   it("Refresh re-fetches the granular log", async () => {

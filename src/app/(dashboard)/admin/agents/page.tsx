@@ -22,7 +22,7 @@
  * shown a blank surface. The route is capability-gated on the API side.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -173,6 +173,25 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Fire-once guard for the "fleet viewed" engagement event: the roster can be
+  // refetched (Refresh, post-onboard), so a ref keeps the view event to a single
+  // emission per mount. Never set before the auth-redirect guard passes.
+  const fleetViewedRef = useRef(false);
+
+  // Best-effort engagement analytics: a viewed/open event is a learning signal
+  // (the same loop drift + procedure learning consume). A failure must never
+  // break the surface, so the POST is fire-and-forget. /api/analytics is the
+  // observability beacon; fetchWithRefresh is the repo's client analytics path.
+  const trackEngagement = useCallback(
+    (event: string, metadata: Record<string, unknown>) => {
+      void fetchWithRefresh("/api/analytics", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ event, metadata }),
+      }).catch(() => undefined);
+    },
+    [],
+  );
 
   // Onboard form state.
   const [name, setName] = useState("");
@@ -204,14 +223,38 @@ export default function AgentsPage() {
         return;
       }
       const body = (await res.json()) as AgentsResponse;
-      setAgents(body.agents ?? []);
+      const roster = body.agents ?? [];
+      setAgents(roster);
+      // Fire the "fleet viewed" engagement event ONCE, after the first
+      // successful roster load, with the lifecycle buckets the metric tiles read.
+      // The ref keeps refetches (Refresh, post-onboard) from re-firing it.
+      if (!fleetViewedRef.current) {
+        fleetViewedRef.current = true;
+        let active = 0;
+        let paused = 0;
+        let invited = 0;
+        let connected = 0;
+        for (const a of roster) {
+          if (a.state === "active") active += 1;
+          else if (a.state === "paused") paused += 1;
+          else if (a.state === "invited") invited += 1;
+          if (a.connections && a.connections.length > 0) connected += 1;
+        }
+        trackEngagement("agent.fleet_viewed", {
+          total: roster.length,
+          active,
+          paused,
+          invited,
+          connected,
+        });
+      }
     } catch (e) {
       setError((e as Error).message || "Network error");
       setAgents([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [trackEngagement]);
 
   useEffect(() => {
     // Redirect unauthenticated users; never render a blank state. Same guard
@@ -693,6 +736,9 @@ export default function AgentsPage() {
                 key={a.id}
                 href={`/admin/agents/${a.id}`}
                 data-testid={`agent-row-${a.id}`}
+                onClick={() =>
+                  trackEngagement("agent.detail_opened", { agent_id: a.id, state: a.state })
+                }
                 style={{ textDecoration: "none", color: "inherit", display: "block" }}
               >
                 <GlassPanel

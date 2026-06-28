@@ -27,6 +27,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getInstinctUser, fetchWithRefresh } from "@/lib/client-auth";
+import { GlassPanel, MetricTile, StatusPill, Sparkline } from "@/components/console";
 
 // Mirrors LearningSignal in src/lib/platform-scan/benchmark/scorer.ts. `target`
 // is optional on the wire so a signal mined without a single attributable target
@@ -56,6 +57,42 @@ interface BenchmarkRunRow {
 }
 
 const SIGNAL_KINDS: SignalKind[] = ["coverage_gap", "noise_candidate"];
+
+// ---------------------------------------------------------------------------
+// "Versus the competition" wire types - mirror the GET .../benchmark/competitive
+// response in src/app/api/admin/platform-scans/benchmark/competitive/route.ts.
+// ---------------------------------------------------------------------------
+interface RivalOnlyGap {
+  findingClass: string;
+  tools: string[];
+}
+interface ComparisonRow {
+  tool: string;
+  label: string;
+  target: string;
+  runAt: string;
+  theirs: { recall: number; precision: number; findings: number };
+  ours: { recall: number; precision: number; matched: string[] };
+  rivalOnlyGaps: RivalOnlyGap[];
+  parity: boolean;
+}
+interface TrendPoint {
+  runAt: string;
+  recall: number;
+  coverageClasses: number;
+}
+interface ImprovementTrend {
+  series: TrendPoint[];
+  latestRecall: number;
+  recallDelta: number;
+  coverageDelta: number;
+  hasPrior: boolean;
+}
+interface CompetitiveResponse {
+  ok?: boolean;
+  comparison?: ComparisonRow[];
+  improvement?: ImprovementTrend;
+}
 
 // One-line, operator-facing framing per signal kind so the backlog reads as a
 // to-do list, not a metric dump.
@@ -207,9 +244,177 @@ function SignalGroup({ kind, signals }: { kind: SignalKind; signals: LearningSig
   );
 }
 
+// A horizontal recall/precision bar (no charting dep - a div). `value` is 0..1.
+function MetricBar({
+  value,
+  accent,
+  testId,
+}: {
+  value: number;
+  accent: string;
+  testId?: string;
+}) {
+  const widthPct = `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
+  return (
+    <div
+      data-testid={testId}
+      style={{
+        position: "relative",
+        height: "0.55rem",
+        borderRadius: 999,
+        background: "var(--wp-dark-border, #242a36)",
+        overflow: "hidden",
+        minWidth: "3rem",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: widthPct,
+          background: accent,
+          borderRadius: 999,
+        }}
+      />
+    </div>
+  );
+}
+
+// One head-to-head row: a tool's recall/precision laid next to ours, with bars.
+function ComparisonCard({ row, index }: { row: ComparisonRow; index: number }) {
+  const ourRecall = row.ours?.recall ?? 0;
+  const beatsUs = row.theirs.recall > ourRecall + 1e-9;
+  return (
+    <div
+      data-testid={`competition-row-${index}`}
+      data-tool={row.tool}
+      data-target={row.target}
+      style={{
+        padding: "0.8rem 0.9rem",
+        marginBottom: "0.6rem",
+        background: "var(--wp-dark-surface, #1f1f22)",
+        border: "1px solid var(--wp-dark-border, #333)",
+        borderRadius: "0.5rem",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.55rem", flexWrap: "wrap" }}>
+        <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--wp-text, #eee)" }}>{row.label}</span>
+        <span style={{ fontSize: "0.78rem", color: "var(--wp-text-muted, #6b7280)" }}>vs us on</span>
+        <code style={{ fontSize: "0.78rem", color: "var(--wp-gold, #f1c233)" }}>{row.target}</code>
+        <span style={{ flex: 1 }} />
+        <StatusPill
+          status={row.parity ? "resolved" : beatsUs ? "critical" : "open"}
+          label={row.parity ? "Parity (we match/beat)" : beatsUs ? "Rival leads" : "We lead"}
+          testId={`competition-status-${index}`}
+        />
+      </div>
+
+      {/* Recall: theirs vs ours, side by side bars. */}
+      <div style={{ display: "grid", gridTemplateColumns: "5.5rem 1fr 3rem", gap: "0.5rem", alignItems: "center", marginBottom: "0.35rem" }}>
+        <span style={{ fontSize: "0.75rem", color: "var(--wp-text-muted, #6b7280)" }}>{row.label} recall</span>
+        <MetricBar value={row.theirs.recall} accent="var(--wp-info, #3b82f6)" testId={`competition-theirs-recall-bar-${index}`} />
+        <span data-testid={`competition-theirs-recall-${index}`} style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--wp-info, #3b82f6)", textAlign: "right" }}>{pct(row.theirs.recall)}</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "5.5rem 1fr 3rem", gap: "0.5rem", alignItems: "center" }}>
+        <span style={{ fontSize: "0.75rem", color: "var(--wp-text-muted, #6b7280)" }}>Our recall</span>
+        <MetricBar value={ourRecall} accent="var(--wp-success, #22c55e)" testId={`competition-ours-recall-bar-${index}`} />
+        <span data-testid={`competition-ours-recall-${index}`} style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--wp-success, #22c55e)", textAlign: "right" }}>{pct(ourRecall)}</span>
+      </div>
+
+      {/* Rival-only gaps = our prioritized backlog for this target/tool. */}
+      {row.rivalOnlyGaps.length > 0 && (
+        <div data-testid={`competition-gaps-${index}`} style={{ marginTop: "0.6rem" }}>
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--wp-error, #ef4444)", marginBottom: "0.3rem" }}>
+            Rival-only gaps (our backlog)
+          </div>
+          {row.rivalOnlyGaps.map((g, gi) => (
+            <code
+              key={g.findingClass}
+              data-testid={`competition-gap-${index}-${gi}`}
+              style={{ display: "block", fontSize: "0.8rem", color: "var(--wp-text, #eee)", marginBottom: "0.15rem" }}
+            >
+              {g.findingClass}
+            </code>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CompetitionSection({
+  comparison,
+  improvement,
+}: {
+  comparison: ComparisonRow[];
+  improvement: ImprovementTrend | null;
+}) {
+  return (
+    <GlassPanel
+      testId="competition-section"
+      title="Versus the competition"
+      subtitle="OWASP ZAP + Nuclei scored against the SAME corpus, ground truth and scorer as us - head to head, plus our recall improvement over time."
+      glow="gold"
+      style={{ marginBottom: "2rem" }}
+    >
+      {/* Improvement over time tile (our recall trend sparkline + latest delta). */}
+      <div data-testid="improvement-tile" style={{ marginBottom: "1.2rem" }}>
+        {improvement && improvement.series.length > 0 ? (
+          <MetricTile
+            testId="improvement-metric"
+            display={pct(improvement.latestRecall)}
+            label="Our recall (latest run)"
+            kicker="Improvement over time"
+            accent="var(--wp-success, #22c55e)"
+            delta={
+              improvement.hasPrior
+                ? {
+                    value: Math.round(improvement.recallDelta * 100),
+                    label: `${improvement.recallDelta >= 0 ? "+" : ""}${Math.round(improvement.recallDelta * 100)} pts vs prior`,
+                  }
+                : { value: 0, direction: "flat", label: "first run" }
+            }
+            sparkline={
+              <Sparkline
+                data={improvement.series.map((p) => p.recall)}
+                accent="var(--wp-success, #22c55e)"
+                area
+                width={120}
+                height={32}
+                testId="improvement-sparkline"
+              />
+            }
+          />
+        ) : (
+          <p data-testid="improvement-empty" style={{ fontSize: "0.83rem", color: "var(--wp-text-dim, #aaa)", margin: 0 }}>
+            No recall trend yet - run a benchmark sweep to start the series.
+          </p>
+        )}
+      </div>
+
+      {/* Per-tool head-to-head comparison. */}
+      {comparison.length === 0 ? (
+        <p data-testid="competition-empty" style={{ fontSize: "0.83rem", color: "var(--wp-text-dim, #aaa)", margin: 0 }}>
+          No competitor benchmark runs yet - run the competitive sweep (ZAP + Nuclei) to see the head-to-head.
+        </p>
+      ) : (
+        <div data-testid="competition-list">
+          {comparison.map((row, i) => (
+            <ComparisonCard key={`${row.tool}:${row.target}`} row={row} index={i} />
+          ))}
+        </div>
+      )}
+    </GlassPanel>
+  );
+}
+
 export default function BenchmarkDashboardPage() {
   const router = useRouter();
   const [runs, setRuns] = useState<BenchmarkRunRow[]>([]);
+  const [comparison, setComparison] = useState<ComparisonRow[]>([]);
+  const [improvement, setImprovement] = useState<ImprovementTrend | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -221,6 +426,23 @@ export default function BenchmarkDashboardPage() {
       if (!res.ok) throw new Error(`Failed to load benchmark runs (HTTP ${res.status})`);
       const data = (await res.json()) as { ok?: boolean; runs?: BenchmarkRunRow[] };
       setRuns(data.runs ?? []);
+
+      // The competitive head-to-head is a SEPARATE endpoint; a failure there must
+      // never blank the base dashboard, so it degrades to an explicit empty state.
+      try {
+        const compRes = await fetchWithRefresh("/api/admin/platform-scans/benchmark/competitive");
+        if (compRes.ok) {
+          const comp = (await compRes.json()) as CompetitiveResponse;
+          setComparison(comp.comparison ?? []);
+          setImprovement(comp.improvement ?? null);
+        } else {
+          setComparison([]);
+          setImprovement(null);
+        }
+      } catch {
+        setComparison([]);
+        setImprovement(null);
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -328,6 +550,9 @@ export default function BenchmarkDashboardPage() {
             Latest run <time dateTime={latest.runAt} title={latest.runAt}>{whenLabel(latest.runAt)}</time>
             {latest.labeledTargets === 0 && " · no labeled targets yet - recall/precision are not yet trustworthy"}
           </p>
+
+          {/* 1b. Versus the competition: ZAP + Nuclei head-to-head + our improvement. */}
+          <CompetitionSection comparison={comparison} improvement={improvement} />
 
           {/* 3. Learning-signal backlog from the latest run, grouped by kind. */}
           <div data-testid="benchmark-backlog" style={{ marginBottom: "2rem" }}>

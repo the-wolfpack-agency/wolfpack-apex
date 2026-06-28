@@ -40,6 +40,37 @@ function mkRes(body: unknown, opts: { ok?: boolean; status?: number } = {}): any
 }
 
 const isBenchmark = (url: string) => url === "/api/admin/platform-scans/benchmark";
+const isCompetitive = (url: string) =>
+  url === "/api/admin/platform-scans/benchmark/competitive";
+
+// Mirrors the GET .../benchmark/competitive response (comparison + improvement).
+const COMPETITIVE = {
+  ok: true,
+  comparison: [
+    {
+      tool: "nuclei",
+      label: "Nuclei",
+      target: "vampi",
+      runAt: "2026-06-28T10:00:00.000Z",
+      theirs: { recall: 0.4, precision: 1, findings: 5 },
+      ours: { recall: 0.6, precision: 1, matched: ["security:SQL injection"] },
+      rivalOnlyGaps: [
+        { findingClass: "security:Broken object level authorization (IDOR)", tools: ["nuclei"] },
+      ],
+      parity: false,
+    },
+  ],
+  improvement: {
+    series: [
+      { runAt: "2026-06-27T10:00:00.000Z", recall: 0.5, coverageClasses: 9 },
+      { runAt: "2026-06-28T10:00:00.000Z", recall: 0.6, coverageClasses: 12 },
+    ],
+    latestRecall: 0.6,
+    recallDelta: 0.1,
+    coverageDelta: 3,
+    hasPrior: true,
+  },
+};
 
 // Mirrors the BenchmarkRunRow shape returned by GET .../benchmark (`runs`).
 const RUNS = [
@@ -194,4 +225,73 @@ it("redirects unauthenticated users to /login and does not fetch", async () => {
   await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/login?next=/admin/benchmark"));
   // The guard returns before any data fetch fires.
   expect(mockFetchWithRefresh).not.toHaveBeenCalled();
+});
+
+describe("Versus the competition section", () => {
+  it("renders per-tool head-to-head bars + rival-only gap backlog from the competitive GET", async () => {
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      if (isBenchmark(url)) return Promise.resolve(mkRes({ ok: true, runs: RUNS }));
+      if (isCompetitive(url)) return Promise.resolve(mkRes(COMPETITIVE));
+      return Promise.resolve(mkRes({}));
+    });
+    render(<BenchmarkDashboardPage />);
+
+    // The section + the first comparison row render with tool/target metadata.
+    expect(await screen.findByTestId("competition-section")).toBeInTheDocument();
+    const row = screen.getByTestId("competition-row-0");
+    expect(row).toHaveAttribute("data-tool", "nuclei");
+    expect(row).toHaveAttribute("data-target", "vampi");
+
+    // Their recall (40%) is laid next to ours (60%).
+    expect(screen.getByTestId("competition-theirs-recall-0")).toHaveTextContent("40%");
+    expect(screen.getByTestId("competition-ours-recall-0")).toHaveTextContent("60%");
+
+    // The rival-only gap (the backlog) is listed.
+    expect(screen.getByTestId("competition-gap-0-0")).toHaveTextContent(
+      "security:Broken object level authorization (IDOR)",
+    );
+  });
+
+  it("renders the improvement tile with the recall sparkline + the latest delta", async () => {
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      if (isBenchmark(url)) return Promise.resolve(mkRes({ ok: true, runs: RUNS }));
+      if (isCompetitive(url)) return Promise.resolve(mkRes(COMPETITIVE));
+      return Promise.resolve(mkRes({}));
+    });
+    render(<BenchmarkDashboardPage />);
+
+    expect(await screen.findByTestId("improvement-metric")).toHaveTextContent("60%");
+    // The sparkline rendered with the 2-point series.
+    expect(screen.getByTestId("improvement-sparkline")).toHaveAttribute("data-points", "2");
+    // The latest delta (+10 pts) is shown.
+    expect(screen.getByTestId("improvement-metric")).toHaveTextContent("+10 pts vs prior");
+  });
+
+  it("shows explicit empty states when there are no competitor runs (never blank)", async () => {
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      if (isBenchmark(url)) return Promise.resolve(mkRes({ ok: true, runs: RUNS }));
+      // Competitive endpoint returns nothing yet.
+      if (isCompetitive(url)) return Promise.resolve(mkRes({ ok: true, comparison: [], improvement: null }));
+      return Promise.resolve(mkRes({}));
+    });
+    render(<BenchmarkDashboardPage />);
+
+    expect(await screen.findByTestId("competition-section")).toBeInTheDocument();
+    expect(screen.getByTestId("competition-empty")).toHaveTextContent(/no competitor benchmark runs yet/i);
+    expect(screen.getByTestId("improvement-empty")).toHaveTextContent(/no recall trend yet/i);
+  });
+
+  it("degrades cleanly when the competitive endpoint errors (base dashboard intact)", async () => {
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      if (isBenchmark(url)) return Promise.resolve(mkRes({ ok: true, runs: RUNS }));
+      if (isCompetitive(url)) return Promise.resolve(mkRes({ error: "boom" }, { ok: false, status: 500 }));
+      return Promise.resolve(mkRes({}));
+    });
+    render(<BenchmarkDashboardPage />);
+
+    // The base summary still renders (a competitive failure must not blank the page).
+    expect(await screen.findByTestId("summary-recall")).toBeInTheDocument();
+    // The competition section degrades to its empty states, never an error blank.
+    expect(screen.getByTestId("competition-empty")).toBeInTheDocument();
+  });
 });
