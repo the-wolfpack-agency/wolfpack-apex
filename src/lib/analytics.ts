@@ -449,6 +449,15 @@ export type InstinctEventType =
   //   fired when an admin probes the signing wiring (sign a server-generated
   //   probe, then independently verify it). No secrets in the payload.
   | "ogiam.signing_selftest"
+  // ogiam.enforcement_posture_changed { capability, mode, prev_mode } - an admin
+  //   graduated a capability's gate posture (monitor <-> enforce). The control
+  //   knob that turns "we logged what it would do" into "we blocked it".
+  | "ogiam.enforcement_posture_changed"
+  // ogiam.policy_simulated { window_days, decisions, candidate_capabilities,
+  //   newly_blocked, currently_blocked } - an admin replayed a candidate enforce
+  //   set over the recorded decision ledger to see its blast radius BEFORE
+  //   enforcing. Proves the cross-execution data is a decision-support asset.
+  | "ogiam.policy_simulated"
   // Agent principals (OGIAM, agents onboarded like people).
   // agent.created          { agent_id, role, owner_user_id, identity_provider }
   //   an admin onboarded an agent through the invite flow.

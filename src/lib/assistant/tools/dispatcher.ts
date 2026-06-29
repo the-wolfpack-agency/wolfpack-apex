@@ -19,6 +19,7 @@
 
 import { trackEvent } from "@/lib/analytics";
 import { authorize } from "@/lib/ogiam/authorize";
+import { resolveEnforcementMode } from "@/lib/ogiam/enforcement-policy";
 import { recordActionOutcome } from "@/lib/ogiam/ledger";
 import { ingestAgentAction } from "@/lib/agents/audit/brain-ingest";
 import { createPendingApproval } from "@/lib/agents/approvals/store";
@@ -148,6 +149,17 @@ async function runOneTool<P, R>(
          autonomous agent governed: every step is authorized under its identity,
          and high-risk steps are stopped, not just logged. */
   const agent = ctx.agentPrincipal;
+  /* Resolve the enforcement posture for this (workspace, capability). A
+     per-capability admin override wins; with NO override this returns the prior
+     hardcoded default (agents enforce, the human assistant monitors), so the gate
+     behaves exactly as before until an admin sets a posture. Fail-safe: any DB
+     error resolves to that same default, never throws. */
+  const gateWorkspaceId = agent ? agent.workspaceId : ctx.workspaceId ?? "default";
+  const mode = await resolveEnforcementMode({
+    workspaceId: gateWorkspaceId,
+    capability: tool.capability,
+    isAgent: Boolean(agent),
+  });
   /* Held across the gate so an agent OUTCOME can be linked to its decision seq
      after execution. Absent when the ledger write was skipped/failed. */
   let decision: OgiamDecision | null = null;
@@ -175,7 +187,7 @@ async function runOneTool<P, R>(
       surface: agent ? "/agent" : "/assistant",
       workflowId: ctx.workflowId,
       params: parsed.data,
-      mode: agent ? "enforce" : "monitor",
+      mode,
     });
     if (agent && decision.unauditable) {
       // Fail closed: the action could not be written to the tamper-evident

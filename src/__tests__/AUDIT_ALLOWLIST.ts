@@ -84,6 +84,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "chat completion — no persistent state change audit-worthy; analytics already tracks",
   },
   {
+    route: "src/app/api/admin/ogiam/simulate/route.ts",
+    reason: "read-only enforcement simulator; POST only to carry the candidate enforce-set in the body. Replays the ogiam_decisions ledger and returns a report, no state change, fires ogiam.policy_simulated analytics",
+  },
+  {
     route: "src/app/api/features/[id]/analyze/route.ts",
     reason: "read-only analysis — produces a report, doesn't mutate feature state",
   },
