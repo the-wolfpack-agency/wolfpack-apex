@@ -77,3 +77,7 @@ Price per system/target (matches the onboarding unit and the cost driver).
 
 See [ogiam-client-deployment-plan.md](./ogiam-client-deployment-plan.md) for the
 go-to-market sequence that lands these with existing and adjacent clients.
+
+For the pentest / full-system-assurance product specifically (value metric, tier
+rationale, willingness-to-pay, and the go-to-market wedge), see
+[ogiam-pentest-pricing.md](./ogiam-pentest-pricing.md), which extends this doc.
