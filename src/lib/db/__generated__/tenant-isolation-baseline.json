@@ -40,7 +40,9 @@
     "ogiam_decisions",
     "workspace_ai_policy"
   ],
-  "filesScanned": 1272,
+  "enforcedTableCount": 0,
+  "enforcedTables": [],
+  "filesScanned": 1273,
   "filesTouchingScoped": 80,
   "totalOffenders": 78,
   "counts": {

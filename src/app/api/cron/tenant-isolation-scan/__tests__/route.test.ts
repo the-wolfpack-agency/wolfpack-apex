@@ -27,6 +27,8 @@ jest.mock(
   () => ({
     scopedTableCount: 37,
     scopedTables: [],
+    enforcedTableCount: 0,
+    enforcedTables: [],
     totalOffenders: 78,
     counts: { "principal-resolve": 52, "pk-pinned-upstream": 10, unclassified: 0 },
     unclassifiedCount: 0,
@@ -83,6 +85,8 @@ describe("GET /api/cron/tenant-isolation-scan", () => {
       "system",
       expect.objectContaining({
         scoped_tables: 37,
+        rls_enforced_tables: 0,
+        rls_tripwire_tables: 37,
         total_offenders: 78,
         unclassified: 0,
         source: "cron",

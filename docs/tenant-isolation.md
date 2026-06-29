@@ -95,35 +95,62 @@ All seven get the RLS tripwire in migration 196. `workspace_id` is `TEXT` (opaqu
 string slugs like `default`, `demo-cto`, `tm_<rand>`), never a UUID - see the
 note in migration 193 and the user-id / workspace-id schema-guard tests.
 
-## Recommended future initiative: codebase-wide session-var RLS
+## Session-var RLS retrofit (in progress)
 
-Out of scope here because it is cross-cutting - it touches `src/lib/db.ts` and
-every table in the schema, not just platform-scan. Doing it piecemeal would be
-inconsistent and risky. Tracked here as a concrete design sketch so the next
-engineer doesn't have to rediscover it:
+The retrofit graduates a table from "tripwire" (permissive `USING (true)`) to
+real, enforced isolation where Postgres itself filters every row. It is rolled
+out per table group, never big-bang, with the app-side predicate staying in
+place throughout (defense in depth - predicate AND policy both holding).
 
-1. **Transaction helper.** Add `withWorkspaceScope(workspaceId, fn)` to
-   `src/lib/db.ts`. It checks out one pooled client, opens a transaction, runs
-   `SELECT set_config('app.workspace_id', $1, true)` (the `true` = `SET LOCAL`,
-   so it is scoped to the transaction and reset on release), runs `fn` against
-   that client, then commits/rolls back and releases. Every workspace-scoped
-   read/write moves inside a `withWorkspaceScope` block.
-2. **Real policies.** Replace the permissive `USING (true)` policies with
+### Step 1 - the mechanism (DONE)
+
+`withWorkspaceScope(workspaceId, fn)` in `src/lib/db.ts` checks out one pooled
+client, opens a transaction, runs `SELECT set_config('app.workspace_id', $1,
+true)` (the `true` = transaction-local, reset on release), and runs `fn` inside
+an **AsyncLocalStorage** context that pins that client. While inside, `query` /
+`safeQuery` / `writeQuery` transparently run on that client, so a policy keyed on
+`current_setting('app.workspace_id')` filters every row with ZERO call-site
+churn. Outside a scope, `query` uses the pool exactly as before. Unit-tested in
+`src/lib/__tests__/db-workspace-scope.test.ts` (routing, commit/rollback/release,
+nesting, shadow-mode). The retrofit progress (how many scoped tables are enforced
+vs tripwire-only) is tracked by the scanner + `/api/cron/tenant-isolation-scan`
+(`system.tenant_isolation_scanned` carries `rls_enforced_tables`).
+
+### Step 2 - per-table flip (gated on a real-DB verify)
+
+For each table group:
+
+1. **Wrap the call sites.** Every route/cron/job that reads or writes the table
+   runs its handler body inside `withWorkspaceScope(callerWorkspaceId, ...)`. A
+   missed path, once the policy is FORCED, returns zero rows (fail-closed) - so
+   the conversion must be complete and proven before the flip.
+2. **Flip the policy.** Replace the permissive policy with
    `USING (workspace_id = current_setting('app.workspace_id', true))
-    WITH CHECK (workspace_id = current_setting('app.workspace_id', true))`.
-   The `true` second arg to `current_setting` returns NULL instead of erroring
-   when unset, which lets the migration land before the helper is wired
-   everywhere (NULL never equals a real workspace_id, so it fails closed).
-3. **Migration order.** Land the helper + convert all call sites FIRST, verify
-   green against a real DB, THEN swap the policies in a later migration. Swapping
-   policies before the helper exists would deny live traffic.
-4. **Roll out per table group**, not big-bang: convert one domain's call sites,
-   flip that domain's policies, verify, repeat. The app-side predicate stays in
-   place throughout (defense in depth - the predicate and the policy both holding
-   is strictly safer than either alone).
-5. **Keep the guardrail tests.** Even after session-var RLS lands, the
-   predicate-presence tests stay valuable as defense in depth: belt and braces.
+    WITH CHECK (workspace_id = current_setting('app.workspace_id', true))`
+   AND add `ALTER TABLE x FORCE ROW LEVEL SECURITY`. **FORCE is mandatory**: the
+   app connects as the table owner, and an owner BYPASSES RLS without FORCE, so a
+   policy alone is fake enforcement.
+3. **Verify on a real database FIRST.** The exact policy shape is validated by
+   `src/lib/db/__tests__/workspace-scope-rls-enforcement.test.ts` - a proof
+   harness that, against a real Postgres (it SKIPS without `DATABASE_URL`), shows
+   a scoped read returns only the caller's rows, an unscoped read is fail-closed,
+   a cross-workspace UPDATE affects zero rows, and `WITH CHECK` blocks a
+   mis-tagged insert. Run it (`DATABASE_URL=... npx jest
+   workspace-scope-rls-enforcement`) before shipping any FORCE migration. This
+   step is why the flip is NOT done blind: swapping policies before the call
+   sites are wrapped + verified would deny live traffic.
 
-Until that initiative ships, the app-side predicate (enforced by the guardrail
-tests) is the boundary, and the permissive RLS policy is the tripwire that makes
-the eventual switch a one-migration change rather than a schema-wide scramble.
+`withTransaction()` opens its own connection and is not yet scope-aware, so keep
+FORCE-RLS tables on the `writeQuery` path (which IS scope-aware) until the two are
+unified.
+
+### Step 3 - keep the guardrails
+
+The predicate-presence guardrails
+(`src/lib/db/__tests__/tenant-isolation-global.test.ts` repo-wide;
+`src/lib/platform-scan/__tests__/tenant-isolation.test.ts` for platform-scan)
+stay valuable as defense in depth even after a table is FORCE-enforced.
+
+Until every scoped table is enforced, the app-side predicate is the boundary and
+the permissive RLS policy is the tripwire that makes each flip a contained,
+verified change rather than a schema-wide scramble.

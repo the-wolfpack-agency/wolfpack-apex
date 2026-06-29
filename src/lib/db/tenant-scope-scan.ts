@@ -83,6 +83,10 @@ export interface Offender {
 
 export interface ScanResult {
   scopedTables: string[];
+  /** Scoped tables that carry a real FORCE-RLS policy (session-var enforced),
+   *  as opposed to the permissive deny-by-default tripwire. Tracks how far the
+   *  RLS retrofit has progressed toward removing the whitepaper caveat. */
+  enforcedTables: string[];
   filesScanned: number;
   filesTouchingScoped: number;
   offenders: Offender[];
@@ -117,6 +121,33 @@ export function discoverScopedTables(repoRoot: string): Set<string> {
     }
   }
   return scoped;
+}
+
+/**
+ * Tables that have a REAL session-var RLS policy enforced (FORCE ROW LEVEL
+ * SECURITY). Without FORCE, the table owner — the app's pooled connection role —
+ * bypasses RLS entirely, so a policy alone is fake enforcement. The retrofit
+ * graduates a table from tripwire (permissive USING(true)) to enforced by adding
+ * FORCE; this counts how many have crossed that line.
+ */
+export function discoverForcedRlsTables(repoRoot: string): Set<string> {
+  const dir = path.join(repoRoot, "src/db/migrations");
+  const forced = new Set<string>();
+  const dropped = new Set<string>();
+  // Process in migration order so a later DISABLE/NO FORCE wins.
+  for (const fn of fs.readdirSync(dir).sort()) {
+    if (!fn.endsWith(".sql") || fn.endsWith(".down.sql")) continue;
+    const text = fs.readFileSync(path.join(dir, fn), "utf8");
+    for (const m of text.matchAll(/ALTER TABLE\s+(\w+)\s+FORCE ROW LEVEL SECURITY/gi)) {
+      forced.add(m[1]);
+      dropped.delete(m[1]);
+    }
+    for (const m of text.matchAll(/ALTER TABLE\s+(\w+)\s+NO FORCE ROW LEVEL SECURITY/gi)) {
+      dropped.add(m[1]);
+      forced.delete(m[1]);
+    }
+  }
+  return forced;
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +263,7 @@ const EMPTY_COUNTS = (): Record<OffenderClass, number> => ({
 /** Scan the whole repo for tenant-scope offenders. */
 export function scanRepo(repoRoot: string): ScanResult {
   const scoped = discoverScopedTables(repoRoot);
+  const forced = discoverForcedRlsTables(repoRoot);
   const files = listSourceFiles(repoRoot);
   const offenders: Offender[] = [];
   const touching = new Set<string>();
@@ -259,6 +291,8 @@ export function scanRepo(repoRoot: string): ScanResult {
   for (const o of offenders) counts[o.klass] += 1;
   return {
     scopedTables: [...scoped].sort(),
+    // Only count FORCE-RLS on tables that are actually workspace-scoped.
+    enforcedTables: [...forced].filter((t) => scoped.has(t)).sort(),
     filesScanned: files.length,
     filesTouchingScoped: touching.size,
     offenders,

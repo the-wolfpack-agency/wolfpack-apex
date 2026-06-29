@@ -90,11 +90,20 @@ describe("tenant-isolation committed baseline stays in sync", () => {
   });
 
   it("its scoped-table set matches the live scan (regenerate with the script when this trips)", () => {
-    // Deep-equality on the scoped-table set forces `npx tsx
-    // scripts/scan-tenant-isolation.ts --write` whenever a workspace-scoped
-    // table is added/removed — the exact moment a human should re-review tenancy.
+    // Deep-equality on the scoped-table set forces `npm run scan:tenant-isolation
+    // -- --write` whenever a workspace-scoped table is added/removed — the exact
+    // moment a human should re-review tenancy.
     const b = JSON.parse(fs.readFileSync(BASELINE, "utf8"));
     expect(b.scopedTables).toEqual(result.scopedTables);
+  });
+
+  it("its FORCE-RLS enforced-table set matches the live scan (retrofit progress is tracked)", () => {
+    // Every table that graduates to real FORCE-RLS must regenerate the baseline,
+    // so the recorded coverage metric (and the whitepaper-caveat status) stays true.
+    const b = JSON.parse(fs.readFileSync(BASELINE, "utf8"));
+    expect(b.enforcedTables ?? []).toEqual(result.enforcedTables);
+    // Enforced tables must themselves be workspace-scoped.
+    for (const t of result.enforcedTables) expect(result.scopedTables).toContain(t);
   });
 });
 

@@ -50,6 +50,7 @@ async function recordScan(
 ): Promise<NextResponse> {
   const counts = (baseline.counts ?? {}) as Record<string, number>;
   const scopedTables = baseline.scopedTableCount ?? baseline.scopedTables?.length ?? 0;
+  const enforcedTables = baseline.enforcedTableCount ?? baseline.enforcedTables?.length ?? 0;
   const totalOffenders = baseline.totalOffenders ?? 0;
   const unclassified = baseline.unclassifiedCount ?? 0;
 
@@ -59,6 +60,10 @@ async function recordScan(
 
   trackEvent("system.tenant_isolation_scanned", actorId, actorRole, {
     scoped_tables: scopedTables,
+    // Retrofit progress: how many scoped tables have real FORCE-RLS enforcement
+    // vs are still permissive tripwires. The whitepaper caveat lifts as this rises.
+    rls_enforced_tables: enforcedTables,
+    rls_tripwire_tables: scopedTables - enforcedTables,
     total_offenders: totalOffenders,
     unclassified,
     source,
@@ -79,6 +84,7 @@ async function recordScan(
     ok: true,
     recorded: inserted !== null,
     scopedTables,
+    enforcedTables,
     totalOffenders,
     unclassified,
     counts,
