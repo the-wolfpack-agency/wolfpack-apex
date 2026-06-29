@@ -135,5 +135,51 @@ test.describe("Agent fleet console reality check", () => {
         .map((f) => `  - [${f.kind}] ${f.detail}`)
         .join("\n")}`,
     ).toEqual([]);
+
+    // ---- MOBILE viewport pass (390x844, iPhone-class) ----
+    // The fleet nav row (Write approvals / Platform scans / Connections /
+    // Shared memory + Refresh) overflowed the right edge on a narrow viewport.
+    // Reload at a phone width and assert NO horizontal overflow anywhere and
+    // that the nav controls sit within the viewport. SMOKE-creds gated (this is
+    // inside the authenticated block, which skips cleanly without creds).
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${target.baseUrl}/admin/agents`, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+    await expect(
+      page.getByTestId("admin-agents-page"),
+      "the agents console mounts at a phone width",
+    ).toBeVisible({ timeout: 8_000 });
+
+    // No horizontal scroll: the document content fits the viewport (2px slack
+    // for sub-pixel rounding).
+    const overflow = await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth -
+        (window.innerWidth || document.documentElement.clientWidth),
+    );
+    expect(
+      overflow,
+      `no horizontal overflow on /admin/agents at 390px (overflow=${overflow}px)`,
+    ).toBeLessThanOrEqual(2);
+
+    // The nav buttons are within the viewport: every nav control's right edge is
+    // at or inside the viewport width.
+    const navTestIds = [
+      "agents-approvals-link",
+      "agents-platform-scans-link",
+      "agents-connectors-link",
+      "agents-memory-link",
+    ];
+    for (const testId of navTestIds) {
+      const box = await page.getByTestId(testId).boundingBox();
+      if (box) {
+        expect(
+          box.x + box.width,
+          `${testId} fits within the 390px viewport (right edge=${box.x + box.width}px)`,
+        ).toBeLessThanOrEqual(392);
+      }
+    }
   });
 });

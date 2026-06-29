@@ -157,5 +157,58 @@ test.describe("Agent detail command-view reality check", () => {
         .map((f) => `  - [${f.kind}] ${f.detail}`)
         .join("\n")}`,
     ).toEqual([]);
+
+    // ---- MOBILE viewport pass (390x844, iPhone-class) ----
+    // Two redesign bugs this defends against on a narrow viewport: the action
+    // buttons (Pause / Revoke) overflowing the right edge, and the metrics row
+    // (Gate enforcement / Assigned runs / Last active) being occluded behind a
+    // mis-offset page-level sticky header. Reload at a phone width and assert NO
+    // horizontal overflow and that the lifecycle buttons sit within the
+    // viewport. SMOKE-creds gated (inside the authenticated block; skips cleanly
+    // without creds).
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${target.baseUrl}${AGENT_PATH}`, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+    await expect(
+      page.getByTestId("admin-agent-page"),
+      "the agent detail page mounts at a phone width",
+    ).toBeVisible({ timeout: 8_000 });
+
+    // Only assert the action layout on a live agent (not the not-found state).
+    if ((await page.getByTestId("agent-name").count()) > 0) {
+      // No horizontal scroll: content fits the viewport (2px sub-pixel slack).
+      const overflow = await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          (window.innerWidth || document.documentElement.clientWidth),
+      );
+      expect(
+        overflow,
+        `no horizontal overflow on ${AGENT_PATH} at 390px (overflow=${overflow}px)`,
+      ).toBeLessThanOrEqual(2);
+
+      // The metrics row renders (not occluded behind a sticky header).
+      await expect(
+        page.getByTestId("agent-metrics-panel"),
+        "the metrics row renders at a phone width (not hidden behind a sticky header)",
+      ).toBeVisible();
+
+      // Whichever lifecycle action buttons are present for the agent's current
+      // state sit within the viewport (no right-edge clip).
+      for (const testId of ["agent-pause", "agent-resume", "agent-revoke"]) {
+        const control = page.getByTestId(testId);
+        if ((await control.count()) > 0) {
+          const box = await control.boundingBox();
+          if (box) {
+            expect(
+              box.x + box.width,
+              `${testId} fits within the 390px viewport (right edge=${box.x + box.width}px)`,
+            ).toBeLessThanOrEqual(392);
+          }
+        }
+      }
+    }
   });
 });

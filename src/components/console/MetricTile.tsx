@@ -152,12 +152,24 @@ export function MetricTile({
             textTransform: "uppercase",
             letterSpacing: "0.08em",
             color: "var(--wp-text-muted, #929cad)",
+            minWidth: 0,
+            overflowWrap: "anywhere",
           }}
         >
           {kicker}
         </div>
       )}
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          gap: 10,
+          // A long pre-formatted display string + sparkline must wrap rather
+          // than force the tile wider than its grid track.
+          flexWrap: "wrap",
+          minWidth: 0,
+        }}
+      >
         <span
           data-testid="metric-value"
           style={{
@@ -166,6 +178,8 @@ export function MetricTile({
             lineHeight: 1.05,
             color: accent ?? "var(--wp-text, #e9edf4)",
             fontVariantNumeric: "tabular-nums",
+            minWidth: 0,
+            overflowWrap: "anywhere",
           }}
         >
           {shownValue}
@@ -186,7 +200,12 @@ export function MetricTile({
       >
         <span
           data-testid="metric-label"
-          style={{ fontSize: 12, color: "var(--wp-text-dim, #b4bcc8)" }}
+          style={{
+            fontSize: 12,
+            color: "var(--wp-text-dim, #b4bcc8)",
+            minWidth: 0,
+            overflowWrap: "anywhere",
+          }}
         >
           {label}
         </span>

@@ -44,7 +44,7 @@ export function SectionHeader({
         marginBottom: 16,
       }}
     >
-      <div style={{ minWidth: 0 }}>
+      <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
         {eyebrow != null && (
           <div
             data-testid="section-header-eyebrow"
@@ -86,7 +86,17 @@ export function SectionHeader({
       {actions != null && (
         <div
           data-testid="section-header-actions"
-          style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            // Wrap a busy actions row onto the next line instead of clipping the
+            // rightmost control; minWidth:0 lets it shrink below intrinsic size
+            // so it drops below the title on narrow screens rather than
+            // forcing horizontal overflow.
+            flexWrap: "wrap",
+            minWidth: 0,
+          }}
         >
           {actions}
         </div>

@@ -28,6 +28,7 @@ jest.mock("next/link", () => ({
 
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import PlatformScansPage from "@/app/(dashboard)/admin/platform-scans/page";
+import { TESTING_TAXONOMY } from "@/lib/platform-scan/testing-taxonomy";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mkRes(body: unknown, opts: { ok?: boolean; status?: number } = {}): any {
@@ -645,4 +646,156 @@ it("renders the findings error state when the list GET fails", async () => {
   // The shell still rendered (not blank): the hero + run controls are present.
   expect(screen.getByTestId("platform-scans-page")).toBeInTheDocument();
   expect(screen.getByTestId("run-scan")).toBeInTheDocument();
+});
+
+// --- Part A: layout-bug fixes (no clip / wrap on the findings controls) ---
+
+it("the findings controls row wraps and takes a full line (never clips the rightmost control)", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  const controls = await screen.findByTestId("severity-filter");
+  // The controls row wraps and claims a full line so it cannot squeeze the
+  // "Findings" title/subtitle to near-zero width nor clip on the right.
+  expect(controls.style.flexWrap).toBe("wrap");
+  expect(controls.style.flex).toContain("100%");
+  expect(controls.style.minWidth).toBe("0");
+  // Every header control is still present (nothing dropped to fit).
+  expect(screen.getByTestId("severity-chip-actionable")).toBeInTheDocument();
+  expect(screen.getByTestId("severity-chip-all")).toBeInTheDocument();
+  expect(screen.getByTestId("bulk-acknowledge")).toBeInTheDocument();
+  expect(screen.getByTestId("bulk-resolve")).toBeInTheDocument();
+});
+
+it("the run-scan controls wrap, with mode-select + run hooks for the mobile stack rules", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  const controls = await screen.findByTestId("scan-controls");
+  expect(controls.style.flexWrap).toBe("wrap");
+  expect(controls.style.maxWidth).toBe("100%");
+  // The run button carries the class the mobile media query targets to go
+  // full-width (no horizontal overflow on a phone).
+  expect(screen.getByTestId("run-scan").className).toContain("wp-scan-run");
+  expect(screen.getByTestId("platform-select").className).toContain("wp-scan-select");
+  expect(screen.getByTestId("mode-select").className).toContain("wp-scan-select");
+});
+
+// --- Part B: the UX posture grade is explainable (drill-down to real finding) ---
+
+it("posture drill-down shows the REAL ux finding when a ux_gap is loaded", async () => {
+  const UX_POSTURE = { grade: "B", ux: 1, a11y: 0, total: 1, bySeverity: { high: 0, medium: 1, low: 0 }, score: 4 };
+  const uxNit = mkFinding({
+    id: "ux-1",
+    category: "ux_gap",
+    severity: "medium",
+    title: "Primary call-to-action is below the fold on mobile",
+    detail: "The submit button requires scrolling on a 390px viewport.",
+  });
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(mkRes({ summary: SUMMARY, scans: SCANS, uxPosture: UX_POSTURE }));
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [uxNit] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  // The actual finding behind the grade is shown inline (title + detail), not a
+  // bare "1 UX nit" the user can't see.
+  const finding = await screen.findByTestId("ux-posture-finding-ux-1");
+  expect(finding).toHaveTextContent("Primary call-to-action is below the fold on mobile");
+  expect(finding).toHaveTextContent("requires scrolling on a 390px viewport");
+  // With a loaded finding, the reveal affordance is not needed.
+  expect(screen.queryByTestId("ux-posture-reveal")).not.toBeInTheDocument();
+});
+
+it("posture drill-down offers a reveal that widens the list when the nit is not loaded", async () => {
+  const UX_POSTURE = { grade: "B", ux: 1, a11y: 0, total: 1, bySeverity: { high: 0, medium: 1, low: 0 }, score: 4 };
+  let widened = false;
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(mkRes({ summary: SUMMARY, scans: SCANS, uxPosture: UX_POSTURE }));
+    if (isList(url, opts)) {
+      // Default actionable band hides the medium ux nit; once widened it loads.
+      if (String(url).includes("severity=")) return Promise.resolve(mkRes({ findings: [] }));
+      widened = true;
+      return Promise.resolve(mkRes({ findings: [mkFinding({ id: "ux-2", category: "ux_gap", severity: "medium", title: "Low-contrast helper text", detail: "Helper text fails contrast." })] }));
+    }
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  // No ux_gap loaded yet -> the reveal affordance is offered with the real count.
+  const reveal = await screen.findByTestId("ux-posture-reveal");
+  expect(reveal).toHaveTextContent("View the 1 nit");
+  fireEvent.click(reveal);
+
+  // Revealing widens the list to all severities, which loads the real finding.
+  await waitFor(() => expect(widened).toBe(true));
+  expect(await screen.findByTestId("ux-posture-finding-ux-2")).toHaveTextContent("Low-contrast helper text");
+});
+
+it("posture drill-down is absent when the grade has zero nits", async () => {
+  const UX_POSTURE = { grade: "A", ux: 0, a11y: 0, total: 0, bySeverity: { high: 0, medium: 0, low: 0 }, score: 0 };
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(mkRes({ summary: SUMMARY, scans: SCANS, uxPosture: UX_POSTURE }));
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+  await screen.findByTestId("ux-posture");
+  expect(screen.queryByTestId("ux-posture-drilldown")).not.toBeInTheDocument();
+});
+
+// --- Part C: the validation-coverage ("What we tested") map ---
+
+it("renders the validation-coverage map with every taxonomy row", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  const panel = await screen.findByTestId("validation-coverage");
+  expect(panel).toHaveTextContent("What we tested");
+  const rows = within(screen.getByTestId("validation-coverage-rows")).getAllByTestId(/^coverage-row-/);
+  // One rendered row per taxonomy entry.
+  expect(rows.length).toBe(TESTING_TAXONOMY.length);
+  // The first taxonomy row's area + validates copy is rendered.
+  expect(panel).toHaveTextContent(TESTING_TAXONOMY[0].area);
+  expect(panel).toHaveTextContent(TESTING_TAXONOMY[0].validates);
+});
+
+it("the validation-coverage map contains NO tool or brand names", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  const panel = await screen.findByTestId("validation-coverage");
+  const text = (panel.textContent ?? "").toLowerCase();
+  const forbidden = [
+    "semgrep", "openclaw", "zap", "burp", "nuclei", "snyk", "nessus",
+    "qualys", "playwright", "axe", "lighthouse", "trivy", "checkov",
+    "sonarqube", "wapiti", "nikto", "acunetix", "qdrant", "neo4j", "postgres",
+  ];
+  for (const name of forbidden) {
+    expect(text).not.toContain(name);
+  }
 });

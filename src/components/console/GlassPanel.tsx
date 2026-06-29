@@ -63,7 +63,9 @@ export function GlassPanel({
       data-testid={testId ?? "glass-panel"}
       data-glow={glow}
       className={merged}
-      style={style}
+      // Contain the panel: it must never be the source of horizontal overflow,
+      // even if a child tries to be wider than the column it sits in.
+      style={{ minWidth: 0, maxWidth: "100%", overflowWrap: "anywhere", ...style }}
     >
       {hasHeader && (
         <header
@@ -73,11 +75,14 @@ export function GlassPanel({
             alignItems: "flex-start",
             justifyContent: "space-between",
             gap: 12,
+            // Let the header itself wrap so the actions drop below the title
+            // on narrow widths instead of clipping.
+            flexWrap: "wrap",
             padding: "14px 16px",
             borderBottom: "1px solid var(--wp-dark-border, #242a36)",
           }}
         >
-          <div style={{ minWidth: 0 }}>
+          <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
             {title != null && (
               <div
                 style={{
@@ -105,14 +110,33 @@ export function GlassPanel({
           {actions != null && (
             <div
               data-testid="glass-panel-actions"
-              style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                // Wrap a busy actions row rather than clip the rightmost
+                // control; minWidth:0 lets it shrink to drop below the title.
+                flexWrap: "wrap",
+                minWidth: 0,
+              }}
             >
               {actions}
             </div>
           )}
         </header>
       )}
-      <div style={{ padding: padded ? 16 : 0 }}>{children}</div>
+      <div
+        data-testid="glass-panel-body"
+        style={{
+          padding: padded ? 16 : 0,
+          // Long unbreakable content (URLs, hashes) wraps instead of pushing
+          // the panel wider than its column.
+          minWidth: 0,
+          overflowWrap: "anywhere",
+        }}
+      >
+        {children}
+      </div>
     </section>
   );
 }

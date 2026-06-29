@@ -1789,23 +1789,28 @@ export default function AgentProfilePage({
 
   return (
     <div data-testid="admin-agent-page" style={wrap}>
-      {/* A subtle fade keeps tab switches smooth without any layout shift. */}
-      <style>{"@keyframes wpFadeIn{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}"}</style>
+      {/* A subtle fade keeps tab switches smooth without any layout shift.
+          The mobile rule degrades the lifecycle action row gracefully: on a
+          narrow viewport (<= 480px) the pause/resume/revoke buttons go
+          full-width and stack so they never overflow the right edge. Desktop
+          is untouched (the buttons keep their natural width when there is
+          room). */}
+      <style>{"@keyframes wpFadeIn{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}@media (max-width:480px){.wp-agent-lifecycle{width:100%;justify-content:stretch}.wp-agent-lifecycle>button{flex:1 1 100%}.wp-agent-lifecycle .wp-agent-revoke-confirm{width:100%}.wp-agent-lifecycle .wp-agent-revoke-confirm>button{flex:1 1 100%}}"}</style>
 
-      {/* Sticky header. The primary controls (name, state chip, lifecycle
-          actions) stay reachable no matter which tab or how far the inner list
-          is scrolled, so the heavy single-column scroll never hides them. */}
+      {/* In-flow header. The primary controls (name, state chip, lifecycle
+          actions) and the tab bar live here. This is NOT sticky on purpose:
+          the global dashboard layout owns the page chrome, and a page-level
+          sticky element overlapped the metrics row beneath it on scroll, hiding
+          Gate enforcement / Assigned runs / Last active behind it. Keeping the
+          header in normal flow means content is never occluded; the solid
+          background + bottom border still set it apart visually. */}
       <div
         data-testid="agent-header"
         style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 5,
           margin: "0 -1.5rem",
-          padding: "1rem 1.5rem 0.75rem",
+          padding: "0.25rem 1.5rem 0.75rem",
           background: "var(--wp-dark, #0b0d11)",
           borderBottom: "1px solid var(--wp-dark-border, #333)",
-          backdropFilter: "blur(6px)",
         }}
       >
         {backLink}
@@ -1850,6 +1855,7 @@ export default function AgentProfilePage({
               inline confirm before the destructive PATCH. */}
           <div
             data-testid="agent-lifecycle"
+            className="wp-agent-lifecycle"
             style={{
               display: "flex",
               gap: "0.5rem",
@@ -1921,6 +1927,7 @@ export default function AgentProfilePage({
             {!isRevoked && confirmingRevoke && (
               <div
                 data-testid="agent-revoke-confirm"
+                className="wp-agent-revoke-confirm"
                 style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}
               >
                 <span style={{ fontSize: "0.8rem", color: "var(--wp-error, #ef4444)" }}>
