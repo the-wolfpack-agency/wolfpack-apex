@@ -466,6 +466,13 @@ export type InstinctEventType =
   | "ai_inventory.scan_completed"
   // ai_inventory.viewed { total, ungoverned } - an admin opened the inventory.
   | "ai_inventory.viewed"
+  // MCP (Model Context Protocol) static scanner. Governs the new MCP attack
+  // surface without our core ever connecting to a server.
+  // mcp.scan_completed  { target, servers, findings, critical, high }
+  | "mcp.scan_completed"
+  // mcp.finding_detected { server, class, severity } - one per MCP risk found,
+  //   so the learning loop sees the threat distribution across client setups.
+  | "mcp.finding_detected"
   // Agent principals (OGIAM, agents onboarded like people).
   // agent.created          { agent_id, role, owner_user_id, identity_provider }
   //   an admin onboarded an agent through the invite flow.

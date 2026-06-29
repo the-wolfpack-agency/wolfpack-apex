@@ -50,7 +50,7 @@ const PROVIDER_ENDPOINTS: ReadonlyArray<{ re: RegExp; provider: string }> = [
 
 /** Provider API-key signatures (reuses the precision-first secret philosophy:
  *  a real provider token format, never a generic high-entropy guess). */
-const KEY_SIGNATURES: ReadonlyArray<{ re: RegExp; provider: string }> = [
+export const KEY_SIGNATURES: ReadonlyArray<{ re: RegExp; provider: string }> = [
   { re: /\bsk-ant-[A-Za-z0-9_-]{24,}\b/, provider: "anthropic" },
   // Negative lookahead so an Anthropic key (sk-ant-...) is not double-counted as
   // OpenAI: sk-ant- is otherwise a syntactic subset of the OpenAI sk- format.

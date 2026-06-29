@@ -22,7 +22,8 @@ export type AiSurfaceKind =
   | "ai_sdk" // an import/require of a known LLM SDK
   | "provider_endpoint" // a hardcoded model-provider API URL
   | "api_key" // a provider API key signature (precision-first)
-  | "ai_route"; // an app route/handler that is an AI feature
+  | "ai_route" // an app route/handler that is an AI feature
+  | "mcp_server"; // a configured Model Context Protocol server (tool surface)
 
 export type AiSurfaceRisk = "low" | "medium" | "high" | "critical";
 
