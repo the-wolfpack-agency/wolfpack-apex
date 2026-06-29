@@ -458,6 +458,14 @@ export type InstinctEventType =
   //   set over the recorded decision ledger to see its blast radius BEFORE
   //   enforcing. Proves the cross-execution data is a decision-support asset.
   | "ogiam.policy_simulated"
+  // AI Surface Inventory (shadow-AI discovery). You cannot govern what you cannot
+  // see: these track the inventory of AI touchpoints found in a client's code and
+  // the "ungoverned AI" gap over time, the foundation the other AI-governance
+  // surfaces register into.
+  // ai_inventory.scan_completed { target, surfaces, ungoverned, written }
+  | "ai_inventory.scan_completed"
+  // ai_inventory.viewed { total, ungoverned } - an admin opened the inventory.
+  | "ai_inventory.viewed"
   // Agent principals (OGIAM, agents onboarded like people).
   // agent.created          { agent_id, role, owner_user_id, identity_provider }
   //   an admin onboarded an agent through the invite flow.
