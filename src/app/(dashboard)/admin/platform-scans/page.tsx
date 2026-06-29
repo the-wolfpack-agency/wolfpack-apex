@@ -140,7 +140,7 @@ const UX_GRADE_TONE: Record<UxGrade, SeverityTone> = {
 
 const UX_GRADE_LABEL: Record<UxGrade, string> = {
   A: "No UX or accessibility gaps",
-  B: "Minor usability nits",
+  B: "Minor usability issues",
   C: "Usability gaps to address",
   D: "A blocking UX/a11y gap present",
   F: "Multiple blocking UX/a11y gaps",

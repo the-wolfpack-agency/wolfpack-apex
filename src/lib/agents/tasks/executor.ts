@@ -28,6 +28,7 @@ import {
 } from "@/lib/assistant/forms/execute";
 import type { FormKind, FormSpec } from "@/lib/assistant/forms/types";
 import { resolveInternalOrigin } from "@/lib/qr/origin";
+import { internalFetch } from "@/lib/http/internal-fetch";
 import {
   findPromotedProcedure,
   recordLearnedProcedure,
@@ -368,13 +369,25 @@ async function executeOperationOnBehalf(args: {
     });
 
     const method = operation.method.toUpperCase();
-    const res = await deps.fetchImpl(`${deps.resolveOrigin()}${operation.path}`, {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
+    // Route through the shared internalFetch so this on-behalf self-call gets
+    // the Vercel deployment-protection bypass header, the transient-throw
+    // retry, and the diagnosable error message (the fix for the prod
+    // "On-behalf execution failed: fetch failed" bug). deps.fetchImpl is still
+    // the injected transport (default global fetch; tests stub it), so the
+    // existing test seams are preserved. The token is forwarded verbatim as
+    // the Authorization bearer and is NEVER logged; the origin is the trusted
+    // server origin (never request-derived, CWE-918).
+    const res = await internalFetch(operation.path, {
+      originOverride: deps.resolveOrigin(),
+      fetchImpl: deps.fetchImpl,
+      init: {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: method === "GET" ? undefined : JSON.stringify(operation.values),
       },
-      body: method === "GET" ? undefined : JSON.stringify(operation.values),
     });
 
     if (res.status >= 200 && res.status < 300) {
