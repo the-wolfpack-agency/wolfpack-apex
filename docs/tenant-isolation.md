@@ -47,16 +47,24 @@ isolation that actually matters is the predicate in the store code.
 ## What enforces the predicate
 
 A query that touches a workspace-scoped table without a `workspace_id` predicate
-is a silent cross-tenant leak: the query runs, just over the wrong rows. Two
+is a silent cross-tenant leak: the query runs, just over the wrong rows. Three
 guardrails keep that from regressing:
 
-- `src/lib/platform-scan/__tests__/tenant-isolation.test.ts` - statically reads
-  every platform-scan store source file, extracts the SQL string literals, and
-  asserts each `SELECT` / `UPDATE` / `DELETE` against a workspace-scoped table has
-  a `workspace_id = ...` predicate (and each `INSERT` supplies `workspace_id` as
-  a column). It also asserts migration 196 is well-formed (RLS on exactly the
-  workspace-scoped table set, no columns, no data, no `current_setting`). Adding
-  a query that forgets the filter fails the build.
+- `src/lib/db/__tests__/tenant-isolation-global.test.ts` - the REPO-WIDE gate.
+  Walks EVERY workspace-scoped table (discovered from the migrations) across ALL
+  of `src/` via the shared scanner `src/lib/db/tenant-scope-scan.ts`, and fails
+  the build if any filtering query lacks a `workspace_id` predicate AND does not
+  fall into a documented benign class (principal-resolve, pk-pinned-upstream,
+  resolves-from-credential, system-cross-workspace, dynamic-where,
+  not-a-table-access). Anything else is "unclassified" - the alarm. This is what
+  caught (and now guards against) the job-codes-dossier leak class: a tenant-owned
+  table filtered by a non-tenant business key. Run ad-hoc with
+  `npm run scan:tenant-isolation`. Coverage is recorded as a time series by
+  `/api/cron/tenant-isolation-scan` (migration 208 + `system.tenant_isolation_scanned`).
+- `src/lib/platform-scan/__tests__/tenant-isolation.test.ts` - the original,
+  narrower guardrail over the 7 platform-scan store files. It additionally asserts
+  migration 196 is well-formed (RLS on exactly the platform-scan workspace-scoped
+  table set, no columns, no data, no `current_setting`).
 - `src/lib/platform-scan/__tests__/workspace-scoping.test.ts` - the prior
   guardrail in the same spirit, focused on the store read paths.
 

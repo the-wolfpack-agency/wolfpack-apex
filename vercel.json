@@ -10,6 +10,7 @@
     { "path": "/api/cron/agent-failover", "schedule": "*/10 * * * *" },
     { "path": "/api/cron/demo-canary", "schedule": "0 */6 * * *" },
     { "path": "/api/cron/engagement-sweep", "schedule": "0 */12 * * *" },
-    { "path": "/api/cron/pentest-sweep", "schedule": "30 */12 * * *" }
+    { "path": "/api/cron/pentest-sweep", "schedule": "30 */12 * * *" },
+    { "path": "/api/cron/tenant-isolation-scan", "schedule": "0 4 * * *" }
   ]
 }

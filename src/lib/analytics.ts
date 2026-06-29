@@ -367,6 +367,11 @@ export type InstinctEventType =
   // message } - no PII, error text only.
   | "system.search_provider_failed"
   | "system.analytics_queried"
+  // Tenant-isolation coverage scan (/api/cron/tenant-isolation-scan). One event
+  // per recorded scan so the learning loop tracks the cross-tenant-leak gap over
+  // time. metadata: { scoped_tables, total_offenders, unclassified, source,
+  // <per-class counts...> }. `unclassified` MUST trend at 0.
+  | "system.tenant_isolation_scanned"
   /* Unified "Scan a document" router on /finance/invoices - emitted
      when a user drops a file in either Invoice or Receipt mode so the
      learning loop can see WHICH intake surface the user chose and

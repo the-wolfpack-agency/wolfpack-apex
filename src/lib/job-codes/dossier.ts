@@ -179,9 +179,19 @@ interface EventRow {
  * event query to a per-code materialized view; the metadata-LIKE
  * filter degrades on a sequential scan.
  */
-export async function buildCodeDossier(code: string): Promise<CodeDossier | null> {
+export async function buildCodeDossier(
+  code: string,
+  workspaceId: string,
+): Promise<CodeDossier | null> {
   const trimmed = code.trim();
   if (!trimmed) return null;
+  // Tenant isolation: job codes (instinct_job_codes_cache) are an agency-global
+  // catalogue with NO workspace_id column, but the receipts (instinct_receipt_scans)
+  // and edits (instinct_job_codes_edits) applied to a code are workspace-owned
+  // (workspace_id NOT NULL). Two workspaces can share a global code, so every
+  // tenant-owned source below MUST be filtered by workspace_id - otherwise
+  // workspace A's dossier rolls up workspace B's spend and audit trail. See
+  // docs/tenant-isolation.md + the repo-wide guardrail.
 
   const cacheRes = await query<CacheRow>(
     `SELECT code, description, active, last_seen_at, source_web_url, extra
@@ -221,10 +231,11 @@ export async function buildCodeDossier(code: string): Promise<CodeDossier | null
             applied_program, applied_po_number, applied_po_amount
      FROM instinct_receipt_scans
      WHERE LOWER(applied_to_code) = LOWER($1)
+       AND workspace_id = $2
        AND applied_at IS NOT NULL
      ORDER BY applied_at DESC
      LIMIT 200`,
-    [trimmed],
+    [trimmed, workspaceId],
   );
   const receipts: DossierReceipt[] = receiptsRes.rows.map((r) => ({
     scanId: r.id,
@@ -264,9 +275,10 @@ export async function buildCodeDossier(code: string): Promise<CodeDossier | null
             edited_by_role, status, graph_error, created_at
      FROM instinct_job_codes_edits
      WHERE code_lower = LOWER($1)
+       AND workspace_id = $2
      ORDER BY created_at DESC
      LIMIT 200`,
-    [trimmed],
+    [trimmed, workspaceId],
   );
 
   /* Analytics events that carry this code in metadata. JSONB ->> is

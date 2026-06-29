@@ -32,7 +32,10 @@ export async function GET(
   }
 
   const t0 = Date.now();
-  const dossier = await buildCodeDossier(code);
+  // Scope the dossier to the caller's workspace: receipts + edits are
+  // tenant-owned, so the rollup must never cross workspaces (see dossier.ts).
+  const workspaceId = auth.user.workspaceId ?? "default";
+  const dossier = await buildCodeDossier(code, workspaceId);
   if (!dossier) {
     return NextResponse.json(
       { error: "code_not_found", code },
