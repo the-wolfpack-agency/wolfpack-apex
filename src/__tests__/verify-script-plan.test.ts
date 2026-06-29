@@ -124,4 +124,11 @@ describe("scripts/verify.sh VERIFY_DRY_RUN plan", () => {
     expect(res.stdout).toMatch(/- qr-download-decode/);
     expect(res.stdout).not.toMatch(/- e2e-smoke/);
   });
+
+  it("VERIFY_SKIP_SMOKE skips the prod smoke but keeps the PR-code e2e gates", () => {
+    const res = plan({ VERIFY_STAGES: "e2e", CI: "true", VERIFY_SKIP_SMOKE: "1" });
+    expect(res.stdout).toMatch(/- qr-download-decode/);
+    expect(res.stdout).toMatch(/- next-build/);
+    expect(res.stdout).not.toMatch(/- e2e-smoke/);
+  });
 });

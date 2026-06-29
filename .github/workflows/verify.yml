@@ -106,6 +106,10 @@ jobs:
         env:
           CI: "true"
           VERIFY_STAGES: "e2e"
+          # The deployed-URL smoke gates PR code via next-build + qr-download here;
+          # the prod smoke (PROD_URL) runs on push to main against fresh prod, not
+          # on PRs (a PR cannot fix stale prod state). See scripts/verify.sh.
+          VERIFY_SKIP_SMOKE: ${{ github.event_name == 'pull_request' && '1' || '0' }}
           PROD_URL: ${{ secrets.PROD_URL }}
           SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}

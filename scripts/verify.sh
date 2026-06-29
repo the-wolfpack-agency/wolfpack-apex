@@ -109,7 +109,7 @@ if [ "${VERIFY_DRY_RUN:-0}" = "1" ]; then
   if [ "${VERIFY_SKIP_BUILD:-0}" != "1" ]; then
     stage_enabled e2e && echo "    - next-build"
   fi
-  if [ "${VERIFY_SKIP_E2E:-0}" != "1" ] && [ "${CI:-}" = "true" ]; then
+  if [ "${VERIFY_SKIP_E2E:-0}" != "1" ] && [ "${VERIFY_SKIP_SMOKE:-0}" != "1" ] && [ "${CI:-}" = "true" ]; then
     stage_enabled e2e && echo "    - e2e-smoke"
   fi
   exit 0
@@ -136,8 +136,15 @@ if stage_enabled e2e; then
     run_stage "next-build" npx next build
   fi
 
+  # The e2e-smoke probes the DEPLOYED prod URL (PROD_URL). That is a post-merge
+  # "verify on the deployed URL" check, not a PR gate: a PR cannot fix prod state,
+  # and the PR's own code is already gated by lint + unit shards + next-build +
+  # qr-download. So VERIFY_SKIP_SMOKE=1 (set for pull_request events in verify.yml)
+  # skips it on PRs; it still runs on push to main against the freshly deployed prod.
   if [ "${VERIFY_SKIP_E2E:-0}" = "1" ]; then
     skip_stage "e2e-smoke" "VERIFY_SKIP_E2E=1"
+  elif [ "${VERIFY_SKIP_SMOKE:-0}" = "1" ]; then
+    skip_stage "e2e-smoke" "deployed-URL smoke runs post-merge, not on PRs"
   elif [ "${CI:-}" != "true" ]; then
     skip_stage "e2e-smoke" "local run - CI only"
   else
