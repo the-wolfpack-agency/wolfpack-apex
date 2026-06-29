@@ -1,11 +1,12 @@
 {
   "finding_hashes": [
-    "2b49ac86fb78010c",
+    "0a067289b312f509",
     "2e8ed64462b13d4e",
     "8cf2d9d4ae713a8f",
+    "a6e4884915059f39",
+    "c805f77765445cac",
     "c8d06122092aad61"
   ],
-  "total": 4,
-  "generated_at": "2026-06-10T00:00:00",
-  "note": "Identity via agenticqa.security.finding_fingerprint (file|cwe|rule|snippet, line-independent). Instinct only; tool vendored+skipped."
+  "total": 6,
+  "generated_at": "2026-06-29T22:36:51.449163"
 }

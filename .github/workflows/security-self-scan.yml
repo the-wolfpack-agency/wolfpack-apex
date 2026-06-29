@@ -288,14 +288,28 @@ jobs:
 
       - name: Commit updated baseline
         if: steps.pat-check.outputs.configured == 'true'
+        # Best-effort: a baseline-commit failure must never fail the scan job (the
+        # gate is the separate "Fail on NEW critical findings" step below).
+        continue-on-error: true
         run: |
-          if [ -f .agenticqa/scan-baseline.json ]; then
-            git config user.name "AgenticQA Bot"
-            git config user.email "agenticqa@wolfpack.dev"
-            git add .agenticqa/scan-baseline.json
-            git diff --cached --quiet || git commit -m "chore: update security scan baseline [skip ci]"
-            git push || echo "Push failed (non-blocking)"
-          fi
+          [ -f .agenticqa/scan-baseline.json ] || exit 0
+          git config user.name "AgenticQA Bot"
+          git config user.email "agenticqa@wolfpack.dev"
+          # On a pull_request run, actions/checkout checks out the detached
+          # refs/pull/<n>/merge ref, so `git push` has no branch to push to and
+          # dies with exit 128 - which is why the baseline never auto-updated on
+          # PRs and every PR got stuck on stale-baseline drift. Re-anchor onto the
+          # real target branch (the PR head, or main on a push run) before
+          # committing the regenerated baseline.
+          TARGET="${{ github.head_ref || github.ref_name }}"
+          cp .agenticqa/scan-baseline.json /tmp/scan-baseline.json
+          git fetch origin "$TARGET" --depth=1
+          git checkout -B "$TARGET" "origin/$TARGET"
+          cp /tmp/scan-baseline.json .agenticqa/scan-baseline.json
+          git add .agenticqa/scan-baseline.json
+          git diff --cached --quiet && { echo "Baseline unchanged."; exit 0; }
+          git commit -m "chore: update security scan baseline [skip ci]"
+          git push origin "$TARGET" || echo "Push failed (non-blocking)"
 
       - name: Fail on NEW critical findings only
         if: >-

@@ -257,6 +257,45 @@ export async function listAgentActionTrail(
   }));
 }
 
+/** The minimal decision shape the enforcement simulator replays over. */
+export interface SimDecisionRow {
+  capability: string;
+  tool: string;
+  principal_agent: string;
+  would_block: boolean;
+  intended_outcome: string;
+  enforced: boolean;
+  risk_tier: string;
+}
+
+/** Hard cap on rows a single simulation pulls, so a candidate replay over a busy
+ *  workspace can't drag the whole ledger into memory. */
+export const OGIAM_SIM_MAX_ROWS = 5000;
+
+/**
+ * Decisions for a workspace within the last `windowDays`, newest first, capped.
+ * Backs the enforcement simulator (a read-only "what would this policy have
+ * blocked" replay). Uses the (workspace_id, created_at) index; parameterized on
+ * both workspace and window; degrades to [] on cache/DB miss like its siblings.
+ */
+export async function listDecisionsForSimulation(
+  workspaceId: string,
+  windowDays: number,
+): Promise<SimDecisionRow[]> {
+  const days = Math.min(Math.max(Math.trunc(windowDays) || 30, 1), 365);
+  const res = await safeQuery<SimDecisionRow>(
+    `SELECT capability, tool, principal_agent, would_block, intended_outcome,
+            enforced, risk_tier
+       FROM ogiam_decisions
+      WHERE workspace_id = $1
+        AND created_at > NOW() - make_interval(days => $2)
+      ORDER BY created_at DESC
+      LIMIT ${OGIAM_SIM_MAX_ROWS}`,
+    [workspaceId, days],
+  );
+  return res.rows;
+}
+
 interface CountRow {
   total: string | number;
   would_block: string | number;

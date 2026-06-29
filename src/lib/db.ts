@@ -5,6 +5,7 @@
  * Shadow mode: returns empty results when DATABASE_URL is not set.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool, type PoolClient, type PoolConfig, type QueryResult } from "pg";
 
 /**
@@ -69,11 +70,45 @@ function createPool(): Pool {
 
 export const pool = createPool();
 
+/**
+ * Per-request workspace scope (the session-var RLS retrofit's foundation).
+ *
+ * `withWorkspaceScope(workspaceId, fn)` checks out ONE pooled client, opens a
+ * transaction, sets the `app.workspace_id` GUC (transaction-local), and runs
+ * `fn` inside an AsyncLocalStorage context that pins that client. While inside,
+ * `query` / `safeQuery` / `writeQuery` transparently run on that same client, so
+ * a Postgres RLS policy keyed on `current_setting('app.workspace_id')` filters
+ * every row WITHOUT each call site having to thread a client param.
+ *
+ * AsyncLocalStorage (Node's async-context primitive — the same mechanism Prisma,
+ * Knex, and OpenTelemetry use for ambient request context) was chosen over the
+ * alternatives deliberately: threading an explicit client through every store
+ * function is enormous churn and one missed argument silently bypasses RLS;
+ * a request-global variable cannot work with a connection pool (the GUC must
+ * live on the SAME checked-out client as the query, inside the same tx). ALS
+ * gives a safe default — OUTSIDE a scope `query` uses the pool exactly as before
+ * — with zero call-site churn.
+ */
+interface WorkspaceScope {
+  workspaceId: string;
+  client: PoolClient;
+}
+const scopeStore = new AsyncLocalStorage<WorkspaceScope>();
+
+/** The active workspace scope, if the caller is inside withWorkspaceScope. */
+export function activeWorkspaceScope(): { workspaceId: string } | undefined {
+  const s = scopeStore.getStore();
+  return s ? { workspaceId: s.workspaceId } : undefined;
+}
+
 export async function query<T extends Record<string, unknown> = Record<string, unknown>>(
   text: string,
   params?: unknown[],
 ): Promise<QueryResult<T>> {
-  return pool.query<T>(text, params);
+  // Inside a workspace scope, run on the scoped tx client so RLS sees the GUC.
+  // Outside (the default everywhere today), use the pool exactly as before.
+  const scope = scopeStore.getStore();
+  return (scope ? scope.client : pool).query<T>(text, params);
 }
 
 export async function safeQuery<T = Record<string, unknown>>(
@@ -255,6 +290,71 @@ export async function withTransaction<R>(
       await client.query("ROLLBACK");
     } catch (rbErr) {
       // A rollback failure must not mask the original error; log + continue.
+      console.warn("[db] ROLLBACK failed:", (rbErr as Error).message);
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Run `fn` with every `query` / `safeQuery` / `writeQuery` call scoped to one
+ * workspace via a transaction-local `app.workspace_id` GUC. This is the seam a
+ * real (FORCE) row-level-security policy keyed on
+ * `current_setting('app.workspace_id', true)` hangs off — the predicate and the
+ * policy then BOTH hold (defense in depth). See docs/tenant-isolation.md.
+ *
+ * Contracts:
+ *   - Shadow mode (no DATABASE_URL): runs `fn` directly with NO scoped client, so
+ *     reads still no-op through safeQuery exactly as today. A transactional
+ *     write in shadow mode is still rejected by writeQuery (no_database).
+ *   - Nesting: re-entering with the SAME workspaceId reuses the open scope (no
+ *     second connection). Re-entering with a DIFFERENT workspaceId throws — a
+ *     cross-tenant nesting is always a bug, never silently honored.
+ *   - The client is ALWAYS released; COMMIT on success, ROLLBACK + re-throw on
+ *     failure (mirrors withTransaction).
+ *
+ * NOTE: withTransaction() opens its OWN connection and is NOT yet scope-aware, so
+ * a multi-write atomic block does not inherit the GUC. Until that is unified,
+ * keep FORCE-RLS tables off the withTransaction path (they use writeQuery, which
+ * IS scope-aware). Tracked in docs/tenant-isolation.md.
+ */
+export async function withWorkspaceScope<R>(
+  workspaceId: string,
+  fn: () => Promise<R>,
+): Promise<R> {
+  if (!workspaceId) {
+    throw new Error("withWorkspaceScope requires a non-empty workspaceId");
+  }
+  const existing = scopeStore.getStore();
+  if (existing) {
+    if (existing.workspaceId !== workspaceId) {
+      throw new Error(
+        `withWorkspaceScope nesting mismatch: already scoped to '${existing.workspaceId}', refused re-scope to '${workspaceId}'`,
+      );
+    }
+    // Already scoped to the same workspace on an open client — just run.
+    return fn();
+  }
+  // Shadow mode: no DB. Run fn with pool/shadow semantics (no scoped client).
+  if (!process.env.DATABASE_URL) {
+    return fn();
+  }
+  const client: PoolClient = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // set_config(name, value, is_local=true) is the parameterized form of
+    // `SET LOCAL` (SET LOCAL cannot bind a parameter). Transaction-scoped, reset
+    // automatically on COMMIT/ROLLBACK + client release.
+    await client.query("SELECT set_config('app.workspace_id', $1, true)", [workspaceId]);
+    const out = await scopeStore.run({ workspaceId, client }, fn);
+    await client.query("COMMIT");
+    return out;
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rbErr) {
       console.warn("[db] ROLLBACK failed:", (rbErr as Error).message);
     }
     throw err;

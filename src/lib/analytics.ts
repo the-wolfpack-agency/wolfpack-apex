@@ -367,6 +367,11 @@ export type InstinctEventType =
   // message } - no PII, error text only.
   | "system.search_provider_failed"
   | "system.analytics_queried"
+  // Tenant-isolation coverage scan (/api/cron/tenant-isolation-scan). One event
+  // per recorded scan so the learning loop tracks the cross-tenant-leak gap over
+  // time. metadata: { scoped_tables, total_offenders, unclassified, source,
+  // <per-class counts...> }. `unclassified` MUST trend at 0.
+  | "system.tenant_isolation_scanned"
   /* Unified "Scan a document" router on /finance/invoices - emitted
      when a user drops a file in either Invoice or Receipt mode so the
      learning loop can see WHICH intake surface the user chose and
@@ -444,6 +449,36 @@ export type InstinctEventType =
   //   fired when an admin probes the signing wiring (sign a server-generated
   //   probe, then independently verify it). No secrets in the payload.
   | "ogiam.signing_selftest"
+  // ogiam.enforcement_posture_changed { capability, mode, prev_mode } - an admin
+  //   graduated a capability's gate posture (monitor <-> enforce). The control
+  //   knob that turns "we logged what it would do" into "we blocked it".
+  | "ogiam.enforcement_posture_changed"
+  // ogiam.policy_simulated { window_days, decisions, candidate_capabilities,
+  //   newly_blocked, currently_blocked } - an admin replayed a candidate enforce
+  //   set over the recorded decision ledger to see its blast radius BEFORE
+  //   enforcing. Proves the cross-execution data is a decision-support asset.
+  | "ogiam.policy_simulated"
+  // AI Surface Inventory (shadow-AI discovery). You cannot govern what you cannot
+  // see: these track the inventory of AI touchpoints found in a client's code and
+  // the "ungoverned AI" gap over time, the foundation the other AI-governance
+  // surfaces register into.
+  // ai_inventory.scan_completed { target, surfaces, ungoverned, written }
+  | "ai_inventory.scan_completed"
+  // ai_inventory.viewed { total, ungoverned } - an admin opened the inventory.
+  | "ai_inventory.viewed"
+  // MCP (Model Context Protocol) static scanner. Governs the new MCP attack
+  // surface without our core ever connecting to a server.
+  // mcp.scan_completed  { target, servers, findings, critical, high }
+  | "mcp.scan_completed"
+  // mcp.finding_detected { server, class, severity } - one per MCP risk found,
+  //   so the learning loop sees the threat distribution across client setups.
+  | "mcp.finding_detected"
+  // AI-code governance: a deterministic gate over AI-authored diffs before merge.
+  // ai_code.reviewed { ref, author, outcome, findings, highest_severity }
+  | "ai_code.reviewed"
+  // ai_code.finding_detected { class, severity, cwe } - one per code risk, so the
+  //   learning loop mines what AI tools keep introducing.
+  | "ai_code.finding_detected"
   // Agent principals (OGIAM, agents onboarded like people).
   // agent.created          { agent_id, role, owner_user_id, identity_provider }
   //   an admin onboarded an agent through the invite flow.

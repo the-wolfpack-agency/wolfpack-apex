@@ -30,14 +30,14 @@ beforeEach(() => {
 describe("buildCodeDossier", () => {
   it("returns null when the cache has no row for the code", async () => {
     mockQuery.mockResolvedValueOnce(rows([])); // cache miss
-    const res = await buildCodeDossier("UNKNOWN");
+    const res = await buildCodeDossier("UNKNOWN", "ws-A");
     expect(res).toBeNull();
     expect(mockQuery).toHaveBeenCalledTimes(1);
   });
 
   it("returns null on empty / whitespace input without hitting the DB", async () => {
-    expect(await buildCodeDossier("")).toBeNull();
-    expect(await buildCodeDossier("   ")).toBeNull();
+    expect(await buildCodeDossier("", "ws-A")).toBeNull();
+    expect(await buildCodeDossier("   ", "ws-A")).toBeNull();
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
@@ -60,7 +60,7 @@ describe("buildCodeDossier", () => {
       .mockResolvedValueOnce(rows([])) // edits
       .mockResolvedValueOnce(rows([])); // events
 
-    const d = await buildCodeDossier("WOLFPACK-AUTO");
+    const d = await buildCodeDossier("WOLFPACK-AUTO", "ws-A");
     expect(d).not.toBeNull();
     expect(d!.header).toMatchObject({
       code: "WOLFPACK-AUTO",
@@ -110,7 +110,7 @@ describe("buildCodeDossier", () => {
       .mockResolvedValueOnce(rows([]))
       .mockResolvedValueOnce(rows([]));
 
-    const d = await buildCodeDossier("X");
+    const d = await buildCodeDossier("X", "ws-A");
     expect(d!.rollups.spendMtd).toBe(100);
     expect(d!.rollups.spendYtd).toBe(350); // 100 + 250
     expect(d!.rollups.spendAllTime).toBe(1349); // + 999 last year
@@ -134,7 +134,7 @@ describe("buildCodeDossier", () => {
       .mockResolvedValueOnce(rows([]))
       .mockResolvedValueOnce(rows([]));
 
-    const d = await buildCodeDossier("Y");
+    const d = await buildCodeDossier("Y", "ws-A");
     expect(d!.rollups.spendAllTime).toBe(120.5);
     expect(d!.rollups.poRemaining).toBe(500 - 120.5);
   });
@@ -150,7 +150,7 @@ describe("buildCodeDossier", () => {
       .mockResolvedValueOnce(rows([]))
       .mockResolvedValueOnce(rows([]));
 
-    const d = await buildCodeDossier("Z");
+    const d = await buildCodeDossier("Z", "ws-A");
     expect(d!.rollups.poRemaining).toBeNull();
   });
 
@@ -199,7 +199,7 @@ describe("buildCodeDossier", () => {
         },
       ]));
 
-    const d = await buildCodeDossier("W");
+    const d = await buildCodeDossier("W", "ws-A");
     expect(d!.activity.length).toBe(3); // edit + 2 events; cell_edit_succeeded dropped
     expect(d!.activity[0].at).toBe(t1);
     expect(d!.activity[1].at).toBe(t2);
@@ -207,5 +207,39 @@ describe("buildCodeDossier", () => {
     expect(d!.activity[1].kind).toBe("cell_edit");
     expect(d!.activity[1].summary).toContain("PO Number");
     expect(d!.rollups.lastActivityAt).toBe(t1);
+  });
+
+  it("CROSS-TENANT: scopes the receipts + edits queries to the caller's workspace_id", async () => {
+    // Regression guard for the cross-tenant leak: instinct_receipt_scans and
+    // instinct_job_codes_edits are workspace-owned, so the dossier must filter
+    // both by the passed workspaceId. Two workspaces can share a global job
+    // code; without this predicate workspace A would see workspace B's spend
+    // and audit trail. We assert the SQL carries `workspace_id = $2` and the
+    // workspaceId is bound as the 2nd param on BOTH tenant-owned queries.
+    mockQuery
+      .mockResolvedValueOnce(rows([{
+        code: "SHARED", description: "", active: true,
+        last_seen_at: new Date().toISOString(), source_web_url: null, extra: {},
+      }]))
+      .mockResolvedValueOnce(rows([])) // receipts
+      .mockResolvedValueOnce(rows([])) // edits
+      .mockResolvedValueOnce(rows([])); // events
+
+    await buildCodeDossier("SHARED", "ws-tenant-A");
+
+    const calls = mockQuery.mock.calls;
+    const receiptCall = calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("instinct_receipt_scans"),
+    );
+    const editsCall = calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("instinct_job_codes_edits"),
+    );
+    expect(receiptCall).toBeDefined();
+    expect(editsCall).toBeDefined();
+    // SQL constrains workspace_id, and the workspace is bound as the 2nd param.
+    expect(receiptCall![0]).toMatch(/workspace_id\s*=\s*\$2/);
+    expect(receiptCall![1]).toEqual(["SHARED", "ws-tenant-A"]);
+    expect(editsCall![0]).toMatch(/workspace_id\s*=\s*\$2/);
+    expect(editsCall![1]).toEqual(["SHARED", "ws-tenant-A"]);
   });
 });

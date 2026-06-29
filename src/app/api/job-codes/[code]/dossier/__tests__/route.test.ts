@@ -117,6 +117,10 @@ describe("GET /api/job-codes/[code]/dossier", () => {
     expect(body.dossier.header.code).toBe("WOLFPACK-AUTO");
     expect(body.dossier.rollups.receiptCount).toBe(3);
 
+    // Tenant isolation: the route MUST thread the caller's workspaceId into the
+    // dossier builder so receipts/edits are scoped to the right workspace.
+    expect(mockBuildDossier).toHaveBeenCalledWith("WOLFPACK-AUTO", "w-1");
+
     expect(mockTrackEvent).toHaveBeenCalledWith(
       "system.job_code_dossier_viewed",
       "u-1",
