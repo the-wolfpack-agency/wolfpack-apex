@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * /admin/platform-scans — the SCAN COMMAND CENTER.
+ * /admin/platform-scans - the SCAN COMMAND CENTER.
  *
  * Flagship client-facing "view the results" surface for the platform-scan agent.
  * An agent crawls a target platform's routes/journeys and surfaces findings:
@@ -14,7 +14,7 @@
  * GlassPanel surfaces, MetricTile hero row with count-up + sparklines, StatusPill
  * severity vocabulary, a div-built severity-distribution bar (no charting dep),
  * SectionHeader treatments, and ConsoleGrid staggered reveal. Data wiring,
- * controls, and states are preserved exactly — same endpoints, same handlers.
+ * controls, and states are preserved exactly - same endpoints, same handlers.
  *
  * Auth: every fetch goes through fetchWithRefresh (15-min access TTL, HttpOnly
  * refresh rotation). POST bodies use jsonHeaders(). Unauthenticated visitors are
@@ -33,6 +33,7 @@ import {
   ConsoleGrid,
   type SeverityTone,
 } from "@/components/console";
+import { TESTING_TAXONOMY } from "@/lib/platform-scan/testing-taxonomy";
 
 type Severity = "critical" | "high" | "medium" | "low";
 type Category = "bug" | "ux_gap" | "broken_journey" | "security" | "performance";
@@ -127,7 +128,7 @@ interface UxPosture {
   score: number;
 }
 
-// Grade -> tone. A success, B/C gold, D warning, F error — same tone vocabulary
+// Grade -> tone. A success, B/C gold, D warning, F error - same tone vocabulary
 // the severity pills use, so the headline reads consistently.
 const UX_GRADE_TONE: Record<UxGrade, SeverityTone> = {
   A: "success",
@@ -174,7 +175,7 @@ const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low"];
 // The findings list DEFAULTS to the actionable band so the ~73 LOW-severity
 // code-smells from a single static scan don't flood the queue. The summary
 // rollup still shows full counts (nothing hidden silently) and a chip widens the
-// list to every severity — no data is lost, low findings stay reachable.
+// list to every severity - no data is lost, low findings stay reachable.
 const ACTIONABLE_SEVERITIES: Severity[] = ["critical", "high"];
 
 const EMPTY_SUMMARY: FindingsSummary = {
@@ -440,7 +441,24 @@ function FindingRow({
 // At-a-glance UX/accessibility posture headline. Renders the graded pill + the
 // ux/a11y split, or an explicit empty state when no UX posture has been computed
 // (absent on the wire / no findings yet) - never a blank.
-function UxPostureBadge({ posture }: { posture: UxPosture | null }) {
+//
+// Drill-down: the grade alone ("B / Minor usability nits") is not explainable on
+// its own, so this component surfaces the ACTUAL finding(s) behind the grade.
+// `uxFindings` are the ux_gap findings already loaded into the open list - when
+// any are loaded it lists them inline (title + detail), honestly showing the real
+// data. When the grade reports nits but none are currently loaded (the list is
+// narrowed to the actionable band, hiding lower-severity UX nits), it offers a
+// "View the N nit(s)" affordance that widens + filters the list so they appear -
+// nothing fabricated, nothing hidden.
+function UxPostureBadge({
+  posture,
+  uxFindings,
+  onReveal,
+}: {
+  posture: UxPosture | null;
+  uxFindings: ScanFindingRow[];
+  onReveal: () => void;
+}) {
   if (!posture) {
     return (
       <div
@@ -459,28 +477,197 @@ function UxPostureBadge({ posture }: { posture: UxPosture | null }) {
     );
   }
 
+  // Number of UX/a11y gaps behind the grade that are NOT currently loaded into
+  // the open list (the actionable-band default can hide lower-severity nits).
+  // When > 0 we offer a reveal affordance instead of pretending the list is
+  // complete.
+  const loadedCount = uxFindings.length;
+  const hasNits = posture.total > 0;
+
   return (
-    <div
-      data-testid="ux-posture"
-      data-grade={posture.grade}
-      style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}
-    >
-      <span data-testid="ux-posture-grade">
-        <StatusPill status={posture.grade} tone={UX_GRADE_TONE[posture.grade]} size="md" label={`Grade ${posture.grade}`} />
-      </span>
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", minWidth: 0 }}>
-        <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
-          UX posture: {posture.grade}
+    <div data-testid="ux-posture" data-grade={posture.grade} style={{ minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+        <span data-testid="ux-posture-grade">
+          <StatusPill status={posture.grade} tone={UX_GRADE_TONE[posture.grade]} size="md" label={`Grade ${posture.grade}`} />
         </span>
-        <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim, #aaa)" }}>
-          {UX_GRADE_LABEL[posture.grade]}
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", minWidth: 0 }}>
+          <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
+            UX posture: {posture.grade}
+          </span>
+          <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim, #aaa)" }}>
+            {UX_GRADE_LABEL[posture.grade]}
+          </span>
+        </div>
+        <span style={{ flex: 1, minWidth: 0 }} />
+        <span data-testid="ux-posture-split" style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)", whiteSpace: "nowrap" }}>
+          {posture.ux} UX · {posture.a11y} accessibility · {posture.total} total
         </span>
       </div>
-      <span style={{ flex: 1 }} />
-      <span data-testid="ux-posture-split" style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)" }}>
-        {posture.ux} UX · {posture.a11y} accessibility · {posture.total} total
-      </span>
+
+      {/* Drill-down: the actual finding(s) behind the grade. */}
+      {hasNits && (
+        <div data-testid="ux-posture-drilldown" style={{ marginTop: "0.7rem" }}>
+          {loadedCount > 0 ? (
+            <div data-testid="ux-posture-findings" style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+              {uxFindings.map((f) => (
+                <div
+                  key={f.id}
+                  data-testid={`ux-posture-finding-${f.id}`}
+                  style={{
+                    padding: "0.5rem 0.7rem",
+                    borderRadius: "0.45rem",
+                    background: "var(--wp-dark-surface, #1f1f22)",
+                    border: "1px solid var(--wp-dark-border, #333)",
+                    borderLeft: `3px solid ${SEVERITY_VAR[f.severity]}`,
+                    minWidth: 0,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  <div style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--wp-text, #eee)" }}>{f.title}</div>
+                  <div style={{ marginTop: "0.15rem", fontSize: "0.78rem", color: "var(--wp-text-dim, #aaa)" }}>{f.detail}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <button
+              type="button"
+              data-testid="ux-posture-reveal"
+              onClick={onReveal}
+              style={{
+                fontSize: "0.78rem",
+                fontWeight: 600,
+                cursor: "pointer",
+                color: "var(--wp-gold, #f1c233)",
+                background: "transparent",
+                border: "1px solid var(--wp-gold, #f1c233)",
+                borderRadius: "0.4rem",
+                padding: "0.3rem 0.7rem",
+              }}
+            >
+              View the {posture.total} {posture.total === 1 ? "nit" : "nits"} behind this grade
+            </button>
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+// "What we tested" - the client-facing validation-coverage map. Renders the
+// testing-taxonomy (pure data) as a tidy three-column grid: Area | Type of
+// testing | What is validated. Plain language, confident, true, and contains
+// NO tool or brand names (enforced by the taxonomy test). It maps the TYPES of
+// testing the platform performs to the system areas so a client understands how
+// comprehensive the scan that just ran really is. Built on the console kit.
+function ValidationCoverage() {
+  // Three-column track on desktop; the leftmost two columns hug their content
+  // and the "validates" column takes the rest. minWidth:0 on every cell so long
+  // copy wraps instead of forcing horizontal overflow. On narrow viewports the
+  // header row hides and each row stacks (label chips above the prose).
+  const rowGrid = {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gap: "0.35rem 1rem",
+    alignItems: "start",
+  } as const;
+
+  return (
+    <GlassPanel
+      testId="validation-coverage"
+      title="What we tested"
+      subtitle="The kinds of testing this scan applies, the system areas they cover, and what each one validates."
+      style={{ marginBottom: "1.25rem" }}
+    >
+      {/* Responsive promotion to a 3-column grid at >=720px. Scoped to this
+          page's class so it touches nothing in the shared kit; below the
+          breakpoint each row stays single-column and stacks cleanly. The header
+          row hides on narrow widths since the stacked rows are self-evident. */}
+      <style>{`
+        @media (min-width: 720px) {
+          .wp-coverage-grid {
+            grid-template-columns: minmax(8rem, 0.8fr) minmax(8rem, 0.9fr) minmax(0, 1.6fr) !important;
+          }
+        }
+        @media (max-width: 719px) {
+          [data-testid="validation-coverage-header"] { display: none !important; }
+          /* Run-scan controls stack + go full-width on phones so no select or
+             button overflows or gets cut off on the right. */
+          .wp-scan-field { flex: 1 1 100% !important; }
+          .wp-scan-select { flex: 1 1 auto !important; }
+          .wp-scan-field[style*="margin-left: auto"],
+          .wp-scan-field { margin-left: 0 !important; }
+          .wp-scan-run { flex: 1 1 100% !important; width: 100% !important; }
+        }
+      `}</style>
+      {/* Column header - sm+ only; on phones each row self-labels. */}
+      <div
+        data-testid="validation-coverage-header"
+        className="wp-coverage-grid"
+        style={{
+          ...rowGrid,
+          paddingBottom: "0.6rem",
+          marginBottom: "0.6rem",
+          borderBottom: "1px solid var(--wp-dark-border, #333)",
+          fontSize: "0.72rem",
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+          color: "var(--wp-text-muted, #6b7280)",
+        }}
+      >
+        <span style={{ minWidth: 0 }}>Area</span>
+        <span style={{ minWidth: 0 }}>Type of testing</span>
+        <span style={{ minWidth: 0 }}>What is validated</span>
+      </div>
+
+      <div data-testid="validation-coverage-rows">
+        {TESTING_TAXONOMY.map((entry) => (
+          <div
+            key={entry.area}
+            data-testid={`coverage-row-${entry.area}`}
+            className="wp-coverage-grid"
+            style={{
+              ...rowGrid,
+              padding: "0.55rem 0",
+              borderBottom: "1px solid var(--wp-dark-border, #2a2a2e)",
+            }}
+          >
+            <span
+              style={{
+                minWidth: 0,
+                overflowWrap: "anywhere",
+                fontSize: "0.85rem",
+                fontWeight: 700,
+                color: "var(--wp-text, #eee)",
+              }}
+            >
+              {entry.area}
+            </span>
+            <span
+              style={{
+                minWidth: 0,
+                overflowWrap: "anywhere",
+                fontSize: "0.82rem",
+                color: "var(--wp-gold, #f1c233)",
+              }}
+            >
+              {entry.testingType}
+            </span>
+            <span
+              style={{
+                minWidth: 0,
+                overflowWrap: "anywhere",
+                fontSize: "0.82rem",
+                lineHeight: 1.5,
+                color: "var(--wp-text-dim, #aaa)",
+              }}
+            >
+              {entry.validates}
+            </span>
+          </div>
+        ))}
+      </div>
+    </GlassPanel>
   );
 }
 
@@ -523,6 +710,11 @@ export default function PlatformScansPage() {
 
   const selectedTarget = targets.find((t) => t.platform === selectedPlatform) ?? null;
   const allSeverities = severities.length === 0;
+  // The ux_gap findings currently loaded in the open list (covers both general
+  // UX and accessibility gaps - a11y is a ux_gap with an "Accessibility:" title).
+  // Drives the posture drill-down: when any are loaded we show the REAL finding;
+  // otherwise the badge offers a reveal that widens the list so they load.
+  const uxFindings = findings.filter((f) => f.category === "ux_gap");
 
   // Best-effort engagement analytics: a viewed/toggle event is a learning signal
   // (the same loop drift + procedure learning consume). A failure must never
@@ -687,14 +879,14 @@ export default function PlatformScansPage() {
       const body = (await res.json().catch(() => ({}))) as { error?: string };
       throw new Error(body.error ?? `Action failed (HTTP ${res.status})`);
     }
-    // Decided findings leave the open list — drop them in place + refresh the
+    // Decided findings leave the open list - drop them in place + refresh the
     // rollup so the severity/category counts track the open queue.
     setFindings((prev) => prev.filter((f) => f.id !== id));
     void loadSummary(filterPlatform || undefined);
   }, [loadSummary, filterPlatform]);
 
   // Bulk-triage every OPEN finding matching the ACTIVE severity + platform
-  // filter — what the operator currently sees, nothing hidden. Resolve is guarded
+  // filter - what the operator currently sees, nothing hidden. Resolve is guarded
   // by a confirm. After the batch, reload the list + rollup so counts track.
   const bulkTriage = useCallback(async (status: "acknowledged" | "resolved") => {
     if (status === "resolved" && typeof window !== "undefined") {
@@ -762,7 +954,7 @@ export default function PlatformScansPage() {
     .join(" · ");
 
   // Lower-severity findings hidden by the active band. Surfaced as a "show all"
-  // affordance so nothing is hidden silently — the data is one click away.
+  // affordance so nothing is hidden silently - the data is one click away.
   const hiddenCount = allSeverities
     ? 0
     : SEVERITY_ORDER.filter((s) => !severities.includes(s)).reduce(
@@ -840,7 +1032,7 @@ export default function PlatformScansPage() {
         </GlassPanel>
         <GlassPanel padded testId="metric-panel-grade">
           <MetricTile
-            display={uxPosture ? uxPosture.grade : "—"}
+            display={uxPosture ? uxPosture.grade : "-"}
             label="UX/a11y grade"
             kicker={uxPosture ? UX_GRADE_LABEL[uxPosture.grade] : "No UX scan yet"}
             accent={uxPosture ? `var(--wp-${UX_GRADE_TONE[uxPosture.grade] === "neutral" ? "text" : UX_GRADE_TONE[uxPosture.grade]})` : undefined}
@@ -865,34 +1057,50 @@ export default function PlatformScansPage() {
         subtitle="Pick a target and how to crawl it, then launch."
         style={{ marginBottom: "1.25rem" }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
-          <label htmlFor="platform-select" style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)" }}>Platform</label>
-          <select
-            id="platform-select"
-            data-testid="platform-select"
-            value={selectedPlatform}
-            onChange={(e) => { setSelectedPlatform(e.target.value); setMode("http"); }}
-            style={ctrl}
-          >
-            {targets.length === 0 && <option value="">(no targets)</option>}
-            {targets.map((t) => (
-              <option key={t.platform} value={t.platform}>{t.platform}</option>
-            ))}
-          </select>
-          <select
-            data-testid="mode-select"
-            value={mode}
-            onChange={(e) => setMode(e.target.value as ScanMode)}
-            title={selectedTarget?.hasStatic ? "How to scan" : "Source scan not configured for this platform"}
-            style={ctrl}
-          >
-            <option value="http">Live crawl (HTTP){selectedTarget?.hasLogin ? " · authenticated" : ""}</option>
-            <option value="static" disabled={!selectedTarget?.hasStatic}>Source scan</option>
-            <option value="api" disabled={!selectedTarget?.hasApi}>API contract</option>
-          </select>
+        {/* The control row wraps and, on mobile, each field + the run button go
+            full-width so nothing overflows or gets cut off. The .wp-scan-* class
+            hooks drive the mobile rules in the page's scoped style block. */}
+        <div
+          data-testid="scan-controls"
+          className="wp-scan-controls"
+          style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap", minWidth: 0, maxWidth: "100%" }}
+        >
+          <div className="wp-scan-field" style={{ display: "flex", alignItems: "center", gap: "0.4rem", minWidth: 0 }}>
+            <label htmlFor="platform-select" style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)", whiteSpace: "nowrap" }}>Platform</label>
+            <select
+              id="platform-select"
+              data-testid="platform-select"
+              className="wp-scan-select"
+              value={selectedPlatform}
+              onChange={(e) => { setSelectedPlatform(e.target.value); setMode("http"); }}
+              style={{ ...ctrl, minWidth: 0, maxWidth: "100%" }}
+            >
+              {targets.length === 0 && <option value="">(no targets)</option>}
+              {targets.map((t) => (
+                <option key={t.platform} value={t.platform}>{t.platform}</option>
+              ))}
+            </select>
+          </div>
+          <div className="wp-scan-field" style={{ display: "flex", alignItems: "center", gap: "0.4rem", minWidth: 0 }}>
+            <label htmlFor="mode-select" style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)", whiteSpace: "nowrap" }}>Mode</label>
+            <select
+              id="mode-select"
+              data-testid="mode-select"
+              className="wp-scan-select"
+              value={mode}
+              onChange={(e) => setMode(e.target.value as ScanMode)}
+              title={selectedTarget?.hasStatic ? "How to scan" : "Source scan not configured for this platform"}
+              style={{ ...ctrl, minWidth: 0, maxWidth: "100%" }}
+            >
+              <option value="http">Live crawl (HTTP){selectedTarget?.hasLogin ? " · authenticated" : ""}</option>
+              <option value="static" disabled={!selectedTarget?.hasStatic}>Source scan</option>
+              <option value="api" disabled={!selectedTarget?.hasApi}>API contract</option>
+            </select>
+          </div>
           <button
             type="button"
             data-testid="run-scan"
+            className="wp-scan-run"
             disabled={scanning || !selectedPlatform}
             onClick={() => void runScan()}
             style={{
@@ -904,39 +1112,40 @@ export default function PlatformScansPage() {
               color: "#0b0b0c",
               background: "var(--wp-gold, #f1c233)",
               opacity: scanning || !selectedPlatform ? 0.6 : 1,
+              whiteSpace: "nowrap",
             }}
           >
             {scanning ? `Scanning ${selectedPlatform}…` : "Run scan"}
           </button>
           {summary && (
-            <span data-testid="scan-summary" style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}>
+            <span data-testid="scan-summary" style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)", minWidth: 0, overflowWrap: "anywhere" }}>
               {summary.platform} ({summary.mode === "static" ? "source" : "HTTP"}):{" "}
               {summary.routes !== null ? `${summary.routes} route${summary.routes === 1 ? "" : "s"}, ` : ""}
               {summary.findings} finding{summary.findings === 1 ? "" : "s"}, {summary.critical} critical
             </span>
           )}
           {scanError && (
-            <span data-testid="scan-error" style={{ fontSize: "0.85rem", color: "var(--wp-error, #ef4444)" }}>
+            <span data-testid="scan-error" style={{ fontSize: "0.85rem", color: "var(--wp-error, #ef4444)", minWidth: 0, overflowWrap: "anywhere" }}>
               {scanError}
             </span>
           )}
           {targets.length > 1 && (
-            <>
-              <span style={{ flex: 1 }} />
-              <label htmlFor="filter-platform" style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)" }}>Showing</label>
+            <div className="wp-scan-field" style={{ display: "flex", alignItems: "center", gap: "0.4rem", minWidth: 0, marginLeft: "auto" }}>
+              <label htmlFor="filter-platform" style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)", whiteSpace: "nowrap" }}>Showing</label>
               <select
                 id="filter-platform"
                 data-testid="filter-platform"
+                className="wp-scan-select"
                 value={filterPlatform}
                 onChange={(e) => setFilterPlatform(e.target.value)}
-                style={ctrl}
+                style={{ ...ctrl, minWidth: 0, maxWidth: "100%" }}
               >
                 <option value="">All platforms</option>
                 {targets.map((t) => (
                   <option key={t.platform} value={t.platform}>{t.platform}</option>
                 ))}
               </select>
-            </>
+            </div>
           )}
         </div>
       </GlassPanel>
@@ -944,7 +1153,11 @@ export default function PlatformScansPage() {
       {/* Posture + distribution */}
       <ConsoleGrid minColWidth={320} style={{ marginBottom: "1.25rem" }} testId="posture-grid">
         <GlassPanel testId="ux-posture-panel" title="UX / accessibility posture">
-          <UxPostureBadge posture={uxPosture} />
+          <UxPostureBadge
+            posture={uxPosture}
+            uxFindings={uxFindings}
+            onReveal={() => setSeverityBand("all")}
+          />
         </GlassPanel>
         <GlassPanel
           testId="severity-distribution-panel"
@@ -978,7 +1191,23 @@ export default function PlatformScansPage() {
         subtitle="The open queue. Acknowledge or resolve to clear a row; decided rows leave the list."
         style={{ marginBottom: "1.25rem" }}
         actions={
-          <div data-testid="severity-filter" style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+          <div
+            data-testid="severity-filter"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              // Always wrap; never clip the rightmost control. flex:1 1 100%
+              // makes this controls row claim a full line of its own in the
+              // GlassPanel header so it never squeezes the "Findings" title +
+              // subtitle to near-zero width (the one-word-per-line bug). On
+              // mobile the chips + buttons stack onto multiple lines.
+              flexWrap: "wrap",
+              flex: "1 1 100%",
+              minWidth: 0,
+              maxWidth: "100%",
+            }}
+          >
             <span style={{ fontSize: "0.78rem", color: "var(--wp-text-muted, #6b7280)" }}>Showing severity</span>
             <button
               type="button"
@@ -1005,7 +1234,7 @@ export default function PlatformScansPage() {
                 onClick={() => setSeverityBand("all")}
                 style={{ fontSize: "0.78rem", color: "var(--wp-gold, #f1c233)", background: "transparent", border: "none", cursor: "pointer", padding: "0.3rem 0.2rem" }}
               >
-                +{hiddenCount} lower-severity hidden — show all
+                +{hiddenCount} lower-severity hidden - show all
               </button>
             )}
             <button
@@ -1060,6 +1289,9 @@ export default function PlatformScansPage() {
           </div>
         )}
       </GlassPanel>
+
+      {/* What we tested - the client-facing validation-coverage map. */}
+      <ValidationCoverage />
 
       {/* Scan history */}
       <GlassPanel testId="scan-history" title="Scan history">

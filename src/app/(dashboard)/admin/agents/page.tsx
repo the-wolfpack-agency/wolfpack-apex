@@ -378,6 +378,8 @@ export default function AgentsPage() {
         testId="agents-section-header"
         actions={
           <div
+            data-testid="agents-nav-actions"
+            className="wp-agents-nav"
             style={{
               display: "flex",
               alignItems: "center",
@@ -385,6 +387,11 @@ export default function AgentsPage() {
               flexWrap: "wrap",
             }}
           >
+            {/* Mobile rule: on a narrow viewport (<= 480px) the nav links +
+                Refresh go full-width and stack so the row never overflows the
+                right edge of a 360-390px viewport. Desktop is untouched: the
+                buttons keep their natural width when there is room. */}
+            <style>{"@media (max-width:480px){.wp-agents-nav{width:100%}.wp-agents-nav>a,.wp-agents-nav>button{flex:1 1 100%;text-align:center}}"}</style>
             {NAV_LINKS.map((l) => (
               <Link
                 key={l.testId}

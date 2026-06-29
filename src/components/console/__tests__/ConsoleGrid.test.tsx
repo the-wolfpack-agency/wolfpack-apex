@@ -96,4 +96,53 @@ describe("ConsoleGrid", () => {
     );
     expect(mockFetch).not.toHaveBeenCalled();
   });
+
+  describe("responsive overflow contract", () => {
+    // The auto-fit template must use min(100%, Npx) so a wide minColWidth can
+    // collapse to 1 column on a 360px screen instead of forcing horizontal
+    // overflow. jsdom can't measure, so we assert the template string shape.
+    test("template uses min(100%, ...) so it collapses on narrow viewports", () => {
+      render(
+        <ConsoleGrid minColWidth={420}>
+          <div>a</div>
+        </ConsoleGrid>,
+      );
+      const grid = screen.getByTestId("console-grid");
+      expect(grid.style.gridTemplateColumns).toContain("min(100%, 420px)");
+      expect(grid.style.gridTemplateColumns).toContain("auto-fit");
+    });
+
+    test("grid is width-contained (minWidth:0 / maxWidth:100%)", () => {
+      render(
+        <ConsoleGrid>
+          <div>a</div>
+        </ConsoleGrid>,
+      );
+      const grid = screen.getByTestId("console-grid");
+      expect(grid.style.minWidth).toBe("0");
+      expect(grid.style.maxWidth).toBe("100%");
+    });
+
+    test("each cell can shrink below its content (minWidth:0)", () => {
+      render(
+        <ConsoleGrid>
+          <div>a</div>
+        </ConsoleGrid>,
+      );
+      expect(
+        screen.getByTestId("console-grid-item-0").style.minWidth,
+      ).toBe("0");
+    });
+
+    test("flat (stagger=false) cells also shrink (minWidth:0)", () => {
+      render(
+        <ConsoleGrid stagger={false}>
+          <div>a</div>
+        </ConsoleGrid>,
+      );
+      expect(
+        screen.getByTestId("console-grid-item-0").style.minWidth,
+      ).toBe("0");
+    });
+  });
 });

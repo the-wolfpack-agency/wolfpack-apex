@@ -237,6 +237,30 @@ describe("/admin/agents: roster", () => {
     // The guard returns before loading, so no roster fetch fires.
     expect(mockFetchWithRefresh).not.toHaveBeenCalled();
   });
+
+  it("nav actions row wraps and carries the mobile full-width rule so the buttons never overflow the right edge", async () => {
+    mockFetchWithRefresh.mockResolvedValue(mkRes({ agents: [] }));
+
+    await act(async () => {
+      render(<AgentsPage />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agents-nav-actions")).toBeInTheDocument());
+    const nav = screen.getByTestId("agents-nav-actions");
+    // The row wraps onto the next line instead of clipping the rightmost
+    // control, and carries the class the mobile media query targets.
+    expect(nav.style.flexWrap).toBe("wrap");
+    expect(nav.className).toContain("wp-agents-nav");
+    // Every existing nav control is preserved inside the wrapping row.
+    expect(screen.getByTestId("agents-approvals-link")).toBeInTheDocument();
+    expect(screen.getByTestId("agents-platform-scans-link")).toBeInTheDocument();
+    expect(screen.getByTestId("agents-connectors-link")).toBeInTheDocument();
+    expect(screen.getByTestId("agents-memory-link")).toBeInTheDocument();
+    // The mobile rule that stacks the nav buttons full-width is in the document.
+    const styleText = document.head.innerHTML + document.body.innerHTML;
+    expect(styleText).toContain("max-width:480px");
+    expect(styleText).toContain(".wp-agents-nav");
+  });
 });
 
 describe("/admin/agents: engagement analytics", () => {

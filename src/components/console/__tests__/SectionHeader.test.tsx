@@ -60,4 +60,32 @@ describe("SectionHeader", () => {
     render(<SectionHeader title="x" className="mb-0" />);
     expect(screen.getByTestId("section-header").className).toContain("mb-0");
   });
+
+  describe("responsive overflow contract", () => {
+    // jsdom can't measure layout, so we assert the CSS contract that makes a
+    // busy actions row wrap/drop below the title instead of clipping the
+    // rightmost control (the desktop+mobile overflow bug this kit fixes).
+    test("the outer container flex-wraps so actions can drop below the title", () => {
+      render(<SectionHeader title="x" actions={<button>a</button>} />);
+      expect(screen.getByTestId("section-header").style.flexWrap).toBe("wrap");
+    });
+
+    test("the actions slot flex-wraps and can shrink (minWidth:0)", () => {
+      render(
+        <SectionHeader
+          title="x"
+          actions={
+            <>
+              <button>a</button>
+              <button>b</button>
+              <button>c</button>
+            </>
+          }
+        />,
+      );
+      const slot = screen.getByTestId("section-header-actions");
+      expect(slot.style.flexWrap).toBe("wrap");
+      expect(slot.style.minWidth).toBe("0");
+    });
+  });
 });

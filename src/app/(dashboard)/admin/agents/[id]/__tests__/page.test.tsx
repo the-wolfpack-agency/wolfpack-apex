@@ -2152,7 +2152,7 @@ describe("/admin/agents/[id]: tabbed layout", () => {
     expect(screen.getByTestId("agent-tab-access")).toHaveAttribute("aria-selected", "false");
     expect(screen.getByTestId("agent-tab-activity")).toHaveAttribute("aria-selected", "false");
 
-    // The sticky header keeps the name, state chip, and lifecycle reachable.
+    // The in-flow header carries the name, state chip, and lifecycle controls.
     expect(screen.getByTestId("agent-header")).toBeInTheDocument();
     expect(screen.getByTestId("agent-name")).toBeInTheDocument();
     expect(screen.getByTestId("agent-state-chip")).toBeInTheDocument();
@@ -2349,5 +2349,92 @@ describe("/admin/agents/[id]: command-view console redesign", () => {
 
     await waitFor(() => expect(screen.getByTestId("agent-error")).toBeInTheDocument());
     expect(screen.getByTestId("agent-error")).toHaveTextContent(/could not load agent/i);
+  });
+});
+
+describe("/admin/agents/[id]: responsive layout (no sticky occlusion, no mobile overflow)", () => {
+  // The redesign regression: a page-level sticky header overlapped the metrics
+  // row beneath it on scroll (Gate enforcement / Assigned runs / Last active hid
+  // behind it), and the lifecycle action buttons overflowed the right edge on a
+  // narrow viewport. These tests pin the corrected layout: the header is in
+  // normal flow (NOT position:sticky/fixed) so nothing is occluded, and the
+  // lifecycle row + its buttons carry the wrap / full-width-on-mobile classes.
+  it("renders the header in normal flow, not sticky/fixed (so the metrics row is never occluded)", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        tasks: () => mkRes({ tasks: [] }),
+        log: () => mkRes({ entries: [] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-header")).toBeInTheDocument());
+    const header = screen.getByTestId("agent-header");
+    // The unintended page-level sticky/fixed positioning is gone: the global
+    // layout owns the chrome, so the header must not overlay scrolling content.
+    expect(header.style.position).not.toBe("sticky");
+    expect(header.style.position).not.toBe("fixed");
+    // A solid background + bottom border still set the header apart visually,
+    // and the metrics row renders right after it (never hidden behind it).
+    expect(header.style.background).toContain("var(--wp-dark");
+    expect(header.style.borderBottom).toContain("var(--wp-dark-border");
+    expect(screen.getByTestId("agent-metrics")).toBeInTheDocument();
+  });
+
+  it("gives the lifecycle action row the wrap + full-width-on-mobile classes (no right-edge clip)", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent({ state: "active" }) }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-lifecycle")).toBeInTheDocument());
+    const lifecycle = screen.getByTestId("agent-lifecycle");
+    // The row wraps instead of clipping the rightmost control, and carries the
+    // class the mobile media query targets to stack the buttons full-width.
+    expect(lifecycle.style.flexWrap).toBe("wrap");
+    expect(lifecycle.className).toContain("wp-agent-lifecycle");
+    // Pause + Revoke are present (every existing control preserved) and live
+    // inside the wrapping row, so they fit a narrow viewport.
+    expect(screen.getByTestId("agent-pause")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-revoke")).toBeInTheDocument();
+    // The mobile rule that stacks the buttons full-width is in the document.
+    const styleText = document.head.innerHTML + document.body.innerHTML;
+    expect(styleText).toContain("max-width:480px");
+    expect(styleText).toContain(".wp-agent-lifecycle");
+  });
+
+  it("gives the armed revoke-confirm row the wrap + full-width-on-mobile class", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent({ state: "active" }) }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-revoke")).toBeInTheDocument());
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-revoke"));
+    });
+    const confirm = screen.getByTestId("agent-revoke-confirm");
+    expect(confirm.style.flexWrap).toBe("wrap");
+    expect(confirm.className).toContain("wp-agent-revoke-confirm");
+    // The destructive confirm + cancel controls are preserved.
+    expect(screen.getByTestId("agent-revoke-confirm-yes")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-revoke-confirm-cancel")).toBeInTheDocument();
   });
 });

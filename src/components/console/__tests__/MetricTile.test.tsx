@@ -157,3 +157,31 @@ describe("MetricTile — count-up", () => {
     expect(screen.getByTestId("metric-value")).toHaveTextContent("77");
   });
 });
+
+describe("MetricTile — responsive overflow contract", () => {
+  // jsdom can't measure layout; assert the CSS contract that lets a long
+  // value/label/delta wrap instead of forcing the tile wider than its track.
+  test("the tile root can shrink below its content (minWidth:0)", () => {
+    render(<MetricTile value={1} label="x" />);
+    expect(screen.getByTestId("metric-tile").style.minWidth).toBe("0");
+  });
+
+  test("a long display value wraps instead of forcing width", () => {
+    render(
+      <MetricTile
+        display="a-very-long-unbreakable-pre-formatted-value-string"
+        label="x"
+      />,
+    );
+    const v = screen.getByTestId("metric-value");
+    expect(v.style.minWidth).toBe("0");
+    expect(v.style.overflowWrap).toBe("anywhere");
+  });
+
+  test("the label wraps long unbreakable text (minWidth:0 / overflow-wrap)", () => {
+    render(<MetricTile value={1} label="a-very-long-unbreakable-label" />);
+    const l = screen.getByTestId("metric-label");
+    expect(l.style.minWidth).toBe("0");
+    expect(l.style.overflowWrap).toBe("anywhere");
+  });
+});

@@ -137,5 +137,49 @@ test.describe("Scan command center reality check", () => {
         .map((f) => `  - [${f.kind}] ${f.detail}`)
         .join("\n")}`,
     ).toEqual([]);
+
+    // --- Mobile pass (390x844): the layout-bug fixes must hold on a phone. ---
+    // The run-scan deck + findings controls historically overflowed and were cut
+    // off on the right; this asserts NO horizontal overflow and that the key
+    // controls sit within the viewport. Same authed page, smaller viewport.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${target.baseUrl}/admin/platform-scans`, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+    await expect(
+      page.getByTestId("platform-scans-page"),
+      "the command center mounts on mobile",
+    ).toBeVisible({ timeout: 8_000 });
+
+    // No horizontal overflow: the document is not wider than the viewport
+    // (a small 2px slack absorbs sub-pixel rounding / scrollbar gutter).
+    const noOverflow = await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth <= window.innerWidth + 2,
+    );
+    expect(noOverflow, "no horizontal overflow on a 390px viewport").toBe(true);
+
+    // The run-scan control + the findings controls render within the viewport
+    // (right edge not clipped off-screen).
+    for (const testId of ["run-scan", "platform-select", "mode-select", "severity-filter"]) {
+      const el = page.getByTestId(testId);
+      if ((await el.count()) === 0) continue;
+      await expect(el, `${testId} is visible on mobile`).toBeVisible();
+      const box = await el.boundingBox();
+      expect(box, `${testId} has a layout box on mobile`).not.toBeNull();
+      if (box) {
+        expect(
+          box.x + box.width,
+          `${testId} right edge stays within the 390px viewport`,
+        ).toBeLessThanOrEqual(390 + 2);
+      }
+    }
+
+    // The client-facing coverage map renders on mobile too (stacked rows).
+    await expect(
+      page.getByTestId("validation-coverage"),
+      "the validation-coverage map renders on mobile",
+    ).toBeVisible();
   });
 });

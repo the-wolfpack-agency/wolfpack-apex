@@ -51,8 +51,14 @@ export function ConsoleGrid({
       className={className}
       style={{
         display: "grid",
+        // minmax(min(100%, Npx), 1fr): the inner min() clamps each track to the
+        // container width so a wide minColWidth can never push the grid past a
+        // narrow (e.g. 360px) viewport. Tracks collapse cleanly to 1 column.
         gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${minColWidth}px), 1fr))`,
         gap,
+        // Belt-and-braces: keep the grid itself from ever exceeding its parent.
+        minWidth: 0,
+        maxWidth: "100%",
         ...style,
       }}
     >
@@ -64,11 +70,19 @@ export function ConsoleGrid({
             index={i}
             staggerMs={staggerMs}
             data-testid={`console-grid-item-${i}`}
+            // minWidth:0 lets a cell shrink below its content's intrinsic width
+            // (the default for grid items is min-content), so long unbreakable
+            // content can't force a track wider than the column.
+            style={{ minWidth: 0 }}
           >
             {child}
           </StaggeredItem>
         ) : (
-          <div key={i} data-testid={`console-grid-item-${i}`}>
+          <div
+            key={i}
+            data-testid={`console-grid-item-${i}`}
+            style={{ minWidth: 0 }}
+          >
             {child}
           </div>
         ),
