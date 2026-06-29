@@ -16,13 +16,15 @@
  * PRECISION/RECALL HONESTY CAVEAT (the precision-first ethos):
  *   Precision and recall are ONLY trustworthy on LABELED targets (targets with
  *   a non-empty `groundTruth`). On an unlabeled target we cannot know what we
- *   missed (recall is meaningless, so we report 1 = "nothing known to miss")
- *   and we cannot know whether an "extra" class is a false positive or a real
- *   finding the labels simply do not list yet. Every aggregate metric here is
- *   therefore computed OVER LABELED TARGETS ONLY, and every "extra" class is
- *   surfaced as a *candidate*, never a confirmed false positive. Ground truth
- *   may be incomplete; we never punish the tool for finding a true bug that the
- *   corpus has not yet labeled.
+ *   missed (recall is meaningless) and we cannot know whether an "extra" class
+ *   is a false positive or a real finding the labels simply do not list yet.
+ *   We therefore represent an unknowable metric as `null` (NOT 1) - an explicit
+ *   "not applicable" the dashboard renders as "n/a", never as "100%". A vacuous
+ *   1 shown to a client is a LIE; null is the truth. Every aggregate metric here
+ *   is computed OVER LABELED TARGETS ONLY, and every "extra" class is surfaced
+ *   as a *candidate*, never a confirmed false positive. Ground truth may be
+ *   incomplete; we never punish the tool for finding a true bug that the corpus
+ *   has not yet labeled.
  *
  * Everything here is PURE: no DB, no network, no clock. The only side effect is
  * analytics emission, and `trackEvent` is INJECTED (deps) so tests are fully
@@ -60,11 +62,12 @@ export interface TargetScore {
    */
   extra: { findingClass: string; count: number }[];
   /**
-   * matched / groundTruth.length. 1 when no ground truth is defined - there is
-   * nothing to miss, so recall is vacuously perfect (and not trustworthy; see
-   * `labeled`).
+   * matched / groundTruth.length. `null` when no ground truth is defined - there
+   * is nothing to measure recall against, so recall is NOT APPLICABLE (the
+   * dashboard must render "n/a", never "100%"). Only a real number on a labeled
+   * target; see `labeled`.
    */
-  recall: number;
+  recall: number | null;
   /** Whether the target has ground truth. Precision/recall are only trustworthy when true. */
   labeled: boolean;
 }
@@ -77,17 +80,17 @@ export interface BenchmarkReport {
   perTarget: TargetScore[];
   /**
    * Overall recall over LABELED targets only: sum(matched) / sum(groundTruth).
-   * 1 when there are no labeled targets (nothing known to miss). Untrustworthy
-   * unless `labeledTargets > 0`.
+   * `null` when there are no labeled targets - recall is NOT APPLICABLE (render
+   * "n/a", never "100%"). A real number only when `labeledTargets > 0`.
    */
-  recall: number;
+  recall: number | null;
   /**
    * Precision-ish over LABELED targets only: sum(matched) / sum(matched+extra).
-   * "ish" because extras are candidates, not confirmed false positives. 1 when
-   * there is nothing reported on labeled targets. Untrustworthy unless
-   * `labeledTargets > 0`.
+   * "ish" because extras are candidates, not confirmed false positives. `null`
+   * when nothing is reported on labeled targets (NOT APPLICABLE, render "n/a").
+   * A real number only when there is something to score.
    */
-  precision: number;
+  precision: number | null;
   /** Distinct finding classes seen across ALL targets (labeled or not). Coverage breadth. */
   coverageClasses: string[];
   /** Targets that errored (could not be scanned) - a robustness signal. */
@@ -140,9 +143,9 @@ export const NOISE_CANDIDATE_MIN_COUNT = 3;
  *
  * Maps every finding to its class key, compares the set against the target's
  * declared ground-truth classes, and partitions into matched / missed / extra.
- * On an unlabeled target nothing can be "missed" (recall is vacuously 1) and
- * every reported class lands in `extra` but flagged untrustworthy via
- * `labeled: false`.
+ * On an unlabeled target nothing can be "missed" (recall is `null` = NOT
+ * APPLICABLE, never a vacuous 1) and every reported class lands in `extra` but
+ * flagged untrustworthy via `labeled: false`.
  */
 export function scoreTarget(target: BenchmarkTarget, findings: ScanFinding[]): TargetScore {
   const groundTruth = target.groundTruth ?? [];
@@ -170,8 +173,9 @@ export function scoreTarget(target: BenchmarkTarget, findings: ScanFinding[]): T
     .map(([findingClass, count]) => ({ findingClass, count }))
     .sort((a, b) => (b.count - a.count) || a.findingClass.localeCompare(b.findingClass));
 
-  // recall = matched / groundTruth; vacuously 1 when there is nothing to miss.
-  const recall = labeled ? matched.length / groundTruth.length : 1;
+  // recall = matched / groundTruth; null (NOT APPLICABLE) when there is no
+  // ground truth to measure against - never a vacuous 1 that reads as "100%".
+  const recall = labeled ? matched.length / groundTruth.length : null;
 
   return {
     name: target.name,
@@ -225,11 +229,12 @@ export function scoreBenchmark(
     }
   }
 
-  // Labeled-only metrics. Vacuously 1 when there is nothing to score (no labeled
-  // ground truth / no reports) - flagged untrustworthy via labeledTargets === 0.
-  const recall = truthTotal > 0 ? matchedTotal / truthTotal : 1;
+  // Labeled-only metrics. `null` (NOT APPLICABLE) when there is nothing to score
+  // (no labeled ground truth / no reports) - never a vacuous 1 that the
+  // dashboard would render as "100%". A real number only when a denominator exists.
+  const recall = truthTotal > 0 ? matchedTotal / truthTotal : null;
   const precisionDenom = matchedTotal + extraTotalLabeled;
-  const precision = precisionDenom > 0 ? matchedTotal / precisionDenom : 1;
+  const precision = precisionDenom > 0 ? matchedTotal / precisionDenom : null;
 
   const coverageClasses = [...coverage].sort();
 
@@ -245,8 +250,10 @@ export function scoreBenchmark(
 
   deps.trackEvent("platform.benchmark_run", deps.actor.id, deps.actor.role, {
     targets: report.targets,
-    recall: report.recall,
-    precision: report.precision,
+    // Analytics meta is string|number|boolean; a not-applicable metric is emitted
+    // as the explicit string "n/a" (never coerced to 0/1 which would read as real).
+    recall: report.recall ?? "n/a",
+    precision: report.precision ?? "n/a",
     coverage_classes: report.coverageClasses.length,
     errored: report.erroredCount,
   });

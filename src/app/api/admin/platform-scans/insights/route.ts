@@ -86,10 +86,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
 
+  const workspaceId = auth.user.workspaceId ?? "default";
+
   const url = new URL(req.url);
   const limitParam = Number(url.searchParams.get("limit"));
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : undefined;
 
-  const insights = await listRecentInsights(limit);
+  // Tenant-scoped read (FIX 2): only this workspace's insights are returned, never
+  // another tenant's.
+  const insights = await listRecentInsights(workspaceId, limit);
   return NextResponse.json({ ok: true, insights });
 }

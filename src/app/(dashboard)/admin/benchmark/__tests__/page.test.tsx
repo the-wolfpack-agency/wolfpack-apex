@@ -252,6 +252,44 @@ describe("Versus the competition section", () => {
     );
   });
 
+  it("renders n/a (not 0%/100%) and no parity claim for an UNLABELED target (fix #1/#2)", async () => {
+    // An unlabeled-target row: recall/precision null, parity null. The dashboard
+    // must show "n/a" and NOT claim "Parity (we match/beat)" - the exact lie the
+    // audit flagged (a vacuous 100% + false parity on own/unlabeled apps).
+    const unlabeled = {
+      ok: true,
+      comparison: [
+        {
+          tool: "zap",
+          label: "OWASP ZAP",
+          target: "ogiam.com",
+          runAt: "2026-06-28T10:00:00.000Z",
+          theirs: { recall: null, precision: null, findings: 7 },
+          ours: { recall: null, precision: null, matched: [] },
+          rivalOnlyGaps: [],
+          parity: null,
+        },
+      ],
+      improvement: null,
+    };
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      if (isBenchmark(url)) return Promise.resolve(mkRes({ ok: true, runs: RUNS }));
+      if (isCompetitive(url)) return Promise.resolve(mkRes(unlabeled));
+      return Promise.resolve(mkRes({}));
+    });
+    render(<BenchmarkDashboardPage />);
+
+    await screen.findByTestId("competition-row-0");
+    // Both recalls render "n/a", never a fabricated 0% or 100%.
+    expect(screen.getByTestId("competition-theirs-recall-0")).toHaveTextContent("n/a");
+    expect(screen.getByTestId("competition-ours-recall-0")).toHaveTextContent("n/a");
+    expect(screen.getByTestId("competition-theirs-recall-0")).not.toHaveTextContent("%");
+    // The status pill must NOT claim parity; it explicitly says parity is n/a.
+    const status = screen.getByTestId("competition-status-0");
+    expect(status).toHaveTextContent(/n\/a/i);
+    expect(status).not.toHaveTextContent(/we match\/beat/i);
+  });
+
   it("renders the improvement tile with the recall sparkline + the latest delta", async () => {
     mockFetchWithRefresh.mockImplementation((url: string) => {
       if (isBenchmark(url)) return Promise.resolve(mkRes({ ok: true, runs: RUNS }));

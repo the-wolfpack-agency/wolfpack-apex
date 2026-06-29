@@ -127,7 +127,7 @@ describe("POST (generate insights)", () => {
 });
 
 describe("GET (list recent insights)", () => {
-  test("returns 200 with the recent insights for the dashboard", async () => {
+  test("returns 200 with the recent insights for the dashboard, scoped to the workspace", async () => {
     mockListRecent.mockResolvedValue([
       { id: "xins_1", kind: "compound_risk", severity: "critical", platform: "acme", modalities: [], members: [], narrative: "n", status: "open", key: "k", generatedAt: "2026-06-28T00:00:00.000Z" },
     ]);
@@ -135,6 +135,8 @@ describe("GET (list recent insights)", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.insights).toHaveLength(1);
+    // FIX 2: the read is tenant-scoped - the resolved workspaceId is the first arg.
+    expect(mockListRecent).toHaveBeenCalledWith("ws-1", undefined);
   });
 
   test("403 when the capability check fails", async () => {

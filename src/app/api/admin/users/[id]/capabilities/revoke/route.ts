@@ -17,6 +17,7 @@ import {
   saveUserOverrides,
 } from "@/lib/auth/capability-overrides";
 import { trackEvent } from "@/lib/analytics";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 export async function POST(
   req: NextRequest,
@@ -56,6 +57,22 @@ export async function POST(
       user_id: targetUserId,
     },
   );
+
+  // Revoking a capability is a security-relevant authority change: record it to
+  // the hash-chained audit log. afterState captures the resulting override set so
+  // the entry reflects the change. Best-effort; never breaks the response.
+  const meta = extractRequestMetadata(req);
+  await recordAudit({
+    actor: { user_id: auth.user.id, role: auth.user.role },
+    action: "admin.user.capability_revoked",
+    resourceType: "team_member",
+    resourceId: targetUserId,
+    beforeState: { overrides: existing },
+    afterState: { overrides: next, capability: body.capability },
+    ipAddress: meta.ipAddress,
+    userAgent: meta.userAgent,
+    requestId: meta.requestId,
+  }).catch((e) => console.warn("[audit]", (e as Error).message));
 
   return NextResponse.json({ ok: true, overrides: next });
 }

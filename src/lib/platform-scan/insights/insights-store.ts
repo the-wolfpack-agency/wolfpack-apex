@@ -50,26 +50,39 @@ function toInsightRow(r: DbRow): InsightRow {
 }
 
 /**
- * Persist a batch of insights, UPSERTING by the stable `key` so re-running the
- * engine never duplicates an insight (it refreshes severity/members/narrative +
- * the generated_at timestamp instead). Returns how many rows were written.
+ * Persist a batch of insights for a workspace, UPSERTING by the TENANT-SCOPED key
+ * (workspace_id, key) so re-running the engine never duplicates an insight (it
+ * refreshes severity/members/narrative + the generated_at timestamp instead).
+ * Returns how many rows were written.
+ *
+ * Cross-tenant isolation (FIX 2): the dedup key is `kind::platform::route::...`
+ * with NO tenant in it, so two workspaces that scan the same platform/route
+ * produce the SAME key. The old `ON CONFLICT (key)` therefore let workspace B
+ * OVERWRITE workspace A's row, and the unfiltered read served it back to the
+ * wrong tenant. Scoping the conflict target to (workspace_id, key) - backed by the
+ * UNIQUE(workspace_id, key) index in migration 206 - and namespacing the id by
+ * workspace keeps each tenant's insights its own.
  *
  * Degrades gracefully: a DB error (or shadow mode) is caught per-row and the
  * function returns the count it managed, never throwing - a transient store hiccup
  * must not lose the insights the engine already emitted to analytics.
  */
-export async function recordInsights(insights: Insight[]): Promise<{ written: number }> {
+export async function recordInsights(
+  insights: Insight[],
+  workspaceId: string,
+): Promise<{ written: number }> {
   let written = 0;
   for (const ins of insights) {
-    // Deterministic id derived from the key keeps the id stable across re-runs
-    // too (the key is the natural identity); ON CONFLICT (key) is the dedup guard.
-    const id = `xins_${ins.key}`;
+    // Deterministic id derived from workspace + key keeps the id stable across
+    // re-runs AND unique per tenant; ON CONFLICT (workspace_id, key) is the dedup
+    // guard. Two tenants sharing a key get two distinct rows + ids.
+    const id = `xins_${workspaceId}_${ins.key}`;
     try {
       await writeQuery(
         `INSERT INTO instinct_cross_scan_insights
-           (id, platform, kind, severity, modalities, members, narrative, key)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)
-         ON CONFLICT (key) DO UPDATE SET
+           (id, workspace_id, platform, kind, severity, modalities, members, narrative, key)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9)
+         ON CONFLICT (workspace_id, key) DO UPDATE SET
            severity   = EXCLUDED.severity,
            modalities = EXCLUDED.modalities,
            members    = EXCLUDED.members,
@@ -77,6 +90,7 @@ export async function recordInsights(insights: Insight[]): Promise<{ written: nu
            generated_at = NOW()`,
         [
           id,
+          workspaceId,
           ins.platform,
           ins.kind,
           ins.severity,
@@ -97,19 +111,28 @@ export async function recordInsights(insights: Insight[]): Promise<{ written: nu
 }
 
 /**
- * Recent insights, newest first, for the dashboard feed. Default limit 50, capped
- * at 200. Degrades to [] with no DB (safeQuery) so the dashboard renders its
- * explicit empty state rather than 500ing.
+ * Recent insights for a workspace, newest first, for the dashboard feed. Default
+ * limit 50, capped at 200. Degrades to [] with no DB (safeQuery) so the dashboard
+ * renders its explicit empty state rather than 500ing.
+ *
+ * Tenant isolation (FIX 2): EVERY read is filtered by workspace_id. The old read
+ * had no filter, so it served one tenant's insights to another. A row with a NULL
+ * workspace_id (pre-206 backfill is additive, so legacy rows may have NULL) is
+ * deliberately NOT returned to any tenant - it cannot be attributed safely.
  */
-export async function listRecentInsights(limit?: number): Promise<InsightRow[]> {
+export async function listRecentInsights(
+  workspaceId: string,
+  limit?: number,
+): Promise<InsightRow[]> {
   const lim = Math.min(Math.max(limit ?? 50, 1), 200);
   const { rows } = await safeQuery<DbRow>(
     `SELECT id, generated_at, platform, kind, severity, modalities, members,
             narrative, status, key
        FROM instinct_cross_scan_insights
+      WHERE workspace_id = $1
       ORDER BY generated_at DESC
-      LIMIT $1`,
-    [lim],
+      LIMIT $2`,
+    [workspaceId, lim],
   );
   return rows.map(toInsightRow);
 }

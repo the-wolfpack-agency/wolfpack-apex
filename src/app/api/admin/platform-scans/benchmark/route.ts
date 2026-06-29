@@ -38,6 +38,7 @@ import {
   recordBenchmarkRun,
   listRecentBenchmarkRuns,
 } from "@/lib/platform-scan/benchmark/benchmark-store";
+import { trackEvent } from "@/lib/analytics";
 
 /** CI path: Authorization: Bearer ${CRON_SECRET}. False when CRON_SECRET unset. */
 function isAuthorizedCron(req: NextRequest): boolean {
@@ -95,10 +96,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       });
       results.push({ target, findings: rows.map(toScanFinding), errored: false });
     } catch (err) {
+      const detail = (err as Error).message;
       console.warn(
         `[platform-scans/benchmark] listFindings failed for ${target.name}:`,
-        (err as Error).message,
+        detail,
       );
+      // DEGRADE SIGNAL: a swallowed read means recall/coverage will be computed
+      // over a SMALLER corpus than intended. Without this event the learning loop
+      // would treat a partial run as a real one and trend on numbers that silently
+      // dropped a target. The errored count still flows into the report (below);
+      // this fires the explicit signal so the partial run is never mistaken for a
+      // clean one. The run still completes - we never fail the whole sweep for one
+      // target's read.
+      trackEvent("platform.scan_read_degraded", actorId, actorRole, {
+        surface: "benchmark",
+        detail,
+        target: target.name,
+        workspace_id: workspaceId,
+      });
       results.push({ target, findings: [], errored: true });
     }
   }

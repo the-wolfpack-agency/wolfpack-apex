@@ -11,6 +11,7 @@
  * branches on `allowed`, never on the status code.
  */
 const mockAuthorize = jest.fn();
+const mockTrack = jest.fn();
 const mockAuthFn = jest.fn();
 let mockAuth: () => Promise<unknown> = async () => ({
   ok: true,
@@ -25,6 +26,9 @@ jest.mock("@/lib/auth/require-capability", () => ({
 }));
 jest.mock("@/lib/platform-scan/browser/gate", () => ({
   authorizeBrowserAction: (...a: unknown[]) => mockAuthorize(...a),
+}));
+jest.mock("@/lib/analytics", () => ({
+  trackEvent: (...a: unknown[]) => mockTrack(...a),
 }));
 
 import { NextRequest } from "next/server";
@@ -170,4 +174,55 @@ it("400 on invalid JSON body", async () => {
   const res = await post("{not json", { authorization: "Bearer s3cret" });
   expect(res.status).toBe(400);
   expect(mockAuthorize).not.toHaveBeenCalled();
+});
+
+describe("fail closed on unauditable (no audit, no action)", () => {
+  // The gate may return { allowed: true } with a decision marked unauditable
+  // (enforce-mode ledger write failed; effectiveOutcome stays "allow"). The
+  // route MUST override that to a deny — mirroring the internal dispatcher.
+  const UNAUDITABLE_ALLOW = {
+    allowed: true,
+    decision: {
+      ...ALLOW_VERDICT.decision,
+      effectiveOutcome: "allow",
+      mode: "enforce",
+      enforced: true,
+      unauditable: true,
+      wouldBlock: true,
+    },
+  };
+
+  it("200 { allowed: false } when the gate verdict is allow-but-unauditable", async () => {
+    mockAuthorize.mockResolvedValue(UNAUDITABLE_ALLOW);
+    const res = await post(MUTATING);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.allowed).toBe(false);
+    expect(json.reason).toMatch(/unauditable/i);
+    // Must NOT echo the allow decision summary.
+    expect(json).not.toHaveProperty("decision");
+  });
+
+  it("fires platform.browser_action_blocked on the fail-closed override", async () => {
+    mockAuthorize.mockResolvedValue(UNAUDITABLE_ALLOW);
+    await post(MUTATING);
+    expect(mockTrack).toHaveBeenCalledWith(
+      "platform.browser_action_blocked",
+      "admin-1",
+      "admin",
+      expect.objectContaining({ reason: "unauditable", platform: "acme", action: "submit" }),
+    );
+  });
+
+  it("a normal allow (no unauditable flag) is unaffected and fires no block event", async () => {
+    const res = await post(READ_ONLY);
+    expect(res.status).toBe(200);
+    expect((await res.json()).allowed).toBe(true);
+    expect(mockTrack).not.toHaveBeenCalledWith(
+      "platform.browser_action_blocked",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
 });

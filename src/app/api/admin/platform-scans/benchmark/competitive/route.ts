@@ -37,13 +37,12 @@ import {
   type CompetitorTool,
   type RawCompetitorFinding,
   type CompetitiveReport,
-  type OurTargetScore,
 } from "@/lib/platform-scan/benchmark/competitive";
 import {
   recordCompetitorRun,
-  listRecentCompetitorRuns,
+  listLatestCompetitorRunPerPair,
+  ourLatestScoreForTarget,
 } from "@/lib/platform-scan/benchmark/competitive-store";
-import type { TargetScore } from "@/lib/platform-scan/benchmark/scorer";
 
 /** CI path: Authorization: Bearer ${CRON_SECRET}. False when CRON_SECRET unset. */
 function isAuthorizedCron(req: NextRequest): boolean {
@@ -78,32 +77,6 @@ function parseEntry(raw: unknown): CompetitiveRequest | null {
     target: target.trim(),
     findings: findings as RawCompetitorFinding[],
   };
-}
-
-/**
- * Read OUR latest score for a target out of the persisted benchmark runs. Walks
- * the recent runs newest-first and returns the first run whose report.perTarget
- * carries this target, mapped to OurTargetScore. Defaults to a vacuous 0-recall /
- * 1-precision / no-matched score when we have no run yet for the target (so the
- * head-to-head still renders honestly: we simply have not scored it).
- */
-function ourLatestScore(
-  target: string,
-  runs: Awaited<ReturnType<typeof listRecentBenchmarkRuns>>,
-): OurTargetScore {
-  for (const run of runs) {
-    const perTarget = (run.report?.perTarget ?? []) as TargetScore[];
-    const t = perTarget.find((p) => p.name === target);
-    if (t) {
-      return {
-        target,
-        recall: t.recall,
-        precision: precisionOf(t),
-        matched: t.matched,
-      };
-    }
-  }
-  return { target, recall: 0, precision: 1, matched: [] };
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -154,8 +127,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // Read OUR recent runs ONCE; every entry's "ours" side derives from it.
-  const ourRecent = await listRecentBenchmarkRuns(50);
   const deps = {
     trackEvent,
     actor: { id: actorId, role: actorRole },
@@ -170,15 +141,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const competitorScore = scoreCompetitor(entry.tool, target, normalized);
 
     // Fire the head-to-head run event (the builder fires the gap/parity events).
+    // A not-applicable metric (unlabeled target) is emitted as the explicit string
+    // "n/a", never coerced to 0/1 which would read as a real score downstream.
     deps.trackEvent("platform.competitor_benchmark_run", actorId, actorRole, {
       tool: entry.tool,
       target: target.name,
-      recall: competitorScore.score.recall,
-      precision: precisionOf(competitorScore.score),
+      recall: competitorScore.score.recall ?? "n/a",
+      precision: precisionOf(competitorScore.score) ?? "n/a",
       findings: competitorScore.findings,
     });
 
-    const ours = ourLatestScore(target.name, ourRecent);
+    // Fix #5: query OUR latest score for THIS target directly (not a truncated
+    // window walk), so a newer run outside a 50-row window is never missed and we
+    // never fabricate recall 0 for an unscored target (hasRun:false -> recall null).
+    const ours = await ourLatestScoreForTarget(target.name);
     const report = buildCompetitiveReport(ours, [competitorScore], deps);
     reports.push(report);
 
@@ -222,27 +198,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!auth.ok) return auth.response;
 
   // Comparison: the latest competitor run PER (tool, target), each laid next to
-  // our recall on that target. listRecentCompetitorRuns is newest-first, so the
-  // first occurrence of a (tool, target) key IS the latest.
-  const competitorRuns = await listRecentCompetitorRuns(200);
-  const seen = new Set<string>();
-  const comparison = competitorRuns
-    .filter((r) => {
-      const key = `${r.tool}:${r.target}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .map((r) => ({
-      tool: r.tool,
-      label: COMPETITOR_LABEL[r.tool] ?? r.tool,
-      target: r.target,
-      runAt: r.runAt,
-      theirs: { recall: r.recall, precision: r.precision, findings: r.findings },
-      ours: r.report?.ours ?? { recall: 0, precision: 1, matched: [] },
-      rivalOnlyGaps: r.report?.rivalOnlyGaps ?? [],
-      parity: r.report?.parity ?? false,
-    }));
+  // our recall on that target. Fix #7: select latest-per-pair in SQL (DISTINCT ON)
+  // rather than de-duping a truncated 200-row window client-side, which could DROP
+  // the newest run for a pair when older runs filled the window first.
+  const competitorRuns = await listLatestCompetitorRunPerPair();
+  const comparison = competitorRuns.map((r) => ({
+    tool: r.tool,
+    label: COMPETITOR_LABEL[r.tool] ?? r.tool,
+    target: r.target,
+    runAt: r.runAt,
+    theirs: { recall: r.recall, precision: r.precision, findings: r.findings },
+    // null (n/a) when not applicable - never a fabricated 0/1 that reads as a real
+    // metric. The dashboard renders null as "n/a".
+    ours: r.report?.ours ?? { recall: null, precision: null, matched: [] },
+    rivalOnlyGaps: r.report?.rivalOnlyGaps ?? [],
+    parity: r.report?.parity ?? null,
+  }));
 
   // Improvement: OUR recall trend over time (the same source as the base trend).
   const ourRecent = await listRecentBenchmarkRuns(50);

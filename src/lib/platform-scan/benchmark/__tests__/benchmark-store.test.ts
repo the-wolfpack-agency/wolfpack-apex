@@ -39,7 +39,9 @@ const SIGNALS: LearningSignal[] = [
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockWriteQuery.mockResolvedValue({ rows: [] });
+  // The insert now uses RETURNING id + expectRows:1, so a successful write returns
+  // exactly one row. (A 0-row write is the discarded-write case - tested below.)
+  mockWriteQuery.mockResolvedValue({ rows: [{ id: "bench_db" }] });
   mockSafeQuery.mockResolvedValue({ rows: [], fromCache: false });
 });
 
@@ -54,12 +56,34 @@ describe("recordBenchmarkRun", () => {
     expect(params[0]).toBe(id);
     expect(params[1]).toBe(3); // targets
     expect(params[2]).toBe(2); // labeled_targets
-    expect(params[3]).toBe(0.5); // recall
+    expect(params[3]).toBe(0.5); // recall (in-range -> unchanged by clampRatio)
     expect(params[4]).toBe(0.8); // precision
     expect(params[5]).toBe(2); // coverage_classes -> coverageClasses.length
     expect(params[6]).toBe(1); // errored
     expect(JSON.parse(params[7] as string)).toEqual(REPORT);
     expect(JSON.parse(params[8] as string)).toEqual(SIGNALS);
+    // FALSE-SUCCESS FIX (#1): the write asserts exactly one row landed.
+    expect(sql).toMatch(/RETURNING id/i);
+    expect(mockWriteQuery.mock.calls[0][2]).toEqual({ expectRows: 1 });
+  });
+
+  test("FALSE-SUCCESS: a 0-row discarded write does NOT return a fake id (degrades to { id: null })", async () => {
+    // With expectRows:1 the strict writeQuery throws on a 0-row (RLS-discarded)
+    // write; recordBenchmarkRun catches and returns { id: null } instead of the
+    // old behavior of reporting a bench_ id that was never persisted. The scorer
+    // already emitted analytics, so the run is not lost - only the trend row, and
+    // the caller degrades gracefully.
+    mockWriteQuery.mockRejectedValue(
+      Object.assign(new Error("row-count mismatch: expected 1, got 0"), { code: "unexpected_row_count" }),
+    );
+    await expect(recordBenchmarkRun(REPORT, SIGNALS)).resolves.toEqual({ id: null });
+  });
+
+  test("LOSSY-METRIC FIX (#5): out-of-range / non-finite ratios are clamped to [0,1] before write", async () => {
+    await recordBenchmarkRun({ ...REPORT, recall: 1.4, precision: Number.NaN }, SIGNALS);
+    const params = mockWriteQuery.mock.calls[0][1] as unknown[];
+    expect(params[3]).toBe(1); // recall 1.4 clamped to 1
+    expect(params[4]).toBe(0); // precision NaN -> 0 (never a NaN ratio in the column)
   });
 
   test("degrades gracefully: a write throw returns { id: null } and does not re-throw", async () => {

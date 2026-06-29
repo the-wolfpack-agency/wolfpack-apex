@@ -14,7 +14,8 @@
  * end); only db reads, persistence, analytics, and audit are mocked - no DB touched.
  */
 const mockListRuns = jest.fn();
-const mockListCompetitorRuns = jest.fn();
+const mockOurScore = jest.fn();
+const mockListLatestPerPair = jest.fn();
 const mockRecordRun = jest.fn();
 const mockTrack = jest.fn();
 const mockRecordAudit = jest.fn();
@@ -31,11 +32,15 @@ jest.mock("@/lib/auth/require-capability", () => ({
   },
 }));
 jest.mock("@/lib/platform-scan/benchmark/benchmark-store", () => ({
+  // Still used by GET's improvement trend.
   listRecentBenchmarkRuns: (...a: unknown[]) => mockListRuns(...a),
 }));
 jest.mock("@/lib/platform-scan/benchmark/competitive-store", () => ({
   recordCompetitorRun: (...a: unknown[]) => mockRecordRun(...a),
-  listRecentCompetitorRuns: (...a: unknown[]) => mockListCompetitorRuns(...a),
+  // FIX #5/#7: POST reads OUR latest score per-target directly; GET reads latest
+  // competitor run per (tool, target) via DISTINCT ON.
+  ourLatestScoreForTarget: (...a: unknown[]) => mockOurScore(...a),
+  listLatestCompetitorRunPerPair: (...a: unknown[]) => mockListLatestPerPair(...a),
 }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrack(...a) }));
 jest.mock("@/lib/audit-log", () => ({
@@ -68,27 +73,31 @@ function makeGet(headers: Record<string, string> = {}) {
   );
 }
 
-/** A persisted OUR-run whose report.perTarget carries a vampi score with the
- *  given matched classes, so ourLatestScore reads it for the head-to-head. */
-function ourRunForVampi(matched: string[]) {
-  return [
-    {
-      id: "bench_1",
-      runAt: "2026-06-28T00:00:00.000Z",
-      targets: 5,
-      labeledTargets: 3,
-      recall: matched.length / 5,
-      precision: 1,
-      coverageClasses: 10,
-      errored: 0,
-      report: {
-        perTarget: [
-          { name: VAMPI, matched, missed: [], extra: [], recall: matched.length / 5, labeled: true },
-        ],
-      },
-      signals: [],
-    },
-  ];
+/** OUR latest score for vampi with the given matched GT classes - a labeled,
+ *  scored run so parity is claimable. Shapes what ourLatestScoreForTarget returns. */
+function oursForVampi(matched: string[]) {
+  return {
+    target: VAMPI,
+    recall: matched.length / 5,
+    precision: 1,
+    matched,
+    labeled: true,
+    hasRun: true,
+    runAt: "2026-06-28T00:00:00.000Z",
+  };
+}
+
+/** The "we never scored this target" shape: recall unknown (null), hasRun false. */
+function oursNoRun() {
+  return {
+    target: VAMPI,
+    recall: null,
+    precision: null,
+    matched: [],
+    labeled: true,
+    hasRun: false,
+    runAt: null,
+  };
 }
 
 beforeEach(() => {
@@ -96,14 +105,15 @@ beforeEach(() => {
   process.env.CRON_SECRET = "s3cret";
   mockAuth = async () => ({ ok: true, user: { id: "admin-1", role: "admin", workspaceId: "ws-1" } });
   mockListRuns.mockResolvedValue([]);
-  mockListCompetitorRuns.mockResolvedValue([]);
+  mockOurScore.mockResolvedValue(oursNoRun());
+  mockListLatestPerPair.mockResolvedValue([]);
   mockRecordRun.mockResolvedValue({ id: "comp_1" });
   mockRecordAudit.mockResolvedValue({ ok: true });
 });
 
 describe("POST (score a competitor vs us)", () => {
   test("scores nuclei vs vampi, fires the run event, persists, audits, returns the report", async () => {
-    mockListRuns.mockResolvedValue(ourRunForVampi(["security:SQL injection"]));
+    mockOurScore.mockResolvedValue(oursForVampi(["security:SQL injection"]));
     const res = await makePost(
       { tool: "nuclei", target: VAMPI, findings: [{ templateId: "sqli" }, { templateId: "idor" }] },
       { authorization: "Bearer s3cret" },
@@ -144,8 +154,8 @@ describe("POST (score a competitor vs us)", () => {
   });
 
   test("fires competitive_parity_confirmed when we match/beat the rival", async () => {
-    mockListRuns.mockResolvedValue(
-      ourRunForVampi([
+    mockOurScore.mockResolvedValue(
+      oursForVampi([
         "security:SQL injection",
         "security:Broken object level authorization (IDOR)",
       ]),
@@ -166,7 +176,7 @@ describe("POST (score a competitor vs us)", () => {
   });
 
   test("accepts an ARRAY of entries (multi-tool sweep) and scores each", async () => {
-    mockListRuns.mockResolvedValue(ourRunForVampi([]));
+    mockOurScore.mockResolvedValue(oursForVampi([]));
     const res = await makePost(
       [
         { tool: "zap", target: VAMPI, findings: [{ alert: "SQL Injection" }] },
@@ -181,7 +191,7 @@ describe("POST (score a competitor vs us)", () => {
   });
 
   test("capability path attributes events + audit to the user", async () => {
-    mockListRuns.mockResolvedValue(ourRunForVampi([]));
+    mockOurScore.mockResolvedValue(oursForVampi([]));
     const res = await makePost({ tool: "zap", target: VAMPI, findings: [] }); // no bearer
     expect(res.status).toBe(200);
     expect(mockAuthFn).toHaveBeenCalled();
@@ -222,8 +232,33 @@ describe("POST (score a competitor vs us)", () => {
     expect(res.status).toBe(403);
   });
 
+  test("FIX #5: when we have NO scored run for the target, recall/parity render n/a (null), never a false 0 + false parity", async () => {
+    // ourLatestScoreForTarget returns the no-run shape (recall null, hasRun false).
+    // The rival also finds nothing mappable. Old code defaulted us to recall 0 and
+    // could claim parity (rivalOnlyGaps empty). Now: parity is null (not claimable)
+    // and our recall is null (unknown), not a fabricated 0 that understates us.
+    mockOurScore.mockResolvedValue(oursNoRun());
+    const res = await makePost(
+      { tool: "nuclei", target: VAMPI, findings: [{ templateId: "banner-disclosure" }] },
+      { authorization: "Bearer s3cret" },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.reports[0].ours.recall).toBeNull();
+    expect(body.reports[0].parity).toBeNull();
+    // No parity event fired - we never claim "matched/beat every tool" without a run.
+    expect(mockTrack).not.toHaveBeenCalledWith(
+      "platform.competitive_parity_confirmed",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+    // ourLatestScoreForTarget was queried for the specific target.
+    expect(mockOurScore).toHaveBeenCalledWith(VAMPI);
+  });
+
   test("never loses the run: a persistence failure still returns the report (200)", async () => {
-    mockListRuns.mockResolvedValue(ourRunForVampi([]));
+    mockOurScore.mockResolvedValue(oursForVampi([]));
     mockRecordRun.mockResolvedValue({ id: null });
     const res = await makePost(
       { tool: "zap", target: VAMPI, findings: [{ alert: "SQL Injection" }] },
@@ -238,8 +273,10 @@ describe("POST (score a competitor vs us)", () => {
 });
 
 describe("GET (comparison + improvement)", () => {
-  test("returns latest per (tool,target) comparison + our improvement trend", async () => {
-    mockListCompetitorRuns.mockResolvedValue([
+  test("returns latest per (tool,target) comparison (deduped in SQL) + our improvement trend", async () => {
+    // FIX #7: the store now returns latest-per-pair via DISTINCT ON, so the route
+    // does NOT client-dedup. We hand it the already-deduped single row per pair.
+    mockListLatestPerPair.mockResolvedValue([
       {
         id: "comp_2",
         runAt: "2026-06-28T00:00:00.000Z",
@@ -248,17 +285,7 @@ describe("GET (comparison + improvement)", () => {
         recall: 0.4,
         precision: 1,
         findings: 5,
-        report: { ours: { recall: 0.6, precision: 1, matched: [] }, rivalOnlyGaps: [], parity: true },
-      },
-      {
-        id: "comp_1",
-        runAt: "2026-06-21T00:00:00.000Z",
-        tool: "nuclei",
-        target: VAMPI,
-        recall: 0.2,
-        precision: 1,
-        findings: 3,
-        report: { ours: { recall: 0.3, precision: 1, matched: [] }, rivalOnlyGaps: [], parity: false },
+        report: { labeled: true, ours: { recall: 0.6, precision: 1, matched: [] }, rivalOnlyGaps: [], parity: true },
       },
     ]);
     mockListRuns.mockResolvedValue([
@@ -291,6 +318,6 @@ describe("GET (comparison + improvement)", () => {
     mockAuth = async () => ({ ok: false, response: new Response(null, { status: 401 }) });
     const res = await makeGet();
     expect(res.status).toBe(401);
-    expect(mockListCompetitorRuns).not.toHaveBeenCalled();
+    expect(mockListLatestPerPair).not.toHaveBeenCalled();
   });
 });

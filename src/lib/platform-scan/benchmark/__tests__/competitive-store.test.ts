@@ -19,11 +19,14 @@ jest.mock("@/lib/db", () => ({
 import {
   recordCompetitorRun,
   listRecentCompetitorRuns,
+  listLatestCompetitorRunPerPair,
+  ourLatestScoreForTarget,
 } from "@/lib/platform-scan/benchmark/competitive-store";
 import type { CompetitiveReport } from "@/lib/platform-scan/benchmark/competitive";
 
 const REPORT: CompetitiveReport = {
   target: "vampi",
+  labeled: true,
   ours: { recall: 0.4, precision: 0.9, matched: ["security:SQL injection"] },
   tools: [
     { tool: "nuclei", label: "Nuclei", recall: 0.2, precision: 1, matched: [], findings: 3 },
@@ -116,5 +119,124 @@ describe("listRecentCompetitorRuns", () => {
   test("degrades to [] with no DB", async () => {
     mockSafeQuery.mockResolvedValue({ rows: [], fromCache: false });
     expect(await listRecentCompetitorRuns()).toEqual([]);
+  });
+
+  test("preserves NULL recall/precision (n/a) instead of coercing to 0 (fix #2)", async () => {
+    mockSafeQuery.mockResolvedValue({
+      rows: [
+        {
+          id: "comp_1",
+          run_at: "2026-06-28T00:00:00.000Z",
+          tool: "nuclei",
+          target: "ownApp",
+          recall: null, // unlabeled target -> not applicable
+          precision: null,
+          findings: 4,
+          report: { ...REPORT, labeled: false },
+        },
+      ],
+      fromCache: false,
+    });
+    const rows = await listRecentCompetitorRuns();
+    // A null must stay null (n/a), NOT become 0 - a 0 recall is a real bad score,
+    // null means "not measurable", and conflating them is the lie.
+    expect(rows[0].recall).toBeNull();
+    expect(rows[0].precision).toBeNull();
+  });
+});
+
+describe("listLatestCompetitorRunPerPair (FIX #7 - DISTINCT ON in SQL, no truncated client dedup)", () => {
+  test("selects DISTINCT ON (tool, target) latest-first in SQL, re-sorted newest-first", async () => {
+    mockSafeQuery.mockResolvedValue({
+      rows: [
+        { id: "c_z", run_at: "2026-06-20T00:00:00.000Z", tool: "zap", target: "vampi", recall: 0.2, precision: 1, findings: 2, report: REPORT },
+        { id: "c_n", run_at: "2026-06-28T00:00:00.000Z", tool: "nuclei", target: "vampi", recall: 0.4, precision: 1, findings: 3, report: REPORT },
+      ],
+      fromCache: false,
+    });
+    const rows = await listLatestCompetitorRunPerPair();
+    const sql = mockSafeQuery.mock.calls[0][0] as string;
+    // The dedup is done in SQL, not client-side over a truncated window.
+    expect(sql).toMatch(/DISTINCT ON \(tool, target\)/i);
+    expect(sql).toMatch(/ORDER BY tool, target, run_at DESC/i);
+    // Result re-sorted newest-first overall.
+    expect(rows.map((r) => r.id)).toEqual(["c_n", "c_z"]);
+  });
+
+  test("degrades to [] with no DB", async () => {
+    mockSafeQuery.mockResolvedValue({ rows: [], fromCache: false });
+    expect(await listLatestCompetitorRunPerPair()).toEqual([]);
+  });
+});
+
+describe("ourLatestScoreForTarget (FIX #5 - query the latest run FOR THAT TARGET directly)", () => {
+  test("returns the latest scored run for the target with run_at, labeled, hasRun", async () => {
+    mockSafeQuery.mockResolvedValue({
+      rows: [
+        {
+          run_at: "2026-06-28T00:00:00.000Z",
+          report: {
+            perTarget: [
+              {
+                name: "vampi",
+                matched: ["security:SQL injection"],
+                missed: ["security:Mass assignment"],
+                extra: [],
+                recall: 0.2,
+                labeled: true,
+              },
+            ],
+          },
+        },
+      ],
+      fromCache: false,
+    });
+    const ours = await ourLatestScoreForTarget("vampi");
+    expect(ours).toMatchObject({
+      target: "vampi",
+      recall: 0.2,
+      matched: ["security:SQL injection"],
+      labeled: true,
+      hasRun: true,
+      runAt: "2026-06-28T00:00:00.000Z",
+    });
+    // Filters on the target via JSONB containment, ordered latest-first, limit 1.
+    const sql = mockSafeQuery.mock.calls[0][0] as string;
+    expect(sql).toMatch(/report -> 'perTarget' @> \$1::jsonb/i);
+    expect(sql).toMatch(/ORDER BY run_at DESC/i);
+    expect(JSON.parse(mockSafeQuery.mock.calls[0][1][0] as string)).toEqual([{ name: "vampi" }]);
+  });
+
+  test("NO run for the target -> hasRun false, recall/precision NULL (never a fabricated 0)", async () => {
+    mockSafeQuery.mockResolvedValue({ rows: [], fromCache: false });
+    const ours = await ourLatestScoreForTarget("never-scored");
+    // FIX #5: a target outside our window / never scored must not understate us as
+    // recall 0; it is UNKNOWN -> null + hasRun false, so parity is not claimable.
+    expect(ours.hasRun).toBe(false);
+    expect(ours.recall).toBeNull();
+    expect(ours.precision).toBeNull();
+    expect(ours.runAt).toBeNull();
+    expect(ours.matched).toEqual([]);
+  });
+
+  test("an UNLABELED stored per-target score -> recall/precision null even though hasRun true", async () => {
+    mockSafeQuery.mockResolvedValue({
+      rows: [
+        {
+          run_at: "2026-06-28T00:00:00.000Z",
+          report: {
+            perTarget: [
+              { name: "ownApp", matched: [], missed: [], extra: [{ findingClass: "bug:x", count: 5 }], recall: null, labeled: false },
+            ],
+          },
+        },
+      ],
+      fromCache: false,
+    });
+    const ours = await ourLatestScoreForTarget("ownApp");
+    expect(ours.hasRun).toBe(true);
+    expect(ours.labeled).toBe(false);
+    expect(ours.recall).toBeNull();
+    expect(ours.precision).toBeNull();
   });
 });

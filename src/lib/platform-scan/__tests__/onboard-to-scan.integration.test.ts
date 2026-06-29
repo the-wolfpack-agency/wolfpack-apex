@@ -61,7 +61,8 @@ let storedTargetRow: Record<string, unknown> | null = null;
 const mockWriteQuery = jest.fn(async (sql: string, params: unknown[] = []) => {
   writeCalls.push({ sql, params });
   if (/INSERT INTO instinct_platform_scans\b/i.test(sql)) return { rows: [{ id: "scan-1" }] };
-  return { rows: [] };
+  // Finding upserts now use RETURNING id + expectRows:1, so return one row.
+  return { rows: [{ id: "row-1" }] };
 });
 const mockSafeQuery = jest.fn(async (sql: string, params: unknown[] = []) => {
   safeCalls.push({ sql, params });
@@ -74,6 +75,21 @@ jest.mock("@/lib/db", () => ({
   writeQuery: (sql: string, params: unknown[] = []) => mockWriteQuery(sql, params),
   safeQuery: (sql: string, params: unknown[] = []) => mockSafeQuery(sql, params),
   query: jest.fn(async () => ({ rows: [] })),
+  // recordScan is now ATOMIC via withTransaction; faithful mock that runs fn with
+  // a tx whose write() delegates to mockWriteQuery + enforces the expectRows
+  // contract (a 0-row write throws) exactly like the real helper.
+  withTransaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+    const tx = {
+      async write(sql: string, params: unknown[] = [], opts?: { expectRows?: number }) {
+        const res = (await mockWriteQuery(sql, params)) as { rows: unknown[] };
+        if (opts?.expectRows !== undefined && res.rows.length !== opts.expectRows) {
+          throw new Error(`row-count mismatch: expected ${opts.expectRows}, got ${res.rows.length}`);
+        }
+        return res;
+      },
+    };
+    return fn(tx);
+  },
 }));
 
 // 3. Connector credential load: an oauth_password (Salesforce-style) connection.
@@ -301,7 +317,7 @@ beforeEach(() => {
   mockWriteQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
     writeCalls.push({ sql, params });
     if (/INSERT INTO instinct_platform_scans\b/i.test(sql)) return { rows: [{ id: "scan-1" }] };
-    return { rows: [] };
+    return { rows: [{ id: "row-1" }] }; // finding upserts satisfy expectRows:1
   });
   mockSafeQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
     safeCalls.push({ sql, params });

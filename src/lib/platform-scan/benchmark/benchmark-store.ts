@@ -34,14 +34,29 @@ export interface BenchmarkRunRow {
 
 type DbRow = Record<string, unknown>;
 
+/**
+ * recall + precision are 0..1 RATIOS. The columns are bare NUMERIC and the value
+ * arrives as a string from pg, so a naive Number() can yield NaN (then silently
+ * become 0 via `|| 0`, losing a real value) or an out-of-range number (a corrupt
+ * row would render a >100% bar on the trend). clampRatio is the single guard for
+ * both the write (store a value we know is in range) and the read (never surface
+ * a NaN / out-of-band ratio to the dashboard). Non-finite -> 0; otherwise clamp
+ * to [0, 1]. We do NOT need a migration: the guard lives in code on both seams.
+ */
+export function clampRatio(v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return n < 0 ? 0 : n > 1 ? 1 : n;
+}
+
 function toRunRow(r: DbRow): BenchmarkRunRow {
   return {
     id: String(r.id),
     runAt: r.run_at instanceof Date ? r.run_at.toISOString() : String(r.run_at),
     targets: Number(r.targets) || 0,
     labeledTargets: Number(r.labeled_targets) || 0,
-    recall: Number(r.recall) || 0,
-    precision: Number(r.precision) || 0,
+    recall: clampRatio(r.recall),
+    precision: clampRatio(r.precision),
     coverageClasses: Number(r.coverage_classes) || 0,
     errored: Number(r.errored) || 0,
     report: (r.report ?? {}) as BenchmarkReport,
@@ -65,21 +80,31 @@ export async function recordBenchmarkRun(
 ): Promise<{ id: string | null }> {
   const id = `bench_${randomUUID()}`;
   try {
+    // RETURNING id + expectRows:1 turns a write the DB silently discarded (RLS
+    // policy, auto-updatable view, a trigger that rolled back) into a thrown
+    // WriteQueryError instead of a SILENT FALSE SUCCESS. Without it, a 0-row
+    // INSERT returned cleanly and this function reported a bench_ id that was
+    // never persisted - the caller (and the dashboard trend) believing a run was
+    // stored when nothing landed. The throw is caught below and surfaces as
+    // { id: null } (the scorer already emitted analytics, so the run is not lost
+    // - only the durable trend row is, and the caller degrades gracefully).
     await writeQuery(
       `INSERT INTO instinct_benchmark_runs
          (id, targets, labeled_targets, recall, precision, coverage_classes, errored, report, signals)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)
+       RETURNING id`,
       [
         id,
         report.targets,
         report.labeledTargets,
-        report.recall,
-        report.precision,
+        clampRatio(report.recall),
+        clampRatio(report.precision),
         report.coverageClasses.length,
         report.erroredCount,
         JSON.stringify(report),
         JSON.stringify(signals),
       ],
+      { expectRows: 1 },
     );
     return { id };
   } catch (err) {

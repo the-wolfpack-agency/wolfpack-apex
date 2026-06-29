@@ -175,7 +175,7 @@ describe("POST (trigger a scoring run)", () => {
     );
   });
 
-  test("a target whose listFindings throws is counted errored and the run still completes", async () => {
+  test("a target whose listFindings throws is counted errored, fires scan_read_degraded, and the run still completes", async () => {
     mockListFindings.mockImplementation(async (_ws: string, opts: { platform: string }) => {
       if (opts.platform === BENCHMARK_CORPUS[0].name) throw new Error("store down");
       return [];
@@ -187,6 +187,26 @@ describe("POST (trigger a scoring run)", () => {
     expect(body.report.erroredCount).toBe(1);
     expect(body.report.targets).toBe(BENCHMARK_CORPUS.length);
     expect(mockRecordRun).toHaveBeenCalledTimes(1);
+    // DEGRADE SIGNAL (fix #4): the swallowed per-target read now fires
+    // platform.scan_read_degraded so the learning loop never mistakes a recall
+    // computed over a smaller corpus for a real, complete run.
+    expect(mockTrack).toHaveBeenCalledWith(
+      "platform.scan_read_degraded",
+      "benchmark-scorer",
+      "agent",
+      expect.objectContaining({ surface: "benchmark", target: BENCHMARK_CORPUS[0].name }),
+    );
+  });
+
+  test("no scan_read_degraded fires when every target reads cleanly", async () => {
+    mockListFindings.mockResolvedValue([]);
+    await makePost({ authorization: "Bearer s3cret" });
+    expect(mockTrack).not.toHaveBeenCalledWith(
+      "platform.scan_read_degraded",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   test("capability path: scores the caller's workspace, attributes the audit to the user", async () => {

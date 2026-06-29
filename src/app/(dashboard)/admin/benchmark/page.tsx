@@ -48,8 +48,9 @@ interface BenchmarkRunRow {
   runAt: string;
   targets: number;
   labeledTargets: number;
-  recall: number;
-  precision: number;
+  // null when no labeled targets in the run (NOT APPLICABLE -> render "n/a").
+  recall: number | null;
+  precision: number | null;
   coverageClasses: number;
   errored: number;
   report?: unknown;
@@ -71,10 +72,12 @@ interface ComparisonRow {
   label: string;
   target: string;
   runAt: string;
-  theirs: { recall: number; precision: number; findings: number };
-  ours: { recall: number; precision: number; matched: string[] };
+  // recall/precision are null on an unlabeled target (NOT APPLICABLE -> "n/a").
+  theirs: { recall: number | null; precision: number | null; findings: number };
+  ours: { recall: number | null; precision: number | null; matched: string[] };
   rivalOnlyGaps: RivalOnlyGap[];
-  parity: boolean;
+  // null when parity is NOT CLAIMABLE (unlabeled target, no run, no tools).
+  parity: boolean | null;
 }
 interface TrendPoint {
   runAt: string;
@@ -126,8 +129,11 @@ function whenLabel(iso: string): string {
 }
 
 // recall / precision land in [0,1]; render them as whole-number percentages.
-function pct(n: number): string {
-  if (!Number.isFinite(n)) return "-";
+function pct(n: number | null | undefined): string {
+  // A not-applicable metric (null) is rendered as an explicit "n/a", never "0%"
+  // or "100%". Conflating "we measured 0" with "not measurable" is the lie the
+  // adversarial audit flagged on this very dashboard.
+  if (n === null || n === undefined || !Number.isFinite(n)) return "n/a";
   return `${Math.round(n * 100)}%`;
 }
 
@@ -244,17 +250,21 @@ function SignalGroup({ kind, signals }: { kind: SignalKind; signals: LearningSig
   );
 }
 
-// A horizontal recall/precision bar (no charting dep - a div). `value` is 0..1.
+// A horizontal recall/precision bar (no charting dep - a div). `value` is 0..1,
+// or null when NOT APPLICABLE (renders an empty track, never a misleading 0%/100%).
 function MetricBar({
   value,
   accent,
   testId,
 }: {
-  value: number;
+  value: number | null;
   accent: string;
   testId?: string;
 }) {
-  const widthPct = `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
+  const widthPct =
+    value === null || !Number.isFinite(value)
+      ? "0%"
+      : `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
   return (
     <div
       data-testid={testId}
@@ -284,8 +294,17 @@ function MetricBar({
 
 // One head-to-head row: a tool's recall/precision laid next to ours, with bars.
 function ComparisonCard({ row, index }: { row: ComparisonRow; index: number }) {
-  const ourRecall = row.ours?.recall ?? 0;
-  const beatsUs = row.theirs.recall > ourRecall + 1e-9;
+  // Do NOT coerce null -> 0: an unknown recall must read as n/a, not "0%".
+  const ourRecall = row.ours?.recall ?? null;
+  const theirRecall = row.theirs?.recall ?? null;
+  // "beats us" is only knowable when BOTH recalls are real numbers.
+  const beatsUs =
+    typeof theirRecall === "number" &&
+    typeof ourRecall === "number" &&
+    theirRecall > ourRecall + 1e-9;
+  // parity is tri-state: true (proven), false (rival leads / we lead pending),
+  // null (not claimable - unlabeled / no run). null renders as an explicit n/a.
+  const parityKnown = row.parity !== null && row.parity !== undefined;
   return (
     <div
       data-testid={`competition-row-${index}`}
@@ -305,8 +324,18 @@ function ComparisonCard({ row, index }: { row: ComparisonRow; index: number }) {
         <code style={{ fontSize: "0.78rem", color: "var(--wp-gold, #f1c233)" }}>{row.target}</code>
         <span style={{ flex: 1 }} />
         <StatusPill
-          status={row.parity ? "resolved" : beatsUs ? "critical" : "open"}
-          label={row.parity ? "Parity (we match/beat)" : beatsUs ? "Rival leads" : "We lead"}
+          status={
+            !parityKnown ? "open" : row.parity ? "resolved" : beatsUs ? "critical" : "open"
+          }
+          label={
+            !parityKnown
+              ? "Parity n/a (unlabeled)"
+              : row.parity
+                ? "Parity (we match/beat)"
+                : beatsUs
+                  ? "Rival leads"
+                  : "We lead"
+          }
           testId={`competition-status-${index}`}
         />
       </div>

@@ -34,6 +34,7 @@ jest.mock("@/lib/ogiam/gate-rate-limit", () => ({
 
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/admin/platform-scans/ingest/route";
+import { WriteQueryError } from "@/lib/db";
 
 const VALID = {
   platform: "acme",
@@ -132,11 +133,62 @@ it("400 on invalid JSON body", async () => {
   expect(mockRecord).not.toHaveBeenCalled();
 });
 
-it("never 500s: a store throw returns a zeroed 200", async () => {
+// CONTRACT CHANGE (data-loss fix): a recordScan throw is a PERSISTENCE FAILURE,
+// not a success. The route used to return { ok:true, scanId:null, findingCount:0 }
+// at 200 - a false success that made the CI runner mark the run green and DISCARD
+// the only copy of the findings. It now returns a non-2xx + ok:false so the caller
+// RETRIES, and fires platform.scan_persist_degraded so the dropped run is recorded.
+// (This test previously asserted the OLD zeroed-200 contract; updated.)
+it("CONTRACT: a real store write error returns 500 + ok:false + fires scan_persist_degraded (NOT a zeroed 200)", async () => {
   mockRecord.mockRejectedValue(new Error("db down"));
   const res = await post(VALID, { authorization: "Bearer s3cret" });
+  expect(res.status).toBe(500);
+  const body = await res.json();
+  expect(body.ok).toBe(false);
+  expect(body.error).toBe("persist_failed");
+  expect(mockTrack).toHaveBeenCalledWith(
+    "platform.scan_persist_degraded",
+    "browser-scan",
+    "agent",
+    expect.objectContaining({ surface: "ingest", platform: "acme", finding_count: 1 }),
+  );
+});
+
+it("CONTRACT: a no_database (shadow-mode) WriteQueryError returns 503 + ok:false + scan_persist_degraded", async () => {
+  // shadow mode (DATABASE_URL unset) is exactly the case the old code dropped data
+  // on: writeQuery throws no_database, the catch said ok:true, and the runner moved
+  // on. Now it is a 503 (explicitly NOT ok) so nothing is silently discarded.
+  mockRecord.mockRejectedValue(new WriteQueryError("no db", "no_database"));
+  const res = await post(VALID, { authorization: "Bearer s3cret" });
+  expect(res.status).toBe(503);
+  const body = await res.json();
+  expect(body.ok).toBe(false);
+  expect(body.reason).toBe("no_database");
+  expect(mockTrack).toHaveBeenCalledWith(
+    "platform.scan_persist_degraded",
+    "browser-scan",
+    "agent",
+    expect.objectContaining({ surface: "ingest" }),
+  );
+});
+
+it("LEGIT 200: an empty observations[] (nothing to ingest) still records a 0-finding scan at 200", async () => {
+  // 'tried and failed' (above) is distinct from 'nothing to ingest'. An empty but
+  // PRESENT source array with platform+baseUrl is a valid scan that found nothing;
+  // recordScan succeeds and the route returns a clean 200 - no degrade event.
+  mockRecord.mockResolvedValue({ scanId: "scan-empty", findingCount: 0, criticalCount: 0 });
+  const res = await post(
+    { platform: "acme", baseUrl: "https://acme.test", observations: [] },
+    { authorization: "Bearer s3cret" },
+  );
   expect(res.status).toBe(200);
-  expect(await res.json()).toEqual({ ok: true, scanId: null, findingCount: 0 });
+  expect(await res.json()).toEqual({ ok: true, scanId: "scan-empty", findingCount: 0 });
+  expect(mockTrack).not.toHaveBeenCalledWith(
+    "platform.scan_persist_degraded",
+    expect.anything(),
+    expect.anything(),
+    expect.anything(),
+  );
 });
 
 // --- Raw-observations path (apex classifies SERVER-SIDE via classifyPage) ---

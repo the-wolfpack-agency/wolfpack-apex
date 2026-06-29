@@ -1,11 +1,13 @@
 /**
  * insights-store round-trip (db mocked).
  *
- * recordInsights UPSERTS one row per insight keyed by the stable dedup `key`
- * (ON CONFLICT (key)) so a re-run never duplicates; listRecentInsights reads recent
- * rows back shaped for the dashboard feed. Both degrade gracefully (writeQuery
- * throw -> the row is skipped, never re-thrown; safeQuery -> [] with no DB) so a
- * store hiccup never loses the insights the engine emitted nor 500s the dashboard.
+ * recordInsights UPSERTS one row per insight keyed by the TENANT-SCOPED conflict
+ * target (workspace_id, key) so a re-run never duplicates AND two workspaces that
+ * share a key stay isolated (FIX 2); listRecentInsights reads recent rows back for
+ * a SPECIFIC workspace (filtered by workspace_id). Both degrade gracefully
+ * (writeQuery throw -> the row is skipped, never re-thrown; safeQuery -> [] with no
+ * DB) so a store hiccup never loses the insights the engine emitted nor 500s the
+ * dashboard.
  */
 const mockWriteQuery = jest.fn();
 const mockSafeQuery = jest.fn();
@@ -28,7 +30,7 @@ const INSIGHT: Insight = {
   ],
   narrative: "Compound risk on /x.",
   platform: "acme",
-  key: "compound_risk::acme::/x::performance+security",
+  key: "compound_risk::deadbeef",
 };
 
 beforeEach(() => {
@@ -38,43 +40,55 @@ beforeEach(() => {
 });
 
 describe("recordInsights", () => {
-  test("writes one UPSERT row per insight, keyed by `key` (ON CONFLICT key)", async () => {
-    const { written } = await recordInsights([INSIGHT]);
+  test("writes one UPSERT row per insight, conflict target (workspace_id, key)", async () => {
+    const { written } = await recordInsights([INSIGHT], "ws-1");
     expect(written).toBe(1);
     expect(mockWriteQuery).toHaveBeenCalledTimes(1);
     const [sql, params] = mockWriteQuery.mock.calls[0];
     expect(sql).toMatch(/INSERT INTO instinct_cross_scan_insights/i);
-    expect(sql).toMatch(/ON CONFLICT \(key\) DO UPDATE/i);
-    // key is bound; modalities + members are serialized JSON.
+    expect(sql).toMatch(/ON CONFLICT \(workspace_id, key\) DO UPDATE/i);
+    // workspace_id + key are bound; modalities + members are serialized JSON.
+    expect(params).toContain("ws-1");
     expect(params).toContain(INSIGHT.key);
     expect(params).toContain(JSON.stringify(INSIGHT.modalities));
     expect(params).toContain(JSON.stringify(INSIGHT.members));
   });
 
-  test("re-running with the same insight does NOT change the bound key (dedup by key)", async () => {
-    await recordInsights([INSIGHT]);
-    await recordInsights([INSIGHT]);
-    const firstKey = mockWriteQuery.mock.calls[0][1].at(-1);
-    const secondKey = mockWriteQuery.mock.calls[1][1].at(-1);
-    expect(firstKey).toBe(secondKey);
+  test("FIX 2: same key in two DIFFERENT workspaces produces DISTINCT ids (no overwrite)", async () => {
+    await recordInsights([INSIGHT], "ws-A");
+    await recordInsights([INSIGHT], "ws-B");
+    const idA = mockWriteQuery.mock.calls[0][1][0]; // first bound param is the id
+    const idB = mockWriteQuery.mock.calls[1][1][0];
+    expect(idA).not.toBe(idB); // tenant-namespaced id -> no cross-tenant clobber
+    expect(idA).toContain("ws-A");
+    expect(idB).toContain("ws-B");
+    // The workspace_id bound param differs too.
+    expect(mockWriteQuery.mock.calls[0][1]).toContain("ws-A");
+    expect(mockWriteQuery.mock.calls[1][1]).toContain("ws-B");
+  });
+
+  test("re-running with the same insight + workspace does NOT change the bound id (dedup)", async () => {
+    await recordInsights([INSIGHT], "ws-1");
+    await recordInsights([INSIGHT], "ws-1");
+    expect(mockWriteQuery.mock.calls[0][1][0]).toBe(mockWriteQuery.mock.calls[1][1][0]);
   });
 
   test("a per-row write failure is swallowed; remaining rows still persist", async () => {
     mockWriteQuery
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValueOnce({ rows: [] });
-    const second: Insight = { ...INSIGHT, key: "regression::acme::/y::security::SQLi", kind: "regression" };
-    const { written } = await recordInsights([INSIGHT, second]);
-    expect(written).toBe(1); // first failed, second succeeded; no throw
+    const second: Insight = { ...INSIGHT, key: "regression::cafebabe", kind: "regression" };
+    const { written } = await recordInsights([INSIGHT, second], "ws-1");
+    expect(written).toBe(1);
   });
 });
 
 describe("listRecentInsights", () => {
-  test("maps rows to the dashboard shape, newest-first via safeQuery", async () => {
+  test("reads ONLY the given workspace's rows, newest-first via safeQuery", async () => {
     mockSafeQuery.mockResolvedValue({
       rows: [
         {
-          id: "xins_1",
+          id: "xins_ws-1_k1",
           generated_at: "2026-06-28T00:00:00.000Z",
           platform: "acme",
           kind: "compound_risk",
@@ -87,22 +101,18 @@ describe("listRecentInsights", () => {
         },
       ],
     });
-    const rows = await listRecentInsights();
+    const rows = await listRecentInsights("ws-1");
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      id: "xins_1",
-      kind: "compound_risk",
-      severity: "critical",
-      platform: "acme",
-      status: "open",
-    });
-    expect(rows[0].modalities).toEqual(["security", "performance"]);
-    // ORDER BY generated_at DESC in the read.
-    expect(mockSafeQuery.mock.calls[0][0]).toMatch(/ORDER BY generated_at DESC/i);
+    expect(rows[0]).toMatchObject({ kind: "compound_risk", platform: "acme", status: "open" });
+    // FIX 2: the read is filtered by workspace_id and bound to the given workspace.
+    const [sql, params] = mockSafeQuery.mock.calls[0];
+    expect(sql).toMatch(/WHERE workspace_id = \$1/i);
+    expect(sql).toMatch(/ORDER BY generated_at DESC/i);
+    expect(params[0]).toBe("ws-1");
   });
 
   test("degrades to [] with no DB (safeQuery returns empty)", async () => {
     mockSafeQuery.mockResolvedValue({ rows: [] });
-    expect(await listRecentInsights()).toEqual([]);
+    expect(await listRecentInsights("ws-1")).toEqual([]);
   });
 });

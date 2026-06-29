@@ -652,6 +652,14 @@ export type InstinctEventType =
   // A previously-resolved finding reappeared in a later scan (regression). Fed back
   // to learning + surfaced to the client. { platform, finding_class, route?, gap_days }
   | "platform.cross_scan_regression_detected"
+  // A read (corpus/findings load) failed and was swallowed, so the downstream
+  // result is PARTIAL not empty-because-clean. Mandatory signal so the learning
+  // loop never mistakes a degraded run for a real result. { surface, detail }
+  | "platform.scan_read_degraded"
+  // A persistence write failed after the result was computed: the value was
+  // returned/served but NOT durably stored. Never report silent success.
+  // { surface, detail }
+  | "platform.scan_persist_degraded"
   // Client engagement with the redesigned consoles: results actually viewed. These
   // close the learning loop on what clients look at. { open_total, critical, high, targets }
   | "platform.results_viewed"

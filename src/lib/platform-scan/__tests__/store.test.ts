@@ -5,15 +5,51 @@
  * Brain ingest per finding, and the triage workflow are all asserted without a
  * database.
  */
+// mockWriteQuery now stands in for BOTH the top-level writeQuery (triage /
+// bulkTriage) AND the in-transaction tx.write (recordScan header + findings +
+// auto-resolve). recordScan was made ATOMIC: its writes run through
+// withTransaction(fn) on ONE client. The mock withTransaction below invokes fn
+// with a tx whose write() delegates to mockWriteQuery, so the existing
+// call-ordering assertions (header, then findings, then auto-resolve) still hold,
+// and a tx.write that throws (or returns 0 rows when expectRows is asserted)
+// propagates out of withTransaction exactly as the real helper would.
 const mockWriteQuery = jest.fn();
 const mockSafeQuery = jest.fn();
 const mockTrackEvent = jest.fn();
 const mockIngest = jest.fn();
 const mockNotify = jest.fn();
 
+// Faithful stand-in for the real withTransaction: runs fn with a tx whose write()
+// delegates to mockWriteQuery AND enforces the same expectRows row-count contract
+// (throw on mismatch) so a 0-row write surfaces as an error in tests too. fn
+// throwing propagates (the real helper rolls back + re-throws).
+class FakeWriteError extends Error {
+  code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.code = code;
+  }
+}
+async function fakeWithTransaction(fn: (tx: unknown) => Promise<unknown>) {
+  const tx = {
+    async write(text: string, params?: unknown[], opts?: { expectRows?: number }) {
+      const res = (await mockWriteQuery(text, params, opts)) as { rows: unknown[] };
+      if (opts?.expectRows !== undefined && res.rows.length !== opts.expectRows) {
+        throw new FakeWriteError(
+          `row-count mismatch: expected ${opts.expectRows}, got ${res.rows.length}`,
+          "unexpected_row_count",
+        );
+      }
+      return res;
+    },
+  };
+  return fn(tx);
+}
+
 jest.mock("@/lib/db", () => ({
   writeQuery: (...a: unknown[]) => mockWriteQuery(...a),
   safeQuery: (...a: unknown[]) => mockSafeQuery(...a),
+  withTransaction: (fn: (tx: unknown) => Promise<unknown>) => fakeWithTransaction(fn),
 }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrackEvent(...a) }));
 jest.mock("@/lib/platform-scan/brain-ingest", () => ({ ingestPlatformScanFinding: (...a: unknown[]) => mockIngest(...a) }));
@@ -43,9 +79,12 @@ beforeEach(() => {
 });
 
 it("recordScan writes the header + one row per finding, emits analytics, and feeds the Brain", async () => {
+  // Each finding upsert now uses RETURNING id + expectRows:1, so it must return
+  // exactly one row (a 0-row write would surface as an error - see the dedicated
+  // 0-row test below).
   mockWriteQuery
     .mockResolvedValueOnce({ rows: [{ id: "scan-1" }] }) // header insert
-    .mockResolvedValue({ rows: [] }); // finding inserts
+    .mockResolvedValue({ rows: [{ id: "f" }] }); // finding upserts return their id
 
   const out = await recordScan({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin", result: RESULT });
 
@@ -64,10 +103,55 @@ it("recordScan writes the header + one row per finding, emits analytics, and fee
   expect(mockIngest).toHaveBeenCalledWith("wolfpack-auto", expect.objectContaining({ route: "/admin/leads" }));
 });
 
+it("DATA-LOSS: a 0-row header write (RLS/view-discarded) surfaces as an ERROR, never a false scanId", async () => {
+  // The header insert carries expectRows:1. A write the DB silently discarded
+  // returns rows:[] - which the strict helper turns into a throw. recordScan must
+  // propagate it (the transaction rolls back) instead of returning a scanId that
+  // was never persisted.
+  mockWriteQuery.mockResolvedValueOnce({ rows: [] }); // header discarded -> 0 rows
+  await expect(
+    recordScan({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin", result: RESULT }),
+  ).rejects.toThrow(/row-count mismatch/);
+  // No finding upsert attempted (we never got a scan id) and no false success.
+  expect(mockWriteQuery).toHaveBeenCalledTimes(1);
+  expect(mockTrackEvent).not.toHaveBeenCalledWith("platform.scan_completed", expect.anything(), expect.anything(), expect.anything());
+});
+
+it("DATA-LOSS: a 0-row finding upsert surfaces as an ERROR (no partial false success)", async () => {
+  // Header ok, but the SECOND finding upsert is silently discarded (0 rows). With
+  // expectRows:1 that throws -> the whole transaction rolls back and recordScan
+  // re-throws, so the caller never hears findingCount:0 / success for a partial write.
+  mockWriteQuery
+    .mockResolvedValueOnce({ rows: [{ id: "scan-x" }] }) // header
+    .mockResolvedValueOnce({ rows: [{ id: "f1" }] })     // first finding ok
+    .mockResolvedValueOnce({ rows: [] });                // second finding discarded
+  await expect(
+    recordScan({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin", result: RESULT }),
+  ).rejects.toThrow(/row-count mismatch/);
+});
+
+it("ATOMICITY: a mid-loop finding write failure rolls back and re-throws (no orphaned partial, no findingCount:0)", async () => {
+  // The real failure shape: header committed-in-tx, first finding ok, second
+  // finding THROWS. The transaction must roll the whole unit back and recordScan
+  // must re-throw so the caller sees an error - NOT a swallowed { findingCount: 0 }
+  // that drops the data while reporting success.
+  mockWriteQuery
+    .mockResolvedValueOnce({ rows: [{ id: "scan-y" }] }) // header
+    .mockResolvedValueOnce({ rows: [{ id: "f1" }] })     // first finding ok
+    .mockRejectedValueOnce(new Error("connection reset")); // second finding throws
+  await expect(
+    recordScan({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin", result: RESULT }),
+  ).rejects.toThrow(/connection reset/);
+  // Completion analytics + Brain ingest are POST-COMMIT, so a rolled-back scan
+  // emits no completion event and ingests nothing - nothing is reported as done.
+  expect(mockTrackEvent).not.toHaveBeenCalledWith("platform.scan_completed", expect.anything(), expect.anything(), expect.anything());
+  expect(mockIngest).not.toHaveBeenCalled();
+});
+
 it("HUMAN ALERTING: a critical finding notifies the admin who ran the scan, high priority, naming the platform + count", async () => {
   mockWriteQuery
     .mockResolvedValueOnce({ rows: [{ id: "scan-c" }] })
-    .mockResolvedValue({ rows: [] });
+    .mockResolvedValue({ rows: [{ id: "f" }] }); // finding upserts return a row (expectRows:1)
 
   await recordScan({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin", result: RESULT });
 
@@ -89,7 +173,7 @@ it("HUMAN ALERTING: a critical finding notifies the admin who ran the scan, high
 it("HUMAN ALERTING: zero critical findings does NOT notify (no alert spam)", async () => {
   mockWriteQuery
     .mockResolvedValueOnce({ rows: [{ id: "scan-h" }] })
-    .mockResolvedValue({ rows: [] });
+    .mockResolvedValue({ rows: [{ id: "f" }] });
   // A high finding but no critical → no alert.
   await recordScan({
     workspaceId: "ws-1",
@@ -103,7 +187,7 @@ it("HUMAN ALERTING: zero critical findings does NOT notify (no alert spam)", asy
 it("HUMAN ALERTING: a notify throw does not break recordScan (best effort)", async () => {
   mockWriteQuery
     .mockResolvedValueOnce({ rows: [{ id: "scan-e" }] })
-    .mockResolvedValue({ rows: [] });
+    .mockResolvedValue({ rows: [{ id: "f" }] });
   mockNotify.mockRejectedValue(new Error("notifications down"));
 
   const out = await recordScan({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin", result: RESULT });
@@ -124,7 +208,7 @@ it("AUTO-RESOLVE: a covered route with no current finding resolves its stale ope
   };
   mockWriteQuery
     .mockResolvedValueOnce({ rows: [{ id: "scan-AR" }] }) // header
-    .mockResolvedValueOnce({ rows: [] })                  // finding upsert
+    .mockResolvedValueOnce({ rows: [{ id: "f" }] })        // finding upsert (expectRows:1)
     .mockResolvedValueOnce({ rows: [{ id: "stale-1" }, { id: "stale-2" }] }); // auto-resolve UPDATE
 
   const out = await recordScan({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin", result: resultWithCoverage });
@@ -145,7 +229,7 @@ it("AUTO-RESOLVE: a covered route with no current finding resolves its stale ope
 it("AUTO-RESOLVE: no event/UPDATE when nothing was stale (UPDATE returns 0 rows)", async () => {
   mockWriteQuery
     .mockResolvedValueOnce({ rows: [{ id: "scan-AR2" }] })
-    .mockResolvedValueOnce({ rows: [] })
+    .mockResolvedValueOnce({ rows: [{ id: "f" }] }) // finding upsert (expectRows:1)
     .mockResolvedValueOnce({ rows: [] }); // UPDATE resolves nothing
   const out = await recordScan({
     workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin",
@@ -199,7 +283,7 @@ it("recordScan persists coverage on the header row", async () => {
 });
 
 it("recordScan with NO coverage persists zeros + nulls (never implies full coverage)", async () => {
-  mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "scan-noc" }] }).mockResolvedValue({ rows: [] });
+  mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "scan-noc" }] }).mockResolvedValue({ rows: [{ id: "f" }] });
   await recordScan({ workspaceId: "ws-1", actorId: "a", actorRole: "admin", result: { ...RESULT, findings: [] } });
   const params = mockWriteQuery.mock.calls[0][1] as unknown[];
   expect(params.slice(-5)).toEqual([0, 0, 0, null, null]);
@@ -207,7 +291,7 @@ it("recordScan with NO coverage persists zeros + nulls (never implies full cover
 });
 
 it("recordScan fires platform.scan_coverage_degraded ONLY when coverage is degraded", async () => {
-  mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "scan-deg" }] }).mockResolvedValue({ rows: [] });
+  mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "scan-deg" }] }).mockResolvedValue({ rows: [{ id: "f" }] });
   await recordScan({
     workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin",
     result: { ...RESULT, findings: [], coverage: degradedCoverage },
@@ -218,7 +302,7 @@ it("recordScan fires platform.scan_coverage_degraded ONLY when coverage is degra
 });
 
 it("recordScan does NOT fire the degraded event for a clean, fully-covered scan", async () => {
-  mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "scan-clean" }] }).mockResolvedValue({ rows: [] });
+  mockWriteQuery.mockResolvedValueOnce({ rows: [{ id: "scan-clean" }] }).mockResolvedValue({ rows: [{ id: "f" }] });
   await recordScan({
     workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin",
     result: { ...RESULT, findings: [], coverage: cleanCoverage },

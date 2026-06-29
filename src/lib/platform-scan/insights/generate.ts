@@ -34,6 +34,7 @@ import {
   type CorrelationFinding,
   type CorrelationHistory,
   type CorrelateOptions,
+  type ResolvedFindingRef,
 } from "./correlate";
 import type { ScanFindingRow } from "../store";
 
@@ -57,7 +58,10 @@ export interface GenerateResult {
   persisted: number;
 }
 
-/** Map a stored finding row to the minimal shape correlation needs. */
+/** Map a stored finding row to the minimal shape correlation needs. createdAt is
+ *  threaded through so the regression detector can require the resolution to
+ *  PREDATE the reopen (FIX 6) - without it every open finding matching a resolved
+ *  class was falsely flagged. */
 function toCorrelationFinding(r: ScanFindingRow): CorrelationFinding {
   return {
     platform: r.platform,
@@ -65,6 +69,27 @@ function toCorrelationFinding(r: ScanFindingRow): CorrelationFinding {
     severity: r.severity,
     category: r.category,
     title: r.title,
+    createdAt: r.createdAt,
+  };
+}
+
+/**
+ * Build the regression history from the store's RESOLVED findings (FIX 1).
+ *
+ * The route previously called generateInsights with NO history, so detectRegressions
+ * always returned [] and the advertised regression insight could NEVER fire in prod.
+ * Here we read the resolved corpus and map each row to a ResolvedFindingRef. The
+ * store does not expose decided_at on ScanFindingRow, so we use createdAt as the
+ * resolution timestamp proxy (the row's own timestamp); the regression detector's
+ * ordering + future-date guards (FIX 6) keep this conservative either way.
+ */
+function toResolvedRef(r: ScanFindingRow): ResolvedFindingRef {
+  return {
+    platform: r.platform,
+    route: r.route,
+    category: r.category,
+    title: r.title,
+    resolvedAt: r.createdAt,
   };
 }
 
@@ -93,24 +118,62 @@ export async function generateInsights(
     rows = await read(workspaceId, { status: "open", limit: 500 });
   } catch (err) {
     // A read failure must not throw from the engine; with no corpus there is
-    // nothing to correlate, so return empty rather than 500 the caller.
-    console.warn("[insights/generate] listFindings failed:", (err as Error).message);
+    // nothing to correlate, so return empty rather than 500 the caller. But it is
+    // NOT a clean result - fire the degrade signal so the learning loop never
+    // mistakes a swallowed read failure for "no findings" (FIX 8).
+    const detail = (err as Error).message;
+    console.warn("[insights/generate] listFindings failed:", detail);
+    track("platform.scan_read_degraded", actor.id, actor.role, {
+      surface: "cross_scan",
+      detail,
+    });
     rows = [];
   }
   const findings = rows.map(toCorrelationFinding);
 
-  // 2. CORRELATE (pure).
-  const insights = correlateFindings(findings, deps.history, deps.options);
+  // 1b. READ the RESOLVED corpus and build the regression history (FIX 1). The
+  //     route used to call us with NO history, so detectRegressions ALWAYS returned
+  //     [] - the advertised regression insight could never fire in prod. An
+  //     explicitly injected deps.history wins (tests); otherwise we derive it from
+  //     the resolved findings. A read failure here degrades to "no history" (still
+  //     compute the other insights) and fires the degrade signal.
+  let history: CorrelationHistory | undefined = deps.history;
+  if (history === undefined) {
+    try {
+      const resolvedRows = await read(workspaceId, { status: "resolved", limit: 500 });
+      history = { resolved: resolvedRows.map(toResolvedRef) };
+    } catch (err) {
+      const detail = (err as Error).message;
+      console.warn("[insights/generate] listFindings(resolved) failed:", detail);
+      track("platform.scan_read_degraded", actor.id, actor.role, {
+        surface: "cross_scan",
+        detail,
+      });
+      history = undefined;
+    }
+  }
 
-  // 3. PERSIST (best effort - never throws).
+  // 2. CORRELATE (pure).
+  const insights = correlateFindings(findings, history, deps.options);
+
+  // 3. PERSIST (best effort - never throws). Thread the workspaceId so each row is
+  //    tenant-scoped (FIX 2): without it, the dedup key is shared across tenants
+  //    and one workspace's insight overwrote another's.
   let persisted = 0;
   try {
-    const res = await persist(insights);
+    const res = await persist(insights, workspaceId);
     persisted = res.written;
   } catch (err) {
     // recordInsights already swallows per-row errors; this guards a total failure
-    // of the seam (e.g. an injected fake that throws). Insights are still returned.
-    console.warn("[insights/generate] recordInsights failed:", (err as Error).message);
+    // of the seam (e.g. an injected fake that throws). Insights are still returned,
+    // but the value was NOT durably stored - fire the persist-degrade signal so the
+    // learning loop never reports silent success (FIX 8).
+    const detail = (err as Error).message;
+    console.warn("[insights/generate] recordInsights failed:", detail);
+    track("platform.scan_persist_degraded", actor.id, actor.role, {
+      surface: "cross_scan",
+      detail,
+    });
   }
 
   // 4. LEARN - one event per insight, plus the typed sub-events. Analytics
