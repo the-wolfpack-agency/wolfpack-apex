@@ -28,6 +28,7 @@ import {
   buildRestConnectorForWorkspace,
   pickConfiguredConnector,
 } from "@/lib/assistant/connectors";
+import { internalFetch } from "@/lib/http/internal-fetch";
 
 export type { FormKind } from "@/lib/assistant/forms/types";
 
@@ -77,20 +78,27 @@ export function success(message: string, resourceId?: string, resourceUrl?: stri
 
 /* Helper: re-call our own Next API routes from the server side so we
  * inherit their auth + capability checks instead of duplicating them.
- * The Authorization header forwards through. */
+ * The Authorization header forwards through. Transport goes through the
+ * shared internalFetch so the Vercel deployment-protection bypass header,
+ * the transient-throw retry, and the diagnosable error message apply here
+ * too (the fix for the prod "fetch failed" self-call bug). The status /
+ * JSON translation below is unchanged. */
 async function forwardJson(
   origin: string,
   authHeader: string | null,
   path: string,
   body: unknown,
 ): Promise<{ status: number; data: unknown }> {
-  const res = await fetch(`${origin}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(authHeader ? { Authorization: authHeader } : {}),
+  const res = await internalFetch(path, {
+    originOverride: origin,
+    init: {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(authHeader ? { Authorization: authHeader } : {}),
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
   });
   let data: unknown = null;
   try {
@@ -225,9 +233,15 @@ async function submitMessage(
     const url = `/api/ms/chats?match=${encodeURIComponent(recipient)}`;
     let listRes: Response;
     try {
-      listRes = await fetch(`${origin}${url}`, {
-        method: "GET",
-        headers: { ...(authHeader ? { Authorization: authHeader } : {}) },
+      /* Same shared transport as forwardJson: deployment-protection bypass +
+         transient-throw retry + diagnosable error. Auth header forwarded
+         verbatim. The match / status handling below is unchanged. */
+      listRes = await internalFetch(url, {
+        originOverride: origin,
+        init: {
+          method: "GET",
+          headers: { ...(authHeader ? { Authorization: authHeader } : {}) },
+        },
       });
     } catch (err) {
       return failure("internal", `Failed to look up recipient: ${(err as Error).message}`);

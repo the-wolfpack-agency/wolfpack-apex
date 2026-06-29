@@ -2,12 +2,21 @@
  * GET /api/cron/release-gate-check - the proactive release-gate notifier sweep.
  *
  * Reads the live production release gate (src/lib/deploy/release-gate.ts) and,
- * for every change that has been blocking prod past the age threshold and has
- * NOT already been notified for its current state inside the cooldown, pushes an
- * in-app notification + an email to the responsible person (PR author when we
- * can resolve them, plus admins/cto), records a dedupe row in
- * instinct_release_gate_notifications (migration 207), and fires the analytics.
- * This is the signal that was missing when a PR blocked prod for 19h.
+ * for every change in a USER-ACTIONABLE state (ready_to_merge / awaiting_approval)
+ * that has been blocking prod past the age threshold and has NOT already been
+ * notified for its current state inside the cooldown, pushes an in-app
+ * notification (and, ONLY when RELEASE_GATE_EMAIL_ALERTS === "1", an email) to
+ * the responsible person (PR author when we can resolve them, plus admins/cto),
+ * records a dedupe row in instinct_release_gate_notifications (migration 207),
+ * and fires the analytics. This is the signal that was missing when a PR blocked
+ * prod for 19h.
+ *
+ * ANTI-SPAM (hardened after a prod EMAIL-SPAM incident): EMAIL IS OFF BY DEFAULT
+ * (opt in via RELEASE_GATE_EMAIL_ALERTS=1); the dedupe ledger FAILS CLOSED (a
+ * read failure sends nothing this run, not everything); the dedupe row is
+ * recorded on ATTEMPT not delivery so a bouncing channel can never loop; only
+ * user-actionable states notify; the age threshold is 4h; and a per-run cap
+ * bounds a burst. See src/lib/deploy/release-gate-notify.ts for the full policy.
  *
  * Two auth paths (mirrors /api/cron/integration-health):
  *   1. Cron path: Authorization: Bearer ${CRON_SECRET}. Vercel Cron hits this on
@@ -207,6 +216,10 @@ async function runSweep(): Promise<NextResponse> {
       sendEmail,
       track: trackEvent,
       now: Date.now,
+      // EMAIL OFF BY DEFAULT. Email is the loud, bounce-prone channel that caused
+      // the prod spam incident, so it is opt-in: only when RELEASE_GATE_EMAIL_ALERTS
+      // is explicitly "1" do we email; otherwise the sweep is in-app only.
+      emailEnabled: process.env.RELEASE_GATE_EMAIL_ALERTS === "1",
     });
     return NextResponse.json({
       ok: true,
@@ -215,11 +228,21 @@ async function runSweep(): Promise<NextResponse> {
       degraded: result.degraded,
       degradedDetail: result.degradedDetail,
       failures: result.failures,
+      dedupeUnavailable: result.dedupeUnavailable,
+      suppressed: result.suppressed,
     });
   } catch (err) {
     // Never 500 the cron monitor: a top-level throw returns a zeroed 200.
     console.error("[cron/release-gate-check]", (err as Error).message);
-    return NextResponse.json({ ok: true, checked: 0, notified: 0, degraded: false, failures: 0 });
+    return NextResponse.json({
+      ok: true,
+      checked: 0,
+      notified: 0,
+      degraded: false,
+      failures: 0,
+      dedupeUnavailable: false,
+      suppressed: 0,
+    });
   }
 }
 

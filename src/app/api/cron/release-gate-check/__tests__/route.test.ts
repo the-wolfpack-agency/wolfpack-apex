@@ -31,17 +31,29 @@ function get(headers: Record<string, string> = {}) {
 }
 
 let savedSecret: string | undefined;
+let savedEmailFlag: string | undefined;
 beforeAll(() => {
   savedSecret = process.env.CRON_SECRET;
+  savedEmailFlag = process.env.RELEASE_GATE_EMAIL_ALERTS;
   process.env.CRON_SECRET = SECRET;
 });
 afterAll(() => {
   if (savedSecret === undefined) delete process.env.CRON_SECRET;
   else process.env.CRON_SECRET = savedSecret;
+  if (savedEmailFlag === undefined) delete process.env.RELEASE_GATE_EMAIL_ALERTS;
+  else process.env.RELEASE_GATE_EMAIL_ALERTS = savedEmailFlag;
 });
 beforeEach(() => {
   jest.clearAllMocks();
-  mockCheckAndNotify.mockResolvedValue({ checked: 2, notified: 1, degraded: false, failures: 0 });
+  delete process.env.RELEASE_GATE_EMAIL_ALERTS;
+  mockCheckAndNotify.mockResolvedValue({
+    checked: 2,
+    notified: 1,
+    degraded: false,
+    failures: 0,
+    dedupeUnavailable: false,
+    suppressed: 0,
+  });
 });
 
 it("the cron bearer path runs the sweep without a session and returns the summary", async () => {
@@ -50,6 +62,42 @@ it("the cron bearer path runs the sweep without a session and returns the summar
   expect(await res.json()).toMatchObject({ ok: true, checked: 2, notified: 1 });
   expect(mockRequireCapability).not.toHaveBeenCalled();
   expect(mockCheckAndNotify).toHaveBeenCalledTimes(1);
+});
+
+it("email is OFF (emailEnabled:false) when RELEASE_GATE_EMAIL_ALERTS is unset", async () => {
+  await GET(get({ authorization: `Bearer ${SECRET}` }));
+  expect(mockCheckAndNotify).toHaveBeenCalledWith(
+    expect.objectContaining({ emailEnabled: false }),
+  );
+});
+
+it("email is ON (emailEnabled:true) only when RELEASE_GATE_EMAIL_ALERTS === '1'", async () => {
+  process.env.RELEASE_GATE_EMAIL_ALERTS = "1";
+  await GET(get({ authorization: `Bearer ${SECRET}` }));
+  expect(mockCheckAndNotify).toHaveBeenCalledWith(
+    expect.objectContaining({ emailEnabled: true }),
+  );
+});
+
+it("any value other than '1' for RELEASE_GATE_EMAIL_ALERTS keeps email OFF", async () => {
+  process.env.RELEASE_GATE_EMAIL_ALERTS = "true";
+  await GET(get({ authorization: `Bearer ${SECRET}` }));
+  expect(mockCheckAndNotify).toHaveBeenCalledWith(
+    expect.objectContaining({ emailEnabled: false }),
+  );
+});
+
+it("surfaces dedupeUnavailable + suppressed in the summary", async () => {
+  mockCheckAndNotify.mockResolvedValue({
+    checked: 3,
+    notified: 0,
+    degraded: false,
+    failures: 0,
+    dedupeUnavailable: true,
+    suppressed: 1,
+  });
+  const res = await GET(get({ authorization: `Bearer ${SECRET}` }));
+  expect(await res.json()).toMatchObject({ ok: true, dedupeUnavailable: true, suppressed: 1 });
 });
 
 it("the admin path requires settings.manage_team and runs on success", async () => {

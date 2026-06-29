@@ -451,6 +451,73 @@ describe("on-behalf OPERATION execution (declarative operation registry)", () =>
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("RETRIES once on a transient fetch throw, then RUNS (the prod 'fetch failed' self-call fix)", async () => {
+    /* The operation self-call now routes through the shared internalFetch, which
+       retries ONCE on a thrown fetch (undici "fetch failed" is often a transient
+       resolve/connect blip on Vercel) before giving up. A throw on the first
+       attempt followed by a 200 on the retry must produce a successful "ran"
+       step, not an errored one. This is the core fix for the prod
+       "On-behalf execution failed: fetch failed" bug. */
+    const dispatch = jest
+      .fn()
+      .mockResolvedValueOnce(opResult({ targetUrl: "https://ogiam.com" }, ["targetUrl"]));
+    const fetchImpl = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("fetch failed"))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ shortUrl: "/q/zzz" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    const out = await runAgentTask(
+      { ...task, goal: "Create a QR code linked to ogiam.com" },
+      {
+        dispatch: dispatch as never,
+        notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+        getOwnerRole: jest.fn().mockResolvedValue({ role: "dev", workspaceId: "ws-1" }) as never,
+        mintToken: jest.fn().mockResolvedValue("tok") as never,
+        origin: (() => "https://internal.example") as never,
+        fetchImpl: fetchImpl as never,
+      },
+    );
+    expect(out.status).toBe("succeeded");
+    expect(out.steps[0].outcome).toBe("ran");
+    // The injected transport was retried exactly once (two attempts total).
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("ERRORS with a DIAGNOSABLE message (origin + path) when the fetch throws on BOTH attempts", async () => {
+    /* A persistent throw (e.g. protection still gating because the bypass secret
+       is unset) degrades to a typed error step whose detail names the resolved
+       origin + path - never the opaque "fetch failed" - so a residual prod
+       failure is pinpointable. */
+    const dispatch = jest
+      .fn()
+      .mockResolvedValueOnce(opResult({ targetUrl: "https://ogiam.com" }, ["targetUrl"]));
+    const fetchImpl = jest.fn().mockRejectedValue(new Error("getaddrinfo ENOTFOUND"));
+    const out = await runAgentTask(
+      { ...task, goal: "Create a QR code linked to ogiam.com" },
+      {
+        dispatch: dispatch as never,
+        notifyOwner: jest.fn() as never,
+        lookupProcedure: jest.fn().mockResolvedValue(null) as never,
+        recordProcedure: jest.fn() as never,
+        getOwnerRole: jest.fn().mockResolvedValue({ role: "dev", workspaceId: "ws-1" }) as never,
+        mintToken: jest.fn().mockResolvedValue("tok") as never,
+        origin: (() => "https://internal.example") as never,
+        fetchImpl: fetchImpl as never,
+      },
+    );
+    expect(out.status).toBe("failed");
+    expect(out.steps[0].outcome).toBe("error");
+    // The diagnosable message names the internal origin + path.
+    expect(out.steps[0].detail).toMatch(/internal\.example\/api\/qr/);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("ERRORS (never throws into the loop) when the fetch throws", async () => {
     const dispatch = jest
       .fn()

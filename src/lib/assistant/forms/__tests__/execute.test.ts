@@ -446,14 +446,37 @@ describe("unrouted + fetch-failure error paths", () => {
     expect((await res.json()).code).toBe("internal");
   });
 
-  test("a fetch rejection propagates (executor does not swallow it)", async () => {
-    (global.fetch as jest.Mock).mockRejectedValueOnce(new Error("ECONNREFUSED"));
+  test("a persistent fetch rejection surfaces a DIAGNOSABLE error (origin + path + cause), not raw 'fetch failed'", async () => {
+    /* The shared internalFetch retries once on a thrown fetch (transient undici
+       blip) then raises a pinpointable error. A rejection on BOTH attempts is a
+       real failure: the executor does not swallow it (the route's outer
+       try/catch turns it into an "internal" failure), and the message now names
+       the resolved origin + path so a residual prod failure is diagnosable. */
+    (global.fetch as jest.Mock)
+      .mockRejectedValueOnce(new Error("ECONNREFUSED"))
+      .mockRejectedValueOnce(new Error("ECONNREFUSED"));
     await expect(
       executeFormAction(
         "create_email",
         { to: "a@b.com", subject: "Hi", body: "Body" },
         { origin: ORIGIN, authHeader: AUTH },
       ),
-    ).rejects.toThrow("ECONNREFUSED");
+    ).rejects.toThrow(`Failed to reach internal API at ${ORIGIN}/api/mail/send: ECONNREFUSED`);
+    // Retried exactly once (two attempts total) before giving up.
+    expect((global.fetch as jest.Mock).mock.calls).toHaveLength(2);
+  });
+
+  test("a TRANSIENT fetch throw is retried once and then succeeds (no error surfaced)", async () => {
+    (global.fetch as jest.Mock)
+      .mockRejectedValueOnce(new Error("fetch failed"))
+      .mockResolvedValueOnce(jsonResponse(200, {}));
+    const res = await executeFormAction(
+      "create_email",
+      { to: "a@b.com", subject: "Hi", body: "Body" },
+      { origin: ORIGIN, authHeader: AUTH },
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json())).toMatchObject({ ok: true });
+    expect((global.fetch as jest.Mock).mock.calls).toHaveLength(2);
   });
 });
