@@ -19,7 +19,20 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { getInstinctUser, fetchWithRefresh } from "@/lib/client-auth";
+import { getInstinctUser, fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+import {
+  GlassPanel,
+  MetricTile,
+  StatusPill,
+  SectionHeader,
+  ConsoleGrid,
+  type SeverityTone,
+} from "@/components/console";
+import type {
+  ReleaseGateStatus,
+  BlockingChange,
+  ReleaseBlockState,
+} from "@/lib/deploy/release-gate";
 
 interface ReadinessCheck {
   name: string;
@@ -31,6 +44,335 @@ interface ReadinessCheck {
 interface ReadinessResult {
   ok: boolean;
   checks: ReadinessCheck[];
+}
+
+/**
+ * Map a release-gate state to a command-center tone. This is the one place the
+ * gate's vocabulary becomes colour, so an operator reads the same severity here
+ * as everywhere else in the console.
+ *   awaiting_approval               -> warning
+ *   checks_failing / merge_conflict -> error
+ *   checks_running                  -> info
+ *   ready_to_merge                  -> success
+ */
+const STATE_TONE: Record<ReleaseBlockState, SeverityTone> = {
+  awaiting_approval: "warning",
+  checks_failing: "error",
+  merge_conflict: "error",
+  checks_running: "info",
+  ready_to_merge: "success",
+};
+
+/** Short, human label for each state shown inside the pill. */
+const STATE_LABEL: Record<ReleaseBlockState, string> = {
+  awaiting_approval: "Awaiting approval",
+  checks_failing: "Checks failing",
+  merge_conflict: "Merge conflict",
+  checks_running: "Checks running",
+  ready_to_merge: "Ready to promote",
+};
+
+/** "blocking for 3.2h" / "blocking for 0.5h" - plain-language age. */
+function blockingForLabel(ageHours: number): string {
+  return `blocking for ${ageHours.toFixed(1)}h`;
+}
+
+/**
+ * One blocking-change row. Owns its own promote lifecycle (confirm -> spinner
+ * -> success/failure) so a slow merge on one row never freezes the others.
+ * Only a ready_to_merge change renders the Promote button; everything else is
+ * read-only with its plain-language reason.
+ */
+function BlockingRow({
+  change,
+  onPromoted,
+}: {
+  change: BlockingChange;
+  onPromoted: () => void;
+}) {
+  const [promoting, setPromoting] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const promote = useCallback(async () => {
+    setPromoting(true);
+    setConfirming(false);
+    setResult(null);
+    try {
+      const res = await fetchWithRefresh("/api/admin/deployment/release-gate/promote", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ prNumber: change.number }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        reason?: string;
+        mergedSha?: string;
+      };
+      if (res.ok && data.ok) {
+        setResult({ ok: true, message: "Promoted - deploying now." });
+        // Let the operator see the success, then refresh the gate.
+        setTimeout(onPromoted, 1200);
+      } else {
+        setResult({
+          ok: false,
+          message: data.reason ?? `Could not promote (HTTP ${res.status}).`,
+        });
+      }
+    } catch (e) {
+      setResult({ ok: false, message: (e as Error).message });
+    } finally {
+      setPromoting(false);
+    }
+  }, [change.number, onPromoted]);
+
+  const tone = STATE_TONE[change.state];
+
+  return (
+    <div
+      data-testid={`blocking-row-${change.number}`}
+      data-state={change.state}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.5rem",
+        padding: "0.85rem 1rem",
+        background: "var(--wp-dark-surface, #1f1f22)",
+        border: "1px solid var(--wp-dark-border, #242a36)",
+        borderRadius: "0.6rem",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+        <StatusPill
+          status={change.state}
+          tone={tone}
+          label={STATE_LABEL[change.state]}
+          testId={`blocking-pill-${change.number}`}
+        />
+        <a
+          href={change.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid={`blocking-link-${change.number}`}
+          style={{ fontWeight: 600, color: "var(--wp-text, #e9edf4)", textDecoration: "none" }}
+        >
+          {change.title}{" "}
+          <span style={{ color: "var(--wp-text-muted, #929cad)", fontWeight: 500 }}>
+            #{change.number}
+          </span>
+        </a>
+        <span style={{ flex: 1 }} />
+        {change.state === "ready_to_merge" && !result?.ok && (
+          confirming ? (
+            <span style={{ display: "inline-flex", gap: "0.4rem", alignItems: "center" }}>
+              <button
+                type="button"
+                data-testid={`promote-confirm-${change.number}`}
+                disabled={promoting}
+                onClick={() => void promote()}
+                style={{
+                  padding: "0.35rem 0.8rem",
+                  borderRadius: "0.4rem",
+                  border: "none",
+                  cursor: promoting ? "default" : "pointer",
+                  fontWeight: 600,
+                  color: "#0b0b0c",
+                  background: "var(--wp-success, #22c55e)",
+                  opacity: promoting ? 0.6 : 1,
+                }}
+              >
+                {promoting ? "Promoting…" : "Confirm promote"}
+              </button>
+              <button
+                type="button"
+                data-testid={`promote-cancel-${change.number}`}
+                disabled={promoting}
+                onClick={() => setConfirming(false)}
+                style={{
+                  padding: "0.35rem 0.6rem",
+                  borderRadius: "0.4rem",
+                  border: "1px solid var(--wp-dark-border, #242a36)",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  color: "var(--wp-text-dim, #b4bcc8)",
+                  background: "transparent",
+                }}
+              >
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              data-testid={`promote-${change.number}`}
+              onClick={() => setConfirming(true)}
+              style={{
+                padding: "0.35rem 0.9rem",
+                borderRadius: "0.4rem",
+                border: "none",
+                cursor: "pointer",
+                fontWeight: 600,
+                color: "#0b0b0c",
+                background: "var(--wp-success, #22c55e)",
+              }}
+            >
+              Promote to production
+            </button>
+          )
+        )}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap", fontSize: "0.83rem" }}>
+        <span data-testid={`blocking-reason-${change.number}`} style={{ color: "var(--wp-text-dim, #b4bcc8)" }}>
+          {change.reason}
+        </span>
+        <span style={{ color: "var(--wp-text-muted, #929cad)" }}>·</span>
+        <span style={{ color: "var(--wp-text-muted, #929cad)" }}>{change.author}</span>
+        <span style={{ color: "var(--wp-text-muted, #929cad)" }}>·</span>
+        <span data-testid={`blocking-age-${change.number}`} style={{ color: "var(--wp-text-muted, #929cad)" }}>
+          {blockingForLabel(change.ageHours)}
+        </span>
+      </div>
+      {result && (
+        <div
+          data-testid={`promote-result-${change.number}`}
+          style={{
+            fontSize: "0.83rem",
+            fontWeight: 600,
+            color: result.ok ? "var(--wp-success, #22c55e)" : "var(--wp-error, #ef4444)",
+          }}
+        >
+          {result.message}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Production release gate section: the operator-facing answer to "what is
+ * blocking a deploy to production right now, and what can I ship in one click?"
+ * Fetches the gate via fetchWithRefresh; honours the honest-degrade contract
+ * (degraded => explicit warning, NEVER a false all-clear); promotes ready code.
+ */
+function ReleaseGateSection() {
+  const [gate, setGate] = useState<ReleaseGateStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetchWithRefresh("/api/admin/deployment/release-gate");
+      if (!res.ok) throw new Error(`Failed to read the release gate (HTTP ${res.status})`);
+      const data = (await res.json()) as { ok: boolean; gate: ReleaseGateStatus };
+      setGate(data.gate);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const blocking = gate?.blocking ?? [];
+  const degraded = gate?.degraded;
+
+  return (
+    <GlassPanel testId="release-gate-section" style={{ marginTop: "2rem" }} glow="gold">
+      <SectionHeader
+        as="h2"
+        eyebrow="Production release gate"
+        title="What is blocking a deploy"
+        subtitle={
+          gate
+            ? `Targeting ${gate.productionBranch}. Built changes waiting to ship to production.`
+            : "Built changes waiting to ship to production."
+        }
+        actions={
+          <button
+            type="button"
+            data-testid="release-gate-refresh"
+            disabled={loading}
+            onClick={() => void load()}
+            style={{
+              padding: "0.4rem 0.85rem",
+              borderRadius: "0.4rem",
+              border: "1px solid var(--wp-dark-border, #242a36)",
+              cursor: loading ? "default" : "pointer",
+              fontWeight: 600,
+              color: "var(--wp-text, #e9edf4)",
+              background: "transparent",
+              opacity: loading ? 0.6 : 1,
+            }}
+          >
+            {loading ? "Checking…" : "Refresh"}
+          </button>
+        }
+      />
+
+      {loading ? (
+        <p data-testid="release-gate-loading" style={{ color: "var(--wp-text-dim, #b4bcc8)" }}>
+          Checking the production release gate…
+        </p>
+      ) : error ? (
+        <p data-testid="release-gate-error" style={{ color: "var(--wp-error, #ef4444)" }}>
+          {error}
+        </p>
+      ) : (
+        <>
+          {degraded && (
+            <div
+              data-testid="release-gate-degraded"
+              style={{
+                padding: "0.85rem 1rem",
+                marginBottom: "1rem",
+                borderRadius: "0.5rem",
+                fontWeight: 600,
+                color: "var(--wp-warning, #f97316)",
+                background: "color-mix(in srgb, var(--wp-warning, #f97316) 12%, transparent)",
+                border: "1px solid color-mix(in srgb, var(--wp-warning, #f97316) 38%, transparent)",
+              }}
+            >
+              Could not reach GitHub to check - status unknown. {degraded.detail}
+            </div>
+          )}
+
+          {!degraded && (
+            <ConsoleGrid minColWidth={180} style={{ marginBottom: "1.1rem" }}>
+              <MetricTile
+                testId="release-gate-blocking-count"
+                value={blocking.length}
+                label="Changes blocked from production"
+                accent={blocking.length > 0 ? "var(--wp-warning, #f97316)" : "var(--wp-success, #22c55e)"}
+              />
+              <MetricTile
+                testId="release-gate-ready-count"
+                value={blocking.filter((c) => c.state === "ready_to_merge").length}
+                label="Ready to promote now"
+                accent="var(--wp-success, #22c55e)"
+              />
+            </ConsoleGrid>
+          )}
+
+          {!degraded && blocking.length === 0 ? (
+            <p data-testid="release-gate-empty" style={{ color: "var(--wp-text-dim, #b4bcc8)" }}>
+              All changes are live in production.
+            </p>
+          ) : (
+            <div data-testid="release-gate-rows" style={{ display: "grid", gap: "0.6rem" }}>
+              {blocking.map((change) => (
+                <BlockingRow key={change.number} change={change} onPromoted={() => void load()} />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </GlassPanel>
+  );
 }
 
 const OK_COLOR = "var(--wp-success, #22c55e)";
@@ -97,6 +439,9 @@ export default function DeploymentReadinessPage() {
   const [result, setResult] = useState<ReadinessResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Gate every authenticated fetch (readiness AND release gate) behind a known
+  // session so an unauthenticated visit redirects without firing a request.
+  const [authed, setAuthed] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -120,6 +465,7 @@ export default function DeploymentReadinessPage() {
       router.push("/login?next=/admin/deployment");
       return;
     }
+    setAuthed(true);
     void load();
   }, [router, load]);
 
@@ -209,6 +555,8 @@ export default function DeploymentReadinessPage() {
           </div>
         </>
       ) : null}
+
+      {authed && <ReleaseGateSection />}
     </div>
   );
 }

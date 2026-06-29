@@ -37,9 +37,14 @@ const ALL_CAPS: readonly Capability[] = Object.keys(CAPABILITIES) as Capability[
 /** CTO: full admin. Gets every registered capability. */
 const CTO: readonly Capability[] = ALL_CAPS;
 
-/** CEO: same as CTO minus dev-only deployment actions. Keeps admin + finance. */
+/**
+ * CEO: same as CTO minus dev-only deployment actions. Keeps admin + finance.
+ * `sites.deploy` AND `deploy.promote` (push a change to production) are
+ * dev/CTO-owned — promoting prod is an engineering action, so CEO/EVP/VP/CCO
+ * see the gate (via the deployment-page capability) but cannot click promote.
+ */
 const CEO: readonly Capability[] = ALL_CAPS.filter(
-  (c) => c !== "sites.deploy",
+  (c) => c !== "sites.deploy" && c !== "deploy.promote",
 );
 
 /**
@@ -198,6 +203,8 @@ const DEV: readonly Capability[] = [
   "sites.view",
   "sites.deploy",           // dev-only by default
   "sites.edit",
+  "deploy.promote",         // dev promotes ready changes to production
+
   "meetings.view",          // dev gets read-only meetings (debugging routing/parsers)
   "settings.view_own",
   "briefing.view",

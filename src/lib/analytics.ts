@@ -660,6 +660,19 @@ export type InstinctEventType =
   // returned/served but NOT durably stored. Never report silent success.
   // { surface, detail }
   | "platform.scan_persist_degraded"
+  // Release gate: a built change is blocked from reaching production (e.g.
+  // awaiting approval, checks failing). Surfaced in-product so no one silently
+  // stalls a deploy. { pr_number, state, reason, age_hours }
+  | "deploy.release_blocked_detected"
+  // An operator opened the release gate (dashboard banner or /admin/deployment).
+  // { blocking_count }
+  | "deploy.release_gate_viewed"
+  // A notification was sent because a change has been blocking prod past the
+  // threshold. { pr_number, channel, age_hours }
+  | "deploy.release_unblock_notified"
+  // A change was promoted to production from inside the product (release gate
+  // Promote action), not via the GitHub UI. { pr_number, merged_sha }
+  | "deploy.production_promoted"
   // Client engagement with the redesigned consoles: results actually viewed. These
   // close the learning loop on what clients look at. { open_total, critical, high, targets }
   | "platform.results_viewed"
