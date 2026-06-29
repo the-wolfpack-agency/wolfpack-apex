@@ -12,7 +12,13 @@
  * without a database, an LLM, or the notifications layer.
  */
 
-import { tryDispatchTool } from "@/lib/assistant/tools/dispatcher";
+// Import from the tools BARREL (not the dispatcher directly): the barrel's
+// side-effect imports register the full tool set. The dispatcher alone does NOT
+// register tools, so importing tryDispatchTool from it left the agent execution
+// path with a PARTIAL registry - any tool not transitively imported silently
+// returned no_match (e.g. CRM search: "check salesforce for client list"), while
+// the human chat path worked because it loads the barrel via assistant.ts.
+import { tryDispatchTool } from "@/lib/assistant/tools";
 import { notify } from "@/lib/notifications/in-app";
 import { trackEvent } from "@/lib/analytics";
 import { safeQuery } from "@/lib/db";
