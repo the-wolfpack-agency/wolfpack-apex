@@ -226,6 +226,11 @@ jobs:
           retention-days: 30
 
       - name: Post PR comment
+        # Reporting only, NOT the security gate. Marked best-effort so a comment
+        # permission/API hiccup can never skip the downstream "Fail on NEW
+        # critical findings" enforcement step (that was a fail-open defect: a
+        # cosmetic comment failure silently disabled the security gate).
+        continue-on-error: true
         if: >-
           steps.pat-check.outputs.configured == 'true' &&
           github.event_name == 'pull_request'
