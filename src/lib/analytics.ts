@@ -473,6 +473,12 @@ export type InstinctEventType =
   // mcp.finding_detected { server, class, severity } - one per MCP risk found,
   //   so the learning loop sees the threat distribution across client setups.
   | "mcp.finding_detected"
+  // AI-code governance: a deterministic gate over AI-authored diffs before merge.
+  // ai_code.reviewed { ref, author, outcome, findings, highest_severity }
+  | "ai_code.reviewed"
+  // ai_code.finding_detected { class, severity, cwe } - one per code risk, so the
+  //   learning loop mines what AI tools keep introducing.
+  | "ai_code.finding_detected"
   // Agent principals (OGIAM, agents onboarded like people).
   // agent.created          { agent_id, role, owner_user_id, identity_provider }
   //   an admin onboarded an agent through the invite flow.
