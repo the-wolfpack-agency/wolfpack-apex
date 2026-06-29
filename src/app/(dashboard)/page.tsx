@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import IntegrationStatusBanner from "@/components/IntegrationStatusBanner";
 import MicrosoftConnectionBanner from "@/components/MicrosoftConnectionBanner";
 import MorningBriefing from "@/components/MorningBriefing";
+import ReleaseGateBanner from "@/components/ReleaseGateBanner";
 import MsInsightsPanel from "@/components/MsInsightsPanel";
 import Skeleton from "@/components/ui/Skeleton";
 import Tooltip from "@/components/ui/Tooltip";
@@ -378,6 +379,11 @@ export default function DashboardPage() {
       <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>
         Dashboard
       </h1>
+
+      {/* Production release gate nudge - surfaces built-and-waiting changes (or
+          an honest "status unknown") at the top of the landing page so a blocked
+          deploy is impossible to miss. Renders null when prod is current. */}
+      <ReleaseGateBanner />
 
       {/* Microsoft 365 disconnected warning, rendered FIRST so a revoked or
           expired MS token is never silent. Without it, a disconnected token

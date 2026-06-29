@@ -147,6 +147,14 @@ export const CAPABILITIES = {
   // delete, edit fields. Senior roles only — invoices are financial.
   "finance.invoices.view": "View the AP invoice queue",
   "finance.invoices.manage": "Upload invoices and change their approval / payment status",
+
+  // Deploy — production release gate. Reading the gate (what is blocking
+  // prod) rides on the existing deployment-page capability; PROMOTING code
+  // to production is a privileged, irreversible action so it gets its OWN
+  // capability gated to deploy-owning roles (CTO via ALL_CAPS, dev). A
+  // promote fails closed in the lib too — this is the human authorization
+  // on top of the technical mergeability gate.
+  "deploy.promote": "Promote a ready change to production (merge it to the prod branch)",
 } as const;
 
 export type Capability = keyof typeof CAPABILITIES;
