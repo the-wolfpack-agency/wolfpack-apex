@@ -26,7 +26,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveAgentFromRequest } from "@/lib/agents/identity";
 import { getAgent } from "@/lib/agents/store";
-import { tryDispatchTool } from "@/lib/assistant/tools/dispatcher";
+// Barrel import (not the dispatcher directly) so the FULL tool set is registered
+// for the agent act path. Importing from the dispatcher left a partial registry
+// and silently no_match'd tools the human path had. See executor.ts.
+import { tryDispatchTool } from "@/lib/assistant/tools";
 import { trackEvent } from "@/lib/analytics";
 
 /* --------------------- Per-agent rate limiter ------------------------- */

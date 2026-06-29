@@ -43,8 +43,12 @@ jest.mock("@/lib/agents/audit/brain-ingest", () => ({
 }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrack(...a) }));
 
-import { tryDispatchTool } from "@/lib/assistant/tools/dispatcher";
-import "@/lib/assistant/tools/search-external-records-tool"; // self-registers the tool
+// REGRESSION GUARD: import tryDispatchTool from the BARREL, exactly as the agent
+// execution path now does (executor.ts / agents/act). We deliberately do NOT
+// import the tool module directly - if the barrel ever stops registering the
+// full set (the prod bug where the agent path used a partial registry and
+// no_match'd "check salesforce for client list"), this test fails.
+import { tryDispatchTool } from "@/lib/assistant/tools";
 import type { ToolContext } from "@/lib/assistant/tools/types";
 
 const agentCtx: ToolContext = {
@@ -127,9 +131,13 @@ it("'list the clients' (no connector word) also routes + lists", async () => {
 });
 
 it("a bare search ('look up Acme') is NOT claimed by the CRM list tool (Universal Search owns it)", async () => {
-  /* The CRM list tool must not shadow bare-search. With Universal Search NOT
-     imported in this harness, the dispatcher finds no matching tool → null. */
+  /* The CRM list tool must not shadow bare-search. Now that the agent path loads
+     the FULL tool set via the barrel (the fix), Universal Search ("search")
+     correctly claims a bare-search phrasing - the CRM list tool stays out of it.
+     The key invariant: search_external_records did NOT grab it, and no CRM
+     connector call was made. */
   const res = await tryDispatchTool("look up Acme", agentCtx);
-  expect(res).toBeNull();
+  expect(res?.tool).not.toBe("search_external_records");
+  expect(res?.tool).toBe("search");
   expect(mockFetch).not.toHaveBeenCalled();
 });
