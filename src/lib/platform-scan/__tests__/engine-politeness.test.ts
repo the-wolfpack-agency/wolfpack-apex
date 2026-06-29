@@ -193,7 +193,16 @@ describe("finding detection is UNCHANGED by the politeness layer", () => {
   it("output is byte-identical across two different politeness configs (timing-invariant)", async () => {
     const a = await run({ perHostConcurrency: 1, minGapMs: 50 });
     const b = await run({ perHostConcurrency: 8, minGapMs: 0 });
-    expect(JSON.stringify(a.findings)).toEqual(JSON.stringify(b.findings));
+    // evidence.durationMs is the MEASURED request time (0 vs 1ms depending on
+    // load); it is the one legitimately timing-variant field, so normalize it
+    // out. The point of this test is that DETECTION (route/severity/category/
+    // title/detail/status) is invariant to politeness, not the wall-clock.
+    // Comparing it raw made this assertion flaky under CI load.
+    const stripTiming = (findings: typeof a.findings) =>
+      findings.map((f) => ({ ...f, evidence: { ...f.evidence, durationMs: 0 } }));
+    expect(JSON.stringify(stripTiming(a.findings))).toEqual(
+      JSON.stringify(stripTiming(b.findings)),
+    );
     expect(JSON.stringify(a.coverage)).toEqual(JSON.stringify(b.coverage));
   });
 });

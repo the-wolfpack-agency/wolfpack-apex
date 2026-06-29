@@ -41,21 +41,39 @@ jest.mock("@/lib/assistant/connectors/credentials", () => ({
   listConnectorCredentials: (ws?: string) => mockListCreds(ws),
 }));
 
-// 3. DB: capture every writeQuery so we can assert the scan-header row + one row
-//    per finding were persisted. The scan-header INSERT ... RETURNING id yields
-//    scan-1; finding inserts yield no rows. safeQuery / query are inert.
+// 3. DB: capture every write so we can assert the scan-header row + one row per
+//    finding were persisted. The scan-header INSERT ... RETURNING id yields
+//    scan-1; each finding upsert now uses RETURNING id + expectRows:1, so it must
+//    yield exactly one row (a 0-row write would surface as an error - the whole
+//    point of the atomic-write fix). recordScan is now ATOMIC: it routes its
+//    writes through withTransaction(fn), so the mock below runs fn with a tx whose
+//    write() delegates to mockWriteQuery AND enforces the expectRows contract,
+//    faithfully reproducing the real helper. safeQuery / query are inert.
 const writeCalls: { sql: string; params: unknown[] }[] = [];
 const mockWriteQuery = jest.fn(async (sql: string, params: unknown[] = []) => {
   writeCalls.push({ sql, params });
   if (/INSERT INTO instinct_platform_scans\b/i.test(sql)) {
     return { rows: [{ id: "scan-1" }] };
   }
-  return { rows: [] };
+  // Finding upserts + auto-resolve UPDATE return a row so expectRows:1 is satisfied.
+  return { rows: [{ id: "row-1" }] };
 });
 jest.mock("@/lib/db", () => ({
   writeQuery: (sql: string, params: unknown[] = []) => mockWriteQuery(sql, params),
   safeQuery: jest.fn(async () => ({ rows: [] })),
   query: jest.fn(async () => ({ rows: [] })),
+  withTransaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+    const tx = {
+      async write(sql: string, params: unknown[] = [], opts?: { expectRows?: number }) {
+        const res = (await mockWriteQuery(sql, params)) as { rows: unknown[] };
+        if (opts?.expectRows !== undefined && res.rows.length !== opts.expectRows) {
+          throw new Error(`row-count mismatch: expected ${opts.expectRows}, got ${res.rows.length}`);
+        }
+        return res;
+      },
+    };
+    return fn(tx);
+  },
 }));
 
 // 4. Analytics: capture every trackEvent.
@@ -207,10 +225,11 @@ beforeEach(() => {
   mockLoadCreds.mockResolvedValue({ ...CONNECTION });
   mockListCreds.mockResolvedValue([]);
   // re-arm writeQuery routing after clearAllMocks reset the implementation.
+  // Finding upserts + auto-resolve UPDATE return a row so expectRows:1 holds.
   mockWriteQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
     writeCalls.push({ sql, params });
     if (/INSERT INTO instinct_platform_scans\b/i.test(sql)) return { rows: [{ id: "scan-1" }] };
-    return { rows: [] };
+    return { rows: [{ id: "row-1" }] };
   });
 });
 

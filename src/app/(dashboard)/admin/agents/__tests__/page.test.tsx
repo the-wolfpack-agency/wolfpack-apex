@@ -16,10 +16,24 @@ import "@testing-library/jest-dom";
  */
 
 const mockFetchWithRefresh = jest.fn();
+const mockPush = jest.fn();
+// The authenticated user the page's redirect guard reads. Set to null in the
+// auth-redirect test to assert the unauthenticated path.
+let mockUser: unknown = { id: "u-cto", role: "admin" };
+
 jest.mock("@/lib/client-auth", () => ({
   fetchWithRefresh: (...a: unknown[]) =>
     (mockFetchWithRefresh as unknown as (...args: unknown[]) => unknown)(...a),
   jsonHeaders: () => ({ "Content-Type": "application/json" }),
+  getInstinctUser: () => mockUser,
+}));
+
+// The router object is stable across renders (as the real Next router is), so
+// the page's auth-guard effect, keyed on the router identity, does not re-run
+// every render.
+const mockRouter = { push: mockPush };
+jest.mock("next/navigation", () => ({
+  useRouter: () => mockRouter,
 }));
 
 // next/link renders a plain anchor in jsdom.
@@ -66,6 +80,8 @@ function makeAgent(over: Partial<Record<string, unknown>> = {}) {
 
 beforeEach(() => {
   mockFetchWithRefresh.mockReset();
+  mockPush.mockReset();
+  mockUser = { id: "u-cto", role: "admin" };
 });
 
 describe("/admin/agents: roster", () => {
@@ -88,6 +104,56 @@ describe("/admin/agents: roster", () => {
     // The roster page framing makes clear these are AI principals.
     expect(screen.getByTestId("admin-agents-page")).toHaveTextContent(/AI principals/i);
     expect(screen.getByTestId("admin-agents-page")).toHaveTextContent(/OGIAM/i);
+  });
+
+  it("each agent card links into its per-agent detail page", async () => {
+    const agent = makeAgent({ id: "ag-link" });
+    mockFetchWithRefresh.mockResolvedValue(mkRes({ agents: [agent] }));
+
+    await act(async () => {
+      render(<AgentsPage />);
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId(`agent-row-${agent.id}`)).toBeInTheDocument(),
+    );
+    // The card is the navigation into /admin/agents/[id]; the href is exact.
+    expect(screen.getByTestId(`agent-row-${agent.id}`)).toHaveAttribute(
+      "href",
+      `/admin/agents/${agent.id}`,
+    );
+  });
+
+  it("renders the fleet-overview metric tiles with counts derived from the roster", async () => {
+    // Two active, one paused, one invited; one of the active has a connection.
+    mockFetchWithRefresh.mockResolvedValue(
+      mkRes({
+        agents: [
+          makeAgent({ id: "a1", state: "active", connections: ["salesforce"] }),
+          makeAgent({ id: "a2", state: "active", connections: [] }),
+          makeAgent({ id: "a3", state: "paused", connections: [] }),
+          makeAgent({ id: "a4", state: "invited", connections: [] }),
+        ],
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentsPage />);
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("agents-fleet-metrics")).toBeInTheDocument(),
+    );
+    // Count-up animates from 0 to the real value; assert the final value lands.
+    await waitFor(() =>
+      expect(screen.getByTestId("fleet-metric-total")).toHaveTextContent("4"),
+    );
+    expect(screen.getByTestId("fleet-metric-active")).toHaveTextContent("2");
+    expect(screen.getByTestId("fleet-metric-paused")).toHaveTextContent("1");
+    expect(screen.getByTestId("fleet-metric-invited")).toHaveTextContent("1");
+    expect(screen.getByTestId("fleet-metric-connected")).toHaveTextContent("1");
+    // The fleet panel carries an activity sparkline (real trend data only).
+    expect(screen.getByTestId("fleet-trend-sparkline")).toBeInTheDocument();
   });
 
   it("renders the agent's bound services as chips when it has connections", async () => {
@@ -158,6 +224,107 @@ describe("/admin/agents: roster", () => {
     await waitFor(() => expect(screen.getByTestId("agents-error")).toBeInTheDocument());
     expect(screen.getByTestId("agents-error")).toHaveTextContent(/permission/i);
   });
+
+  it("redirects an unauthenticated visitor to /login and does not fetch the roster", async () => {
+    mockUser = null;
+    mockFetchWithRefresh.mockResolvedValue(mkRes({ agents: [] }));
+
+    await act(async () => {
+      render(<AgentsPage />);
+    });
+
+    expect(mockPush).toHaveBeenCalledWith("/login?next=/admin/agents");
+    // The guard returns before loading, so no roster fetch fires.
+    expect(mockFetchWithRefresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("/admin/agents: engagement analytics", () => {
+  // Every analytics POST the page fires through fetchWithRefresh -> /api/analytics.
+  const analyticsBodies = () =>
+    mockFetchWithRefresh.mock.calls
+      .filter(
+        (c) =>
+          String(c[0]) === "/api/analytics" &&
+          (c[1] as { method?: string } | undefined)?.method === "POST",
+      )
+      .map((c) => JSON.parse(String((c[1] as { body: string }).body)));
+
+  it("fires agent.fleet_viewed ONCE after a successful roster load with the lifecycle buckets", async () => {
+    mockFetchWithRefresh.mockResolvedValue(
+      mkRes({
+        agents: [
+          makeAgent({ id: "a1", state: "active", connections: ["salesforce"] }),
+          makeAgent({ id: "a2", state: "active", connections: [] }),
+          makeAgent({ id: "a3", state: "paused", connections: [] }),
+          makeAgent({ id: "a4", state: "invited", connections: [] }),
+        ],
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentsPage />);
+    });
+
+    await waitFor(() =>
+      expect(analyticsBodies().filter((b) => b.event === "agent.fleet_viewed").length).toBe(1),
+    );
+    const viewed = analyticsBodies().find((b) => b.event === "agent.fleet_viewed");
+    expect(viewed.metadata).toEqual({ total: 4, active: 2, paused: 1, invited: 1, connected: 1 });
+  });
+
+  it("does NOT re-fire agent.fleet_viewed when the roster refetches (Refresh)", async () => {
+    mockFetchWithRefresh.mockResolvedValue(mkRes({ agents: [makeAgent({ id: "a1" })] }));
+
+    await act(async () => {
+      render(<AgentsPage />);
+    });
+    await waitFor(() =>
+      expect(analyticsBodies().filter((b) => b.event === "agent.fleet_viewed").length).toBe(1),
+    );
+
+    // Refresh refetches the roster; fleet_viewed must stay at exactly one.
+    await act(async () => {
+      fireEvent.click(screen.getByText("Refresh"));
+    });
+    await waitFor(() =>
+      expect(mockFetchWithRefresh.mock.calls.filter((c) => (c[1] as any)?.method !== "POST").length).toBeGreaterThanOrEqual(2),
+    );
+    expect(analyticsBodies().filter((b) => b.event === "agent.fleet_viewed").length).toBe(1);
+  });
+
+  it("fires agent.detail_opened with the agent id + state when a card is clicked", async () => {
+    const agent = makeAgent({ id: "ag-open", state: "paused" });
+    mockFetchWithRefresh.mockResolvedValue(mkRes({ agents: [agent] }));
+
+    await act(async () => {
+      render(<AgentsPage />);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId(`agent-row-${agent.id}`)).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId(`agent-row-${agent.id}`));
+    });
+
+    const opened = analyticsBodies().find((b) => b.event === "agent.detail_opened");
+    expect(opened).toBeTruthy();
+    expect(opened.metadata).toEqual({ agent_id: "ag-open", state: "paused" });
+  });
+
+  it("fires NO analytics on the auth-redirect (logged-out) path", async () => {
+    mockUser = null;
+    mockFetchWithRefresh.mockResolvedValue(mkRes({ agents: [] }));
+
+    await act(async () => {
+      render(<AgentsPage />);
+    });
+
+    expect(mockPush).toHaveBeenCalledWith("/login?next=/admin/agents");
+    // The guard returns before loading, so neither roster nor analytics fire.
+    expect(mockFetchWithRefresh).not.toHaveBeenCalled();
+  });
 });
 
 describe("/admin/agents: onboard form", () => {
@@ -167,6 +334,10 @@ describe("/admin/agents: onboard form", () => {
    */
   function route(roster: unknown[], postResult: any) {
     mockFetchWithRefresh.mockImplementation((url: unknown, init?: { method?: string }) => {
+      // Engagement analytics (fleet_viewed) fires its own fire-and-forget POST to
+      // /api/analytics; keep it distinct from the onboard POST so it never gets
+      // the onboard result and the onboard assertions stay precise.
+      if (String(url) === "/api/analytics") return Promise.resolve(mkRes({ ok: true }));
       if (init?.method === "POST") return Promise.resolve(postResult);
       return Promise.resolve(mkRes({ agents: roster }));
     });
@@ -211,9 +382,12 @@ describe("/admin/agents: onboard form", () => {
     );
     expect(screen.getByTestId("agent-onboarding-secret-copy")).toBeInTheDocument();
 
-    // A POST fired to the agents endpoint with the form payload.
+    // A POST fired to the agents endpoint with the form payload (the analytics
+    // beacon also POSTs, so scope the lookup to the agents endpoint).
     const post = mockFetchWithRefresh.mock.calls.find(
-      (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
+      (c) =>
+        (c[1] as { method?: string } | undefined)?.method === "POST" &&
+        String(c[0]).includes("/api/admin/agents"),
     );
     expect(post).toBeTruthy();
     expect(String(post?.[0])).toContain("/api/admin/agents");

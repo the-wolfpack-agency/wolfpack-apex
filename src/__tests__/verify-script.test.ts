@@ -23,12 +23,19 @@ function shim(dir: string, name: string, body: string) {
 }
 
 function runVerify(stubDir: string, extraEnv: Record<string, string> = {}) {
+  // Strip verify-control vars the CI unit job injects (VERIFY_STAGES=unit,
+  // JEST_SHARD, ...) so they do not leak into the spawned verify.sh and skew
+  // which stages this test expects to run.
+  const base = { ...process.env };
+  for (const k of ["VERIFY_STAGES", "JEST_SHARD", "JEST_WORKERS", "JEST_JSON", "VERIFY_DRY_RUN"]) {
+    delete base[k];
+  }
   return spawnSync("bash", [SCRIPT], {
     env: {
-      ...process.env,
+      ...base,
       PATH: `${stubDir}:${process.env.PATH ?? ""}`,
-      CI: "true",           // ensure e2e branch is the CI branch
-      VERIFY_SKIP_E2E: "1", // always skip e2e for the unit test — covered separately
+      CI: "true", // ensure e2e branch is the CI branch
+      VERIFY_SKIP_E2E: "1", // always skip e2e for the unit test - covered separately
       ...extraEnv,
     },
     encoding: "utf-8",

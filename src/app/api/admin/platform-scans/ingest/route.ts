@@ -25,6 +25,7 @@ import { classifyPage, type PageObservation } from "@/lib/platform-scan/browser/
 import { classifyJourney, type JourneyTrace } from "@/lib/platform-scan/browser/journey";
 import type { PlatformScanResult, ScanFinding } from "@/lib/platform-scan/types";
 import { trackEvent } from "@/lib/analytics";
+import { WriteQueryError } from "@/lib/db";
 import { checkRateLimit } from "@/lib/ogiam/gate-rate-limit";
 
 /**
@@ -268,7 +269,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }).catch((e) => console.warn("[audit]", (e as Error).message));
     return NextResponse.json({ ok: true, scanId, findingCount });
   } catch (err) {
-    console.error("[platform-scans/ingest]", (err as Error).message);
-    return NextResponse.json({ ok: true, scanId: null, findingCount: 0 });
+    // DATA-LOSS FIX: a recordScan throw used to return { ok:true, scanId:null,
+    // findingCount:0 } - the false-success that made a CI runner mark the run GREEN
+    // and DISCARD the only copy of the findings it just collected. A persistence
+    // failure (a real write error, a 0-row RLS-discarded write surfaced by
+    // expectRows, or shadow-mode `no_database`) is NOT a success: return a non-2xx
+    // so the caller RETRIES instead of dropping data, and fire
+    // platform.scan_persist_degraded so the learning loop records the dropped run
+    // and never mistakes a failed persist for a clean ingest.
+    const e = err as Error;
+    const wqe = err instanceof WriteQueryError ? err : null;
+    // no_database (shadow mode) is a misconfiguration, not a transient blip ->
+    // 503 (no point hammering retries, but explicitly NOT ok). A real write/row
+    // error is potentially transient -> 500 so the runner retries.
+    const status = wqe?.code === "no_database" ? 503 : 500;
+    const detail = wqe ? `${wqe.code}: ${wqe.message}` : e.message;
+    console.error("[platform-scans/ingest] persist failed:", detail);
+    trackEvent("platform.scan_persist_degraded", actorId, actorRole, {
+      surface: "ingest",
+      detail,
+      platform,
+      finding_count: typedFindings.length,
+      workspace_id: workspaceId,
+    });
+    return NextResponse.json(
+      { ok: false, error: "persist_failed", reason: wqe?.code ?? "db_error" },
+      { status },
+    );
   }
 }

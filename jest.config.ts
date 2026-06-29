@@ -1,4 +1,11 @@
 import type { Config } from "jest";
+// Single source of truth for the native-ESM allowlist lives in the resolver
+// (a .cjs so the resolver itself can require it without a TS build step). Both
+// transformIgnorePatterns (below) and the resolver derive from this one list,
+// so they can never drift apart.
+const { ESM_PACKAGE_ROOTS } = require("./jest.resolver.cjs") as {
+  ESM_PACKAGE_ROOTS: string[];
+};
 
 /**
  * ESM-in-node_modules allowlist.
@@ -24,47 +31,21 @@ import type { Config } from "jest";
  * Keep this list tight: add a package only when a stack trace shows its
  * published `.js` using `import`/`export` under /node_modules/.
  */
-const ESM_PACKAGES = [
-  // isomorphic-dompurify bundles its own jsdom; this tree is ESM:
-  "@exodus",
-  "isomorphic-dompurify",
-  "parse5",
-  "entities",
-  "lru-cache",
-  "tough-cookie",
-  "@asamuzakjp",
-  "@csstools",
-  "@react-pdf",
-  "fontkit",
-  "jay-peg",
-  "linebreak",
-  "unicode-properties",
-  "unicode-trie",
-  "bidi-js",
-  "hyphen",
-  "restructure",
-  "dfa",
-  "clone",
-  "brotli",
-  "tiny-inflate",
-  "yoga-layout",
-  "emoji-regex-xs",
-  "vite-compatible-readable-stream",
-  "color-string",
-  "abs-svg-path",
-  "normalize-svg-path",
-  "parse-svg-path",
-  "svg-arc-to-cubic-bezier",
-  "hsl-to-hex",
-  "media-engine",
-  "postcss-value-parser",
-  "is-url",
-  "color-name",
-];
+const ESM_PACKAGES = ESM_PACKAGE_ROOTS;
 
 const config: Config = {
   testEnvironment: "node",
   preset: "ts-jest",
+  // Recycle a worker once its heap crosses 512MB. The ~13k-test suite leaks
+  // heap across files inside a long-lived worker; on a loaded CI runner that
+  // bloat starves the worker and triggers GC stalls that blow the 5s default
+  // timeout on otherwise-deterministic tests (ms-graph-chats,
+  // email-signatures-detect, engine-politeness, export-pdf flaked in CI but
+  // pass 3/3 locally). Recycling the worker before the bloat lands fixes the
+  // root cause. We do NOT set a global testTimeout: a longer timeout would
+  // only mask slowness instead of removing it, and would let a genuinely slow
+  // test sail through. workerIdleMemoryLimit is a native Jest knob - no dep.
+  workerIdleMemoryLimit: "512MB",
   testMatch: ["<rootDir>/src/**/__tests__/**/*.test.{ts,tsx}"],
   // ts-jest's preset omits mjs/cjs; some allowlisted ESM deps resolve to
   // .mjs via package "exports", so Jest must know to look for them.
@@ -72,6 +53,20 @@ const config: Config = {
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/src/$1",
   },
+  // Custom resolver = Jest's default resolver + a CJS-rewrite for the
+  // allowlisted native-ESM node_modules. REQUIRED because scripts/verify.sh
+  // runs Jest with `--experimental-vm-modules` (so export-pdf's dynamic
+  // import() can load @react-pdf): under that flag jest-resolve refuses to
+  // `require()` any ESM-typed `.js` (it throws "Must use import to load ES
+  // Module: .../@exodus/bytes/encoding-lite.js") BEFORE the transform runs, so
+  // the transformIgnorePatterns allowlist alone is insufficient. The resolver
+  // serves those files as pre-transpiled `.cjs` copies (which jest-resolve
+  // always treats as CJS), so the require chains
+  // (isomorphic-dompurify -> jsdom -> @exodus/bytes; @react-pdf) load for real
+  // without mocking the sanitizer. Full root-cause writeup in
+  // jest.resolver.cjs. Reproduce with:
+  //   NODE_OPTIONS=--experimental-vm-modules npx jest <suite> --no-cache
+  resolver: "<rootDir>/jest.resolver.cjs",
   transform: {
     // Custom transformer = ts-jest + an `import.meta` shim for the ESM
     // node_modules we allowlist below (yoga-layout's WASM loader). It also

@@ -5,7 +5,7 @@
  * Shadow mode: returns empty results when DATABASE_URL is not set.
  */
 
-import { Pool, type PoolConfig, type QueryResult } from "pg";
+import { Pool, type PoolClient, type PoolConfig, type QueryResult } from "pg";
 
 /**
  * Normalize the connection string to explicitly request
@@ -176,4 +176,89 @@ export async function writeQuery<T = Record<string, unknown>>(
     );
   }
   return { rows: result.rows as T[] };
+}
+
+/**
+ * A single-statement strict write bound to ONE transaction client. Same
+ * semantics as the top-level writeQuery (throws WriteQueryError on a pg error
+ * and on an `expectRows` mismatch), but every call runs on the same connection
+ * inside the open BEGIN/COMMIT so a mid-sequence failure ROLLs BACK the whole
+ * unit of work instead of leaving an orphaned partial write. This is the seam
+ * that makes a multi-row write (e.g. a scan header + its findings) all-or-nothing.
+ */
+export interface TxClient {
+  write<T = Record<string, unknown>>(
+    text: string,
+    params?: unknown[],
+    opts?: { expectRows?: number },
+  ): Promise<{ rows: T[] }>;
+}
+
+/**
+ * Run `fn` inside a single Postgres transaction. BEGIN before `fn`, COMMIT if it
+ * resolves, ROLLBACK if it throws (and the original error is re-thrown so the
+ * caller can surface it). The client is always released back to the pool.
+ *
+ * Why this exists: a sequence of separate writeQuery calls is NOT atomic — a
+ * failure partway through leaves earlier rows committed while the caller is told
+ * the operation failed (or, worse, told it succeeded with a zeroed count). Wrap
+ * any multi-write durable operation in withTransaction so it is all-or-nothing.
+ *
+ * Mirrors writeQuery's shadow-mode contract: throws WriteQueryError("no_database")
+ * when DATABASE_URL is unset, because a transactional WRITE in shadow mode is not
+ * a valid state — silently no-op'ing a write is the exact data-loss class this
+ * module exists to prevent.
+ */
+export async function withTransaction<R>(
+  fn: (tx: TxClient) => Promise<R>,
+): Promise<R> {
+  if (!process.env.DATABASE_URL) {
+    throw new WriteQueryError(
+      "withTransaction called without DATABASE_URL — writes require a real database.",
+      "no_database",
+    );
+  }
+  const client: PoolClient = await pool.connect();
+  const tx: TxClient = {
+    async write<T = Record<string, unknown>>(
+      text: string,
+      params?: unknown[],
+      opts?: { expectRows?: number },
+    ): Promise<{ rows: T[] }> {
+      let result: QueryResult<T & Record<string, unknown>>;
+      try {
+        result = await client.query<T & Record<string, unknown>>(text, params);
+      } catch (err) {
+        throw new WriteQueryError(
+          `withTransaction write failed: ${(err as Error).message}`,
+          "db_error",
+          { cause: err },
+        );
+      }
+      if (opts?.expectRows !== undefined && result.rows.length !== opts.expectRows) {
+        throw new WriteQueryError(
+          `withTransaction row-count mismatch: expected ${opts.expectRows}, got ${result.rows.length}`,
+          "unexpected_row_count",
+          { expected: opts.expectRows, actual: result.rows.length },
+        );
+      }
+      return { rows: result.rows as T[] };
+    },
+  };
+  try {
+    await client.query("BEGIN");
+    const out = await fn(tx);
+    await client.query("COMMIT");
+    return out;
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rbErr) {
+      // A rollback failure must not mask the original error; log + continue.
+      console.warn("[db] ROLLBACK failed:", (rbErr as Error).message);
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
 }

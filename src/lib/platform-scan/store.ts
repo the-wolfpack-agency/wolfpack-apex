@@ -11,7 +11,7 @@
  * summary all persist from a single scan.
  */
 
-import { safeQuery, writeQuery } from "@/lib/db";
+import { safeQuery, writeQuery, withTransaction } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { notify } from "@/lib/notifications/in-app";
 import { ingestPlatformScanFinding } from "./brain-ingest";
@@ -87,41 +87,95 @@ export async function recordScan(
   // NULLs in that case so a missing signal is never mistaken for "fully covered".
   const cov = result.coverage;
 
-  const scanRes = await writeQuery<{ id: string }>(
-    `INSERT INTO instinct_platform_scans
-       (workspace_id, platform, base_url, route_count, finding_count, critical_count, triggered_by,
-        attempted_routes, succeeded_routes, errored_routes, auth_established, coverage_ratio)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-     RETURNING id`,
-    [
-      workspaceId, result.platform, result.baseUrl, result.routeCount, result.findings.length, criticalCount, actorId,
-      cov ? cov.attempted : 0,
-      cov ? cov.succeeded : 0,
-      cov ? cov.errored : 0,
-      cov ? cov.authEstablished : null,
-      cov ? cov.coverageRatio : null,
-    ],
-  );
-  const scanId = scanRes.rows[0].id;
-
-  for (const f of result.findings) {
-    // Identity = (workspace, platform, route, title). A re-scan UPDATES the
-    // existing finding (refreshes severity/evidence + which scan last saw it)
-    // instead of inserting a duplicate; human triage (status/decided_*) and the
-    // original created_at are preserved. This is what stops the findings list
-    // from piling up across runs.
-    await writeQuery(
-      `INSERT INTO instinct_platform_scan_findings
-         (scan_id, workspace_id, platform, route, severity, category, title, detail, evidence)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
-       ON CONFLICT (workspace_id, platform, route, title) DO UPDATE SET
-         scan_id = EXCLUDED.scan_id,
-         severity = EXCLUDED.severity,
-         category = EXCLUDED.category,
-         detail = EXCLUDED.detail,
-         evidence = EXCLUDED.evidence`,
-      [scanId, workspaceId, result.platform, f.route, f.severity, f.category, f.title, f.detail, JSON.stringify(f.evidence)],
+  // ATOMIC PERSISTENCE: the scan header, every finding upsert, and the
+  // auto-resolve UPDATE are ONE unit of work. A mid-loop failure used to leave an
+  // orphaned header + partial findings committed while the caller (and the ingest
+  // route) were told findingCount:0 - the worst data-loss shape: a silent partial
+  // write reported as a clean zero. Wrapping in a single transaction makes it
+  // all-or-nothing: any write failure ROLLs BACK and re-throws so the caller sees
+  // an error (and, in ingest, retries) instead of dropping the only copy of the
+  // findings. expectRows:1 on the header + each upsert surfaces a 0-row write
+  // (RLS-discarded / view-swallowed) as an error rather than a false success.
+  const persisted = await withTransaction(async (tx) => {
+    const scanRes = await tx.write<{ id: string }>(
+      `INSERT INTO instinct_platform_scans
+         (workspace_id, platform, base_url, route_count, finding_count, critical_count, triggered_by,
+          attempted_routes, succeeded_routes, errored_routes, auth_established, coverage_ratio)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING id`,
+      [
+        workspaceId, result.platform, result.baseUrl, result.routeCount, result.findings.length, criticalCount, actorId,
+        cov ? cov.attempted : 0,
+        cov ? cov.succeeded : 0,
+        cov ? cov.errored : 0,
+        cov ? cov.authEstablished : null,
+        cov ? cov.coverageRatio : null,
+      ],
+      { expectRows: 1 },
     );
+    const sid = scanRes.rows[0].id;
+
+    for (const f of result.findings) {
+      // Identity = (workspace, platform, route, title). A re-scan UPDATES the
+      // existing finding (refreshes severity/evidence + which scan last saw it)
+      // instead of inserting a duplicate; human triage (status/decided_*) and the
+      // original created_at are preserved. This is what stops the findings list
+      // from piling up across runs. RETURNING id + expectRows:1 turns a write the
+      // DB silently discarded (RLS/policy) into an error instead of a false success.
+      await tx.write(
+        `INSERT INTO instinct_platform_scan_findings
+           (scan_id, workspace_id, platform, route, severity, category, title, detail, evidence)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+         ON CONFLICT (workspace_id, platform, route, title) DO UPDATE SET
+           scan_id = EXCLUDED.scan_id,
+           severity = EXCLUDED.severity,
+           category = EXCLUDED.category,
+           detail = EXCLUDED.detail,
+           evidence = EXCLUDED.evidence
+         RETURNING id`,
+        [sid, workspaceId, result.platform, f.route, f.severity, f.category, f.title, f.detail, JSON.stringify(f.evidence)],
+        { expectRows: 1 },
+      );
+    }
+
+    // AUTO-RESOLVE (inside the SAME transaction so a failure rolls the whole scan
+    // back too): close the find -> fix -> re-scan loop. When a scan covers a route
+    // (scannedRoutes) but no longer reports a finding it previously had open on
+    // that route, the underlying bug was fixed: mark it resolved. Without this,
+    // every fixed bug lingers as a stale "open" row and the findings list never
+    // shrinks even as the target improves. Scoping by `route = ANY(scannedRoutes)`
+    // keeps modalities from stepping on each other: an HTTP scan (route = URL path)
+    // never touches a static finding (route = file path). Omitting scannedRoutes
+    // (external ingest) skips this: we must not resolve findings the run did not
+    // actually re-check. No expectRows here: resolving 0 stale findings is valid.
+    let resolvedCount = 0;
+    if (result.scannedRoutes && result.scannedRoutes.length > 0) {
+      const SEP = "\x1f"; // unit separator, safe: never appears in a route/title
+      const foundKeys = result.findings.map((f) => `${f.route}${SEP}${f.title}`);
+      const resolved = await tx.write<{ id: string }>(
+        `UPDATE instinct_platform_scan_findings
+            SET status = 'resolved', decided_by = $4, decided_at = now()
+          WHERE workspace_id = $1
+            AND platform = $2
+            AND status = 'open'
+            AND route = ANY($3::text[])
+            AND (route || $5 || title) <> ALL($6::text[])
+          RETURNING id`,
+        [workspaceId, result.platform, result.scannedRoutes, "auto:rescan", SEP, foundKeys],
+      );
+      resolvedCount = resolved.rows.length;
+    }
+
+    return { scanId: sid, autoResolvedCount: resolvedCount };
+  });
+  const scanId = persisted.scanId;
+  const autoResolvedCount = persisted.autoResolvedCount;
+
+  // POST-COMMIT side effects: only run once the scan + findings are durably
+  // committed. Analytics + Brain ingest (a network call we must not hold a DB
+  // connection across) fire here so a side-effect failure never rolls back
+  // persisted data, and persisted data is never claimed before COMMIT.
+  for (const f of result.findings) {
     trackEvent("platform.scan_finding_detected", actorId, actorRole, {
       platform: result.platform,
       route: f.route,
@@ -132,40 +186,17 @@ export async function recordScan(
     await ingestPlatformScanFinding(result.platform, f);
   }
 
-  // AUTO-RESOLVE: close the find -> fix -> re-scan loop. When a scan covers a
-  // route (scannedRoutes) but no longer reports a finding it previously had open
-  // on that route, the underlying bug was fixed: mark it resolved. Without this,
-  // every fixed bug lingers as a stale "open" row and the findings list never
-  // shrinks even as the target improves. Scoping by `route = ANY(scannedRoutes)`
-  // keeps modalities from stepping on each other: an HTTP scan (route = URL path)
-  // never touches a static finding (route = file path) because the identifier
-  // spaces don't overlap. Omitting scannedRoutes (external ingest) skips this:
-  // we must not resolve findings the run didn't actually re-check.
-  let autoResolvedCount = 0;
-  if (result.scannedRoutes && result.scannedRoutes.length > 0) {
-    const SEP = ""; // unit separator, safe: never appears in a route/title
-    const foundKeys = result.findings.map((f) => `${f.route}${SEP}${f.title}`);
-    const resolved = await writeQuery<{ id: string }>(
-      `UPDATE instinct_platform_scan_findings
-          SET status = 'resolved', decided_by = $4, decided_at = now()
-        WHERE workspace_id = $1
-          AND platform = $2
-          AND status = 'open'
-          AND route = ANY($3::text[])
-          AND (route || $5 || title) <> ALL($6::text[])
-        RETURNING id`,
-      [workspaceId, result.platform, result.scannedRoutes, "auto:rescan", SEP, foundKeys],
-    );
-    autoResolvedCount = resolved.rows.length;
-    if (autoResolvedCount > 0) {
-      // One aggregate signal, not per-row: a per-row event would flood the
-      // stream and break the "one row per durable fact" idiom (mirrors bulkTriageFindings).
-      trackEvent("platform.scan_findings_auto_resolved", actorId, actorRole, {
-        platform: result.platform,
-        count: autoResolvedCount,
-        scan_id: scanId,
-      });
-    }
+  // AUTO-RESOLVE analytics (post-commit): the UPDATE itself ran inside the
+  // transaction above; fire the aggregate learning signal only once the resolve
+  // is durably committed. One aggregate signal, not per-row: a per-row event
+  // would flood the stream and break the "one row per durable fact" idiom
+  // (mirrors bulkTriageFindings).
+  if (autoResolvedCount > 0) {
+    trackEvent("platform.scan_findings_auto_resolved", actorId, actorRole, {
+      platform: result.platform,
+      count: autoResolvedCount,
+      scan_id: scanId,
+    });
   }
 
   trackEvent("platform.scan_completed", actorId, actorRole, {

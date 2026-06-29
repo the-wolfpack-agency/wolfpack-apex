@@ -1,0 +1,78 @@
+name: Competitive Benchmark (Head to Head vs Free Scanners)
+
+# THE COMPETITIVE BENCHMARK. Proves to clients we find the same (and more) issues
+# than the leading FREE scanners. Mirrors benchmark-sweep.yml (scheduled GitHub
+# Actions). Each tick runs OWASP ZAP (baseline) + Nuclei against the SAME
+# consent-to-test corpus targets we score ourselves against, parses each tool's
+# JSON, and POSTs the raw findings to apex's competitive endpoint, which normalizes
+# them into OUR taxonomy, scores them with the SAME scorer vs the same ground truth,
+# and records the head-to-head + refreshes the rival-only-gap backlog.
+#
+# TOOL CHOICE (documented in scripts/competitive-benchmark.mjs):
+#   - OWASP ZAP  the canonical free DAST baseline (zap-baseline.py: read-only).
+#   - Nuclei     modern template-driven scanner (intrusive/dos/fuzz tags excluded).
+#   - REJECTED: Nikto (dated/noisy), paid tools (non-reproducible without a license).
+#
+# READ-ONLY ONLY. Targets come ONLY from the consent corpus, gated through the same
+# read-only consent floor as benchmark-sweep.yml. Active probing of planted vulns is
+# a SEPARATE, explicitly-authorized pentest run, NOT this workflow.
+#
+# Auth: identical scheme to benchmark-sweep.yml - the competitive endpoint takes
+# Authorization: Bearer ${CRON_SECRET}. We pass INGEST_SECRET into CRON_SECRET. No
+# new secrets scheme invented.
+#
+# Secrets it needs:
+#   - TARGET_BASE_URL  apex base URL (the competitive endpoint lives here).
+#   - INGEST_SECRET    the Bearer secret for the endpoint (-> CRON_SECRET).
+# Optional self-hosted labeled targets on OUR infra (swept READ-ONLY here):
+#   - BENCHMARK_JUICE_SHOP_URL / BENCHMARK_OWASP_URL / BENCHMARK_VAMPI_URL /
+#     BENCHMARK_NODEGOAT_URL
+
+on:
+  schedule:
+    # Weekly, Monday 07:00 UTC - one hour after benchmark-sweep.yml so OUR score is
+    # fresh before the head-to-head reads it for the comparison.
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Apex base URL (defaults to the TARGET_BASE_URL secret)"
+        required: false
+        default: ""
+      tools:
+        description: "Comma list of tools to run (subset of zap,nuclei)"
+        required: false
+        default: "zap,nuclei"
+
+permissions:
+  contents: read
+
+jobs:
+  competitive-benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # ZAP + Nuclei run via their official docker images (pulled on first use by the
+      # script). Docker is preinstalled on ubuntu-latest runners; no extra setup.
+      - name: Run competitive benchmark (ZAP + Nuclei head to head)
+        run: node scripts/competitive-benchmark.mjs --tools "$TOOLS"
+        env:
+          # The script reads BASE_URL / CRON_SECRET (argv overrides env). We map the
+          # existing scan secret names onto those so the scheme stays shared with
+          # benchmark-sweep.yml.
+          BASE_URL: ${{ github.event.inputs.base != '' && github.event.inputs.base || secrets.TARGET_BASE_URL }}
+          CRON_SECRET: ${{ secrets.INGEST_SECRET }}
+          TOOLS: ${{ github.event.inputs.tools != '' && github.event.inputs.tools || 'zap,nuclei' }}
+          # Optional self-hosted labeled targets (our infra). Read-only here.
+          BENCHMARK_JUICE_SHOP_URL: ${{ secrets.BENCHMARK_JUICE_SHOP_URL }}
+          BENCHMARK_OWASP_URL: ${{ secrets.BENCHMARK_OWASP_URL }}
+          BENCHMARK_VAMPI_URL: ${{ secrets.BENCHMARK_VAMPI_URL }}
+          BENCHMARK_NODEGOAT_URL: ${{ secrets.BENCHMARK_NODEGOAT_URL }}

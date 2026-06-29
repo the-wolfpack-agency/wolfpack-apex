@@ -36,6 +36,7 @@ import {
   authorizeBrowserAction,
   type BrowserActionKind,
 } from "@/lib/platform-scan/browser/gate";
+import { trackEvent } from "@/lib/analytics";
 
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -128,6 +129,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   });
 
   if (verdict.allowed) {
+    // FAIL CLOSED ON UNAUDITABLE. authorize() (called inside the gate) marks an
+    // enforce-mode decision unauditable + wouldBlock when the tamper-evident
+    // ledger write fails, but does NOT flip effectiveOutcome away from "allow".
+    // The gate returns { allowed: true } in that case, so branching on
+    // verdict.allowed alone would authorize a benign browser action UN-AUDITED.
+    // Mirror the internal dispatcher (src/lib/assistant/tools/dispatcher.ts) and
+    // refuse: no audit, no action. unauditable is only ever set in enforce mode,
+    // so read-only (monitor) actions are unaffected.
+    if (verdict.decision.unauditable) {
+      // Keep the block observable: the gate already fired _allowed before we
+      // overrode it, so surface the fail-closed override as a block event. A
+      // normal policy deny already comes back as { allowed: false } from the
+      // gate lib, so this branch keys ONLY on unauditable (mirrors the internal
+      // dispatcher: no audit, no action).
+      trackEvent("platform.browser_action_blocked", actorId, actorRole, {
+        platform,
+        action: kind,
+        reason: "unauditable",
+      });
+      return NextResponse.json({
+        allowed: false,
+        reason: "unauditable: ledger unavailable, failing closed",
+      });
+    }
     // Echo a non-secret decision summary so the runner can correlate + log it.
     // Never echo params/host/principal - only the explainability fields.
     return NextResponse.json({

@@ -17,6 +17,14 @@ export interface SmokeProbe {
   path: string;
   /** Case-insensitive text fragment that proves the page is not blank. */
   expectText: string;
+  /**
+   * For routes whose rendered content depends on account state, ANY of these
+   * fragments proves a healthy authenticated render. Example: /setup shows the
+   * wizard ("Set up") for a fresh workspace but redirects an already-onboarded
+   * account to the dashboard shell ("Instinct"); both are valid, a 401 blank is
+   * not. When set, this supersedes expectText for the body-text assertion.
+   */
+  expectAnyText?: string[];
   /** If true, expect JSON content-type (API endpoints). */
   json?: boolean;
   /** Allowed non-2xx status for the main document (e.g. 401 for pre-auth). */
@@ -233,11 +241,14 @@ export async function probePath(
     return;
   }
 
-  // Assert the expected text is present somewhere in the rendered body.
-  const bodyText = await page.locator("body").innerText().catch(() => "");
+  // Assert an expected text fragment is present somewhere in the rendered body.
+  // expectAnyText (when set) passes if ANY fragment matches, for state-dependent
+  // routes; otherwise the single expectText must match.
+  const bodyText = (await page.locator("body").innerText().catch(() => "")).toLowerCase();
+  const candidates = probe.expectAnyText ?? [probe.expectText];
   expect(
-    bodyText.toLowerCase().includes(probe.expectText.toLowerCase()),
-    `Expected text "${probe.expectText}" not found on ${probe.path}`,
+    candidates.some((t) => bodyText.includes(t.toLowerCase())),
+    `None of [${candidates.join(", ")}] found on ${probe.path}`,
   ).toBe(true);
 
   // 3-second idle window for async CSP/network failures to surface.

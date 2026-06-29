@@ -236,21 +236,11 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "Notifications stream owns this — admin digest trigger",
   },
 
-  // Capability / RBAC stream (concurrent PR). Role and capability changes
-  // are high-sensitivity compliance events; that stream is adding audit
-  // calls as part of its own enforcement work.
-  {
-    route: "src/app/api/admin/users/[id]/role/route.ts",
-    reason: "Capability/RBAC stream owns this — role change audit added in their PR",
-  },
-  {
-    route: "src/app/api/admin/users/[id]/capabilities/grant/route.ts",
-    reason: "Capability/RBAC stream owns this",
-  },
-  {
-    route: "src/app/api/admin/users/[id]/capabilities/revoke/route.ts",
-    reason: "Capability/RBAC stream owns this",
-  },
+  // RBAC mutation routes (role change, capability grant/revoke) are NOT
+  // allowlisted: they call recordAudit directly. Role/capability changes are
+  // exactly the security-relevant authority changes the hash-chained audit log
+  // exists for. See src/app/api/admin/users/[id]/role/route.ts and the
+  // capabilities/grant + revoke routes.
 
   // People sub-routes not on the HR critical path
   {

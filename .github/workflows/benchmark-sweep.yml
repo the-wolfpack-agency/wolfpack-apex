@@ -1,0 +1,70 @@
+name: Benchmark Sweep (Continuous Learning Loop)
+
+# THE CONTINUOUS BENCHMARK SWEEP. The always-on learning loop that replaces slow
+# manual testing. Mirrors ux-scan-sweep.yml (scheduled GitHub Actions, real
+# chromium) because the scan needs a live browser the Vercel cron runtime cannot
+# run. Each tick:
+#   - walks the consent-to-test corpus (BENCHMARK_CORPUS) and selects every target
+#     that passes the read-only consent gate (assertBenchmarkConsent read-only),
+#   - scans each target READ-ONLY (GET/HEAD floor) and POSTs the raw observations to
+#     apex's ingest endpoint, which classifies + recordScan()s them server-side,
+#   - then POSTs the benchmark endpoint to trigger SERVER-SIDE scoring, refreshing
+#     the recall / coverage / noise-candidate learning signals automatically.
+#
+# READ-ONLY ONLY. This sweep never mutates a target. Active recall - probing the
+# planted vulns on a self-hosted labeled fixture - is a SEPARATE, explicitly
+# authorized pentest run (a pentest scope token), NOT this workflow.
+#
+# Auth: identical scheme to ux-scan-sweep.yml / platform-scan-browser.yml - the
+# ingest + benchmark endpoints take Authorization: Bearer ${CRON_SECRET}. We pass
+# INGEST_SECRET into the script's CRON_SECRET env. No new secrets scheme invented.
+#
+# Secrets it needs:
+#   - TARGET_BASE_URL  apex base URL (ingest + benchmark endpoints live here).
+#   - INGEST_SECRET    the Bearer secret for both endpoints (-> CRON_SECRET).
+# Optional:
+#   - BENCHMARK_JUICE_SHOP_URL  a self-hosted labeled target on OUR infra. If set,
+#     the self-hosted-juice-shop corpus entry points at it. It is swept READ-ONLY
+#     here like any other corpus target; active probing of it is a separate run.
+
+on:
+  schedule:
+    # Weekly, Monday 06:00 UTC - the corpus is small and stable, so a weekly cadence
+    # keeps the recall / coverage signals fresh without redundant daily passes.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Apex base URL (defaults to the TARGET_BASE_URL secret)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark-sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run continuous benchmark sweep
+        run: node scripts/benchmark-sweep.mjs
+        env:
+          # The script reads BASE_URL / CRON_SECRET (argv overrides env). We map the
+          # existing scan secret names onto those so the scheme stays shared with
+          # ux-scan-sweep.yml.
+          BASE_URL: ${{ github.event.inputs.base != '' && github.event.inputs.base || secrets.TARGET_BASE_URL }}
+          CRON_SECRET: ${{ secrets.INGEST_SECRET }}
+          # Optional self-hosted labeled target (our infra). Read-only here; active
+          # recall against it is a separate authorized pentest run.
+          BENCHMARK_JUICE_SHOP_URL: ${{ secrets.BENCHMARK_JUICE_SHOP_URL }}

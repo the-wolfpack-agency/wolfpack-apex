@@ -1,0 +1,568 @@
+/**
+ * Cross-scan correlation - the moat, as a PURE function.
+ *
+ * Every other scanner classifies ONE finding on ONE route in ONE modality at ONE
+ * point in time. This module is the only thing in the system that reads the WHOLE
+ * corpus of findings (every modality, every target) PLUS the history of resolved
+ * findings, and folds them into higher-order Insights no single-layer scanner can
+ * produce:
+ *
+ *   - compound_risk      : >=2 distinct categories/modalities land on the SAME
+ *                          route/resource. A security gap + a broken journey + a
+ *                          perf cliff on /checkout is an exploit/abandonment chain
+ *                          larger than its parts. Severity is CONDITIONALLY
+ *                          elevated (see compoundSeverity) - never lying that a
+ *                          high+low is a critical.
+ *   - regression         : a findingClass that was RESOLVED in history is OPEN
+ *                          again AND the resolution predates the reopen. The fix
+ *                          regressed; the narrative carries the gap in days.
+ *   - systemic_pattern   : the same findingClass across >=N distinct platforms /
+ *                          targets. A platform-wide weakness, not a one-off.
+ *   - coverage_blind_spot: a target where a modality was provably NOT exercised
+ *                          (driven by real scan coverage, never by absence of
+ *                          findings - a clean scanned modality is NOT a blind
+ *                          spot). A recommendation to scan the missing axis.
+ *
+ * PURE + deterministic: same input -> byte-identical output (insights are sorted,
+ * keys are stable). This is the tested heart; generate.ts wires it to I/O.
+ *
+ * The "modality" axis IS the ScanCategory (bug / ux_gap / broken_journey /
+ * security / performance). The findings model is deliberately modality-agnostic
+ * (see types.ts), so a category is exactly the modality a finding came from.
+ */
+
+import { createHash } from "node:crypto";
+import type { ScanSeverity, ScanCategory } from "../types";
+
+/** Severity rank: higher = worse. Drives elevation + peak-severity narratives. */
+const SEVERITY_RANK: Record<ScanSeverity, number> = {
+  low: 0,
+  medium: 1,
+  high: 2,
+  critical: 3,
+};
+const RANK_SEVERITY: ScanSeverity[] = ["low", "medium", "high", "critical"];
+
+/** The worse of two severities. */
+function maxSeverity(a: ScanSeverity, b: ScanSeverity): ScanSeverity {
+  return SEVERITY_RANK[a] >= SEVERITY_RANK[b] ? a : b;
+}
+
+/**
+ * Compound-risk severity policy (FIX 7).
+ *
+ * A compound risk is NOT unconditionally one band worse than its members - that
+ * turned a high + a low into a critical, which is a lie (a single low finding does
+ * not make a high a critical). The honest, documented policy:
+ *
+ *   - If any member is already `critical`, the chain is `critical`.
+ *   - Else if >= 2 members are at `high`, the chain is `critical` (two high
+ *     weaknesses on one resource genuinely compound into an exploit chain).
+ *   - Else if there are >= 2 members at medium-or-above, elevate the peak by one
+ *     band, capped at `high` (never invent a critical from non-critical parts).
+ *   - Otherwise (e.g. high + low, or all low) the chain is just the peak member
+ *     severity - no elevation, because there is no second substantial weakness to
+ *     compound with.
+ *
+ * Pure + deterministic. `members` is the full group (>= 2 distinct modalities).
+ */
+function compoundSeverity(members: { severity: ScanSeverity }[]): ScanSeverity {
+  const peak = members.reduce<ScanSeverity>(
+    (acc, m) => maxSeverity(acc, m.severity),
+    "low",
+  );
+  if (peak === "critical") return "critical";
+
+  const highCount = members.filter((m) => m.severity === "high").length;
+  if (highCount >= 2) return "critical";
+
+  const mediumPlus = members.filter((m) => SEVERITY_RANK[m.severity] >= 1).length;
+  if (mediumPlus >= 2) {
+    // Elevate one band, capped at high (no critical from non-critical parts).
+    return RANK_SEVERITY[Math.min(SEVERITY_RANK[peak] + 1, SEVERITY_RANK.high)];
+  }
+
+  // Not enough substantial members to compound: do not elevate.
+  return peak;
+}
+
+/**
+ * The delimiter used to join structured key/group components. The unit separator
+ * (U+001F) is a control char that cannot appear in a route or title, so it cannot
+ * be forged to split or merge a group (FIX 4). Written as an escape so the source
+ * stays plain text.
+ */
+const SEP = "\u001f";
+
+/**
+ * A stable, collision-proof dedup key: sha256 of a JSON tuple (FIX 5).
+ *
+ * The old keys joined raw fields with `::` / `+`, which ALSO appear in routes and
+ * titles - so two genuinely distinct insights could produce the SAME key and the
+ * store's ON CONFLICT silently overwrote one (data lost). Hashing a structured
+ * tuple makes that impossible: the structure, not a fragile concatenation, is the
+ * identity. The `kind` stays a readable prefix for debuggability.
+ */
+function insightKey(kind: InsightKind, tuple: unknown): string {
+  const h = createHash("sha256").update(JSON.stringify(tuple)).digest("hex").slice(0, 32);
+  return `${kind}::${h}`;
+}
+
+/**
+ * Route normalization (FIX 4).
+ *
+ * Raw routes carry query strings + fragments and mix URL paths (`/checkout`) with
+ * file paths (`src/app/page.tsx`). Grouping on the raw string both SPLITS the same
+ * resource (`/checkout?a=1` vs `/checkout`) and MERGES unrelated ones. Normalize:
+ *   - strip query (`?...`) and fragment (`#...`),
+ *   - namespace file paths vs URL paths so they can never collide,
+ *   - canonicalize the trailing slash (drop it except for the bare root URL).
+ * Returns `{ ns, path }`; callers join with SEP (a char that cannot appear in the
+ * fields).
+ */
+function normalizeRoute(route: string): { ns: "url" | "file"; path: string } {
+  let r = route.trim();
+  // Cut at the FIRST of `?` (query) or `#` (fragment).
+  const qi = r.indexOf("?");
+  const hi = r.indexOf("#");
+  const cut = Math.min(qi === -1 ? r.length : qi, hi === -1 ? r.length : hi);
+  r = r.slice(0, cut);
+
+  // A URL path starts with `/` (or is a full http(s) URL we reduce to its path).
+  // Anything else (e.g. `src/app/page.tsx`, `pages/api/x.ts`) is a file path.
+  let ns: "url" | "file";
+  if (/^https?:\/\//i.test(r)) {
+    try {
+      r = new URL(r).pathname;
+    } catch {
+      /* leave r as-is if it does not parse */
+    }
+    ns = "url";
+  } else if (r.startsWith("/")) {
+    ns = "url";
+  } else {
+    ns = "file";
+  }
+
+  // Canonical trailing slash: drop it for URL paths except the bare root.
+  if (ns === "url" && r.length > 1 && r.endsWith("/")) {
+    r = r.replace(/\/+$/, "");
+    if (r === "") r = "/";
+  }
+  return { ns, path: r };
+}
+
+/** Group key for compound-risk grouping: platform + normalized route, joined with
+ *  the unforgeable separator. */
+function routeGroupKey(platform: string, route: string): string {
+  const { ns, path } = normalizeRoute(route);
+  return [platform, ns, path].join(SEP);
+}
+
+/** The minimal finding shape correlation needs. ScanFindingRow (the store row) is
+ *  a structural superset, so listFindings() output flows in directly. */
+export interface CorrelationFinding {
+  platform: string;
+  route: string;
+  severity: ScanSeverity;
+  category: ScanCategory;
+  title: string;
+  /** When the finding was first opened (ISO). Drives the regression ordering check
+   *  (a resolution must predate the reopen to count as a regression). Optional:
+   *  absent => regression ordering cannot be proven, so it is NOT claimed. */
+  createdAt?: string;
+}
+
+/** A historical finding that has been RESOLVED, used for regression detection.
+ *  resolvedAt is an ISO timestamp (the store's decided_at / created_at). */
+export interface ResolvedFindingRef {
+  platform: string;
+  route: string;
+  category: ScanCategory;
+  title: string;
+  /** When the finding was resolved (ISO). Drives the regression gap-in-days. */
+  resolvedAt: string;
+}
+
+/** History context for regression detection. `now` is injectable for determinism
+ *  in tests (defaults to Date.now at call time via the caller). */
+export interface CorrelationHistory {
+  resolved: ResolvedFindingRef[];
+}
+
+/** A reference back to a member finding, so the UI can show the chain. */
+export interface FindingRef {
+  platform: string;
+  route: string;
+  severity: ScanSeverity;
+  category: ScanCategory;
+  title: string;
+}
+
+export type InsightKind =
+  | "compound_risk"
+  | "regression"
+  | "systemic_pattern"
+  | "coverage_blind_spot";
+
+export interface Insight {
+  kind: InsightKind;
+  severity: ScanSeverity;
+  /** Distinct categories/modalities this insight spans, sorted + de-duped. */
+  modalities: ScanCategory[];
+  /** The findings that compose the insight. Empty for a blind-spot (the point is
+   *  what is MISSING), populated for the others. */
+  members: FindingRef[];
+  /** Human-readable explanation of the chain / pattern. */
+  narrative: string;
+  /** The platform/target this insight is about. */
+  platform: string;
+  /** Stable dedup key: same logical insight -> same key across re-runs. */
+  key: string;
+}
+
+export interface CorrelateOptions {
+  /** Minimum distinct platforms for a systemic_pattern. Default 2. */
+  systemicMinTargets?: number;
+  /** Injected clock for deterministic regression gap-in-days. Default Date.now. */
+  now?: () => number;
+  /** Every category we EXPECT a thorough scan to exercise. A target missing one
+   *  of these (and provably not having scanned it) yields a coverage_blind_spot. */
+  expectedCategories?: ScanCategory[];
+  /**
+   * What each platform/target ACTUALLY scanned, keyed by platform. The value is
+   * the set of categories/modalities that genuinely ran for that target (FIX 3).
+   *
+   * Blind-spot detection MUST be driven by real coverage, not by absence of
+   * findings: a modality that was scanned and came back CLEAN has zero findings,
+   * and inferring "never scanned" from that falsely brands a clean result a blind
+   * spot. When this map is provided, a blind spot is only emitted for a category
+   * in `expectedCategories` that is NOT in the platform's scanned set (positive
+   * evidence it was not exercised). When it is absent, NO blind spot is emitted -
+   * we never assert a falsehood from missing data.
+   */
+  scannedCategories?: Record<string, ScanCategory[]>;
+}
+
+const ALL_CATEGORIES: ScanCategory[] = [
+  "bug",
+  "ux_gap",
+  "broken_journey",
+  "security",
+  "performance",
+];
+
+/** Identity of a "finding class" independent of which target it landed on:
+ *  category + title. Two targets with the same class is a systemic pattern; the
+ *  same class resolved-then-open is a regression. */
+function classKey(category: ScanCategory, title: string): string {
+  return `${category}::${title}`;
+}
+
+function sortedUnique<T extends string>(xs: T[]): T[] {
+  return Array.from(new Set(xs)).sort();
+}
+
+function toRef(f: CorrelationFinding): FindingRef {
+  return {
+    platform: f.platform,
+    route: f.route,
+    severity: f.severity,
+    category: f.category,
+    title: f.title,
+  };
+}
+
+/**
+ * The core IP. Reads the full finding corpus (across modalities + targets) and the
+ * resolved-finding history, returns the higher-order Insights. Pure: deterministic
+ * ordering, stable keys, no I/O.
+ */
+export function correlateFindings(
+  findings: CorrelationFinding[],
+  history?: CorrelationHistory,
+  options?: CorrelateOptions,
+): Insight[] {
+  const systemicMin = Math.max(options?.systemicMinTargets ?? 2, 2);
+  const nowMs = (options?.now ?? Date.now)();
+  const expected = options?.expectedCategories ?? ALL_CATEGORIES;
+
+  const insights: Insight[] = [];
+
+  insights.push(...detectCompoundRisks(findings));
+  insights.push(...detectRegressions(findings, history, nowMs));
+  insights.push(...detectSystemicPatterns(findings, systemicMin));
+  insights.push(...detectBlindSpots(expected, options?.scannedCategories));
+
+  // Deterministic order: worst severity first, then by kind, then by key, so a
+  // re-run with identical input produces byte-identical output.
+  insights.sort((a, b) => {
+    const s = SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity];
+    if (s !== 0) return s;
+    if (a.kind !== b.kind) return a.kind < b.kind ? -1 : 1;
+    return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+  });
+
+  return insights;
+}
+
+/**
+ * compound_risk: group findings by (platform, NORMALIZED route); a group spanning
+ * >=2 distinct categories is a chain. Severity is conditionally elevated.
+ */
+function detectCompoundRisks(findings: CorrelationFinding[]): Insight[] {
+  // Group by platform + NORMALIZED route (FIX 4): query strings + fragments are
+  // stripped and file paths are namespaced apart from URL paths, so the same
+  // resource no longer splits across `?`-variants and unrelated file/URL paths no
+  // longer merge. The group key uses the unforgeable U+001F separator.
+  const byRoute = new Map<string, CorrelationFinding[]>();
+  for (const f of findings) {
+    const k = routeGroupKey(f.platform, f.route);
+    const arr = byRoute.get(k);
+    if (arr) arr.push(f);
+    else byRoute.set(k, [f]);
+  }
+
+  const out: Insight[] = [];
+  for (const [, group] of byRoute) {
+    const modalities = sortedUnique(group.map((g) => g.category));
+    if (modalities.length < 2) continue; // needs >=2 distinct modalities, same route
+
+    const platform = group[0].platform;
+    const route = group[0].route;
+    const { ns, path: normRoute } = normalizeRoute(route);
+    const peak = group.reduce<ScanSeverity>(
+      (acc, g) => maxSeverity(acc, g.severity),
+      "low",
+    );
+    // Conditional elevation (FIX 7): a high + a low is no longer auto-critical.
+    const severity = compoundSeverity(group);
+
+    // Stable member ordering (worst severity, then category) so the narrative +
+    // key are deterministic.
+    const members = group
+      .slice()
+      .sort(
+        (a, b) =>
+          SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] ||
+          (a.category < b.category ? -1 : a.category > b.category ? 1 : 0),
+      )
+      .map(toRef);
+
+    const elevated = SEVERITY_RANK[severity] > SEVERITY_RANK[peak];
+    const narrative =
+      `Compound risk on ${normRoute} (${platform}): ${modalities.length} independent ` +
+      `weaknesses across ${modalities.join(", ")} land on the same resource. ` +
+      (elevated
+        ? `Chained, they exceed any single finding, so this is rated ${severity} ` +
+          `(above the worst member, ${peak}). `
+        : `Rated ${severity} (the worst member; not enough substantial findings to ` +
+          `elevate the chain). `) +
+      `Findings: ` +
+      members.map((m) => `${m.category}/${m.title}`).join("; ") + ".";
+
+    out.push({
+      kind: "compound_risk",
+      severity,
+      modalities,
+      members,
+      narrative,
+      platform,
+      // Structured, hashed key (FIX 5): a route/title containing `::` or `+` is no
+      // longer concatenated raw into the key, so distinct insights cannot collide
+      // and silently overwrite one another under ON CONFLICT. The normalized route
+      // + namespace + sorted modality set are the identity; a re-run with the same
+      // set dedups, a new modality on the route is a distinct insight.
+      key: insightKey("compound_risk", [platform, ns, normRoute, modalities]),
+    });
+  }
+  return out;
+}
+
+/**
+ * regression: a findingClass that appears in resolved history AND is open now, on
+ * the same platform+route, AND the resolution PREDATES the reopen (FIX 6). The fix
+ * regressed. Without the ordering check, any open finding matching a resolved class
+ * by route+title was flagged - even one that has been continuously open since
+ * before it was ever "resolved", which is not a regression.
+ */
+function detectRegressions(
+  findings: CorrelationFinding[],
+  history: CorrelationHistory | undefined,
+  nowMs: number,
+): Insight[] {
+  if (!history || history.resolved.length === 0) return [];
+
+  // Index resolved findings by platform+route+class, keeping the MOST RECENT
+  // resolution (largest valid resolvedAt) so the gap is measured from the last
+  // fix. A future-dated or unparseable resolvedAt is ignored as the "most recent"
+  // (guarded below) so a bogus timestamp cannot fabricate a regression.
+  const resolvedIndex = new Map<string, ResolvedFindingRef>();
+  for (const r of history.resolved) {
+    const ms = Date.parse(r.resolvedAt);
+    // Guard: a resolution dated in the FUTURE is not trustworthy ordering data.
+    if (!Number.isFinite(ms) || ms > nowMs) continue;
+    const k = `${r.platform}${SEP}${r.route}${SEP}${classKey(r.category, r.title)}`;
+    const prev = resolvedIndex.get(k);
+    if (!prev || ms > Date.parse(prev.resolvedAt)) {
+      resolvedIndex.set(k, r);
+    }
+  }
+
+  const out: Insight[] = [];
+  const seen = new Set<string>();
+  for (const f of findings) {
+    const k = `${f.platform}${SEP}${f.route}${SEP}${classKey(f.category, f.title)}`;
+    const prev = resolvedIndex.get(k);
+    if (!prev) continue;
+    if (seen.has(k)) continue; // one regression insight per class+route
+
+    const resolvedMs = Date.parse(prev.resolvedAt);
+    if (!Number.isFinite(resolvedMs)) continue; // unparseable: cannot prove ordering
+
+    // ORDERING CHECK (FIX 6): a regression requires the finding to have REOPENED
+    // after the resolution. If the open finding carries a createdAt, require
+    // resolvedAt < createdAt (it was resolved, THEN a new instance opened). When
+    // createdAt is absent we cannot prove ordering, so we do NOT claim a
+    // regression - a false "regressed" is worse than a missed one here.
+    if (f.createdAt === undefined) continue;
+    const createdMs = Date.parse(f.createdAt);
+    if (!Number.isFinite(createdMs)) continue;
+    if (resolvedMs >= createdMs) continue; // resolved AFTER (or at) the open: not a regression
+
+    seen.add(k);
+
+    const gapDays = Math.max(0, Math.round((nowMs - resolvedMs) / 86_400_000));
+
+    // A regression is at least the severity of the reopened finding; a reopened
+    // critical stays critical.
+    const severity = f.severity;
+
+    const narrative =
+      `Regression on ${f.route} (${f.platform}): "${f.title}" (${f.category}) was ` +
+      `previously resolved ${gapDays} day${gapDays === 1 ? "" : "s"} ago and has ` +
+      `reappeared. A fix regressed; reopen and re-verify the original remediation.`;
+
+    out.push({
+      kind: "regression",
+      severity,
+      modalities: [f.category],
+      members: [toRef(f)],
+      narrative,
+      platform: f.platform,
+      // Structured, hashed key (FIX 5): route/title with `::` no longer collides.
+      key: insightKey("regression", [f.platform, f.route, f.category, f.title]),
+    });
+  }
+  return out;
+}
+
+/**
+ * systemic_pattern: the same findingClass (category+title) across >=N distinct
+ * platforms/targets. A platform-wide weakness.
+ */
+function detectSystemicPatterns(
+  findings: CorrelationFinding[],
+  minTargets: number,
+): Insight[] {
+  const byClass = new Map<
+    string,
+    { category: ScanCategory; title: string; members: CorrelationFinding[]; platforms: Set<string> }
+  >();
+  for (const f of findings) {
+    const k = `${f.category}${SEP}${f.title}`;
+    let e = byClass.get(k);
+    if (!e) {
+      e = { category: f.category, title: f.title, members: [], platforms: new Set() };
+      byClass.set(k, e);
+    }
+    e.members.push(f);
+    e.platforms.add(f.platform);
+  }
+
+  const out: Insight[] = [];
+  for (const [, e] of byClass) {
+    if (e.platforms.size < minTargets) continue;
+
+    const peak = e.members.reduce<ScanSeverity>(
+      (acc, g) => maxSeverity(acc, g.severity),
+      "low",
+    );
+    const platforms = Array.from(e.platforms).sort();
+    const members = e.members
+      .slice()
+      .sort((a, b) => (a.platform < b.platform ? -1 : a.platform > b.platform ? 1 : 0))
+      .map(toRef);
+
+    const narrative =
+      `Systemic pattern: "${e.title}" (${e.category}) appears on ${e.platforms.size} ` +
+      `distinct targets (${platforms.join(", ")}). This is a platform-wide weakness, ` +
+      `not a one-off; fix it once at the source/template rather than per target.`;
+
+    out.push({
+      kind: "systemic_pattern",
+      severity: peak,
+      modalities: [e.category],
+      members,
+      narrative,
+      // Systemic spans many targets; "all" marks it as not target-scoped.
+      platform: "all",
+      // Structured, hashed key (FIX 5): title with `::`/`+` no longer collides.
+      key: insightKey("systemic_pattern", [e.category, e.title, platforms]),
+    });
+  }
+  return out;
+}
+
+/**
+ * coverage_blind_spot: a target where a whole expected modality was provably NOT
+ * exercised (FIX 3).
+ *
+ * The old logic inferred "modality scanned" from the PRESENCE of findings, so a
+ * modality that was scanned and came back CLEAN was falsely reported as "never
+ * scanned - cannot claim a clean bill". That is a lie about a real clean result.
+ *
+ * The honest rule: drive blind spots from actual scan COVERAGE. Only when we have
+ * positive evidence (`scannedCategories[platform]`) that a target did NOT run an
+ * expected modality do we emit a blind spot. With no coverage data plumbed, we
+ * emit NOTHING - we never label a clean result a blind spot, and never assert a
+ * falsehood from missing data.
+ */
+function detectBlindSpots(
+  expected: ScanCategory[],
+  scannedCategories?: Record<string, ScanCategory[]>,
+): Insight[] {
+  // No coverage data => no positive evidence a modality was skipped => emit
+  // nothing. (Absence of findings is NOT evidence of absence of scanning.)
+  if (!scannedCategories) return [];
+
+  const out: Insight[] = [];
+  for (const platform of Object.keys(scannedCategories).sort()) {
+    const scanned = new Set(scannedCategories[platform] ?? []);
+    // A target that ran nothing tells us nothing about which axes are blind.
+    if (scanned.size === 0) continue;
+
+    const missing = expected.filter((c) => !scanned.has(c)).sort();
+    if (missing.length === 0) continue;
+
+    const covered = Array.from(scanned).sort();
+    const narrative =
+      `Coverage blind spot on ${platform}: the scan exercised ${covered.join(", ")} ` +
+      `but ${missing.join(", ")} ${missing.length === 1 ? "was" : "were"} never ` +
+      `run. A clean bill on ${missing.join(", ")} cannot be claimed until that ` +
+      `modality is scanned. Recommend running the missing scan.`;
+
+    out.push({
+      kind: "coverage_blind_spot",
+      // A blind spot is a recommendation, not an active vuln: medium.
+      severity: "medium",
+      modalities: missing,
+      members: [],
+      narrative,
+      platform,
+      // Structured, hashed key (FIX 5): platform with delimiters no longer collides.
+      key: insightKey("coverage_blind_spot", [platform, missing]),
+    });
+  }
+  return out;
+}

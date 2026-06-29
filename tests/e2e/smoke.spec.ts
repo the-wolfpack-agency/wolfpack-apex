@@ -18,6 +18,7 @@ import {
   signInIfPossible,
   type SmokeProbe,
 } from "./helpers/smoke-helpers";
+import { waitForAppReady } from "./helpers/app-ready";
 
 const target = resolveSmokeTarget();
 
@@ -25,7 +26,12 @@ const target = resolveSmokeTarget();
 // signed-in dashboard shell; the landing route works unauthenticated.
 const PROBES: SmokeProbe[] = [
   { path: "/", expectText: "Instinct" },
-  { path: "/setup", expectText: "Setup" },
+  // /setup shows the wizard ("Set up your workspace") for a fresh workspace but
+  // redirects an already-onboarded account (e.g. the smoke user) to the
+  // dashboard shell. Accept either; a 401 blank is the real failure we guard.
+  // The old "Setup" probe never matched the "Set up" h1 and was hidden by
+  // verify.yml continue-on-error.
+  { path: "/setup", expectText: "Set up", expectAnyText: ["Set up", "Instinct"] },
   { path: "/tasks", expectText: "Task" },
   { path: "/notifications", expectText: "Notification" },
   { path: "/settings", expectText: "Setting" },
@@ -43,6 +49,11 @@ test.describe("verify smoke", () => {
       // Local fallback is fine, just surface it.
       console.log(`[smoke] PROD_URL not set; using ${target.baseUrl}`);
     }
+    // Wait for the target to actually be up before probing. A cold preview
+    // returns 502/503 for the first few seconds; without this gate the first
+    // probe races the boot and fails on readiness, not on a real bug. This
+    // does NOT change what any probe asserts.
+    await waitForAppReady(target.baseUrl);
   });
 
   test("authenticated routes render cleanly", async ({ page }) => {

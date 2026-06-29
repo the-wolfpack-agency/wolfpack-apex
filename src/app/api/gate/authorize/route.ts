@@ -167,6 +167,34 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     mode: "enforce",
   });
 
+  // FAIL CLOSED ON UNAUDITABLE. The whole point of the gate is that every
+  // external decision lands in the tamper-evident ledger: "no audit, no action".
+  // authorize() sets decision.unauditable in enforce mode when the ledger write
+  // failed even after a retry, but it deliberately does NOT mutate
+  // effectiveOutcome (a benign action's intended outcome is still "allow"). So we
+  // MUST NOT branch on effectiveOutcome alone: a down ledger would otherwise
+  // authorize a benign action UN-AUDITED. Mirror the internal dispatcher
+  // (src/lib/assistant/tools/dispatcher.ts:180) and refuse. A normal policy deny
+  // is auditable (wouldBlock true, unauditable false) and flows through the
+  // served-verdict path below as { allowed: false }, so we key ONLY on
+  // unauditable here.
+  if (decision.unauditable) {
+    trackEvent(
+      "platform.gate_api_blocked",
+      `apikey:${key.id}`,
+      "external_agent",
+      { reason: "unauditable", agent: key.agent, tool },
+    );
+    return NextResponse.json({
+      allowed: false,
+      decision: {
+        ruleId: decision.ruleId,
+        effectiveOutcome: decision.effectiveOutcome,
+        reason: "unauditable: ledger unavailable, failing closed",
+      },
+    });
+  }
+
   const allowed = decision.effectiveOutcome === "allow";
 
   // A served verdict (allow OR policy-deny). Fire the authorized event; the gate

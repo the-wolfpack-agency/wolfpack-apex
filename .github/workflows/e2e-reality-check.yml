@@ -156,6 +156,11 @@ jobs:
         run: npx playwright test tests/e2e/knowledge-qa-cache.spec.ts --config=playwright.config.ts --reporter=github
 
 
+      # Upload ALL diagnostics so any real failure is debuggable and no data
+      # is lost: the HTML report, the raw trace/video/screenshot artifacts
+      # (test-results/, written per the config's outputDir), and the legacy
+      # custom screenshots dir. `if: always()` so we get artifacts even when
+      # the gate steps fail.
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
@@ -163,6 +168,7 @@ jobs:
           name: reality-check-report
           path: |
             playwright-report/
+            test-results/
             tests/e2e/screenshots/
           retention-days: 14
           if-no-files-found: ignore

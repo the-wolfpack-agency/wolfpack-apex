@@ -23,10 +23,18 @@ import "@testing-library/jest-dom";
  */
 
 const mockFetchWithRefresh = jest.fn();
+const mockPush = jest.fn();
+/* A signed-in admin by default so the auth-redirect guard lets the page load.
+   The auth-redirect test flips this to null to assert the /login push. */
+let mockUser: unknown = { id: "u-cto", role: "admin" };
 jest.mock("@/lib/client-auth", () => ({
   fetchWithRefresh: (...a: unknown[]) =>
     (mockFetchWithRefresh as unknown as (...args: unknown[]) => unknown)(...a),
   jsonHeaders: () => ({ "Content-Type": "application/json" }),
+  getInstinctUser: () => mockUser,
+}));
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush }),
 }));
 
 jest.mock("next/link", () => ({
@@ -326,6 +334,8 @@ const params = Promise.resolve({ id: "ag-1" });
 
 beforeEach(() => {
   mockFetchWithRefresh.mockReset();
+  mockPush.mockReset();
+  mockUser = { id: "u-cto", role: "admin" };
 });
 
 describe("/admin/agents/[id]: profile", () => {
@@ -1202,6 +1212,100 @@ describe("/admin/agents/[id]: behavior and drift", () => {
   });
 });
 
+describe("/admin/agents/[id]: command-view engagement analytics", () => {
+  // Analytics POSTs the page fires through fetchWithRefresh -> /api/analytics.
+  const analyticsBodies = () =>
+    mockFetchWithRefresh.mock.calls
+      .filter(
+        (c) =>
+          String(c[0]).includes("/api/analytics") &&
+          (c[1] as { method?: string } | undefined)?.method === "POST",
+      )
+      .map((c) => JSON.parse(String((c[1] as { body: string }).body)));
+
+  it("fires agent.command_view_viewed ONCE after a successful agent load with the metric-tile counts", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        // Two ledger entries -> decision_count 2; one task -> run_count 1.
+        log: () => mkRes({ entries: [makeLogEntry({ id: "c-1" }), makeLogEntry({ id: "c-2" })] }),
+        tasks: () => mkRes({ tasks: [makeTask({ id: "t-1" })] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() =>
+      expect(
+        analyticsBodies().filter((b) => b.event === "agent.command_view_viewed").length,
+      ).toBe(1),
+    );
+    const viewed = analyticsBodies().find((b) => b.event === "agent.command_view_viewed");
+    expect(viewed.metadata.agent_id).toBe("ag-1");
+    expect(viewed.metadata.decision_count).toBe(2);
+    expect(viewed.metadata.run_count).toBe(1);
+  });
+
+  it("command_view_viewed stays at exactly one even after a lifecycle PATCH refetches the agent", async () => {
+    const active = makeAgent({ state: "active" });
+    const paused = makeAgent({ state: "paused" });
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: active }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        onPatch: () => mkRes({ agent: paused }),
+        log: () => mkRes({ entries: [] }),
+        tasks: () => mkRes({ tasks: [] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+    await waitFor(() =>
+      expect(
+        analyticsBodies().filter((b) => b.event === "agent.command_view_viewed").length,
+      ).toBe(1),
+    );
+
+    // Pause the agent: the PATCH refetches/updates the agent record.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("agent-pause"));
+    });
+    await waitFor(() =>
+      expect(
+        mockFetchWithRefresh.mock.calls.some((c) => (c[1] as any)?.method === "PATCH"),
+      ).toBe(true),
+    );
+    expect(
+      analyticsBodies().filter((b) => b.event === "agent.command_view_viewed").length,
+    ).toBe(1);
+  });
+
+  it("fires NO analytics on the auth-redirect (logged-out) path", async () => {
+    mockUser = null;
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    expect(mockPush).toHaveBeenCalledWith("/login?next=/admin/agents/ag-1");
+    // The guard returns before any load, so no command-view analytics fires.
+    expect(
+      analyticsBodies().some((b) => b.event === "agent.command_view_viewed"),
+    ).toBe(false);
+  });
+});
+
 describe("/admin/agents/[id]: agent log (granular audit trail)", () => {
   it("loads entries from the granular endpoint and renders summary rows with the right outcome pill colors", async () => {
     const allow = makeLogEntry({
@@ -1447,20 +1551,16 @@ describe("/admin/agents/[id]: agent log (granular audit trail)", () => {
 
     await waitFor(() => expect(screen.getByTestId("agent-log-list")).toBeInTheDocument());
 
-    // One analytics POST fired with the view event and the rendered entry count.
-    await waitFor(() => {
-      const post = mockFetchWithRefresh.mock.calls.find(
-        (c) =>
-          (c[1] as { method?: string } | undefined)?.method === "POST" &&
-          String(c[0]).includes("/api/analytics"),
-      );
-      expect(post).toBeTruthy();
-    });
-    const post = mockFetchWithRefresh.mock.calls.find(
-      (c) =>
-        (c[1] as { method?: string } | undefined)?.method === "POST" &&
-        String(c[0]).includes("/api/analytics"),
-    );
+    // The log-view analytics POST fired with the rendered entry count. (The page
+    // also fires a command-view event; scope the lookup to agent.log_viewed.)
+    const findLogViewed = () =>
+      mockFetchWithRefresh.mock.calls.find((c) => {
+        if ((c[1] as { method?: string } | undefined)?.method !== "POST") return false;
+        if (!String(c[0]).includes("/api/analytics")) return false;
+        return JSON.parse(String((c[1] as { body: string }).body)).event === "agent.log_viewed";
+      });
+    await waitFor(() => expect(findLogViewed()).toBeTruthy());
+    const post = findLogViewed();
     const body = JSON.parse((post?.[1] as { body: string }).body);
     expect(body.event).toBe("agent.log_viewed");
     expect(body.metadata.agent_id).toBe("ag-1");
@@ -1487,13 +1587,15 @@ describe("/admin/agents/[id]: agent log (granular audit trail)", () => {
     expect(screen.getByTestId("agent-name")).toBeInTheDocument();
     expect(screen.getByTestId("agent-drift-baseline")).toBeInTheDocument();
     expect(screen.queryByTestId("agent-log-list")).not.toBeInTheDocument();
-    // No view analytics fires on a failed load.
-    const post = mockFetchWithRefresh.mock.calls.find(
-      (c) =>
-        (c[1] as { method?: string } | undefined)?.method === "POST" &&
-        String(c[0]).includes("/api/analytics"),
-    );
-    expect(post).toBeFalsy();
+    // No LOG view analytics fires on a failed log load. (The command-view event
+    // is independent of the log: it fires on the successful agent load and is
+    // asserted in its own describe.)
+    const logPost = mockFetchWithRefresh.mock.calls.find((c) => {
+      if ((c[1] as { method?: string } | undefined)?.method !== "POST") return false;
+      if (!String(c[0]).includes("/api/analytics")) return false;
+      return JSON.parse(String((c[1] as { body: string }).body)).event === "agent.log_viewed";
+    });
+    expect(logPost).toBeFalsy();
   });
 
   it("Refresh re-fetches the granular log", async () => {
@@ -2107,5 +2209,145 @@ describe("/admin/agents/[id]: tabbed layout", () => {
     for (const s of sections) {
       expect(screen.getByTestId(s)).toBeInTheDocument();
     }
+  });
+});
+
+describe("/admin/agents/[id]: command-view console redesign", () => {
+  it("redirects an unauthenticated visitor to /login with a next back to this agent (never blank)", async () => {
+    mockUser = null;
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    expect(mockPush).toHaveBeenCalledWith("/login?next=/admin/agents/ag-1");
+    // The agent fetch never fires when the guard short-circuits the load.
+    const agentGet = mockFetchWithRefresh.mock.calls.find((c) =>
+      String(c[0]).endsWith("/api/admin/agents/ag-1"),
+    );
+    expect(agentGet).toBeFalsy();
+  });
+
+  it("renders the identity header: name, the id in a monospace block, and a status pill", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent({ state: "paused" }) }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-name")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-name")).toHaveTextContent("Research Scout");
+    // The id is rendered in a monospace element in the header.
+    expect(screen.getByTestId("agent-id-mono")).toHaveTextContent("ag-1");
+    // The state renders as a console StatusPill (keyed by the same testid),
+    // carrying the kit's tone for the agent state.
+    const pill = screen.getByTestId("agent-state-chip");
+    expect(pill).toHaveTextContent(/paused/i);
+    expect(pill).toHaveAttribute("data-tone", "warning");
+  });
+
+  it("renders the metric tiles from the fetched ledger + work list (decisions, allowed, denied, enforcement, runs)", async () => {
+    // Three governed actions: two allowed, one denied; one of the allowed would
+    // have blocked (enforcement). One assigned run.
+    const allow1 = makeLogEntry({ id: "m-allow-1", effective_outcome: "allow", would_block: false });
+    const allow2 = makeLogEntry({ id: "m-allow-2", effective_outcome: "allow", would_block: true });
+    const deny1 = makeLogEntry({ id: "m-deny-1", effective_outcome: "deny", would_block: true });
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        tasks: () => mkRes({ tasks: [makeTask({ id: "run-1" })] }),
+        log: () => mkRes({ entries: [allow1, allow2, deny1] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-metrics")).toBeInTheDocument());
+
+    // The metrics panel is always mounted (the trust surface) on the default tab.
+    expect(screen.getByTestId("agent-metrics-panel")).toBeInTheDocument();
+
+    // Decisions = 3, allowed = 2, denied = 1, enforcement = 2/3 = 67%, runs = 1.
+    // The MetricTile value counts up; assert the final rendered figure.
+    await waitFor(() =>
+      expect(screen.getByTestId("metric-decisions")).toHaveTextContent("3"),
+    );
+    expect(screen.getByTestId("metric-allowed")).toHaveTextContent("2");
+    expect(screen.getByTestId("metric-denied")).toHaveTextContent("1");
+    expect(screen.getByTestId("metric-enforcement")).toHaveTextContent("67%");
+    expect(screen.getByTestId("metric-runs")).toHaveTextContent("1");
+    // The decision-activity sparkline renders when there is at least one decision.
+    expect(screen.getByTestId("metric-decisions-spark")).toBeInTheDocument();
+  });
+
+  it("zeroes the metric tiles cleanly when the ledger and work list are empty (no decisions, no sparkline)", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ agent: makeAgent() }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+        tasks: () => mkRes({ tasks: [] }),
+        log: () => mkRes({ entries: [] }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-metrics")).toBeInTheDocument());
+    // A freshly onboarded agent reads zeros, not a blank panel.
+    await waitFor(() =>
+      expect(screen.getByTestId("metric-decisions")).toHaveTextContent("0"),
+    );
+    expect(screen.getByTestId("metric-enforcement")).toHaveTextContent("0%");
+    // No sparkline when there is no decision activity to trend.
+    expect(screen.queryByTestId("metric-decisions-spark")).not.toBeInTheDocument();
+  });
+
+  it("still renders the not-found state for a missing agent (never blank)", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({}, { ok: false, status: 404 }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-not-found")).toBeInTheDocument());
+    // The metrics panel does not render when there is no agent.
+    expect(screen.queryByTestId("agent-metrics")).not.toBeInTheDocument();
+  });
+
+  it("renders the error state without blanking when the agent fetch fails non-404", async () => {
+    mockFetchWithRefresh.mockImplementation(
+      routeByUrl({
+        agent: () => mkRes({ error: "boom" }, { ok: false, status: 500 }),
+        scan: () => mkRes({}, { ok: false, status: 404 }),
+      }),
+    );
+
+    await act(async () => {
+      render(<AgentProfilePage params={params} />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-error")).toBeInTheDocument());
+    expect(screen.getByTestId("agent-error")).toHaveTextContent(/could not load agent/i);
   });
 });

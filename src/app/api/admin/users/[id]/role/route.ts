@@ -13,6 +13,7 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { isTeamRole } from "@/lib/auth/role-capabilities";
 import { safeQuery, query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 export async function POST(
   req: NextRequest,
@@ -62,6 +63,22 @@ export async function POST(
     to_role: body.role,
     changed_by: auth.user.id,
   });
+
+  // A role change is exactly what the hash-chained audit log exists for: who
+  // granted what authority to whom, before/after, when. Best-effort write that
+  // never breaks the response (mirrors the /name route).
+  const meta = extractRequestMetadata(req);
+  await recordAudit({
+    actor: { user_id: auth.user.id, role: auth.user.role },
+    action: "admin.user.role_changed",
+    resourceType: "team_member",
+    resourceId: targetUserId,
+    beforeState: { role: fromRole },
+    afterState: { role: body.role },
+    ipAddress: meta.ipAddress,
+    userAgent: meta.userAgent,
+    requestId: meta.requestId,
+  }).catch((e) => console.warn("[audit]", (e as Error).message));
 
   return NextResponse.json({ ok: true, from_role: fromRole, to_role: body.role });
 }

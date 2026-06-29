@@ -1,21 +1,38 @@
 "use client";
 
 /**
- * /admin/platform-scans — review surface for the platform-scan agent.
+ * /admin/platform-scans — the SCAN COMMAND CENTER.
  *
+ * Flagship client-facing "view the results" surface for the platform-scan agent.
  * An agent crawls a target platform's routes/journeys and surfaces findings:
  * bugs, UX gaps, broken journeys, security, and performance issues, each with a
- * severity. Findings are gated into the learning loop. A human reviews them
- * here: run a fresh scan, then acknowledge or resolve each open finding (decided
- * rows drop out of the open list in place, like the agent approvals queue).
+ * severity. Findings are gated into the learning loop. A human reviews them here:
+ * run a fresh scan, then acknowledge or resolve each open finding (decided rows
+ * drop out of the open list in place, like the agent approvals queue).
+ *
+ * Presentation is the dark-glass command-center kit (@/components/console):
+ * GlassPanel surfaces, MetricTile hero row with count-up + sparklines, StatusPill
+ * severity vocabulary, a div-built severity-distribution bar (no charting dep),
+ * SectionHeader treatments, and ConsoleGrid staggered reveal. Data wiring,
+ * controls, and states are preserved exactly — same endpoints, same handlers.
  *
  * Auth: every fetch goes through fetchWithRefresh (15-min access TTL, HttpOnly
- * refresh rotation). POST bodies use jsonHeaders().
+ * refresh rotation). POST bodies use jsonHeaders(). Unauthenticated visitors are
+ * redirected to /login (never a blank surface).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+import { fetchWithRefresh, getInstinctToken, jsonHeaders } from "@/lib/client-auth";
+import {
+  GlassPanel,
+  MetricTile,
+  StatusPill,
+  Sparkline,
+  SectionHeader,
+  ConsoleGrid,
+  type SeverityTone,
+} from "@/components/console";
 
 type Severity = "critical" | "high" | "medium" | "low";
 type Category = "bug" | "ux_gap" | "broken_journey" | "security" | "performance";
@@ -55,9 +72,21 @@ interface ScanTarget {
 
 type ScanMode = "http" | "static" | "api";
 
-const SEVERITY_COLOR: Record<Severity, string> = {
+// Severity -> the console kit's tone vocabulary. The kit collapses high into the
+// error tone; we keep high VISUALLY distinct (warning/amber) here so the four
+// severities read as four bands, matching the prior design + the distribution bar.
+const SEVERITY_TONE: Record<Severity, SeverityTone> = {
+  critical: "error",
+  high: "warning",
+  medium: "gold",
+  low: "neutral",
+};
+
+// CSS var per severity for the distribution bar + sparkline accents (token-based;
+// the tone vocabulary backs each one so colours stay single-sourced).
+const SEVERITY_VAR: Record<Severity, string> = {
   critical: "var(--wp-error, #ef4444)",
-  high: "#f59e0b",
+  high: "var(--wp-warning, #f59e0b)",
   medium: "var(--wp-gold, #f1c233)",
   low: "var(--wp-text-dim, #aaa)",
 };
@@ -87,8 +116,7 @@ interface FindingsSummary {
 type UxGrade = "A" | "B" | "C" | "D" | "F";
 
 // The UX/accessibility posture grade the summary route computes from open ux_gap
-// findings. Mirrors the security posture grade: one at-a-glance letter that trends
-// over time. Optional on the wire so an older summary response (pre-uxPosture)
+// findings. Optional on the wire so an older summary response (pre-uxPosture)
 // renders the explicit "No UX scan yet" empty state, never a blank.
 interface UxPosture {
   grade: UxGrade;
@@ -99,14 +127,14 @@ interface UxPosture {
   score: number;
 }
 
-// Grade -> chip color. A green, B/C gold, D amber, F red - same token vocabulary
-// the severity chips already use, so the headline reads consistently.
-const UX_GRADE_COLOR: Record<UxGrade, string> = {
-  A: "var(--wp-success, #22c55e)",
-  B: "var(--wp-gold, #f1c233)",
-  C: "var(--wp-gold, #f1c233)",
-  D: "#f59e0b",
-  F: "var(--wp-error, #ef4444)",
+// Grade -> tone. A success, B/C gold, D warning, F error — same tone vocabulary
+// the severity pills use, so the headline reads consistently.
+const UX_GRADE_TONE: Record<UxGrade, SeverityTone> = {
+  A: "success",
+  B: "gold",
+  C: "gold",
+  D: "warning",
+  F: "error",
 };
 
 const UX_GRADE_LABEL: Record<UxGrade, string> = {
@@ -185,7 +213,6 @@ function CoverageHealth({ scan }: { scan: ScanHistoryRow }) {
         data-degraded="unknown"
         style={{
           padding: "0.7rem 1rem",
-          marginBottom: "1rem",
           borderRadius: "0.5rem",
           fontSize: "0.85rem",
           color: "var(--wp-text-dim, #aaa)",
@@ -213,7 +240,6 @@ function CoverageHealth({ scan }: { scan: ScanHistoryRow }) {
         data-degraded="false"
         style={{
           padding: "0.7rem 1rem",
-          marginBottom: "1rem",
           borderRadius: "0.5rem",
           fontSize: "0.85rem",
           fontWeight: 600,
@@ -241,7 +267,6 @@ function CoverageHealth({ scan }: { scan: ScanHistoryRow }) {
       role="alert"
       style={{
         padding: "0.85rem 1rem",
-        marginBottom: "1rem",
         borderRadius: "0.5rem",
         fontSize: "0.85rem",
         color: "var(--wp-text, #eee)",
@@ -260,6 +285,63 @@ function evidenceLine(evidence: Record<string, unknown>): string {
   if (evidence.status !== undefined && evidence.status !== null) parts.push(`status ${String(evidence.status)}`);
   if (typeof evidence.durationMs === "number") parts.push(`${evidence.durationMs}ms`);
   return parts.join(" · ");
+}
+
+// Horizontal stacked severity-distribution bar built from divs + token colours.
+// No charting dependency. Zero total renders an explicit empty band.
+function SeverityDistributionBar({ summary }: { summary: FindingsSummary }) {
+  const total = SEVERITY_ORDER.reduce((n, s) => n + summary.bySeverity[s], 0);
+  return (
+    <div data-testid="severity-distribution">
+      <div
+        style={{
+          display: "flex",
+          width: "100%",
+          height: 14,
+          borderRadius: 999,
+          overflow: "hidden",
+          background: "var(--wp-dark-surface, #1f1f22)",
+          border: "1px solid var(--wp-dark-border, #333)",
+        }}
+      >
+        {total === 0 ? (
+          <div
+            data-testid="severity-distribution-empty"
+            style={{ flex: 1, background: "var(--wp-dark-surface, #1f1f22)" }}
+          />
+        ) : (
+          SEVERITY_ORDER.map((sev) => {
+            const count = summary.bySeverity[sev];
+            if (count === 0) return null;
+            const pct = (count / total) * 100;
+            return (
+              <div
+                key={sev}
+                data-testid={`severity-distribution-${sev}`}
+                title={`${count} ${sev} (${pct.toFixed(0)}%)`}
+                style={{ width: `${pct}%`, background: SEVERITY_VAR[sev] }}
+              />
+            );
+          })
+        )}
+      </div>
+      <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginTop: "0.6rem" }}>
+        {SEVERITY_ORDER.map((sev) => (
+          <span
+            key={sev}
+            data-testid={`sev-count-${sev}`}
+            style={{ display: "inline-flex", alignItems: "center", opacity: summary.bySeverity[sev] === 0 ? 0.45 : 1 }}
+          >
+            <StatusPill
+              status={sev}
+              tone={SEVERITY_TONE[sev]}
+              label={`${sev} ${summary.bySeverity[sev]}`}
+            />
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function FindingRow({
@@ -293,25 +375,14 @@ function FindingRow({
         padding: "0.85rem 1rem",
         background: "var(--wp-dark-surface, #1f1f22)",
         border: "1px solid var(--wp-dark-border, #333)",
+        borderLeft: `3px solid ${SEVERITY_VAR[finding.severity]}`,
         borderRadius: "0.5rem",
         marginBottom: "0.6rem",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
-        <span
-          data-testid={`finding-severity-${finding.id}`}
-          style={{
-            fontSize: "0.7rem",
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.04em",
-            padding: "0.15rem 0.5rem",
-            borderRadius: "0.35rem",
-            color: "#0b0b0c",
-            background: SEVERITY_COLOR[finding.severity],
-          }}
-        >
-          {finding.severity}
+        <span data-testid={`finding-severity-${finding.id}`}>
+          <StatusPill status={finding.severity} tone={SEVERITY_TONE[finding.severity]} size="md" />
         </span>
         <span style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--wp-text-muted, #6b7280)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
           {CATEGORY_LABEL[finding.category]}
@@ -366,7 +437,7 @@ function FindingRow({
   );
 }
 
-// At-a-glance UX/accessibility posture headline. Renders the graded chip + the
+// At-a-glance UX/accessibility posture headline. Renders the graded pill + the
 // ux/a11y split, or an explicit empty state when no UX posture has been computed
 // (absent on the wire / no findings yet) - never a blank.
 function UxPostureBadge({ posture }: { posture: UxPosture | null }) {
@@ -376,7 +447,6 @@ function UxPostureBadge({ posture }: { posture: UxPosture | null }) {
         data-testid="ux-posture-empty"
         style={{
           padding: "0.7rem 1rem",
-          marginBottom: "1rem",
           borderRadius: "0.5rem",
           fontSize: "0.85rem",
           color: "var(--wp-text-dim, #aaa)",
@@ -389,42 +459,16 @@ function UxPostureBadge({ posture }: { posture: UxPosture | null }) {
     );
   }
 
-  const color = UX_GRADE_COLOR[posture.grade];
   return (
     <div
       data-testid="ux-posture"
       data-grade={posture.grade}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "0.75rem",
-        flexWrap: "wrap",
-        padding: "0.75rem 1rem",
-        marginBottom: "1rem",
-        background: "var(--wp-dark-surface, #1f1f22)",
-        border: "1px solid var(--wp-dark-border, #333)",
-        borderRadius: "0.5rem",
-      }}
+      style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}
     >
-      <span
-        data-testid="ux-posture-grade"
-        title={`UX/accessibility posture grade: ${posture.grade}`}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: "2rem",
-          height: "2rem",
-          fontSize: "1.05rem",
-          fontWeight: 800,
-          borderRadius: "0.45rem",
-          color: "#0b0b0c",
-          background: color,
-        }}
-      >
-        {posture.grade}
+      <span data-testid="ux-posture-grade">
+        <StatusPill status={posture.grade} tone={UX_GRADE_TONE[posture.grade]} size="md" label={`Grade ${posture.grade}`} />
       </span>
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", minWidth: 0 }}>
         <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
           UX posture: {posture.grade}
         </span>
@@ -441,6 +485,11 @@ function UxPostureBadge({ posture }: { posture: UxPosture | null }) {
 }
 
 export default function PlatformScansPage() {
+  // Auth gate: redirect unauthenticated visitors instead of rendering a blank
+  // surface. Mirrors the dashboard/goals guard. Until the check runs, hold the
+  // page back so we never flash an empty command center to a logged-out user.
+  const [authed, setAuthed] = useState<boolean | null>(null);
+
   const [findings, setFindings] = useState<ScanFindingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -462,8 +511,58 @@ export default function PlatformScansPage() {
   const [bulkBusy, setBulkBusy] = useState<"acknowledged" | "resolved" | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
 
+  // Fire-once guard for the "results viewed" engagement event: the summary
+  // reloads on every filter change, so a ref keeps the view event to a single
+  // emission per mount (re-renders / re-fetches never double-fire). Never set
+  // before the auth-redirect guard passes, so a logged-out visitor emits nothing.
+  const resultsViewedRef = useRef(false);
+  // Latest onboarded-target count, mirrored into a ref so the results-viewed
+  // event can read it without making loadSummary depend on (and re-fire with)
+  // the targets state.
+  const targetsCountRef = useRef(0);
+
   const selectedTarget = targets.find((t) => t.platform === selectedPlatform) ?? null;
   const allSeverities = severities.length === 0;
+
+  // Best-effort engagement analytics: a viewed/toggle event is a learning signal
+  // (the same loop drift + procedure learning consume). A failure must never
+  // break the surface, so the POST is fire-and-forget. /api/analytics is the
+  // observability beacon; fetchWithRefresh is the repo's client analytics path.
+  const trackEngagement = useCallback(
+    (event: string, metadata: Record<string, unknown>) => {
+      void fetchWithRefresh("/api/analytics", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ event, metadata }),
+      }).catch(() => undefined);
+    },
+    [],
+  );
+
+  // Toggle the severity band the LIST is narrowed to and record the toggle as an
+  // engagement signal. "actionable" = critical+high; "all" = every severity.
+  const setSeverityBand = useCallback(
+    (band: "actionable" | "all") => {
+      setSeverities(band === "actionable" ? ACTIONABLE_SEVERITIES : []);
+      trackEngagement("platform.severity_filter_toggled", {
+        band,
+        platform: filterPlatform || "all",
+      });
+    },
+    [trackEngagement, filterPlatform],
+  );
+
+  useEffect(() => {
+    const token = getInstinctToken();
+    if (!token) {
+      if (typeof window !== "undefined") {
+        window.location.href = "/login?next=/admin/platform-scans";
+      }
+      setAuthed(false);
+      return;
+    }
+    setAuthed(true);
+  }, []);
 
   const load = useCallback(async (platform?: string, sevs?: Severity[]) => {
     setLoading(true);
@@ -492,15 +591,28 @@ export default function PlatformScansPage() {
       const res = await fetchWithRefresh(`/api/admin/platform-scans/summary${qs}`);
       if (!res.ok) return;
       const data = (await res.json()) as { summary?: FindingsSummary; scans?: ScanHistoryRow[]; uxPosture?: UxPosture };
-      setFindingsSummary(data.summary ?? EMPTY_SUMMARY);
+      const loadedSummary = data.summary ?? EMPTY_SUMMARY;
+      setFindingsSummary(loadedSummary);
       setScanHistory(data.scans ?? []);
       // null when the route omits it (older deploy) so the badge shows its empty
       // state rather than a stale/blank grade.
       setUxPosture(data.uxPosture ?? null);
+      // Fire the "results viewed" engagement event ONCE, after the first
+      // successful summary load, with the loaded rollup. The ref keeps re-fetches
+      // (filter changes, post-scan reloads) from re-firing it.
+      if (!resultsViewedRef.current) {
+        resultsViewedRef.current = true;
+        trackEngagement("platform.results_viewed", {
+          open_total: loadedSummary.total,
+          critical: loadedSummary.bySeverity.critical,
+          high: loadedSummary.bySeverity.high,
+          targets: targetsCountRef.current,
+        });
+      }
     } catch {
       /* rollup is contextual; the findings list still renders without it. */
     }
-  }, []);
+  }, [trackEngagement]);
 
   const loadTargets = useCallback(async () => {
     try {
@@ -509,6 +621,7 @@ export default function PlatformScansPage() {
       const data = (await res.json()) as { targets?: ScanTarget[] };
       const list = data.targets ?? [];
       setTargets(list);
+      targetsCountRef.current = list.length;
       if (list.length > 0) setSelectedPlatform((p) => p || list[0].platform);
     } catch {
       /* targets are a convenience; a failure leaves the selector empty but the
@@ -517,16 +630,18 @@ export default function PlatformScansPage() {
   }, []);
 
   useEffect(() => {
+    if (authed !== true) return;
     void loadTargets();
-  }, [loadTargets]);
+  }, [authed, loadTargets]);
 
   // Load findings on mount and whenever the platform OR severity filter changes
   // (filter "" means all platforms; empty severities means all severities). The
   // summary always reloads with the FULL counts regardless of the list filter.
   useEffect(() => {
+    if (authed !== true) return;
     void load(filterPlatform || undefined, severities);
     void loadSummary(filterPlatform || undefined);
-  }, [filterPlatform, severities, load, loadSummary]);
+  }, [authed, filterPlatform, severities, load, loadSummary]);
 
   const runScan = useCallback(async () => {
     if (!selectedPlatform) {
@@ -610,199 +725,267 @@ export default function PlatformScansPage() {
     }
   }, [load, loadSummary, filterPlatform, severities]);
 
+  // Hold the page back until the auth check has run so a logged-out visitor never
+  // flashes the command center before the redirect fires.
+  if (authed !== true) {
+    return (
+      <div
+        data-testid="platform-scans-auth-pending"
+        style={{ padding: "1.5rem", color: "var(--wp-text-dim, #aaa)" }}
+      >
+        Loading…
+      </div>
+    );
+  }
+
+  // Most-recent run drives the "last scan" tile + coverage line.
+  const latestScan = scanHistory[0] ?? null;
+  // Finding-count trend over time (oldest -> newest) for the hero sparkline.
+  const findingTrend = [...scanHistory].reverse().map((s) => s.findingCount);
+  const criticalTrend = [...scanHistory].reverse().map((s) => s.criticalCount);
+  const platformsScanned = new Set(scanHistory.map((s) => s.platform)).size;
+
+  // Control style shared by the selects.
+  const ctrl = {
+    padding: "0.4rem 0.6rem",
+    borderRadius: "0.4rem",
+    fontSize: "0.85rem",
+    background: "var(--wp-dark-surface, #1f1f22)",
+    color: "var(--wp-text, #eee)",
+    border: "1px solid var(--wp-dark-border, #333)",
+  } as const;
+
+  const categoryLine = Object.entries(findingsSummary.byCategory)
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([cat, n]) => `${CATEGORY_LABEL[cat as Category] ?? cat} ${n}`)
+    .join(" · ");
+
+  // Lower-severity findings hidden by the active band. Surfaced as a "show all"
+  // affordance so nothing is hidden silently — the data is one click away.
+  const hiddenCount = allSeverities
+    ? 0
+    : SEVERITY_ORDER.filter((s) => !severities.includes(s)).reduce(
+        (n, s) => n + findingsSummary.bySeverity[s],
+        0,
+      );
+
+  const chipStyle = (active: boolean) =>
+    ({
+      padding: "0.3rem 0.7rem",
+      borderRadius: "0.4rem",
+      fontSize: "0.78rem",
+      fontWeight: 600,
+      cursor: "pointer",
+      color: active ? "#0b0b0c" : "var(--wp-text-dim, #aaa)",
+      background: active ? "var(--wp-gold, #f1c233)" : "transparent",
+      border: "1px solid var(--wp-dark-border, #333)",
+    }) as const;
+
   return (
-    <div data-testid="platform-scans-page" style={{ padding: "1.5rem", maxWidth: 920, margin: "0 auto", color: "var(--wp-text, #eee)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.4rem" }}>
-        <h1 style={{ margin: 0, fontSize: "1.5rem", color: "var(--wp-gold, #f1c233)" }}>Platform scans</h1>
-        <span style={{ flex: 1 }} />
-        <Link href="/admin/agents" data-testid="back-to-agents" style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}>
-          ← Agents
-        </Link>
-      </div>
-      <p style={{ marginTop: 0, marginBottom: "1rem", fontSize: "0.9rem", color: "var(--wp-text-muted, #6b7280)" }}>
-        An agent crawls a target platform&apos;s journeys and surfaces bugs and use-case gaps; each finding is gated into the learning loop.
-      </p>
+    <div
+      data-testid="platform-scans-page"
+      style={{ padding: "1.5rem", maxWidth: 1080, margin: "0 auto", color: "var(--wp-text, #eee)" }}
+    >
+      <SectionHeader
+        as="h1"
+        eyebrow="Scan command center"
+        title="Platform scans"
+        subtitle="An agent crawls a target platform's journeys and surfaces bugs and use-case gaps; each finding is gated into the learning loop."
+        actions={
+          <Link href="/admin/agents" data-testid="back-to-agents" style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}>
+            ← Agents
+          </Link>
+        }
+      />
 
-      {(() => {
-        const ctrl = {
-          padding: "0.4rem 0.6rem", borderRadius: "0.4rem", fontSize: "0.85rem",
-          background: "var(--wp-dark-surface, #1f1f22)", color: "var(--wp-text, #eee)",
-          border: "1px solid var(--wp-dark-border, #333)",
-        } as const;
-        return (
-      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap", marginBottom: "1.2rem" }}>
-        <label htmlFor="platform-select" style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)" }}>Platform</label>
-        <select
-          id="platform-select"
-          data-testid="platform-select"
-          value={selectedPlatform}
-          onChange={(e) => { setSelectedPlatform(e.target.value); setMode("http"); }}
-          style={ctrl}
-        >
-          {targets.length === 0 && <option value="">(no targets)</option>}
-          {targets.map((t) => (
-            <option key={t.platform} value={t.platform}>{t.platform}</option>
-          ))}
-        </select>
-        <select
-          data-testid="mode-select"
-          value={mode}
-          onChange={(e) => setMode(e.target.value as ScanMode)}
-          title={selectedTarget?.hasStatic ? "How to scan" : "Source scan not configured for this platform"}
-          style={ctrl}
-        >
-          <option value="http">Live crawl (HTTP){selectedTarget?.hasLogin ? " · authenticated" : ""}</option>
-          <option value="static" disabled={!selectedTarget?.hasStatic}>Source scan</option>
-          <option value="api" disabled={!selectedTarget?.hasApi}>API contract</option>
-        </select>
-        <button
-          type="button"
-          data-testid="run-scan"
-          disabled={scanning || !selectedPlatform}
-          onClick={() => void runScan()}
-          style={{
-            padding: "0.45rem 1rem",
-            borderRadius: "0.4rem",
-            border: "none",
-            cursor: scanning || !selectedPlatform ? "default" : "pointer",
-            fontWeight: 600,
-            color: "#0b0b0c",
-            background: "var(--wp-gold, #f1c233)",
-            opacity: scanning || !selectedPlatform ? 0.6 : 1,
-          }}
-        >
-          {scanning ? `Scanning ${selectedPlatform}…` : "Run scan"}
-        </button>
-        {summary && (
-          <span data-testid="scan-summary" style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}>
-            {summary.platform} ({summary.mode === "static" ? "source" : "HTTP"}):{" "}
-            {summary.routes !== null ? `${summary.routes} route${summary.routes === 1 ? "" : "s"}, ` : ""}
-            {summary.findings} finding{summary.findings === 1 ? "" : "s"}, {summary.critical} critical
-          </span>
-        )}
-        {scanError && (
-          <span data-testid="scan-error" style={{ fontSize: "0.85rem", color: "var(--wp-error, #ef4444)" }}>
-            {scanError}
-          </span>
-        )}
-        {targets.length > 1 && (
-          <>
-            <span style={{ flex: 1 }} />
-            <label htmlFor="filter-platform" style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)" }}>Showing</label>
-            <select
-              id="filter-platform"
-              data-testid="filter-platform"
-              value={filterPlatform}
-              onChange={(e) => setFilterPlatform(e.target.value)}
-              style={ctrl}
-            >
-              <option value="">All platforms</option>
-              {targets.map((t) => (
-                <option key={t.platform} value={t.platform}>{t.platform}</option>
-              ))}
-            </select>
-          </>
-        )}
-      </div>
-        );
-      })()}
+      {/* Hero metrics row */}
+      <ConsoleGrid minColWidth={180} style={{ marginBottom: "1.25rem" }} testId="hero-metrics">
+        <GlassPanel padded testId="metric-panel-targets">
+          <MetricTile
+            value={targets.length}
+            label="Targets onboarded"
+            kicker={platformsScanned > 0 ? `${platformsScanned} scanned` : "Scan a target"}
+            accent="var(--wp-gold, #f1c233)"
+            testId="metric-targets"
+          />
+        </GlassPanel>
+        <GlassPanel padded testId="metric-panel-open">
+          <MetricTile
+            value={findingsSummary.total}
+            label="Open findings"
+            kicker="Across all severities"
+            sparkline={findingTrend.length > 1 ? <Sparkline data={findingTrend} accent="var(--wp-info, #3b82f6)" area ariaLabel="open findings trend" /> : undefined}
+            testId="metric-open"
+          />
+        </GlassPanel>
+        <GlassPanel padded glow={findingsSummary.bySeverity.critical > 0 ? "gold" : "none"} testId="metric-panel-critical">
+          <MetricTile
+            value={findingsSummary.bySeverity.critical}
+            label="Critical"
+            kicker="Highest priority"
+            accent={SEVERITY_VAR.critical}
+            sparkline={criticalTrend.length > 1 ? <Sparkline data={criticalTrend} accent={SEVERITY_VAR.critical} ariaLabel="critical trend" /> : undefined}
+            testId="metric-critical"
+          />
+        </GlassPanel>
+        <GlassPanel padded testId="metric-panel-high">
+          <MetricTile
+            value={findingsSummary.bySeverity.high}
+            label="High"
+            kicker="Actionable now"
+            accent={SEVERITY_VAR.high}
+            testId="metric-high"
+          />
+        </GlassPanel>
+        <GlassPanel padded testId="metric-panel-grade">
+          <MetricTile
+            display={uxPosture ? uxPosture.grade : "—"}
+            label="UX/a11y grade"
+            kicker={uxPosture ? UX_GRADE_LABEL[uxPosture.grade] : "No UX scan yet"}
+            accent={uxPosture ? `var(--wp-${UX_GRADE_TONE[uxPosture.grade] === "neutral" ? "text" : UX_GRADE_TONE[uxPosture.grade]})` : undefined}
+            testId="metric-grade"
+          />
+        </GlassPanel>
+        <GlassPanel padded testId="metric-panel-last-scan">
+          <MetricTile
+            display={latestScan ? whenLabel(latestScan.createdAt) : "Never"}
+            label="Last scan"
+            kicker={latestScan ? latestScan.platform : "No scans yet"}
+            testId="metric-last-scan"
+          />
+        </GlassPanel>
+      </ConsoleGrid>
 
-      <UxPostureBadge posture={uxPosture} />
-
-      {scanHistory.length > 0 && <CoverageHealth scan={scanHistory[0]} />}
-
-      {(() => {
-        const categoryLine = Object.entries(findingsSummary.byCategory)
-          .filter(([, n]) => n > 0)
-          .sort((a, b) => b[1] - a[1])
-          .map(([cat, n]) => `${CATEGORY_LABEL[cat as Category] ?? cat} ${n}`)
-          .join(" · ");
-        return (
-          <div
-            data-testid="findings-summary"
+      {/* Run-scan control deck */}
+      <GlassPanel
+        testId="scan-controls-panel"
+        glow="gold"
+        title="Run a scan"
+        subtitle="Pick a target and how to crawl it, then launch."
+        style={{ marginBottom: "1.25rem" }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+          <label htmlFor="platform-select" style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)" }}>Platform</label>
+          <select
+            id="platform-select"
+            data-testid="platform-select"
+            value={selectedPlatform}
+            onChange={(e) => { setSelectedPlatform(e.target.value); setMode("http"); }}
+            style={ctrl}
+          >
+            {targets.length === 0 && <option value="">(no targets)</option>}
+            {targets.map((t) => (
+              <option key={t.platform} value={t.platform}>{t.platform}</option>
+            ))}
+          </select>
+          <select
+            data-testid="mode-select"
+            value={mode}
+            onChange={(e) => setMode(e.target.value as ScanMode)}
+            title={selectedTarget?.hasStatic ? "How to scan" : "Source scan not configured for this platform"}
+            style={ctrl}
+          >
+            <option value="http">Live crawl (HTTP){selectedTarget?.hasLogin ? " · authenticated" : ""}</option>
+            <option value="static" disabled={!selectedTarget?.hasStatic}>Source scan</option>
+            <option value="api" disabled={!selectedTarget?.hasApi}>API contract</option>
+          </select>
+          <button
+            type="button"
+            data-testid="run-scan"
+            disabled={scanning || !selectedPlatform}
+            onClick={() => void runScan()}
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.6rem",
-              flexWrap: "wrap",
-              padding: "0.75rem 1rem",
-              marginBottom: "1rem",
-              background: "var(--wp-dark-surface, #1f1f22)",
-              border: "1px solid var(--wp-dark-border, #333)",
-              borderRadius: "0.5rem",
+              padding: "0.45rem 1rem",
+              borderRadius: "0.4rem",
+              border: "none",
+              cursor: scanning || !selectedPlatform ? "default" : "pointer",
+              fontWeight: 600,
+              color: "#0b0b0c",
+              background: "var(--wp-gold, #f1c233)",
+              opacity: scanning || !selectedPlatform ? 0.6 : 1,
             }}
           >
-            {SEVERITY_ORDER.map((sev) => {
-              const count = findingsSummary.bySeverity[sev];
-              return (
-                <span
-                  key={sev}
-                  data-testid={`sev-count-${sev}`}
-                  title={`${count} open ${sev} finding${count === 1 ? "" : "s"}`}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "0.35rem",
-                    fontSize: "0.78rem",
-                    fontWeight: 700,
-                    padding: "0.2rem 0.6rem",
-                    borderRadius: "0.4rem",
-                    color: "#0b0b0c",
-                    background: SEVERITY_COLOR[sev],
-                    opacity: count === 0 ? 0.4 : 1,
-                  }}
-                >
-                  <span style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>{sev}</span>
-                  <span>{count}</span>
-                </span>
-              );
-            })}
-            <span style={{ flex: 1 }} />
-            {categoryLine && (
-              <span data-testid="category-breakdown" style={{ fontSize: "0.8rem", color: "var(--wp-text-dim, #aaa)" }}>
-                {categoryLine}
-              </span>
-            )}
-            <span data-testid="open-total" style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--wp-text-muted, #6b7280)" }}>
-              {findingsSummary.total} open
+            {scanning ? `Scanning ${selectedPlatform}…` : "Run scan"}
+          </button>
+          {summary && (
+            <span data-testid="scan-summary" style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}>
+              {summary.platform} ({summary.mode === "static" ? "source" : "HTTP"}):{" "}
+              {summary.routes !== null ? `${summary.routes} route${summary.routes === 1 ? "" : "s"}, ` : ""}
+              {summary.findings} finding{summary.findings === 1 ? "" : "s"}, {summary.critical} critical
             </span>
-          </div>
-        );
-      })()}
+          )}
+          {scanError && (
+            <span data-testid="scan-error" style={{ fontSize: "0.85rem", color: "var(--wp-error, #ef4444)" }}>
+              {scanError}
+            </span>
+          )}
+          {targets.length > 1 && (
+            <>
+              <span style={{ flex: 1 }} />
+              <label htmlFor="filter-platform" style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #6b7280)" }}>Showing</label>
+              <select
+                id="filter-platform"
+                data-testid="filter-platform"
+                value={filterPlatform}
+                onChange={(e) => setFilterPlatform(e.target.value)}
+                style={ctrl}
+              >
+                <option value="">All platforms</option>
+                {targets.map((t) => (
+                  <option key={t.platform} value={t.platform}>{t.platform}</option>
+                ))}
+              </select>
+            </>
+          )}
+        </div>
+      </GlassPanel>
 
-      {(() => {
-        // Lower-severity findings hidden by the active band (medium + low when the
-        // default actionable band is on). Surfaced as a "show all" affordance so
-        // nothing is hidden silently — the data is one click away.
-        const hiddenCount = allSeverities
-          ? 0
-          : SEVERITY_ORDER.filter((s) => !severities.includes(s)).reduce(
-              (n, s) => n + findingsSummary.bySeverity[s],
-              0,
-            );
-        const chip = (active: boolean) =>
-          ({
-            padding: "0.3rem 0.7rem",
-            borderRadius: "0.4rem",
-            fontSize: "0.78rem",
-            fontWeight: 600,
-            cursor: "pointer",
-            color: active ? "#0b0b0c" : "var(--wp-text-dim, #aaa)",
-            background: active ? "var(--wp-gold, #f1c233)" : "transparent",
-            border: "1px solid var(--wp-dark-border, #333)",
-          }) as const;
-        return (
-          <div
-            data-testid="severity-filter"
-            style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}
-          >
+      {/* Posture + distribution */}
+      <ConsoleGrid minColWidth={320} style={{ marginBottom: "1.25rem" }} testId="posture-grid">
+        <GlassPanel testId="ux-posture-panel" title="UX / accessibility posture">
+          <UxPostureBadge posture={uxPosture} />
+        </GlassPanel>
+        <GlassPanel
+          testId="severity-distribution-panel"
+          title="Severity distribution"
+          subtitle={
+            <span data-testid="findings-summary">
+              <span data-testid="open-total">{findingsSummary.total} open</span>
+              {categoryLine && (
+                <>
+                  {" · "}
+                  <span data-testid="category-breakdown">{categoryLine}</span>
+                </>
+              )}
+            </span>
+          }
+        >
+          <SeverityDistributionBar summary={findingsSummary} />
+        </GlassPanel>
+      </ConsoleGrid>
+
+      {latestScan && (
+        <div style={{ marginBottom: "1.25rem" }}>
+          <CoverageHealth scan={latestScan} />
+        </div>
+      )}
+
+      {/* Findings result grid */}
+      <GlassPanel
+        testId="findings-panel"
+        title="Findings"
+        subtitle="The open queue. Acknowledge or resolve to clear a row; decided rows leave the list."
+        style={{ marginBottom: "1.25rem" }}
+        actions={
+          <div data-testid="severity-filter" style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
             <span style={{ fontSize: "0.78rem", color: "var(--wp-text-muted, #6b7280)" }}>Showing severity</span>
             <button
               type="button"
               data-testid="severity-chip-actionable"
               aria-pressed={!allSeverities}
-              onClick={() => setSeverities(ACTIONABLE_SEVERITIES)}
-              style={chip(!allSeverities)}
+              onClick={() => setSeverityBand("actionable")}
+              style={chipStyle(!allSeverities)}
             >
               Actionable (critical + high)
             </button>
@@ -810,8 +993,8 @@ export default function PlatformScansPage() {
               type="button"
               data-testid="severity-chip-all"
               aria-pressed={allSeverities}
-              onClick={() => setSeverities([])}
-              style={chip(allSeverities)}
+              onClick={() => setSeverityBand("all")}
+              style={chipStyle(allSeverities)}
             >
               All severities
             </button>
@@ -819,13 +1002,12 @@ export default function PlatformScansPage() {
               <button
                 type="button"
                 data-testid="show-all-severities"
-                onClick={() => setSeverities([])}
+                onClick={() => setSeverityBand("all")}
                 style={{ fontSize: "0.78rem", color: "var(--wp-gold, #f1c233)", background: "transparent", border: "none", cursor: "pointer", padding: "0.3rem 0.2rem" }}
               >
                 +{hiddenCount} lower-severity hidden — show all
               </button>
             )}
-            <span style={{ flex: 1 }} />
             <button
               type="button"
               data-testid="bulk-acknowledge"
@@ -854,35 +1036,35 @@ export default function PlatformScansPage() {
             >
               {bulkBusy === "resolved" ? "Resolving…" : "Resolve all shown"}
             </button>
-            {bulkError && (
-              <span data-testid="bulk-error" style={{ width: "100%", fontSize: "0.8rem", color: "var(--wp-error, #ef4444)" }}>
-                {bulkError}
-              </span>
-            )}
           </div>
-        );
-      })()}
+        }
+      >
+        {bulkError && (
+          <div data-testid="bulk-error" style={{ marginBottom: "0.75rem", fontSize: "0.8rem", color: "var(--wp-error, #ef4444)" }}>
+            {bulkError}
+          </div>
+        )}
+        {loading ? (
+          <p data-testid="findings-loading" style={{ color: "var(--wp-text-dim, #aaa)", margin: 0 }}>Loading…</p>
+        ) : error ? (
+          <p data-testid="findings-error" style={{ color: "var(--wp-error, #ef4444)", margin: 0 }}>{error}</p>
+        ) : findings.length === 0 ? (
+          <p data-testid="findings-empty" style={{ color: "var(--wp-text-dim, #aaa)", margin: 0 }}>
+            No open findings. Run a scan to check the platform.
+          </p>
+        ) : (
+          <div data-testid="findings-list">
+            {findings.map((f) => (
+              <FindingRow key={f.id} finding={f} onDecide={decide} />
+            ))}
+          </div>
+        )}
+      </GlassPanel>
 
-      {loading ? (
-        <p data-testid="findings-loading" style={{ color: "var(--wp-text-dim, #aaa)" }}>Loading…</p>
-      ) : error ? (
-        <p data-testid="findings-error" style={{ color: "var(--wp-error, #ef4444)" }}>{error}</p>
-      ) : findings.length === 0 ? (
-        <p data-testid="findings-empty" style={{ color: "var(--wp-text-dim, #aaa)" }}>
-          No open findings. Run a scan to check the platform.
-        </p>
-      ) : (
-        <div data-testid="findings-list">
-          {findings.map((f) => (
-            <FindingRow key={f.id} finding={f} onDecide={decide} />
-          ))}
-        </div>
-      )}
-
-      <div data-testid="scan-history" style={{ marginTop: "2rem" }}>
-        <h2 style={{ fontSize: "1rem", color: "var(--wp-gold, #f1c233)", marginBottom: "0.6rem" }}>Scan history</h2>
+      {/* Scan history */}
+      <GlassPanel testId="scan-history" title="Scan history">
         {scanHistory.length === 0 ? (
-          <p data-testid="scan-history-empty" style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}>
+          <p data-testid="scan-history-empty" style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)", margin: 0 }}>
             No scans yet.
           </p>
         ) : (
@@ -939,7 +1121,7 @@ export default function PlatformScansPage() {
             ))}
           </div>
         )}
-      </div>
+      </GlassPanel>
     </div>
   );
 }

@@ -13,8 +13,12 @@ import "@testing-library/jest-dom";
  */
 
 const mockFetchWithRefresh = jest.fn();
+// Default: an authenticated session so the page renders the command center
+// rather than redirecting. The auth-redirect test overrides this to null.
+const mockGetInstinctToken = jest.fn(() => "tok-123" as string | null);
 jest.mock("@/lib/client-auth", () => ({
   fetchWithRefresh: (...a: unknown[]) => (mockFetchWithRefresh as unknown as (...args: unknown[]) => unknown)(...a),
+  getInstinctToken: () => mockGetInstinctToken(),
   jsonHeaders: () => ({ "Content-Type": "application/json" }),
 }));
 jest.mock("next/link", () => ({
@@ -70,7 +74,11 @@ const SCANS = [
 const summaryRes = (over: { summary?: unknown; scans?: unknown } = {}) =>
   mkRes({ summary: over.summary ?? SUMMARY, scans: over.scans ?? SCANS });
 
-beforeEach(() => mockFetchWithRefresh.mockReset());
+beforeEach(() => {
+  mockFetchWithRefresh.mockReset();
+  mockGetInstinctToken.mockReset();
+  mockGetInstinctToken.mockReturnValue("tok-123");
+});
 
 it("populates the platform selector from targets and labels findings by platform", async () => {
   mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
@@ -438,4 +446,203 @@ it("shows the 'No UX scan yet' empty state when uxPosture is absent (never blank
 
   expect(await screen.findByTestId("ux-posture-empty")).toBeInTheDocument();
   expect(screen.queryByTestId("ux-posture")).not.toBeInTheDocument();
+});
+
+// --- Command-center redesign: hero metrics, distribution, tones, auth guard ---
+
+it("renders the hero metric tiles with the right counts from targets + summary", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  // Hero grid mounts with all six tiles.
+  expect(await screen.findByTestId("hero-metrics")).toBeInTheDocument();
+  // Targets tile = number of onboarded targets (2). Count-up may animate, so wait
+  // for the final value.
+  const targetsTile = await screen.findByTestId("metric-targets");
+  await waitFor(() => expect(within(targetsTile).getByTestId("metric-value")).toHaveTextContent("2"));
+  // Open + critical + high pull straight from the summary rollup.
+  const openTile = screen.getByTestId("metric-open");
+  await waitFor(() => expect(within(openTile).getByTestId("metric-value")).toHaveTextContent("24"));
+  const criticalTile = screen.getByTestId("metric-critical");
+  await waitFor(() => expect(within(criticalTile).getByTestId("metric-value")).toHaveTextContent("3"));
+  const highTile = screen.getByTestId("metric-high");
+  await waitFor(() => expect(within(highTile).getByTestId("metric-value")).toHaveTextContent("6"));
+  // Last-scan tile names the most-recent platform.
+  expect(within(screen.getByTestId("metric-last-scan")).getByText("wolfpack-auto")).toBeInTheDocument();
+});
+
+it("renders the severity-distribution bar with a segment per non-zero severity", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  expect(await screen.findByTestId("severity-distribution")).toBeInTheDocument();
+  // Every severity in SUMMARY is non-zero, so all four segments render.
+  await waitFor(() => expect(screen.getByTestId("severity-distribution-critical")).toBeInTheDocument());
+  expect(screen.getByTestId("severity-distribution-high")).toBeInTheDocument();
+  expect(screen.getByTestId("severity-distribution-medium")).toBeInTheDocument();
+  expect(screen.getByTestId("severity-distribution-low")).toBeInTheDocument();
+  // The empty band is NOT rendered when there are findings.
+  expect(screen.queryByTestId("severity-distribution-empty")).not.toBeInTheDocument();
+});
+
+it("renders the empty distribution band when there are zero findings of any severity", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes({ summary: { total: 0, bySeverity: { critical: 0, high: 0, medium: 0, low: 0 }, byCategory: {} } }));
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  expect(await screen.findByTestId("severity-distribution-empty")).toBeInTheDocument();
+  expect(screen.queryByTestId("severity-distribution-critical")).not.toBeInTheDocument();
+});
+
+it("severity pills carry the correct tone — critical=error, high=warning, medium=gold, low=neutral", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  // The rollup pills (inside sev-count-*) carry the severity tone.
+  const critPill = within(await screen.findByTestId("sev-count-critical")).getByTestId("status-pill");
+  expect(critPill).toHaveAttribute("data-tone", "error");
+  expect(within(screen.getByTestId("sev-count-high")).getByTestId("status-pill")).toHaveAttribute("data-tone", "warning");
+  expect(within(screen.getByTestId("sev-count-medium")).getByTestId("status-pill")).toHaveAttribute("data-tone", "gold");
+  expect(within(screen.getByTestId("sev-count-low")).getByTestId("status-pill")).toHaveAttribute("data-tone", "neutral");
+
+  // The per-finding severity badge is a StatusPill with the matching tone.
+  const findingSevPill = within(await screen.findByTestId("finding-severity-f-1")).getByTestId("status-pill");
+  expect(findingSevPill).toHaveAttribute("data-tone", "error");
+});
+
+it("redirects an unauthenticated visitor to /login (never renders the command center blank)", async () => {
+  // No token -> the auth guard fires the /login?next= redirect. jsdom's Location
+  // is non-configurable in our toolchain (see the qr/__tests__ note), so we assert
+  // the OBSERVABLE consequences here — the auth-pending placeholder renders, the
+  // full command center does NOT, and no authenticated fetch is made while logged
+  // out. The exact href is exercised in the Playwright e2e (unauth -> /login).
+  mockGetInstinctToken.mockReturnValue(null);
+
+  render(<PlatformScansPage />);
+
+  expect(screen.getByTestId("platform-scans-auth-pending")).toBeInTheDocument();
+  expect(screen.queryByTestId("platform-scans-page")).not.toBeInTheDocument();
+  // No data fetches were made while logged out.
+  expect(mockFetchWithRefresh).not.toHaveBeenCalled();
+});
+
+// --- Engagement analytics: the learning-loop wiring ---
+
+// Every analytics POST the page fires through fetchWithRefresh -> /api/analytics.
+const analyticsPosts = () =>
+  mockFetchWithRefresh.mock.calls.filter(
+    (c) => String(c[0]) === "/api/analytics" && (c[1] as { method?: string } | undefined)?.method === "POST",
+  );
+const analyticsBodies = () => analyticsPosts().map((c) => JSON.parse(String((c[1] as { body: string }).body)));
+
+it("fires platform.results_viewed ONCE on authed mount with the loaded summary + target counts", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  // One results_viewed event fires after the first successful summary load.
+  await waitFor(() =>
+    expect(analyticsBodies().filter((b) => b.event === "platform.results_viewed").length).toBe(1),
+  );
+  const viewed = analyticsBodies().find((b) => b.event === "platform.results_viewed");
+  // open_total + critical + high from the rollup; targets from the loaded targets.
+  expect(viewed.metadata).toEqual({ open_total: 24, critical: 3, high: 6, targets: 2 });
+});
+
+it("does NOT re-fire platform.results_viewed when the summary reloads (severity toggle)", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+  await waitFor(() =>
+    expect(analyticsBodies().filter((b) => b.event === "platform.results_viewed").length).toBe(1),
+  );
+
+  // Toggling the band reloads the summary; results_viewed must stay at exactly one.
+  fireEvent.click(screen.getByTestId("severity-chip-all"));
+  await waitFor(() =>
+    expect(analyticsBodies().some((b) => b.event === "platform.severity_filter_toggled")).toBe(true),
+  );
+  expect(analyticsBodies().filter((b) => b.event === "platform.results_viewed").length).toBe(1);
+});
+
+it("fires platform.severity_filter_toggled with the band on each chip", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({ findings: [mkFinding()] }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+  await screen.findByTestId("finding-row-f-1");
+
+  // "All severities" chip -> band: "all".
+  fireEvent.click(screen.getByTestId("severity-chip-all"));
+  await waitFor(() => {
+    const all = analyticsBodies().find(
+      (b) => b.event === "platform.severity_filter_toggled" && b.metadata.band === "all",
+    );
+    expect(all).toBeTruthy();
+    expect(all.metadata.platform).toBe("all");
+  });
+
+  // "Actionable" chip -> band: "actionable".
+  fireEvent.click(screen.getByTestId("severity-chip-actionable"));
+  await waitFor(() =>
+    expect(
+      analyticsBodies().some(
+        (b) => b.event === "platform.severity_filter_toggled" && b.metadata.band === "actionable",
+      ),
+    ).toBe(true),
+  );
+});
+
+it("fires NO analytics on the auth-redirect (logged-out) path", async () => {
+  mockGetInstinctToken.mockReturnValue(null);
+  render(<PlatformScansPage />);
+  expect(screen.getByTestId("platform-scans-auth-pending")).toBeInTheDocument();
+  // The auth guard returns before any fetch, so no analytics (or data) call fires.
+  expect(mockFetchWithRefresh).not.toHaveBeenCalled();
+});
+
+it("renders the findings error state when the list GET fails", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: { method?: string }) => {
+    if (isTargets(url)) return Promise.resolve(mkRes({ targets: TARGETS }));
+    if (isSummary(url)) return Promise.resolve(summaryRes());
+    if (isList(url, opts)) return Promise.resolve(mkRes({}, { ok: false, status: 500 }));
+    return Promise.resolve(mkRes({}));
+  });
+  render(<PlatformScansPage />);
+
+  const err = await screen.findByTestId("findings-error");
+  expect(err).toHaveTextContent("HTTP 500");
+  // The shell still rendered (not blank): the hero + run controls are present.
+  expect(screen.getByTestId("platform-scans-page")).toBeInTheDocument();
+  expect(screen.getByTestId("run-scan")).toBeInTheDocument();
 });

@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * /admin/agents: onboard and manage agent principals (OGIAM, agents as
- * first-class users).
+ * /admin/agents: the AGENT FLEET command center. Onboard and manage agent
+ * principals (OGIAM, agents as first-class users).
  *
  * Agent principals are AI actors that the system treats like teammates: each
  * has an identity, a role, an owner, and a lifecycle (invited, active, paused,
@@ -11,13 +11,34 @@
  * WHAT they did. Onboarding mints a one-time secret, the agent's joining
  * credential, shown exactly once.
  *
+ * Presentation: the dark-glass console kit (GlassPanel / MetricTile /
+ * StatusPill / Sparkline / SectionHeader / ConsoleGrid). The data + every
+ * control is unchanged from the prior roster page; only the surface is the new
+ * command-center language so an operator reads fleet status + results at a
+ * glance and drills into a single agent from a card.
+ *
  * Auth: every fetch goes through fetchWithRefresh (15-min access TTL, HttpOnly
- * refresh rotation). The route is capability-gated on the API side.
+ * refresh rotation). Unauthenticated visitors are redirected to /login, never
+ * shown a blank surface. The route is capability-gated on the API side.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+import { useRouter } from "next/navigation";
+import {
+  fetchWithRefresh,
+  jsonHeaders,
+  getInstinctUser,
+} from "@/lib/client-auth";
+import {
+  GlassPanel,
+  MetricTile,
+  StatusPill,
+  Sparkline,
+  SectionHeader,
+  ConsoleGrid,
+  colorForStatus,
+} from "@/components/console";
 
 type AgentState = "invited" | "active" | "paused" | "revoked";
 
@@ -39,7 +60,7 @@ interface AgentRecord {
   revokedAt: string | null;
   /* The connector names BOUND to this agent: the systems it operates, which
      make it (for example) a Salesforce or Jira agent. The roster GET returns
-     this so each row can show the agent's services at a glance. Optional so an
+     this so each card can show the agent's services at a glance. Optional so an
      older payload without it degrades to the "no service" hint, not a crash. */
   connections?: string[];
 }
@@ -85,47 +106,92 @@ function relativeTime(iso: string | null): string {
   return `${days}d ago`;
 }
 
-/* State-chip colors. Invited grey (pending join), active green, paused amber,
-   revoked red. Tuned to read on the dark surface, falling back when the
-   var(--wp-*) token is absent. */
-function stateColor(state: AgentState): { fg: string; bg: string } {
+/* The header nav links, kept identical (href + testid + title) so the existing
+   approvals / platform-scans / connectors / memory navigation is preserved
+   verbatim; only the chrome is the console-kit treatment. */
+const NAV_LINKS = [
+  {
+    href: "/admin/agents/approvals",
+    testId: "agents-approvals-link",
+    label: "Write approvals",
+    title:
+      "Writes an agent has proposed, awaiting your approval before they run.",
+  },
+  {
+    href: "/admin/platform-scans",
+    testId: "agents-platform-scans-link",
+    label: "Platform scans",
+    title:
+      "Bugs and use-case gaps an agent found by scanning a target platform's journeys.",
+  },
+  {
+    href: "/admin/connectors",
+    testId: "agents-connectors-link",
+    label: "Connections",
+    title:
+      "Client platforms an agent is connected to with a saved login, ready for an authenticated scan.",
+  },
+  {
+    href: "/admin/agents/memory",
+    testId: "agents-memory-link",
+    label: "Shared memory",
+    title:
+      "What the agents have learned: the shared procedures one agent records and another inherits.",
+  },
+] as const;
+
+/* Map an agent lifecycle state to the status word the console severity
+   vocabulary already understands, so a fleet pill reads the same here as on
+   every other admin console surface. "invited" has no word in the vocabulary,
+   so it deliberately resolves to the neutral tone. */
+function statusForState(state: AgentState): string {
   switch (state) {
     case "active":
-      return { fg: "var(--wp-success, #22c55e)", bg: "rgba(34,197,94,0.12)" };
+      return "active";
     case "paused":
-      return { fg: "var(--wp-gold, #f1c233)", bg: "rgba(241,194,51,0.12)" };
+      return "paused";
     case "revoked":
-      return { fg: "var(--wp-error, #ef4444)", bg: "rgba(239,68,68,0.12)" };
+      return "failed";
     default:
-      return { fg: "var(--wp-text-dim, #aaa)", bg: "rgba(160,160,160,0.12)" };
+      return "invited";
   }
 }
 
-function StateChip({ state, id }: { state: AgentState; id?: string }) {
-  const c = stateColor(state);
-  return (
-    <span
-      data-testid={id ? `agent-state-chip-${id}` : undefined}
-      style={{
-        padding: "0.1rem 0.55rem",
-        borderRadius: "10px",
-        fontSize: "0.7rem",
-        background: c.bg,
-        color: c.fg,
-        border: `1px solid ${c.fg}`,
-        textTransform: "capitalize",
-        fontWeight: 600,
-      }}
-    >
-      {state}
-    </span>
-  );
-}
+const linkButtonStyle: React.CSSProperties = {
+  background: "var(--wp-dark-surface2, #1a1a1a)",
+  color: "var(--wp-gold, #f1c233)",
+  border: "1px solid var(--wp-gold, #f1c233)",
+  borderRadius: "6px",
+  padding: "0.4rem 0.9rem",
+  fontSize: "0.85rem",
+  textDecoration: "none",
+  whiteSpace: "nowrap",
+};
 
 export default function AgentsPage() {
+  const router = useRouter();
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Fire-once guard for the "fleet viewed" engagement event: the roster can be
+  // refetched (Refresh, post-onboard), so a ref keeps the view event to a single
+  // emission per mount. Never set before the auth-redirect guard passes.
+  const fleetViewedRef = useRef(false);
+
+  // Best-effort engagement analytics: a viewed/open event is a learning signal
+  // (the same loop drift + procedure learning consume). A failure must never
+  // break the surface, so the POST is fire-and-forget. /api/analytics is the
+  // observability beacon; fetchWithRefresh is the repo's client analytics path.
+  const trackEngagement = useCallback(
+    (event: string, metadata: Record<string, unknown>) => {
+      void fetchWithRefresh("/api/analytics", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ event, metadata }),
+      }).catch(() => undefined);
+    },
+    [],
+  );
 
   // Onboard form state.
   const [name, setName] = useState("");
@@ -157,18 +223,49 @@ export default function AgentsPage() {
         return;
       }
       const body = (await res.json()) as AgentsResponse;
-      setAgents(body.agents ?? []);
+      const roster = body.agents ?? [];
+      setAgents(roster);
+      // Fire the "fleet viewed" engagement event ONCE, after the first
+      // successful roster load, with the lifecycle buckets the metric tiles read.
+      // The ref keeps refetches (Refresh, post-onboard) from re-firing it.
+      if (!fleetViewedRef.current) {
+        fleetViewedRef.current = true;
+        let active = 0;
+        let paused = 0;
+        let invited = 0;
+        let connected = 0;
+        for (const a of roster) {
+          if (a.state === "active") active += 1;
+          else if (a.state === "paused") paused += 1;
+          else if (a.state === "invited") invited += 1;
+          if (a.connections && a.connections.length > 0) connected += 1;
+        }
+        trackEngagement("agent.fleet_viewed", {
+          total: roster.length,
+          active,
+          paused,
+          invited,
+          connected,
+        });
+      }
     } catch (e) {
       setError((e as Error).message || "Network error");
       setAgents([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [trackEngagement]);
 
   useEffect(() => {
+    // Redirect unauthenticated users; never render a blank state. Same guard
+    // every authenticated dashboard page uses (see /admin/benchmark).
+    const u = getInstinctUser<{ role: string }>();
+    if (!u) {
+      router.push("/login?next=/admin/agents");
+      return;
+    }
     void load();
-  }, [load]);
+  }, [router, load]);
 
   async function onboard(e: React.FormEvent) {
     e.preventDefault();
@@ -231,148 +328,170 @@ export default function AgentsPage() {
     }
   }
 
+  /* Fleet overview, derived purely from the fetched roster, no invented
+     metrics. Counts each lifecycle bucket, the agents with a live connection,
+     and a small activity series (onboards per day over the last week) for the
+     fleet-size sparkline, so the trend element only ever shows real data. */
+  const fleet = useMemo(() => {
+    const total = agents.length;
+    let active = 0;
+    let paused = 0;
+    let invited = 0;
+    let revoked = 0;
+    let connected = 0;
+    for (const a of agents) {
+      if (a.state === "active") active += 1;
+      else if (a.state === "paused") paused += 1;
+      else if (a.state === "invited") invited += 1;
+      else if (a.state === "revoked") revoked += 1;
+      if (a.connections && a.connections.length > 0) connected += 1;
+    }
+    // Onboards per day over the trailing 7 days (oldest → newest), for the
+    // fleet-size sparkline. Built from createdAt only; empty roster → zeros.
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const buckets = [0, 0, 0, 0, 0, 0, 0];
+    for (const a of agents) {
+      const t = new Date(a.createdAt).getTime();
+      if (Number.isNaN(t)) continue;
+      const ago = Math.floor((now - t) / day);
+      if (ago >= 0 && ago < 7) buckets[6 - ago] += 1;
+    }
+    return { total, active, paused, invited, revoked, connected, trend: buckets };
+  }, [agents]);
+
   return (
     <div
       data-testid="admin-agents-page"
       style={{
         padding: "2rem 1.5rem",
-        maxWidth: "920px",
+        maxWidth: "1100px",
         margin: "0 auto",
         color: "var(--wp-text, #eee)",
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          marginBottom: "0.5rem",
-          flexWrap: "wrap",
-          gap: "0.5rem",
-        }}
+      <SectionHeader
+        as="h1"
+        eyebrow="OGIAM · governed AI principals"
+        title="Agent fleet"
+        subtitle="These are AI principals, governed by OGIAM and onboarded like teammates. Each carries a role, an owner, and a lifecycle; every action it takes is gated and recorded in the AI Gateway decision log."
+        testId="agents-section-header"
+        actions={
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              flexWrap: "wrap",
+            }}
+          >
+            {NAV_LINKS.map((l) => (
+              <Link
+                key={l.testId}
+                href={l.href}
+                data-testid={l.testId}
+                title={l.title}
+                style={linkButtonStyle}
+              >
+                {l.label}
+              </Link>
+            ))}
+            <button
+              type="button"
+              onClick={() => void load()}
+              disabled={loading}
+              style={{
+                background: "var(--wp-dark-surface2, #1a1a1a)",
+                color: "var(--wp-text-dim, #aaa)",
+                border: "1px solid var(--wp-dark-border, #333)",
+                borderRadius: "6px",
+                padding: "0.4rem 0.9rem",
+                fontSize: "0.85rem",
+                cursor: loading ? "not-allowed" : "pointer",
+              }}
+            >
+              {loading ? "Loading..." : "Refresh"}
+            </button>
+          </div>
+        }
+      />
+
+      {/* Fleet overview metrics row. Every tile maps a field the roster already
+          carries, no invented metrics. */}
+      <GlassPanel
+        glow="gold"
+        padded
+        testId="agents-fleet-overview"
+        style={{ marginBottom: "1.5rem" }}
       >
-        <h1 style={{ margin: 0, fontSize: "1.5rem", color: "var(--wp-gold, #f1c233)" }}>
-          Agents
-        </h1>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          <Link
-            href="/admin/agents/approvals"
-            data-testid="agents-approvals-link"
-            title="Writes an agent has proposed, awaiting your approval before they run."
-            style={{
-              background: "var(--wp-dark-surface2, #1a1a1a)",
-              color: "var(--wp-gold, #f1c233)",
-              border: "1px solid var(--wp-gold, #f1c233)",
-              borderRadius: "6px",
-              padding: "0.4rem 0.9rem",
-              fontSize: "0.85rem",
-              textDecoration: "none",
-            }}
-          >
-            Write approvals
-          </Link>
-          <Link
-            href="/admin/platform-scans"
-            data-testid="agents-platform-scans-link"
-            title="Bugs and use-case gaps an agent found by scanning a target platform's journeys."
-            style={{
-              background: "var(--wp-dark-surface2, #1a1a1a)",
-              color: "var(--wp-gold, #f1c233)",
-              border: "1px solid var(--wp-gold, #f1c233)",
-              borderRadius: "6px",
-              padding: "0.4rem 0.9rem",
-              fontSize: "0.85rem",
-              textDecoration: "none",
-            }}
-          >
-            Platform scans
-          </Link>
-          <Link
-            href="/admin/connectors"
-            data-testid="agents-connectors-link"
-            title="Client platforms an agent is connected to with a saved login, ready for an authenticated scan."
-            style={{
-              background: "var(--wp-dark-surface2, #1a1a1a)",
-              color: "var(--wp-gold, #f1c233)",
-              border: "1px solid var(--wp-gold, #f1c233)",
-              borderRadius: "6px",
-              padding: "0.4rem 0.9rem",
-              fontSize: "0.85rem",
-              textDecoration: "none",
-            }}
-          >
-            Connections
-          </Link>
-          <Link
-            href="/admin/agents/memory"
-            data-testid="agents-memory-link"
-            title="What the agents have learned: the shared procedures one agent records and another inherits."
-            style={{
-              background: "var(--wp-dark-surface2, #1a1a1a)",
-              color: "var(--wp-gold, #f1c233)",
-              border: "1px solid var(--wp-gold, #f1c233)",
-              borderRadius: "6px",
-              padding: "0.4rem 0.9rem",
-              fontSize: "0.85rem",
-              textDecoration: "none",
-            }}
-          >
-            Shared memory
-          </Link>
-          <button
-            type="button"
-            onClick={() => void load()}
-            disabled={loading}
-            style={{
-              background: "var(--wp-dark-surface2, #1a1a1a)",
-              color: "var(--wp-text-dim, #aaa)",
-              border: "1px solid var(--wp-dark-border, #333)",
-              borderRadius: "6px",
-              padding: "0.4rem 0.9rem",
-              fontSize: "0.85rem",
-              cursor: loading ? "not-allowed" : "pointer",
-            }}
-          >
-            {loading ? "Loading..." : "Refresh"}
-          </button>
-        </div>
-      </div>
-      <p style={{ color: "var(--wp-text-dim, #aaa)", margin: "0 0 1.5rem 0", fontSize: "0.9rem" }}>
-        These are AI principals, governed by OGIAM and onboarded like teammates.
-        Each carries a role, an owner, and a lifecycle; every action it takes is
-        gated and recorded in the AI Gateway decision log.
-      </p>
+        <ConsoleGrid minColWidth={180} testId="agents-fleet-metrics">
+          <MetricTile
+            testId="fleet-metric-total"
+            value={fleet.total}
+            label="Agents in fleet"
+            kicker="Total principals"
+            accent="var(--wp-gold, #f1c233)"
+            sparkline={
+              <Sparkline
+                data={fleet.trend}
+                accent="var(--wp-gold, #f1c233)"
+                area
+                ariaLabel="onboards over the last 7 days"
+                testId="fleet-trend-sparkline"
+              />
+            }
+          />
+          <MetricTile
+            testId="fleet-metric-active"
+            value={fleet.active}
+            label="Active"
+            kicker="Live + gated"
+            accent={colorForStatus("active")}
+          />
+          <MetricTile
+            testId="fleet-metric-paused"
+            value={fleet.paused}
+            label="Paused"
+            kicker="Idle"
+            accent={colorForStatus("paused")}
+          />
+          <MetricTile
+            testId="fleet-metric-invited"
+            value={fleet.invited}
+            label="Invited"
+            kicker="Awaiting join"
+          />
+          <MetricTile
+            testId="fleet-metric-connected"
+            value={fleet.connected}
+            label="Connected"
+            kicker="With a bound service"
+            accent={colorForStatus("active")}
+          />
+        </ConsoleGrid>
+      </GlassPanel>
 
       {/* One-time secret panel. Renders prominently after a successful onboard
           and is the only place the credential is ever shown. */}
       {secret && (
-        <div
-          data-testid="agent-onboarding-secret"
-          style={{
-            padding: "1rem 1.1rem",
-            marginBottom: "1.5rem",
-            background: "rgba(34,197,94,0.06)",
-            border: "1px solid var(--wp-success, #22c55e)",
-            borderRadius: "8px",
-          }}
+        <GlassPanel
+          glow="blue"
+          testId="agent-onboarding-secret"
+          title={
+            <span style={{ color: "var(--wp-success, #22c55e)" }}>
+              {secret.agent.name} onboarded
+            </span>
+          }
+          subtitle={
+            <span data-testid="agent-onboarding-secret-warning">
+              Shown once. Copy it now; it is the agent&apos;s onboarding
+              credential and is never shown again.
+            </span>
+          }
+          style={{ marginBottom: "1.5rem" }}
         >
-          <div style={{ fontWeight: 700, color: "var(--wp-success, #22c55e)", fontSize: "0.95rem" }}>
-            {secret.agent.name} onboarded
-          </div>
-          <div
-            data-testid="agent-onboarding-secret-warning"
-            style={{
-              marginTop: "0.4rem",
-              fontSize: "0.82rem",
-              color: "var(--wp-text-dim, #aaa)",
-            }}
-          >
-            Shown once. Copy it now; it is the agent&apos;s onboarding credential
-            and is never shown again.
-          </div>
           <div
             style={{
-              marginTop: "0.7rem",
               display: "flex",
               alignItems: "center",
               gap: "0.5rem",
@@ -429,37 +548,96 @@ export default function AgentsPage() {
               I saved it
             </button>
           </div>
-        </div>
+        </GlassPanel>
       )}
 
       {/* Onboard form. */}
-      <form
-        data-testid="agent-onboard-form"
-        onSubmit={(e) => void onboard(e)}
-        style={{
-          padding: "1.1rem 1.2rem",
-          marginBottom: "1.75rem",
-          background: "var(--wp-dark-surface, #1f1f22)",
-          border: "1px solid var(--wp-dark-border, #333)",
-          borderRadius: "8px",
-        }}
+      <GlassPanel
+        title="Onboard an agent"
+        subtitle="Mint a governed identity for a new AI principal. The one-time secret is shown once on success."
+        style={{ marginBottom: "1.75rem" }}
       >
-        <div style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.9rem", color: "var(--wp-text, #eee)" }}>
-          Onboard an agent
-        </div>
-        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
-          <label style={{ flex: "2 1 220px", display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-            <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim, #aaa)" }}>Name</span>
-            <input
-              type="text"
-              data-testid="agent-onboard-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Research Scout"
-              maxLength={120}
+        <form data-testid="agent-onboard-form" onSubmit={(e) => void onboard(e)}>
+          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+            <label style={{ flex: "2 1 220px", display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+              <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim, #aaa)" }}>Name</span>
+              <input
+                type="text"
+                data-testid="agent-onboard-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Research Scout"
+                maxLength={120}
+                style={{
+                  padding: "0.5rem 0.7rem",
+                  fontSize: "0.9rem",
+                  background: "var(--wp-dark-surface2, #1a1a1a)",
+                  color: "var(--wp-text, #eee)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  borderRadius: "6px",
+                }}
+              />
+            </label>
+            <label style={{ flex: "1 1 140px", display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+              <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim, #aaa)" }}>Role</span>
+              <select
+                data-testid="agent-onboard-role"
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                style={{
+                  padding: "0.5rem 0.7rem",
+                  fontSize: "0.9rem",
+                  background: "var(--wp-dark-surface2, #1a1a1a)",
+                  color: "var(--wp-text, #eee)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  borderRadius: "6px",
+                  textTransform: "uppercase",
+                }}
+              >
+                {ROLE_OPTIONS.map((r) => (
+                  <option key={r} value={r}>
+                    {r.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.3rem", marginBottom: "0.75rem" }}>
+            <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim, #aaa)" }}>
+              Description (optional)
+            </span>
+            <textarea
+              data-testid="agent-onboard-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What is this agent for? Helps the team understand its remit."
+              rows={2}
+              maxLength={500}
               style={{
                 padding: "0.5rem 0.7rem",
-                fontSize: "0.9rem",
+                fontSize: "0.88rem",
+                background: "var(--wp-dark-surface2, #1a1a1a)",
+                color: "var(--wp-text, #eee)",
+                border: "1px solid var(--wp-dark-border, #333)",
+                borderRadius: "6px",
+                resize: "vertical",
+                fontFamily: "inherit",
+              }}
+            />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.3rem", marginBottom: "0.75rem" }}>
+            <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim, #aaa)" }}>
+              Invite by email (optional)
+            </span>
+            <input
+              data-testid="agent-onboard-invite-email"
+              type="email"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              placeholder="teammate@company.com sends the join link + one-time secret"
+              style={{
+                padding: "0.5rem 0.7rem",
+                fontSize: "0.88rem",
                 background: "var(--wp-dark-surface2, #1a1a1a)",
                 color: "var(--wp-text, #eee)",
                 border: "1px solid var(--wp-dark-border, #333)",
@@ -467,256 +645,227 @@ export default function AgentsPage() {
               }}
             />
           </label>
-          <label style={{ flex: "1 1 140px", display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-            <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim, #aaa)" }}>Role</span>
-            <select
-              data-testid="agent-onboard-role"
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
+          {formError && (
+            <div
+              data-testid="agent-onboard-error"
               style={{
+                marginBottom: "0.75rem",
                 padding: "0.5rem 0.7rem",
-                fontSize: "0.9rem",
-                background: "var(--wp-dark-surface2, #1a1a1a)",
-                color: "var(--wp-text, #eee)",
-                border: "1px solid var(--wp-dark-border, #333)",
+                background: "rgba(239,68,68,0.08)",
+                color: "var(--wp-error, #ef4444)",
+                border: "1px solid var(--wp-error, #ef4444)",
                 borderRadius: "6px",
-                textTransform: "uppercase",
+                fontSize: "0.82rem",
               }}
             >
-              {ROLE_OPTIONS.map((r) => (
-                <option key={r} value={r}>
-                  {r.toUpperCase()}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <label style={{ display: "flex", flexDirection: "column", gap: "0.3rem", marginBottom: "0.75rem" }}>
-          <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim, #aaa)" }}>
-            Description (optional)
-          </span>
-          <textarea
-            data-testid="agent-onboard-description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="What is this agent for? Helps the team understand its remit."
-            rows={2}
-            maxLength={500}
-            style={{
-              padding: "0.5rem 0.7rem",
-              fontSize: "0.88rem",
-              background: "var(--wp-dark-surface2, #1a1a1a)",
-              color: "var(--wp-text, #eee)",
-              border: "1px solid var(--wp-dark-border, #333)",
-              borderRadius: "6px",
-              resize: "vertical",
-              fontFamily: "inherit",
-            }}
-          />
-        </label>
-        <label style={{ display: "flex", flexDirection: "column", gap: "0.3rem", marginBottom: "0.75rem" }}>
-          <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim, #aaa)" }}>
-            Invite by email (optional)
-          </span>
-          <input
-            data-testid="agent-onboard-invite-email"
-            type="email"
-            value={inviteEmail}
-            onChange={(e) => setInviteEmail(e.target.value)}
-            placeholder="teammate@company.com — emails the join link + one-time secret"
-            style={{
-              padding: "0.5rem 0.7rem",
-              fontSize: "0.88rem",
-              background: "var(--wp-dark-surface2, #1a1a1a)",
-              color: "var(--wp-text, #eee)",
-              border: "1px solid var(--wp-dark-border, #333)",
-              borderRadius: "6px",
-            }}
-          />
-        </label>
-        {formError && (
-          <div
-            data-testid="agent-onboard-error"
-            style={{
-              marginBottom: "0.75rem",
-              padding: "0.5rem 0.7rem",
-              background: "rgba(239,68,68,0.08)",
-              color: "var(--wp-error, #ef4444)",
-              border: "1px solid var(--wp-error, #ef4444)",
-              borderRadius: "6px",
-              fontSize: "0.82rem",
-            }}
-          >
-            {formError}
+              {formError}
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="submit"
+              data-testid="agent-onboard-submit"
+              disabled={submitting}
+              style={{
+                padding: "0.5rem 1.1rem",
+                borderRadius: "6px",
+                fontSize: "0.88rem",
+                fontWeight: 600,
+                background: "var(--wp-gold, #f1c233)",
+                color: "var(--wp-dark, #111)",
+                border: "1px solid var(--wp-gold, #f1c233)",
+                cursor: submitting ? "not-allowed" : "pointer",
+              }}
+            >
+              {submitting ? "Onboarding..." : "Onboard agent"}
+            </button>
           </div>
-        )}
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button
-            type="submit"
-            data-testid="agent-onboard-submit"
-            disabled={submitting}
-            style={{
-              padding: "0.5rem 1.1rem",
-              borderRadius: "6px",
-              fontSize: "0.88rem",
-              fontWeight: 600,
-              background: "var(--wp-gold, #f1c233)",
-              color: "var(--wp-dark, #111)",
-              border: "1px solid var(--wp-gold, #f1c233)",
-              cursor: submitting ? "not-allowed" : "pointer",
-            }}
-          >
-            {submitting ? "Onboarding..." : "Onboard agent"}
-          </button>
-        </div>
-      </form>
+        </form>
+      </GlassPanel>
+
+      <SectionHeader
+        title="Fleet roster"
+        subtitle="Each card is one principal. Open a card to see its full identity, gate decisions, and bound services."
+        testId="agents-roster-header"
+      />
 
       {error && (
-        <div
-          data-testid="agents-error"
-          style={{
-            padding: "0.75rem 1rem",
-            background: "rgba(239,68,68,0.08)",
-            color: "var(--wp-error, #ef4444)",
-            border: "1px solid var(--wp-error, #ef4444)",
-            borderRadius: "6px",
-            marginBottom: "1rem",
-          }}
-        >
-          {error}
-        </div>
+        <GlassPanel testId="agents-error-panel" style={{ marginBottom: "1rem" }}>
+          <div
+            data-testid="agents-error"
+            style={{
+              color: "var(--wp-error, #ef4444)",
+              fontSize: "0.9rem",
+            }}
+          >
+            {error}
+          </div>
+        </GlassPanel>
+      )}
+
+      {!error && loading && agents.length === 0 && (
+        <GlassPanel testId="agents-loading">
+          <div style={{ color: "var(--wp-text-dim, #aaa)", fontSize: "0.9rem" }}>
+            Loading the fleet...
+          </div>
+        </GlassPanel>
       )}
 
       {!error && !loading && agents.length === 0 && (
-        <div
-          data-testid="agents-empty"
-          style={{
-            padding: "1.5rem",
-            background: "var(--wp-dark-surface, #1f1f22)",
-            border: "1px dashed var(--wp-dark-border, #333)",
-            borderRadius: "8px",
-            textAlign: "center",
-            color: "var(--wp-text-muted, #6b7280)",
-          }}
-        >
-          No agent principals yet. Onboard one above to give an AI actor a
-          governed identity.
-        </div>
-      )}
-
-      <ul style={{ listStyle: "none", padding: 0, margin: 0 }} data-testid="agents-roster">
-        {agents.map((a) => (
-          <li
-            key={a.id}
-            data-testid={`agent-row-${a.id}`}
+        <GlassPanel testId="agents-empty-panel">
+          <div
+            data-testid="agents-empty"
             style={{
-              marginBottom: "0.5rem",
-              background: "var(--wp-dark-surface, #1f1f22)",
-              border: "1px solid var(--wp-dark-border, #333)",
-              borderRadius: "8px",
+              textAlign: "center",
+              color: "var(--wp-text-muted, #6b7280)",
+              fontSize: "0.9rem",
+              padding: "0.5rem 0",
             }}
           >
-            <Link
-              href={`/admin/agents/${a.id}`}
-              style={{
-                display: "block",
-                padding: "1rem 1.1rem",
-                textDecoration: "none",
-                color: "inherit",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "baseline",
-                  justifyContent: "space-between",
-                  flexWrap: "wrap",
-                  gap: "0.5rem",
-                }}
+            No agent principals yet. Onboard one above to give an AI actor a
+            governed identity.
+          </div>
+        </GlassPanel>
+      )}
+
+      {agents.length > 0 && (
+        <div data-testid="agents-roster">
+          <ConsoleGrid minColWidth={320} testId="agents-roster-grid">
+            {agents.map((a) => (
+              <Link
+                key={a.id}
+                href={`/admin/agents/${a.id}`}
+                data-testid={`agent-row-${a.id}`}
+                onClick={() =>
+                  trackEngagement("agent.detail_opened", { agent_id: a.id, state: a.state })
+                }
+                style={{ textDecoration: "none", color: "inherit", display: "block" }}
               >
-                <div style={{ fontSize: "0.95rem", color: "var(--wp-text, #eee)" }}>
-                  <strong>{a.name}</strong>
-                  <span
+                <GlassPanel
+                  padded
+                  style={{ height: "100%", cursor: "pointer" }}
+                >
+                  <div
                     style={{
-                      marginLeft: "0.5rem",
-                      fontSize: "0.78rem",
-                      color: "var(--wp-text-dim, #aaa)",
-                      textTransform: "uppercase",
+                      display: "flex",
+                      alignItems: "baseline",
+                      justifyContent: "space-between",
+                      flexWrap: "wrap",
+                      gap: "0.5rem",
                     }}
                   >
-                    {a.role}
-                  </span>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                  <StateChip state={a.state} id={a.id} />
-                  <span
-                    title={a.createdAt}
-                    style={{ fontSize: "0.78rem", color: "var(--wp-text-muted, #6b7280)" }}
+                    <div style={{ fontSize: "0.98rem", color: "var(--wp-text, #eee)", minWidth: 0 }}>
+                      <strong>{a.name}</strong>
+                      <span
+                        style={{
+                          marginLeft: "0.5rem",
+                          fontSize: "0.78rem",
+                          color: "var(--wp-text-dim, #aaa)",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {a.role}
+                      </span>
+                    </div>
+                    <StatusPill
+                      status={statusForState(a.state)}
+                      label={a.state}
+                      size="md"
+                      testId={`agent-state-chip-${a.id}`}
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: "0.5rem",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "0.5rem",
+                      fontSize: "0.78rem",
+                      color: "var(--wp-text-muted, #6b7280)",
+                    }}
                   >
-                    {relativeTime(a.createdAt)}
-                  </span>
-                </div>
-              </div>
-              <div
-                style={{
-                  marginTop: "0.4rem",
-                  fontSize: "0.78rem",
-                  color: "var(--wp-text-muted, #6b7280)",
-                }}
-              >
-                owner: {a.ownerUserId ?? "unassigned"}
-                {a.description ? ` · ${a.description}` : ""}
-              </div>
-              {/* Bound services: the systems this agent operates, rendered as
-                  small chips so the roster shows at a glance which agent is a
-                  Salesforce / Jira / ... agent. A muted hint stands in when the
-                  agent has nothing connected yet. */}
-              {a.connections && a.connections.length > 0 ? (
-                <div
-                  data-testid={`agent-services-${a.id}`}
-                  style={{
-                    marginTop: "0.5rem",
-                    display: "flex",
-                    gap: "0.35rem",
-                    flexWrap: "wrap",
-                    alignItems: "center",
-                  }}
-                >
-                  {a.connections.map((conn) => (
-                    <span
-                      key={conn}
+                    <span>owner: {a.ownerUserId ?? "unassigned"}</span>
+                    <span title={a.createdAt}>{relativeTime(a.createdAt)}</span>
+                  </div>
+
+                  {a.description && (
+                    <div
                       style={{
-                        padding: "0.1rem 0.5rem",
-                        borderRadius: "10px",
-                        fontSize: "0.7rem",
-                        fontWeight: 600,
-                        fontFamily: "var(--wp-mono, monospace)",
-                        background: "rgba(34,197,94,0.12)",
-                        color: "var(--wp-success, #22c55e)",
-                        border: "1px solid var(--wp-success, #22c55e)",
+                        marginTop: "0.4rem",
+                        fontSize: "0.8rem",
+                        color: "var(--wp-text-dim, #aaa)",
                       }}
                     >
-                      {conn}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <div
-                  data-testid={`agent-services-${a.id}`}
-                  style={{
-                    marginTop: "0.5rem",
-                    fontSize: "0.72rem",
-                    color: "var(--wp-text-muted, #6b7280)",
-                    fontStyle: "italic",
-                  }}
-                >
-                  no service connected
-                </div>
-              )}
-            </Link>
-          </li>
-        ))}
-      </ul>
+                      {a.description}
+                    </div>
+                  )}
+
+                  {/* Bound services: the systems this agent operates, rendered
+                      as small chips so the roster shows at a glance which agent
+                      is a Salesforce / Jira / ... agent. A muted hint stands in
+                      when the agent has nothing connected yet. */}
+                  {a.connections && a.connections.length > 0 ? (
+                    <div
+                      data-testid={`agent-services-${a.id}`}
+                      style={{
+                        marginTop: "0.6rem",
+                        display: "flex",
+                        gap: "0.35rem",
+                        flexWrap: "wrap",
+                        alignItems: "center",
+                      }}
+                    >
+                      {a.connections.map((conn) => (
+                        <span
+                          key={conn}
+                          style={{
+                            padding: "0.1rem 0.5rem",
+                            borderRadius: "10px",
+                            fontSize: "0.7rem",
+                            fontWeight: 600,
+                            fontFamily: "var(--wp-mono, monospace)",
+                            background: "rgba(34,197,94,0.12)",
+                            color: "var(--wp-success, #22c55e)",
+                            border: "1px solid var(--wp-success, #22c55e)",
+                          }}
+                        >
+                          {conn}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div
+                      data-testid={`agent-services-${a.id}`}
+                      style={{
+                        marginTop: "0.6rem",
+                        fontSize: "0.72rem",
+                        color: "var(--wp-text-muted, #6b7280)",
+                        fontStyle: "italic",
+                      }}
+                    >
+                      no service connected
+                    </div>
+                  )}
+
+                  <div
+                    aria-hidden
+                    style={{
+                      marginTop: "0.7rem",
+                      fontSize: "0.76rem",
+                      fontWeight: 600,
+                      color: "var(--wp-gold, #f1c233)",
+                    }}
+                  >
+                    Open agent →
+                  </div>
+                </GlassPanel>
+              </Link>
+            ))}
+          </ConsoleGrid>
+        </div>
+      )}
     </div>
   );
 }

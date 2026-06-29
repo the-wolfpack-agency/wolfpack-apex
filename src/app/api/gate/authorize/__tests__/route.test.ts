@@ -238,6 +238,53 @@ describe("scope enforcement (defense in depth on top of the gate)", () => {
   });
 });
 
+describe("fail closed on unauditable (no audit, no action)", () => {
+  // authorize() sets unauditable + wouldBlock when the enforce-mode ledger write
+  // failed, but leaves effectiveOutcome === "allow". The route MUST refuse the
+  // action regardless, mirroring the internal dispatcher.
+  const UNAUDITABLE_ALLOW = {
+    ...ALLOW_DECISION,
+    unauditable: true,
+    wouldBlock: true,
+    recordedSeq: undefined,
+  };
+
+  it("200 { allowed: false } when the decision is unauditable even though effectiveOutcome is 'allow'", async () => {
+    mockAuthorize.mockResolvedValue(UNAUDITABLE_ALLOW);
+    const res = await post(IN_SCOPE_BODY, BEARER);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.allowed).toBe(false);
+    expect(json.decision.reason).toMatch(/unauditable/i);
+    // The served-verdict event must NOT fire on a fail-closed block.
+    expect(mockTrack).not.toHaveBeenCalledWith(
+      "platform.gate_api_authorized",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("fires platform.gate_api_blocked with reason 'unauditable' on the fail-closed path", async () => {
+    mockAuthorize.mockResolvedValue(UNAUDITABLE_ALLOW);
+    await post(IN_SCOPE_BODY, BEARER);
+    expect(mockTrack).toHaveBeenCalledWith(
+      "platform.gate_api_blocked",
+      "apikey:key-1",
+      "external_agent",
+      expect.objectContaining({ reason: "unauditable", agent: "acme-bot", tool: "send_mail" }),
+    );
+  });
+
+  it("never leaks params on the fail-closed block", async () => {
+    mockAuthorize.mockResolvedValue(UNAUDITABLE_ALLOW);
+    const res = await post(IN_SCOPE_BODY, BEARER);
+    const text = JSON.stringify(await res.json());
+    expect(text).not.toContain("123-45-6789");
+    expect(text).not.toContain("victim@example.com");
+  });
+});
+
 describe("body validation", () => {
   it("400 when tool is missing", async () => {
     const res = await post({ capability: "mail.read" }, BEARER);

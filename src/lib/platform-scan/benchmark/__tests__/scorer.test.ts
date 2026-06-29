@@ -122,25 +122,27 @@ describe("scoreTarget", () => {
     expect(score.extra).toEqual([{ findingClass: "ux_gap:no empty state", count: 2 }]);
   });
 
-  it("unlabeled target -> labeled false, recall 1 (nothing to miss), extras still listed but untrustworthy", () => {
+  it("unlabeled target -> labeled false, recall null (n/a, NOT a vacuous 1), extras still listed but untrustworthy", () => {
     const t = target("unlabeled"); // no groundTruth
     const findings = [finding("bug", "broken link"), finding("bug", "broken link", "/2")];
 
     const score = scoreTarget(t, findings);
 
     expect(score.labeled).toBe(false);
-    expect(score.recall).toBe(1); // vacuously perfect: nothing known to miss
+    // FIX #2: recall is null (not applicable), never 1 - a vacuous 1 reads as "100%"
+    // to a client. There is no ground truth to measure recall against.
+    expect(score.recall).toBeNull();
     expect(score.missed).toEqual([]);
     // Extras are still surfaced so no data is lost, but labeled:false flags them
     // as untrustworthy (could be genuinely unlabeled real findings).
     expect(score.extra).toEqual([{ findingClass: "bug:broken link", count: 2 }]);
   });
 
-  it("empty groundTruth array is treated as unlabeled", () => {
+  it("empty groundTruth array is treated as unlabeled (recall null, never 1)", () => {
     const t = target("emptyGT", []);
     const score = scoreTarget(t, [finding("bug", "x")]);
     expect(score.labeled).toBe(false);
-    expect(score.recall).toBe(1);
+    expect(score.recall).toBeNull();
   });
 
   it("no findings against labeled target -> recall 0, all missed", () => {
@@ -221,28 +223,43 @@ describe("scoreBenchmark", () => {
     });
   });
 
-  it("empty results -> vacuous metrics, no crash, event still fired", () => {
+  it("empty results -> n/a metrics (null, not vacuous 1), no crash, event still fired", () => {
     const { deps, calls } = makeDeps();
     const report = scoreBenchmark([], deps);
 
     expect(report.targets).toBe(0);
-    expect(report.recall).toBe(1); // nothing to miss
-    expect(report.precision).toBe(1); // nothing reported
+    // FIX #2: no labeled targets -> recall/precision are null (n/a), never 1.
+    expect(report.recall).toBeNull();
+    expect(report.precision).toBeNull();
     expect(report.coverageClasses).toEqual([]);
     expect(report.labeledTargets).toBe(0);
     expect(calls.filter((c) => c.type === "platform.benchmark_run")).toHaveLength(1);
   });
 
-  it("no labeled targets -> metrics vacuously 1 and labeledTargets 0 (untrustworthy)", () => {
+  it("no labeled targets -> metrics null (n/a) and labeledTargets 0 (not a fabricated 100%)", () => {
     const results: BenchmarkResult[] = [
       { target: target("u1"), findings: [finding("bug", "a")] },
       { target: target("u2"), findings: [finding("bug", "b")] },
     ];
     const { deps } = makeDeps();
     const report = scoreBenchmark(results, deps);
-    expect(report.recall).toBe(1);
-    expect(report.precision).toBe(1);
+    // FIX #2: own/unlabeled apps no longer show "100%, perfect" - they show n/a.
+    expect(report.recall).toBeNull();
+    expect(report.precision).toBeNull();
     expect(report.labeledTargets).toBe(0);
+  });
+
+  it("FIX #2 negative: unlabeled extras never inflate a null aggregate to a real number", () => {
+    // A target with no ground truth but many findings must NOT push recall/precision
+    // off null - there is nothing to score, so the dashboard shows n/a, not 100%.
+    const noisy = Array.from({ length: 9 }, (_, i) => finding("bug", `b${i}`, `/r${i}`));
+    const { deps } = makeDeps();
+    const report = scoreBenchmark([{ target: target("ownApp"), findings: noisy }], deps);
+    expect(report.recall).toBeNull();
+    expect(report.precision).toBeNull();
+    expect(report.labeledTargets).toBe(0);
+    // The findings are still counted as coverage breadth (no data lost).
+    expect(report.coverageClasses.length).toBe(9);
   });
 });
 
