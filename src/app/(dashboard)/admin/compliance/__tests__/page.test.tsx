@@ -58,6 +58,32 @@ test("error on a non-ok GET", async () => {
   expect(await screen.findByTestId("compliance-error")).toBeInTheDocument();
 });
 
+test("download signed evidence: button present on a history row, clicking calls the export endpoint via fetchWithRefresh", async () => {
+  // jsdom lacks blob/object-URL + anchor.click download plumbing; stub them.
+  const createObjectURL = jest.fn(() => "blob:evidence");
+  const revokeObjectURL = jest.fn();
+  Object.defineProperty(URL, "createObjectURL", { value: createObjectURL, configurable: true });
+  Object.defineProperty(URL, "revokeObjectURL", { value: revokeObjectURL, configurable: true });
+  jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+  mockFetch.mockImplementation((url: string) =>
+    typeof url === "string" && url.includes("/export")
+      ? Promise.resolve({ ok: true, status: 200, blob: async () => new Blob(["{}"], { type: "application/json" }) })
+      : route({ reports: [{ id: "cmp_42", framework: "SOC2", coverage: 1, covered: 4, partial: 0, gap: 0, createdAt: "2026-06-30" }] })(url),
+  );
+
+  render(<CompliancePage />);
+  const btn = await screen.findByTestId("compliance-export");
+  expect(btn).toBeInTheDocument();
+
+  fireEvent.click(btn);
+
+  await waitFor(() =>
+    expect(mockFetch.mock.calls.some((c) => typeof c[0] === "string" && c[0].includes("/api/admin/compliance/report/export?id=cmp_42"))).toBe(true),
+  );
+  await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
+});
+
 test("generate POSTs the selected framework and renders the coverage + controls (incl. a gap)", async () => {
   mockFetch.mockImplementation(route({ reports: [] }));
   render(<CompliancePage />);
