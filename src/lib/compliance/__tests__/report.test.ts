@@ -18,6 +18,11 @@ const healthy: EvidenceInputs = {
   redteamRecent: true,
   aiSurfacesTotal: 40,
   ungovernedAiSurfaces: 0,
+  signingActive: true,
+  signingAlgorithm: "ES256",
+  secretsEncryptedAtRest: true,
+  tenantIsolationEnforced: true,
+  tenantScopedTables: 44,
 };
 
 const cold: EvidenceInputs = {
@@ -30,6 +35,11 @@ const cold: EvidenceInputs = {
   redteamRecent: false,
   aiSurfacesTotal: 0,
   ungovernedAiSurfaces: 0,
+  signingActive: false,
+  signingAlgorithm: "none",
+  secretsEncryptedAtRest: false,
+  tenantIsolationEnforced: false,
+  tenantScopedTables: 0,
 };
 
 test("a healthy system reports high coverage across every framework", () => {

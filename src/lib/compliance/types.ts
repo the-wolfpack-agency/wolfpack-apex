@@ -37,6 +37,20 @@ export interface EvidenceInputs {
   /** Discovered AI touchpoints and how many are ungoverned. */
   aiSurfacesTotal: number;
   ungovernedAiSurfaces: number;
+  /** A real (non-null) signer is active, so the ledger + evidence exports are
+   *  cryptographically signed and independently verifiable (data-protection). */
+  signingActive: boolean;
+  /** The signing algorithm in force (ES256 via Key Vault in prod, HS256-local in
+   *  dev, "none" when no signer is configured). */
+  signingAlgorithm: string;
+  /** At-rest secret encryption is operational (an encrypt/decrypt probe round-
+   *  trips and the ciphertext differs from the plaintext). */
+  secretsEncryptedAtRest: boolean;
+  /** Repo-wide tenant-isolation guardrail: every workspace-scoped query is
+   *  classified (0 unclassified) as of the last CI-verified scan. */
+  tenantIsolationEnforced: boolean;
+  /** Count of workspace-scoped tables under the guardrail. */
+  tenantScopedTables: number;
 }
 
 /** One framework control mapped to an OGIAM capability + an evidence-driven
