@@ -485,6 +485,12 @@ export type InstinctEventType =
   // ai_redteam.vuln_detected { category, technique, attack_id } - one per attack
   //   that got through (a gate regression). The healthy state emits none.
   | "ai_redteam.vuln_detected"
+  // Compliance engine: framework coverage generated from measured evidence.
+  // compliance.report_generated { framework, coverage, covered, partial, gap }
+  | "compliance.report_generated"
+  // compliance.gap_detected { framework, control_id } - one per uncovered control,
+  //   so the learning loop watches the gaps close over time.
+  | "compliance.gap_detected"
   // Agent principals (OGIAM, agents onboarded like people).
   // agent.created          { agent_id, role, owner_user_id, identity_provider }
   //   an admin onboarded an agent through the invite flow.
