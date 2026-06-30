@@ -498,6 +498,12 @@ export type InstinctEventType =
   // compliance.gap_detected { framework, control_id } - one per uncovered control,
   //   so the learning loop watches the gaps close over time.
   | "compliance.gap_detected"
+  // ogiam.demo_seeded { surfaces, decisions, flagged, would_block, enforce_policies,
+  //   redteam_pass_rate, compliance_reports } - an operator restored a known-good,
+  //   populated governance state across all five demo beats. Seeds through the REAL
+  //   domain path (gate -> ledger -> triple-write), so the data is honest + audited,
+  //   never injected; the learning loop sees the same events a live client would.
+  | "ogiam.demo_seeded"
   // compliance.evidence_exported { framework, report_id, signed } - a signed,
   //   forwardable evidence artifact was generated for a stored report.
   | "compliance.evidence_exported"
