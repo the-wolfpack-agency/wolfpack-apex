@@ -8,6 +8,7 @@ import {
   connectPlaud as connectPlaudHelper,
 } from "@/lib/integrations/connect";
 import { sanitizeHtml } from "@/lib/html-sanitize";
+import MfaSettingsCard from "@/components/MfaSettingsCard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1325,6 +1326,12 @@ export default function SettingsPage() {
       {/* Change password */}
       <SectionCard title="Change password" id="change-password">
         <ChangePasswordCard />
+      </SectionCard>
+
+      {/* Multi-factor authentication — OPT-IN, self-service TOTP. Non-enforcing:
+          enabling/disabling it never changes the login flow in this release. */}
+      <SectionCard title="Multi-factor authentication" id="mfa">
+        <MfaSettingsCard />
       </SectionCard>
 
       {/* Email signatures - re-enabled now that /emails has shipped the
