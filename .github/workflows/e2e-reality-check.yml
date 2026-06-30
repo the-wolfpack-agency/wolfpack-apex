@@ -106,6 +106,7 @@ jobs:
           tests/e2e/feedback-screenshot-flow.spec.ts
           tests/e2e/ogiam-shadow-flow.spec.ts
           tests/e2e/ogiam-adversarial-flow.spec.ts
+          tests/e2e/ogiam-trends.spec.ts
           tests/e2e/agents-onboarding.spec.ts
           tests/e2e/ai-redteam.spec.ts
           tests/e2e/ai-surfaces.spec.ts

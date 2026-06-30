@@ -12,6 +12,7 @@
     { "path": "/api/cron/engagement-sweep", "schedule": "0 */12 * * *" },
     { "path": "/api/cron/pentest-sweep", "schedule": "30 */12 * * *" },
     { "path": "/api/cron/tenant-isolation-scan", "schedule": "0 4 * * *" },
-    { "path": "/api/cron/ai-redteam", "schedule": "0 */6 * * *" }
+    { "path": "/api/cron/ai-redteam", "schedule": "0 */6 * * *" },
+    { "path": "/api/admin/ogiam/governance-alerts/scan", "schedule": "10 */6 * * *" }
   ]
 }
