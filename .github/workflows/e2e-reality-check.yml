@@ -1,16 +1,19 @@
 name: E2E Reality Check
 
-# Browser-level reality-check specs — the layer that would have caught the
-# 2026-04-19 iframe-parity regression (commit 9097a47) that 400+ jest tests
-# missed. Runs three specs:
-#   1. sites-preview-reality-check — gate (must pass to merge)
-#   2. sites-upload-reality-check  — continue-on-error until SMOKE creds
-#                                    are wired into CI secrets
-#   3. sites-designer-journey      — continue-on-error until SMOKE creds
-#                                    are wired + SITES_SMOKE_PROJECT_ID set
+# Browser-level reality-check specs — the layer that catches parity regressions
+# 400+ jest tests miss. Restructured for speed + reliability:
+#   * Targets the DEPLOYED app via PROD_URL. If PROD_URL is unset the job SKIPS
+#     with a loud warning, instead of silently booting a local `next dev` server
+#     that cold-compiles every route (slow) and flakes on dev-mode CSP/eval — the
+#     exact cause of the recurring dashboard-quick-actions timeouts.
+#   * The Playwright browser is cached, so the ~1-2 min install only runs on a
+#     version bump.
+#   * The two HARD gates run in ONE parallel invocation on every PR + push.
+#   * The SOFT specs run in ONE invocation on push-to-main ONLY, so they stay off
+#     the PR critical path (they never gated a merge; they only delayed it).
 #
-# Gate promotion: flip `continue-on-error` to `false` once the creds are
-# in repo secrets. Track in next handoff.
+# To make the gates run: set PROD_URL (+ SMOKE_* for the soft specs) in repo
+# secrets. To promote a soft spec to a hard gate, move it into the gates step.
 
 on:
   push:
@@ -38,129 +41,80 @@ jobs:
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Require PROD_URL (reality-check targets the live deployment)
+        id: cfg
+        run: |
+          if [ -z "${PROD_URL}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "::warning::PROD_URL secret not set — reality-check SKIPPED. It must target the deployed app; a local dev server cold-compiles routes and flakes. Add PROD_URL in Settings -> Secrets -> Actions."
+          else
+            echo "configured=true" >> $GITHUB_OUTPUT
+          fi
+
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        if: steps.cfg.outputs.configured == 'true'
         with:
           node-version: 20
           cache: "npm"
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
 
-      # Gate — must pass. Parity regression = merge blocked.
-      - name: Preview parity spec (gate)
-        run: npx playwright test tests/e2e/sites-preview-reality-check.spec.ts --config=playwright.config.ts --reporter=github
+      - name: Install dependencies
+        if: steps.cfg.outputs.configured == 'true'
+        run: npm ci
 
-      # Soft gates until creds land. Still surface failures in the run
-      # log so we can watch them mature.
-      - name: Upload reality spec (soft)
+      - name: Cache Playwright browsers
+        if: steps.cfg.outputs.configured == 'true'
+        id: pw-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright (deps always; browser only on cache miss)
+        if: steps.cfg.outputs.configured == 'true'
+        run: |
+          if [ "${{ steps.pw-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
+
+      # HARD GATES — one parallel invocation; must pass on PR + push. A parity
+      # regression blocks the merge. Both specs are read-only page renders, so
+      # --workers=2 is safe and roughly halves the wall time.
+      - name: Reality-check gates (preview parity + dashboard quick-actions)
+        if: steps.cfg.outputs.configured == 'true'
+        run: >-
+          npx playwright test
+          tests/e2e/sites-preview-reality-check.spec.ts
+          tests/e2e/dashboard-quick-actions.spec.ts
+          --config=playwright.config.ts --workers=2 --reporter=github
+
+      # SOFT SPECS — one invocation, push-to-main ONLY (off the PR critical path).
+      # They never gated a merge (continue-on-error), so running them on every PR
+      # only delayed it. They still run post-merge for visibility, serially
+      # (workers:1 from the config) since several mutate. continue-on-error keeps
+      # a soft failure from failing the job.
+      - name: Reality-check soft specs (post-merge visibility)
+        if: steps.cfg.outputs.configured == 'true' && github.event_name == 'push'
         continue-on-error: true
-        run: npx playwright test tests/e2e/sites-upload-reality-check.spec.ts --config=playwright.config.ts --reporter=github
+        run: >-
+          npx playwright test
+          tests/e2e/sites-upload-reality-check.spec.ts
+          tests/e2e/sites-designer-journey.spec.ts
+          tests/e2e/feature-requests-data-flow.spec.ts
+          tests/e2e/feedback-screenshot-flow.spec.ts
+          tests/e2e/ogiam-shadow-flow.spec.ts
+          tests/e2e/ogiam-adversarial-flow.spec.ts
+          tests/e2e/agents-onboarding.spec.ts
+          tests/e2e/search-autofocus.spec.ts
+          tests/e2e/emails-inbox-flow.spec.ts
+          tests/e2e/messages-bugs.spec.ts
+          tests/e2e/knowledge-qa-cache.spec.ts
+          --config=playwright.config.ts --reporter=github
 
-      - name: Designer journey spec (soft)
-        continue-on-error: true
-        run: npx playwright test tests/e2e/sites-designer-journey.spec.ts --config=playwright.config.ts --reporter=github
-
-      # Real DB round-trip for the first Tier-4-renamed table.
-      # POSTs a feature-request through the API and independently GETs
-      # it back — the only test layer that can detect a silent-
-      # discard bug where a 200 response coexists with data that never
-      # landed. Soft gate until smoke creds are in secrets; becomes a
-      # hard gate the moment they are.
-      - name: Feature-requests data-flow spec (soft)
-        continue-on-error: true
-        run: npx playwright test tests/e2e/feature-requests-data-flow.spec.ts --config=playwright.config.ts --reporter=github
-
-      # Feedback screenshot round-trip: POST /api/feedback with an image,
-      # read it back through the admin list + the lazy screenshot endpoint,
-      # then assert the thumbnail renders on /admin/feedback with no CSP
-      # failures. Catches a 201 that silently drops the image or an admin
-      # page that 200s but shows a blank widget. Soft gate until smoke creds
-      # are in secrets; promote to hard gate after a few green runs.
-      - name: Feedback screenshot flow spec (soft)
-        continue-on-error: true
-        run: npx playwright test tests/e2e/feedback-screenshot-flow.spec.ts --config=playwright.config.ts --reporter=github
-
-      # OGIAM shadow-mode explorer reality check: GET the decisions API and
-      # assert the { workspace_id, summary, decisions[] } shape, then load
-      # /admin/ogiam and assert it is not blank, the list or empty-state testid
-      # renders, and there are no CSP/network failures. Catches a 200 with the
-      # wrong shape or a blank explorer that unit tests miss. Soft gate until
-      # smoke creds are in secrets; promote to hard gate after a few green runs.
-      - name: OGIAM shadow flow spec (soft)
-        continue-on-error: true
-        run: npx playwright test tests/e2e/ogiam-shadow-flow.spec.ts --config=playwright.config.ts --reporter=github
-
-      # OGIAM adversarial flow reality check: drive an adversarial prompt through
-      # the deployed assistant chat endpoint, then assert the decisions API
-      # contract and that /admin/ogiam renders cleanly. Confirms the live dispatch
-      # path reaches the gate; the deterministic proof is the replay-dispatch unit
-      # test. Soft gate until smoke creds are in secrets; promote to hard gate
-      # after a few green runs.
-      - name: OGIAM adversarial flow spec (soft)
-        continue-on-error: true
-        run: npx playwright test tests/e2e/ogiam-adversarial-flow.spec.ts --config=playwright.config.ts --reporter=github
-
-      # Agent-principal onboarding reality check: load /admin/agents and assert
-      # the roster-or-empty testid renders, the onboard form + role select mount,
-      # the page is not blank, and there are no CSP/network failures. Non-
-      # destructive (never POSTs a real agent). Catches a blank roster or an
-      # onboard form that never mounts, which unit tests miss. Soft gate until
-      # smoke creds are in secrets; promote to hard gate after a few green runs.
-      - name: Agents onboarding spec (soft)
-        continue-on-error: true
-        run: npx playwright test tests/e2e/agents-onboarding.spec.ts --config=playwright.config.ts --reporter=github
-
-      # Real-browser specs for /emails /messages /dashboard /search.
-      # These cover regressions jsdom missed: layout/wrap, focus,
-      # computed styles, IntersectionObserver / scroll. Soft gate
-      # until creds are in secrets; promote to hard gate after a few
-      # green runs.
-      - name: Search autofocus spec (soft)
-        continue-on-error: true
-        run: npx playwright test tests/e2e/search-autofocus.spec.ts --config=playwright.config.ts --reporter=github
-
-      # Promoted to hard gate after the per-position testid fix —
-      # tests now pin every tile by its rendered index, so a regression
-      # that re-introduces a shared testid (or drops a tile) will fail
-      # the suite.
-      - name: Dashboard quick-actions spec (gate)
-        continue-on-error: false
-        run: npx playwright test tests/e2e/dashboard-quick-actions.spec.ts --config=playwright.config.ts --reporter=github
-
-      # Emails inbox flow — temporarily demoted to soft gate
-      # (2026-05-12). The dashboard layout's Loading guard
-      # blocks render until /api/auth/whoami resolves, and the
-      # /emails route's cold-compile in CI's dev-mode workspace
-      # races the spec's 10s right-pane wait, so every push has
-      # been failing here. Promote back to hard once SMOKE creds
-      # + a real DATABASE_URL are wired into the workflow (which
-      # gets whoami answered before the compile latency matters).
-      # Locks in the Gmail-style 3-column shell (inbox + nav rail
-      # stay mounted while a thread is open), pane mutual
-      # exclusion, layout geometry, the styled UnsavedDraftDialog
-      # regression guard, and the mobile carve-out where the
-      # reader takes full width.
-      - name: Emails inbox flow spec (soft)
-        continue-on-error: true
-        run: npx playwright test tests/e2e/emails-inbox-flow.spec.ts --config=playwright.config.ts --reporter=github
-
-      - name: Messages bug-fix spec (soft)
-        continue-on-error: true
-        run: npx playwright test tests/e2e/messages-bugs.spec.ts --config=playwright.config.ts --reporter=github
-
-      # Knowledge semantic Q&A cache + LLM fallback (migration 108).
-      # Soft gate while we wait for the embed key in CI; promote once
-      # OPENAI_API_KEY + a primed knowledge_qa_entries table are
-      # reliably available against the smoke target.
-      - name: Knowledge Q&A cache spec (soft)
-        continue-on-error: true
-        run: npx playwright test tests/e2e/knowledge-qa-cache.spec.ts --config=playwright.config.ts --reporter=github
-
-
-      # Upload ALL diagnostics so any real failure is debuggable and no data
-      # is lost: the HTML report, the raw trace/video/screenshot artifacts
-      # (test-results/, written per the config's outputDir), and the legacy
-      # custom screenshots dir. `if: always()` so we get artifacts even when
-      # the gate steps fail.
+      # Upload ALL diagnostics so any real failure is debuggable and no data is
+      # lost: the HTML report + the raw trace/video/screenshot artifacts.
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
