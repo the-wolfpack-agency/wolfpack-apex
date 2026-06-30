@@ -125,6 +125,7 @@ function routeFetch(opts: {
   readiness?: unknown;
   readinessStatus?: number;
   gate?: unknown;
+  plan?: unknown;
   promote?: (body: unknown) => Response;
 }) {
   return (url: string, init?: { method?: string; body?: string }) => {
@@ -133,7 +134,7 @@ function routeFetch(opts: {
       return Promise.resolve(opts.promote ? opts.promote(body) : okJson({ ok: true, mergedSha: "abc123" }));
     }
     if (url.includes("/release-gate")) {
-      return Promise.resolve(okJson({ ok: true, gate: opts.gate }));
+      return Promise.resolve(okJson({ ok: true, gate: opts.gate, plan: opts.plan ?? null }));
     }
     // readiness
     if (opts.readinessStatus && opts.readinessStatus >= 400) {
@@ -268,5 +269,65 @@ describe("ReleaseGateSection", () => {
     render(<DeploymentReadinessPage />);
 
     expect(await screen.findByTestId("release-gate-empty")).toHaveTextContent(/All changes are live in production/i);
+  });
+
+  test("renders the recommended approval order with per-step rebase notes", async () => {
+    mockGetUser.mockReturnValue({ role: "admin" });
+    mockFetch.mockImplementation(
+      routeFetch({
+        gate: {
+          productionBranch: "main",
+          checkedAt: new Date().toISOString(),
+          blocking: [
+            change({ number: 10, state: "ready_to_merge", reason: "Ready to promote", ageHours: 5 }),
+            change({ number: 11, state: "ready_to_merge", reason: "Ready to promote", ageHours: 1 }),
+          ],
+        },
+        plan: {
+          readyCount: 2,
+          independentCount: 0,
+          hasOverlaps: true,
+          steps: [
+            { number: 10, title: "First", url: "u10", reason: "Ready to promote", ready: true, order: 1, independent: false, rebaseAfter: [], sharedFiles: [], note: "Promote first of its overlapping group - it merges clean; the others rebase onto it." },
+            { number: 11, title: "Second", url: "u11", reason: "Ready to promote", ready: true, order: 2, independent: false, rebaseAfter: [10], sharedFiles: ["src/lib/analytics.ts"], note: "Promote after #10, then a one-line union rebase on append-only files (analytics.ts)." },
+          ],
+        },
+      }),
+    );
+    render(<DeploymentReadinessPage />);
+
+    expect(await screen.findByTestId("merge-plan")).toBeInTheDocument();
+    // Ordered steps in the recommended sequence.
+    const steps = screen.getAllByTestId(/^merge-step-\d+$/);
+    expect(steps).toHaveLength(2);
+    expect(steps[0]).toHaveAttribute("data-order", "1");
+    expect(steps[1]).toHaveAttribute("data-order", "2");
+    // The second step tells the operator to rebase after the first, on a hot file.
+    expect(screen.getByTestId("merge-step-note-11")).toHaveTextContent(/after #10/i);
+    expect(screen.getByTestId("merge-step-note-11")).toHaveTextContent(/union/i);
+  });
+
+  test("merge plan flags an all-independent set as safe in any order", async () => {
+    mockGetUser.mockReturnValue({ role: "admin" });
+    mockFetch.mockImplementation(
+      routeFetch({
+        gate: {
+          productionBranch: "main",
+          checkedAt: new Date().toISOString(),
+          blocking: [change({ number: 20, state: "ready_to_merge", reason: "Ready to promote", ageHours: 2 })],
+        },
+        plan: {
+          readyCount: 1,
+          independentCount: 1,
+          hasOverlaps: false,
+          steps: [
+            { number: 20, title: "Solo", url: "u20", reason: "Ready to promote", ready: true, order: 1, independent: true, rebaseAfter: [], sharedFiles: [], note: "Independent - touches no files another open change touches. Safe to promote in any order." },
+          ],
+        },
+      }),
+    );
+    render(<DeploymentReadinessPage />);
+
+    expect(await screen.findByTestId("merge-plan-independent")).toHaveTextContent(/any order/i);
   });
 });

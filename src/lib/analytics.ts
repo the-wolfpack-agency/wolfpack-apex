@@ -741,6 +741,10 @@ export type InstinctEventType =
   // An operator opened the release gate (dashboard banner or /admin/deployment).
   // { blocking_count }
   | "deploy.release_gate_viewed"
+  // The recommended approval order was computed for the open changes, so the
+  // human gate promotes in a conflict-free sequence instead of guessing.
+  // { ready_count, independent_count, has_overlaps, degraded }
+  | "deploy.merge_plan_computed"
   // A notification was sent because a change has been blocking prod past the
   // threshold. { pr_number, channel, age_hours }
   | "deploy.release_unblock_notified"
@@ -1163,6 +1167,15 @@ export type InstinctEventType =
   | "auth.forgot_password_requested"
   | "auth.forgot_password_rate_limited"
   | "auth.reset_password_completed"
+  // Self-service admin MFA (TOTP, opt-in, NON-ENFORCING). Enroll =>
+  // pending enrollment started; verified => code confirmed + recovery
+  // codes issued; disabled => enrollment removed; challenge_failed => a
+  // bad/expired code at confirm time. The learning loop watches enrolled
+  // vs verified to measure adoption (the gate for a later enforcement PR).
+  | "auth.mfa_enrolled"
+  | "auth.mfa_verified"
+  | "auth.mfa_disabled"
+  | "auth.mfa_challenge_failed"
   // Client-side polling efficiency (badge coalesce + adaptive cadence).
   // Emitted periodically so the learning loop can track real-world idle
   // request volume + the wins from the May 2026 optimization pass.

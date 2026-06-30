@@ -30,6 +30,17 @@ export type TeamRole = "ceo" | "cto" | "evp" | "vp" | "cco" | "dev" | "sales" | 
 
 const ALL_CAPS: readonly Capability[] = Object.keys(CAPABILITIES) as Capability[];
 
+/**
+ * Self-service capabilities EVERY authenticated role gets, regardless of seat.
+ * `account.manage_mfa` lives here because MFA is opt-in self-service: every
+ * user must be able to protect their own login. CTO/CEO/EVP/VP/CCO get it via
+ * ALL_CAPS membership; the explicit role arrays below spread SELF_SERVICE so HR,
+ * sales, ops, dev, and designer get it too. (ALL_CAPS already includes it, so
+ * spreading into the privileged sets would be a harmless dup — we only spread
+ * into the explicit arrays.)
+ */
+const SELF_SERVICE: readonly Capability[] = ["account.manage_mfa"];
+
 // ──────────────────────────────────────────────────────────────────────────
 // Role baselines
 // ──────────────────────────────────────────────────────────────────────────
@@ -57,6 +68,7 @@ const EVP: readonly Capability[] = CEO;
 
 /** HR: owns people + benefits + payroll. Sees meetings + docs + journal. */
 const HR: readonly Capability[] = [
+  ...SELF_SERVICE,            // every role manages its own MFA
   // HR suite — full
   "hr.employees.view",
   "hr.employees.edit",
@@ -113,6 +125,7 @@ const HR: readonly Capability[] = [
 
 /** Sales: clients + meetings, read-only on docs/reports, no HR/finance. */
 const SALES: readonly Capability[] = [
+  ...SELF_SERVICE,            // every role manages its own MFA
   "clients.view",
   "clients.edit",
   "meetings.view",
@@ -143,6 +156,7 @@ const SALES: readonly Capability[] = [
 
 /** Ops: internal process + docs. No HR, no finance, no deploys. */
 const OPS: readonly Capability[] = [
+  ...SELF_SERVICE,            // every role manages its own MFA
   "docs.view",
   "docs.edit",
   "docs.generate",
@@ -182,6 +196,7 @@ const OPS: readonly Capability[] = [
 
 /** Dev: full dev surface + sites. No HR sensitive, no finance. */
 const DEV: readonly Capability[] = [
+  ...SELF_SERVICE,            // every role manages its own MFA
   "docs.view",
   "docs.edit",
   "docs.generate",
@@ -226,6 +241,7 @@ const DEV: readonly Capability[] = [
 
 /** Designer: docs + knowledge + assistant; no finance, no HR, no deploys. */
 const DESIGNER: readonly Capability[] = [
+  ...SELF_SERVICE,            // every role manages its own MFA
   "docs.view",
   "docs.generate",
   "knowledge.search",
