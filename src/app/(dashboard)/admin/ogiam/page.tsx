@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { fetchWithRefresh } from "@/lib/client-auth";
+import { Sparkline } from "@/components/console";
 
 interface DecisionRow {
   id: string;
@@ -160,6 +161,235 @@ function tierColor(tier: string): { fg: string; bg: string } {
   }
 }
 
+interface DecisionBucket {
+  day: string;
+  total: number;
+  would_block: number;
+}
+interface RedTeamBucket {
+  day: string;
+  pass_rate: number | null;
+  vulns: number;
+  runs: number;
+}
+interface SurfaceBucket {
+  day: string;
+  new_ungoverned: number;
+  cumulative_ungoverned: number;
+}
+interface TrendsResponse {
+  workspace_id: string;
+  window_days: number;
+  decisions: DecisionBucket[];
+  redteam: RedTeamBucket[];
+  surfaces: SurfaceBucket[];
+}
+
+type TrendsState =
+  | { kind: "loading" }
+  | { kind: "error"; message: string }
+  | { kind: "ready"; data: TrendsResponse };
+
+/**
+ * Governance drift-trends section. The renewal story: the gate-decision volume +
+ * would-block mix, the red-team pass-rate history, and the ungoverned-AI-surface
+ * count, each as a day-bucketed sparkline. Read-only; auth via fetchWithRefresh.
+ * Renders loading / error / empty / ready states explicitly so the section is
+ * never a silent blank.
+ */
+function TrendsSection() {
+  const [state, setState] = useState<TrendsState>({ kind: "loading" });
+
+  const load = useCallback(async () => {
+    setState({ kind: "loading" });
+    try {
+      const res = await fetchWithRefresh("/api/admin/ogiam/trends?window=30");
+      if (!res.ok) {
+        setState({
+          kind: "error",
+          message:
+            res.status === 403
+              ? "You don't have permission to view governance trends."
+              : `Could not load trends (HTTP ${res.status}).`,
+        });
+        return;
+      }
+      setState({ kind: "ready", data: (await res.json()) as TrendsResponse });
+    } catch (e) {
+      setState({ kind: "error", message: (e as Error).message || "Network error" });
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <section
+      data-testid="ogiam-trends"
+      style={{
+        marginBottom: "1.5rem",
+        padding: "1rem 1.1rem",
+        background: "var(--wp-dark-surface, #1f1f22)",
+        border: "1px solid var(--wp-dark-border, #333)",
+        borderRadius: "8px",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+          marginBottom: "0.75rem",
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: "1.05rem", color: "var(--wp-text, #eee)" }}>
+          Governance trends
+        </h2>
+        <span style={{ fontSize: "0.75rem", color: "var(--wp-text-muted, #6b7280)" }}>
+          last 30 days
+        </span>
+      </div>
+
+      {state.kind === "loading" && (
+        <div data-testid="ogiam-trends-loading" style={{ fontSize: "0.85rem", color: "var(--wp-text-dim, #aaa)" }}>
+          Loading trends…
+        </div>
+      )}
+
+      {state.kind === "error" && (
+        <div
+          data-testid="ogiam-trends-error"
+          style={{
+            padding: "0.6rem 0.8rem",
+            background: "rgba(239,68,68,0.08)",
+            color: "var(--wp-error, #ef4444)",
+            border: "1px solid var(--wp-error, #ef4444)",
+            borderRadius: "6px",
+            fontSize: "0.82rem",
+          }}
+        >
+          {state.message}
+        </div>
+      )}
+
+      {state.kind === "ready" && (() => {
+        const decisions = state.data.decisions ?? [];
+        const redteam = state.data.redteam ?? [];
+        const surfaces = state.data.surfaces ?? [];
+        const totalBuckets = decisions.length + redteam.length + surfaces.length;
+        if (totalBuckets === 0) {
+          return (
+            <div
+              data-testid="ogiam-trends-empty"
+              style={{ fontSize: "0.85rem", color: "var(--wp-text-muted, #6b7280)" }}
+            >
+              No governance trend data yet. Trends appear as gate decisions, red-team
+              runs, and AI-surface scans accumulate.
+            </div>
+          );
+        }
+        const tiles: {
+          key: string;
+          label: string;
+          headline: string;
+          series: number[];
+          accent: string;
+        }[] = [
+          {
+            key: "would-block",
+            label: "Would-block mix / day",
+            headline: String(
+              decisions.reduce((s, b) => s + b.would_block, 0),
+            ),
+            series: decisions.map((b) => b.would_block),
+            accent: "var(--wp-gold, #f1c233)",
+          },
+          {
+            key: "decisions",
+            label: "Gate decisions / day",
+            headline: String(decisions.reduce((s, b) => s + b.total, 0)),
+            series: decisions.map((b) => b.total),
+            accent: "var(--wp-info, #3b82f6)",
+          },
+          {
+            key: "passrate",
+            label: "Red-team pass rate",
+            headline:
+              redteam.length > 0 && redteam[redteam.length - 1].pass_rate != null
+                ? `${((redteam[redteam.length - 1].pass_rate ?? 0) * 100).toFixed(0)}%`
+                : "—",
+            series: redteam.map((b) => (b.pass_rate ?? 0) * 100),
+            accent: "var(--wp-success, #22c55e)",
+          },
+          {
+            key: "ungoverned",
+            label: "Ungoverned AI (cumulative)",
+            headline:
+              surfaces.length > 0
+                ? String(surfaces[surfaces.length - 1].cumulative_ungoverned)
+                : "0",
+            series: surfaces.map((b) => b.cumulative_ungoverned),
+            accent: "#ef4444",
+          },
+        ];
+        return (
+          <div
+            data-testid="ogiam-trends-grid"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: "0.75rem",
+            }}
+          >
+            {tiles.map((t) => (
+              <div
+                key={t.key}
+                data-testid={`ogiam-trend-tile-${t.key}`}
+                style={{
+                  padding: "0.7rem 0.8rem",
+                  background: "var(--wp-dark-surface2, #1a1a1a)",
+                  border: "1px solid var(--wp-dark-border, #333)",
+                  borderRadius: "6px",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "0.72rem",
+                    color: "var(--wp-text-muted, #6b7280)",
+                    marginBottom: "0.3rem",
+                  }}
+                >
+                  {t.label}
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "0.5rem",
+                  }}
+                >
+                  <span style={{ fontSize: "1.3rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
+                    {t.headline}
+                  </span>
+                  <Sparkline
+                    data={t.series}
+                    accent={t.accent}
+                    area
+                    testId={`ogiam-trend-spark-${t.key}`}
+                    ariaLabel={`${t.label} trend`}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+    </section>
+  );
+}
+
 export default function OgiamPage() {
   const [rows, setRows] = useState<DecisionRow[]>([]);
   const [summary, setSummary] = useState<DecisionSummary | null>(null);
@@ -302,6 +532,8 @@ export default function OgiamPage() {
         Shadow mode: monitoring, not blocking. Every action below was allowed to
         run; the gate records what it would have decided.
       </p>
+
+      <TrendsSection />
 
       {chain && (() => {
         const v = chain.verification;

@@ -69,6 +69,14 @@ function routeFetch(decisions: unknown, verify: unknown | "fail") {
         verify === "fail" ? mkRes({}, { ok: false, status: 500 }) : mkRes(verify),
       );
     }
+    // The trends section fires its own fetch on mount; route it to an empty
+    // (but well-shaped) payload so it renders its empty state without flaking
+    // the decision-explorer assertions below.
+    if (u.includes("/api/admin/ogiam/trends")) {
+      return Promise.resolve(
+        mkRes({ workspace_id: "default", window_days: 30, decisions: [], redteam: [], surfaces: [] }),
+      );
+    }
     return Promise.resolve(mkRes(decisions));
   });
 }
