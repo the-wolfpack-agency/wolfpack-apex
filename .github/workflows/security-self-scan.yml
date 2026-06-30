@@ -287,7 +287,14 @@ jobs:
             }
 
       - name: Commit updated baseline
-        if: steps.pat-check.outputs.configured == 'true'
+        # ONLY on push to main, never on pull_request runs. The baseline JSON
+        # carries a generated_at timestamp, so a PR run rewrites it even when the
+        # findings are identical; committing that to the PR branch then conflicts
+        # with main on every push (the merge-conflict churn this stops). Main's
+        # baseline is kept current by this same step on push-to-main, and PR runs
+        # compare against that committed baseline read-only, so the gate still
+        # works without any branch-side writes.
+        if: steps.pat-check.outputs.configured == 'true' && github.event_name == 'push'
         # Best-effort: a baseline-commit failure must never fail the scan job (the
         # gate is the separate "Fail on NEW critical findings" step below).
         continue-on-error: true
