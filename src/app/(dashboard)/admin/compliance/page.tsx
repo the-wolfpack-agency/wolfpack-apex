@@ -73,6 +73,7 @@ export default function CompliancePage() {
   const [history, setHistory] = useState<ReportRecord[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [generating, setGenerating] = useState(false);
+  const [exportingId, setExportingId] = useState<string | null>(null);
 
   const loadHistory = useCallback(async () => {
     setState("loading");
@@ -106,6 +107,31 @@ export default function CompliancePage() {
       setGenerating(false);
     }
   }, [framework, loadHistory]);
+
+  /**
+   * Download the signed evidence artifact for a stored report. Forwardable to a
+   * CISO/auditor: a signed canonical-JSON envelope they can verify offline. Goes
+   * through fetchWithRefresh (authenticated route); the response is saved as a
+   * file via an object URL so no raw navigation/fetch leaks the auth header.
+   */
+  const downloadEvidence = useCallback(async (id: string, framework: string) => {
+    setExportingId(id);
+    try {
+      const res = await fetchWithRefresh(`/api/admin/compliance/report/export?id=${encodeURIComponent(id)}`);
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `compliance-evidence-${framework}-${id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objectUrl);
+    } finally {
+      setExportingId(null);
+    }
+  }, []);
 
   return (
     <div data-testid="compliance-root" className="mx-auto max-w-7xl px-6 py-10 lg:px-8">
@@ -202,6 +228,7 @@ export default function CompliancePage() {
                   <th className="py-2 pr-4">Framework</th>
                   <th className="py-2 pr-4">Coverage</th>
                   <th className="py-2 pr-4">Gaps</th>
+                  <th className="py-2 pr-4">Evidence</th>
                 </tr>
               </thead>
               <tbody>
@@ -212,6 +239,18 @@ export default function CompliancePage() {
                     <td className="py-2.5 pr-4 text-ink-soft">{pct(r.coverage)}</td>
                     <td className="py-2.5 pr-4">
                       <StatusPill status={r.gap === 0 ? "clean" : "gap"} tone={r.gap === 0 ? "success" : "error"} label={String(r.gap)} />
+                    </td>
+                    <td className="py-2.5 pr-4">
+                      <button
+                        type="button"
+                        onClick={() => void downloadEvidence(r.id, r.framework)}
+                        disabled={exportingId === r.id}
+                        data-testid="compliance-export"
+                        title="Download signed evidence (forwardable to an auditor)"
+                        className="rounded-md border border-hairline px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted transition-colors hover:text-ink disabled:opacity-50"
+                      >
+                        {exportingId === r.id ? "Exporting…" : "Download signed evidence"}
+                      </button>
                     </td>
                   </tr>
                 ))}

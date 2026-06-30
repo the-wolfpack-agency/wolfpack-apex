@@ -39,6 +39,48 @@ export async function recordReport(workspaceId: string, report: ComplianceReport
   return id;
 }
 
+/** The full stored report plus its identity, workspace-scoped. The export
+ *  signs THIS, so it must be fetched by (id, workspaceId) - never id alone, so
+ *  one workspace can never sign/export another workspace's report (no IDOR). */
+export interface StoredComplianceReport {
+  id: string;
+  workspaceId: string;
+  framework: string;
+  report: ComplianceReport;
+  createdAt: string;
+}
+
+export async function getReportById(
+  workspaceId: string,
+  id: string,
+): Promise<StoredComplianceReport | null> {
+  const res = await safeQuery<{
+    id: string;
+    workspace_id: string;
+    framework: string;
+    report: unknown;
+    created_at: string;
+  }>(
+    `SELECT id, workspace_id, framework, report, created_at::text AS created_at
+       FROM instinct_compliance_reports
+      WHERE workspace_id = $1 AND id = $2
+      LIMIT 1`,
+    [workspaceId, id],
+  );
+  const r = res.rows[0];
+  if (!r) return null;
+  // The `report` JSONB column round-trips as an object (pg) or a string (some
+  // drivers); normalize so callers always get a ComplianceReport.
+  const report = (typeof r.report === "string" ? JSON.parse(r.report) : r.report) as ComplianceReport;
+  return {
+    id: r.id,
+    workspaceId: r.workspace_id,
+    framework: r.framework,
+    report,
+    createdAt: r.created_at,
+  };
+}
+
 export async function listReports(workspaceId: string, limit = 100): Promise<ComplianceReportRecord[]> {
   const lim = Math.min(Math.max(Math.trunc(limit), 1), 500);
   const res = await safeQuery<DbRow>(

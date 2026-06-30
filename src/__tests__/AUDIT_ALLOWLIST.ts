@@ -104,6 +104,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "compliance engine; derives a framework report from measured OGIAM evidence (audit chain, gate decisions, red-team, AI inventory) and records a read-derived report (no domain mutation), firing compliance.report_generated / compliance.gap_detected, same read-derived-snapshot posture as the AI-surface scan",
   },
   {
+    route: "src/app/api/admin/compliance/report/export/route.ts",
+    reason: "signed evidence export; serializes + signs an EXISTING stored compliance report (canonical JSON + detached signature + printable HTML) fetched workspace-scoped via getReportById — read-derived, no domain mutation — and fires compliance.evidence_exported, mirroring the compliance/report read-derived-snapshot entry above",
+  },
+  {
     route: "src/app/api/features/[id]/analyze/route.ts",
     reason: "read-only analysis — produces a report, doesn't mutate feature state",
   },

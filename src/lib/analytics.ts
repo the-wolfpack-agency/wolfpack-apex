@@ -491,6 +491,9 @@ export type InstinctEventType =
   // compliance.gap_detected { framework, control_id } - one per uncovered control,
   //   so the learning loop watches the gaps close over time.
   | "compliance.gap_detected"
+  // compliance.evidence_exported { framework, report_id, signed } - a signed,
+  //   forwardable evidence artifact was generated for a stored report.
+  | "compliance.evidence_exported"
   // Agent principals (OGIAM, agents onboarded like people).
   // agent.created          { agent_id, role, owner_user_id, identity_provider }
   //   an admin onboarded an agent through the invite flow.
