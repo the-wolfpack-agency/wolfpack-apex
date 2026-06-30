@@ -1136,6 +1136,15 @@ export type InstinctEventType =
   | "auth.forgot_password_requested"
   | "auth.forgot_password_rate_limited"
   | "auth.reset_password_completed"
+  // Self-service admin MFA (TOTP, opt-in, NON-ENFORCING). Enroll =>
+  // pending enrollment started; verified => code confirmed + recovery
+  // codes issued; disabled => enrollment removed; challenge_failed => a
+  // bad/expired code at confirm time. The learning loop watches enrolled
+  // vs verified to measure adoption (the gate for a later enforcement PR).
+  | "auth.mfa_enrolled"
+  | "auth.mfa_verified"
+  | "auth.mfa_disabled"
+  | "auth.mfa_challenge_failed"
   // Client-side polling efficiency (badge coalesce + adaptive cadence).
   // Emitted periodically so the learning loop can track real-world idle
   // request volume + the wins from the May 2026 optimization pass.
