@@ -6,6 +6,7 @@
  */
 import { detectAiSurfaces, type SourceFile } from "./detect";
 import { upsertSurfaces, summarize, type AiSurfaceRecord } from "./store";
+import { remediationFor, type Remediation } from "./remediation";
 import type { AiSurface, AiSurfaceSummary } from "./types";
 
 export interface DiscoveryResult {
@@ -13,6 +14,9 @@ export interface DiscoveryResult {
   surfaces: AiSurface[];
   written: number;
   summary: AiSurfaceSummary;
+  /** Deterministic remediation for each UNGOVERNED surface, in surface order.
+   *  Detection is not a dead end: every gap ships with its fix. */
+  remediations: Remediation[];
 }
 
 export async function runDiscovery(args: {
@@ -31,5 +35,7 @@ export async function runDiscovery(args: {
     firstSeenAt: "",
     lastSeenAt: "",
   }));
-  return { target: args.target, surfaces, written, summary: summarize(asRecords) };
+  // Remediation only for the ungoverned gap — governed surfaces need no fix.
+  const remediations = surfaces.filter((s) => !s.governed).map(remediationFor);
+  return { target: args.target, surfaces, written, summary: summarize(asRecords), remediations };
 }
