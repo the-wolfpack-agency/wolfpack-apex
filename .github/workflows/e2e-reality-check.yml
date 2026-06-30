@@ -109,6 +109,7 @@ jobs:
           tests/e2e/agents-onboarding.spec.ts
           tests/e2e/ai-redteam.spec.ts
           tests/e2e/ai-surfaces.spec.ts
+          tests/e2e/compliance.spec.ts
           tests/e2e/search-autofocus.spec.ts
           tests/e2e/emails-inbox-flow.spec.ts
           tests/e2e/messages-bugs.spec.ts
