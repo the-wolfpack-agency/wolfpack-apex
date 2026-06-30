@@ -104,6 +104,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "compliance engine; derives a framework report from measured OGIAM evidence (audit chain, gate decisions, red-team, AI inventory) and records a read-derived report (no domain mutation), firing compliance.report_generated / compliance.gap_detected, same read-derived-snapshot posture as the AI-surface scan",
   },
   {
+    route: "src/app/api/admin/ogiam/governance-alerts/scan/route.ts",
+    reason: "governance drift alert sweep; detects regressions from existing governance signals (red-team pass-rate history, ungoverned-AI-surface inventory) and dispatches a notification through the notifications layer (which writes its own per-recipient DB rows). The only row it writes is the (workspace_id, alert_kind, fingerprint) dedupe claim so it never re-alerts — no domain-state mutation. Fires ogiam.drift_alert_dispatched per dispatched alert; same read-derived-snapshot posture as the ai-redteam run and ai-surfaces scan",
+  },
+  {
     route: "src/app/api/features/[id]/analyze/route.ts",
     reason: "read-only analysis — produces a report, doesn't mutate feature state",
   },

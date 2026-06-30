@@ -458,6 +458,17 @@ export type InstinctEventType =
   //   set over the recorded decision ledger to see its blast radius BEFORE
   //   enforcing. Proves the cross-execution data is a decision-support asset.
   | "ogiam.policy_simulated"
+  // ogiam.trends_viewed { window_days, buckets, source } - an admin opened the
+  //   governance drift-trends view (gate-decision volume + outcome mix, red-team
+  //   pass-rate history, ungoverned-AI-surface count over time). The renewal
+  //   story: the line goes down and stays down.
+  | "ogiam.trends_viewed"
+  // ogiam.drift_alert_dispatched { alert_kind, fingerprint, recipient_count } -
+  //   a governance regression (red-team pass-rate drop, a new vuln, or a new
+  //   ungoverned AI surface) crossed a threshold and was fanned out through the
+  //   notifications layer. Deduped by (workspace_id, alert_kind, fingerprint) so
+  //   the same condition never re-alerts.
+  | "ogiam.drift_alert_dispatched"
   // AI Surface Inventory (shadow-AI discovery). You cannot govern what you cannot
   // see: these track the inventory of AI touchpoints found in a client's code and
   // the "ungoverned AI" gap over time, the foundation the other AI-governance
