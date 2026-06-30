@@ -90,6 +90,17 @@ export const CAPABILITIES = {
   "sites.deploy": "Trigger site deploys",
   "sites.edit": "Edit site briefs and assets",
 
+  // Account — self-service security the user manages for THEIR OWN account.
+  // `account.manage_mfa` gates the opt-in TOTP enroll/verify/disable/status
+  // routes. It is granted to EVERY role (mapped via a shared SELF_SERVICE set
+  // in role-capabilities.ts) precisely because MFA is self-service: every
+  // authenticated user must be able to protect their own login. We do NOT
+  // reuse `settings.view_own` (a read-only profile-view grant) — enabling MFA
+  // is a security-state mutation, semantically distinct from viewing settings,
+  // and giving it its own capability keeps the audit/enforcement story clean
+  // when the later enforcement PR needs to reason about who can self-enroll.
+  "account.manage_mfa": "Enroll, verify, or disable multi-factor auth on your own account",
+
   // Settings
   "settings.view_own": "View own profile settings",
   "settings.view_workspace": "View workspace-wide settings",
