@@ -100,6 +100,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "continuous AI red-team; runs an adversarial corpus through the real gate (deterministic, offline, no domain mutation) and records a read-derived assurance run, firing ai_redteam.run_completed / ai_redteam.vuln_detected, same read-derived-snapshot posture as the gate self-test",
   },
   {
+    route: "src/app/api/admin/compliance/report/route.ts",
+    reason: "compliance engine; derives a framework report from measured OGIAM evidence (audit chain, gate decisions, red-team, AI inventory) and records a read-derived report (no domain mutation), firing compliance.report_generated / compliance.gap_detected, same read-derived-snapshot posture as the AI-surface scan",
+  },
+  {
     route: "src/app/api/features/[id]/analyze/route.ts",
     reason: "read-only analysis — produces a report, doesn't mutate feature state",
   },
