@@ -244,10 +244,13 @@ interface MfaRow extends Record<string, unknown> {
   recovery_code_hashes: string[];
 }
 
-function mfaId(userId: string): string {
-  // Deterministic per-user id (one enrollment per user). Hash so the raw user
-  // id isn't echoed in the PK, matching the "mfa_<hash>" family convention.
-  return "mfa_" + createHash("sha256").update(userId).digest("hex").slice(0, 24);
+function mfaId(): string {
+  // Random opaque PK. One enrollment per user is enforced by UNIQUE(user_id) +
+  // ON CONFLICT (user_id), so the id never needs to be derived from the user id
+  // - and MUST NOT be hashed from it (an auth-derived value flowing into a fast
+  // hash trips js/insufficient-password-hash, and there is no reason to hash an
+  // opaque id at all). A random token is both simpler and avoids that sink.
+  return "mfa_" + randomBytes(16).toString("hex");
 }
 
 /**
@@ -265,7 +268,7 @@ export async function enrollMfa(params: {
   const secret = generateSecret();
   const encrypted = encryptSecret(secret);
   const workspaceId = params.workspaceId ?? DEFAULT_WORKSPACE_ID;
-  const id = mfaId(params.userId);
+  const id = mfaId();
 
   if (!process.env.DATABASE_URL) {
     // Shadow mode (no DB): return a usable secret so the UI/flow works in dev.

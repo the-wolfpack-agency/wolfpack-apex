@@ -20,7 +20,7 @@
 --     once at confirm time and never persisted, so a DB read cannot recover
 --     them.
 --
--- id is a deterministic TEXT key "mfa_<...>"; user_id + workspace_id are
+-- id is a random opaque TEXT key "mfa_<random>"; user_id + workspace_id are
 -- TEXT (opaque slugs, never UUID), matching the ai-surface / ogiam family.
 -- Workspace-scoped, so the repo-wide tenant-isolation guardrail covers it.
 -- UNIQUE(user_id) — a user has at most one MFA enrollment row.
