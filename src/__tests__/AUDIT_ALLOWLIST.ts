@@ -96,6 +96,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "static MCP risk scan; records a read-derived inventory of configured MCP servers from a supplied config/manifest (no MCP connection, no domain-state mutation) and fires mcp.scan_completed / mcp.finding_detected, same read-derived-snapshot posture as the AI-surface scan",
   },
   {
+    route: "src/app/api/admin/ai-redteam/run/route.ts",
+    reason: "continuous AI red-team; runs an adversarial corpus through the real gate (deterministic, offline, no domain mutation) and records a read-derived assurance run, firing ai_redteam.run_completed / ai_redteam.vuln_detected, same read-derived-snapshot posture as the gate self-test",
+  },
+  {
     route: "src/app/api/features/[id]/analyze/route.ts",
     reason: "read-only analysis — produces a report, doesn't mutate feature state",
   },
