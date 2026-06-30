@@ -479,6 +479,12 @@ export type InstinctEventType =
   // ai_code.finding_detected { class, severity, cwe } - one per code risk, so the
   //   learning loop mines what AI tools keep introducing.
   | "ai_code.finding_detected"
+  // Continuous AI red-team: an adversarial corpus run against the gate.
+  // ai_redteam.run_completed { attacks, blocked, vulns, pass_rate, source }
+  | "ai_redteam.run_completed"
+  // ai_redteam.vuln_detected { category, technique, attack_id } - one per attack
+  //   that got through (a gate regression). The healthy state emits none.
+  | "ai_redteam.vuln_detected"
   // Agent principals (OGIAM, agents onboarded like people).
   // agent.created          { agent_id, role, owner_user_id, identity_provider }
   //   an admin onboarded an agent through the invite flow.
