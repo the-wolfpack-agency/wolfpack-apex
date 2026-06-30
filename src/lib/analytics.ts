@@ -741,6 +741,10 @@ export type InstinctEventType =
   // An operator opened the release gate (dashboard banner or /admin/deployment).
   // { blocking_count }
   | "deploy.release_gate_viewed"
+  // The recommended approval order was computed for the open changes, so the
+  // human gate promotes in a conflict-free sequence instead of guessing.
+  // { ready_count, independent_count, has_overlaps, degraded }
+  | "deploy.merge_plan_computed"
   // A notification was sent because a change has been blocking prod past the
   // threshold. { pr_number, channel, age_hours }
   | "deploy.release_unblock_notified"

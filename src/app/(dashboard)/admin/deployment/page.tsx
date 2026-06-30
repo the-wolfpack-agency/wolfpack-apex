@@ -33,6 +33,7 @@ import type {
   BlockingChange,
   ReleaseBlockState,
 } from "@/lib/deploy/release-gate";
+import type { MergePlan, MergeStep } from "@/lib/deploy/merge-plan";
 
 interface ReadinessCheck {
   name: string;
@@ -249,6 +250,65 @@ function BlockingRow({
 }
 
 /**
+ * Recommended approval order: the operator-facing fix for "which do I merge
+ * first?" Renders the ordered, annotated promotion sequence so a human gate
+ * promotes in a conflict-free order instead of guessing (which is what caused the
+ * pile-up of merge conflicts). Independent changes are flagged safe-any-order;
+ * overlapping ones say which earlier change to land first and on which files.
+ */
+function MergePlanPanel({ plan }: { plan: MergePlan }) {
+  const ordered = plan.steps.filter((s) => s.ready);
+  if (ordered.length === 0) return null;
+
+  return (
+    <div
+      data-testid="merge-plan"
+      style={{
+        marginBottom: "1.1rem",
+        padding: "0.9rem 1rem",
+        borderRadius: "0.6rem",
+        background: "color-mix(in srgb, var(--wp-info, #3b82f6) 8%, transparent)",
+        border: "1px solid color-mix(in srgb, var(--wp-info, #3b82f6) 32%, transparent)",
+      }}
+    >
+      <div style={{ fontWeight: 700, color: "var(--wp-text, #e9edf4)", marginBottom: "0.5rem" }}>
+        Recommended approval order
+      </div>
+      {plan.degraded ? (
+        <div data-testid="merge-plan-degraded" style={{ marginBottom: "0.6rem", fontSize: "0.82rem", fontWeight: 600, color: "var(--wp-warning, #f97316)" }}>
+          Overlap analysis incomplete - order is best-effort. {plan.degraded.detail}
+        </div>
+      ) : !plan.hasOverlaps ? (
+        <div data-testid="merge-plan-independent" style={{ marginBottom: "0.6rem", fontSize: "0.82rem", color: "var(--wp-text-dim, #b4bcc8)" }}>
+          These changes touch no shared files - promote them in any order, no conflicts expected.
+        </div>
+      ) : (
+        <div style={{ marginBottom: "0.6rem", fontSize: "0.82rem", color: "var(--wp-text-dim, #b4bcc8)" }}>
+          Promote in this order to avoid conflicts. Promote one, let it deploy, then the next.
+        </div>
+      )}
+      <ol data-testid="merge-plan-steps" style={{ margin: 0, paddingLeft: "1.4rem", display: "grid", gap: "0.45rem" }}>
+        {ordered.map((step: MergeStep) => (
+          <li key={step.number} data-testid={`merge-step-${step.number}`} data-order={step.order} style={{ fontSize: "0.85rem" }}>
+            <a
+              href={step.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontWeight: 600, color: "var(--wp-text, #e9edf4)", textDecoration: "none" }}
+            >
+              {step.title} <span style={{ color: "var(--wp-text-muted, #929cad)", fontWeight: 500 }}>#{step.number}</span>
+            </a>
+            <div data-testid={`merge-step-note-${step.number}`} style={{ color: "var(--wp-text-dim, #b4bcc8)", marginTop: "0.15rem" }}>
+              {step.note}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/**
  * Production release gate section: the operator-facing answer to "what is
  * blocking a deploy to production right now, and what can I ship in one click?"
  * Fetches the gate via fetchWithRefresh; honours the honest-degrade contract
@@ -256,6 +316,7 @@ function BlockingRow({
  */
 function ReleaseGateSection() {
   const [gate, setGate] = useState<ReleaseGateStatus | null>(null);
+  const [plan, setPlan] = useState<MergePlan | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -265,8 +326,9 @@ function ReleaseGateSection() {
     try {
       const res = await fetchWithRefresh("/api/admin/deployment/release-gate");
       if (!res.ok) throw new Error(`Failed to read the release gate (HTTP ${res.status})`);
-      const data = (await res.json()) as { ok: boolean; gate: ReleaseGateStatus };
+      const data = (await res.json()) as { ok: boolean; gate: ReleaseGateStatus; plan: MergePlan | null };
       setGate(data.gate);
+      setPlan(data.plan ?? null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -357,6 +419,8 @@ function ReleaseGateSection() {
               />
             </ConsoleGrid>
           )}
+
+          {!degraded && plan && <MergePlanPanel plan={plan} />}
 
           {!degraded && blocking.length === 0 ? (
             <p data-testid="release-gate-empty" style={{ color: "var(--wp-text-dim, #b4bcc8)" }}>

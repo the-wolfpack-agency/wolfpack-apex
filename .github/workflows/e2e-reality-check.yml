@@ -114,6 +114,7 @@ jobs:
           tests/e2e/compliance.spec.ts
           tests/e2e/compliance-export.spec.ts
           tests/e2e/demo-reset.spec.ts
+          tests/e2e/deployment-release-gate.spec.ts
           tests/e2e/search-autofocus.spec.ts
           tests/e2e/emails-inbox-flow.spec.ts
           tests/e2e/messages-bugs.spec.ts
