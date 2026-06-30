@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
-import { getReleaseGate } from "@/lib/deploy/release-gate";
+import { getReleaseGate, fetchChangedFilesByPr } from "@/lib/deploy/release-gate";
+import { planMergeOrder } from "@/lib/deploy/merge-plan";
 
 /**
  * GET /api/admin/deployment/release-gate -> read the Production Release Gate:
@@ -33,5 +34,25 @@ export async function GET(req: NextRequest) {
     degraded: gate.degraded ? gate.degraded.detail : false,
   });
 
-  return NextResponse.json({ ok: true, gate });
+  // Recommended approval order: which change to promote first, which are
+  // independent, and which need a quick rebase after an earlier one lands. We
+  // only need file lists when the gate read succeeded and something is blocking;
+  // when GitHub already degraded we skip the extra calls and pass that through.
+  let plan;
+  if (!gate.degraded && gate.blocking.length > 0) {
+    const ready = gate.blocking.filter((c) => c.state === "ready_to_merge");
+    const { filesByPr, degraded } = ready.length > 0
+      ? await fetchChangedFilesByPr(ready.map((c) => c.number))
+      : { filesByPr: {}, degraded: undefined };
+    plan = planMergeOrder(gate.blocking, filesByPr, degraded ? { degraded } : {});
+
+    trackEvent("deploy.merge_plan_computed", user.id, user.role, {
+      ready_count: plan.readyCount,
+      independent_count: plan.independentCount,
+      has_overlaps: plan.hasOverlaps,
+      degraded: plan.degraded ? plan.degraded.detail : false,
+    });
+  }
+
+  return NextResponse.json({ ok: true, gate, plan: plan ?? null });
 }

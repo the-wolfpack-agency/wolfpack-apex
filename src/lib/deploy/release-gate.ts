@@ -343,6 +343,60 @@ export async function getReleaseGate(deps: ReleaseGateDeps = {}): Promise<Releas
   return { productionBranch, blocking, checkedAt };
 }
 
+const PR_FILES_QUERY = `
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      files(first: 100) { nodes { path } }
+    }
+  }
+}`.trim();
+
+/** The changed-file paths of one or more PRs, or an honest degrade. */
+export interface ChangedFilesResult {
+  filesByPr: Record<number, string[]>;
+  /**
+   * Present IFF we could not fetch the file lists. Callers feed this into the
+   * merge planner so the UI flags the overlap analysis as incomplete - never a
+   * false "no conflicts."
+   */
+  degraded?: { detail: string };
+}
+
+/**
+ * Fetch the changed-file paths for each PR number, used to predict which ready
+ * changes will collide on merge (the merge-order planner consumes this). Reuses
+ * the same injected GitHub client + GraphQL plumbing as the gate read; one query
+ * per PR (the lists are small and the ready set is tiny in practice).
+ *
+ * HONEST DEGRADE: if any fetch fails we return whatever we gathered plus a
+ * `degraded` detail, so the planner can say "overlap analysis incomplete" rather
+ * than implying the changes are conflict-free.
+ */
+export async function fetchChangedFilesByPr(
+  prNumbers: number[],
+  deps: ReleaseGateDeps = {},
+): Promise<ChangedFilesResult> {
+  const client = deps.client ?? defaultGithubClient();
+  const owner = deps.owner ?? DEFAULT_OWNER;
+  const repo = deps.repo ?? DEFAULT_REPO;
+
+  const filesByPr: Record<number, string[]> = {};
+  for (const number of prNumbers) {
+    let data: { repository: { pullRequest: { files: { nodes: Array<{ path: string }> } } | null } | null };
+    try {
+      data = await graphql(client, PR_FILES_QUERY, { owner, repo, number });
+    } catch (err) {
+      return {
+        filesByPr,
+        degraded: { detail: `Could not fetch changed files for #${number}: ${(err as Error).message}` },
+      };
+    }
+    filesByPr[number] = data.repository?.pullRequest?.files?.nodes?.map((n) => n.path) ?? [];
+  }
+  return { filesByPr };
+}
+
 /**
  * Promote a change to production by merging its PR into the production branch.
  *
