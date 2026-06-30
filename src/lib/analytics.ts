@@ -466,6 +466,13 @@ export type InstinctEventType =
   | "ai_inventory.scan_completed"
   // ai_inventory.viewed { total, ungoverned } - an admin opened the inventory.
   | "ai_inventory.viewed"
+  // ai_inventory.repo_scan_completed { repo, files_scanned, surfaces, ungoverned }
+  //   - a live scan of a public GitHub repo populated the inventory (the wedge's
+  //   single most convincing demo moment).
+  | "ai_inventory.repo_scan_completed"
+  // ai_inventory.remediation_suggested { kind, provider } - one per ungoverned
+  //   surface, so the learning loop sees which AI gaps recur across client code.
+  | "ai_inventory.remediation_suggested"
   // MCP (Model Context Protocol) static scanner. Governs the new MCP attack
   // surface without our core ever connecting to a server.
   // mcp.scan_completed  { target, servers, findings, critical, high }
