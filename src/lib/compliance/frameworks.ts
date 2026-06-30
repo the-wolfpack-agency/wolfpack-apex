@@ -16,6 +16,12 @@ function ledgerLive(e: EvidenceInputs): boolean {
   return e.auditChainValid && e.auditEntries > 0;
 }
 
+/** Data is protected at rest (encrypted secrets) and records are signed
+ *  (verifiable) - the cryptographic data-protection posture. */
+function dataProtected(e: EvidenceInputs): boolean {
+  return e.signingActive && e.secretsEncryptedAtRest;
+}
+
 const SOC2: ComplianceControl[] = [
   {
     id: "SOC2-CC4.1",
@@ -49,6 +55,22 @@ const SOC2: ComplianceControl[] = [
     status: (e) => (e.gateWouldBlock >= 0 && e.gateDecisions > 0 ? "covered" : "partial"),
     evidence: (e) => `${e.gateWouldBlock} would-block decisions of ${e.gateDecisions}`,
   },
+  {
+    id: "SOC2-CC6.6",
+    name: "Logical segregation of tenant data",
+    ogiamControl: "Workspace-scoped access + CI guardrail",
+    rationale: "Every workspace-scoped query is filtered and verified by a repo-wide guardrail (0 unclassified).",
+    status: (e) => (e.tenantIsolationEnforced ? "covered" : e.tenantScopedTables > 0 ? "partial" : "gap"),
+    evidence: (e) => `${e.tenantScopedTables} workspace-scoped tables, ${e.tenantIsolationEnforced ? "0" : ">0"} unclassified queries`,
+  },
+  {
+    id: "SOC2-CC6.7",
+    name: "Encryption + key management",
+    ogiamControl: "Named-algorithm crypto registry",
+    rationale: "Secrets are encrypted at rest and records are signed through a named-algorithm registry, never ad hoc.",
+    status: (e) => (dataProtected(e) ? "covered" : e.signingActive || e.secretsEncryptedAtRest ? "partial" : "gap"),
+    evidence: (e) => `signing ${e.signingAlgorithm}, secrets encrypted at rest: ${e.secretsEncryptedAtRest}`,
+  },
 ];
 
 const ISO42001: ComplianceControl[] = [
@@ -75,6 +97,14 @@ const ISO42001: ComplianceControl[] = [
     rationale: "Governance is enforced per capability, not assumed; posture changes are audited.",
     status: (e) => (e.enforceCapabilities > 0 ? "covered" : "partial"),
     evidence: (e) => `${e.enforceCapabilities} capabilities under active enforcement`,
+  },
+  {
+    id: "ISO42001-A.8.3",
+    name: "Data protection for AI systems",
+    ogiamControl: "Encrypted secrets + signed records",
+    rationale: "AI system secrets are encrypted at rest and its records are cryptographically signed and verifiable.",
+    status: (e) => (dataProtected(e) ? "covered" : e.signingActive || e.secretsEncryptedAtRest ? "partial" : "gap"),
+    evidence: (e) => `signing ${e.signingAlgorithm}, secrets encrypted at rest: ${e.secretsEncryptedAtRest}`,
   },
 ];
 
@@ -145,6 +175,14 @@ const EU_AI_ACT: ComplianceControl[] = [
     rationale: "The control plane is deterministic and continuously proven against AI attack classes.",
     status: (e) => (redteamHealthy(e) ? "covered" : e.redteamPassRate !== null ? "partial" : "gap"),
     evidence: (e) => `red-team pass ${e.redteamPassRate ?? "n/a"}${e.redteamRecent ? " (recent)" : ""}`,
+  },
+  {
+    id: "EUAIACT-ART12-INTEGRITY",
+    name: "Record integrity (signed, tamper-evident logs)",
+    ogiamControl: "Hash-chained ledger + signed evidence export",
+    rationale: "Records are tamper-evident AND cryptographically signed, so an auditor can verify them independently.",
+    status: (e) => (ledgerLive(e) && e.signingActive ? "covered" : ledgerLive(e) ? "partial" : "gap"),
+    evidence: (e) => `ledger ${e.auditChainValid ? "verified" : "unverified"}, evidence signed via ${e.signingAlgorithm}`,
   },
 ];
 
