@@ -92,6 +92,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "shadow-AI discovery; records a read-derived inventory of AI touchpoints found in supplied source (no domain-state mutation) and fires ai_inventory.scan_completed, mirroring the agent-baseline read-derived-snapshot precedent",
   },
   {
+    route: "src/app/api/admin/ai-surfaces/repo-scan/route.ts",
+    reason: "live public-repo shadow-AI discovery; fetches a github.com repo's source (read-only, SSRF-guarded, capped) and records the SAME read-derived inventory of AI touchpoints the ai-surfaces/scan route writes (no domain-state mutation), firing ai_inventory.repo_scan_completed / ai_inventory.remediation_suggested — same read-derived-snapshot posture as the supplied-source scan",
+  },
+  {
     route: "src/app/api/admin/ai-surfaces/mcp-scan/route.ts",
     reason: "static MCP risk scan; records a read-derived inventory of configured MCP servers from a supplied config/manifest (no MCP connection, no domain-state mutation) and fires mcp.scan_completed / mcp.finding_detected, same read-derived-snapshot posture as the AI-surface scan",
   },
