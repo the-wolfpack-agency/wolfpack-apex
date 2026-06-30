@@ -1,0 +1,34 @@
+# Merge strategy for APPEND-ONLY registry files.
+#
+# THE PROBLEM: a handful of files are append-only registries that almost every
+# feature branch adds a line/entry to (analytics event names, the audit
+# allowlist, the e2e soft-spec list). Two branches that both append near the end
+# do not semantically conflict, but git's default 3-way merge flags the
+# overlapping insertions as a conflict, so the second, third, ... PR to merge has
+# to be hand-resolved into a trivial union. We lived exactly this pile-up.
+#
+# THE FIX: `merge=union` (a built-in git merge driver) keeps BOTH sides' inserted
+# lines in a conflicting hunk instead of stopping. For these line-oriented,
+# order-insensitive lists that is precisely the correct resolution, so the
+# conflict never surfaces. It applies to GitHub's merge button too (same git).
+#
+# WHY NOT the alternatives we considered:
+#   - A custom merge-driver script: more power, but a script to maintain and a
+#     local `git config` step every clone needs; union is built in and needs none.
+#   - Restructuring to generate these lists (glob the e2e specs, derive the event
+#     union from a registry): more robust long-term, but a much larger change;
+#     revisit if churn persists.
+#   - Doing nothing: the status quo that cost real time on every multi-PR day.
+#
+# SAFETY NET: union can, in rare diff-alignment cases, produce output that is not
+# valid for a structured file. That is caught by the build, never shipped: tsc +
+# eslint gate analytics.ts and AUDIT_ALLOWLIST.ts, and the reality-check-workflow
+# guard test parses the e2e list. A bad union fails CI, it does not merge silently.
+#
+# DELIBERATELY EXCLUDED: src/lib/db/__generated__/tenant-isolation-baseline.json
+# is GENERATED, not appended by hand. Union would corrupt the JSON; it must be
+# regenerated (npm run scan:tenant-isolation -- --write) on conflict, not merged.
+
+src/lib/analytics.ts                    merge=union
+src/__tests__/AUDIT_ALLOWLIST.ts        merge=union
+.github/workflows/e2e-reality-check.yml merge=union
