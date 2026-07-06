@@ -7,6 +7,11 @@ jest.mock("@/lib/microsoft-graph", () => ({
   getAppOnlyToken: (...a: any[]) => mockGetAppOnlyToken(...a),
 }));
 
+const mockTrackEvent = jest.fn();
+jest.mock("@/lib/analytics", () => ({
+  trackEvent: (...a: any[]) => mockTrackEvent(...a),
+}));
+
 const realFetch = global.fetch;
 
 import { sendViaGraph, isGraphMailConfigured } from "@/lib/mail/send-via-graph";
@@ -136,5 +141,52 @@ describe("sendViaGraph", () => {
     await sendViaGraph(ARGS);
     const body = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
     expect(body.message.from.emailAddress.name).toBe("Wolfpack Agency");
+  });
+});
+
+describe("sendViaGraph — undeliverable seed-recipient chokepoint", () => {
+  it("refuses to send to a seed domain even when fully configured", async () => {
+    // Fully configured: MS_MAIL_FROM set and a token available. The guard must
+    // still short-circuit BEFORE any Graph call — this is the last line of
+    // defense against the cto@wolfpack.dev bounce class (6 DSNs 2026-07-04).
+    process.env.MS_MAIL_FROM = "noreply@thewolfpack.agency";
+    mockGetAppOnlyToken.mockResolvedValue("app-token");
+
+    const result = await sendViaGraph({ ...ARGS, to: "cto@wolfpack.dev" });
+
+    expect(result).toEqual({ delivered: false, reason: "seed_recipient" });
+    expect(mockGetAppOnlyToken).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("records mail.seed_recipient_skipped so the learning loop sees demand", async () => {
+    process.env.MS_MAIL_FROM = "noreply@thewolfpack.agency";
+    await sendViaGraph({ ...ARGS, to: "ceo@wolfpack.dev" });
+
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "mail.seed_recipient_skipped",
+      "system",
+      "system",
+      expect.objectContaining({ to: "ceo@wolfpack.dev", domain: "wolfpack.dev" }),
+    );
+  });
+
+  it("does NOT flag a real recipient — no false positives, delivers normally", async () => {
+    process.env.MS_MAIL_FROM = "noreply@thewolfpack.agency";
+    mockGetAppOnlyToken.mockResolvedValueOnce("app-token");
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      status: 202,
+      text: () => Promise.resolve(""),
+    } as any);
+
+    const result = await sendViaGraph({ ...ARGS, to: "max@thewolfpack.agency" });
+
+    expect(result).toEqual({ delivered: true, reason: "ok" });
+    expect(mockTrackEvent).not.toHaveBeenCalledWith(
+      "mail.seed_recipient_skipped",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
   });
 });

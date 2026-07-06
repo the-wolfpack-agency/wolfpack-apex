@@ -33,7 +33,8 @@ export interface InviteEmailResult {
     | "ok"
     | "no_mail_from"
     | "no_app_token"
-    | "scope_missing";
+    | "scope_missing"
+    | "seed_recipient";
   /** Which provider actually delivered (or attempted). Lets the UI
    *  show "sent via M365" vs "sent via Resend" for debugging. */
   provider?: "graph" | "resend";

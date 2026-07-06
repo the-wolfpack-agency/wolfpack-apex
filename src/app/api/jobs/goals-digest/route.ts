@@ -37,6 +37,10 @@ import {
 } from "@/lib/goals-digest";
 import { trackEvent } from "@/lib/analytics";
 import { safeQuery } from "@/lib/db";
+import {
+  isSeedEmail,
+  seedEmailExclusionSql,
+} from "@/lib/mail/undeliverable-recipients";
 
 // Returns the YYYY-MM-DD Monday for the week containing `now`, in UTC.
 export function currentWeekOfMonday(now: Date = new Date()): string {
@@ -86,15 +90,20 @@ export async function GET(req: NextRequest) {
   }>(
     `SELECT id, email, role, name
        FROM instinct_team_members
-      WHERE is_active = true`,
+      WHERE is_active = true
+        AND ${seedEmailExclusionSql()}`,
   );
 
-  const recipients = teamRows.map((r) => ({
-    user_id: String(r.id),
-    email: String(r.email),
-    role: String(r.role),
-    name: String(r.name),
-  }));
+  const recipients = teamRows
+    // Never digest to an undeliverable seed domain (parked / Null MX). The SQL
+    // already excludes them; this catches any row a reseed re-armed.
+    .filter((r) => !isSeedEmail(r.email))
+    .map((r) => ({
+      user_id: String(r.id),
+      email: String(r.email),
+      role: String(r.role),
+      name: String(r.name),
+    }));
 
   let sent = 0;
   let queued = 0;

@@ -31,6 +31,10 @@ import {
 } from "@/lib/auth/require-capability";
 import { notify } from "@/lib/notifications/in-app";
 import {
+  isSeedEmail,
+  seedEmailExclusionSql,
+} from "@/lib/mail/undeliverable-recipients";
+import {
   runDemoCanary,
   parseCanaryTargets,
   type CanaryResult,
@@ -71,7 +75,8 @@ async function alertAdmins(result: CanaryResult): Promise<number> {
     const { rows } = await safeQuery<ActiveMemberRow>(
       `SELECT id, email, name, role, workspace_id
          FROM instinct_team_members
-        WHERE is_active = true`,
+        WHERE is_active = true
+          AND ${seedEmailExclusionSql()}`,
     );
     const body =
       `The demo-login canary for "${result.name}" is UNHEALTHY: ` +
@@ -79,6 +84,9 @@ async function alertAdmins(result: CanaryResult): Promise<number> {
       `scan_ok=${result.scanOk}, findings=${result.findingCount}). The scan tool ` +
       `regressed against a demo target — investigate before a client hits it.`;
     for (const row of rows) {
+      // Seed rows (parked / Null MX domains) are not real people — never alert
+      // them. SQL already excludes them; this guards a reseed that re-armed one.
+      if (isSeedEmail(row.email)) continue;
       try {
         const member: TeamMember = {
           id: row.id,
