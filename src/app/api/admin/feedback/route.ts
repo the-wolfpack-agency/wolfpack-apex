@@ -60,8 +60,33 @@ export async function GET(req: NextRequest) {
      entry. */
   const status = (url.searchParams.get("status") || "all").toLowerCase();
 
-  const workspaceId = auth.user.workspaceId ?? "default";
-  const args: unknown[] = [workspaceId];
+  /* Workspace scope = EVERY workspace the viewer is an active member of, not
+     just the one their session happens to carry. This keeps the inbox in lockstep
+     with the feedback notifications: notify-readers.ts alerts a reader in the
+     FEEDBACK's workspace, so if the viewer is a reader there they must also be
+     able to READ it here. A viewer who is a member of the CEO's workspace was
+     losing the CEO's notes because the inbox filtered to a different session
+     workspace. Still tenant-isolated: only workspaces the viewer belongs to are
+     included (never an arbitrary tenant's feedback).
+
+     Resolved by (id OR email) so cross-workspace membership is found whether the
+     rows are id-anchored or email-anchored (mirrors getValidToken's dual lookup).
+     Falls back to the session workspace if the lookup returns nothing, so an
+     unseeded/edge session never regresses to an empty inbox. */
+  const memberWs = await safeQuery<{ workspace_id: string }>(
+    `SELECT DISTINCT workspace_id
+       FROM instinct_team_members
+      WHERE is_active = true
+        AND (id = $1 OR (email IS NOT NULL AND lower(email) = lower($2)))
+        AND workspace_id IS NOT NULL`,
+    [auth.user.id, auth.user.email ?? ""],
+  );
+  const wsSet = new Set<string>(memberWs.rows.map((r) => r.workspace_id).filter(Boolean));
+  if (auth.user.workspaceId) wsSet.add(auth.user.workspaceId);
+  if (wsSet.size === 0) wsSet.add("default");
+  const workspaceIds = [...wsSet];
+
+  const args: unknown[] = [workspaceIds];
   let sinceClause = "";
   if (since && /^\d{4}-\d{2}-\d{2}/.test(since)) {
     args.push(since);
@@ -120,7 +145,7 @@ export async function GET(req: NextRequest) {
                 PARTITION BY workspace_id, user_id, lower(btrim(message))
               ) AS last_filed_at
        FROM instinct_user_feedback
-       WHERE workspace_id = $1${sinceClause}${statusClause}
+       WHERE workspace_id = ANY($1)${sinceClause}${statusClause}
        ORDER BY workspace_id, user_id, lower(btrim(message)),
                 (resolved_at IS NOT NULL) DESC, btrim(message), created_at ASC
      ) deduped
@@ -137,7 +162,8 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({
-    workspace_id: workspaceId,
+    // The workspace(s) this inbox is scoped to (every workspace the viewer reads).
+    workspace_ids: workspaceIds,
     count: res.rows.length,
     limit,
     status,
