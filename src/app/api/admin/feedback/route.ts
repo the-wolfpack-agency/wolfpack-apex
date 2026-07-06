@@ -84,6 +84,18 @@ export async function GET(req: NextRequest) {
   if (status === "open") statusClause = " AND resolved_at IS NULL";
   else if (status === "resolved") statusClause = " AND resolved_at IS NOT NULL";
 
+  /* Hide automated E2E smoke-test submissions from the HUMAN feedback inbox.
+     The smoke suite files a "E2E SCREENSHOT FLOW …" note as smoke-e2e@… on every
+     run; unfiltered, dozens of these unique rows flood the newest-N window and
+     push real feedback (e.g. the CEO's older notes) past the limit — the inbox
+     "stopped working" exactly when that suite started running frequently. This
+     is test noise, never actionable feedback, so it never belongs in the inbox.
+     Add `?includeTest=1` to see everything (debugging the smoke suite itself). */
+  const includeTest = url.searchParams.get("includeTest") === "1";
+  const excludeTestClause = includeTest
+    ? ""
+    : " AND NOT (lower(coalesce(user_email, '')) LIKE 'smoke-e2e@%' OR message LIKE 'E2E SCREENSHOT FLOW%')";
+
   /* De-duplicate the inbox view: a feedback widget double-submit (or a user
      resending the same note, or the old natural-language intent bug that wrote
      a row per starter-chip click) creates several near-identical rows that flood
@@ -133,7 +145,7 @@ export async function GET(req: NextRequest) {
                 PARTITION BY workspace_id, user_id, lower(btrim(message))
               ) AS last_filed_at
        FROM instinct_user_feedback
-       WHERE TRUE${sinceClause}${statusClause}
+       WHERE TRUE${sinceClause}${statusClause}${excludeTestClause}
        ORDER BY workspace_id, user_id, lower(btrim(message)),
                 (resolved_at IS NOT NULL) DESC, btrim(message), created_at ASC
      ) deduped

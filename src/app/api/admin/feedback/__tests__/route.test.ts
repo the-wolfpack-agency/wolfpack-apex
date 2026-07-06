@@ -163,6 +163,27 @@ describe("GET /api/admin/feedback", () => {
     expect(String(mockSafeQuery.mock.calls[0][0])).not.toMatch(/workspace_id\s*=/);
   });
 
+  it("excludes E2E smoke-test noise from the human inbox (so real feedback isn't buried)", async () => {
+    mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
+    const { GET } = await import("@/app/api/admin/feedback/route");
+    await GET(mkReq("?status=open&limit=200"));
+    const sql = String(mockSafeQuery.mock.calls[0][0]);
+    // The query filters out the smoke-e2e author AND the "E2E SCREENSHOT FLOW" notes.
+    expect(sql).toMatch(/smoke-e2e@%/);
+    expect(sql).toMatch(/E2E SCREENSHOT FLOW%/);
+    expect(sql).toMatch(/AND NOT \(/);
+  });
+
+  it("?includeTest=1 keeps E2E rows (for debugging the smoke suite itself)", async () => {
+    mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
+    const { GET } = await import("@/app/api/admin/feedback/route");
+    await GET(mkReq("?status=all&includeTest=1"));
+    const sql = String(mockSafeQuery.mock.calls[0][0]);
+    // No exclusion clause when includeTest=1.
+    expect(sql).not.toMatch(/smoke-e2e@%/);
+    expect(sql).not.toMatch(/E2E SCREENSHOT FLOW%/);
+  });
+
   it("401 when unauthenticated", async () => {
     mockRequireCap.mockResolvedValue({
       ok: false,
