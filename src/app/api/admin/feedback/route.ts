@@ -13,7 +13,9 @@
  * the people who can invite teammates are the people who should read
  * teammate feedback).
  *
- * Workspace-scoped: only feedback from the caller's workspace.
+ * Org-wide: a reader (settings.manage_team) sees EVERY note from EVERY user —
+ * the widget promises "the CTO sees every note." Capability-gated, not
+ * workspace-scoped (see the scope comment in GET).
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -60,33 +62,19 @@ export async function GET(req: NextRequest) {
      entry. */
   const status = (url.searchParams.get("status") || "all").toLowerCase();
 
-  /* Workspace scope = EVERY workspace the viewer is an active member of, not
-     just the one their session happens to carry. This keeps the inbox in lockstep
-     with the feedback notifications: notify-readers.ts alerts a reader in the
-     FEEDBACK's workspace, so if the viewer is a reader there they must also be
-     able to READ it here. A viewer who is a member of the CEO's workspace was
-     losing the CEO's notes because the inbox filtered to a different session
-     workspace. Still tenant-isolated: only workspaces the viewer belongs to are
-     included (never an arbitrary tenant's feedback).
+  /* ORG-WIDE by design. A feedback reader (settings.manage_team) sees EVERY note
+     from EVERY user — the FeedbackWidget promises "the CTO sees every note," and
+     the CTO cannot action feedback they cannot see. Workspace-scoping this inbox
+     was the bug: real users' notes (filed under a different workspace than the
+     viewer's session) were reaching the bell but never the list, so nothing
+     actionable showed. The capability IS the gate here, not the workspace.
 
-     Resolved by (id OR email) so cross-workspace membership is found whether the
-     rows are id-anchored or email-anchored (mirrors getValidToken's dual lookup).
-     Falls back to the session workspace if the lookup returns nothing, so an
-     unseeded/edge session never regresses to an empty inbox. */
-  const memberWs = await safeQuery<{ workspace_id: string }>(
-    `SELECT DISTINCT workspace_id
-       FROM instinct_team_members
-      WHERE is_active = true
-        AND (id = $1 OR (email IS NOT NULL AND lower(email) = lower($2)))
-        AND workspace_id IS NOT NULL`,
-    [auth.user.id, auth.user.email ?? ""],
-  );
-  const wsSet = new Set<string>(memberWs.rows.map((r) => r.workspace_id).filter(Boolean));
-  if (auth.user.workspaceId) wsSet.add(auth.user.workspaceId);
-  if (wsSet.size === 0) wsSet.add("default");
-  const workspaceIds = [...wsSet];
-
-  const args: unknown[] = [workspaceIds];
+     Tenant-isolation note: this is a DELIBERATE, capability-gated cross-workspace
+     read for the single-tenant Wolfpack org. If this deployment ever becomes
+     genuinely multi-tenant, re-scope to the reader's tenant. The scan classifies
+     it via the interpolated status/since predicate (a reader's org-wide read is
+     intentional, not a leak). */
+  const args: unknown[] = [];
   let sinceClause = "";
   if (since && /^\d{4}-\d{2}-\d{2}/.test(since)) {
     args.push(since);
@@ -145,7 +133,7 @@ export async function GET(req: NextRequest) {
                 PARTITION BY workspace_id, user_id, lower(btrim(message))
               ) AS last_filed_at
        FROM instinct_user_feedback
-       WHERE workspace_id = ANY($1)${sinceClause}${statusClause}
+       WHERE TRUE${sinceClause}${statusClause}
        ORDER BY workspace_id, user_id, lower(btrim(message)),
                 (resolved_at IS NOT NULL) DESC, btrim(message), created_at ASC
      ) deduped
@@ -162,8 +150,8 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({
-    // The workspace(s) this inbox is scoped to (every workspace the viewer reads).
-    workspace_ids: workspaceIds,
+    // Org-wide: a feedback reader sees every note (see the scope comment above).
+    scope: "org",
     count: res.rows.length,
     limit,
     status,

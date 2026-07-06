@@ -38,26 +38,13 @@ describe("GET /api/admin/feedback", () => {
     expect(mockSafeQuery).not.toHaveBeenCalled();
   });
 
-  it("200 returns workspace-scoped feedback, forwarding has_screenshot per row", async () => {
+  it("200 returns ORG-WIDE feedback (every user, any workspace), forwarding has_screenshot", async () => {
     mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
     mockSafeQuery.mockResolvedValue({
       rows: [
-        {
-          id: "f1",
-          workspace_id: "default",
-          user_id: "u1",
-          message: "hi",
-          created_at: "t",
-          has_screenshot: true,
-        },
-        {
-          id: "f2",
-          workspace_id: "default",
-          user_id: "u2",
-          message: "no pic",
-          created_at: "t",
-          has_screenshot: false,
-        },
+        // Two DIFFERENT workspaces — a reader sees both.
+        { id: "f1", workspace_id: "ws_a", user_id: "u1", message: "hi", created_at: "t", has_screenshot: true },
+        { id: "f2", workspace_id: "ws_ceo", user_id: "ceo", message: "calendar bug", created_at: "t", has_screenshot: false },
       ],
       fromCache: false,
     });
@@ -65,36 +52,39 @@ describe("GET /api/admin/feedback", () => {
     const res = await GET(mkReq("?status=all&limit=50"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      workspace_ids: string[];
-      feedback: Array<{ id: string; has_screenshot: boolean }>;
+      scope: string;
+      feedback: Array<{ id: string; workspace_id: string; has_screenshot: boolean }>;
     };
-    expect(body.workspace_ids).toEqual(["default"]);
+    expect(body.scope).toBe("org");
     expect(body.feedback).toHaveLength(2);
-    // The route forwards the per-row screenshot flag the SQL EXISTS produced.
+    // Feedback from a different workspace than the caller is included.
+    expect(body.feedback.map((f) => f.workspace_id)).toEqual(["ws_a", "ws_ceo"]);
     expect(body.feedback[0].has_screenshot).toBe(true);
     expect(body.feedback[1].has_screenshot).toBe(false);
-    // Two queries now: [0] resolves the viewer's workspaces, [1] is the feedback
-    // read, parameterized by the workspace-id ARRAY.
-    expect(mockSafeQuery.mock.calls[1][1][0]).toEqual(["default"]);
+    // Single query, NOT workspace-filtered (no workspace-id param passed).
+    expect(mockSafeQuery).toHaveBeenCalledTimes(1);
+    const sql = String(mockSafeQuery.mock.calls[0][0]);
+    expect(sql).not.toMatch(/workspace_id\s*=\s*ANY/);
+    expect(sql).not.toMatch(/WHERE workspace_id =/);
   });
 
   it("queries the screenshot table via an EXISTS clause for has_screenshot", async () => {
     mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
     const { GET } = await import("@/app/api/admin/feedback/route");
     await GET(mkReq("?status=all"));
-    const sql = String(mockSafeQuery.mock.calls[1][0]);
+    const sql = String(mockSafeQuery.mock.calls[0][0]);
     expect(sql).toMatch(/EXISTS/);
     expect(sql).toContain("instinct_feedback_screenshot");
     expect(sql).toContain("AS has_screenshot");
-    // Scope is the viewer's workspace ARRAY, not a single id.
-    expect(sql).toContain("workspace_id = ANY($1)");
+    // Org-wide read: no workspace predicate.
+    expect(sql).not.toMatch(/workspace_id\s*=/);
   });
 
   it("collapses duplicate submissions: one row per (workspace, user, lower(trimmed message))", async () => {
     mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
     const { GET } = await import("@/app/api/admin/feedback/route");
     await GET(mkReq("?status=all"));
-    const sql = String(mockSafeQuery.mock.calls[1][0]);
+    const sql = String(mockSafeQuery.mock.calls[0][0]);
     // The collapse groups case- and whitespace-insensitively so "Hi" and " hi "
     // land in the same card.
     expect(sql).toContain(
@@ -155,49 +145,22 @@ describe("GET /api/admin/feedback", () => {
     expect(body.feedback[0].last_filed_at).toBe("2026-05-03T18:00:00.000Z");
   });
 
-  it("shows feedback from EVERY workspace the viewer reads (the CEO-feedback fix)", async () => {
-    // The viewer is an active member/reader of two workspaces. The bug: the inbox
-    // only queried the session's single workspace, hiding CEO feedback filed in
-    // the other one — even though the viewer got the bell notification for it.
-    mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
-    mockSafeQuery
-      // [0] resolve the viewer's workspaces (id/email membership)
-      .mockResolvedValueOnce({
-        rows: [{ workspace_id: "ws_cto" }, { workspace_id: "ws_ceo" }],
-        fromCache: false,
-      })
-      // [1] the feedback read, now scoped to that array
-      .mockResolvedValueOnce({
-        rows: [{ id: "fc", workspace_id: "ws_ceo", user_id: "ceo", message: "Calendar bug", created_at: "t", has_screenshot: false }],
-        fromCache: false,
-      });
+  it("does not filter by the caller's workspace at all (a reader sees every user's note)", async () => {
+    mockRequireCap.mockResolvedValue({ ok: true, user: { ...CTO, workspaceId: "ws_cto" } });
+    mockSafeQuery.mockResolvedValue({
+      // Feedback from a workspace the caller is NOT in must still come back.
+      rows: [{ id: "fc", workspace_id: "ws_ceo", user_id: "ceo", message: "Calendar bug", created_at: "t", has_screenshot: false }],
+      fromCache: false,
+    });
     const { GET } = await import("@/app/api/admin/feedback/route");
     const res = await GET(mkReq("?status=open"));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { workspace_ids: string[]; feedback: Array<{ workspace_id: string }> };
-    // Scope includes both member workspaces AND the session workspace, deduped.
-    expect(new Set(body.workspace_ids)).toEqual(new Set(["ws_cto", "ws_ceo", "default"]));
-    // The CEO's note (other workspace) is now returned.
+    const body = (await res.json()) as { feedback: Array<{ workspace_id: string }> };
     expect(body.feedback.map((f) => f.workspace_id)).toContain("ws_ceo");
-    // The feedback query is scoped to exactly that authorized array (tenant-safe).
-    expect(String(mockSafeQuery.mock.calls[1][0])).toContain("workspace_id = ANY($1)");
-    expect(new Set(mockSafeQuery.mock.calls[1][1][0] as string[])).toEqual(
-      new Set(["ws_cto", "ws_ceo", "default"]),
-    );
-    // The membership lookup is gated to active rows keyed by the viewer (id/email).
-    expect(String(mockSafeQuery.mock.calls[0][0])).toMatch(/instinct_team_members[\s\S]*is_active = true/);
-  });
-
-  it("falls back to the session workspace when the viewer has no membership rows", async () => {
-    mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
-    // memberWs empty -> only the session workspace is used (no regression).
-    mockSafeQuery
-      .mockResolvedValueOnce({ rows: [], fromCache: false })
-      .mockResolvedValueOnce({ rows: [], fromCache: false });
-    const { GET } = await import("@/app/api/admin/feedback/route");
-    const res = await GET(mkReq());
-    const body = (await res.json()) as { workspace_ids: string[] };
-    expect(body.workspace_ids).toEqual(["default"]);
+    // No workspace param and no workspace predicate — capability is the gate.
+    expect(mockSafeQuery).toHaveBeenCalledTimes(1);
+    expect(mockSafeQuery.mock.calls[0][1]).not.toContain("ws_cto");
+    expect(String(mockSafeQuery.mock.calls[0][0])).not.toMatch(/workspace_id\s*=/);
   });
 
   it("401 when unauthenticated", async () => {
