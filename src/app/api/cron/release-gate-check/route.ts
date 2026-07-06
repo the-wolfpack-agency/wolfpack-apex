@@ -35,6 +35,10 @@ import { safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { notify } from "@/lib/notifications/in-app";
 import { sendViaGraph } from "@/lib/mail/send-via-graph";
+import {
+  isSeedEmail,
+  seedEmailExclusionSql,
+} from "@/lib/mail/undeliverable-recipients";
 import { getReleaseGate, type BlockingChange } from "@/lib/deploy/release-gate";
 import {
   checkAndNotify,
@@ -73,12 +77,19 @@ async function resolveRecipients(authorLogin: string): Promise<Recipient[]> {
       `SELECT id, email, name, role
          FROM instinct_team_members
         WHERE is_active = true
+          AND ${seedEmailExclusionSql()}
           AND (role IN ('admin', 'cto')
                OR lower(name) = lower($1)
                OR lower(split_part(email, '@', 1)) = lower($1))`,
       [authorLogin],
     );
-    for (const r of rows) byId.set(r.id, r);
+    // Belt-and-suspenders: drop any seed row the SQL missed (e.g. a reseed that
+    // re-armed is_active before migration 217 ran). The bounce class that sent
+    // real DSNs to cto@wolfpack.dev on 2026-07-04 dies here.
+    for (const r of rows) {
+      if (isSeedEmail(r.email)) continue;
+      byId.set(r.id, r);
+    }
   } catch (err) {
     console.error("[cron/release-gate-check] recipient lookup failed:", (err as Error).message);
   }

@@ -1474,6 +1474,9 @@ export type InstinctEventType =
   | "system.ms_mail_send_failed"
   // Agent-prepared draft (created, not sent): the safe terminal step.
   | "mail.draft_created"
+  // Outbound send suppressed: recipient is on an undeliverable seed domain
+  // (parked / Null MX, e.g. wolfpack.dev). See lib/mail/undeliverable-recipients.
+  | "mail.seed_recipient_skipped"
   | "system.ms_mail_draft_failed"
   | "system.ms_mail_read"
   | "system.ms_mail_listed"

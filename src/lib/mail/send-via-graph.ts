@@ -31,6 +31,11 @@
  */
 
 import { getAppOnlyToken } from "@/lib/microsoft-graph";
+import { trackEvent } from "@/lib/analytics";
+import {
+  isSeedEmail,
+  seedEmailDomain,
+} from "@/lib/mail/undeliverable-recipients";
 
 const GRAPH_SEND_URL = "https://graph.microsoft.com/v1.0/users";
 
@@ -39,7 +44,8 @@ export type GraphSendReason =
   | "no_mail_from"
   | "no_app_token"
   | "scope_missing"
-  | "provider_error";
+  | "provider_error"
+  | "seed_recipient";
 
 export interface GraphSendArgs {
   to: string;
@@ -65,6 +71,20 @@ export function isGraphMailConfigured(): boolean {
 }
 
 export async function sendViaGraph(args: GraphSendArgs): Promise<GraphSendResult> {
+  /* Final chokepoint (mirrors the recipient-selection guards): never attempt
+     delivery to a known-undeliverable seed domain (parked, Null MX — e.g.
+     wolfpack.dev). Stops the demo-seed bounce class outright, no matter which
+     caller resolved the recipient, and records the suppressed send so the
+     learning loop sees demand instead of losing the signal. Runs BEFORE the
+     env checks so it is unconditional. */
+  if (isSeedEmail(args.to)) {
+    trackEvent("mail.seed_recipient_skipped", "system", "system", {
+      to: args.to,
+      domain: seedEmailDomain(args.to) ?? "unknown",
+    });
+    return { delivered: false, reason: "seed_recipient" };
+  }
+
   const fromMailbox = process.env.MS_MAIL_FROM;
   if (!fromMailbox || !fromMailbox.includes("@")) {
     return { delivered: false, reason: "no_mail_from" };

@@ -24,7 +24,8 @@ export interface ResetEmailResult {
     | "ok"
     | "no_mail_from"
     | "no_app_token"
-    | "scope_missing";
+    | "scope_missing"
+    | "seed_recipient";
   provider?: "graph" | "resend";
 }
 
