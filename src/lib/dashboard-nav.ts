@@ -10,12 +10,37 @@
  * label + href and ignores the icon to keep the surface dense.
  */
 
+import { INVOICE_TRACKERS } from "@/lib/invoice-tracker/config";
+
 export interface NavItem {
   label: string;
   href: string;
   icon: string;
   /** Optional role-gate — when set, only listed roles see the item. */
   roles?: string[];
+  /** Optional email allowlist — when set, only these (lowercased) emails see the
+   *  item. Used for narrow, person-specific surfaces like the Invoices tab. */
+  emails?: string[];
+}
+
+/** Everyone who may view ANY invoice tracker (union of the per-tracker
+ *  allowlists) sees the Invoices tab; the index + item routes then gate each
+ *  company. Derived from the config so the nav can never drift from access. */
+const INVOICE_VIEWERS = Array.from(
+  new Set(INVOICE_TRACKERS.flatMap((t) => t.viewers.map((e) => e.toLowerCase()))),
+);
+
+/** Single visibility gate for a nav item — used by the sidebar, the nav
+ *  customizer, and the Cmd+K palette so they can never disagree. Role-gate AND
+ *  email-gate must both pass; a missing gate means "everyone". */
+export function canSeeNavItem(
+  item: NavItem,
+  role: string,
+  email: string | null | undefined,
+): boolean {
+  if (item.roles && !item.roles.includes(role)) return false;
+  if (item.emails && !item.emails.includes((email ?? "").trim().toLowerCase())) return false;
+  return true;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -42,6 +67,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Docs", href: "/docs", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
   { label: "Reports", href: "/reports", icon: "M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
   { label: "Budgets", href: "/programs/budgets", icon: "M3 10h18M7 15h2m4 0h4m-7 4h.01M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
+  { label: "Invoices", href: "/invoices", emails: INVOICE_VIEWERS, icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2zM9 8h1" },
   { label: "Clients", href: "/clients", icon: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" },
   { label: "HR", href: "/hr", roles: ["ceo", "cto", "evp", "hr"], icon: "M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" },
   /* Agents: the governed agentic workforce (OGIAM). AI principals onboarded,

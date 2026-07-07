@@ -731,6 +731,23 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["time", "financials", "clients"],
   },
+  invoices: {
+    domain: "invoices",
+    route: "/invoices",
+    title: "Invoices",
+    purpose: "Read-only mirror of a company's budget & SOW invoice workbook, synced live from SharePoint. PCNA is the first; more companies appear as sibling sub-pages under the same tab.",
+    what_you_can_do: [
+      "See the PCNA invoice Summary exactly as it stands in SharePoint.",
+      "Force a live re-sync with Refresh, then open the source workbook in SharePoint.",
+      "Access is limited to the approved finance viewers; others don't see the tab.",
+    ],
+    how_to: [
+      "Open Invoices from the left nav (visible only to approved viewers).",
+      "Pick the company (PCNA) to see its Summary tab.",
+      "Click Refresh now to pull the latest, or Open in SharePoint to edit at source.",
+    ],
+    related_pages: ["job-codes", "financials", "clients"],
+  },
   time: {
     domain: "time",
     route: "/time",
