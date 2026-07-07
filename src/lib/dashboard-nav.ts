@@ -31,16 +31,23 @@ const INVOICE_VIEWERS = Array.from(
 );
 
 /** Single visibility gate for a nav item — used by the sidebar, the nav
- *  customizer, and the Cmd+K palette so they can never disagree. Role-gate AND
- *  email-gate must both pass; a missing gate means "everyone". */
+ *  customizer, and the Cmd+K palette so they can never disagree. Gates are OR:
+ *  the item shows if the user's ROLE is allowed OR their EMAIL is allowlisted.
+ *  This lets one "Invoices" item serve finance-role users (AP queue) AND the
+ *  named PCNA tracker viewers (who may not hold a finance role). A missing gate
+ *  means "everyone"; a set gate that doesn't match simply doesn't admit on its
+ *  own. */
 export function canSeeNavItem(
   item: NavItem,
   role: string,
   email: string | null | undefined,
 ): boolean {
-  if (item.roles && !item.roles.includes(role)) return false;
-  if (item.emails && !item.emails.includes((email ?? "").trim().toLowerCase())) return false;
-  return true;
+  if (!item.roles && !item.emails) return true;
+  const roleOk = item.roles ? item.roles.includes(role) : false;
+  const emailOk = item.emails
+    ? item.emails.includes((email ?? "").trim().toLowerCase())
+    : false;
+  return roleOk || emailOk;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -67,7 +74,12 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Docs", href: "/docs", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
   { label: "Reports", href: "/reports", icon: "M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
   { label: "Budgets", href: "/programs/budgets", icon: "M3 10h18M7 15h2m4 0h4m-7 4h.01M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
-  { label: "Invoices", href: "/invoices", emails: INVOICE_VIEWERS, icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2zM9 8h1" },
+  /* One unified Invoices hub (/invoices) with sub-page tabs: the AP
+     upload/scan queue (finance roles) + the read-only SharePoint
+     trackers like PCNA (named viewers). OR-gated so finance staff AND
+     the tracker viewers both see it; the hub itself only renders the
+     tabs a given user may use. */
+  { label: "Invoices", href: "/invoices", roles: ["ceo", "cto", "evp", "vp", "cco", "hr"], emails: INVOICE_VIEWERS, icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2zM9 8h1" },
   { label: "Clients", href: "/clients", icon: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" },
   { label: "HR", href: "/hr", roles: ["ceo", "cto", "evp", "hr"], icon: "M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" },
   /* Agents: the governed agentic workforce (OGIAM). AI principals onboarded,
@@ -85,7 +97,6 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "QR Codes", href: "/qr", icon: "M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h.75v.75h-.75v-.75z" },
   { label: "Surveys", href: "/surveys", icon: "M9 12h6m-6 4h6m-7-9h.01M9 7h6m-9 13h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" },
   { label: "Job Codes", href: "/job-codes", icon: "M3.75 6h16.5M3.75 12h16.5m-16.5 6h16.5" },
-  { label: "Invoices", href: "/finance/invoices", roles: ["ceo", "cto", "evp", "vp", "cco", "hr"], icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
   { label: "HR Documents", href: "/hr/documents", roles: ["ceo", "cto", "evp", "hr"], icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" },
   { label: "Automations", href: "/automations", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
   { label: "Support", href: "/support", icon: "M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" },
