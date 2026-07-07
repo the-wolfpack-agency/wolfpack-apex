@@ -2,9 +2,11 @@
  * GET /api/cron/release-gate-check - the proactive release-gate notifier sweep.
  *
  * Reads the live production release gate (src/lib/deploy/release-gate.ts) and,
- * for every change in a USER-ACTIONABLE state (ready_to_merge / awaiting_approval)
- * that has been blocking prod past the age threshold and has NOT already been
- * notified for its current state inside the cooldown, pushes an in-app
+ * for every change past its per-state age threshold (ready_to_merge pings
+ * promptly - the "waiting to deploy" signal; awaiting_approval at 4h;
+ * checks_failing / merge_conflict only once STALLED at 8h; checks_running never)
+ * that has NOT already been notified for its current state inside the cooldown,
+ * pushes an in-app
  * notification (and, ONLY when RELEASE_GATE_EMAIL_ALERTS === "1", an email) to
  * the responsible person (PR author when we can resolve them, plus admins/cto),
  * records a dedupe row in instinct_release_gate_notifications (migration 207),
@@ -14,9 +16,10 @@
  * ANTI-SPAM (hardened after a prod EMAIL-SPAM incident): EMAIL IS OFF BY DEFAULT
  * (opt in via RELEASE_GATE_EMAIL_ALERTS=1); the dedupe ledger FAILS CLOSED (a
  * read failure sends nothing this run, not everything); the dedupe row is
- * recorded on ATTEMPT not delivery so a bouncing channel can never loop; only
- * user-actionable states notify; the age threshold is 4h; and a per-run cap
- * bounds a burst. See src/lib/deploy/release-gate-notify.ts for the full policy.
+ * recorded on ATTEMPT not delivery so a bouncing channel can never loop; a
+ * steady-state block re-pings at most once per 6h cooldown; transient states
+ * never notify; and a per-run cap bounds a burst. See
+ * src/lib/deploy/release-gate-notify.ts for the full policy.
  *
  * Two auth paths (mirrors /api/cron/integration-health):
  *   1. Cron path: Authorization: Bearer ${CRON_SECRET}. Vercel Cron hits this on
