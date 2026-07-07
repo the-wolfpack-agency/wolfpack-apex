@@ -807,6 +807,15 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "apply a scanned receipt's coding: business cost-coding write, job_codes.receipt_applied analytics",
   },
 
+  // Invoice tracker: read-only SharePoint mirror. The only "mutation" route
+  // refreshes the local cache from the external workbook — it writes no business
+  // entity, and every refresh + access is on the learning spine via
+  // invoice_tracker.* analytics events.
+  {
+    route: "src/app/api/invoices/[company]/refresh/route.ts",
+    reason: "force a live re-pull of the read-only invoice mirror: cache refresh only, no security-relevant mutation; invoice_tracker.refreshed/refresh_failed analytics",
+  },
+
   // Knowledge base: entry edit/delete, ask (read-only retrieval), feedback.
   // Low-sensitivity UGC + retrieval; same rationale as the knowledge/* and
   // rate allowlist entries above.

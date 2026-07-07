@@ -22,7 +22,7 @@ import WelcomeTooltip from "@/components/WelcomeTooltip";
 import CommandPalette from "@/components/ui/CommandPalette";
 import { useAmbientRefresh } from "@/lib/hooks/useAmbientRefresh";
 import { useEmailArrivalPoll } from "@/lib/hooks/useEmailArrivalPoll";
-import { NAV_ITEMS, PINNED_NAV_HREFS, defaultHiddenForRole } from "@/lib/dashboard-nav";
+import { NAV_ITEMS, PINNED_NAV_HREFS, defaultHiddenForRole, canSeeNavItem } from "@/lib/dashboard-nav";
 
 interface User {
   id: string;
@@ -279,7 +279,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {NAV_ITEMS.filter(
             (item) =>
-              (!item.roles || item.roles.includes(user.role)) &&
+              canSeeNavItem(item, user.role, user.email) &&
               !hiddenHrefs.includes(item.href),
           ).map((item) => {
             const active = isActive(item.href);
@@ -385,9 +385,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       {/* Customize-nav modal */}
       {navCustomizerOpen ? (
         <NavCustomizerModal
-          allItems={NAV_ITEMS.filter(
-            (item) => !item.roles || item.roles.includes(user.role),
-          )}
+          allItems={NAV_ITEMS.filter((item) => canSeeNavItem(item, user.role, user.email))}
           hiddenHrefs={hiddenHrefs}
           onSave={async (next) => {
             await saveNavPrefs(next);
@@ -470,7 +468,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       {/* Cmd+K / Ctrl+K command palette — global navigator. Renders
           nothing until toggled. Role-filters routes the user can't
           reach, mirroring the sidebar's gate. */}
-      <CommandPalette role={user?.role ?? null} />
+      <CommandPalette role={user?.role ?? null} email={user?.email ?? null} />
     </div>
   );
 }

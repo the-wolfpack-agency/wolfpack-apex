@@ -1477,6 +1477,11 @@ export type InstinctEventType =
   // Outbound send suppressed: recipient is on an undeliverable seed domain
   // (parked / Null MX, e.g. wolfpack.dev). See lib/mail/undeliverable-recipients.
   | "mail.seed_recipient_skipped"
+  // Invoice Trackers (SharePoint-mirrored budget/SOW workbooks under /invoices).
+  | "invoice_tracker.viewed"
+  | "invoice_tracker.refreshed"
+  | "invoice_tracker.refresh_failed"
+  | "invoice_tracker.access_denied"
   | "system.ms_mail_draft_failed"
   | "system.ms_mail_read"
   | "system.ms_mail_listed"

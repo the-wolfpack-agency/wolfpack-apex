@@ -68,6 +68,7 @@ export const KNOWN_NAV_HREFS: readonly string[] = [
   "/qr",
   "/surveys",
   "/job-codes",
+  "/invoices",
   "/finance/invoices",
   "/hr/documents",
   "/automations",

@@ -26,19 +26,17 @@ import {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
-import { NAV_ITEMS, type NavItem } from "@/lib/dashboard-nav";
+import { NAV_ITEMS, canSeeNavItem, type NavItem } from "@/lib/dashboard-nav";
 
 interface Props {
   /** User's role — controls which NAV_ITEMS are reachable. */
   role?: string | null;
+  /** User's email — gates email-restricted items (e.g. Invoices). */
+  email?: string | null;
 }
 
-function visibleFor(role: string | null | undefined): NavItem[] {
-  return NAV_ITEMS.filter((item) => {
-    if (!item.roles) return true;
-    if (!role) return false;
-    return item.roles.includes(role);
-  });
+function visibleFor(role: string | null | undefined, email: string | null | undefined): NavItem[] {
+  return NAV_ITEMS.filter((item) => canSeeNavItem(item, role ?? "", email));
 }
 
 function filterByQuery(items: NavItem[], q: string): NavItem[] {
@@ -51,7 +49,7 @@ function filterByQuery(items: NavItem[], q: string): NavItem[] {
   );
 }
 
-export default function CommandPalette({ role }: Props) {
+export default function CommandPalette({ role, email }: Props) {
   const router = useRouter();
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -60,7 +58,7 @@ export default function CommandPalette({ role }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const lastFocusedRef = useRef<HTMLElement | null>(null);
 
-  const allItems = useMemo(() => visibleFor(role), [role]);
+  const allItems = useMemo(() => visibleFor(role, email), [role, email]);
   const items = useMemo(() => filterByQuery(allItems, query), [allItems, query]);
 
   // Open / close on Cmd+K / Ctrl+K, close on Escape.
