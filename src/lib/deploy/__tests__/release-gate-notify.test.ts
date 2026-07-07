@@ -10,10 +10,10 @@
  *     run + observable (logged + dedupeUnavailable:true).
  *   - RECORD ON ATTEMPT: a change whose in-app (and email, when on) BOTH fail
  *     still records the dedupe row, so the next run does NOT re-send (no loop).
- *   - USER-ACTIONABLE STATES ONLY: ready_to_merge / awaiting_approval notify;
- *     checks_running / checks_failing / merge_conflict are skipped (counted in
- *     `checked`, never notified).
- *   - THRESHOLD 4h respected.
+ *   - PER-STATE THRESHOLDS: ready_to_merge pings promptly (0h, the "waiting to
+ *     deploy" signal); awaiting_approval at 4h; checks_failing / merge_conflict
+ *     only once STALLED (8h - an unattended red PR, not active dev);
+ *     checks_running is transient and NEVER notified.
  *   - PER-RUN CAP of 3 enforced, oldest-first, surplus suppressed + logged.
  *   - a state CHANGE between notifiable states re-fires (escalation).
  *   - gate.degraded / a gate throw -> NO notifications + a degraded signal.
@@ -23,6 +23,7 @@ import {
   checkAndNotify,
   blockedMessage,
   DEFAULT_THRESHOLD_HOURS,
+  STALL_THRESHOLD_HOURS,
   MAX_NOTIFY_PER_RUN,
   type CheckAndNotifyDeps,
   type NotifRecord,
@@ -203,22 +204,68 @@ describe("checkAndNotify", () => {
     expect(sendInApp).toHaveBeenCalledTimes(1);
   });
 
-  // FIX 4: SCOPE TO USER-ACTIONABLE STATES.
-  test.each(["checks_running", "checks_failing", "merge_conflict"] as const)(
-    "non-actionable state %s is counted but NEVER notified",
+  // checks_running is transient (the run finishes itself) -> NEVER notified,
+  // even after 20h. It is still counted in `checked`.
+  test("checks_running is counted but NEVER notified (transient)", async () => {
+    const { deps, sendInApp, sendEmail, recordNotif, track } = makeDeps({
+      emailEnabled: true,
+      getReleaseGate: jest
+        .fn()
+        .mockResolvedValue(gate({ blocking: [change({ state: "checks_running", ageHours: 20 })] })),
+    });
+    const res = await checkAndNotify(deps);
+    expect(res).toMatchObject({ checked: 1, notified: 0, suppressed: 0 });
+    expect(sendInApp).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(recordNotif).not.toHaveBeenCalled();
+    expect(track).not.toHaveBeenCalled();
+  });
+
+  // ready_to_merge is the "changes built and waiting to deploy" signal: it pings
+  // promptly (0h threshold) so a ready change is never sat on silently.
+  test("ready_to_merge notifies promptly, even brand new (0h threshold)", async () => {
+    const { deps, sendInApp } = makeDeps({
+      getReleaseGate: jest
+        .fn()
+        .mockResolvedValue(
+          gate({ blocking: [change({ state: "ready_to_merge", reason: "Ready to promote", ageHours: 0.1 })] }),
+        ),
+    });
+    const res = await checkAndNotify(deps);
+    expect(res.notified).toBe(1);
+    expect(sendInApp).toHaveBeenCalledTimes(1);
+  });
+
+  // checks_failing / merge_conflict = "stuck, needs a human". They notify ONLY
+  // once STALLED (>= STALL_THRESHOLD_HOURS), so active dev (a red check being
+  // iterated) stays quiet, but an unattended bump ("tests failing - fix needed")
+  // surfaces.
+  test.each(["checks_failing", "merge_conflict"] as const)(
+    "stall state %s is NOT notified before the stall window",
     async (state) => {
-      const { deps, sendInApp, sendEmail, recordNotif, track } = makeDeps({
+      const { deps, sendInApp } = makeDeps({
         emailEnabled: true,
         getReleaseGate: jest
           .fn()
-          .mockResolvedValue(gate({ blocking: [change({ state, ageHours: 20 })] })),
+          .mockResolvedValue(gate({ blocking: [change({ state, ageHours: STALL_THRESHOLD_HOURS - 0.1 })] })),
       });
       const res = await checkAndNotify(deps);
-      expect(res).toMatchObject({ checked: 1, notified: 0, suppressed: 0 });
+      expect(res).toMatchObject({ checked: 1, notified: 0 });
       expect(sendInApp).not.toHaveBeenCalled();
-      expect(sendEmail).not.toHaveBeenCalled();
-      expect(recordNotif).not.toHaveBeenCalled();
-      expect(track).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each(["checks_failing", "merge_conflict"] as const)(
+    "stall state %s IS notified once past the stall window",
+    async (state) => {
+      const { deps, sendInApp } = makeDeps({
+        getReleaseGate: jest
+          .fn()
+          .mockResolvedValue(gate({ blocking: [change({ state, ageHours: STALL_THRESHOLD_HOURS })] })),
+      });
+      const res = await checkAndNotify(deps);
+      expect(res.notified).toBe(1);
+      expect(sendInApp).toHaveBeenCalledTimes(1);
     },
   );
 
@@ -235,6 +282,28 @@ describe("checkAndNotify", () => {
       expect(sendInApp).toHaveBeenCalledTimes(1);
     },
   );
+
+  // A per-state override can quiet or sharpen a single state without touching
+  // the others (e.g. silence stall pings for a noisy repo).
+  test("stateThresholds override can silence a state (null) or sharpen it", async () => {
+    const silenced = makeDeps({
+      stateThresholds: { checks_failing: null },
+      getReleaseGate: jest
+        .fn()
+        .mockResolvedValue(gate({ blocking: [change({ state: "checks_failing", ageHours: 40 })] })),
+    });
+    expect((await checkAndNotify(silenced.deps)).notified).toBe(0);
+    expect(silenced.sendInApp).not.toHaveBeenCalled();
+
+    const sharpened = makeDeps({
+      stateThresholds: { checks_running: 1 },
+      getReleaseGate: jest
+        .fn()
+        .mockResolvedValue(gate({ blocking: [change({ state: "checks_running", ageHours: 2 })] })),
+    });
+    expect((await checkAndNotify(sharpened.deps)).notified).toBe(1);
+    expect(sharpened.sendInApp).toHaveBeenCalledTimes(1);
+  });
 
   test("no blocking changes -> nothing sent", async () => {
     const { deps, sendInApp, sendEmail, track } = makeDeps({

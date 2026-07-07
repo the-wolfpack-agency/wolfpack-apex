@@ -76,11 +76,21 @@ import type {
 import type { InstinctEventType } from "@/lib/analytics";
 
 /**
- * Default: a change blocking prod for >= 4h is a genuine stall worth a proactive
- * ping. Raised from 30 min so a freshly-opened PR mid-review never fires - that
- * is normal dev workflow, not a production stall.
+ * `awaiting_approval` stall window: a review request sitting >= 4h is a genuine
+ * stall worth a ping; a freshly-opened request mid-review is normal and stays
+ * quiet.
  */
 export const DEFAULT_THRESHOLD_HOURS = 4;
+
+/**
+ * Stall window for the "stuck, needs a human" states (checks_failing /
+ * merge_conflict). During ACTIVE development a red check or a conflict clears
+ * well under this; only an UNATTENDED one - e.g. an abandoned dependency bump
+ * whose author is a bot nobody is watching - crosses it. Set high on purpose:
+ * this is the line between "someone is working on it" and "nobody is, surface
+ * it". This is the "tests failing - fix needed" signal a human never saw.
+ */
+export const STALL_THRESHOLD_HOURS = 8;
 
 /** Default cooldown: do not re-notify the same (pr, state) within 6 hours. */
 export const DEFAULT_COOLDOWN_HOURS = 6;
@@ -93,14 +103,39 @@ export const DEFAULT_COOLDOWN_HOURS = 6;
 export const MAX_NOTIFY_PER_RUN = 3;
 
 /**
- * The ONLY states we proactively notify on: the ones a HUMAN must clear. The
- * other states (checks_running / checks_failing / merge_conflict) are the
- * author's normal dev workflow, not an inbox-worthy production stall.
+ * Per-state age threshold (hours) a blocking change must cross before it earns a
+ * proactive ping. `null` = NEVER notify (a transient state that resolves itself).
+ *
+ *   ready_to_merge    0  built + green + approved: the "changes waiting to
+ *                        deploy" signal. Ping promptly so it can be promoted.
+ *   awaiting_approval 4  needs a reviewer, but not a just-opened request.
+ *   checks_failing    8  a red PR nobody is clearing ("tests failing - fix
+ *                        needed", e.g. an unattended dependency bump).
+ *   merge_conflict    8  a conflict nobody is resolving - same stall class.
+ *   checks_running  null transient; the run finishes on its own. Never ping.
+ *
+ * Widening WHICH states notify does NOT widen HOW OFTEN: every anti-spam guard
+ * still applies on top of this - the 6h per-(pr,state) cooldown, dedupe recorded
+ * on attempt, the fail-closed dedupe read, the per-run cap, and email-off-by-
+ * default. A steady-state block still pings at most once per cooldown.
  */
-export const NOTIFIABLE_STATES: ReadonlySet<ReleaseBlockState> = new Set<ReleaseBlockState>([
-  "ready_to_merge",
-  "awaiting_approval",
-]);
+export const STATE_THRESHOLD_HOURS: Record<ReleaseBlockState, number | null> = {
+  ready_to_merge: 0,
+  awaiting_approval: DEFAULT_THRESHOLD_HOURS,
+  checks_failing: STALL_THRESHOLD_HOURS,
+  merge_conflict: STALL_THRESHOLD_HOURS,
+  checks_running: null,
+};
+
+/**
+ * States that can EVER notify (non-null threshold). Derived from the policy map
+ * so the two can never drift apart.
+ */
+export const NOTIFIABLE_STATES: ReadonlySet<ReleaseBlockState> = new Set(
+  (Object.keys(STATE_THRESHOLD_HOURS) as ReleaseBlockState[]).filter(
+    (s) => STATE_THRESHOLD_HOURS[s] !== null,
+  ),
+);
 
 /** A persisted dedupe record (one logical (pr_number, state) we already pinged). */
 export interface NotifRecord {
@@ -152,8 +187,18 @@ export interface CheckAndNotifyDeps {
    * the loud, bounce-prone channel, so it is opt-in.
    */
   emailEnabled?: boolean;
-  /** Override the age threshold (hours). Defaults to DEFAULT_THRESHOLD_HOURS. */
+  /**
+   * Global threshold override (hours) applied to every NOTIFIABLE state - a
+   * never-notify state (null in STATE_THRESHOLD_HOURS) stays never. Mostly for
+   * manual tuning / tests; per-state `stateThresholds` wins over it.
+   */
   thresholdHours?: number;
+  /**
+   * Per-state threshold override (hours; `null` = never), merged over
+   * STATE_THRESHOLD_HOURS. Highest precedence. Lets a caller quiet or sharpen a
+   * single state without touching the others.
+   */
+  stateThresholds?: Partial<Record<ReleaseBlockState, number | null>>;
   /** Override the re-notify cooldown (hours). Defaults to DEFAULT_COOLDOWN_HOURS. */
   cooldownHours?: number;
   /** Override the per-run notify cap. Defaults to MAX_NOTIFY_PER_RUN. */
@@ -197,6 +242,26 @@ export function blockedMessage(change: BlockingChange): string {
 }
 
 /**
+ * Resolve the age threshold (hours) for a state, or `null` to never notify it.
+ * Precedence: per-state override (`stateThresholds`) -> global `thresholdHours`
+ * override -> the STATE_THRESHOLD_HOURS policy. A state whose policy base is
+ * `null` (transient, e.g. checks_running) stays never-notify under a global
+ * override; only an explicit per-state override can change that.
+ */
+function resolveThreshold(
+  state: ReleaseBlockState,
+  deps: CheckAndNotifyDeps,
+): number | null {
+  if (deps.stateThresholds && state in deps.stateThresholds) {
+    return deps.stateThresholds[state] ?? null;
+  }
+  const base = STATE_THRESHOLD_HOURS[state];
+  if (base === null) return null;
+  if (deps.thresholdHours !== undefined) return deps.thresholdHours;
+  return base;
+}
+
+/**
  * Has this exact (pr_number, state) already been notified inside the cooldown
  * window? A state CHANGE is NOT deduped - it is a new notifiable event.
  */
@@ -226,7 +291,6 @@ export async function checkAndNotify(
   deps: CheckAndNotifyDeps,
 ): Promise<CheckAndNotifyResult> {
   const nowMs = deps.now();
-  const thresholdHours = deps.thresholdHours ?? DEFAULT_THRESHOLD_HOURS;
   const cooldownMs = (deps.cooldownHours ?? DEFAULT_COOLDOWN_HOURS) * 3_600_000;
   const maxNotify = deps.maxNotifyPerRun ?? MAX_NOTIFY_PER_RUN;
   const emailEnabled = deps.emailEnabled === true;
@@ -270,8 +334,9 @@ export async function checkAndNotify(
   // cap pings the most-stalled changes when many are open at once.
   const eligible = gate.blocking
     .filter((change) => {
-      if (change.ageHours < thresholdHours) return false;
-      if (!NOTIFIABLE_STATES.has(change.state)) return false;
+      const threshold = resolveThreshold(change.state, deps);
+      if (threshold === null) return false; // never-notify state (transient)
+      if (change.ageHours < threshold) return false; // not stalled long enough
       if (alreadyNotified(change, recent, nowMs, cooldownMs)) return false;
       return true;
     })
