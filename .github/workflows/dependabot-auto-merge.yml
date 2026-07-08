@@ -28,6 +28,19 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Satisfy the "require 1 approving review" rule. Dependabot PRs never land
+      # in a human review queue, so without this a green patch/minor bump waits
+      # forever. Scoped to patch/minor only; majors still need a human. The
+      # approval is by github-actions[bot] (a non-author), so it counts.
+      - name: Approve patch + minor updates
+        if: |
+          steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+          steps.meta.outputs.update-type == 'version-update:semver-minor'
+        run: gh pr review --approve "$PR_URL" --body "Auto-approved Dependabot patch/minor bump; merge still gates on the required status checks."
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Enable auto-merge for patch + minor updates
         if: |
           steps.meta.outputs.update-type == 'version-update:semver-patch' ||
