@@ -55,6 +55,14 @@ describe("cron schedule coverage", () => {
     expect(dirs.length).toBeGreaterThan(0);
   });
 
+  it("has no duplicate cron paths in vercel.json (a duplicate path fails the Vercel build)", () => {
+    const raw = readFileSync(join(REPO_ROOT, "vercel.json"), "utf8");
+    const crons = (JSON.parse(raw) as { crons?: Array<{ path: string }> }).crons ?? [];
+    const paths = crons.map((c) => c.path);
+    const duplicates = [...new Set(paths.filter((p, i) => paths.indexOf(p) !== i))];
+    expect(duplicates).toEqual([]);
+  });
+
   test.each(cronRouteDirs())(
     "cron route %s is scheduled in vercel.json (or explicitly manual-only)",
     (name) => {
