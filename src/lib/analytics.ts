@@ -305,6 +305,27 @@ export type InstinctEventType =
   // which features attract churn vs. get abandoned.
   | "features.edited"
   | "features.deleted"
+  // Maintenance rails intake queue (agency daily bug/feature requests).
+  // A GitHub issue lifecycle event (opened -> triaged -> resolved) mapped
+  // into analytics + the hash-chained audit log so no request is lost and
+  // the learning loop can grade intake volume, category mix, and cycle
+  // time. Metadata:
+  //   maintenance.intake.opened   { issue_number, type, category, action }
+  //   maintenance.intake.triaged  { issue_number, type, category, action }
+  //   maintenance.intake.resolved { issue_number, type, category, action,
+  //                                 cycle_time_ms, cycle_time_hours }
+  //     - cycle_time_* is the derived resolve signal (resolvedAt - openedAt)
+  //       so the insights aggregator sees time-to-close without a re-scan.
+  | "maintenance.intake.opened"
+  | "maintenance.intake.triaged"
+  | "maintenance.intake.resolved"
+  // maintenance.intake.telemetry_degraded { issue_number, action, reason }
+  //   - the secondary audit write failed after the analytics event was
+  //     already recorded. The intake signal is NOT lost (analytics captured
+  //     it); this event makes the degraded audit path visible to the
+  //     learning loop instead of failing silently. Mirrors the
+  //     platform.scan_persist_degraded idiom.
+  | "maintenance.intake.telemetry_degraded"
   // Discussions
   | "discussion.thread_created"
   | "discussion.reply_posted"

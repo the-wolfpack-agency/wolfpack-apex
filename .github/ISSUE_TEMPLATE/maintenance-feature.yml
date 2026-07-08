@@ -1,0 +1,79 @@
+name: "Maintenance: Feature request"
+description: Request a feature or improvement for the maintenance rails intake queue. Structured so the intake telemetry can classify it (area, priority, acceptance).
+title: "[feature]: "
+labels:
+  - maint-queue
+  - feature
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the request. Every field maps into the intake telemetry
+        (analytics + audit) so the learning loop can grade demand by area and
+        cycle time. Keep the title short; put detail in the fields below.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One line describing the requested feature.
+      placeholder: Add a CSV export to the client pipeline view.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area / module
+      description: Which part of Instinct would this land in? (maps to the telemetry `category`)
+      options:
+        - assistant
+        - knowledge
+        - dashboard
+        - hr
+        - clients
+        - sites
+        - financials
+        - calendar
+        - mail
+        - auth
+        - platform-scan
+        - agents
+        - other
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How urgent is this relative to other requests?
+      options:
+        - critical - blocking a client commitment
+        - high - needed soon, clear value
+        - medium - would help, not urgent
+        - low - nice to have
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What are you trying to do, and why is it hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Bullet the conditions that must be true for this to be "done".
+      placeholder: |
+        - A "Export CSV" button appears on /clients pipeline
+        - The CSV includes status, votes, estimated hours
+        - Export is audited and fires an analytics event
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds you use today, or other approaches you weighed.
+    validations:
+      required: false

@@ -1,0 +1,9 @@
+# Issue-template chooser config for Wolfpack Instinct.
+# blank_issues_enabled=false forces every request through a structured
+# template so the maintenance rails intake queue always gets typed fields
+# (area, severity/priority, repro/acceptance) instead of free-form issues.
+blank_issues_enabled: false
+contact_links:
+  - name: Security disclosure
+    url: https://wolfpack-instinct.vercel.app/security-posture
+    about: For a suspected vulnerability, use the security posture contact path, not a public issue.

@@ -1,0 +1,81 @@
+name: "Maintenance: Bug report"
+description: File a bug for the maintenance rails intake queue. Structured so the intake telemetry can classify it (area, severity, repro).
+title: "[bug]: "
+labels:
+  - maint-queue
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing. Every field maps into the intake telemetry
+        (analytics + audit) so nothing gets lost. Keep the title short; put
+        detail in the fields below.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One line describing the bug.
+      placeholder: Assistant chat blanks after a 401 refresh.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area / module
+      description: Which part of Instinct does this affect? (maps to the telemetry `category`)
+      options:
+        - assistant
+        - knowledge
+        - dashboard
+        - hr
+        - clients
+        - sites
+        - financials
+        - calendar
+        - mail
+        - auth
+        - platform-scan
+        - agents
+        - other
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: How badly does this hurt right now?
+      options:
+        - critical - production down / data loss / client-facing outage
+        - high - core journey broken, no workaround
+        - medium - degraded but has a workaround
+        - low - cosmetic / minor
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps. Include the URL/page and the account/role used.
+      placeholder: |
+        1. Log in as a member on /assistant
+        2. Wait 15 minutes for the access token to expire
+        3. Send a chat message
+        4. Observe the blank panel
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+      description: What should happen, and what actually happens?
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment / URL
+      description: Deployed URL, browser, or commit SHA where you saw it.
+      placeholder: https://wolfpack-instinct.vercel.app/assistant - Chrome 126
+    validations:
+      required: false
