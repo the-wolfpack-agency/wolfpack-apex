@@ -15,7 +15,7 @@
  */
 
 /** Where a task submission originated. Feeds the learning loop. */
-export type TaskSource = "detail_page" | "chat_widget" | "api";
+export type TaskSource = "detail_page" | "chat_widget" | "deploy_gate" | "api";
 
 export interface TaskTemplateInput {
   objective: string;

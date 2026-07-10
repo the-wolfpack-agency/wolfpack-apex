@@ -35,7 +35,7 @@ const MAX_GOAL_LEN = 4000;
 
 function resolveSource(raw: unknown): TaskSource {
   const s = (raw as Record<string, unknown>)?.source;
-  return s === "detail_page" || s === "chat_widget" ? s : "api";
+  return s === "detail_page" || s === "chat_widget" || s === "deploy_gate" ? s : "api";
 }
 
 export async function POST(
