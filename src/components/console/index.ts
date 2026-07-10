@@ -26,6 +26,9 @@ export type { SectionHeaderProps } from "./SectionHeader";
 export { ConsoleGrid, default as ConsoleGridDefault } from "./ConsoleGrid";
 export type { ConsoleGridProps } from "./ConsoleGrid";
 
+export { Stepper, default as StepperDefault } from "./Stepper";
+export type { StepperProps, StepperStep, StepStatus } from "./Stepper";
+
 // Shared severity vocabulary + count-up hook (importable by pages too).
 export {
   toneForStatus,

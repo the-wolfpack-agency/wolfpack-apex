@@ -34,6 +34,7 @@ import type {
   ReleaseBlockState,
 } from "@/lib/deploy/release-gate";
 import type { MergePlan, MergeStep } from "@/lib/deploy/merge-plan";
+import { DeploymentPipelinePanel } from "@/components/deploy/DeploymentPipelinePanel";
 
 interface ReadinessCheck {
   name: string;
@@ -621,6 +622,18 @@ export default function DeploymentReadinessPage() {
       ) : null}
 
       {authed && <ReleaseGateSection />}
+
+      {/* The full pipeline: the release gate above shows what's blocking the
+          next deploy; this shows every change's whole journey to production
+          (CI -> merge -> build -> promote -> verify -> health), stitched across
+          GitHub + Vercel + our own post-deploy checks. Gated on authed so it
+          only mounts (and fetches) after the auth check, never on the redirect
+          path. */}
+      {authed && (
+        <div style={{ marginTop: "2rem" }}>
+          <DeploymentPipelinePanel testId="deployment-pipeline" />
+        </div>
+      )}
     </div>
   );
 }

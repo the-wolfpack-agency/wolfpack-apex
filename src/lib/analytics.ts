@@ -793,6 +793,12 @@ export type InstinctEventType =
   //   an operator dispatched an agent from the release gate to triage a PR that
   //   is blocking production. Links the deploy issue to the agent that took it.
   | "deploy.triage_dispatched"
+  // deploy.pipeline_viewed  { scope: "fleet" | "agent", pipeline_count, degraded }
+  //   an operator opened the full deployment pipeline view (the stitched
+  //   CI -> merge -> build -> promote -> verify -> health timeline). scope=agent
+  //   is the per-agent Deployments tab; the learning loop sees which deployments
+  //   the fleet actually watches.
+  | "deploy.pipeline_viewed"
   // Client engagement with the redesigned consoles: results actually viewed. These
   // close the learning loop on what clients look at. { open_total, critical, high, targets }
   | "platform.results_viewed"
