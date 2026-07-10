@@ -27,6 +27,7 @@ import {
   Sparkline,
   ConsoleGrid,
 } from "@/components/console";
+import { AgentDeploymentsPanel } from "@/components/deploy/AgentDeploymentsPanel";
 
 type AgentState = "invited" | "active" | "paused" | "revoked";
 
@@ -331,13 +332,14 @@ type LifecycleAction = "pause" | "resume" | "revoke";
    grouping: Overview (identity + system model), Work (assigned work + pending
    writes), Access (connected systems + backup), Activity (drift + agent log).
    Every section lands in exactly one tab and every panel stays mounted. */
-type TabKey = "overview" | "work" | "access" | "activity";
+type TabKey = "overview" | "work" | "access" | "activity" | "deployments";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "work", label: "Work" },
   { key: "access", label: "Access" },
   { key: "activity", label: "Activity" },
+  { key: "deployments", label: "Deployments" },
 ];
 
 function relativeTime(iso: string | null): string {
@@ -3816,6 +3818,14 @@ export default function AgentProfilePage({
       >
         View this agent&apos;s gated actions &rarr;
       </Link>
+      </div>
+
+      {/* Deployments: the code changes this agent engaged with (the blocking
+          deploys it was dispatched to triage from the release gate), each shown
+          as its full pipeline. Loads independently so a deployment-read failure
+          never blanks the profile. */}
+      <div data-testid="agent-panel-deployments" role="tabpanel" style={{ ...panelStyle("deployments"), marginTop: "1.5rem" }}>
+        <AgentDeploymentsPanel agentId={id} testId="agent-deployments" />
       </div>
     </div>
   );
