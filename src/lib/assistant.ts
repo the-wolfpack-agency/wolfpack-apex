@@ -2126,6 +2126,9 @@ async function callAI(
       max_tokens: 2048,
       model_tier: "standard",
       latency_target: "real_time",
+      // Govern the assistant's answers with the OGIAM Agent Constitution. The
+      // router prepends it to `system` at the chokepoint.
+      apply_constitution: true,
       metadata: {
         feature: "assistant_chat",
         user_id: userId,

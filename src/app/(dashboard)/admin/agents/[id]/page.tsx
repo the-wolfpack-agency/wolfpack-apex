@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, use } from "react";
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { fetchWithRefresh, jsonHeaders, getInstinctUser } from "@/lib/client-auth";
@@ -290,6 +291,28 @@ type TasksState =
   | { kind: "loading" }
   | { kind: "error" }
   | { kind: "present"; tasks: AgentTask[] };
+
+/* Shared styling for the task-template inputs so the objective, success
+   criteria, context, and target fields read as one form. */
+const TASK_FIELD_STYLE: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "0.6rem 0.7rem",
+  background: "var(--wp-dark-surface2, #1a1a1a)",
+  color: "var(--wp-text, #eee)",
+  border: "1px solid var(--wp-dark-border, #333)",
+  borderRadius: "6px",
+  fontSize: "0.85rem",
+  fontFamily: "inherit",
+  resize: "vertical",
+};
+const TASK_LABEL_STYLE: CSSProperties = {
+  display: "block",
+  fontSize: "0.78rem",
+  fontWeight: 600,
+  color: "var(--wp-text, #eee)",
+  marginBottom: "0.3rem",
+};
 
 /* Scan load is independent of the agent load: a missing scan (404 no_scan) is
    the expected steady state for a freshly onboarded agent, not an error. */
@@ -928,7 +951,12 @@ export default function AgentProfilePage({
      never blanks the profile. The assign form POSTs a goal and prepends the
      returned task; revoked agents (409) and validation (400) surface inline. */
   const [tasks, setTasks] = useState<TasksState>({ kind: "loading" });
+  // The task template. `goal` holds the Objective (maps to the task goal / the
+  // plan); the rest are the structured template fields.
   const [goal, setGoal] = useState("");
+  const [successCriteria, setSuccessCriteria] = useState("");
+  const [taskContext, setTaskContext] = useState("");
+  const [targetConnectionId, setTargetConnectionId] = useState("");
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
   /* Run-queued control: drains tasks already sitting in "queued" (e.g. ones
@@ -1353,15 +1381,23 @@ export default function AgentProfilePage({
      the poll effect picks it up. Clears the textarea on success; 400/404/409
      surface inline (409 = the agent must be active to run work). */
   async function assignTask() {
-    const trimmed = goal.trim();
-    if (!trimmed || assigning) return;
+    const objective = goal.trim();
+    const sc = successCriteria.trim();
+    // Objective and Success criteria are the required template fields.
+    if (!objective || !sc || assigning) return;
     setAssigning(true);
     setAssignError(null);
     try {
       const res = await fetchWithRefresh(`/api/admin/agents/${id}/tasks`, {
         method: "POST",
         headers: jsonHeaders(),
-        body: JSON.stringify({ goal: trimmed }),
+        body: JSON.stringify({
+          objective,
+          successCriteria: sc,
+          context: taskContext.trim() || undefined,
+          targetConnectionId: targetConnectionId || undefined,
+          source: "detail_page",
+        }),
       });
       if (res.status === 201 || res.ok) {
         const body = (await res.json()) as TaskResponse;
@@ -1373,6 +1409,9 @@ export default function AgentProfilePage({
           });
         }
         setGoal("");
+        setSuccessCriteria("");
+        setTaskContext("");
+        setTargetConnectionId("");
         /* The returned task is already terminal (or, if the runtime is still
            draining it, queued/running), so prepending it is enough: a terminal
            task renders its real status and steps at once, and a still-in-flight
@@ -1385,8 +1424,8 @@ export default function AgentProfilePage({
       } else if (res.status === 404) {
         setAssignError("This agent no longer exists.");
       } else if (res.status === 400) {
-        const b = (await res.json().catch(() => ({}))) as { error?: string };
-        setAssignError(b.error || "That goal is not valid. Add an instruction and try again.");
+        const b = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+        setAssignError(b.detail || b.error || "That task is not valid. Complete the required fields and try again.");
       } else {
         setAssignError(`Could not assign work (HTTP ${res.status}).`);
       }
@@ -2416,9 +2455,10 @@ export default function AgentProfilePage({
             color: "var(--wp-text-muted, #9ca3af)",
           }}
         >
-          Write what you want in plain language, then press Assign. The agent plans the
-          steps and runs each one through the governance gate on your behalf. Number the
-          lines to run several actions in sequence (for example, search, then summarize).
+          Fill in the template and press Assign. The agent plans the objective into
+          steps and runs each one through the governance gate on your behalf, guided by
+          your success criteria. Number the objective lines to run several actions in
+          sequence (for example, search, then summarize).
         </p>
 
         <form
@@ -2429,26 +2469,72 @@ export default function AgentProfilePage({
           }}
           style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "1rem" }}
         >
+          <label style={TASK_LABEL_STYLE} htmlFor="agent-task-goal-input">
+            Objective <span style={{ color: "var(--wp-gold, #e8b528)" }}>*</span>
+          </label>
           <textarea
+            id="agent-task-goal-input"
             data-testid="agent-task-goal"
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
             disabled={isRevoked || assigning}
             rows={3}
-            placeholder={"Describe the work. A numbered list becomes multiple governed steps, e.g.\n1. Find the latest invoice for ACME\n2. Draft a follow-up email"}
-            style={{
-              width: "100%",
-              boxSizing: "border-box",
-              padding: "0.6rem 0.7rem",
-              background: "var(--wp-dark-surface2, #1a1a1a)",
-              color: "var(--wp-text, #eee)",
-              border: "1px solid var(--wp-dark-border, #333)",
-              borderRadius: "6px",
-              fontSize: "0.85rem",
-              fontFamily: "inherit",
-              resize: "vertical",
-            }}
+            placeholder={"What should this agent accomplish? Number the steps if there are several, e.g.\n1. Find the latest invoice for ACME\n2. Draft a follow-up email"}
+            style={TASK_FIELD_STYLE}
           />
+
+          <label style={TASK_LABEL_STYLE} htmlFor="agent-task-success-input">
+            Success criteria <span style={{ color: "var(--wp-gold, #e8b528)" }}>*</span>
+          </label>
+          <textarea
+            id="agent-task-success-input"
+            data-testid="agent-task-success"
+            value={successCriteria}
+            onChange={(e) => setSuccessCriteria(e.target.value)}
+            disabled={isRevoked || assigning}
+            rows={2}
+            placeholder={"How will we know it is done and done well? (the definition of done)"}
+            style={TASK_FIELD_STYLE}
+          />
+
+          <label style={TASK_LABEL_STYLE} htmlFor="agent-task-context-input">
+            Context <span style={{ color: "var(--wp-text-muted, #9ca3af)", fontWeight: 400 }}>(optional)</span>
+          </label>
+          <textarea
+            id="agent-task-context-input"
+            data-testid="agent-task-context"
+            value={taskContext}
+            onChange={(e) => setTaskContext(e.target.value)}
+            disabled={isRevoked || assigning}
+            rows={2}
+            placeholder={"Links, data, or background the agent should use."}
+            style={TASK_FIELD_STYLE}
+          />
+
+          {connections.kind === "present" && connections.bound.length > 0 && (
+            <>
+              <label style={TASK_LABEL_STYLE} htmlFor="agent-task-target-input">
+                Target system{" "}
+                <span style={{ color: "var(--wp-text-muted, #9ca3af)", fontWeight: 400 }}>(optional)</span>
+              </label>
+              <select
+                id="agent-task-target-input"
+                data-testid="agent-task-target"
+                value={targetConnectionId}
+                onChange={(e) => setTargetConnectionId(e.target.value)}
+                disabled={isRevoked || assigning}
+                style={TASK_FIELD_STYLE}
+              >
+                <option value="">No specific system</option>
+                {connections.bound.map((c) => (
+                  <option key={c.connectorName} value={c.connectorName}>
+                    {c.connectorName}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+
           {assignError && (
             <div
               data-testid="agent-task-error"
@@ -2465,7 +2551,11 @@ export default function AgentProfilePage({
             </div>
           )}
           {(() => {
-            const disabled = isRevoked || assigning || goal.trim().length === 0;
+            const disabled =
+              isRevoked ||
+              assigning ||
+              goal.trim().length === 0 ||
+              successCriteria.trim().length === 0;
             return (
               <button
                 type="submit"

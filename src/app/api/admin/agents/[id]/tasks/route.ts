@@ -24,9 +24,19 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { getAgent } from "@/lib/agents/store";
 import { createTask, listTasksForAgent } from "@/lib/agents/tasks/store";
 import { executeTaskAsAgent } from "@/lib/agents/tasks/run-inline";
+import {
+  validateTaskTemplate,
+  composeGuidance,
+  type TaskSource,
+} from "@/lib/agents/tasks/template";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 const MAX_GOAL_LEN = 4000;
+
+function resolveSource(raw: unknown): TaskSource {
+  const s = (raw as Record<string, unknown>)?.source;
+  return s === "detail_page" || s === "chat_widget" ? s : "api";
+}
 
 export async function POST(
   req: NextRequest,
@@ -51,19 +61,46 @@ export async function POST(
     return NextResponse.json({ error: "agent_not_active" }, { status: 409 });
   }
 
-  const body = (await req.json().catch(() => null)) as { goal?: unknown } | null;
-  const goal = typeof body?.goal === "string" ? body.goal.trim() : "";
-  if (!goal) {
-    return NextResponse.json(
-      { error: "invalid_input", detail: "goal is required" },
-      { status: 400 },
-    );
-  }
-  if (goal.length > MAX_GOAL_LEN) {
-    return NextResponse.json(
-      { error: "invalid_input", detail: `goal must be <= ${MAX_GOAL_LEN} chars` },
-      { status: 400 },
-    );
+  const raw = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+
+  /* Two accepted shapes:
+       - Template (control plane): { objective, successCriteria, context?,
+         targetConnectionId?, source? }. objective -> goal (the plan); the rest
+         is stored structured + composed into run-context guidance.
+       - Legacy: { goal }. Still supported so any older caller keeps working. */
+  let goal: string;
+  let successCriteria: string | undefined;
+  let context: string | undefined;
+  let targetConnectionId: string | undefined;
+  let guidance: string | undefined;
+
+  if (raw && typeof raw.objective === "string") {
+    const parsed = validateTaskTemplate(raw);
+    if (!parsed.ok) {
+      return NextResponse.json(
+        { error: "invalid_input", detail: parsed.error },
+        { status: 400 },
+      );
+    }
+    goal = parsed.value.objective;
+    successCriteria = parsed.value.successCriteria;
+    context = parsed.value.context;
+    targetConnectionId = parsed.value.targetConnectionId;
+    guidance = composeGuidance(parsed.value);
+  } else {
+    goal = typeof raw?.goal === "string" ? (raw.goal as string).trim() : "";
+    if (!goal) {
+      return NextResponse.json(
+        { error: "invalid_input", detail: "objective is required" },
+        { status: 400 },
+      );
+    }
+    if (goal.length > MAX_GOAL_LEN) {
+      return NextResponse.json(
+        { error: "invalid_input", detail: `objective must be <= ${MAX_GOAL_LEN} chars` },
+        { status: 400 },
+      );
+    }
   }
 
   const task = await createTask({
@@ -72,6 +109,10 @@ export async function POST(
     assignedBy: auth.user.id,
     assignedByRole: auth.user.role,
     goal,
+    successCriteria,
+    context,
+    targetConnectionId,
+    source: resolveSource(raw),
   });
 
   /* Directing an autonomous principal is a security-relevant action, so it is
@@ -102,7 +143,7 @@ export async function POST(
       ownerUserId: agent.ownerUserId,
       workspaceId: workspace,
     },
-    { id: task.id, goal: task.goal },
+    { id: task.id, goal: task.goal, guidance },
   );
 
   return NextResponse.json({ task: completed ?? task }, { status: 201 });

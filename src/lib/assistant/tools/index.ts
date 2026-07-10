@@ -36,6 +36,10 @@ import "@/lib/assistant/connectors";
    by another tool's intent. The handler enforces authorization (owner or
    manager-or-above) and the agent's own per-step OGIAM gate governs execution. */
 import "./delegate-to-agent-tool";
+/* execute_agent_widget OPENS the agent control plane (picker + task template)
+   in chat. Registered AFTER delegate so an explicit "Agent1 <do X>" still
+   executes immediately; this claims "run/execute/launch ... agent" only. */
+import "./execute-agent-widget-tool";
 /* who_is OWNS "who is <name>" — team-first, CRM-fallback. Registered
    BEFORE search_external_records so the cascade stops at the right
    answer: a literal teammate returns their roster info instead of
