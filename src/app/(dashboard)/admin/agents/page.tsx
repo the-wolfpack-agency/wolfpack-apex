@@ -39,6 +39,7 @@ import {
   ConsoleGrid,
   colorForStatus,
 } from "@/components/console";
+import { ReleaseGatePanel } from "@/components/deploy/ReleaseGatePanel";
 
 type AgentState = "invited" | "active" | "paused" | "revoked";
 
@@ -477,6 +478,13 @@ export default function AgentsPage() {
           />
         </ConsoleGrid>
       </GlassPanel>
+
+      {/* Deployment control plane, step 1: the Production Release Gate surfaced
+          where the fleet is managed, so deployment activity is visible and
+          actionable from inside the agents surface. Gated on !loading so it only
+          mounts (and fetches) for an authenticated, loaded page, never on the
+          unauth redirect path. */}
+      {!loading && <ReleaseGatePanel testId="agents-release-gate" />}
 
       {/* One-time secret panel. Renders prominently after a successful onboard
           and is the only place the credential is ever shown. */}
