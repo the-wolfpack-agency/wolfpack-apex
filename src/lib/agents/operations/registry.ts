@@ -107,6 +107,25 @@ export const AGENT_OPERATIONS: AgentOperation[] = [
     ],
   },
   {
+    id: "capture_screenshot",
+    summary: "Capture a screenshot of a URL as visual verification",
+    // "screenshot / snapshot ..." — the required url field gates it, so a loose
+    // intent is safe (no URL -> escalate to the owner).
+    intent: /\bscreenshot\b|\bscreen\s*shot\b|\bsnapshot\b/i,
+    method: "POST",
+    path: "/api/tools/screenshot",
+    // The capture route + its serving route are gated on team administration,
+    // the same rank that runs agents.
+    capability: "settings.manage_team",
+    fields: [
+      {
+        name: "url",
+        required: true,
+        extract: (instruction) => extractUrl(instruction),
+      },
+    ],
+  },
+  {
     id: "web_search",
     summary: "Search the web for information",
     // Two routing shapes, anchored on a PUBLIC-web surface noun so this does NOT

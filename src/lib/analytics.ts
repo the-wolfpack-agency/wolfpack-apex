@@ -1589,6 +1589,9 @@ export type InstinctEventType =
   | "tools.visual_diff_run"
   | "tools.accessibility_checked"
   | "tools.page_viewed"
+  // tools.screenshot_captured { workspace_id, source_url, byte_size }
+  //   a URL was captured by the screenshot engine (agent verification proof).
+  | "tools.screenshot_captured"
   // E2E reality-check suite (browser-level parity + upload + designer journey)
   // Every Playwright reality-check run posts this so the learning loop can
   // track which specs flap, which catch regressions, and which never fail -
