@@ -18,7 +18,7 @@
  *   OGIAM_CONSTITUTION_DIR=/path node scripts/sync-constitution.mjs
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,9 +33,19 @@ const SRC_DIR =
 
 const OUT = join(APEX_ROOT, "src", "lib", "constitution", "generated.ts");
 
-function build() {
-  const md = readFileSync(join(SRC_DIR, "AGENTS.md"), "utf-8");
-  const version = readFileSync(join(SRC_DIR, "VERSION"), "utf-8").trim();
+/** Read a file, or return undefined if it is missing. Avoids a check-then-read
+ *  race (js/file-system-race): we attempt the read and handle ENOENT instead of
+ *  probing existence first. Non-ENOENT errors propagate. */
+function readOrUndefined(path) {
+  try {
+    return readFileSync(path, "utf-8");
+  } catch (err) {
+    if (err && err.code === "ENOENT") return undefined;
+    throw err;
+  }
+}
+
+function render(md, version) {
   // JSON.stringify makes a safe JS string literal regardless of backticks,
   // ${...} sequences, or newlines in the markdown.
   return (
@@ -48,17 +58,20 @@ function build() {
 }
 
 function main() {
-  if (!existsSync(SRC_DIR)) {
+  const md = readOrUndefined(join(SRC_DIR, "AGENTS.md"));
+  const versionRaw = readOrUndefined(join(SRC_DIR, "VERSION"));
+  if (md === undefined || versionRaw === undefined) {
     console.error(
-      `[sync-constitution] canonical source not found at ${SRC_DIR}.\n` +
+      `[sync-constitution] canonical source not found under ${SRC_DIR}.\n` +
         `Set OGIAM_CONSTITUTION_DIR to the AgenticQA-core constitution dir.`,
     );
     process.exit(2);
   }
-  const next = build();
-  const check = process.argv.includes("--check");
-  const current = existsSync(OUT) ? readFileSync(OUT, "utf-8") : "";
-  if (check) {
+
+  const next = render(md, versionRaw.trim());
+  const current = readOrUndefined(OUT) ?? "";
+
+  if (process.argv.includes("--check")) {
     if (current !== next) {
       console.error(
         "[sync-constitution] generated.ts is OUT OF SYNC with AgenticQA-core. " +
@@ -69,6 +82,7 @@ function main() {
     console.log("[sync-constitution] in sync.");
     return;
   }
+
   writeFileSync(OUT, next, "utf-8");
   console.log(`[sync-constitution] wrote ${OUT}`);
 }
