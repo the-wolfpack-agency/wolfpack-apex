@@ -702,6 +702,13 @@ describe("/admin/agents/[id]: assigned work (tasks)", () => {
         target: { value: "Draft a summary" },
       });
     });
+    // Objective alone is not enough; Success criteria is also required.
+    expect(submit.disabled).toBe(true);
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("agent-task-success"), {
+        target: { value: "The summary is accurate and concise" },
+      });
+    });
     expect(submit.disabled).toBe(false);
 
     // The governance note explains the Blocked outcome so it does not read as a failure.
@@ -737,6 +744,9 @@ describe("/admin/agents/[id]: assigned work (tasks)", () => {
       fireEvent.change(screen.getByTestId("agent-task-goal"), {
         target: { value: "Summarise Q2 numbers" },
       });
+      fireEvent.change(screen.getByTestId("agent-task-success"), {
+        target: { value: "Numbers reconcile" },
+      });
     });
     await act(async () => {
       fireEvent.click(screen.getByTestId("agent-task-submit"));
@@ -754,10 +764,15 @@ describe("/admin/agents/[id]: assigned work (tasks)", () => {
     expect(post).toBeTruthy();
     expect(String(post?.[0])).toContain("/api/admin/agents/ag-1/tasks");
     const body = JSON.parse((post?.[1] as { body: string }).body);
-    expect(body.goal).toBe("Summarise Q2 numbers");
+    // The template shape: objective (the plan) + the required success criteria,
+    // tagged with the surface it came from.
+    expect(body.objective).toBe("Summarise Q2 numbers");
+    expect(body.successCriteria).toBe("Numbers reconcile");
+    expect(body.source).toBe("detail_page");
 
-    // The textarea is cleared after a successful assign.
+    // The form is cleared after a successful assign.
     expect(screen.getByTestId("agent-task-goal")).toHaveValue("");
+    expect(screen.getByTestId("agent-task-success")).toHaveValue("");
   });
 
   it("shows an inline error when assigning to an inactive agent (409)", async () => {
@@ -780,6 +795,9 @@ describe("/admin/agents/[id]: assigned work (tasks)", () => {
     await act(async () => {
       fireEvent.change(screen.getByTestId("agent-task-goal"), {
         target: { value: "Do something" },
+      });
+      fireEvent.change(screen.getByTestId("agent-task-success"), {
+        target: { value: "It is done" },
       });
     });
     await act(async () => {
@@ -829,6 +847,9 @@ describe("/admin/agents/[id]: live execution", () => {
     await act(async () => {
       fireEvent.change(screen.getByTestId("agent-task-goal"), {
         target: { value: "Reconcile the ledger" },
+      });
+      fireEvent.change(screen.getByTestId("agent-task-success"), {
+        target: { value: "Totals match" },
       });
     });
 
@@ -883,6 +904,7 @@ describe("/admin/agents/[id]: live execution", () => {
 
     await act(async () => {
       fireEvent.change(screen.getByTestId("agent-task-goal"), { target: { value: "Do work" } });
+      fireEvent.change(screen.getByTestId("agent-task-success"), { target: { value: "Work done" } });
     });
     await act(async () => {
       fireEvent.click(screen.getByTestId("agent-task-submit"));

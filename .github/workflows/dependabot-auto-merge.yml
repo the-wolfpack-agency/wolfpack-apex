@@ -1,11 +1,16 @@
 name: Dependabot auto-merge
 
-# Auto-merges green patch/minor Dependabot PRs.
-# Major version bumps ALWAYS require manual review (filtered out below).
+# Fully automates Dependabot PATCH/MINOR bumps: they merge on their own once the
+# full CI suite (regression + tests + security) is green AND prod is healthy — no
+# human approval. Human-authored PRs still require review: branch protection keeps
+# "require review" and exempts ONLY Dependabot (via bypass_pull_request_allowances);
+# your own PRs that change UI/functionality still need a person. No bot ever
+# approves a PR — a bot approval would fake a human review (rejected anti-pattern),
+# guardrail-tested in src/__tests__/dependabot-no-bot-approve.test.ts. MAJOR bumps
+# are excluded: they open a PR and wait for a human.
 #
-# Why pull_request_target: lets us merge from forks Dependabot pushes from
-# the bot account, with secrets available. We never check out PR code here
-# (only inspect metadata + call gh CLI), so this is safe.
+# Why pull_request_target: acts on PRs Dependabot pushes from the bot account with
+# secrets available. We never check out PR code (only read metadata + call gh CLI).
 
 on:
   pull_request_target:
@@ -28,24 +33,47 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Satisfy the "require 1 approving review" rule. Dependabot PRs never land
-      # in a human review queue, so without this a green patch/minor bump waits
-      # forever. Scoped to patch/minor only; majors still need a human. The
-      # approval is by github-actions[bot] (a non-author), so it counts.
-      - name: Approve patch + minor updates
+      # Gate: prod must be healthy right now — never auto-land a dep bump on top of
+      # an already-degraded prod. (The regression + security suite is Gate 2,
+      # enforced as REQUIRED status checks in branch protection; auto-merge cannot
+      # complete until they are green.) Runs only for patch/minor; majors never
+      # reach auto-merge.
+      - name: Check prod health
+        id: health
         if: |
           steps.meta.outputs.update-type == 'version-update:semver-patch' ||
           steps.meta.outputs.update-type == 'version-update:semver-minor'
-        run: gh pr review --approve "$PR_URL" --body "Auto-approved Dependabot patch/minor bump; merge still gates on the required status checks."
+        run: |
+          URL="${PROD_HEALTH_URL:-https://wolfpack-instinct.vercel.app/api/version}"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$URL" || echo 000)
+          echo "prod health ($URL) -> $code"
+          if [ "$code" = "200" ]; then echo "healthy=true" >> "$GITHUB_OUTPUT"; else echo "healthy=false" >> "$GITHUB_OUTPUT"; fi
+        env:
+          PROD_HEALTH_URL: ${{ vars.PROD_HEALTH_URL }}
+
+      # NO approval step. Auto-merge waits for the required status checks (full
+      # regression + security suite) to pass, then merges with no human — Dependabot
+      # is on the review-bypass list so the human-review requirement is waived for
+      # it (and only it).
+      - name: Enable auto-merge (patch/minor, prod healthy)
+        if: |
+          steps.health.outputs.healthy == 'true' && (
+          steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+          steps.meta.outputs.update-type == 'version-update:semver-minor')
+        run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Enable auto-merge for patch + minor updates
+      # Prod degraded: hold auto-merge and say so. The bump waits for a human /
+      # a re-run once prod is healthy, rather than landing on a broken prod.
+      - name: Hold + note when prod is unhealthy
         if: |
+          steps.health.outputs.healthy == 'false' && (
           steps.meta.outputs.update-type == 'version-update:semver-patch' ||
-          steps.meta.outputs.update-type == 'version-update:semver-minor'
-        run: gh pr merge --auto --squash "$PR_URL"
+          steps.meta.outputs.update-type == 'version-update:semver-minor')
+        run: |
+          gh pr comment "$PR_URL" --body "Auto-merge held — the prod health check did not return 200. This bump will not auto-land while prod is degraded; re-run this workflow, or merge manually, once prod is healthy."
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

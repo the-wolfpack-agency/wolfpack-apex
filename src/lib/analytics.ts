@@ -563,6 +563,10 @@ export type InstinctEventType =
   //   OGIAM enforce gate let it through.
   | "agent.scan_completed"
   | "agent.acted"
+  // agent.constitution_applied { agent_id, task_id, constitution_version, workspace_id }
+  //   the OGIAM Agent Constitution was applied to this agent run's context, so
+  //   the run is governed by the same operator rules as every other surface.
+  | "agent.constitution_applied"
   // Write approvals (human-in-the-loop): a mutation an agent proposed is captured
   // pending approval, then approved/rejected by a human, then executed.
   | "agent.write_pending_approval"

@@ -35,6 +35,7 @@ import { ScanReceiptWidget } from "@/components/widgets/ScanReceiptWidget";
 import { ScanInvoiceWidget } from "@/components/widgets/ScanInvoiceWidget";
 import { ScanHrDocWidget } from "@/components/widgets/ScanHrDocWidget";
 import { ClarifyWidget } from "@/components/widgets/ClarifyWidget";
+import { ExecuteAgentWidget } from "@/components/widgets/ExecuteAgentWidget";
 
 export interface ChatWidgetProps {
   spec: WidgetSpec;
@@ -93,6 +94,8 @@ export function ChatWidget({ spec, workflowId }: ChatWidgetProps) {
       return <ScanHrDocWidget spec={spec} workflowId={workflowId} />;
     case "clarify":
       return <ClarifyWidget spec={spec} workflowId={workflowId} />;
+    case "execute_agent":
+      return <ExecuteAgentWidget spec={spec} workflowId={workflowId} />;
     default:
       /* Forward-compat: silently render nothing for unknown kinds.
        * The text answer above the widget still surfaces, so the

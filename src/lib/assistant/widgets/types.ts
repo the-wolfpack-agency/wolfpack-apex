@@ -584,6 +584,27 @@ export interface ClarifyWidgetSpec {
   suggestions: ClarifySuggestion[];
 }
 
+/* execute_agent: the agent control plane inside chat. Renders the task
+ *  template (Objective + Success criteria required, Context optional) plus an
+ *  agent picker, and submits to the governed task API so the agent runs the
+ *  work under its own identity, gated by OGIAM and the constitution. */
+export interface ExecuteAgentOption {
+  id: string;
+  name: string;
+  /** invited | active | paused | revoked. Only active agents can run work. */
+  state: string;
+}
+
+export interface ExecuteAgentWidgetSpec {
+  kind: "execute_agent";
+  /** Roster to choose from (active agents first). */
+  agents: ExecuteAgentOption[];
+  /** Preselected agent id when the user named one. */
+  preselectedAgentId?: string;
+  /** POST URL template; the widget replaces {id} with the chosen agent id. */
+  submitUrlTemplate: string;
+}
+
 /** Discriminated union of every widget kind. Add new entries as the
  *  framework expands. */
 export type WidgetSpec =
@@ -607,4 +628,5 @@ export type WidgetSpec =
   | ScanReceiptWidgetSpec
   | ScanInvoiceWidgetSpec
   | ScanHrDocWidgetSpec
+  | ExecuteAgentWidgetSpec
   | ClarifyWidgetSpec;

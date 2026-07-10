@@ -192,13 +192,16 @@ describe("POST /api/admin/agents/[id]/tasks", () => {
     expect(body.task.status).toBe("succeeded");
     expect(body.task.steps).toHaveLength(2);
 
-    expect(mockCreateTask).toHaveBeenCalledWith({
-      agentId: "a_1",
-      workspaceId: "default",
-      assignedBy: "u_cto",
-      assignedByRole: "admin",
-      goal: "draft the brief", // trimmed
-    });
+    expect(mockCreateTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "a_1",
+        workspaceId: "default",
+        assignedBy: "u_cto",
+        assignedByRole: "admin",
+        goal: "draft the brief", // trimmed
+        source: "api", // legacy goal-only submission
+      }),
+    );
 
     // The task was executed inline AS the agent's identity.
     expect(mockExecuteTaskAsAgent).toHaveBeenCalledWith(
@@ -214,6 +217,60 @@ describe("POST /api/admin/agents/[id]/tasks", () => {
         resourceId: "t_1",
         afterState: { agent_id: "a_1" },
       }),
+    );
+  });
+
+  it("201 accepts the full template: objective -> goal, structured fields stored, guidance composed", async () => {
+    const res = await POST(
+      mkReq({
+        objective: "  Reconcile June invoices  ",
+        successCriteria: "  All 31 matched or flagged  ",
+        context: "  SharePoint /Finance  ",
+        targetConnectionId: "conn-x",
+        source: "chat_widget",
+      }),
+      ctx as any,
+    );
+    expect(res.status).toBe(201);
+
+    expect(mockCreateTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "a_1",
+        goal: "Reconcile June invoices", // objective -> goal, trimmed
+        successCriteria: "All 31 matched or flagged",
+        context: "SharePoint /Finance",
+        targetConnectionId: "conn-x",
+        source: "chat_widget",
+      }),
+    );
+
+    // Guidance (success criteria + context + target) is threaded to the run,
+    // NOT folded into the goal, so it never creates spurious plan steps.
+    const runArg = mockExecuteTaskAsAgent.mock.calls[0][1];
+    expect(runArg.goal).toBe("draft the brief"); // task.goal from the mocked created row
+    expect(runArg.guidance).toContain("All 31 matched or flagged");
+    expect(runArg.guidance).toContain("Context: SharePoint /Finance");
+    expect(runArg.guidance).toContain("Target system: conn-x");
+  });
+
+  it("400 when the template is missing the required success criteria", async () => {
+    const res = await POST(
+      mkReq({ objective: "do the thing", successCriteria: "" }),
+      ctx as any,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { detail: string };
+    expect(body.detail).toMatch(/Success criteria is required/);
+    expect(mockCreateTask).not.toHaveBeenCalled();
+  });
+
+  it("clamps an unknown source to api", async () => {
+    await POST(
+      mkReq({ objective: "o", successCriteria: "s", source: "evil" }),
+      ctx as any,
+    );
+    expect(mockCreateTask).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "api" }),
     );
   });
 

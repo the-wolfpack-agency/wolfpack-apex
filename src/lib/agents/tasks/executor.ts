@@ -21,6 +21,7 @@
 import { tryDispatchTool } from "@/lib/assistant/tools";
 import { notify } from "@/lib/notifications/in-app";
 import { trackEvent } from "@/lib/analytics";
+import { getConstitution, CONSTITUTION_VERSION } from "@/lib/constitution";
 import { safeQuery } from "@/lib/db";
 import { mintOnBehalfToken } from "@/lib/agents/on-behalf";
 import {
@@ -58,6 +59,12 @@ export interface ExecutableTask {
   role: string;
   workspaceId: string;
   ownerUserId: string;
+  /**
+   * Run-context guidance from the task template (success criteria, context,
+   * target). Attached to the agent run context so tools can honor it. NOT part
+   * of the goal, so it never creates spurious plan steps.
+   */
+  guidance?: string;
 }
 
 type DispatchFn = typeof tryDispatchTool;
@@ -143,6 +150,12 @@ export interface ExecutorDeps {
    * NEVER logged.
    */
   fetchImpl?: FetchFn;
+  /**
+   * Constitution applied to this run. Defaults to the bundled OGIAM Agent
+   * Constitution; injectable so a test can assert the run is governed and the
+   * applied event carries the right version.
+   */
+  constitution?: { version: string; text: string };
 }
 
 export interface RunResult {
@@ -490,6 +503,14 @@ export async function runAgentTask(
   let grounding: Grounding = { used: false, hits: 0, snippets: [] };
   let modelSelection: ModelSelection | undefined;
 
+  // The OGIAM Agent Constitution that governs this run. Same operator rules the
+  // assistant runs under, so behavior is consistent across every surface and
+  // every model version. Injectable for tests.
+  const constitution = deps.constitution ?? {
+    version: CONSTITUTION_VERSION,
+    text: getConstitution(),
+  };
+
   const agentCtx: {
     userId: string;
     userRole: string;
@@ -501,6 +522,9 @@ export async function runAgentTask(
       workspaceId: string;
       ownerUserId: string;
     };
+    constitution: { version: string; text: string };
+    /** Template guidance (success criteria, context, target) for this run. */
+    guidance?: string;
     grounding?: { snippets: string[] };
     priorResults?: { instruction: string; result: string }[];
   } = {
@@ -517,7 +541,18 @@ export async function runAgentTask(
       workspaceId: task.workspaceId,
       ownerUserId: task.ownerUserId,
     },
+    constitution,
+    ...(task.guidance ? { guidance: task.guidance } : {}),
   };
+
+  // Record that this run is constitution-governed so the signal is in the
+  // learning loop and visible in the agent's log. Fire-and-forget.
+  trackEvent("agent.constitution_applied", task.agentId, task.role, {
+    agent_id: task.agentId,
+    task_id: task.id,
+    constitution_version: constitution.version,
+    workspace_id: task.workspaceId,
+  });
 
   // DETERMINISTIC-FIRST. Only an EXPLORING run (no inherited procedure) ever
   // considers tokens. A reused procedure is free: we deliberately do NOT ground
