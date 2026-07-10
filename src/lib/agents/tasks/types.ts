@@ -25,6 +25,9 @@ export interface TaskStep {
   outcome: StepOutcome;
   /** Short human-readable detail (the answer, the refusal reason, etc.). */
   detail: string;
+  /** Workspace-internal URL of a visual artifact (e.g. a captured screenshot)
+   *  the step produced; the agent-run UI renders it as a thumbnail. */
+  imageUrl?: string;
 }
 
 export interface AgentTask {

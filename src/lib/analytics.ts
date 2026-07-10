@@ -567,6 +567,10 @@ export type InstinctEventType =
   //   the OGIAM Agent Constitution was applied to this agent run's context, so
   //   the run is governed by the same operator rules as every other surface.
   | "agent.constitution_applied"
+  // agent.reasoned { agent_id, task_id, workspace_id, instruction_len }
+  //   no deterministic tool matched an instruction, so the agent reasoned about
+  //   it with the governed LLM (budget + constitution) instead of failing.
+  | "agent.reasoned"
   // Write approvals (human-in-the-loop): a mutation an agent proposed is captured
   // pending approval, then approved/rejected by a human, then executed.
   | "agent.write_pending_approval"
@@ -1593,6 +1597,9 @@ export type InstinctEventType =
   | "tools.visual_diff_run"
   | "tools.accessibility_checked"
   | "tools.page_viewed"
+  // tools.screenshot_captured { workspace_id, source_url, byte_size }
+  //   a URL was captured by the screenshot engine (agent verification proof).
+  | "tools.screenshot_captured"
   // E2E reality-check suite (browser-level parity + upload + designer journey)
   // Every Playwright reality-check run posts this so the learning loop can
   // track which specs flap, which catch regressions, and which never fail -
