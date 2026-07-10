@@ -567,6 +567,10 @@ export type InstinctEventType =
   //   the OGIAM Agent Constitution was applied to this agent run's context, so
   //   the run is governed by the same operator rules as every other surface.
   | "agent.constitution_applied"
+  // agent.reasoned { agent_id, task_id, workspace_id, instruction_len }
+  //   no deterministic tool matched an instruction, so the agent reasoned about
+  //   it with the governed LLM (budget + constitution) instead of failing.
+  | "agent.reasoned"
   // Write approvals (human-in-the-loop): a mutation an agent proposed is captured
   // pending approval, then approved/rejected by a human, then executed.
   | "agent.write_pending_approval"

@@ -50,6 +50,11 @@ import {
   type ModelSelection,
 } from "@/lib/ai/models";
 import { getPlanner } from "./planner";
+import {
+  reasonAboutInstruction,
+  type ReasonInput,
+  type ReasonResult,
+} from "./reasoning";
 import type { TaskStatus, TaskStep } from "./types";
 
 export interface ExecutableTask {
@@ -74,6 +79,8 @@ type RecordFn = typeof recordLearnedProcedure;
 type GroundFn = typeof groundFromBrain;
 type SelectModelFn = typeof selectModel;
 type LogModelSelectionFn = typeof logModelSelection;
+/** Governed LLM fallback for an instruction no deterministic tool matched. */
+type ReasonFn = (input: ReasonInput) => Promise<ReasonResult>;
 
 /** The owner's authority for a delegated (on-behalf) execution. */
 export interface OwnerIdentity {
@@ -156,6 +163,12 @@ export interface ExecutorDeps {
    * applied event carries the right version.
    */
   constitution?: { version: string; text: string };
+  /**
+   * Governed LLM reasoning fallback, invoked when no deterministic tool matched
+   * an instruction. Defaults to the real router-backed reasoner; tests inject a
+   * fake so the loop stays unit-testable without an LLM.
+   */
+  reason?: ReasonFn;
 }
 
 export interface RunResult {
@@ -473,6 +486,7 @@ export async function runAgentTask(
   const autofill = deps.autofill ?? autofillForm;
   const resolveOrigin = deps.origin ?? resolveInternalOrigin;
   const fetchImpl = deps.fetchImpl ?? fetch;
+  const reason = deps.reason ?? reasonAboutInstruction;
 
   // Inheritance: reuse a promoted procedure for this goal instead of
   // re-exploring. Best effort: a memory miss or failure falls back to planning.
@@ -631,6 +645,36 @@ export async function runAgentTask(
     }
 
     if (res === null) {
+      // DETERMINISTIC-FIRST fallback: no tool matched, so reason about the
+      // instruction with the governed LLM (per-workspace budget gate +
+      // constitution + cost analytics) instead of failing the run at zero
+      // tokens. Read-only (produces text, no side effect), so no OGIAM mutation
+      // gate is needed; the step is recorded + surfaced. Degrades to no_match
+      // when the AI is unconfigured / over budget / unavailable.
+      const reasoned = await reason({
+        instruction,
+        agentId: task.agentId,
+        role: task.role,
+        workspaceId: task.workspaceId,
+        guidance: agentCtx.guidance,
+        priorResults: agentCtx.priorResults,
+      });
+      if (reasoned.ok) {
+        const detail = truncate(reasoned.answer);
+        steps.push({ index: i, instruction, tool: "reasoning", outcome: "ran", detail });
+        recordPriorResult(instruction, detail);
+        try {
+          trackEvent("agent.reasoned", task.agentId, task.role, {
+            agent_id: task.agentId,
+            task_id: task.id,
+            workspace_id: task.workspaceId,
+            instruction_len: instruction.length,
+          });
+        } catch {
+          /* telemetry is best effort; the reasoning already ran */
+        }
+        continue;
+      }
       steps.push({ index: i, instruction, tool: null, outcome: "no_match", detail: "no tool matched this instruction" });
       continue;
     }
