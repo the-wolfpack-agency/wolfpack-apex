@@ -189,9 +189,11 @@ function isGateBlock(result: { ok: boolean; code?: string; message?: string }): 
   );
 }
 
-/** Outcome of a single on-behalf form execution. */
+/** Outcome of a single on-behalf form execution. `imageUrl` is set when the
+ *  operation returned a visual artifact (e.g. a captured screenshot) so the run
+ *  step can render it as a thumbnail. */
 type OnBehalfOutcome =
-  | { kind: "ran"; detail: string }
+  | { kind: "ran"; detail: string; imageUrl?: string }
   | { kind: "blocked"; detail: string }
   | { kind: "error"; detail: string };
 
@@ -411,12 +413,18 @@ async function executeOperationOnBehalf(args: {
 
     if (res.status >= 200 && res.status < 300) {
       let detail = `Completed ${operation.id} on behalf of the owner.`;
+      let imageUrl: string | undefined;
       try {
         const body = (await res.json()) as {
           shortUrl?: unknown;
           fullRedirectUrl?: unknown;
+          imageUrl?: unknown;
           message?: unknown;
         };
+        // A visual artifact (e.g. a screenshot) surfaces as a step thumbnail.
+        if (typeof body.imageUrl === "string" && body.imageUrl.trim()) {
+          imageUrl = body.imageUrl;
+        }
         const target =
           typeof body.fullRedirectUrl === "string" && body.fullRedirectUrl.trim()
             ? body.fullRedirectUrl
@@ -431,7 +439,7 @@ async function executeOperationOnBehalf(args: {
       } catch {
         /* non-JSON 2xx is still a success; keep the generic summary */
       }
-      return { kind: "ran", detail };
+      return { kind: "ran", detail, imageUrl };
     }
 
     // Non-2xx: include the HTTP status and any { error } body.
@@ -743,7 +751,14 @@ export async function runAgentTask(
         }
         {
           const detail = truncate(outcome.detail);
-          steps.push({ index: i, instruction, tool: res.tool, outcome: "ran", detail });
+          steps.push({
+            index: i,
+            instruction,
+            tool: res.tool,
+            outcome: "ran",
+            detail,
+            ...(outcome.imageUrl ? { imageUrl: outcome.imageUrl } : {}),
+          });
           recordPriorResult(instruction, detail);
         }
         continue;
@@ -810,7 +825,14 @@ export async function runAgentTask(
         }
         {
           const detail = truncate(outcome.detail);
-          steps.push({ index: i, instruction, tool: res.tool, outcome: "ran", detail });
+          steps.push({
+            index: i,
+            instruction,
+            tool: res.tool,
+            outcome: "ran",
+            detail,
+            ...(outcome.imageUrl ? { imageUrl: outcome.imageUrl } : {}),
+          });
           recordPriorResult(instruction, detail);
         }
         continue;

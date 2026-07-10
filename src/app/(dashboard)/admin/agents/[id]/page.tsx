@@ -104,6 +104,8 @@ interface AgentTaskStep {
   tool: string | null;
   outcome: StepOutcome;
   detail: string | null;
+  /** Workspace-internal URL of a visual artifact (e.g. a captured screenshot). */
+  imageUrl?: string | null;
 }
 
 interface AgentTask {
@@ -564,6 +566,27 @@ function TaskRow({ task }: { task: AgentTask }) {
                     >
                       {step.detail}
                     </span>
+                  ) : null}
+                  {step.imageUrl ? (
+                    <a
+                      href={step.imageUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-testid={`agent-task-${task.id}-step-${step.index}-screenshot`}
+                      style={{ display: "block", marginTop: "0.35rem" }}
+                    >
+                      <img
+                        src={step.imageUrl}
+                        alt="Captured screenshot"
+                        style={{
+                          maxWidth: "260px",
+                          width: "100%",
+                          height: "auto",
+                          borderRadius: "6px",
+                          border: "1px solid var(--wp-dark-border, #333)",
+                        }}
+                      />
+                    </a>
                   ) : null}
                 </span>
                 <span
