@@ -40,6 +40,12 @@ export interface AICompleteRequest {
   sensitivity?: AISensitivity;
   latency_target?: AILatencyTarget;
   metadata?: AICompleteRequestMetadata;
+  /**
+   * Opt in to prepend the OGIAM Agent Constitution to `system` at the router
+   * chokepoint (see src/lib/constitution). Off by default so cheap, high-volume
+   * completions are never bloated; the assistant + OGIAM agent surfaces set it.
+   */
+  apply_constitution?: boolean;
 }
 
 export interface AICompleteResponse {
