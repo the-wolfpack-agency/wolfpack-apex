@@ -40,6 +40,7 @@ import {
   colorForStatus,
 } from "@/components/console";
 import { ReleaseGatePanel } from "@/components/deploy/ReleaseGatePanel";
+import { ModelRegressionPanel } from "@/components/agents/ModelRegressionPanel";
 
 type AgentState = "invited" | "active" | "paused" | "revoked";
 
@@ -485,6 +486,13 @@ export default function AgentsPage() {
           mounts (and fetches) for an authenticated, loaded page, never on the
           unauth redirect path. */}
       {!loading && <ReleaseGatePanel testId="agents-release-gate" />}
+
+      {/* Agent evals: model-version regression watch. Answers the founding
+          question the rest of the fleet surface could not, did the newest model
+          make any agent measurably worse at its task. Gated on !loading so it
+          only mounts (and fetches) for an authenticated, loaded page, never on
+          the unauth redirect path. */}
+      {!loading && <ModelRegressionPanel testId="agents-model-regression" />}
 
       {/* One-time secret panel. Renders prominently after a successful onboard
           and is the only place the credential is ever shown. */}

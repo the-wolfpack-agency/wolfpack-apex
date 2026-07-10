@@ -630,6 +630,15 @@ export type InstinctEventType =
   | "agent.baseline_captured"
   | "agent.drift_checked"
   | "agent.auto_paused"
+  // Model-version regression evals (migration 221, src/lib/agents/evals/*).
+  // agent.model_evaluated  { agent_id, workspace_id, verdict, candidate_model,
+  //   baseline_model, delta, candidate_samples, baseline_samples }
+  //   one per eval sweep per agent; the learning loop sees every evaluation.
+  // agent.model_regression_detected  { agent_id, workspace_id, candidate_model,
+  //   baseline_model, delta } the newest model's task-success rate fell past the
+  //   regression threshold vs the previously-used model. Audited + owner-notified.
+  | "agent.model_evaluated"
+  | "agent.model_regression_detected"
   // GOVERNED backup-agent failover for uptime (migration 184). An agent can
   // designate a BACKUP; when the primary goes unhealthy (paused/revoked) or a
   // task stalls, its queued work fails over to the backup, which runs it under
