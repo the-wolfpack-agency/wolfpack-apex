@@ -12,6 +12,7 @@ import { trackEvent } from "@/lib/analytics";
 import {
   listCachedTasks,
   createTask,
+  resolveDefaultListId,
   GraphTasksError,
   TaskStatus,
   TaskImportance,
@@ -71,9 +72,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  if (!body.listId || typeof body.listId !== "string") {
-    return NextResponse.json({ error: "listId is required" }, { status: 400 });
-  }
+  // listId is OPTIONAL: when omitted we create in the user's default To Do list
+  // so a task can be created with just a title (no forced list pick).
+  const explicitListId = typeof body.listId === "string" ? body.listId.trim() : "";
   if (!body.title || typeof body.title !== "string" || body.title.trim().length === 0) {
     return NextResponse.json({ error: "title is required" }, { status: 400 });
   }
@@ -82,7 +83,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const task = await createTask(user.id, body.listId, {
+    const listId = explicitListId || (await resolveDefaultListId(user.id));
+    const task = await createTask(user.id, listId, {
       title: body.title.trim(),
       body: body.body,
       dueAt: body.dueAt ?? undefined,

@@ -172,6 +172,8 @@ interface GraphList {
   displayName: string;
   isOwner?: boolean;
   isShared?: boolean;
+  /** "none" | "defaultList" | "flaggedEmails". Marks the user's default list. */
+  wellknownListName?: string;
   "@odata.etag"?: string;
 }
 
@@ -279,6 +281,34 @@ export async function listTaskLists(userId: string): Promise<GraphList[]> {
   const token = await resolveToken(userId);
   const res = await graphCall<{ value: GraphList[] }>("GET", "me/todo/lists", token);
   return res.value ?? [];
+}
+
+/**
+ * Resolve the user's DEFAULT To Do list id so a task can be created without the
+ * user having to pick a list. Microsoft To Do always has a default list
+ * (wellknownListName "defaultList", usually shown as "Tasks"). We fetch the
+ * lists from Graph, cache them (so the picker populates for next time), and
+ * return the default list's Graph id, falling back to the first owned list.
+ * Throws GraphTasksError(404) only if the account genuinely has no lists.
+ */
+export async function resolveDefaultListId(userId: string): Promise<string> {
+  const lists = await listTaskLists(userId);
+  if (lists.length === 0) {
+    throw new GraphTasksError(404, "No Microsoft To Do lists found for this account");
+  }
+  // Best-effort cache warm so the "New task" list picker is populated afterward.
+  for (const g of lists) {
+    try {
+      await upsertList(userId, g);
+    } catch {
+      /* caching is best-effort; never block task creation on it */
+    }
+  }
+  const chosen =
+    lists.find((l) => l.wellknownListName === "defaultList") ??
+    lists.find((l) => l.isOwner) ??
+    lists[0];
+  return chosen.id;
 }
 
 /**
