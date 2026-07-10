@@ -50,6 +50,38 @@ describe("GET /api/admin/deployment/pipeline", () => {
     expect(ev[3]).toMatchObject({ scope: "fleet", pipeline_count: 1, degraded: false });
   });
 
+  it("scopes to the workspace and fires deploy.agent_regression_correlated when the live deploy has impact", async () => {
+    mockGetPipelines.mockResolvedValue({
+      pipelines: [
+        {
+          id: "sha1", live: true, commitSha: "sha1", status: "deployed",
+          agentImpact: { regressionCount: 2, since: "2026-07-10T00:00:00Z", regressions: [] },
+        },
+      ],
+      servingSha: "sha1", checkedAt: "t", degraded: [],
+    });
+    const res = await get();
+    expect(res.status).toBe(200);
+    // orchestrator scoped to the caller's workspace
+    expect(mockGetPipelines.mock.calls[0][0]).toMatchObject({ workspaceId: "ws-1" });
+    // both events fired (viewed + correlated)
+    const events = mockTrack.mock.calls.map((c) => c[0]);
+    expect(events).toContain("deploy.pipeline_viewed");
+    expect(events).toContain("deploy.agent_regression_correlated");
+    const corr = mockTrack.mock.calls.find((c) => c[0] === "deploy.agent_regression_correlated")!;
+    expect(corr[3]).toMatchObject({ commit_sha: "sha1", regression_count: 2 });
+  });
+
+  it("does NOT fire the correlation event when the live deploy has no regressions", async () => {
+    mockGetPipelines.mockResolvedValue({
+      pipelines: [{ id: "sha1", live: true, commitSha: "sha1", status: "deployed", agentImpact: { regressionCount: 0, since: "t", regressions: [] } }],
+      servingSha: "sha1", checkedAt: "t", degraded: [],
+    });
+    await get();
+    const events = mockTrack.mock.calls.map((c) => c[0]);
+    expect(events).not.toContain("deploy.agent_regression_correlated");
+  });
+
   it("propagates the capability failure (401/403)", async () => {
     mockAuth = async () => ({ ok: false, response: new Response(null, { status: 403 }) });
     const res = await get();

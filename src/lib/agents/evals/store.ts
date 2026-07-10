@@ -324,6 +324,45 @@ export async function listModelRegressions(
   }));
 }
 
+/**
+ * Regressions (only) recorded at or after an instant, worst-first. Used to
+ * correlate agent quality with a deployment: "since this deploy went live,
+ * these agents regressed." Improvements are excluded (the caller wants the
+ * rollback-relevant signal, not context). `sinceIso` is an ISO-8601 timestamp.
+ */
+export async function listModelRegressionsSince(
+  workspaceId: string,
+  sinceIso: string,
+  limit = 20,
+): Promise<ModelRegressionRecord[]> {
+  const res = await safeQuery<Record<string, unknown>>(
+    `SELECT id, agent_id, baseline_model, candidate_model,
+            baseline_success_rate, candidate_success_rate, delta,
+            baseline_samples, candidate_samples, verdict,
+            created_at::text AS created_at
+       FROM instinct_agent_model_regressions
+      WHERE workspace_id = $1
+        AND verdict = 'regressed'
+        AND created_at >= $2::timestamptz
+      ORDER BY delta ASC
+      LIMIT $3`,
+    [workspaceId, sinceIso, Math.min(Math.max(limit, 1), 100)],
+  );
+  return res.rows.map((r) => ({
+    id: String(r.id),
+    agentId: String(r.agent_id),
+    baselineModel: String(r.baseline_model),
+    candidateModel: String(r.candidate_model),
+    baselineSuccessRate: Number(r.baseline_success_rate),
+    candidateSuccessRate: Number(r.candidate_success_rate),
+    delta: Number(r.delta),
+    baselineSamples: Number(r.baseline_samples),
+    candidateSamples: Number(r.candidate_samples),
+    verdict: String(r.verdict),
+    createdAt: String(r.created_at),
+  }));
+}
+
 export interface AgentModelStanding {
   agentId: string;
   agentName: string;

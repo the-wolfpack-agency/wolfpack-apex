@@ -35,6 +35,10 @@ import {
   runDeploymentReadiness,
   type ReadinessResult,
 } from "./deployment-readiness";
+import {
+  listModelRegressionsSince,
+  type ModelRegressionRecord,
+} from "@/lib/agents/evals/store";
 import { safeQuery } from "@/lib/db";
 
 /** The Vercel project whose production deployments back this app. */
@@ -86,6 +90,28 @@ export interface PipelineStage {
 
 export type PipelineStatus = "deployed" | "in_progress" | "failed";
 
+/** One agent that regressed on its model since a deploy went live. */
+export interface AgentImpactItem {
+  agentId: string;
+  baselineModel: string;
+  candidateModel: string;
+  /** candidate - baseline success rate; negative = worse on the newer model. */
+  delta: number;
+}
+
+/**
+ * The agent-quality correlation for a live deploy: model regressions the eval
+ * sweep flagged since this deploy has been serving production. This is a
+ * temporal correlation for a rollback decision ("since we shipped this, these
+ * agents got worse"), NOT a causal claim that the deploy changed the model.
+ */
+export interface AgentImpact {
+  regressionCount: number;
+  regressions: AgentImpactItem[];
+  /** ISO instant the deploy went live; the window start for the correlation. */
+  since: string;
+}
+
 export interface DeploymentPipeline {
   /** Stable key: the commit SHA when known, else a PR key. */
   id: string;
@@ -102,6 +128,8 @@ export interface DeploymentPipeline {
   currentStage: PipelineStageKey;
   /** True when this deploy's commit is the one production is serving now. */
   live: boolean;
+  /** Agent model regressions flagged since this deploy went live. Live only. */
+  agentImpact?: AgentImpact;
 }
 
 /** Normalized input to the pure builder. Exactly one of gateState / deploy is set. */
@@ -253,6 +281,11 @@ export interface PipelineDeps {
   vercelConfigured: () => boolean;
   readiness: () => Promise<ReadinessResult>;
   servingSha: () => string | null;
+  /** Model regressions flagged in a workspace since an instant (agent impact). */
+  regressionsSince: (
+    workspaceId: string,
+    sinceIso: string,
+  ) => Promise<ModelRegressionRecord[]>;
 }
 
 export function defaultPipelineDeps(): PipelineDeps {
@@ -263,6 +296,8 @@ export function defaultPipelineDeps(): PipelineDeps {
     vercelConfigured: vercelIsConfigured,
     readiness: () => runDeploymentReadiness(),
     servingSha: () => process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+    regressionsSince: (workspaceId, sinceIso) =>
+      listModelRegressionsSince(workspaceId, sinceIso),
   };
 }
 
@@ -280,12 +315,17 @@ export interface DeploymentPipelineReport {
  * anything already deployed). Honest-degrade per source. Never throws.
  */
 export async function getDeploymentPipelines(
-  opts: { limit?: number; deps?: PipelineDeps } = {},
+  opts: { limit?: number; deps?: PipelineDeps; workspaceId?: string } = {},
 ): Promise<DeploymentPipelineReport> {
   const deps = opts.deps ?? defaultPipelineDeps();
   const limit = Math.min(Math.max(opts.limit ?? 10, 1), 30);
   const degraded: DeploymentPipelineReport["degraded"] = [];
   const servingSha = deps.servingSha();
+
+  // Remember the live deploy + when it went live, so its agent-quality impact
+  // can be correlated after the pipelines are built.
+  let livePipeline: DeploymentPipeline | null = null;
+  let liveSinceIso: string | null = null;
 
   // Prod health is one fleet-level signal, attributed to the live deploy only.
   let health: "healthy" | "unhealthy" | null = null;
@@ -311,23 +351,30 @@ export async function getDeploymentPipelines(
         const sha = d.meta?.githubCommitSha ?? null;
         if (sha) deployedShas.add(sha);
         const isLive = Boolean(sha && servingSha && sha === servingSha);
-        pipelines.push(
-          buildPipeline({
-            id: sha ?? d.uid,
-            title: d.meta?.githubCommitMessage?.split("\n")[0] || d.name,
-            url: deploymentDashboardUrl(d),
-            author: d.creator?.username ?? "unknown",
-            commitSha: sha,
-            prNumber: null,
-            deploy: {
-              state: d.state,
-              target: d.target,
-              isLive,
-              health: isLive ? health : null,
-              inspectorUrl: d.inspectorUrl,
-            },
-          }),
-        );
+        const pipeline = buildPipeline({
+          id: sha ?? d.uid,
+          title: d.meta?.githubCommitMessage?.split("\n")[0] || d.name,
+          url: deploymentDashboardUrl(d),
+          author: d.creator?.username ?? "unknown",
+          commitSha: sha,
+          prNumber: null,
+          deploy: {
+            state: d.state,
+            target: d.target,
+            isLive,
+            health: isLive ? health : null,
+            inspectorUrl: d.inspectorUrl,
+          },
+        });
+        pipelines.push(pipeline);
+        if (isLive) {
+          livePipeline = pipeline;
+          // When the deploy went live (readyAt), falling back to createdAt.
+          const readyMs = d.readyAt ?? d.createdAt;
+          liveSinceIso = Number.isFinite(readyMs)
+            ? new Date(readyMs).toISOString()
+            : null;
+        }
       }
     } else {
       degraded.push({ source: "vercel", detail: res.error ?? "Vercel API error" });
@@ -359,6 +406,27 @@ export async function getDeploymentPipelines(
           gateState: c.state,
         }),
       );
+    }
+  }
+
+  // Correlate agent quality with the live deploy: model regressions the eval
+  // sweep flagged since it went live. Best effort; a failure just omits the
+  // impact (never breaks the report). Needs a workspace to scope the regressions.
+  if (livePipeline && liveSinceIso && opts.workspaceId) {
+    try {
+      const regs = await deps.regressionsSince(opts.workspaceId, liveSinceIso);
+      livePipeline.agentImpact = {
+        regressionCount: regs.length,
+        since: liveSinceIso,
+        regressions: regs.map((r) => ({
+          agentId: r.agentId,
+          baselineModel: r.baselineModel,
+          candidateModel: r.candidateModel,
+          delta: r.delta,
+        })),
+      };
+    } catch {
+      /* correlation is best effort; the pipeline still stands */
     }
   }
 

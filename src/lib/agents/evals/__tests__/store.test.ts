@@ -31,6 +31,7 @@ jest.mock("@/lib/analytics", () => ({
 import {
   runModelEvalCheck,
   getFleetModelStandings,
+  listModelRegressionsSince,
 } from "@/lib/agents/evals/store";
 
 /** Per-model outcome rows as fetchModelOutcomes' query returns them (recent first). */
@@ -168,5 +169,32 @@ describe("getFleetModelStandings", () => {
     mockSafeQuery.mockResolvedValueOnce({ rows: [] });
     const standings = await getFleetModelStandings("ws-1");
     expect(standings).toEqual([]);
+  });
+});
+
+describe("listModelRegressionsSince", () => {
+  beforeEach(() => mockSafeQuery.mockReset());
+
+  it("scopes by workspace + since instant and maps rows", async () => {
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "r1", agent_id: "agt-x", baseline_model: "old", candidate_model: "new",
+          baseline_success_rate: 0.9, candidate_success_rate: 0.5, delta: -0.4,
+          baseline_samples: 20, candidate_samples: 20, verdict: "regressed",
+          created_at: "2026-07-10T01:00:00Z",
+        },
+      ],
+    });
+    const out = await listModelRegressionsSince("ws-1", "2026-07-10T00:00:00Z");
+    expect(out).toHaveLength(1);
+    expect(out[0].candidateModel).toBe("new");
+    expect(out[0].delta).toBe(-0.4);
+    // query is scoped by workspace + since + regressed-only.
+    const [sql, params] = mockSafeQuery.mock.calls[0];
+    expect(sql).toMatch(/verdict = 'regressed'/);
+    expect(sql).toMatch(/created_at >= \$2/);
+    expect(params[0]).toBe("ws-1");
+    expect(params[1]).toBe("2026-07-10T00:00:00Z");
   });
 });
