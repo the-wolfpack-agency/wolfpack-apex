@@ -26,6 +26,7 @@
  */
 
 import { trackEvent } from "@/lib/analytics";
+import { applyConstitutionToRequest } from "@/lib/constitution";
 import { getObsClient } from "@/lib/obs";
 
 import { AnthropicProvider } from "./anthropic-provider";
@@ -228,7 +229,13 @@ class RouterClient implements AIClient {
     // when the workspace is confirmed over budget.
     await checkBudget(req, this.budgetDeps);
 
-    const primary = pickPrimary(req, this.registry);
+    // Governance chokepoint: when the caller opted in, prepend the OGIAM Agent
+    // Constitution to the system prompt here, so every constitution-governed
+    // surface (assistant + OGIAM agents) inherits the same rules regardless of
+    // which model version answers. No-op for the other call sites.
+    const cReq = applyConstitutionToRequest(req);
+
+    const primary = pickPrimary(cReq, this.registry);
     const obs = getObsClient();
     let response: AICompleteResponse;
     let fallbackUsed = false;
@@ -248,7 +255,7 @@ class RouterClient implements AIClient {
       role: "primary",
     });
     try {
-      response = await primary.complete(req);
+      response = await primary.complete(cReq);
       primarySpan.setAttribute("model_used", response.model_used);
       primarySpan.setAttribute("input_tokens", response.input_tokens);
       primarySpan.setAttribute("output_tokens", response.output_tokens);
@@ -259,7 +266,7 @@ class RouterClient implements AIClient {
     } catch (err) {
       primarySpan.setAttribute("error_message", (err as Error).message);
       primarySpan.end("error");
-      const fallback = pickFallback(primary, this.registry, req);
+      const fallback = pickFallback(primary, this.registry, cReq);
       if (fallback && isRetryableError(err)) {
         console.warn(
           `[ai/router] primary ${primary.name} failed (${(err as Error).message}); falling back to ${fallback.name}`,
@@ -270,7 +277,7 @@ class RouterClient implements AIClient {
           primary_failed: primary.name,
         });
         try {
-          response = await fallback.complete(req);
+          response = await fallback.complete(cReq);
           fbSpan.setAttribute("model_used", response.model_used);
           fbSpan.setAttribute("input_tokens", response.input_tokens);
           fbSpan.setAttribute("output_tokens", response.output_tokens);
@@ -302,7 +309,7 @@ class RouterClient implements AIClient {
       }
     }
 
-    emitCompletionEvent(req, response, fallbackUsed);
+    emitCompletionEvent(cReq, response, fallbackUsed);
     return response;
   }
 }
@@ -327,6 +334,7 @@ function emitCompletionEvent(
     fallback_used: fallbackUsed,
   };
   if (req.sensitivity) metadata.sensitivity = req.sensitivity;
+  metadata.constitution_applied = !!req.apply_constitution;
   trackEvent("ai.completion", userId, userRole, metadata);
 }
 
