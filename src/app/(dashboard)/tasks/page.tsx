@@ -278,7 +278,7 @@ export default function TasksPage() {
         <NewTaskModal
           lists={lists}
           onClose={() => setShowNew(false)}
-          onCreated={async () => { setShowNew(false); await loadTasks(); }}
+          onCreated={async () => { setShowNew(false); await Promise.all([loadTasks(), loadLists()]); }}
         />
       )}
     </div>
@@ -433,12 +433,14 @@ function NewTaskModal({
 }: { lists: TaskList[]; onClose: () => void; onCreated: () => void }) {
   const writableLists = useMemo(() => lists.filter(isWritableList), [lists]);
   const [title, setTitle] = useState("");
-  const [listId, setListId] = useState(writableLists[0]?.msListId ?? "");
+  // Empty listId = create in the user's DEFAULT To Do list (resolved server-
+  // side). The user does not have to pick a list; a specific one is optional.
+  const [listId, setListId] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleCreate() {
-    if (!title.trim() || !listId) return;
+    if (!title.trim()) return;
     setError(null);
     setCreating(true);
     const res = await fetchWithRefresh("/api/tasks", {
@@ -480,17 +482,11 @@ function NewTaskModal({
           className="w-full px-3 py-2 rounded-md text-sm border mb-4"
           style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
         >
-          {/* Explicit placeholder option so Safari renders something
-              instead of a blank box when no value matches an option
-              (e.g. stale listId after lists changed). This is the
-              actual Safari fix — the empty-state UI I added 2026-05-20
-              was reverted because it broke the workflow for users
-              whose lists endpoint returns nothing in this render but
-              who DO have lists on the server (the page's "Sync now"
-              button in the top bar is the right place to repopulate). */}
-          <option value="" disabled>
-            Choose a list…
-          </option>
+          {/* Empty value targets the user's DEFAULT To Do list server-side, so
+              a task is created with just a title. This also fixes the old
+              dead-end where a user with no cached lists had nothing selectable.
+              Specific writable lists are an optional override. */}
+          <option value="">Default list (your To Do)</option>
           {writableLists.map((l) => (
             <option key={l.id} value={l.msListId}>{l.displayName}</option>
           ))}
@@ -514,13 +510,13 @@ function NewTaskModal({
           </button>
           <button
             onClick={handleCreate}
-            disabled={creating || !title.trim() || !listId}
+            disabled={creating || !title.trim()}
             data-testid="new-task-create"
             className="flex-1 px-3 py-2 rounded-md text-sm font-medium"
             style={{
-              background: !title.trim() || !listId ? "var(--wp-dark-surface2)" : "var(--wp-gold)",
-              color: !title.trim() || !listId ? "var(--wp-text-muted, #6b7280)" : "var(--wp-dark)",
-              cursor: creating || !title.trim() || !listId ? "not-allowed" : "pointer",
+              background: !title.trim() ? "var(--wp-dark-surface2)" : "var(--wp-gold)",
+              color: !title.trim() ? "var(--wp-text-muted, #6b7280)" : "var(--wp-dark)",
+              cursor: creating || !title.trim() ? "not-allowed" : "pointer",
             }}
           >
             {creating ? "Creating…" : "Create"}

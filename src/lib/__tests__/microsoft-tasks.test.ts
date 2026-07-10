@@ -93,6 +93,47 @@ describe("listTaskLists", () => {
   });
 });
 
+describe("resolveDefaultListId", () => {
+  it("returns the wellknown defaultList id and caches the lists", async () => {
+    fetchMock.mockResolvedValueOnce(
+      okResponse({
+        value: [
+          { id: "list-flag", displayName: "Flagged Emails", wellknownListName: "flaggedEmails" },
+          { id: "list-def", displayName: "Tasks", isOwner: true, wellknownListName: "defaultList" },
+          { id: "list-proj", displayName: "Project X", isOwner: true, wellknownListName: "none" },
+        ],
+      }),
+    );
+    // upsertList INSERT ... RETURNING id
+    mockQuery.mockResolvedValue({ rows: [{ id: "uuid" }] });
+    const { resolveDefaultListId } = await import("@/lib/integrations/microsoft-tasks");
+    const id = await resolveDefaultListId("user-1");
+    expect(id).toBe("list-def");
+    // Cached all three lists (best-effort warm) so the picker populates next time.
+    expect(mockQuery).toHaveBeenCalledTimes(3);
+  });
+
+  it("falls back to the first owned list when no wellknown default", async () => {
+    fetchMock.mockResolvedValueOnce(
+      okResponse({
+        value: [
+          { id: "list-shared", displayName: "Shared", isOwner: false },
+          { id: "list-own", displayName: "Mine", isOwner: true },
+        ],
+      }),
+    );
+    mockQuery.mockResolvedValue({ rows: [{ id: "uuid" }] });
+    const { resolveDefaultListId } = await import("@/lib/integrations/microsoft-tasks");
+    expect(await resolveDefaultListId("user-1")).toBe("list-own");
+  });
+
+  it("throws GraphTasksError(404) when the account has no lists", async () => {
+    fetchMock.mockResolvedValueOnce(okResponse({ value: [] }));
+    const { resolveDefaultListId, GraphTasksError } = await import("@/lib/integrations/microsoft-tasks");
+    await expect(resolveDefaultListId("user-1")).rejects.toBeInstanceOf(GraphTasksError);
+  });
+});
+
 describe("listTasks", () => {
   it("applies $top/$skip/status filter params", async () => {
     fetchMock.mockResolvedValueOnce(okResponse({ value: [] }));

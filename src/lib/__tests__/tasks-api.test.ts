@@ -21,6 +21,7 @@ const mockCompleteTask = jest.fn();
 const mockGetCachedById = jest.fn();
 const mockSyncAll = jest.fn();
 const mockListCachedLists = jest.fn();
+const mockResolveDefault = jest.fn();
 const mockVerifyWebhook = jest.fn();
 
 class FakeGraphError extends Error {
@@ -42,6 +43,7 @@ jest.mock("@/lib/integrations/microsoft-tasks", () => ({
   getCachedTaskById: (...args: unknown[]) => mockGetCachedById(...args),
   syncAllForUser: (...args: unknown[]) => mockSyncAll(...args),
   listCachedTaskLists: (...args: unknown[]) => mockListCachedLists(...args),
+  resolveDefaultListId: (...args: unknown[]) => mockResolveDefault(...args),
   verifyWebhookClientState: (...args: unknown[]) => mockVerifyWebhook(...args),
   GraphTasksError: FakeGraphError,
 }));
@@ -75,6 +77,7 @@ function mkReq(opts: {
 beforeEach(() => {
   jest.clearAllMocks();
   _resetRateLimit();
+  mockResolveDefault.mockResolvedValue("default-list");
 });
 
 // ---------------------------------------------------------------------------
@@ -116,10 +119,24 @@ describe("POST /api/tasks", () => {
     expect(res.status).toBe(401);
   });
 
-  it("400 when listId missing", async () => {
+  it("201 defaults to the user's default To Do list when listId is missing", async () => {
+    // The list is optional: a task can be created with just a title. The route
+    // resolves the user's default list server-side.
     mockGetUser.mockReturnValue({ id: "u", role: "cto" });
+    mockCreateTask.mockResolvedValue({ id: "task-uuid", msTaskId: "ms-1", title: "t" });
     const res = await tasksPOST(mkReq({ auth: "Bearer x", body: { title: "t" } }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(201);
+    expect(mockResolveDefault).toHaveBeenCalledWith("u");
+    expect(mockCreateTask).toHaveBeenCalledWith("u", "default-list", expect.objectContaining({ title: "t" }));
+  });
+
+  it("honors an explicit listId without resolving the default", async () => {
+    mockGetUser.mockReturnValue({ id: "u", role: "cto" });
+    mockCreateTask.mockResolvedValue({ id: "task-uuid", msTaskId: "ms-1", title: "t" });
+    const res = await tasksPOST(mkReq({ auth: "Bearer x", body: { listId: "l", title: "t" } }));
+    expect(res.status).toBe(201);
+    expect(mockResolveDefault).not.toHaveBeenCalled();
+    expect(mockCreateTask).toHaveBeenCalledWith("u", "l", expect.objectContaining({ title: "t" }));
   });
 
   it("400 when title missing", async () => {
