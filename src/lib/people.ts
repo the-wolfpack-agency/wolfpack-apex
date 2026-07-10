@@ -34,9 +34,25 @@ export async function listEmployees(): Promise<Employee[]> {
 export async function createEmployee(input: Partial<Employee>, createdBy: string, userRole: string): Promise<Employee> {
   if (!input.full_name) throw new Error("full_name required");
   const id = `emp_${randomUUID()}`;
+  // Upsert on email so re-adding a person who was removed before REACTIVATES
+  // them instead of failing on the UNIQUE(email) constraint. This is a real
+  // client need: people leave and rejoin, or get removed by mistake. A NULL
+  // email never conflicts (NULLs are distinct), so unnamed employees always
+  // insert fresh. On conflict we refresh the row's details and reset status.
   const r = await safeQuery(
     `INSERT INTO apex_employees (id, full_name, email, role_title, department, start_date, birth_year, zip_code, status, metadata, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     ON CONFLICT (email) DO UPDATE SET
+       full_name  = EXCLUDED.full_name,
+       role_title = COALESCE(EXCLUDED.role_title, apex_employees.role_title),
+       department = COALESCE(EXCLUDED.department, apex_employees.department),
+       start_date = COALESCE(EXCLUDED.start_date, apex_employees.start_date),
+       birth_year = COALESCE(EXCLUDED.birth_year, apex_employees.birth_year),
+       zip_code   = COALESCE(EXCLUDED.zip_code, apex_employees.zip_code),
+       status     = EXCLUDED.status,
+       metadata   = EXCLUDED.metadata,
+       updated_at = NOW()
+     RETURNING *`,
     [
       id,
       input.full_name,
@@ -51,12 +67,17 @@ export async function createEmployee(input: Partial<Employee>, createdBy: string
       createdBy,
     ],
   );
+  const saved = r.rows[0] as unknown as Employee;
+  // The returned id differs from the freshly-minted one only when an existing
+  // row (matched by email) was reactivated rather than inserted.
+  const reactivated = saved.id !== id;
   trackEvent("hr.employee_added", createdBy, userRole, {
-    employee_id: id,
+    employee_id: saved.id,
     full_name: input.full_name,
     department: input.department ?? "",
+    reactivated,
   });
-  return r.rows[0] as unknown as Employee;
+  return saved;
 }
 
 /**
