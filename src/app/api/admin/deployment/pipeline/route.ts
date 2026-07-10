@@ -21,12 +21,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!auth.ok) return auth.response;
 
   try {
-    const report = await getDeploymentPipelines({ limit: 15 });
+    const workspace = auth.user.workspaceId ?? "default";
+    const report = await getDeploymentPipelines({ limit: 15, workspaceId: workspace });
     trackEvent("deploy.pipeline_viewed", auth.user.id, auth.user.role, {
       scope: "fleet",
       pipeline_count: report.pipelines.length,
       degraded: report.degraded.length > 0,
     });
+
+    // The cross-data signal: when the live deploy correlates with agent model
+    // regressions, record it so the learning loop sees deploy -> agent-quality.
+    const live = report.pipelines.find((p) => p.live && p.agentImpact);
+    if (live?.agentImpact && live.agentImpact.regressionCount > 0) {
+      trackEvent("deploy.agent_regression_correlated", auth.user.id, auth.user.role, {
+        commit_sha: live.commitSha ?? "",
+        regression_count: live.agentImpact.regressionCount,
+        since: live.agentImpact.since,
+      });
+    }
     return NextResponse.json({ ok: true, ...report }, { status: 200 });
   } catch (err) {
     console.error("[api/admin/deployment/pipeline]", (err as Error).message);

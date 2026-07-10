@@ -11,6 +11,7 @@
  * per-agent Deployments tab, so the pipeline looks identical everywhere.
  */
 
+import Link from "next/link";
 import { Stepper, StatusPill } from "@/components/console";
 import type { DeploymentPipeline } from "@/lib/deploy/pipeline";
 
@@ -115,6 +116,36 @@ export function PipelineRow({
           style={{ fontSize: "0.76rem", color: "var(--wp-text-dim, #b4bcc8)" }}
         >
           {current.label}: {current.detail}
+        </div>
+      )}
+
+      {/* Cross-data: agent model regressions flagged since this deploy went
+          live. A rollback signal (correlation, not causation). Live deploy only. */}
+      {pipeline.agentImpact && pipeline.agentImpact.regressionCount > 0 && (
+        <div
+          data-testid={`${testId}-impact`}
+          style={{
+            fontSize: "0.76rem",
+            color: "var(--wp-error, #ef4444)",
+            borderTop: "1px solid var(--wp-dark-border, #333)",
+            paddingTop: "0.45rem",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.2rem",
+          }}
+        >
+          <Link
+            href="/admin/agents"
+            style={{ color: "var(--wp-error, #ef4444)", textDecoration: "none", fontWeight: 700 }}
+          >
+            ⚠ {pipeline.agentImpact.regressionCount} agent model regression
+            {pipeline.agentImpact.regressionCount === 1 ? "" : "s"} flagged since this went live
+          </Link>
+          {pipeline.agentImpact.regressions.slice(0, 3).map((r) => (
+            <span key={r.agentId} style={{ color: "var(--wp-text-dim, #b4bcc8)" }}>
+              {r.agentId}: {r.baselineModel} → {r.candidateModel} ({Math.round(r.delta * 100)} pts)
+            </span>
+          ))}
         </div>
       )}
     </li>

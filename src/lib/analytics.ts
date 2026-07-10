@@ -799,6 +799,11 @@ export type InstinctEventType =
   //   is the per-agent Deployments tab; the learning loop sees which deployments
   //   the fleet actually watches.
   | "deploy.pipeline_viewed"
+  // deploy.agent_regression_correlated  { commit_sha, regression_count, since }
+  //   the cross-data signal: agent model regressions were flagged since the live
+  //   deploy went live. Correlation (rollback signal), not a causal claim. Links
+  //   a deploy to the agent-quality impact observed under it.
+  | "deploy.agent_regression_correlated"
   // Client engagement with the redesigned consoles: results actually viewed. These
   // close the learning loop on what clients look at. { open_total, critical, high, targets }
   | "platform.results_viewed"

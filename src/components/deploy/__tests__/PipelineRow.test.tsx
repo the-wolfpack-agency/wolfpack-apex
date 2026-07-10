@@ -52,3 +52,31 @@ it("shows the MIGRATION badge when the change carries a migration", () => {
   render(<PipelineRow pipeline={pipeline({ hasMigration: true })} testId="row" />);
   expect(screen.getByTestId("row-migration")).toHaveTextContent("MIGRATION");
 });
+
+it("renders the agent-regression correlation line when the live deploy has impact", () => {
+  render(
+    <PipelineRow
+      pipeline={pipeline({
+        live: true,
+        status: "deployed",
+        agentImpact: {
+          regressionCount: 2,
+          since: "2026-07-10T00:00:00Z",
+          regressions: [
+            { agentId: "agt-a", baselineModel: "old", candidateModel: "new", delta: -0.4 },
+            { agentId: "agt-b", baselineModel: "old", candidateModel: "new", delta: -0.2 },
+          ],
+        },
+      })}
+      testId="row"
+    />,
+  );
+  const impact = screen.getByTestId("row-impact");
+  expect(impact).toHaveTextContent(/2 agent model regressions flagged since this went live/i);
+  expect(impact).toHaveTextContent("agt-a: old → new (-40 pts)");
+});
+
+it("does not render the impact line when there is no regression", () => {
+  render(<PipelineRow pipeline={pipeline({ live: true })} testId="row" />);
+  expect(screen.queryByTestId("row-impact")).not.toBeInTheDocument();
+});

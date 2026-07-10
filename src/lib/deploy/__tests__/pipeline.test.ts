@@ -102,6 +102,16 @@ function fakeDeps(over: Partial<PipelineDeps> = {}): PipelineDeps {
     vercelConfigured: () => true,
     readiness: async () => ({ ok: true, checks: [] }),
     servingSha: () => "live-sha",
+    regressionsSince: async () => [],
+    ...over,
+  };
+}
+
+function regressionRecord(over: Record<string, unknown> = {}) {
+  return {
+    id: "r1", agentId: "agt-x", baselineModel: "old", candidateModel: "new",
+    baselineSuccessRate: 0.9, candidateSuccessRate: 0.5, delta: -0.4,
+    baselineSamples: 20, candidateSamples: 20, verdict: "regressed", createdAt: "2026-07-10T01:00:00Z",
     ...over,
   };
 }
@@ -164,6 +174,44 @@ describe("getDeploymentPipelines (fleet orchestrator)", () => {
     });
     const report = await getDeploymentPipelines({ deps });
     expect(report.degraded.some((d) => d.source === "github")).toBe(true);
+  });
+
+  it("attaches agent-regression impact to the LIVE deploy (since it went live)", async () => {
+    const deps = fakeDeps({
+      listDeployments: async () => ({
+        ok: true,
+        data: {
+          deployments: [
+            { uid: "d1", name: "app", url: "a.vercel.app", state: "READY", target: "production", createdAt: 100, readyAt: 200, meta: { githubCommitSha: "live-sha" }, creator: { username: "n" } },
+            { uid: "d2", name: "app", url: "b.vercel.app", state: "READY", target: "production", createdAt: 50, readyAt: 60, meta: { githubCommitSha: "old-sha" }, creator: { username: "n" } },
+          ],
+        },
+      }),
+      regressionsSince: async (ws, since) => {
+        expect(ws).toBe("ws-1");
+        expect(since).toBe(new Date(200).toISOString()); // the live deploy's readyAt
+        return [regressionRecord()];
+      },
+    });
+    const report = await getDeploymentPipelines({ deps, workspaceId: "ws-1" });
+    const live = report.pipelines.find((p) => p.live)!;
+    expect(live.agentImpact?.regressionCount).toBe(1);
+    expect(live.agentImpact?.regressions[0].candidateModel).toBe("new");
+    // Only the live deploy carries impact.
+    const old = report.pipelines.find((p) => p.commitSha === "old-sha")!;
+    expect(old.agentImpact).toBeUndefined();
+  });
+
+  it("omits impact when no workspace is given (no correlation without scope)", async () => {
+    const deps = fakeDeps({
+      listDeployments: async () => ({
+        ok: true,
+        data: { deployments: [{ uid: "d1", name: "app", url: "a.vercel.app", state: "READY", target: "production", createdAt: 1, readyAt: 2, meta: { githubCommitSha: "live-sha" }, creator: {} }] },
+      }),
+      regressionsSince: async () => [regressionRecord()],
+    });
+    const report = await getDeploymentPipelines({ deps }); // no workspaceId
+    expect(report.pipelines.find((p) => p.live)!.agentImpact).toBeUndefined();
   });
 });
 
