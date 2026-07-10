@@ -13,6 +13,10 @@ function mapRow(r: Record<string, unknown>): AgentTask {
     workspaceId: String(r.workspace_id),
     assignedBy: String(r.assigned_by),
     goal: String(r.goal),
+    successCriteria: (r.success_criteria as string | null) ?? null,
+    context: (r.context as string | null) ?? null,
+    targetConnectionId: (r.target_connection_id as string | null) ?? null,
+    source: (r.source as string | null) ?? null,
     status: String(r.status) as TaskStatus,
     steps: (r.steps as TaskStep[] | null) ?? [],
     resultSummary: (r.result_summary as string | null) ?? null,
@@ -22,7 +26,8 @@ function mapRow(r: Record<string, unknown>): AgentTask {
   };
 }
 
-const COLS = `id, agent_id, workspace_id, assigned_by, goal, status, steps,
+const COLS = `id, agent_id, workspace_id, assigned_by, goal, success_criteria,
+  context, target_connection_id, source, status, steps,
   result_summary, created_at::text AS created_at, started_at::text AS started_at,
   finished_at::text AS finished_at`;
 
@@ -31,14 +36,32 @@ export interface CreateTaskInput {
   workspaceId: string;
   assignedBy: string;
   assignedByRole: string;
+  /** The objective the planner runs. */
   goal: string;
+  /** Structured template fields (all optional; migration 219). */
+  successCriteria?: string;
+  context?: string;
+  targetConnectionId?: string;
+  /** Origin surface: detail_page | chat_widget | api. */
+  source?: string;
 }
 
 export async function createTask(input: CreateTaskInput): Promise<AgentTask> {
   const { rows } = await writeQuery<Record<string, unknown>>(
-    `INSERT INTO instinct_agent_tasks (agent_id, workspace_id, assigned_by, goal)
-     VALUES ($1,$2,$3,$4) RETURNING ${COLS}`,
-    [input.agentId, input.workspaceId, input.assignedBy, input.goal],
+    `INSERT INTO instinct_agent_tasks
+       (agent_id, workspace_id, assigned_by, goal, success_criteria, context,
+        target_connection_id, source)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING ${COLS}`,
+    [
+      input.agentId,
+      input.workspaceId,
+      input.assignedBy,
+      input.goal,
+      input.successCriteria ?? null,
+      input.context ?? null,
+      input.targetConnectionId ?? null,
+      input.source ?? null,
+    ],
     { expectRows: 1 },
   );
   const task = mapRow(rows[0]);
@@ -46,6 +69,10 @@ export async function createTask(input: CreateTaskInput): Promise<AgentTask> {
     agent_id: input.agentId,
     task_id: task.id,
     workspace_id: input.workspaceId,
+    source: input.source ?? "api",
+    has_success_criteria: Boolean(input.successCriteria),
+    has_context: Boolean(input.context),
+    has_target: Boolean(input.targetConnectionId),
   });
   return task;
 }

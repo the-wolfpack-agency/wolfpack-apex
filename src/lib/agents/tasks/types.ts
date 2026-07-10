@@ -33,6 +33,12 @@ export interface AgentTask {
   workspaceId: string;
   assignedBy: string;
   goal: string;
+  /** Structured template fields (migration 219). Null on legacy goal-only rows. */
+  successCriteria: string | null;
+  context: string | null;
+  targetConnectionId: string | null;
+  /** Origin surface: detail_page | chat_widget | api. */
+  source: string | null;
   status: TaskStatus;
   steps: TaskStep[];
   resultSummary: string | null;

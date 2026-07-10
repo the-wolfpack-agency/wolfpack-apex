@@ -34,6 +34,8 @@ export interface InlineAgentIdentity {
 export interface InlineTask {
   id: string;
   goal: string;
+  /** Template guidance (success criteria, context, target) for the run. */
+  guidance?: string;
 }
 
 /**
@@ -55,6 +57,7 @@ export async function executeTaskAsAgent(
         role: agent.role,
         workspaceId: agent.workspaceId,
         ownerUserId: agent.ownerUserId,
+        guidance: task.guidance,
       },
       deps,
     );

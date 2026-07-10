@@ -70,6 +70,8 @@ export const SEARCH_PROVIDER_EXEMPT_TOOLS: Record<string, string> = {
     "did-you-mean chip widget for typo'd queries; a disambiguation surface, not a searchable index",
   "cross-tool-insights-widget-tool.ts":
     "rule-based cross-integration insight widget; derives signals, not itself a searchable source",
+  "execute-agent-widget-tool.ts":
+    "opens the agent control-plane widget (run an agent); a task-launch surface, not a searchable index",
   "feedback.ts":
     "the /feedback slash-command tool; writes user feedback, returns a compose widget, not searchable",
   "gate.ts":

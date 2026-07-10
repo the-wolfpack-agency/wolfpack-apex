@@ -59,6 +59,12 @@ export interface ExecutableTask {
   role: string;
   workspaceId: string;
   ownerUserId: string;
+  /**
+   * Run-context guidance from the task template (success criteria, context,
+   * target). Attached to the agent run context so tools can honor it. NOT part
+   * of the goal, so it never creates spurious plan steps.
+   */
+  guidance?: string;
 }
 
 type DispatchFn = typeof tryDispatchTool;
@@ -517,6 +523,8 @@ export async function runAgentTask(
       ownerUserId: string;
     };
     constitution: { version: string; text: string };
+    /** Template guidance (success criteria, context, target) for this run. */
+    guidance?: string;
     grounding?: { snippets: string[] };
     priorResults?: { instruction: string; result: string }[];
   } = {
@@ -534,6 +542,7 @@ export async function runAgentTask(
       ownerUserId: task.ownerUserId,
     },
     constitution,
+    ...(task.guidance ? { guidance: task.guidance } : {}),
   };
 
   // Record that this run is constitution-governed so the signal is in the
