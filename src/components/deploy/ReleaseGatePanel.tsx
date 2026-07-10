@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { fetchWithRefresh } from "@/lib/client-auth";
+import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import {
   GlassPanel,
   MetricTile,
@@ -75,6 +75,169 @@ type PanelState =
 function ageLabel(hours: number): string {
   if (hours < 1) return "under 1h";
   return `${Math.round(hours)}h`;
+}
+
+interface AgentOption {
+  id: string;
+  name: string;
+  state: string;
+}
+
+/**
+ * Per-PR triage dispatcher: pick an active agent and send it a composed,
+ * read-only triage task for the blocking change. Reuses the governed task-assign
+ * path (POST /api/admin/agents/[id]/tasks), so the task runs under the agent's
+ * identity, is constitution-governed, and (when no deterministic tool matches)
+ * lands on the reasoning fallback that produces the actual assessment. Fires
+ * deploy.triage_dispatched so the learning loop links the deploy issue to the
+ * agent that took it.
+ */
+function TriageDispatcher({ change }: { change: BlockingChange }) {
+  const [open, setOpen] = useState(false);
+  const [agents, setAgents] = useState<AgentOption[] | null>(null);
+  const [agentId, setAgentId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ status: string; summary: string | null } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const openDispatch = useCallback(async () => {
+    setOpen(true);
+    if (agents !== null) return;
+    try {
+      const res = await fetchWithRefresh("/api/admin/agents");
+      if (!res.ok) {
+        setAgents([]);
+        return;
+      }
+      const body = (await res.json()) as { agents?: AgentOption[] };
+      const active = (body.agents ?? []).filter((a) => a.state === "active");
+      setAgents(active);
+      if (active[0]) setAgentId(active[0].id);
+    } catch {
+      setAgents([]);
+    }
+  }, [agents]);
+
+  async function dispatch() {
+    if (!agentId || busy) return;
+    setBusy(true);
+    setError(null);
+    // Learning signal: link this deploy issue to the agent that took it.
+    void fetchWithRefresh("/api/analytics", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        event: "deploy.triage_dispatched",
+        metadata: { pr_number: change.number, agent_id: agentId, state: change.state },
+      }),
+    }).catch(() => undefined);
+    try {
+      const res = await fetchWithRefresh(`/api/admin/agents/${agentId}/tasks`, {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          objective: `Triage PR #${change.number} "${change.title}", which is blocking a production deploy. Assess what it changes, why it is blocked (${change.reason}), and the likely fix or next step. Do NOT modify anything; produce a written assessment only.`,
+          successCriteria: "A clear written assessment: what the PR changes, why it is blocked, and the recommended next step.",
+          context: `Blocking PR: ${change.url} (state: ${change.state}).`,
+          source: "deploy_gate",
+        }),
+      });
+      if (res.status === 201 || res.ok) {
+        const body = (await res.json()) as { task?: { status: string; resultSummary: string | null } };
+        setResult({ status: body.task?.status ?? "queued", summary: body.task?.resultSummary ?? null });
+        return;
+      }
+      if (res.status === 409) setError("That agent must be active to run work.");
+      else if (res.status === 403) setError("You do not have permission to dispatch this agent.");
+      else setError(`Could not dispatch (HTTP ${res.status}).`);
+    } catch (e) {
+      setError((e as Error).message || "Network error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (result) {
+    return (
+      <div
+        data-testid={`triage-result-${change.number}`}
+        style={{ marginTop: "0.35rem", fontSize: "0.76rem", color: "var(--wp-text-dim, #aaa)" }}
+      >
+        Triage {result.status}
+        {result.summary ? `: ${result.summary}` : "."}
+      </div>
+    );
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        data-testid={`triage-open-${change.number}`}
+        onClick={() => void openDispatch()}
+        style={{
+          marginTop: "0.35rem",
+          alignSelf: "flex-start",
+          background: "transparent",
+          border: "none",
+          color: "var(--wp-gold, #e8b528)",
+          cursor: "pointer",
+          fontSize: "0.76rem",
+          padding: 0,
+        }}
+      >
+        Triage with an agent →
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: "0.4rem", display: "flex", gap: "0.4rem", alignItems: "center", flexWrap: "wrap" }}>
+      <select
+        data-testid={`triage-agent-${change.number}`}
+        value={agentId}
+        onChange={(e) => setAgentId(e.target.value)}
+        disabled={busy}
+        style={{
+          padding: "0.35rem 0.5rem",
+          background: "var(--wp-dark, #111)",
+          color: "var(--wp-text, #eee)",
+          border: "1px solid var(--wp-dark-border, #333)",
+          borderRadius: "6px",
+          fontSize: "0.78rem",
+          minWidth: "150px",
+        }}
+      >
+        {(agents ?? []).length === 0 && <option value="">No active agents</option>}
+        {(agents ?? []).map((a) => (
+          <option key={a.id} value={a.id}>{a.name}</option>
+        ))}
+      </select>
+      <button
+        type="button"
+        data-testid={`triage-dispatch-${change.number}`}
+        onClick={() => void dispatch()}
+        disabled={busy || !agentId}
+        style={{
+          padding: "0.35rem 0.7rem",
+          background: busy || !agentId ? "var(--wp-dark-surface2, #1a1a1a)" : "var(--wp-gold, #e8b528)",
+          color: busy || !agentId ? "var(--wp-text-muted, #6b7280)" : "var(--wp-dark, #0b0d11)",
+          border: "1px solid var(--wp-dark-border, #333)",
+          borderRadius: "6px",
+          fontSize: "0.78rem",
+          fontWeight: 600,
+          cursor: busy || !agentId ? "not-allowed" : "pointer",
+        }}
+      >
+        {busy ? "Dispatching…" : "Dispatch triage"}
+      </button>
+      {error && (
+        <span data-testid={`triage-error-${change.number}`} style={{ fontSize: "0.72rem", color: "var(--wp-error, #ef4444)" }}>
+          {error}
+        </span>
+      )}
+    </div>
+  );
 }
 
 export function ReleaseGatePanel({ testId = "release-gate-panel" }: { testId?: string }) {
@@ -187,26 +350,29 @@ export function ReleaseGatePanel({ testId = "release-gate-panel" }: { testId?: s
                       data-testid={`${testId}-pr-${c.number}`}
                       style={{
                         display: "flex",
-                        alignItems: "center",
-                        gap: "0.6rem",
+                        flexDirection: "column",
+                        gap: "0.15rem",
                         padding: "0.5rem 0.6rem",
                         borderRadius: "6px",
                         background: "var(--wp-dark-surface2, #1a1a1a)",
                         border: "1px solid var(--wp-dark-border, #333)",
                       }}
                     >
-                      <StatusPill status={STATE_LABEL[c.state]} tone={STATE_TONE[c.state]} />
-                      <a
-                        href={c.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ flex: 1, minWidth: 0, color: "var(--wp-text, #eee)", textDecoration: "none", fontSize: "0.84rem" }}
-                      >
-                        #{c.number} {c.title}
-                      </a>
-                      <span style={{ flexShrink: 0, fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>
-                        {c.author} · blocking {ageLabel(c.ageHours)}
-                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                        <StatusPill status={STATE_LABEL[c.state]} tone={STATE_TONE[c.state]} />
+                        <a
+                          href={c.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ flex: 1, minWidth: 0, color: "var(--wp-text, #eee)", textDecoration: "none", fontSize: "0.84rem" }}
+                        >
+                          #{c.number} {c.title}
+                        </a>
+                        <span style={{ flexShrink: 0, fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>
+                          {c.author} · blocking {ageLabel(c.ageHours)}
+                        </span>
+                      </div>
+                      <TriageDispatcher change={c} />
                     </li>
                   ))}
                 </ul>

@@ -776,6 +776,10 @@ export type InstinctEventType =
   // A change was promoted to production from inside the product (release gate
   // Promote action), not via the GitHub UI. { pr_number, merged_sha }
   | "deploy.production_promoted"
+  // deploy.triage_dispatched { pr_number, agent_id, state }
+  //   an operator dispatched an agent from the release gate to triage a PR that
+  //   is blocking production. Links the deploy issue to the agent that took it.
+  | "deploy.triage_dispatched"
   // Client engagement with the redesigned consoles: results actually viewed. These
   // close the learning loop on what clients look at. { open_total, critical, high, targets }
   | "platform.results_viewed"
