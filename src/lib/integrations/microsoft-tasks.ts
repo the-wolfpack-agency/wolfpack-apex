@@ -55,6 +55,10 @@ export interface MsTask {
   status: TaskStatus;
   importance: TaskImportance;
   dueAt: string | null;
+  startAt: string | null;
+  reminderAt: string | null;
+  isReminderOn: boolean;
+  categories: string[];
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -67,6 +71,10 @@ export interface CreateTaskInput {
   title: string;
   body?: string;
   dueAt?: string | null;
+  startAt?: string | null;
+  reminderAt?: string | null;
+  isReminderOn?: boolean;
+  categories?: string[];
   importance?: TaskImportance;
 }
 
@@ -74,6 +82,10 @@ export interface UpdateTaskInput {
   title?: string;
   body?: string;
   dueAt?: string | null;
+  startAt?: string | null;
+  reminderAt?: string | null;
+  isReminderOn?: boolean;
+  categories?: string[];
   importance?: TaskImportance;
   status?: TaskStatus;
 }
@@ -82,6 +94,37 @@ export interface ListTasksOpts {
   status?: TaskStatus;
   top?: number;
   skip?: number;
+}
+
+/**
+ * Validate the optional Outlook fields shared by the create + update routes.
+ * Returns an error string (for a 400) or null when the shape is acceptable.
+ * Kept here so both /api/tasks and /api/tasks/[id] validate identically (DRY).
+ */
+export function validateOutlookTaskFields(body: {
+  dueAt?: string | null;
+  startAt?: string | null;
+  reminderAt?: string | null;
+  isReminderOn?: boolean;
+  categories?: string[];
+}): string | null {
+  for (const key of ["dueAt", "startAt", "reminderAt"] as const) {
+    const v = body[key];
+    if (v === undefined || v === null) continue;
+    if (typeof v !== "string" || isNaN(new Date(v).getTime())) {
+      return `Invalid ${key}`;
+    }
+  }
+  if (body.isReminderOn !== undefined && typeof body.isReminderOn !== "boolean") {
+    return "Invalid isReminderOn";
+  }
+  if (body.categories !== undefined) {
+    if (!Array.isArray(body.categories) || body.categories.some((c) => typeof c !== "string")) {
+      return "categories must be an array of strings";
+    }
+    if (body.categories.length > 50) return "too many categories";
+  }
+  return null;
 }
 
 export interface SyncResult {
@@ -184,6 +227,10 @@ interface GraphTask {
   status: TaskStatus;
   importance?: TaskImportance;
   dueDateTime?: { dateTime: string; timeZone: string } | null;
+  startDateTime?: { dateTime: string; timeZone: string } | null;
+  reminderDateTime?: { dateTime: string; timeZone: string } | null;
+  isReminderOn?: boolean;
+  categories?: string[];
   completedDateTime?: { dateTime: string; timeZone: string } | null;
   createdDateTime?: string;
   lastModifiedDateTime?: string;
@@ -227,15 +274,20 @@ async function upsertList(userId: string, g: GraphList): Promise<string> {
 async function upsertTask(userId: string, listUuid: string, g: GraphTask): Promise<string> {
   const bodyContent = g.body?.content ?? null;
   const dueAt = parseGraphDateTime(g.dueDateTime ?? null);
+  const startAt = parseGraphDateTime(g.startDateTime ?? null);
+  const reminderAt = parseGraphDateTime(g.reminderDateTime ?? null);
+  const isReminderOn = g.isReminderOn ?? false;
+  const categories = Array.isArray(g.categories) ? g.categories.filter((c) => typeof c === "string") : [];
   const completedAt = parseGraphDateTime(g.completedDateTime ?? null);
   const createdAt = g.createdDateTime ? new Date(g.createdDateTime).toISOString() : new Date().toISOString();
   const updatedAt = g.lastModifiedDateTime ? new Date(g.lastModifiedDateTime).toISOString() : new Date().toISOString();
 
   const { rows } = await query<{ id: string }>(
     `INSERT INTO instinct_tasks
-       (user_id, ms_task_id, list_id, title, body, status, importance, due_at, completed_at,
+       (user_id, ms_task_id, list_id, title, body, status, importance, due_at, start_at,
+        reminder_at, is_reminder_on, categories, completed_at,
         created_at, updated_at, etag, synced_at, payload)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), $13)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15, $16, now(), $17)
      ON CONFLICT (user_id, ms_task_id) DO UPDATE SET
        list_id = EXCLUDED.list_id,
        title = EXCLUDED.title,
@@ -243,6 +295,10 @@ async function upsertTask(userId: string, listUuid: string, g: GraphTask): Promi
        status = EXCLUDED.status,
        importance = EXCLUDED.importance,
        due_at = EXCLUDED.due_at,
+       start_at = EXCLUDED.start_at,
+       reminder_at = EXCLUDED.reminder_at,
+       is_reminder_on = EXCLUDED.is_reminder_on,
+       categories = EXCLUDED.categories,
        completed_at = EXCLUDED.completed_at,
        updated_at = EXCLUDED.updated_at,
        etag = EXCLUDED.etag,
@@ -258,6 +314,10 @@ async function upsertTask(userId: string, listUuid: string, g: GraphTask): Promi
       g.status,
       g.importance ?? "normal",
       dueAt,
+      startAt,
+      reminderAt,
+      isReminderOn,
+      JSON.stringify(categories),
       completedAt,
       createdAt,
       updatedAt,
@@ -347,6 +407,17 @@ export async function createTask(
   };
   if (input.body) body.body = { content: input.body, contentType: "text" };
   if (input.dueAt) body.dueDateTime = { dateTime: input.dueAt, timeZone: "UTC" };
+  if (input.startAt) body.startDateTime = { dateTime: input.startAt, timeZone: "UTC" };
+  if (input.reminderAt) {
+    body.reminderDateTime = { dateTime: input.reminderAt, timeZone: "UTC" };
+    // A reminder time implies the reminder is on unless explicitly disabled.
+    body.isReminderOn = input.isReminderOn ?? true;
+  } else if (input.isReminderOn !== undefined) {
+    body.isReminderOn = input.isReminderOn;
+  }
+  if (input.categories !== undefined) {
+    body.categories = input.categories.filter((c) => typeof c === "string" && c.trim().length > 0);
+  }
 
   const created = await graphCall<GraphTask>(
     "POST",
@@ -386,6 +457,18 @@ export async function updateTask(
   if (patch.body !== undefined) body.body = { content: patch.body, contentType: "text" };
   if (patch.dueAt !== undefined) {
     body.dueDateTime = patch.dueAt ? { dateTime: patch.dueAt, timeZone: "UTC" } : null;
+  }
+  if (patch.startAt !== undefined) {
+    body.startDateTime = patch.startAt ? { dateTime: patch.startAt, timeZone: "UTC" } : null;
+  }
+  if (patch.reminderAt !== undefined) {
+    body.reminderDateTime = patch.reminderAt ? { dateTime: patch.reminderAt, timeZone: "UTC" } : null;
+    body.isReminderOn = patch.reminderAt ? (patch.isReminderOn ?? true) : false;
+  } else if (patch.isReminderOn !== undefined) {
+    body.isReminderOn = patch.isReminderOn;
+  }
+  if (patch.categories !== undefined) {
+    body.categories = patch.categories.filter((c) => typeof c === "string" && c.trim().length > 0);
   }
 
   const updated = await graphCall<GraphTask>(
@@ -618,6 +701,16 @@ export async function getCachedTaskByMsId(userId: string, msTaskId: string): Pro
   return rowToTask(rows[0]);
 }
 
+function normalizeCategories(raw: unknown): string[] {
+  const arr = typeof raw === "string" ? safeParseArray(raw) : raw;
+  if (!Array.isArray(arr)) return [];
+  return arr.filter((c): c is string => typeof c === "string");
+}
+
+function safeParseArray(s: string): unknown {
+  try { return JSON.parse(s); } catch { return []; }
+}
+
 function rowToTask(r: any): MsTask {
   return {
     id: r.id,
@@ -629,6 +722,10 @@ function rowToTask(r: any): MsTask {
     status: r.status,
     importance: r.importance,
     dueAt: r.due_at ? new Date(r.due_at).toISOString() : null,
+    startAt: r.start_at ? new Date(r.start_at).toISOString() : null,
+    reminderAt: r.reminder_at ? new Date(r.reminder_at).toISOString() : null,
+    isReminderOn: r.is_reminder_on ?? false,
+    categories: normalizeCategories(r.categories),
     completedAt: r.completed_at ? new Date(r.completed_at).toISOString() : null,
     createdAt: new Date(r.created_at).toISOString(),
     updatedAt: new Date(r.updated_at).toISOString(),

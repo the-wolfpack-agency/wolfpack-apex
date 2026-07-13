@@ -13,6 +13,7 @@ import {
   listCachedTasks,
   createTask,
   resolveDefaultListId,
+  validateOutlookTaskFields,
   GraphTasksError,
   TaskStatus,
   TaskImportance,
@@ -64,7 +65,9 @@ export async function POST(req: NextRequest) {
 
   let body: {
     listId?: string; title?: string; body?: string;
-    dueAt?: string | null; importance?: TaskImportance;
+    dueAt?: string | null; startAt?: string | null;
+    reminderAt?: string | null; isReminderOn?: boolean;
+    categories?: string[]; importance?: TaskImportance;
   };
   try {
     body = await req.json();
@@ -81,6 +84,8 @@ export async function POST(req: NextRequest) {
   if (body.importance && !VALID_IMPORTANCE.includes(body.importance)) {
     return NextResponse.json({ error: "Invalid importance" }, { status: 400 });
   }
+  const fieldErr = validateOutlookTaskFields(body);
+  if (fieldErr) return NextResponse.json({ error: fieldErr }, { status: 400 });
 
   try {
     const listId = explicitListId || (await resolveDefaultListId(user.id));
@@ -88,6 +93,10 @@ export async function POST(req: NextRequest) {
       title: body.title.trim(),
       body: body.body,
       dueAt: body.dueAt ?? undefined,
+      startAt: body.startAt ?? undefined,
+      reminderAt: body.reminderAt ?? undefined,
+      isReminderOn: body.isReminderOn,
+      categories: body.categories,
       importance: body.importance,
     });
     return NextResponse.json({ task }, { status: 201 });

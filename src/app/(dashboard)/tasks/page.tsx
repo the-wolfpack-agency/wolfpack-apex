@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import AssigneePicker from "@/components/AssigneePicker";
 
 type TaskStatus = "notStarted" | "inProgress" | "completed" | "waitingOnOthers" | "deferred";
 type TaskImportance = "low" | "normal" | "high";
@@ -17,6 +18,12 @@ interface TaskList {
   id: string;
   msListId: string;
   displayName: string;
+}
+
+interface Plan {
+  id: string;
+  msPlanId: string;
+  title: string;
 }
 
 interface Task {
@@ -28,7 +35,27 @@ interface Task {
   status: TaskStatus;
   importance: TaskImportance;
   dueAt: string | null;
+  startAt: string | null;
+  reminderAt: string | null;
+  isReminderOn: boolean;
+  categories: string[];
   completedAt: string | null;
+}
+
+/** Convert an ISO string to the value a <input type="datetime-local"> expects. */
+function toLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function parseCategories(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0);
 }
 
 const STATUS_TABS: { id: "open" | "inProgress" | "completed"; label: string; match: TaskStatus[] }[] = [
@@ -248,8 +275,20 @@ export default function TasksPage() {
                 onClick={() => setDrawerTask(task)}
               >
                 <div className="text-sm font-medium">{task.title}</div>
-                <div className="text-xs mt-0.5" style={{ color: "var(--wp-text-dim)" }}>
-                  {list?.displayName ?? "—"}{task.dueAt ? ` · ${fmtDue(task.dueAt)}` : ""}
+                <div className="text-xs mt-0.5 flex items-center gap-1 flex-wrap" style={{ color: "var(--wp-text-dim)" }}>
+                  <span>{list?.displayName ?? "—"}{task.dueAt ? ` · ${fmtDue(task.dueAt)}` : ""}</span>
+                  {task.isReminderOn && task.reminderAt && (
+                    <span aria-label="Reminder set" title="Reminder set">· 🔔</span>
+                  )}
+                  {(task.categories ?? []).map((c) => (
+                    <span
+                      key={c}
+                      className="px-1.5 py-0.5 rounded text-[10px]"
+                      style={{ background: "var(--wp-dark-surface2)", color: "var(--wp-text-dim)" }}
+                    >
+                      {c}
+                    </span>
+                  ))}
                 </div>
               </button>
               {task.importance === "high" && (
@@ -291,6 +330,9 @@ function TaskDrawer({
   const [title, setTitle] = useState(task.title);
   const [body, setBody] = useState(task.body ?? "");
   const [dueAt, setDueAt] = useState(task.dueAt ? task.dueAt.slice(0, 10) : "");
+  const [startAt, setStartAt] = useState(task.startAt ? task.startAt.slice(0, 10) : "");
+  const [reminderAt, setReminderAt] = useState(toLocalInput(task.reminderAt));
+  const [categories, setCategories] = useState((task.categories ?? []).join(", "));
   const [importance, setImportance] = useState<TaskImportance>(task.importance);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -308,6 +350,9 @@ function TaskDrawer({
         title,
         body,
         dueAt: dueAt ? new Date(dueAt).toISOString() : null,
+        startAt: startAt ? new Date(startAt).toISOString() : null,
+        reminderAt: reminderAt ? new Date(reminderAt).toISOString() : null,
+        categories: parseCategories(categories),
         importance,
       }),
     });
@@ -360,11 +405,40 @@ function TaskDrawer({
           className="w-full px-3 py-2 rounded-md text-sm border mb-3"
           style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
         />
+        <label className="block text-xs mb-1" style={{ color: "var(--wp-text-dim)" }}>Start</label>
+        <input
+          type="date"
+          value={startAt}
+          onChange={(e) => setStartAt(e.target.value)}
+          aria-label="Start date"
+          className="w-full px-3 py-2 rounded-md text-sm border mb-3"
+          style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
+        />
         <label className="block text-xs mb-1" style={{ color: "var(--wp-text-dim)" }}>Due</label>
         <input
           type="date"
           value={dueAt}
           onChange={(e) => setDueAt(e.target.value)}
+          aria-label="Due date"
+          className="w-full px-3 py-2 rounded-md text-sm border mb-3"
+          style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
+        />
+        <label className="block text-xs mb-1" style={{ color: "var(--wp-text-dim)" }}>Reminder</label>
+        <input
+          type="datetime-local"
+          value={reminderAt}
+          onChange={(e) => setReminderAt(e.target.value)}
+          aria-label="Reminder"
+          className="w-full px-3 py-2 rounded-md text-sm border mb-3"
+          style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
+        />
+        <label className="block text-xs mb-1" style={{ color: "var(--wp-text-dim)" }}>Categories (comma-separated)</label>
+        <input
+          type="text"
+          value={categories}
+          onChange={(e) => setCategories(e.target.value)}
+          placeholder="e.g. Client, Urgent"
+          aria-label="Categories"
           className="w-full px-3 py-2 rounded-md text-sm border mb-3"
           style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
         />
@@ -428,6 +502,17 @@ function isWritableList(l: TaskList): boolean {
   return !READ_ONLY_LIST_NAMES.has(l.displayName);
 }
 
+function fireAssigned(assigneeCount: number, planId: string) {
+  fetchWithRefresh("/api/analytics", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({
+      event: "tasks.task_assigned",
+      metadata: { context: "tasks", assignee_count: assigneeCount, plan_id: planId },
+    }),
+  }).catch(() => undefined);
+}
+
 function NewTaskModal({
   lists, onClose, onCreated,
 }: { lists: TaskList[]; onClose: () => void; onCreated: () => void }) {
@@ -436,17 +521,80 @@ function NewTaskModal({
   // Empty listId = create in the user's DEFAULT To Do list (resolved server-
   // side). The user does not have to pick a list; a specific one is optional.
   const [listId, setListId] = useState("");
+  const [startAt, setStartAt] = useState("");
+  const [dueAt, setDueAt] = useState("");
+  const [reminderAt, setReminderAt] = useState("");
+  const [categories, setCategories] = useState("");
+  const [importance, setImportance] = useState<TaskImportance>("normal");
+  // Assignment (To Do can't assign — a chosen assignee promotes this to a
+  // shared Planner task, the only Graph surface with `assignments`).
+  const [assignees, setAssignees] = useState<string[]>([]);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [planId, setPlanId] = useState("");
+  const [plansLoaded, setPlansLoaded] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const assigning = assignees.length > 0;
+
+  // Lazy-load Planner plans the first time the user starts assigning.
+  useEffect(() => {
+    if (!assigning || plansLoaded) return;
+    let cancelled = false;
+    (async () => {
+      const res = await fetchWithRefresh("/api/planner/plans", { headers: authHeaders() });
+      if (!res.ok) { if (!cancelled) setPlansLoaded(true); return; }
+      const data = await res.json();
+      if (cancelled) return;
+      const list: Plan[] = data.plans || [];
+      setPlans(list);
+      if (list.length === 1) setPlanId(list[0].id);
+      setPlansLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, [assigning, plansLoaded]);
 
   async function handleCreate() {
     if (!title.trim()) return;
     setError(null);
+
+    if (assigning) {
+      // Assignment path → Planner (shared team task with assignees).
+      if (!planId) { setError("Pick a plan to assign this task to a teammate."); return; }
+      setCreating(true);
+      const res = await fetchWithRefresh("/api/planner/tasks", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          planId,
+          title: title.trim(),
+          dueAt: dueAt ? new Date(dueAt).toISOString() : null,
+          assignees,
+        }),
+      });
+      setCreating(false);
+      if (res.ok) { fireAssigned(assignees.length, planId); return onCreated(); }
+      const b = await res.json().catch(() => ({}));
+      setError((b as { message?: string; error?: string }).message
+        || (b as { error?: string }).error
+        || `Assign failed (HTTP ${res.status}).`);
+      return;
+    }
+
+    // Personal To Do path (no assignee).
     setCreating(true);
     const res = await fetchWithRefresh("/api/tasks", {
       method: "POST",
       headers: jsonHeaders(),
-      body: JSON.stringify({ title, listId }),
+      body: JSON.stringify({
+        title,
+        listId,
+        startAt: startAt ? new Date(startAt).toISOString() : null,
+        dueAt: dueAt ? new Date(dueAt).toISOString() : null,
+        reminderAt: reminderAt ? new Date(reminderAt).toISOString() : null,
+        categories: parseCategories(categories),
+        importance,
+      }),
     });
     setCreating(false);
     if (res.ok) return onCreated();
@@ -457,13 +605,15 @@ function NewTaskModal({
     );
   }
 
+  const inputStyle = { background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" };
+
   return (
     <div role="dialog" aria-label="New task"
-      className="fixed inset-0 flex items-center justify-center z-50" onClick={onClose}>
+      className="fixed inset-0 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/50" />
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative w-full max-w-sm p-6 rounded-lg border"
+        className="relative w-full max-w-sm p-6 rounded-lg border max-h-[90vh] overflow-y-auto"
         style={{ background: "var(--wp-dark-surface)", borderColor: "var(--wp-dark-border)" }}
       >
         <h2 className="text-lg font-bold mb-4">New task</h2>
@@ -472,25 +622,98 @@ function NewTaskModal({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Task title"
+          aria-label="Task title"
           className="w-full px-3 py-2 rounded-md text-sm border mb-3"
-          style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
+          style={inputStyle}
         />
-        <select
-          data-testid="new-task-list-select"
-          value={listId}
-          onChange={(e) => setListId(e.target.value)}
-          className="w-full px-3 py-2 rounded-md text-sm border mb-4"
-          style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
-        >
-          {/* Empty value targets the user's DEFAULT To Do list server-side, so
-              a task is created with just a title. This also fixes the old
-              dead-end where a user with no cached lists had nothing selectable.
-              Specific writable lists are an optional override. */}
-          <option value="">Default list (your To Do)</option>
-          {writableLists.map((l) => (
-            <option key={l.id} value={l.msListId}>{l.displayName}</option>
-          ))}
-        </select>
+
+        {!assigning && (
+          <select
+            data-testid="new-task-list-select"
+            value={listId}
+            onChange={(e) => setListId(e.target.value)}
+            aria-label="List"
+            className="w-full px-3 py-2 rounded-md text-sm border mb-3"
+            style={inputStyle}
+          >
+            {/* Empty value targets the user's DEFAULT To Do list server-side. */}
+            <option value="">Default list (your To Do)</option>
+            {writableLists.map((l) => (
+              <option key={l.id} value={l.msListId}>{l.displayName}</option>
+            ))}
+          </select>
+        )}
+
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <div>
+            <label className="block text-xs mb-1" style={{ color: "var(--wp-text-dim)" }}>Start</label>
+            <input type="date" value={startAt} onChange={(e) => setStartAt(e.target.value)}
+              aria-label="Start date" className="w-full px-2 py-1.5 rounded-md text-sm border" style={inputStyle} />
+          </div>
+          <div>
+            <label className="block text-xs mb-1" style={{ color: "var(--wp-text-dim)" }}>Due</label>
+            <input type="date" value={dueAt} onChange={(e) => setDueAt(e.target.value)}
+              aria-label="Due date" className="w-full px-2 py-1.5 rounded-md text-sm border" style={inputStyle} />
+          </div>
+        </div>
+
+        {!assigning && (
+          <>
+            <label className="block text-xs mb-1" style={{ color: "var(--wp-text-dim)" }}>Reminder</label>
+            <input type="datetime-local" value={reminderAt} onChange={(e) => setReminderAt(e.target.value)}
+              aria-label="Reminder" className="w-full px-3 py-2 rounded-md text-sm border mb-3" style={inputStyle} />
+
+            <label className="block text-xs mb-1" style={{ color: "var(--wp-text-dim)" }}>Categories (comma-separated)</label>
+            <input type="text" value={categories} onChange={(e) => setCategories(e.target.value)}
+              placeholder="e.g. Client, Urgent" aria-label="Categories"
+              className="w-full px-3 py-2 rounded-md text-sm border mb-3" style={inputStyle} />
+
+            <label className="block text-xs mb-1" style={{ color: "var(--wp-text-dim)" }}>Importance</label>
+            <select value={importance} onChange={(e) => setImportance(e.target.value as TaskImportance)}
+              aria-label="Importance" className="w-full px-3 py-2 rounded-md text-sm border mb-3" style={inputStyle}>
+              <option value="low">Low</option>
+              <option value="normal">Normal</option>
+              <option value="high">High</option>
+            </select>
+          </>
+        )}
+
+        {/* Assignment — the headline gap. Choosing a teammate promotes the task
+            to a shared Planner task (To Do has no assignments in Graph). */}
+        <div className="mb-3 pt-3 border-t" style={{ borderColor: "var(--wp-dark-border)" }}>
+          <AssigneePicker
+            context="tasks"
+            value={assignees}
+            onChange={(ids) => setAssignees(ids)}
+            label="Assign to a teammate"
+          />
+          {assigning && (
+            <div className="mt-2" data-testid="assign-plan-block">
+              <p className="text-[11px] mb-1" style={{ color: "var(--wp-text-dim)" }}>
+                Assigned tasks become shared Planner tasks. Pick the plan it belongs to:
+              </p>
+              <select
+                data-testid="assign-plan-select"
+                value={planId}
+                onChange={(e) => setPlanId(e.target.value)}
+                aria-label="Planner plan"
+                className="w-full px-3 py-2 rounded-md text-sm border"
+                style={inputStyle}
+              >
+                <option value="">Select a plan…</option>
+                {plans.map((p) => (
+                  <option key={p.id} value={p.id}>{p.title}</option>
+                ))}
+              </select>
+              {plansLoaded && plans.length === 0 && (
+                <p className="text-[11px] mt-1" style={{ color: "var(--wp-text-dim)" }}>
+                  No Planner plans found. Open <a href="/planner" className="underline">Planner</a> and Sync to pull your plans.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
         {error && (
           <p
             data-testid="new-task-error"
@@ -510,7 +733,7 @@ function NewTaskModal({
           </button>
           <button
             onClick={handleCreate}
-            disabled={creating || !title.trim()}
+            disabled={creating || !title.trim() || (assigning && !planId)}
             data-testid="new-task-create"
             className="flex-1 px-3 py-2 rounded-md text-sm font-medium"
             style={{
@@ -519,7 +742,7 @@ function NewTaskModal({
               cursor: creating || !title.trim() ? "not-allowed" : "pointer",
             }}
           >
-            {creating ? "Creating…" : "Create"}
+            {creating ? (assigning ? "Assigning…" : "Creating…") : (assigning ? "Assign task" : "Create")}
           </button>
         </div>
       </div>
