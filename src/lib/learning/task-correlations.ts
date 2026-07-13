@@ -64,6 +64,12 @@ export async function getRecentTasksForContext(
     status: r.status,
     importance: r.importance,
     dueAt: r.due_at ? new Date(r.due_at).toISOString() : null,
+    startAt: r.start_at ? new Date(r.start_at).toISOString() : null,
+    reminderAt: r.reminder_at ? new Date(r.reminder_at).toISOString() : null,
+    isReminderOn: r.is_reminder_on ?? false,
+    categories: Array.isArray(r.categories)
+      ? r.categories.filter((c: unknown): c is string => typeof c === "string")
+      : (typeof r.categories === "string" ? (JSON.parse(r.categories || "[]") as string[]) : []),
     completedAt: r.completed_at ? new Date(r.completed_at).toISOString() : null,
     createdAt: new Date(r.created_at).toISOString(),
     updatedAt: new Date(r.updated_at).toISOString(),

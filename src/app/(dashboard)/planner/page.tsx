@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import AssigneePicker, { type AssigneeOption } from "@/components/AssigneePicker";
 
 interface Group { id: string; msGroupId: string; displayName: string }
 interface Plan { id: string; msPlanId: string; title: string; groupId: string | null; msContainerType: "group" | "roster" }
@@ -54,6 +55,24 @@ export default function PlannerPage() {
   const [syncing, setSyncing] = useState(false);
   const [newBucketId, setNewBucketId] = useState<string | null>(null);
   const [drawerTask, setDrawerTask] = useState<Task | null>(null);
+  // Graph user id → display option, so assignee GUIDs render as names.
+  const [directory, setDirectory] = useState<Record<string, AssigneeOption>>({});
+
+  const loadDirectory = useCallback(async () => {
+    const res = await fetchWithRefresh("/api/directory/users?limit=200", { headers: authHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    const map: Record<string, AssigneeOption> = {};
+    for (const u of data.users || []) {
+      map[u.msUserId] = {
+        id: u.msUserId,
+        name: u.displayName || u.userPrincipalName || u.mail || "Unknown",
+        email: u.mail || u.userPrincipalName,
+        jobTitle: u.jobTitle,
+      };
+    }
+    setDirectory(map);
+  }, []);
 
   const loadGroups = useCallback(async () => {
     const res = await fetchWithRefresh("/api/groups", { headers: authHeaders() });
@@ -96,7 +115,7 @@ export default function PlannerPage() {
     } catch { setMsConnected(false); }
   }, []);
 
-  useEffect(() => { loadStatus(); loadGroups(); }, [loadStatus, loadGroups]);
+  useEffect(() => { loadStatus(); loadGroups(); loadDirectory(); }, [loadStatus, loadGroups, loadDirectory]);
   useEffect(() => { loadPlans(); }, [loadPlans]);
   useEffect(() => { loadBuckets(); loadTasks(); }, [loadBuckets, loadTasks]);
 
@@ -237,8 +256,12 @@ export default function PlannerPage() {
                         {priorityLabel(task.priority)}
                       </span>
                       {task.assignees.length > 0 && (
-                        <span className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
-                          · {task.assignees.length} assigned
+                        <span className="text-xs" style={{ color: "var(--wp-text-dim)" }} data-testid="task-assignees">
+                          · {task.assignees
+                            .map((id) => directory[id]?.name ?? "1 person")
+                            .slice(0, 2)
+                            .join(", ")}
+                          {task.assignees.length > 2 ? ` +${task.assignees.length - 2}` : ""}
                         </span>
                       )}
                     </div>
@@ -274,6 +297,7 @@ export default function PlannerPage() {
         <TaskDrawer
           task={drawerTask}
           buckets={buckets}
+          directory={directory}
           onClose={() => setDrawerTask(null)}
           onSaved={async () => { setDrawerTask(null); await loadTasks(); }}
         />
@@ -282,6 +306,7 @@ export default function PlannerPage() {
         <NewTaskModal
           planId={planId}
           bucketId={newBucketId}
+          directory={directory}
           onClose={() => setNewBucketId(null)}
           onCreated={async () => { setNewBucketId(null); await loadTasks(); }}
         />
@@ -291,14 +316,21 @@ export default function PlannerPage() {
 }
 
 function TaskDrawer({
-  task, buckets, onClose, onSaved,
-}: { task: Task; buckets: Bucket[]; onClose: () => void; onSaved: () => void }) {
+  task, buckets, directory, onClose, onSaved,
+}: { task: Task; buckets: Bucket[]; directory: Record<string, AssigneeOption>; onClose: () => void; onSaved: () => void }) {
   const [title, setTitle] = useState(task.title);
   const [dueAt, setDueAt] = useState(task.dueAt ? task.dueAt.slice(0, 10) : "");
   const [bucketId, setBucketId] = useState<string>(task.bucketId ?? "");
   const [percent, setPercent] = useState<number>(task.percentComplete);
+  const [assignees, setAssignees] = useState<string[]>(task.assignees);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const assigneesChanged = useMemo(() => {
+    const a = [...assignees].sort().join(",");
+    const b = [...task.assignees].sort().join(",");
+    return a !== b;
+  }, [assignees, task.assignees]);
 
   async function handleSave() {
     if (!task.etag) { setErr("Missing etag — refresh the page and retry."); return; }
@@ -312,12 +344,23 @@ function TaskDrawer({
         dueAt: dueAt ? new Date(dueAt).toISOString() : null,
         bucketId: bucketId || null,
         percentComplete: percent,
+        assignees,
         etag: task.etag,
       }),
     });
     setSaving(false);
     if (res.status === 409) { setErr("Task changed by someone else — reload and try again."); return; }
     if (!res.ok) { setErr("Save failed."); return; }
+    if (assigneesChanged && assignees.length > 0) {
+      fetchWithRefresh("/api/analytics", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          event: "tasks.task_assigned",
+          metadata: { context: "planner", assignee_count: assignees.length, plan_id: task.planId },
+        }),
+      }).catch(() => undefined);
+    }
     onSaved();
   }
 
@@ -382,6 +425,15 @@ function TaskDrawer({
           onChange={(e) => setPercent(parseInt(e.target.value, 10))}
           className="w-full mb-4"
         />
+        <div className="mb-4">
+          <AssigneePicker
+            context="planner"
+            value={assignees}
+            onChange={(ids) => setAssignees(ids)}
+            knownById={directory}
+            label="Assigned to"
+          />
+        </div>
         {err && <div className="text-xs mb-3" style={{ color: "var(--wp-warning)" }}>{err}</div>}
         <div className="flex gap-2">
           <button
@@ -407,9 +459,10 @@ function TaskDrawer({
 }
 
 function NewTaskModal({
-  planId, bucketId, onClose, onCreated,
-}: { planId: string; bucketId: string; onClose: () => void; onCreated: () => void }) {
+  planId, bucketId, directory, onClose, onCreated,
+}: { planId: string; bucketId: string; directory: Record<string, AssigneeOption>; onClose: () => void; onCreated: () => void }) {
   const [title, setTitle] = useState("");
+  const [assignees, setAssignees] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -420,10 +473,25 @@ function NewTaskModal({
     const res = await fetchWithRefresh("/api/planner/tasks", {
       method: "POST",
       headers: jsonHeaders(),
-      body: JSON.stringify({ planId, bucketId: bucketId || undefined, title }),
+      body: JSON.stringify({
+        planId,
+        bucketId: bucketId || undefined,
+        title,
+        assignees: assignees.length > 0 ? assignees : undefined,
+      }),
     });
     setCreating(false);
     if (!res.ok) { setErr("Create failed."); return; }
+    if (assignees.length > 0) {
+      fetchWithRefresh("/api/analytics", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          event: "tasks.task_assigned",
+          metadata: { context: "planner", assignee_count: assignees.length, plan_id: planId },
+        }),
+      }).catch(() => undefined);
+    }
     onCreated();
   }
 
@@ -446,6 +514,15 @@ function NewTaskModal({
           className="w-full px-3 py-2 rounded-md text-sm border mb-3"
           style={{ background: "var(--wp-dark-surface2)", borderColor: "var(--wp-dark-border)" }}
         />
+        <div className="mb-3">
+          <AssigneePicker
+            context="planner"
+            value={assignees}
+            onChange={(ids) => setAssignees(ids)}
+            knownById={directory}
+            label="Assign to"
+          />
+        </div>
         {err && <div className="text-xs mb-3" style={{ color: "var(--wp-warning)" }}>{err}</div>}
         <div className="flex gap-2">
           <button

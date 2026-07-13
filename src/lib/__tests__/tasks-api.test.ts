@@ -36,6 +36,11 @@ class FakeGraphError extends Error {
 }
 
 jest.mock("@/lib/integrations/microsoft-tasks", () => ({
+  // The Outlook-field validator is a pure guard the routes call before
+  // delegating — use the real implementation so validation is exercised.
+  validateOutlookTaskFields: jest.requireActual(
+    "@/lib/integrations/microsoft-tasks",
+  ).validateOutlookTaskFields,
   listCachedTasks: (...args: unknown[]) => mockListCached(...args),
   createTask: (...args: unknown[]) => mockCreateTask(...args),
   updateTask: (...args: unknown[]) => mockUpdateTask(...args),

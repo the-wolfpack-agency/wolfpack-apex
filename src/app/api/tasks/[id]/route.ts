@@ -11,6 +11,7 @@ import {
   getCachedTaskById,
   updateTask,
   deleteTask,
+  validateOutlookTaskFields,
   GraphTasksError,
   TaskStatus,
   TaskImportance,
@@ -48,6 +49,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   let body: {
     title?: string; body?: string; dueAt?: string | null;
+    startAt?: string | null; reminderAt?: string | null;
+    isReminderOn?: boolean; categories?: string[];
     importance?: TaskImportance; status?: TaskStatus;
   };
   try {
@@ -65,6 +68,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.title !== undefined && typeof body.title !== "string") {
     return NextResponse.json({ error: "Invalid title" }, { status: 400 });
   }
+  const fieldErr = validateOutlookTaskFields(body);
+  if (fieldErr) return NextResponse.json({ error: fieldErr }, { status: 400 });
 
   try {
     // Find the MS list id for this task.
@@ -73,7 +78,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       user.id,
       await lookupMsListId(existing.listId),
       existing.msTaskId,
-      body,
+      {
+        title: body.title,
+        body: body.body,
+        dueAt: body.dueAt,
+        startAt: body.startAt,
+        reminderAt: body.reminderAt,
+        isReminderOn: body.isReminderOn,
+        categories: body.categories,
+        importance: body.importance,
+        status: body.status,
+      },
     );
     return NextResponse.json({ task });
   } catch (err) {

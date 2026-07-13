@@ -1239,6 +1239,16 @@ export type InstinctEventType =
   | "system.task_viewed"
   | "system.task_completed"
   | "system.task_created"
+  // Tasks surface — Outlook-parity actions from the /tasks + /planner pages.
+  // tasks.assignee_searched { context: "tasks" | "planner", query_len }
+  //   the assignee picker ran a directory search (who can I assign to).
+  | "tasks.assignee_searched"
+  // tasks.task_assigned { context, assignee_count, plan_id? }
+  //   a task was assigned to one or more individuals. Because Microsoft To Do
+  //   has no assignments in Graph, assigning routes to a shared Planner task —
+  //   so this fires when the /tasks page creates an assigned Planner task or
+  //   the /planner surface sets assignees.
+  | "tasks.task_assigned"
   // Integration health (AgenticQA nightly orchestrator)
   | "integration.health_sweep"
   | "integration.health_drift_detected"
