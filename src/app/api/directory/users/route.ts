@@ -26,11 +26,17 @@ export async function GET(req: NextRequest) {
   const cursor = url.searchParams.get("cursor") ?? undefined;
   const limitRaw = url.searchParams.get("limit");
   const limit = limitRaw ? Number(limitRaw) : undefined;
+  // internalOnly restricts results to the caller's own org domain — used by the
+  // task assignee picker so it never surfaces the tenant's external guests. The
+  // full Directory page omits it and still sees everyone.
+  const internalOnly = url.searchParams.get("internalOnly") === "true";
+  const emailDomain = internalOnly ? user.email.split("@")[1]?.toLowerCase() || undefined : undefined;
 
   const result = await listUsers(user.id, {
     search,
     department,
     cursor,
+    emailDomain,
     top: Number.isFinite(limit) ? limit : undefined,
   });
   return NextResponse.json(result, {

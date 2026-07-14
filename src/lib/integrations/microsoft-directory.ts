@@ -64,6 +64,9 @@ export interface ListUsersOpts {
   cursor?: string; // local id cursor (for cached reads)
   search?: string;
   department?: string;
+  /** Restrict to users whose email/UPN ends with `@<emailDomain>` (e.g. the
+   *  caller's own org domain) so the tenant's external guests are excluded. */
+  emailDomain?: string;
 }
 
 export interface SyncOpts {
@@ -342,6 +345,13 @@ export async function listUsers(
   if (opts.cursor) {
     conds.push(`id > $${i}`);
     params.push(opts.cursor);
+    i++;
+  }
+  if (opts.emailDomain) {
+    // Match the domain suffix on mail, falling back to UPN. Excludes tenant
+    // guests from other orgs (porsche.us, kiausa.com, etc.).
+    conds.push(`lower(coalesce(mail, user_principal_name, '')) LIKE $${i}`);
+    params.push(`%@${opts.emailDomain.toLowerCase()}`);
     i++;
   }
   params.push(limit + 1);

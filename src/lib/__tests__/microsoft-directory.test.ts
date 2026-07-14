@@ -106,6 +106,15 @@ describe("listUsers", () => {
     expect(params).toContain("%engineer%");
     expect(params).toContain("R&D");
   });
+
+  it("emailDomain restricts to the org domain suffix (excludes tenant guests)", async () => {
+    mockSafeQuery.mockResolvedValueOnce({ rows: [], fromCache: false });
+    const { listUsers } = await import("@/lib/integrations/microsoft-directory");
+    await listUsers("caller", { emailDomain: "thewolfpack.agency" });
+    const [sql, params] = mockSafeQuery.mock.calls[0];
+    expect(sql).toMatch(/lower\(coalesce\(mail, user_principal_name/);
+    expect(params).toContain("%@thewolfpack.agency");
+  });
 });
 
 describe("getUser", () => {

@@ -74,7 +74,9 @@ export default function AssigneePicker({ value, onChange, context, knownById, la
   const runSearch = useCallback(async (q: string) => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ limit: "8" });
+      // internalOnly => only the caller's own org domain (excludes tenant guests);
+      // limit 100 so the whole team is browsable in the scrollable list.
+      const params = new URLSearchParams({ limit: "100", internalOnly: "true" });
       if (q.trim()) params.set("search", q.trim());
       const res = await fetchWithRefresh(`/api/directory/users?${params}`, { headers: authHeaders() });
       if (!res.ok) { setResults([]); setSearched(true); return; }
