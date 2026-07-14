@@ -178,7 +178,7 @@ export default function AssigneePicker({ value, onChange, context, knownById, la
       )}
 
       {available.length > 0 && (
-        <ul className="mt-1 border rounded-md overflow-hidden" role="listbox" aria-label="Teammate results"
+        <ul className="mt-1 border rounded-md max-h-64 overflow-y-auto" role="listbox" aria-label="Teammate results"
           style={{ borderColor: "var(--wp-dark-border)" }}>
           {available.map((o) => (
             <li key={o.id} role="option" aria-selected={false}>
