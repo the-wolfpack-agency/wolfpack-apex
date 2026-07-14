@@ -198,14 +198,15 @@ const MS_SCOPES: string[] = [
   "Channel.ReadBasic.All",
   "ChannelMessage.Send",
   "OnlineMeetings.ReadWrite",
-  /* DISABLED 2026-05-20: the next three (User.Read.All,
-     MailboxSettings.Read, Sites.Read.All) all require admin
-     consent and were blocking non-admin teammates from connecting
-     M365. Trade-off: lose tenant directory lookup, cross-user
-     mailbox settings, and tenant-wide SharePoint search. The
-     SharePoint context resolver gracefully degrades when the
-     scope is absent (returns empty result, doesn't 500). */
-  // "User.Read.All",
+  /* User.Read.All — RE-ENABLED 2026-07-14. Requires (and has) tenant
+     admin consent, granted once so non-admin teammates get it silently
+     at connect time. Backs the tenant directory lookup that powers task
+     assignee search (AssigneePicker) and the org chart. MUST NOT ship
+     without the admin grant in place or non-admin M365 connects break.
+     MailboxSettings.Read / Sites.Read.All stay DISABLED (still admin-
+     consent-required, no active consumer; SharePoint resolver degrades
+     gracefully when Sites.Read.All is absent). */
+  "User.Read.All",
   // "MailboxSettings.Read",
   // "Sites.Read.All",
   "Tasks.Read",

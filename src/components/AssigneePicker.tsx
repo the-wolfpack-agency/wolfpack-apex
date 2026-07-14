@@ -172,7 +172,7 @@ export default function AssigneePicker({ value, onChange, context, knownById, la
       {!loading && searched && available.length === 0 && (
         <div data-testid="assignee-empty" className="text-xs mt-1" style={{ color: "var(--wp-text-dim)" }}>
           {results.length === 0
-            ? "No teammates found. Sync your directory in Settings, then try again."
+            ? "No teammates found. Sync your directory from the Directory page, then try again."
             : "Everyone matching is already assigned."}
         </div>
       )}
