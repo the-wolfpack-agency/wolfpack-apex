@@ -60,6 +60,27 @@ describe("parseSitemap", () => {
     expect(byPath["/admin/login"].journey).toBe("Login");
   });
 
+  it("decodes XML entities in a single pass (no double-unescaping)", () => {
+    // Regression: the decoder used to chain .replace() with &amp; first, so
+    // the "&" it produced was re-consumed by the later passes and "&amp;lt;"
+    // collapsed all the way to "<" (CodeQL: js/double-escaping). A literal
+    // "&lt;" in a <loc> must survive as text, not become a tag delimiter.
+    const specs = parseSitemap(
+      sitemap([`${BASE}/search?a=1&amp;amp;lt;b&amp;c=2`]),
+      BASE,
+    );
+    expect(specs).toHaveLength(1);
+    expect(specs[0].path).toBe("/search?a=1&amp;lt;b&c=2");
+    expect(specs[0].path).not.toContain("<");
+  });
+
+  it("decodes each supported entity exactly once", () => {
+    const specs = parseSitemap(sitemap([`${BASE}/p?q=a&amp;b&quot;c&apos;d`]), BASE);
+    // &amp; decodes to a real "&" separator; the quote entities decode too, then
+    // URL normalisation percent-encodes them (%22 / %27) on the way out.
+    expect(specs[0].path).toBe("/p?q=a&b%22c%27d");
+  });
+
   it("keeps the query string on the path", () => {
     const specs = parseSitemap(sitemap([`${BASE}/inventory?limit=1`]), BASE);
     expect(specs).toHaveLength(1);
