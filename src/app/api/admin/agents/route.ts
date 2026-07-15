@@ -27,6 +27,15 @@ import { trackEvent } from "@/lib/analytics";
    never fail agent creation. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/* The alternatives in EMAIL_RE overlap, so a long adversarial string drives it
+   to polynomial time (CodeQL: js/polynomial-redos). Cap before .test(), same
+   guard sites-schema.ts uses on the identical pattern. 254 is the RFC-5321
+   maximum, so no legal address is rejected by the cap. */
+const EMAIL_MAX = 254;
+function isEmailShaped(v: string): boolean {
+  return v.length <= EMAIL_MAX && EMAIL_RE.test(v);
+}
+
 /* Public base for the agent activation link. Mirrors the outbound-URL
    convention used elsewhere (NEXT_PUBLIC_APP_URL), falling back to the live
    prod alias. */
@@ -162,7 +171,7 @@ export async function POST(req: NextRequest) {
      sendAgentInviteEmail never throws and we only track on success. */
   const inviteEmail =
     typeof body.inviteEmail === "string" ? body.inviteEmail.trim() : "";
-  if (inviteEmail && EMAIL_RE.test(inviteEmail)) {
+  if (inviteEmail && isEmailShaped(inviteEmail)) {
     const activationUrl = `${APP_URL_BASE}/agents/activate?agent=${encodeURIComponent(
       agent.id,
     )}`;

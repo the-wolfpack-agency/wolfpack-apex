@@ -38,6 +38,44 @@ query-filters:
       id: js/path-injection
       path-regex: ^src/lib/doc-generator\.ts$
 
+  # ── Password-hash FPs: neither site stores a human-chosen password ─────
+  # api-keys.ts   → the "password" is randomBytes(32), a 256-bit random token
+  #                 (KEY_BYTES = 32). sha256 + constant-time compare is the
+  #                 correct construction for high-entropy secrets; bcrypt and
+  #                 argon2 exist to slow brute-force of LOW-entropy human
+  #                 passwords, which a 256-bit token is not. A slow KDF here
+  #                 would only tax every API request.
+  # action.ts     → sha256 over the REDACTED params, as a ledger integrity
+  #                 hash. It is not a credential store and nothing verifies a
+  #                 secret against it.
+  - exclude:
+      id: js/insufficient-password-hash
+      path-regex: ^src/lib/ogiam/api-keys\.ts$|^src/lib/ogiam/action\.ts$
+
+  # ── User-controlled-bypass FP: `mode` is a scan-mode selector, not authz ─
+  # body.mode is clamped to the enum static|api|http before use, and the
+  # fail-closed target-ownership gate returns 403 ABOVE this line. The flagged
+  # condition only chooses WHICH scan runs, after authorization already passed.
+  - exclude:
+      id: js/user-controlled-bypass
+      path-regex: ^src/app/api/admin/platform-scans/route\.ts$
+
+  # ── Regexp-anchor FP: the precedence is intentional ────────────────────
+  # /__tests__\/|\.(test|spec)\.[tj]sx?$/ means "path CONTAINS __tests__/" OR
+  # "path ENDS WITH .test.ts". Only the second alternative should be anchored;
+  # anchoring the first would break directory matching.
+  - exclude:
+      id: js/regex/missing-regexp-anchor
+      path-regex: ^src/lib/platform-scan/profile/extract\.ts$
+
+  # ── File-system-race FP: check-then-use is a cache fast path ───────────
+  # A peer worker winning the race is harmless: the cache key is a hash of
+  # (path, mtime, size), so any copy is byte-identical, and the write lands
+  # via an atomic rename. Documented at the call site.
+  - exclude:
+      id: js/file-system-race
+      path-regex: ^jest\.resolver\.cjs$
+
 paths-ignore:
   - "**/node_modules/**"
   - "**/__tests__/**"

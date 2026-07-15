@@ -26,6 +26,15 @@ const MAX_ROUTES = 100;
 /** Discovery fetch timeout. */
 const DISCOVER_TIMEOUT_MS = 8000;
 
+/** The XML entities that legally appear in a sitemap <loc>. */
+const XML_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+};
+
 /** Title-case a path segment ("admin-leads" / "admin_leads" → "Admin Leads"). */
 function labelFromSegment(segment: string): string {
   const cleaned = segment
@@ -88,12 +97,13 @@ export function parseSitemap(xml: string, baseUrl: string): ScanRouteSpec[] {
     if (!raw) continue;
 
     // Decode the handful of XML entities that legally appear in a <loc>.
-    const decoded = raw
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&apos;/g, "'");
+    // Single pass: chained .replace() calls would decode the output of an
+    // earlier one, so "&amp;lt;" would collapse to "<" instead of "&lt;"
+    // (CodeQL: js/double-escaping). One pass can never re-consume its output.
+    const decoded = raw.replace(
+      /&(amp|lt|gt|quot|apos);/g,
+      (_m, entity: string) => XML_ENTITIES[entity] ?? _m,
+    );
 
     let url: URL;
     try {

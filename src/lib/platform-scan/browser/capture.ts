@@ -148,8 +148,13 @@ export function collectUiElements(): UiElement[] {
     // 3. associated <label>: explicit for=, wrapping label, or aria via id.
     const id = el.getAttribute("id");
     if (id) {
+      // Escape backslashes BEFORE quotes: escaping only quotes leaves a
+      // trailing "\" in the id free to escape our own closing quote and break
+      // out of the selector (CodeQL: js/incomplete-sanitization). The id comes
+      // from the scanned page, which is untrusted input.
+      const escapedId = id.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       const forLabel = el.ownerDocument.querySelector(
-        'label[for="' + id.replace(/"/g, '\\"') + '"]',
+        'label[for="' + escapedId + '"]',
       );
       if (forLabel) {
         const t = text(forLabel);
