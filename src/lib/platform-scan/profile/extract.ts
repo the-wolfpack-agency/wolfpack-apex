@@ -44,7 +44,13 @@ const INTEGRATION_REGISTRY: ReadonlyArray<{ pattern: RegExp; name: string; categ
 export function classifySurface(paths: string[]): SurfaceCounts {
   const c: SurfaceCounts = { pages: 0, apiRoutes: 0, components: 0, libModules: 0, migrations: 0, tests: 0, totalFiles: paths.length };
   for (const p of paths) {
-    const isTest = /__tests__\/|\.(test|spec)\.[tj]sx?$/.test(p);
+    // Two separate anchored tests, not one alternation: a test file is either
+    // under a __tests__/ segment (matched anywhere in the path) OR its basename
+    // ends in .test/.spec.[tj]sx (anchored at end). Folding both into
+    // `/__tests__\/|\.(test|spec)\.[tj]sx?$/` left the `$` binding only the
+    // second branch — CodeQL js/regex/missing-regexp-anchor, and a real
+    // precedence trap if anyone later edits it.
+    const isTest = /(^|\/)__tests__\//.test(p) || /\.(test|spec)\.[tj]sx?$/.test(p);
     if (isTest) { c.tests++; continue; }
     if (/\/api\/.*route\.[tj]sx?$/.test(p)) c.apiRoutes++;
     else if (/(^|\/)page\.[tj]sx?$/.test(p)) c.pages++;
