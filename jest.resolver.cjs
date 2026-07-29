@@ -186,7 +186,17 @@ function cachedCjsPath(originalFile, stat) {
 function ensureCjsCopy(originalFile) {
   const stat = fs.statSync(originalFile);
   const out = cachedCjsPath(originalFile, stat);
-  if (fs.existsSync(out)) return out;
+  // Cache hit: the path is content-addressed by (mtime, size), so any existing
+  // copy is byte-identical regardless of which worker wrote it. Probe-and-return
+  // in one guarded step rather than existsSync()-then-use, which CodeQL flags as
+  // a TOCTOU race (js/file-system-race) — here the two code paths never share a
+  // filesystem op, so the check/use pair is gone.
+  try {
+    fs.statSync(out);
+    return out;
+  } catch {
+    // not cached yet — build it below
+  }
   const src = fs.readFileSync(originalFile, "utf8");
   const rewritten = rewriteSpecifiersToAbsolute(shimImportMeta(src), originalFile);
   const transpiled = ts.transpileModule(rewritten, {

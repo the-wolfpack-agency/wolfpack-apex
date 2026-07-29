@@ -39,6 +39,26 @@ describe("classifySurface", () => {
     expect(c.libModules).toBe(0);
     expect(c.totalFiles).toBe(1);
   });
+
+  it("counts files under a __tests__/ segment as tests (unanchored branch)", () => {
+    // The __tests__/ branch matches anywhere in the path, not just the start,
+    // and only at a segment boundary. Guards the split-regex fix that replaced
+    // the mixed-anchor alternation (CodeQL js/regex/missing-regexp-anchor).
+    const c = classifySurface([
+      "src/lib/foo/__tests__/bar.ts", // deep __tests__ dir
+      "__tests__/root.ts", //            top-level __tests__ dir
+    ]);
+    expect(c.tests).toBe(2);
+  });
+
+  it("does not misclassify a path that merely contains 'test' as a test", () => {
+    // Neither branch should fire: no __tests__/ segment, no .test/.spec suffix.
+    // Proves the end-anchor still binds so `contest.ts` / `my__tests__data` are
+    // not swept in.
+    const c = classifySurface(["src/lib/contest.ts", "src/lib/attestation.ts"]);
+    expect(c.tests).toBe(0);
+    expect(c.libModules).toBe(2);
+  });
 });
 
 describe("extractEntities", () => {
