@@ -65,7 +65,7 @@ jobs:
         run: |
           if [ -z "${PAT}" ]; then
             echo "configured=false" >> $GITHUB_OUTPUT
-            echo "::warning::AGENTICQA_REPO_PAT secret not set — static scan will skip. Add it in Settings -> Secrets -> Actions."
+            echo "::warning::AGENTICQA_REPO_PAT secret not set, static scan will skip. Add it in Settings -> Secrets -> Actions."
           else
             echo "configured=true" >> $GITHUB_OUTPUT
           fi
@@ -77,7 +77,7 @@ jobs:
           repository: nhomyk/AgenticQA
           token: ${{ secrets.AGENTICQA_REPO_PAT }}
           # Vendored under vendor/ so the scanner's SKIP_DIRS excludes
-          # it — run_client_scan scans only Instinct, not the tool's
+          # it, run_client_scan scans only Instinct, not the tool's
           # own intentionally-vulnerable fixtures.
           path: vendor/agenticqa-tool
           ref: main
@@ -135,7 +135,7 @@ jobs:
 
           # ── Baseline comparison: only fail on NEW findings ──────────
           # Load baseline (committed to repo). If it doesn't exist, this
-          # is the first run — save current as baseline and pass.
+          # is the first run, save current as baseline and pass.
           baseline_path = ".agenticqa/scan-baseline.json"
           baseline_hashes = set()
           try:
@@ -332,7 +332,7 @@ jobs:
       - name: Skip notice
         if: steps.pat-check.outputs.configured != 'true'
         run: |
-          echo "## Static Scan — Skipped" >> $GITHUB_STEP_SUMMARY
+          echo "## Static Scan: Skipped" >> $GITHUB_STEP_SUMMARY
           echo "AGENTICQA_REPO_PAT secret is not configured." >> $GITHUB_STEP_SUMMARY
           echo "Add a PAT with \`repo\` scope to enable scanning." >> $GITHUB_STEP_SUMMARY
 
@@ -361,7 +361,7 @@ jobs:
         run: |
           if [ -z "${PAT}" ]; then
             echo "configured=false" >> $GITHUB_OUTPUT
-            echo "::warning::AGENTICQA_REPO_PAT secret not set — pentest validation will skip."
+            echo "::warning::AGENTICQA_REPO_PAT secret not set, pentest validation will skip."
           else
             echo "configured=true" >> $GITHUB_OUTPUT
           fi
@@ -373,7 +373,7 @@ jobs:
           repository: nhomyk/AgenticQA
           token: ${{ secrets.AGENTICQA_REPO_PAT }}
           # Vendored under vendor/ so the scanner's SKIP_DIRS excludes
-          # it — run_client_scan scans only Instinct, not the tool's
+          # it, run_client_scan scans only Instinct, not the tool's
           # own intentionally-vulnerable fixtures.
           path: vendor/agenticqa-tool
           ref: main
@@ -405,7 +405,7 @@ jobs:
         id: pentest
         if: steps.pat-check.outputs.configured == 'true'
         run: |
-          # self_hack.py may not exist yet — run it if available,
+          # self_hack.py may not exist yet, run it if available,
           # otherwise fall back to a re-scan with --fail-on-critical
           if [ -f vendor/agenticqa-tool/AgenticQA/scripts/self_hack.py ]; then
             python vendor/agenticqa-tool/AgenticQA/scripts/self_hack.py . \
@@ -413,7 +413,7 @@ jobs:
               --json \
               --output pentest-results.json
           else
-            echo "::warning::self_hack.py not found — running scan with --fail-on-critical as fallback"
+            echo "::warning::self_hack.py not found, running scan with --fail-on-critical as fallback"
             python vendor/agenticqa-tool/AgenticQA/scripts/run_client_scan.py . \
               --json \
               --output pentest-results.json
@@ -440,7 +440,7 @@ jobs:
               if critical > 0:
                   print(f"::error::Confirmed critical vulnerabilities: {critical}")
                   sys.exit(1)
-              print(f"Pentest validation passed — 0 confirmed critical vulnerabilities")
+              print(f"Pentest validation passed, 0 confirmed critical vulnerabilities")
           except FileNotFoundError:
               print("::warning::No pentest results file found")
           PYEOF
@@ -474,7 +474,12 @@ jobs:
       - name: Run npm audit
         id: audit
         run: |
-          npm audit --json > npm-audit.json 2>&1 || true
+          # Audit production dependencies only. Dev-only build tooling
+          # (eslint, jest and their transitive glob/brace-expansion) never
+          # ships to production, and Dependabot already covers every
+          # dependency on the repo security page. This mirrors the prod-only
+          # audit in agenticqa-full-pipeline.yml.
+          npm audit --omit=dev --json > npm-audit.json 2>&1 || true
           echo "--- npm audit complete ---"
 
       - name: Parse audit results
