@@ -298,6 +298,13 @@ jobs:
         # Best-effort: a baseline-commit failure must never fail the scan job (the
         # gate is the separate "Fail on NEW critical findings" step below).
         continue-on-error: true
+        env:
+          # Pass the ref through the environment rather than interpolating
+          # ${{ github.head_ref }} straight into the script. A branch name is
+          # attacker-controllable, so inlining it into the shell allows command
+          # injection (CodeQL/Scorecard: dangerous workflow). As an env var it is
+          # a plain, quoted string that the shell never parses as code.
+          TARGET_REF: ${{ github.head_ref || github.ref_name }}
         run: |
           [ -f .agenticqa/scan-baseline.json ] || exit 0
           git config user.name "AgenticQA Bot"
@@ -308,7 +315,7 @@ jobs:
           # PRs and every PR got stuck on stale-baseline drift. Re-anchor onto the
           # real target branch (the PR head, or main on a push run) before
           # committing the regenerated baseline.
-          TARGET="${{ github.head_ref || github.ref_name }}"
+          TARGET="$TARGET_REF"
           cp .agenticqa/scan-baseline.json /tmp/scan-baseline.json
           git fetch origin "$TARGET" --depth=1
           git checkout -B "$TARGET" "origin/$TARGET"

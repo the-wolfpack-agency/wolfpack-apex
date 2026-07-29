@@ -25,6 +25,10 @@ export type InstinctEventType =
   | "knowledge.doc_generated"
   | "knowledge.doc_downloaded"
   | "knowledge.doc_revised"
+  // Releases (the /releases changelog wiki + release email). `viewed` fires
+  // when the page/API is read; `published` when a release is created/updated.
+  | "releases.viewed"
+  | "releases.published"
   // Documents (generated docs page) - edit/delete. Separate from the legacy
   // knowledge.doc_* events so the learning loop can distinguish generator
   // churn from human curation.

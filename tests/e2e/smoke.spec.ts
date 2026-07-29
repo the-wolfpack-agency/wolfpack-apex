@@ -33,6 +33,7 @@ const PROBES: SmokeProbe[] = [
   // verify.yml continue-on-error.
   { path: "/setup", expectText: "Set up", expectAnyText: ["Set up", "Instinct"] },
   { path: "/tasks", expectText: "Task" },
+  { path: "/releases", expectText: "What's new" },
   { path: "/notifications", expectText: "Notification" },
   { path: "/settings", expectText: "Setting" },
   { path: "/admin/audit", expectText: "Audit" },

@@ -57,6 +57,10 @@ export const CAPABILITIES = {
   "docs.edit": "Edit docs",
   "docs.generate": "Generate new docs (AI-assisted)",
 
+  // Releases (the /releases changelog wiki + release email)
+  "releases.view": "View the releases changelog",
+  "releases.manage": "Publish releases (generator + manual publish)",
+
   // Reports
   "reports.view": "View reports",
   "reports.generate": "Generate new reports",

@@ -64,6 +64,24 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["calendar", "meetings", "tasks", "notifications"],
   },
+  releases: {
+    domain: "releases",
+    route: "/releases",
+    title: "Releases",
+    purpose: "The what's-new changelog — every release with what changed and how to use it.",
+    what_you_can_do: [
+      "See every release, newest first, with a plain-English breakdown of each new feature and fix.",
+      "Read a 'How to use' note on each change so you can start using it right away.",
+      "Filter by year with the date tabs to find when something shipped.",
+      "Get the same notes in your inbox — the team release email is generated from this page.",
+    ],
+    how_to: [
+      "Open Releases from the left nav, or ask the assistant 'what's new'.",
+      "Use the year tabs at the top to jump to a date range.",
+      "Click a release to expand its feature list and how-to-use guidance.",
+    ],
+    related_pages: ["dashboard", "assistant"],
+  },
   assistant: {
     domain: "assistant",
     route: "/assistant",

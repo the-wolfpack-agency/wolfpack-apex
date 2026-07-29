@@ -1,0 +1,73 @@
+name: Security hygiene
+
+# Keeps dependency and supply-chain findings from piling up. This covers the
+# gaps that Dependabot auto-merge cannot:
+#   1. Pin guard: every GitHub Action must be pinned to a full commit SHA, so
+#      the Scorecard "Pinned-Dependencies" findings cannot regress once fixed.
+#   2. Prod audit gate: production dependencies must carry no high or critical
+#      CVEs (npm audit --omit=dev). Dev-only build tooling is excluded because
+#      it never ships to production and produces range-collapse false positives.
+#   3. Backlog report: the count of open Dependabot alerts is written to the run
+#      summary every Monday, so a growing backlog is visible instead of silent.
+#
+# Dependabot (.github/dependabot.yml) plus dependabot-auto-merge.yml still handle
+# routine version bumps. This workflow catches what those cannot: transitive
+# advisories that need package.json overrides, newly unpinned actions, and drift.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 15 * * 1" # Mondays 15:00 UTC
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: read
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Guard - every GitHub Action is pinned to a commit SHA
+        run: |
+          unpinned=$(grep -rnE 'uses: [a-zA-Z0-9._-]+/[^@]+@v?[0-9]' .github/workflows/ \
+            | grep -vE '@[0-9a-f]{40}' || true)
+          if [ -n "$unpinned" ]; then
+            echo "::error::These actions are not pinned to a full commit SHA. Pin them (uses: owner/repo@<40-char-sha> # vX):"
+            echo "$unpinned"
+            exit 1
+          fi
+          echo "All actions are SHA-pinned."
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Production dependency audit (fail on high or critical)
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Report open Dependabot alert count
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repo="${{ github.repository }}"
+          # The default token may lack Dependabot-alert read; degrade gracefully.
+          dep=$(gh api "/repos/$repo/dependabot/alerts" --paginate \
+            -q '[.[] | select(.state=="open")] | length' 2>/dev/null || echo "n/a (token lacks alert read)")
+          {
+            echo "## Security hygiene report"
+            echo ""
+            echo "- Open Dependabot alerts: **$dep**"
+            echo "- Production npm audit: passing (0 high or critical, dev-only excluded)"
+            echo "- Action pinning: enforced"
+          } >> "$GITHUB_STEP_SUMMARY"

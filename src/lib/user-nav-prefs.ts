@@ -55,6 +55,7 @@ export const KNOWN_NAV_HREFS: readonly string[] = [
   "/discussions",
   "/bulletin",
   "/docs",
+  "/releases",
   "/reports",
   "/programs/budgets",
   "/clients",
