@@ -1,17 +1,17 @@
 "use client";
 
 /**
- * TicketDetail — full ticket page body.
+ * TicketDetail, full ticket page body.
  *
  * Three sections, top to bottom:
  *
- *   1. Header — title, severity, category, status, created-by line.
+ *   1. Header, title, severity, category, status, created-by line.
  *   2. Ticket body + collapsible diagnostic text.
  *   3. Either:
- *        a. Draft editor (when status ≠ sent / resolved) — operator
+ *        a. Draft editor (when status ≠ sent / resolved), operator
  *           can edit the AI draft, regenerate it, or open the send
  *           preview modal.
- *        b. Sent state — read-only sent_response + feedback widget.
+ *        b. Sent state, read-only sent_response + feedback widget.
  *
  * Send flow:
  *   "Send to user" opens a confirmation modal that previews exactly
@@ -111,7 +111,7 @@ function formatDateTime(ts?: string | null): string {
 /**
  * Heuristic recipient inference. Looks for the first email address in
  * either the body or the diagnostic text. If nothing matches, the user
- * has to type a recipient — never silently fail.
+ * has to type a recipient, never silently fail.
  */
 export function inferRecipient(t: SupportTicket): string {
   const haystack = `${t.body ?? ""}\n${t.diagnostic_text ?? ""}`;
@@ -141,13 +141,17 @@ export default function TicketDetail({
     ticket.status === "sent" || ticket.status === "resolved";
 
   /* Sync local edits when the parent swaps in a fresh ticket (e.g.
-     after regenerate or a navigation that reloads from the API). */
+     after regenerate or a navigation that reloads from the API).
+     Adjusting state during render is React's derived-state-reset
+     pattern: it stays synchronous with the prop change (no post-paint
+     flash a useEffect would add) and does not call setState from a
+     useMemo, which can trigger an infinite render loop. */
   const ticketDraftKey = `${ticket.id}:${ticket.drafted_at ?? ""}`;
-  useMemo(() => {
+  const [prevDraftKey, setPrevDraftKey] = useState(ticketDraftKey);
+  if (prevDraftKey !== ticketDraftKey) {
+    setPrevDraftKey(ticketDraftKey);
     setDraftText(ticket.draft_response ?? "");
-    return ticketDraftKey;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticketDraftKey]);
+  }
 
   async function handleRegenerate() {
     setRegenerating(true);
@@ -303,7 +307,7 @@ export default function TicketDetail({
         )}
       </section>
 
-      {/* Conversation thread — inbound email + customer replies +
+      {/* Conversation thread, inbound email + customer replies +
           operator outbound replies. Only rendered when the ticket has
           messages so form-created internal tickets without an inbound
           email don't show an empty card. */}
@@ -730,7 +734,7 @@ function SendModal({
           />
           {/* Mirror the address as visible text too so screen readers
               + tests that read .textContent see the resolved address.
-              Plays well with the editable input above — operators see
+              Plays well with the editable input above, operators see
               the canonical version under the field while editing. */}
           <p
             data-testid="send-modal-from-resolved"
