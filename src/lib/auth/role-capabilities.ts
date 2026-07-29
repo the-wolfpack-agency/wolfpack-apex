@@ -39,7 +39,13 @@ const ALL_CAPS: readonly Capability[] = Object.keys(CAPABILITIES) as Capability[
  * spreading into the privileged sets would be a harmless dup — we only spread
  * into the explicit arrays.)
  */
-const SELF_SERVICE: readonly Capability[] = ["account.manage_mfa"];
+const SELF_SERVICE: readonly Capability[] = [
+  "account.manage_mfa",
+  // The releases changelog is org-wide reading, like brain.read: every
+  // authenticated seat can see what shipped. Publishing (releases.manage) is
+  // not here, it stays with CTO/CEO via ALL_CAPS membership.
+  "releases.view",
+];
 
 // ──────────────────────────────────────────────────────────────────────────
 // Role baselines

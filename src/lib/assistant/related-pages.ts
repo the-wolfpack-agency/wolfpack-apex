@@ -70,6 +70,12 @@ const DOMAIN_MAP: DomainEntry[] = [
     keywords: ["goal", "goals", "okr", "okrs", "kr", "key result", "north star"],
   },
   {
+    domain: "releases",
+    label: "Releases",
+    href: "/releases",
+    keywords: ["release", "releases", "changelog", "change log", "what's new", "whats new", "release notes", "new feature", "new features"],
+  },
+  {
     domain: "discussions",
     label: "Discussions",
     href: "/discussions",
