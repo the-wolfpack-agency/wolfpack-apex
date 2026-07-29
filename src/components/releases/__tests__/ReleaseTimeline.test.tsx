@@ -1,8 +1,9 @@
 /**
  * @jest-environment jsdom
  *
- * ReleaseTimeline UI tests: empty state, rendering, the year-tab date filter,
- * and expand-to-reveal the per-feature "How to use" guidance.
+ * ReleaseTimeline UI tests: empty state, month-tab navigation (one month shown
+ * at a time), year tabs when history spans years, and expand-to-reveal the
+ * per-feature "How to use" guidance.
  */
 
 import "@testing-library/jest-dom";
@@ -26,22 +27,26 @@ function rel(over: Partial<Release>): Release {
   };
 }
 
+// Newest-first, as the API returns. Two releases in July 2026 (same month) and
+// one in January 2025 (different year) to exercise month + year tabs.
 const RELEASES: Release[] = [
   rel({
     id: "r1",
-    version: "2026-07-29",
-    title: "July Release",
-    summary: "Summer improvements",
     released_on: "2026-07-29",
-    entries: [{ title: "Login fixed", description: "You can sign in again", how_to_use: "Just log in normally", category: "fix" }],
+    title: "July Late",
+    entries: [{ title: "Login fixed", description: "Sign in works", how_to_use: "Just log in normally", category: "fix" }],
   }),
   rel({
     id: "r2",
-    version: "2025-01-10",
-    title: "January Release",
-    summary: "Winter features",
+    released_on: "2026-07-03",
+    title: "July Early",
+    entries: [{ title: "New dashboard", description: "Fresh home", how_to_use: "Open the Dashboard tab", category: "feature" }],
+  }),
+  rel({
+    id: "r3",
     released_on: "2025-01-10",
-    entries: [{ title: "New dashboard", description: "A fresh home screen", how_to_use: "Open the Dashboard tab", category: "feature" }],
+    title: "January Release",
+    entries: [{ title: "Old thing", description: "d", how_to_use: "Legacy step", category: "improvement" }],
   }),
 ];
 
@@ -50,32 +55,34 @@ test("renders an empty state when there are no releases", () => {
   expect(screen.getByTestId("releases-empty")).toBeInTheDocument();
 });
 
-test("renders every release with year tabs for date filtering", () => {
+test("defaults to the newest year + month and shows only that month", () => {
   render(<ReleaseTimeline releases={RELEASES} />);
-  expect(screen.getByText("July Release")).toBeInTheDocument();
-  expect(screen.getByText("January Release")).toBeInTheDocument();
-  expect(screen.getByTestId("year-tab-all")).toBeInTheDocument();
+  // Year tabs present (spans 2026 + 2025); month tab for July (index 6).
   expect(screen.getByTestId("year-tab-2026")).toBeInTheDocument();
   expect(screen.getByTestId("year-tab-2025")).toBeInTheDocument();
+  expect(screen.getByTestId("month-tab-6")).toBeInTheDocument();
+  // July releases shown; the January (different year) release is not.
+  expect(screen.getByText("July Late")).toBeInTheDocument();
+  expect(screen.getByText("July Early")).toBeInTheDocument();
+  expect(screen.queryByText("January Release")).not.toBeInTheDocument();
 });
 
-test("the newest release is expanded by default and shows its How-to-use", () => {
+test("the newest release in the month is expanded; others are collapsed", () => {
   render(<ReleaseTimeline releases={RELEASES} />);
-  // Newest (July) open by default.
-  expect(screen.getByText("Just log in normally")).toBeInTheDocument();
-  // Older (January) collapsed, so its how-to-use is not rendered yet.
-  expect(screen.queryByText("Open the Dashboard tab")).not.toBeInTheDocument();
+  expect(screen.getByText("Just log in normally")).toBeInTheDocument(); // July Late (open)
+  expect(screen.queryByText("Open the Dashboard tab")).not.toBeInTheDocument(); // July Early (collapsed)
 });
 
 test("clicking a collapsed release expands its feature breakdown", () => {
   render(<ReleaseTimeline releases={RELEASES} />);
-  fireEvent.click(screen.getByRole("button", { name: /January Release/ }));
+  fireEvent.click(screen.getByRole("button", { name: /July Early/ }));
   expect(screen.getByText("Open the Dashboard tab")).toBeInTheDocument();
 });
 
-test("year tab filters releases by date", () => {
+test("switching year tab shows that year's month + releases", () => {
   render(<ReleaseTimeline releases={RELEASES} />);
   fireEvent.click(screen.getByTestId("year-tab-2025"));
-  expect(screen.queryByText("July Release")).not.toBeInTheDocument();
+  expect(screen.getByTestId("month-tab-0")).toBeInTheDocument(); // January
   expect(screen.getByText("January Release")).toBeInTheDocument();
+  expect(screen.queryByText("July Late")).not.toBeInTheDocument();
 });

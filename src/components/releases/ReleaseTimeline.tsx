@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * ReleaseTimeline — the /releases changelog view.
+ * ReleaseTimeline: the /releases changelog view.
  *
  * Simple to scan and organized by date:
  *   - A year tab bar at the top (All / 2026 / 2025 ...) to filter by year.
@@ -27,6 +27,8 @@ function categoryStyle(category?: string): { label: string; color: string } {
       return { label: "Fix", color: "var(--wp-info, #3b82f6)" };
     case "improvement":
       return { label: "Improvement", color: "var(--wp-success, #22c55e)" };
+    case "milestone":
+      return { label: "Milestone", color: "var(--wp-gold, #e8b528)" };
     default:
       return { label: "Feature", color: "var(--wp-gold, #e8b528)" };
   }
@@ -194,34 +196,46 @@ function ReleaseCard({ release, defaultOpen }: { release: Release; defaultOpen: 
 }
 
 export default function ReleaseTimeline({ releases }: { releases: Release[] }) {
-  // Year tabs, derived from the data, newest first, with an "All" option.
-  const years = useMemo(() => {
-    const set = new Set<number>();
-    for (const r of releases) set.add(parseDate(r.released_on).year);
-    return Array.from(set).sort((a, b) => b - a);
+  // Index releases by year -> month so navigation is by-date and you only ever
+  // render one month at a time (no long scroll). Releases arrive newest-first.
+  const byYearMonth = useMemo(() => {
+    const years = new Map<number, Map<number, Release[]>>();
+    for (const r of releases) {
+      const { year, monthIndex } = parseDate(r.released_on);
+      if (!years.has(year)) years.set(year, new Map());
+      const months = years.get(year)!;
+      if (!months.has(monthIndex)) months.set(monthIndex, []);
+      months.get(monthIndex)!.push(r);
+    }
+    return years;
   }, [releases]);
 
-  const [activeYear, setActiveYear] = useState<number | "all">("all");
-
-  const visible = useMemo(
-    () =>
-      activeYear === "all"
-        ? releases
-        : releases.filter((r) => parseDate(r.released_on).year === activeYear),
-    [releases, activeYear],
+  const years = useMemo(
+    () => Array.from(byYearMonth.keys()).sort((a, b) => b - a),
+    [byYearMonth],
   );
 
-  // Group the visible releases under "Month Year" headers, newest first.
-  const groups = useMemo(() => {
-    const map = new Map<string, Release[]>();
-    for (const r of visible) {
-      const { monthLabel } = parseDate(r.released_on);
-      const arr = map.get(monthLabel) ?? [];
-      arr.push(r);
-      map.set(monthLabel, arr);
-    }
-    return Array.from(map.entries()); // insertion order = newest first (releases already sorted)
-  }, [visible]);
+  const [activeYear, setActiveYear] = useState<number | null>(null);
+  const [activeMonth, setActiveMonth] = useState<number | null>(null);
+
+  // Default to the newest year + its newest month once data is in.
+  const effectiveYear = activeYear ?? years[0] ?? null;
+  const monthsForYear = useMemo(
+    () =>
+      effectiveYear == null
+        ? []
+        : Array.from(byYearMonth.get(effectiveYear)?.keys() ?? []).sort((a, b) => b - a),
+    [byYearMonth, effectiveYear],
+  );
+  const effectiveMonth =
+    activeMonth != null && monthsForYear.includes(activeMonth)
+      ? activeMonth
+      : monthsForYear[0] ?? null;
+
+  const shown =
+    effectiveYear != null && effectiveMonth != null
+      ? byYearMonth.get(effectiveYear)?.get(effectiveMonth) ?? []
+      : [];
 
   if (releases.length === 0) {
     return (
@@ -240,69 +254,73 @@ export default function ReleaseTimeline({ releases }: { releases: Release[] }) {
     );
   }
 
-  const tabBase = {
+  const tab = (active: boolean) => ({
     all: "unset" as const,
     cursor: "pointer",
-    padding: "0.35rem 0.85rem",
+    padding: "0.3rem 0.8rem",
     borderRadius: 999,
-    fontSize: "0.85rem",
+    fontSize: "0.82rem",
     fontWeight: 600,
-  };
+    background: active ? "var(--wp-gold, #e8b528)" : "var(--wp-dark-surface, #16181d)",
+    color: active ? "#0b0d11" : "var(--wp-text, #e8eaed)",
+    border: `1px solid ${active ? "var(--wp-gold, #e8b528)" : "var(--wp-dark-border, #23262e)"}`,
+  });
 
   return (
     <div>
-      {/* Year tabs, view changes by date */}
-      <div
-        role="tablist"
-        aria-label="Filter releases by year"
-        style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1.1rem" }}
-      >
-        {(["all", ...years] as const).map((y) => {
-          const active = activeYear === y;
-          return (
+      {/* Year tabs, only when history spans more than one year. */}
+      {years.length > 1 ? (
+        <div
+          role="tablist"
+          aria-label="Filter releases by year"
+          style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.6rem" }}
+        >
+          {years.map((y) => (
             <button
-              key={String(y)}
+              key={y}
               type="button"
               role="tab"
-              aria-selected={active}
+              aria-selected={y === effectiveYear}
               data-testid={`year-tab-${y}`}
-              onClick={() => setActiveYear(y as number | "all")}
-              style={{
-                ...tabBase,
-                background: active ? "var(--wp-gold, #e8b528)" : "var(--wp-dark-surface, #16181d)",
-                color: active ? "#0b0d11" : "var(--wp-text, #e8eaed)",
-                border: `1px solid ${active ? "var(--wp-gold, #e8b528)" : "var(--wp-dark-border, #23262e)"}`,
+              onClick={() => {
+                setActiveYear(y);
+                setActiveMonth(null);
               }}
+              style={tab(y === effectiveYear)}
             >
-              {y === "all" ? "All" : y}
+              {y}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {/* Month tabs: the primary navigation. Pick a month, see just that month. */}
+      <div
+        role="tablist"
+        aria-label="Filter releases by month"
+        style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1.2rem" }}
+      >
+        {monthsForYear.map((m) => {
+          const count = byYearMonth.get(effectiveYear!)?.get(m)?.length ?? 0;
+          return (
+            <button
+              key={m}
+              type="button"
+              role="tab"
+              aria-selected={m === effectiveMonth}
+              data-testid={`month-tab-${m}`}
+              onClick={() => setActiveMonth(m)}
+              style={tab(m === effectiveMonth)}
+            >
+              {MONTHS[m].slice(0, 3)}
+              <span style={{ opacity: 0.6, marginLeft: "0.35rem", fontWeight: 500 }}>{count}</span>
             </button>
           );
         })}
       </div>
 
-      {groups.map(([monthLabel, rels], gi) => (
-        <section key={monthLabel} style={{ marginBottom: "1.4rem" }}>
-          <h2
-            style={{
-              position: "sticky",
-              top: 0,
-              zIndex: 1,
-              margin: "0 0 0.7rem",
-              padding: "0.35rem 0",
-              fontSize: "0.8rem",
-              fontWeight: 700,
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              color: "var(--wp-text-dim, #9aa0aa)",
-              background: "var(--wp-bg, #0b0d11)",
-            }}
-          >
-            {monthLabel}
-          </h2>
-          {rels.map((r, ri) => (
-            <ReleaseCard key={r.id} release={r} defaultOpen={gi === 0 && ri === 0} />
-          ))}
-        </section>
+      {shown.map((r, i) => (
+        <ReleaseCard key={r.id} release={r} defaultOpen={i === 0} />
       ))}
     </div>
   );
