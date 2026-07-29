@@ -171,23 +171,31 @@ function rewriteSpecifiersToAbsolute(source, originalFile) {
   });
 }
 
-function cachedCjsPath(originalFile, stat) {
+function cachedCjsPath(originalFile, src) {
   // Key by absolute path so two packages with same-named files don't collide;
-  // include mtime+size so a dep upgrade busts the cache.
+  // include a content hash so a dep upgrade (any change to the source) busts
+  // the cache.
   const hash = require("crypto")
     .createHash("md5")
     .update(originalFile)
-    .update(String(stat.mtimeMs))
-    .update(String(stat.size))
+    .update(src)
     .digest("hex");
   return path.join(CACHE_DIR, `${hash}.cjs`);
 }
 
 function ensureCjsCopy(originalFile) {
-  const stat = fs.statSync(originalFile);
-  const out = cachedCjsPath(originalFile, stat);
-  if (fs.existsSync(out)) return out;
+  // Read the source once and key the cache off its content. Reading first,
+  // rather than statSync-then-readFileSync, removes a check-then-use race on
+  // originalFile (CodeQL: js/file-system-race) and makes the cache key exact
+  // instead of mtime/size based.
   const src = fs.readFileSync(originalFile, "utf8");
+  const out = cachedCjsPath(originalFile, src);
+  try {
+    fs.accessSync(out);
+    return out;
+  } catch {
+    // Not cached yet; transpile and write it below.
+  }
   const rewritten = rewriteSpecifiersToAbsolute(shimImportMeta(src), originalFile);
   const transpiled = ts.transpileModule(rewritten, {
     compilerOptions: {
