@@ -474,7 +474,12 @@ jobs:
       - name: Run npm audit
         id: audit
         run: |
-          npm audit --json > npm-audit.json 2>&1 || true
+          # Audit production dependencies only. Dev-only build tooling
+          # (eslint, jest and their transitive glob/brace-expansion) never
+          # ships to production, and Dependabot already covers every
+          # dependency on the repo security page. This mirrors the prod-only
+          # audit in agenticqa-full-pipeline.yml.
+          npm audit --omit=dev --json > npm-audit.json 2>&1 || true
           echo "--- npm audit complete ---"
 
       - name: Parse audit results
