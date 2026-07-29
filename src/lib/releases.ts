@@ -1,5 +1,5 @@
 /**
- * releases.ts — release notes / changelog domain logic.
+ * releases.ts: release notes / changelog domain logic.
  *
  * Backs the /releases wiki page and the release email. A release is a dated set
  * of plain-English feature breakdowns (what shipped + how to use it), authored
@@ -19,8 +19,10 @@ export interface ReleaseEntry {
   how_to_use: string;
   /** Product area, e.g. "Auto", "Instinct", "LMS". Optional. */
   area?: string;
-  /** "feature" | "fix" | "improvement". Optional. */
+  /** "feature" | "fix" | "improvement" | "milestone". Optional. */
   category?: string;
+  /** Lines of code for the product (set on creation-milestone entries only). */
+  loc?: number;
 }
 
 export interface Release {
@@ -70,6 +72,7 @@ function toEntries(raw: unknown): ReleaseEntry[] {
       how_to_use: String(e.how_to_use ?? ""),
       area: e.area != null ? String(e.area) : undefined,
       category: e.category != null ? String(e.category) : undefined,
+      loc: typeof e.loc === "number" ? e.loc : undefined,
     }));
 }
 

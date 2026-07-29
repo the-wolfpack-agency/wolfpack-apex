@@ -195,12 +195,41 @@ function ReleaseCard({ release, defaultOpen }: { release: Release; defaultOpen: 
   );
 }
 
+/** Product-creation milestones are versioned "<area>-created". */
+const isMilestone = (r: Release) => r.version.endsWith("-created");
+
 export default function ReleaseTimeline({ releases }: { releases: Release[] }) {
-  // Index releases by year -> month so navigation is by-date and you only ever
-  // render one month at a time (no long scroll). Releases arrive newest-first.
+  const [view, setView] = useState<"releases" | "products">("releases");
+
+  // Creation milestones, oldest first, so the Products view reads as the
+  // product lineup by create date.
+  const milestones = useMemo(
+    () =>
+      releases
+        .filter(isMilestone)
+        .slice()
+        .sort((a, b) => (a.released_on < b.released_on ? -1 : 1)),
+    [releases],
+  );
+
+  // Feature releases (everything that is not a creation milestone).
+  const regular = useMemo(() => releases.filter((r) => !isMilestone(r)), [releases]);
+
+  // Headline stats for the analytics strip.
+  const totalLoc = useMemo(
+    () => milestones.reduce((sum, m) => sum + (m.entries[0]?.loc ?? 0), 0),
+    [milestones],
+  );
+  const featureCount = useMemo(
+    () => regular.reduce((sum, r) => sum + r.entries.length, 0),
+    [regular],
+  );
+
+  // Index feature releases by year -> month so navigation is by-date and you
+  // only ever render one month at a time (no long scroll). Newest-first.
   const byYearMonth = useMemo(() => {
     const years = new Map<number, Map<number, Release[]>>();
-    for (const r of releases) {
+    for (const r of regular) {
       const { year, monthIndex } = parseDate(r.released_on);
       if (!years.has(year)) years.set(year, new Map());
       const months = years.get(year)!;
@@ -208,7 +237,7 @@ export default function ReleaseTimeline({ releases }: { releases: Release[] }) {
       months.get(monthIndex)!.push(r);
     }
     return years;
-  }, [releases]);
+  }, [regular]);
 
   const years = useMemo(
     () => Array.from(byYearMonth.keys()).sort((a, b) => b - a),
@@ -266,8 +295,97 @@ export default function ReleaseTimeline({ releases }: { releases: Release[] }) {
     border: `1px solid ${active ? "var(--wp-gold, #e8b528)" : "var(--wp-dark-border, #23262e)"}`,
   });
 
+  const stats: { label: string; value: string }[] = [
+    { label: "Products", value: String(milestones.length) },
+    { label: "Lines of code", value: totalLoc ? `~${totalLoc.toLocaleString()}` : "0" },
+    { label: "Releases", value: String(regular.length) },
+    { label: "Features shipped", value: String(featureCount) },
+  ];
+
   return (
     <div>
+      {/* Analytics strip: at-a-glance totals across all products. */}
+      <div
+        data-testid="releases-stats"
+        style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1.4rem" }}
+      >
+        {stats.map((s) => (
+          <div
+            key={s.label}
+            style={{
+              flex: "1 1 130px",
+              minWidth: 130,
+              background: "var(--wp-card, #16181d)",
+              border: "1px solid var(--wp-dark-border, #23262e)",
+              borderRadius: 12,
+              padding: "0.9rem 1rem",
+            }}
+          >
+            <div style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--wp-gold, #e8b528)", lineHeight: 1.1 }}>
+              {s.value}
+            </div>
+            <div style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--wp-text-dim, #9aa0aa)", marginTop: "0.2rem" }}>
+              {s.label}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* View toggle: feature Releases vs the product-creation timeline. */}
+      <div
+        role="tablist"
+        aria-label="Choose view"
+        style={{ display: "flex", gap: "0.5rem", marginBottom: "1.1rem" }}
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "releases"}
+          data-testid="view-releases"
+          onClick={() => setView("releases")}
+          style={tab(view === "releases")}
+        >
+          Releases
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "products"}
+          data-testid="view-products"
+          onClick={() => setView("products")}
+          style={tab(view === "products")}
+        >
+          Products
+        </button>
+      </div>
+
+      {view === "products" ? (
+        <ol data-testid="products-timeline" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+          {milestones.map((m) => {
+            const d = parseDate(m.released_on);
+            const name = m.entries[0]?.area ?? m.title.replace(/ created$/i, "");
+            return (
+              <li
+                key={m.id}
+                style={{
+                  display: "flex",
+                  gap: "1rem",
+                  alignItems: "baseline",
+                  padding: "0.65rem 0",
+                  borderBottom: "1px solid var(--wp-dark-border, #23262e)",
+                }}
+              >
+                <span style={{ width: 108, flexShrink: 0, color: "var(--wp-gold, #e8b528)", fontWeight: 700, fontSize: "0.85rem" }}>
+                  {d.dayLabel}, {d.year}
+                </span>
+                <span style={{ fontWeight: 700, color: "var(--wp-text, #e8eaed)" }}>{name}</span>
+                <span style={{ color: "var(--wp-text-dim, #9aa0aa)", fontSize: "0.85rem" }}>created</span>
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
+        <>
       {/* Year tabs, only when history spans more than one year. */}
       {years.length > 1 ? (
         <div
@@ -322,6 +440,8 @@ export default function ReleaseTimeline({ releases }: { releases: Release[] }) {
       {shown.map((r, i) => (
         <ReleaseCard key={r.id} release={r} defaultOpen={i === 0} />
       ))}
+        </>
+      )}
     </div>
   );
 }

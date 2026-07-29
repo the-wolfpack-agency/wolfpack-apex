@@ -146,6 +146,26 @@ function creationDate(dir: string): string | null {
   }
 }
 
+/** Lines of source code tracked by git in a repo (excludes node_modules and
+ *  other gitignored artifacts automatically). Best-effort; 0 on failure. */
+function linesOfCode(dir: string): number {
+  try {
+    // Concatenate all tracked source files then count once, so the total is not
+    // truncated by xargs batching. Exclude vendored/generated trees + type defs
+    // so the number reflects team-authored code. git ls-files already skips
+    // gitignored paths (node_modules, .next, dist).
+    const cmd =
+      `cd '${join(MONO, dir)}' && git ls-files -z -- ` +
+      `'*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.cjs' '*.py' '*.sql' '*.css' '*.scss' ` +
+      `| grep -zvE '(^|/)(vendor|dist|build|coverage|__generated__)/|\\.d\\.ts$|\\.min\\.(js|css)$' ` +
+      `| xargs -0 cat 2>/dev/null | wc -l`;
+    const out = execSync(cmd, { encoding: "utf8", maxBuffer: 512 * 1024 * 1024, shell: "/bin/bash" });
+    return parseInt(out.trim(), 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 interface Publish { version: string; title: string; summary: string; released_on: string; entries: ReleaseEntry[] }
 
 function collect(): Publish[] {
@@ -156,12 +176,14 @@ function collect(): Publish[] {
     // 1. Creation milestone.
     const created = p.dir ? creationDate(p.dir) : p.createdOn ?? null;
     if (created) {
+      const loc = p.dir ? linesOfCode(p.dir) : 0;
+      const locNote = loc ? ` with ~${loc.toLocaleString()} lines of code` : "";
       out.push({
         version: `${s}-created`,
         title: `${p.area} created`,
-        summary: `${p.area} was created on ${created}.`,
+        summary: `${p.area} was created on ${created}${locNote}.`,
         released_on: created,
-        entries: [{ title: `${p.area} project created`, description: `First commit / repo inception for ${p.area}.`, how_to_use: "", area: p.area, category: "milestone" }],
+        entries: [{ title: `${p.area} project created`, description: `First commit / repo inception for ${p.area}${locNote}.`, how_to_use: "", area: p.area, category: "milestone", loc }],
       });
     }
 
