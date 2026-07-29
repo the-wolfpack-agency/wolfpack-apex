@@ -33,7 +33,7 @@ const PROBES: SmokeProbe[] = [
   // verify.yml continue-on-error.
   { path: "/setup", expectText: "Set up", expectAnyText: ["Set up", "Instinct"] },
   { path: "/tasks", expectText: "Task" },
-  { path: "/releases", expectText: "What's new" },
+  { path: "/releases", expectText: "Releases" },
   { path: "/notifications", expectText: "Notification" },
   { path: "/settings", expectText: "Setting" },
   { path: "/admin/audit", expectText: "Audit" },
@@ -41,7 +41,7 @@ const PROBES: SmokeProbe[] = [
 ];
 
 // Routes that only work pre-auth (login itself). Keep the landing / root probe
-// above — it is expected to render without a session.
+// above, it is expected to render without a session.
 const PUBLIC_PATHS = new Set<string>(["/"]);
 
 test.describe("verify smoke", () => {

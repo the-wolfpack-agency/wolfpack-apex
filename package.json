@@ -20,7 +20,8 @@
     "test:qr-download": "playwright test --config=playwright.qr.config.ts",
     "canary": "PROD_URL=${PROD_URL:-https://wolfpack-instinct.vercel.app} playwright test tests/e2e/ --config=playwright.config.ts --reporter=github",
     "self-scan": "npx tsx scripts/self-scan-ai-surfaces.ts",
-    "release:notes": "npx tsx scripts/generate-release-notes.ts"
+    "release:notes": "npx tsx scripts/generate-release-notes.ts",
+    "release:backfill": "npx tsx scripts/backfill-release-notes.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
