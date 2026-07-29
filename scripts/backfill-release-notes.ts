@@ -2,7 +2,8 @@
  * backfill-release-notes.ts: one-time (idempotent) import of Wolfpack product
  * history into the /releases page (instinct_releases), so the timeline shows:
  *   - when each product was created (first commit / repo creation), and
- *   - every hand-authored release report + session handoff across the repos.
+ *   - every hand-authored release report across the repos (feature-facing only;
+ *     internal session handoffs are deliberately excluded).
  *
  * Deterministic markdown parse (no AI reword of historical records). Re-runnable:
  * everything upserts on a stable version key.
@@ -38,11 +39,19 @@ const PRODUCTS: { area: string; dir: string | null; createdOn?: string }[] = [
 /** Folders within a repo that may hold reports/handoffs. */
 const DOC_DIRS = ["demo", "docs"];
 
+// Section headings that are meta/process/internal, NOT shipped features.
+// The page is team-facing, so anything that reads like a session retrospective,
+// coaching note, blocker list, or deploy log is excluded.
 const META = [
   "tl;dr", "tldr", "numbers", "operational", "carry-forward", "carry forward",
   "next-session", "next session", "standing reminders", "reminders",
   "verification", "branch and deploy", "deploy state", "table of contents",
-  "how to read", "session hygiene", "pending", "blockers",
+  "how to read", "session hygiene", "pending", "blockers", "blocker",
+  "lessons", "lesson", "retro", "retrospective", "coaching", "feedback",
+  "what went wrong", "went wrong", "landmine", "post-mortem", "postmortem",
+  "known issue", "gotcha", "mistake", "what i learned", "learnings",
+  "do not", "never ", "rules", "context that git", "conversational context",
+  "outstanding", "next up", "still to do", "remaining work",
 ];
 
 const slug = (area: string) => area.toLowerCase().replace(/\s+/g, "-");
@@ -158,26 +167,21 @@ function collect(): Publish[] {
 
     if (!p.dir) continue;
 
-    // 2. Reports + handoffs from demo/ and docs/.
+    // 2. Release reports only, from demo/ and docs/. Handoffs are internal
+    //    session working notes (retrospectives, blockers, coaching, next-step
+    //    TODOs) and are intentionally NOT surfaced on the team-facing page.
     for (const sub of DOC_DIRS) {
       const dir = join(MONO, p.dir, sub);
       if (!existsSync(dir)) continue;
       for (const f of readdirSync(dir)) {
         const rr = f.match(/^release-report-(\d{4}-\d{2}-\d{2})\.md$/i);
-        const hf = f.match(/^handoff-(\d{4}-\d{2}-\d{2})\.md$/i);
-        if (!rr && !hf) continue;
-        const date = (rr ?? hf)![1];
+        if (!rr) continue;
+        const date = rr[1];
         const md = readFileSync(join(dir, f), "utf8");
-        const kind = rr ? "release" : "handoff";
-        const fallback = `${p.area} ${kind} ${date}`;
-        const parsed = parseReport(md, p.area, fallback);
-        const title =
-          kind === "handoff" && !/handoff/i.test(parsed.title)
-            ? `Handoff: ${parsed.title}`
-            : parsed.title;
+        const parsed = parseReport(md, p.area, `${p.area} release ${date}`);
         out.push({
-          version: kind === "release" ? `${s}-${date}` : `${s}-handoff-${date}`,
-          title,
+          version: `${s}-${date}`,
+          title: parsed.title,
           summary: parsed.summary,
           released_on: date,
           entries: parsed.entries,
