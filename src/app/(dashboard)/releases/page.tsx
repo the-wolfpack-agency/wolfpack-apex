@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * /releases — the "What's new" changelog wiki.
+ * /releases: the changelog wiki.
  *
  * Reads /api/releases (org-wide, releases.view) and renders a date-organized
  * timeline: year tabs + month groups + expandable feature breakdowns. Populated
@@ -43,12 +43,8 @@ export default function ReleasesPage() {
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "1.5rem 1rem 3rem" }}>
       <header style={{ marginBottom: "1.4rem" }}>
         <h1 style={{ margin: 0, fontSize: "1.6rem", fontWeight: 800, color: "var(--wp-text, #e8eaed)" }}>
-          What&apos;s new
+          Releases
         </h1>
-        <p style={{ margin: "0.35rem 0 0", color: "var(--wp-text-dim, #9aa0aa)", fontSize: "0.95rem" }}>
-          Every release, newest first, with what changed and how to use it. Use
-          the year tabs to jump by date.
-        </p>
       </header>
 
       {error ? (
