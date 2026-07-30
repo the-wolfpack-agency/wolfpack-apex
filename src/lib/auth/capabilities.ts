@@ -61,6 +61,9 @@ export const CAPABILITIES = {
   "releases.view": "View the releases changelog",
   "releases.manage": "Publish releases (generator + manual publish)",
 
+  // Products (the /products catalog + current-engagements view)
+  "products.view": "View the product catalog",
+
   // Reports
   "reports.view": "View reports",
   "reports.generate": "Generate new reports",

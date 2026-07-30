@@ -82,6 +82,23 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["dashboard", "assistant"],
   },
+  products: {
+    domain: "products",
+    route: "/products",
+    title: "Products",
+    purpose: "The product catalog: what each Wolfpack product is, the value it delivers, and how its parts could be reused.",
+    what_you_can_do: [
+      "Read a plain-language explanation of every product and the value it delivers.",
+      "See who each product is for and what makes it worth building.",
+      "See where each product, or pieces of it, could be reused in other markets or use cases.",
+      "See which products are live in production versus in flight.",
+    ],
+    how_to: [
+      "Open Products from the left nav, or ask the assistant 'what have we built'.",
+      "Filter by status to see what is live versus in flight.",
+    ],
+    related_pages: ["releases", "dashboard"],
+  },
   assistant: {
     domain: "assistant",
     route: "/assistant",
