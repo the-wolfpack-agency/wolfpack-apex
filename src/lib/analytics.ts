@@ -29,6 +29,8 @@ export type InstinctEventType =
   // when the page/API is read; `published` when a release is created/updated.
   | "releases.viewed"
   | "releases.published"
+  // Products (the /products catalog). `viewed` fires when the page/API is read.
+  | "products.viewed"
   // Documents (generated docs page) - edit/delete. Separate from the legacy
   // knowledge.doc_* events so the learning loop can distinguish generator
   // churn from human curation.

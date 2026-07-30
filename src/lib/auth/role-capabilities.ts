@@ -45,6 +45,9 @@ const SELF_SERVICE: readonly Capability[] = [
   // authenticated seat can see what shipped. Publishing (releases.manage) is
   // not here, it stays with CTO/CEO via ALL_CAPS membership.
   "releases.view",
+  // The product catalog is org-wide reading too: every seat should understand
+  // what the team has built and what is in flight.
+  "products.view",
 ];
 
 // ──────────────────────────────────────────────────────────────────────────
