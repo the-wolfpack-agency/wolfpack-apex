@@ -24,7 +24,7 @@ const MONO = "/Users/nicholashomyk/mono";
  * using the GitHub repo creation date). Reports/handoffs are read from local
  * repos only.
  */
-const PRODUCTS: { area: string; dir: string | null; createdOn?: string }[] = [
+const PRODUCTS: { area: string; dir: string | null; createdOn?: string; slug?: string }[] = [
   { area: "AgenticQA", dir: "AgenticQA" },
   { area: "Auto", dir: "wolfpack-auto" },
   { area: "Instinct", dir: "wolfpack-apex" },
@@ -32,7 +32,10 @@ const PRODUCTS: { area: string; dir: string | null; createdOn?: string }[] = [
   { area: "Weekend", dir: "wolfpack-weekend" },
   { area: "Aidan Mulready", dir: "wolfpack-aidan-mulready" },
   { area: "Beyond", dir: "wolfpack-beyond" },
-  { area: "Porsche Weekend", dir: "wolfpack-porsche-weekend" },
+  // Display name renamed to "Porsche Extended Ownership Experience"; the slug is
+  // pinned to the original so the existing instinct_releases rows upsert in place
+  // (no duplicate milestone) rather than creating a new versioned entry.
+  { area: "Porsche Extended Ownership Experience", dir: "wolfpack-porsche-weekend", slug: "porsche-weekend" },
   { area: "OGIAM", dir: null, createdOn: "2026-06-15" },
 ];
 
@@ -171,7 +174,7 @@ interface Publish { version: string; title: string; summary: string; released_on
 function collect(): Publish[] {
   const out: Publish[] = [];
   for (const p of PRODUCTS) {
-    const s = slug(p.area);
+    const s = p.slug ?? slug(p.area);
 
     // 1. Creation milestone.
     const created = p.dir ? creationDate(p.dir) : p.createdOn ?? null;
