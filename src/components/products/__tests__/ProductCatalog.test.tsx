@@ -87,3 +87,17 @@ test("renders an external link for a product with a url, and none for one withou
   // A product without a url shows no link.
   expect(screen.queryByTestId("product-link-beyond")).not.toBeInTheDocument();
 });
+
+test("groups products by lifecycle in the All view", () => {
+  render(<ProductCatalog products={PRODUCTS} />);
+  const live = screen.getByTestId("products-group-live");
+  const inFlight = screen.getByTestId("products-group-in_flight");
+  // Live group holds the live product; in-flight group holds in_flight + preview.
+  expect(within(live).getByTestId("product-card-auto")).toBeInTheDocument();
+  expect(within(inFlight).getByTestId("product-card-beyond")).toBeInTheDocument();
+  expect(within(inFlight).getByTestId("product-card-porsche")).toBeInTheDocument();
+  // Filtering collapses the grouping (single grid, no group sections).
+  fireEvent.click(screen.getByTestId("products-filter-live"));
+  expect(screen.queryByTestId("products-group-live")).not.toBeInTheDocument();
+  expect(screen.getByTestId("product-card-auto")).toBeInTheDocument();
+});
