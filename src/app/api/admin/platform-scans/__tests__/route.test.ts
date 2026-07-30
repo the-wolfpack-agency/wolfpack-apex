@@ -14,6 +14,7 @@ const mockScan = jest.fn();
 const mockScanSource = jest.fn();
 const mockReadFile = jest.fn();
 const mockDiscover = jest.fn();
+const mockCrawl = jest.fn();
 const mockMerge = jest.fn();
 const mockRecord = jest.fn();
 const mockList = jest.fn();
@@ -35,6 +36,7 @@ jest.mock("@/lib/platform-scan/static/discover-files", () => ({
 }));
 jest.mock("@/lib/platform-scan/discover", () => ({
   discoverRoutes: (...a: unknown[]) => mockDiscover(...a),
+  crawlRoutes: (...a: unknown[]) => mockCrawl(...a),
   mergeManifest: (...a: unknown[]) => mockMerge(...a),
 }));
 const mockIsCurated = jest.fn(() => true);
@@ -104,6 +106,7 @@ beforeEach(() => {
   mockReadFile.mockReturnValue(async () => null);
   mockDiscoverFiles.mockResolvedValue([]); // no repo-tree files by default -> seed
   mockDiscover.mockResolvedValue([]); // no sitemap routes by default
+  mockCrawl.mockResolvedValue([]); // no crawled routes by default
   mockLoadCreds.mockResolvedValue(null); // no connection -> unauthenticated by default
   mockEstablish.mockResolvedValue(null);
   mockEstablishOAuth.mockResolvedValue(null);
@@ -116,20 +119,27 @@ beforeEach(() => {
 });
 
 describe("POST /api/admin/platform-scans (http mode)", () => {
-  it("discovers + merges routes, runs the engine on the merged set, and persists (200)", async () => {
-    mockDiscover.mockResolvedValue([{ path: "/extra", journey: "Extra", auth: "public" }]);
-    mockMerge.mockReturnValue(MANIFEST.routes); // merged result the engine should receive
+  it("discovers (sitemap + crawl), merges under the seed, runs the engine on the merged set, and persists (200)", async () => {
+    const sitemap = [{ path: "/extra", journey: "Extra", auth: "public" as const }];
+    const crawled = [{ path: "/deep", journey: "Deep", auth: "public" as const }];
+    mockDiscover.mockResolvedValue(sitemap);
+    mockCrawl.mockResolvedValue(crawled);
+    const discovered = [...sitemap, ...crawled];
+    // merge #1 unions sitemap + crawl -> discovered; merge #2 unions seed + discovered -> routes.
+    mockMerge.mockReturnValueOnce(discovered).mockReturnValueOnce(MANIFEST.routes);
 
     const res = await post({ platform: "wolfpack-auto" });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, platform: "wolfpack-auto", mode: "http", scanId: "scan-1", findings: RESULT.findings });
 
     expect(mockDiscover).toHaveBeenCalledWith(MANIFEST.baseUrl);
-    expect(mockMerge).toHaveBeenCalledWith(MANIFEST.routes, [{ path: "/extra", journey: "Extra", auth: "public" }]);
+    expect(mockCrawl).toHaveBeenCalledWith(MANIFEST.baseUrl, expect.any(Object));
+    expect(mockMerge).toHaveBeenNthCalledWith(1, sitemap, crawled);
+    expect(mockMerge).toHaveBeenNthCalledWith(2, MANIFEST.routes, discovered);
     expect(mockScan).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "ws-1", platform: "wolfpack-auto", baseUrl: MANIFEST.baseUrl, routes: MANIFEST.routes, authenticated: false }));
     expect(mockRecord).toHaveBeenCalledWith({ workspaceId: "ws-1", actorId: "admin-1", actorRole: "admin", result: RESULT });
     expect(mockTrack).toHaveBeenCalledWith("platform.scan_started", "admin-1", "admin",
-      expect.objectContaining({ platform: "wolfpack-auto", mode: "http", discovered_count: 1 }));
+      expect.objectContaining({ platform: "wolfpack-auto", mode: "http", discovered_count: 2, sitemap_count: 1, crawled_count: 1 }));
   });
 
   it("defaults to the wolfpack-auto platform when body has none", async () => {

@@ -10,6 +10,8 @@ import {
   parseSitemap,
   discoverRoutes,
   mergeManifest,
+  extractLinks,
+  crawlRoutes,
 } from "../discover";
 import type { ScanRouteSpec } from "../types";
 
@@ -232,5 +234,98 @@ describe("mergeManifest", () => {
     ];
     const merged = mergeManifest(dupeSeed, dupeDiscovered);
     expect(merged.map((s) => s.path)).toEqual(["/", "/x"]);
+  });
+});
+
+describe("extractLinks", () => {
+  const origin = "https://x.test";
+  it("keeps same-origin links (relative + absolute), drops external / mailto / fragment / dupes", () => {
+    const html = `
+      <a href="/a">A</a>
+      <a href="/b?q=1#frag">B</a>
+      <a href="https://x.test/c">C</a>
+      <a href="https://other.test/x">ext</a>
+      <a href="mailto:a@b.com">mail</a>
+      <a href="#top">frag</a>
+      <a href='/a'>dup</a>`;
+    expect(extractLinks(html, "https://x.test/", origin)).toEqual(["/a", "/b?q=1", "/c"]);
+  });
+
+  it("returns [] for empty / non-string input", () => {
+    expect(extractLinks("", "https://x.test/", origin)).toEqual([]);
+    expect(extractLinks(undefined as unknown as string, "https://x.test/", origin)).toEqual([]);
+  });
+});
+
+describe("crawlRoutes", () => {
+  const NOWAIT = { minGapMs: 0, now: () => 0, sleep: async () => {} };
+  function res(body: string, ok = true, ct = "text/html"): Response {
+    return {
+      ok,
+      headers: { get: (h: string) => (h.toLowerCase() === "content-type" ? ct : null) },
+      text: async () => body,
+    } as unknown as Response;
+  }
+  const mockFetch = (pages: Record<string, string>) =>
+    (async (url: string) => res(pages[url] ?? "", Object.prototype.hasOwnProperty.call(pages, url))) as unknown as typeof fetch;
+
+  it("BFS-discovers the linked same-origin surface within caps", async () => {
+    const routes = await crawlRoutes("https://x.test", {
+      fetchImpl: mockFetch({
+        "https://x.test/": `<a href="/dash">d</a><a href="/about">a</a>`,
+        "https://x.test/dash": `<a href="/dash/settings">s</a><a href="https://ext.test/y">e</a>`,
+        "https://x.test/about": `<a href="/">home</a>`,
+        "https://x.test/dash/settings": `<a href="/dash">back</a>`,
+      }),
+      politeness: NOWAIT,
+    });
+    expect(routes.map((r) => r.path).sort()).toEqual(["/", "/about", "/dash", "/dash/settings"]);
+    // Auth inference is reused from the sitemap path: nothing under /admin -> public.
+    expect(routes.find((r) => r.path === "/dash")!.auth).toBe("public");
+  });
+
+  it("never follows external-origin links (no SSRF)", async () => {
+    const routes = await crawlRoutes("https://x.test", {
+      fetchImpl: mockFetch({ "https://x.test/": `<a href="https://evil.test/x">e</a><a href="/ok">ok</a>` }),
+      politeness: NOWAIT,
+    });
+    expect(routes.map((r) => r.path).sort()).toEqual(["/", "/ok"]);
+  });
+
+  it("respects maxPages", async () => {
+    const routes = await crawlRoutes("https://x.test", {
+      fetchImpl: mockFetch({ "https://x.test/": `<a href="/a">a</a><a href="/b">b</a><a href="/c">c</a>` }),
+      maxPages: 2,
+      politeness: NOWAIT,
+    });
+    expect(routes.length).toBe(2);
+  });
+
+  it("respects maxDepth (does not follow links past the depth limit)", async () => {
+    const routes = await crawlRoutes("https://x.test", {
+      fetchImpl: mockFetch({
+        "https://x.test/": `<a href="/a">a</a>`,
+        "https://x.test/a": `<a href="/b">b</a>`,
+        "https://x.test/b": `<a href="/c">c</a>`,
+      }),
+      maxDepth: 1,
+      politeness: NOWAIT,
+    });
+    // depth 0: "/", follow to "/a" (depth 1); at depth 1 we record but do not follow.
+    expect(routes.map((r) => r.path).sort()).toEqual(["/", "/a"]);
+  });
+
+  it("degrades: a fetch error records the route but follows no links", async () => {
+    const routes = await crawlRoutes("https://x.test", {
+      fetchImpl: (async () => {
+        throw new Error("net");
+      }) as unknown as typeof fetch,
+      politeness: NOWAIT,
+    });
+    expect(routes.map((r) => r.path)).toEqual(["/"]);
+  });
+
+  it("returns [] for a malformed base URL", async () => {
+    expect(await crawlRoutes("not a url", { politeness: NOWAIT })).toEqual([]);
   });
 });

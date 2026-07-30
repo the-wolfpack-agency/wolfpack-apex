@@ -5,7 +5,7 @@ import { trackEvent } from "@/lib/analytics";
 import { scanPlatform } from "@/lib/platform-scan/engine";
 import { scanSource, defaultReadFile } from "@/lib/platform-scan/static/scan";
 import { discoverRepoFiles } from "@/lib/platform-scan/static/discover-files";
-import { discoverRoutes, mergeManifest } from "@/lib/platform-scan/discover";
+import { discoverRoutes, crawlRoutes, mergeManifest } from "@/lib/platform-scan/discover";
 import {
   establishSession,
   establishOAuthPasswordSession,
@@ -227,13 +227,21 @@ export async function POST(req: NextRequest) {
       }
       throw e;
     }
-    const discovered = await discoverRoutes(scanBaseUrl);
+    // Sitemap first (cheap, authoritative when present), then a bounded, polite,
+    // same-origin link crawl that reaches pages the sitemap omits, including the
+    // AUTHENTICATED surface when a session exists (auth.headers). Both union
+    // under the curated seed, which still wins on a path conflict.
+    const sitemapRoutes = await discoverRoutes(scanBaseUrl);
+    const crawledRoutes = await crawlRoutes(scanBaseUrl, { headers: auth?.headers });
+    const discovered = mergeManifest(sitemapRoutes, crawledRoutes);
     const routes = mergeManifest(manifest.routes, discovered);
     trackEvent("platform.scan_started", user.id, user.role, {
       platform,
       mode,
       route_count: routes.length,
       discovered_count: discovered.length,
+      sitemap_count: sitemapRoutes.length,
+      crawled_count: crawledRoutes.length,
       authenticated: !!auth,
     });
     result = await scanPlatform({
