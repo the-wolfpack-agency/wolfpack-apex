@@ -68,3 +68,22 @@ test("filtering to In flight shows in_flight and preview products, not live", ()
   expect(screen.getByTestId("product-card-beyond")).toBeInTheDocument();
   expect(screen.getByTestId("product-card-porsche")).toBeInTheDocument();
 });
+
+test("renders an external link for a product with a url, and none for one without", () => {
+  render(
+    <ProductCatalog
+      products={[
+        make({ id: "auto", name: "Auto", url: "https://wolfpack-auto.vercel.app" }),
+        make({ id: "beyond", name: "Beyond" }),
+      ]}
+    />,
+  );
+  const link = screen.getByTestId("product-link-auto");
+  expect(link).toHaveAttribute("href", "https://wolfpack-auto.vercel.app");
+  expect(link).toHaveAttribute("target", "_blank");
+  expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
+  // The visible text is the bare domain (protocol stripped).
+  expect(link).toHaveTextContent("wolfpack-auto.vercel.app");
+  // A product without a url shows no link.
+  expect(screen.queryByTestId("product-link-beyond")).not.toBeInTheDocument();
+});

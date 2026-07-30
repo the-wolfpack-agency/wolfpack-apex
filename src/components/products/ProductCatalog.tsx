@@ -171,6 +171,26 @@ export default function ProductCatalog({ products }: { products: Product[] }) {
                 <div style={{ minWidth: 0 }}>
                   <h2 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 800, color: "var(--wp-text, #e8eaed)" }}>{p.name}</h2>
                   <div style={{ color: "var(--wp-gold, #e8b528)", fontSize: "0.9rem", fontWeight: 600, marginTop: "0.15rem" }}>{p.tagline}</div>
+                  {p.url ? (
+                    <a
+                      href={p.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-testid={`product-link-${p.id}`}
+                      aria-label={`Open ${p.name} (opens in a new tab)`}
+                      style={{
+                        display: "inline-block",
+                        marginTop: "0.4rem",
+                        color: "var(--wp-text-dim, #9aa0aa)",
+                        fontSize: "0.82rem",
+                        fontWeight: 600,
+                        textDecoration: "none",
+                        borderBottom: "1px solid var(--wp-dark-border, #23262e)",
+                      }}
+                    >
+                      {p.url.replace(/^https?:\/\//, "")} &#8599;
+                    </a>
+                  ) : null}
                 </div>
                 <StatusChip status={p.status} />
               </div>
