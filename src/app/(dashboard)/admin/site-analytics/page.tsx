@@ -140,32 +140,34 @@ export default function SiteAnalyticsPage() {
             )}
           </div>
 
-          {/* Top pages + countries */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "1rem" }}>
+          {/* Top pages + countries. auto-fit collapses to a single column on
+              narrow screens (phones) so long paths get the full width instead
+              of overflowing the card and colliding with the next column. */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "1rem" }}>
             <div style={card}>
               <div style={label}>Top pages</div>
-              <ul data-testid="top-pages" style={{ listStyle: "none", margin: "0.6rem 0 0", padding: 0, display: "grid", gap: "0.35rem" }}>
+              <ul data-testid="top-pages" style={{ listStyle: "none", margin: "0.6rem 0 0", padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: "0.35rem" }}>
                 {summary.byPage.length === 0 && (
                   <li style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>No data</li>
                 )}
                 {summary.byPage.map((p) => (
                   <li key={p.path} style={{ display: "flex", justifyContent: "space-between", gap: "0.6rem", fontSize: "0.85rem", color: "var(--wp-text, #eee)" }}>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.path}</span>
-                    <span style={{ color: "var(--wp-text-muted, #9ca3af)" }}>{p.count.toLocaleString()}</span>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.path}</span>
+                    <span style={{ flexShrink: 0, color: "var(--wp-text-muted, #9ca3af)" }}>{p.count.toLocaleString()}</span>
                   </li>
                 ))}
               </ul>
             </div>
             <div style={card}>
               <div style={label}>Top countries</div>
-              <ul data-testid="top-countries" style={{ listStyle: "none", margin: "0.6rem 0 0", padding: 0, display: "grid", gap: "0.35rem" }}>
+              <ul data-testid="top-countries" style={{ listStyle: "none", margin: "0.6rem 0 0", padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: "0.35rem" }}>
                 {summary.byCountry.length === 0 && (
                   <li style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>No data</li>
                 )}
                 {summary.byCountry.map((c) => (
                   <li key={c.country} style={{ display: "flex", justifyContent: "space-between", gap: "0.6rem", fontSize: "0.85rem", color: "var(--wp-text, #eee)" }}>
-                    <span>{c.country}</span>
-                    <span style={{ color: "var(--wp-text-muted, #9ca3af)" }}>{c.count.toLocaleString()}</span>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.country}</span>
+                    <span style={{ flexShrink: 0, color: "var(--wp-text-muted, #9ca3af)" }}>{c.count.toLocaleString()}</span>
                   </li>
                 ))}
               </ul>
