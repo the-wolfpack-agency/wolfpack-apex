@@ -1,24 +1,35 @@
 "use client";
 
 /**
- * ProductCatalog: renders the product catalog as a set of cards, one per
- * product, with a lightweight status filter (all / live / in flight). Each card
- * explains what the product is, the value it delivers, who it is for, and where
- * its parts could be reused. Status chips also give an at-a-glance read of what
- * is live versus in flight (the current-engagements view builds on the same
- * data).
+ * ProductCatalog: the /products catalog, organized for scanning.
+ *
+ * Cards are grouped by lifecycle (Live in production / In flight) with section
+ * headers and laid out in a responsive equal-height grid, so the page reads as
+ * an organized portfolio rather than one long column. A lightweight status
+ * filter and live/in-flight counts sit on top (also the current-engagements
+ * read). Built on the shared console kit (ConsoleGrid / SectionHeader /
+ * StatusPill) so it matches the rest of the admin surfaces.
  */
 
 import { useMemo, useState } from "react";
 import { STATUS_LABELS, type Product, type ProductStatus } from "@/lib/products";
+import {
+  ConsoleGrid,
+  SectionHeader,
+  StatusPill,
+  type SeverityTone,
+} from "@/components/console";
 
-const STATUS_COLOR: Record<ProductStatus, string> = {
-  live: "#22c55e",
-  in_flight: "#e8b528",
-  preview: "#38bdf8",
-  platform: "#9aa0aa",
-  client: "#a78bfa",
+/** Product lifecycle -> console severity tone (drives the StatusPill colour). */
+const STATUS_TONE: Record<ProductStatus, SeverityTone> = {
+  live: "success",
+  in_flight: "warning",
+  preview: "info",
+  platform: "neutral",
+  client: "info",
 };
+
+const isInFlight = (s: ProductStatus) => s === "in_flight" || s === "preview";
 
 type Filter = "all" | "live" | "in_flight";
 
@@ -31,52 +42,106 @@ const FILTERS: { key: Filter; label: string }[] = [
 function matches(p: Product, f: Filter): boolean {
   if (f === "all") return true;
   if (f === "live") return p.status === "live";
-  // "In flight" groups everything actively being built but not yet generally live.
-  return p.status === "in_flight" || p.status === "preview";
+  return isInFlight(p.status);
 }
 
-function StatusChip({ status }: { status: ProductStatus }) {
-  const color = STATUS_COLOR[status];
-  return (
-    <span
-      data-testid={`product-status-${status}`}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "0.4rem",
-        fontSize: "0.72rem",
-        fontWeight: 700,
-        textTransform: "uppercase",
-        letterSpacing: "0.04em",
-        color,
-        border: `1px solid ${color}`,
-        background: `${color}1a`,
-        borderRadius: 999,
-        padding: "0.15rem 0.6rem",
-        whiteSpace: "nowrap",
-      }}
-    >
-      <span style={{ width: 6, height: 6, borderRadius: 999, background: color }} aria-hidden="true" />
-      {STATUS_LABELS[status]}
-    </span>
-  );
-}
+/** Ordered groups for the "All" view: live first, then in flight, then the rest. */
+const GROUPS: { key: string; label: string; test: (s: ProductStatus) => boolean }[] = [
+  { key: "live", label: "Live in production", test: (s) => s === "live" },
+  { key: "in_flight", label: "In flight", test: (s) => isInFlight(s) },
+  { key: "other", label: "Other", test: (s) => s !== "live" && !isInFlight(s) },
+];
 
 function Bullets({ title, items }: { title: string; items: string[] }) {
   if (!items.length) return null;
   return (
-    <div style={{ marginTop: "0.9rem" }}>
-      <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--wp-text-dim, #9aa0aa)", marginBottom: "0.4rem" }}>
+    <div>
+      <div
+        style={{
+          fontSize: "0.68rem",
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          color: "var(--wp-text-dim, #9aa0aa)",
+          marginBottom: "0.35rem",
+        }}
+      >
         {title}
       </div>
-      <ul style={{ margin: 0, paddingLeft: "1.1rem", display: "grid", gap: "0.35rem" }}>
+      <ul style={{ margin: 0, paddingLeft: "1.05rem", display: "grid", gap: "0.3rem" }}>
         {items.map((it, i) => (
-          <li key={i} style={{ color: "var(--wp-text, #e8eaed)", fontSize: "0.9rem", lineHeight: 1.5 }}>
+          <li key={i} style={{ color: "var(--wp-text, #e8eaed)", fontSize: "0.86rem", lineHeight: 1.5 }}>
             {it}
           </li>
         ))}
       </ul>
     </div>
+  );
+}
+
+function ProductCard({ p }: { p: Product }) {
+  return (
+    <article
+      id={p.id}
+      data-testid={`product-card-${p.id}`}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.75rem",
+        height: "100%",
+        background: "var(--wp-card, #16181d)",
+        border: "1px solid var(--wp-dark-border, #23262e)",
+        borderRadius: 14,
+        padding: "1.1rem 1.2rem",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.6rem" }}>
+        <div style={{ minWidth: 0 }}>
+          <h2 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 800, color: "var(--wp-text, #e8eaed)" }}>{p.name}</h2>
+          <div style={{ color: "var(--wp-gold, #e8b528)", fontSize: "0.85rem", fontWeight: 600, marginTop: "0.15rem" }}>
+            {p.tagline}
+          </div>
+        </div>
+        <StatusPill status={p.status} label={STATUS_LABELS[p.status]} tone={STATUS_TONE[p.status]} />
+      </div>
+
+      {p.url ? (
+        <a
+          href={p.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid={`product-link-${p.id}`}
+          aria-label={`Open ${p.name} (opens in a new tab)`}
+          style={{
+            color: "var(--wp-text-dim, #9aa0aa)",
+            fontSize: "0.8rem",
+            fontWeight: 600,
+            textDecoration: "none",
+            borderBottom: "1px solid var(--wp-dark-border, #23262e)",
+            alignSelf: "flex-start",
+          }}
+        >
+          {p.url.replace(/^https?:\/\//, "")} &#8599;
+        </a>
+      ) : null}
+
+      <p style={{ margin: 0, color: "var(--wp-text, #e8eaed)", fontSize: "0.9rem", lineHeight: 1.55 }}>{p.summary}</p>
+
+      <Bullets title="What it delivers" items={p.highlights} />
+      <Bullets title="Where its parts could be reused" items={p.potentialUses} />
+
+      <div
+        style={{
+          marginTop: "auto",
+          paddingTop: "0.7rem",
+          borderTop: "1px solid var(--wp-dark-border, #23262e)",
+          fontSize: "0.8rem",
+          color: "var(--wp-text-dim, #9aa0aa)",
+        }}
+      >
+        <strong style={{ color: "var(--wp-text, #e8eaed)" }}>Who it is for:</strong> {p.audience}
+      </div>
+    </article>
   );
 }
 
@@ -89,7 +154,7 @@ export default function ProductCatalog({ products }: { products: Product[] }) {
     () => ({
       total: products.length,
       live: products.filter((p) => p.status === "live").length,
-      inFlight: products.filter((p) => p.status === "in_flight" || p.status === "preview").length,
+      inFlight: products.filter((p) => isInFlight(p.status)).length,
     }),
     [products],
   );
@@ -113,15 +178,18 @@ export default function ProductCatalog({ products }: { products: Product[] }) {
 
   return (
     <div data-testid="products-catalog">
-      {/* At-a-glance counts, doubles as a quick engagements read. */}
-      <div data-testid="products-counts" style={{ display: "flex", gap: "1.2rem", marginBottom: "1rem", color: "var(--wp-text-dim, #9aa0aa)", fontSize: "0.85rem" }}>
+      {/* At-a-glance counts, doubles as the engagements read. */}
+      <div
+        data-testid="products-counts"
+        style={{ display: "flex", gap: "1.2rem", marginBottom: "1rem", color: "var(--wp-text-dim, #9aa0aa)", fontSize: "0.85rem" }}
+      >
         <span><strong style={{ color: "var(--wp-text, #e8eaed)" }}>{counts.total}</strong> products</span>
-        <span><strong style={{ color: STATUS_COLOR.live }}>{counts.live}</strong> live</span>
-        <span><strong style={{ color: STATUS_COLOR.in_flight }}>{counts.inFlight}</strong> in flight</span>
+        <span><strong style={{ color: "var(--wp-success, #22c55e)" }}>{counts.live}</strong> live</span>
+        <span><strong style={{ color: "var(--wp-warning, #f97316)" }}>{counts.inFlight}</strong> in flight</span>
       </div>
 
       {/* Status filter. */}
-      <div role="tablist" aria-label="Filter products by status" style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1.2rem" }}>
+      <div role="tablist" aria-label="Filter products by status" style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1.4rem" }}>
         {FILTERS.map((f) => {
           const active = filter === f.key;
           return (
@@ -153,59 +221,31 @@ export default function ProductCatalog({ products }: { products: Product[] }) {
         <div data-testid="products-filter-empty" style={{ color: "var(--wp-text-dim, #9aa0aa)", padding: "1.5rem 0" }}>
           No products in this status.
         </div>
-      ) : (
-        <div style={{ display: "grid", gap: "1rem" }}>
-          {visible.map((p) => (
-            <article
-              key={p.id}
-              id={p.id}
-              data-testid={`product-card-${p.id}`}
-              style={{
-                background: "var(--wp-card, #16181d)",
-                border: "1px solid var(--wp-dark-border, #23262e)",
-                borderRadius: 14,
-                padding: "1.2rem 1.3rem",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.75rem", flexWrap: "wrap" }}>
-                <div style={{ minWidth: 0 }}>
-                  <h2 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 800, color: "var(--wp-text, #e8eaed)" }}>{p.name}</h2>
-                  <div style={{ color: "var(--wp-gold, #e8b528)", fontSize: "0.9rem", fontWeight: 600, marginTop: "0.15rem" }}>{p.tagline}</div>
-                  {p.url ? (
-                    <a
-                      href={p.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      data-testid={`product-link-${p.id}`}
-                      aria-label={`Open ${p.name} (opens in a new tab)`}
-                      style={{
-                        display: "inline-block",
-                        marginTop: "0.4rem",
-                        color: "var(--wp-text-dim, #9aa0aa)",
-                        fontSize: "0.82rem",
-                        fontWeight: 600,
-                        textDecoration: "none",
-                        borderBottom: "1px solid var(--wp-dark-border, #23262e)",
-                      }}
-                    >
-                      {p.url.replace(/^https?:\/\//, "")} &#8599;
-                    </a>
-                  ) : null}
-                </div>
-                <StatusChip status={p.status} />
-              </div>
-
-              <p style={{ margin: "0.8rem 0 0", color: "var(--wp-text, #e8eaed)", fontSize: "0.95rem", lineHeight: 1.6 }}>{p.summary}</p>
-
-              <Bullets title="What it delivers" items={p.highlights} />
-              <Bullets title="Where its parts could be reused" items={p.potentialUses} />
-
-              <div style={{ marginTop: "0.9rem", fontSize: "0.85rem", color: "var(--wp-text-dim, #9aa0aa)" }}>
-                <strong style={{ color: "var(--wp-text, #e8eaed)" }}>Who it is for:</strong> {p.audience}
-              </div>
-            </article>
-          ))}
+      ) : filter === "all" ? (
+        // Grouped by lifecycle for organization.
+        <div style={{ display: "grid", gap: "1.8rem" }}>
+          {GROUPS.map((g) => {
+            const inGroup = visible.filter((p) => g.test(p.status));
+            if (inGroup.length === 0) return null;
+            return (
+              <section key={g.key} data-testid={`products-group-${g.key}`}>
+                <SectionHeader title={g.label} subtitle={`${inGroup.length} ${inGroup.length === 1 ? "product" : "products"}`} />
+                <ConsoleGrid minColWidth={340} gap={16}>
+                  {inGroup.map((p) => (
+                    <ProductCard key={p.id} p={p} />
+                  ))}
+                </ConsoleGrid>
+              </section>
+            );
+          })}
         </div>
+      ) : (
+        // Single filtered grid, no group headers.
+        <ConsoleGrid minColWidth={340} gap={16}>
+          {visible.map((p) => (
+            <ProductCard key={p.id} p={p} />
+          ))}
+        </ConsoleGrid>
       )}
     </div>
   );
