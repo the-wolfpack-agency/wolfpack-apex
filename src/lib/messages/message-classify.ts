@@ -23,7 +23,7 @@ import type { ChatMessageAttachment, ChatMessageEventDetail } from "@/lib/ms-gra
  */
 export interface RenderableMessage {
   id?: string;
-  from?: { displayName?: string };
+  from?: { displayName?: string; userId?: string; email?: string };
   bodyText?: string;
   body?: { content?: string; contentType?: string };
   messageType?: string;
@@ -118,4 +118,33 @@ export function isNotificationWorthy(message: RenderableMessage): boolean {
   if (isAttachmentOnly(message)) return false;
   if (isNoiseMessage(message)) return false;
   return true;
+}
+
+/** The current user's Graph identity, used to recognize self-authored messages. */
+export interface SelfIdentity {
+  /** Graph user id (aad object id). The stable match. */
+  userId?: string | null;
+  /** mail or userPrincipalName. Fallback when a payload lacks the user id. */
+  email?: string | null;
+}
+
+/**
+ * True when `message` was sent by the current user. A message you send is not a
+ * "new message" notification for you, so the unread badge must exclude it, even
+ * though the timeline still renders your own messages as your bubbles (this
+ * predicate gates the notification/badge path only, never timeline rendering).
+ *
+ * Matches on Graph user id first (stable across display-name changes), falling
+ * back to a case-insensitive email match for older payloads that omit the id.
+ * With no self identity resolved, returns false (fail open: better to show a
+ * possibly-self notification than to silently swallow a real one).
+ */
+export function isFromSelf(message: RenderableMessage, self: SelfIdentity): boolean {
+  const fromId = message.from?.userId;
+  if (self.userId && fromId && fromId === self.userId) return true;
+  const fromEmail = message.from?.email;
+  if (self.email && fromEmail && fromEmail.toLowerCase() === self.email.toLowerCase()) {
+    return true;
+  }
+  return false;
 }

@@ -27,8 +27,10 @@ jest.mock("@/lib/microsoft-graph", () => ({
 }));
 
 const mockListChatsResult = jest.fn();
+const mockGetGraphMe = jest.fn();
 jest.mock("@/lib/ms-graph-chats", () => ({
   listChatsResult: (...a: any[]) => mockListChatsResult(...a),
+  getGraphMe: (...a: any[]) => mockGetGraphMe(...a),
 }));
 
 const mockTrackEvent = jest.fn();
@@ -46,6 +48,15 @@ const USER = { id: "u1", email: "a@x.com", role: "dev" };
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // Default self identity so getGraphMe resolves for the counting paths. The id
+  // and email are chosen not to collide with the other-sender fixtures, which
+  // carry no userId and an "x@x" email, so they still count.
+  mockGetGraphMe.mockResolvedValue({
+    id: "self-id",
+    mail: "self@x.com",
+    userPrincipalName: "self@x.com",
+    displayName: "Self",
+  });
 });
 
 describe("GET /api/ms/chats/unread-count", () => {
@@ -153,6 +164,60 @@ describe("GET /api/ms/chats/unread-count", () => {
       "dev",
       expect.objectContaining({ count: 2, total_chats: 4, has_since: true }),
     );
+  });
+
+  it("does NOT count a chat whose latest message the current user sent (self)", async () => {
+    mockGetUser.mockReturnValue(USER);
+    mockGetValidToken.mockResolvedValue({ accessToken: "t", userEmail: "self@x.com" });
+    const preview = (text: string, from: any) => ({
+      id: "m",
+      body: { content: text, contentType: "text" },
+      bodyText: text,
+      from,
+      createdDateTime: "2026-04-23T10:00:00Z",
+    });
+    mockListChatsResult.mockResolvedValue({
+      ok: true,
+      chats: [
+        // The user's own outbound message: same Graph id as self -> excluded.
+        { id: "mine", topic: "", chatType: "oneOnOne", lastUpdatedDateTime: "2026-04-23T10:00:00Z", members: [], lastMessagePreview: preview("I sent this", { displayName: "Me", email: "self@x.com", userId: "self-id" }) },
+        // A message from the other participant -> counts.
+        { id: "theirs", topic: "", chatType: "oneOnOne", lastUpdatedDateTime: "2026-04-23T11:00:00Z", members: [], lastMessagePreview: preview("they replied", { displayName: "Them", email: "them@x.com", userId: "other-id" }) },
+      ],
+    });
+    const since = "2026-04-22T00:00:00Z";
+    const { GET } = await import("@/app/api/ms/chats/unread-count/route");
+    const res = await GET(
+      mkReq(`/api/ms/chats/unread-count?since=${encodeURIComponent(since)}`, "Bearer t"),
+    );
+    const body = await res.json();
+    expect(body.count).toBe(1);
+    expect(mockGetGraphMe).toHaveBeenCalled();
+  });
+
+  it("matches self by email when the sender's Graph user id is absent (case-insensitive)", async () => {
+    mockGetUser.mockReturnValue(USER);
+    mockGetValidToken.mockResolvedValue({ accessToken: "t", userEmail: "self@x.com" });
+    const preview = (text: string, from: any) => ({
+      id: "m",
+      body: { content: text, contentType: "text" },
+      bodyText: text,
+      from,
+      createdDateTime: "2026-04-23T10:00:00Z",
+    });
+    mockListChatsResult.mockResolvedValue({
+      ok: true,
+      chats: [
+        { id: "mine", topic: "", chatType: "oneOnOne", lastUpdatedDateTime: "2026-04-23T10:00:00Z", members: [], lastMessagePreview: preview("mine, no id", { displayName: "Me", email: "SELF@x.com" }) },
+      ],
+    });
+    const since = "2026-04-22T00:00:00Z";
+    const { GET } = await import("@/app/api/ms/chats/unread-count/route");
+    const res = await GET(
+      mkReq(`/api/ms/chats/unread-count?since=${encodeURIComponent(since)}`, "Bearer t"),
+    );
+    const body = await res.json();
+    expect(body.count).toBe(0);
   });
 
   it("does NOT count chats whose lastMessagePreview has no body text (system / meeting events)", async () => {

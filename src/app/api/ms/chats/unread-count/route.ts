@@ -33,8 +33,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { getValidToken } from "@/lib/microsoft-graph";
-import { listChatsResult } from "@/lib/ms-graph-chats";
-import { isNotificationWorthy } from "@/lib/messages/message-classify";
+import { listChatsResult, getGraphMe } from "@/lib/ms-graph-chats";
+import { isNotificationWorthy, isFromSelf } from "@/lib/messages/message-classify";
 import { trackEvent } from "@/lib/analytics";
 
 /**
@@ -92,17 +92,33 @@ export async function GET(req: NextRequest) {
     // is the shared predicate the timeline renderer uses, so the count and the
     // timeline can never disagree. Bug fix 2026-06-19 (blank meeting-invite
     // notification); supersedes the inline messageType/body/deleted checks.
+    //
+    // A message the CURRENT USER sent is not a "new message" for them, so it
+    // must not raise the badge (reported 2026-07: the badge flashed for the
+    // user's own outbound Teams messages). We resolve the caller's Graph
+    // identity and drop chats whose latest message is self-authored. The /me
+    // lookup runs only when at least one chat is otherwise worthy, so the 60s
+    // badge poll stays a single Graph call in the common (nothing-new) case.
     let count = 0;
     if (since !== null) {
-      for (const chat of result.chats) {
+      const candidates = result.chats.filter((chat) => {
         const ts = chat.lastUpdatedDateTime
           ? Date.parse(chat.lastUpdatedDateTime)
           : NaN;
-        if (Number.isNaN(ts) || ts <= since) continue;
+        if (Number.isNaN(ts) || ts <= since) return false;
         const preview = chat.lastMessagePreview;
-        if (!preview) continue;
-        if (!isNotificationWorthy(preview)) continue;
-        count += 1;
+        return !!preview && isNotificationWorthy(preview);
+      });
+
+      if (candidates.length > 0) {
+        const me = await getGraphMe(token.accessToken);
+        const self = {
+          userId: me?.id ?? null,
+          email: me?.mail ?? me?.userPrincipalName ?? token.userEmail ?? null,
+        };
+        count = candidates.filter(
+          (chat) => !isFromSelf(chat.lastMessagePreview!, self),
+        ).length;
       }
     }
 

@@ -11,6 +11,7 @@ import {
   shouldRenderAsPill,
   isNoiseMessage,
   isNotificationWorthy,
+  isFromSelf,
   type RenderableMessage,
 } from "@/lib/messages/message-classify";
 
@@ -91,5 +92,35 @@ describe("shouldRenderAsPill / isAttachmentOnly (re-exported, unchanged semantic
   it("a normal text message is neither a pill nor noise", () => {
     expect(shouldRenderAsPill(text("hello"))).toBe(false);
     expect(isNoiseMessage(text("hello"))).toBe(false);
+  });
+});
+
+describe("isFromSelf", () => {
+  const msg = (from: RenderableMessage["from"]): RenderableMessage => ({
+    from,
+    body: { content: "hi" },
+    bodyText: "hi",
+  });
+
+  it("true when the Graph user id matches self", () => {
+    expect(isFromSelf(msg({ userId: "u1" }), { userId: "u1" })).toBe(true);
+  });
+
+  it("true when the email matches self (case-insensitive) and the id is absent", () => {
+    expect(isFromSelf(msg({ email: "Me@X.com" }), { email: "me@x.com" })).toBe(true);
+  });
+
+  it("false for a different sender", () => {
+    expect(
+      isFromSelf(msg({ userId: "other", email: "o@x.com" }), { userId: "u1", email: "me@x.com" }),
+    ).toBe(false);
+  });
+
+  it("false (fail open) when no self identity is resolved", () => {
+    expect(isFromSelf(msg({ userId: "u1", email: "me@x.com" }), {})).toBe(false);
+  });
+
+  it("does not match on id when only self email is known and ids differ", () => {
+    expect(isFromSelf(msg({ userId: "other" }), { email: "me@x.com" })).toBe(false);
   });
 });
