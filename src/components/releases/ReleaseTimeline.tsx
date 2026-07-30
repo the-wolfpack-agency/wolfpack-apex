@@ -379,18 +379,19 @@ export default function ReleaseTimeline({ releases }: { releases: Release[] }) {
               <li
                 key={m.id}
                 style={{
-                  display: "flex",
-                  gap: "1rem",
-                  alignItems: "baseline",
-                  padding: "0.65rem 0",
+                  padding: "0.7rem 0",
                   borderBottom: "1px solid var(--wp-dark-border, #23262e)",
                 }}
               >
-                <span style={{ width: 108, flexShrink: 0, color: "var(--wp-gold, #e8b528)", fontWeight: 700, fontSize: "0.85rem" }}>
+                {/* Date on its own line, then name + "created" inline, so a long
+                    product name never fights a fixed date column on a phone. */}
+                <div style={{ color: "var(--wp-gold, #e8b528)", fontWeight: 700, fontSize: "0.78rem", marginBottom: "0.15rem" }}>
                   {d.dayLabel}, {d.year}
-                </span>
-                <span style={{ fontWeight: 700, color: "var(--wp-text, #e8eaed)" }}>{name}</span>
-                <span style={{ color: "var(--wp-text-dim, #9aa0aa)", fontSize: "0.85rem" }}>created</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 700, color: "var(--wp-text, #e8eaed)", fontSize: "0.98rem" }}>{name}</span>
+                  <span style={{ color: "var(--wp-text-dim, #9aa0aa)", fontSize: "0.78rem" }}>created</span>
+                </div>
               </li>
             );
           })}
