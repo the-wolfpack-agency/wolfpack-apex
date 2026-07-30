@@ -227,3 +227,130 @@ export function mergeManifest(
 
   return merged;
 }
+
+/** Breadth ceiling for a crawl (pages visited). Capped by MAX_ROUTES too. */
+const MAX_CRAWL_PAGES = 60;
+/** How many link-hops deep to follow from the base. */
+const DEFAULT_CRAWL_DEPTH = 3;
+
+/**
+ * PURE. Extract same-origin link paths from an HTML page.
+ *
+ * Finds `<a href>` targets, resolves each against `pageUrl`, keeps only those on
+ * `origin` (a crawl never wanders to a third-party host, so there is no SSRF
+ * surface), drops the fragment, and returns unique `path + search` strings.
+ * mailto:, tel:, javascript: and bare "#" anchors are ignored.
+ */
+export function extractLinks(html: string, pageUrl: string, origin: string): string[] {
+  if (!html || typeof html !== "string") return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const hrefRe = /<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi;
+  let m: RegExpExecArray | null;
+  while ((m = hrefRe.exec(html)) !== null) {
+    const raw = (m[1] ?? m[2] ?? m[3] ?? "").trim();
+    if (!raw || /^(mailto:|tel:|javascript:|#)/i.test(raw)) continue;
+    let url: URL;
+    try {
+      url = new URL(raw, pageUrl);
+    } catch {
+      continue;
+    }
+    if (url.origin !== origin) continue; // same-origin only (no SSRF)
+    if (url.protocol !== "http:" && url.protocol !== "https:") continue;
+    const path = `${url.pathname}${url.search}`;
+    if (!path.startsWith("/") || seen.has(path)) continue;
+    seen.add(path);
+    out.push(path);
+  }
+  return out;
+}
+
+export interface CrawlOptions {
+  fetchImpl?: typeof fetch;
+  politeness?: PolitenessOptions;
+  /** Max pages to visit. Capped at MAX_ROUTES regardless. */
+  maxPages?: number;
+  /** Max link-hops from the base. */
+  maxDepth?: number;
+  /** Extra request headers, e.g. a session Cookie for an authenticated crawl. */
+  headers?: Record<string, string>;
+}
+
+/**
+ * Link-following, same-origin, bounded, polite crawl starting at `baseUrl`.
+ * Discovers the reachable route graph a sitemap may omit, especially the
+ * AUTHENTICATED surface when `headers` carries a session cookie, which is the
+ * whole point of "map the full system" for an assessment.
+ *
+ * Safe by construction: only same-origin links are followed (no SSRF to other
+ * hosts), breadth + depth are capped, each fetch has an 8s timeout and goes
+ * through the shared politeness layer (429/503 back-off), and any error yields
+ * whatever was discovered so far, it never throws. The base URL is
+ * ownership-verified by the caller before a crawl runs.
+ */
+export async function crawlRoutes(baseUrl: string, opts: CrawlOptions = {}): Promise<ScanRouteSpec[]> {
+  let origin: string;
+  let startPath: string;
+  try {
+    const u = new URL(baseUrl);
+    origin = u.origin;
+    const path = `${u.pathname}${u.search}`;
+    startPath = path.startsWith("/") ? path : "/";
+  } catch {
+    return [];
+  }
+
+  const maxPages = Math.min(opts.maxPages ?? MAX_CRAWL_PAGES, MAX_ROUTES);
+  const maxDepth = opts.maxDepth ?? DEFAULT_CRAWL_DEPTH;
+
+  const p = opts.politeness ?? {};
+  const fetcher = new PoliteFetcher({
+    fetchImpl: opts.fetchImpl ?? fetch,
+    perHostConcurrency: p.perHostConcurrency,
+    minGapMs: p.minGapMs,
+    maxRetries: p.maxRetries,
+    baseBackoffMs: p.baseBackoffMs,
+    maxBackoffMs: p.maxBackoffMs,
+    now: p.now,
+    sleep: p.sleep,
+    onThrottle: p.onThrottle,
+  });
+
+  const seen = new Set<string>([startPath]);
+  const frontier: { path: string; depth: number }[] = [{ path: startPath, depth: 0 }];
+  const routes: ScanRouteSpec[] = [];
+
+  while (frontier.length > 0 && routes.length < maxPages) {
+    const { path, depth } = frontier.shift()!;
+    routes.push({ path, journey: journeyFromPath(path), auth: authFromPath(path) });
+    if (depth >= maxDepth) continue;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DISCOVER_TIMEOUT_MS);
+    let html = "";
+    try {
+      const res = await fetcher.fetch(`${origin}${path}`, {
+        signal: controller.signal,
+        redirect: "follow",
+        headers: opts.headers,
+      });
+      if (res.ok && (res.headers.get("content-type") ?? "").includes("text/html")) {
+        html = await res.text();
+      }
+    } catch {
+      html = ""; // network/timeout: record the route, follow no links
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (!html) continue;
+    for (const link of extractLinks(html, `${origin}${path}`, origin)) {
+      if (seen.has(link) || seen.size >= MAX_ROUTES) continue;
+      seen.add(link);
+      frontier.push({ path: link, depth: depth + 1 });
+    }
+  }
+
+  return routes;
+}
