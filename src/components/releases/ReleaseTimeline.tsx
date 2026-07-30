@@ -321,7 +321,18 @@ export default function ReleaseTimeline({ releases }: { releases: Release[] }) {
               padding: "0.9rem 1rem",
             }}
           >
-            <div style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--wp-gold, #e8b528)", lineHeight: 1.1 }}>
+            <div
+              style={{
+                // Responsive so long values (e.g. ~1,826,191) scale down to fit
+                // a narrow mobile card instead of overflowing its border.
+                fontSize: "clamp(1rem, 4.5vw, 1.45rem)",
+                fontWeight: 800,
+                color: "var(--wp-gold, #e8b528)",
+                lineHeight: 1.15,
+                letterSpacing: "-0.01em",
+                overflowWrap: "anywhere",
+              }}
+            >
               {s.value}
             </div>
             <div style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--wp-text-dim, #9aa0aa)", marginTop: "0.2rem" }}>
