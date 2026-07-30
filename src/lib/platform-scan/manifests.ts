@@ -90,7 +90,57 @@ const WOLFPACK_BEYOND_API: ApiEndpointSpec[] = [
   { path: "/api/skus", method: "POST", journey: "SKU ingest", requiresAuth: true, invalidBody: {}, expectRejectStatuses: [400, 422] },
 ];
 
+// First-party product platforms. These are systems Wolfpack operates, so they
+// are curated (ownership-exempt) scan targets. Routes are a conservative,
+// verified seed (the honest first step); the run route unions real sitemap
+// routes on top. Base URLs match the /products catalog (src/lib/products.ts);
+// first-party-coverage.test.ts asserts the two never drift, so adding a product
+// URL there forces a scan target here.
+const WOLFPACK_INSTINCT: ScanRouteSpec[] = [
+  { path: "/", journey: "Landing", auth: "public" },
+  { path: "/login", journey: "Sign-in", auth: "public" },
+  { path: "/security-posture", journey: "Security posture", auth: "public" },
+];
+// Instinct gates access client-side (the dashboard shell returns 200 to an
+// unauthenticated HTTP GET and redirects in the browser), so the meaningful
+// black-box auth boundary is the API: these must 401 without a session.
+const WOLFPACK_INSTINCT_API: ApiEndpointSpec[] = [
+  { path: "/api/products", method: "GET", journey: "Product catalog (read)", requiresAuth: true },
+  { path: "/api/releases", method: "GET", journey: "Releases (read)", requiresAuth: true },
+];
+// Porsche Weekend gates /admin server-side (unauthenticated /admin 307s to
+// /admin/login), so the redirect is a genuine auth finding when it regresses.
+const PORSCHE_WEEKEND: ScanRouteSpec[] = [
+  { path: "/admin/login", journey: "Admin sign-in", auth: "public" },
+  { path: "/login", journey: "Sign-in", auth: "public" },
+  { path: "/admin", journey: "Admin dashboard", auth: "required" },
+];
+// Marketing / single-surface sites: seed with the home route only and let
+// sitemap discovery union the rest, so we never assert a route that 404s.
+const HOME_ONLY: ScanRouteSpec[] = [{ path: "/", journey: "Home", auth: "public" }];
+
 export const SCAN_MANIFESTS: Record<string, ScanManifest> = {
+  "wolfpack-instinct": {
+    baseUrl: "https://wolfpack-instinct.vercel.app",
+    routes: WOLFPACK_INSTINCT,
+    apiEndpoints: WOLFPACK_INSTINCT_API,
+  },
+  "ogiam": {
+    baseUrl: "https://ogiam.com",
+    routes: HOME_ONLY,
+  },
+  "porsche-weekend": {
+    baseUrl: "https://weekendwithporsche.com",
+    routes: PORSCHE_WEEKEND,
+  },
+  "wolfpack-lms": {
+    baseUrl: "https://wolfpack-lms.vercel.app",
+    routes: HOME_ONLY,
+  },
+  "aidan-mulready": {
+    baseUrl: "https://aidanmulready.com",
+    routes: HOME_ONLY,
+  },
   "wolfpack-beyond": {
     baseUrl: "https://beyond-sku.vercel.app",
     routes: WOLFPACK_BEYOND,
