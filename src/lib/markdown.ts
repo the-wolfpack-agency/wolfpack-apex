@@ -2,14 +2,17 @@
  * markdown.ts: a small, dependency-light Markdown -> sanitized HTML renderer.
  *
  * Shared by the Engineering wiki (/engineering) and available to any other
- * surface that stores plain Markdown. Output is ALWAYS run through DOMPurify, so
- * page content (which an operator can author) can never inject script/style/
- * event-handler HTML. Supports the subset the wiki needs: headings, bold/italic,
- * inline code, fenced code blocks, ordered/unordered lists, tables, blockquotes,
- * links, and paragraphs. Not a full CommonMark parser; deliberately simple.
+ * surface that stores plain Markdown. Output is safe by CONSTRUCTION: every
+ * piece of text is HTML-escaped by esc() before it is placed in the output, and
+ * only a fixed whitelist of tags is ever emitted (with anchor hrefs restricted
+ * to http(s)/relative by inline()). No caller-supplied HTML is passed through
+ * verbatim, so there is no need for a DOM sanitizer. This deliberately avoids
+ * pulling jsdom (via isomorphic-dompurify) into the serverless runtime, which
+ * fails to load in the Vercel bundle. Supports the subset the wiki needs:
+ * headings, bold/italic, inline code, fenced code blocks, ordered/unordered
+ * lists, tables, blockquotes, links, and paragraphs. Not a full CommonMark
+ * parser; deliberately simple.
  */
-
-import { sanitizeHtmlStrict } from "@/lib/html-sanitize";
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -122,12 +125,9 @@ export function renderMarkdown(md: string): string {
     out.push(`<p>${inline(esc(para.join(" ")))}</p>`);
   }
 
-  // Reuse the shared, lazily-loaded sanitizer (html-sanitize.ts) rather than
-  // importing DOMPurify at module top: a top-level import pulls jsdom's ESM-only
-  // sub-deps into build-time page-data collection and fails the build.
-  return sanitizeHtmlStrict(
-    out.join("\n"),
-    ["h1", "h2", "h3", "h4", "h5", "p", "strong", "em", "code", "pre", "ul", "ol", "li", "a", "blockquote", "table", "thead", "tbody", "tr", "th", "td", "br"],
-    ["href", "target", "rel"],
-  );
+  // No DOM sanitizer pass: the HTML above is built entirely from esc()'d text
+  // plus a fixed set of tags this function emits, so it cannot contain injected
+  // script/style/event-handler markup. See the module header for the safety
+  // model. This keeps jsdom out of the serverless runtime.
+  return out.join("\n");
 }
