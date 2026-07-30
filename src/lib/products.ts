@@ -84,7 +84,7 @@ export const PRODUCTS: Product[] = [
       "The same engine adapts to other high-consideration retail: marine, RV, powersports, equipment, and luxury goods",
       "Individual modules stand on their own: the lead-scoring and follow-up engine, the accounting and payroll ledger, and the feed-ingest layer that normalizes messy data from any source",
     ],
-    status: "live",
+    status: "in_flight",
   },
   {
     id: "agenticqa",
@@ -122,7 +122,7 @@ export const PRODUCTS: Product[] = [
       "A drop-in agent workforce for any CRM or business system",
       "The deterministic decision gate, cost router, and rulebook can govern any other agent deployment",
     ],
-    status: "in_flight",
+    status: "live",
   },
   {
     id: "beyond",
@@ -160,7 +160,7 @@ export const PRODUCTS: Product[] = [
       "The experience-orchestration engine adapts to any experiential marketing: hospitality, luxury, real-estate previews, and resort packages",
       "It is the foundation the Porsche program is built on",
     ],
-    status: "platform",
+    status: "in_flight",
   },
   {
     id: "porsche-weekend",
@@ -179,7 +179,7 @@ export const PRODUCTS: Product[] = [
       "A template for any OEM or brand-specific experiential program",
       "The dealer Experience OS can serve other franchise or dealer networks that run programs locally",
     ],
-    status: "preview",
+    status: "live",
   },
   {
     id: "lms",
@@ -217,7 +217,7 @@ export const PRODUCTS: Product[] = [
       "The template substrate spins up any new client site with the same safety rails in place",
       "Individual pieces (canary deploys with auto-rollback, content gating, the auto-generated docs) can be reused across any project",
     ],
-    status: "client",
+    status: "live",
   },
 ];
 
