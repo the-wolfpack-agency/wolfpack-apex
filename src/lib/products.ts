@@ -151,25 +151,6 @@ export const PRODUCTS: Product[] = [
     status: "in_flight",
   },
   {
-    id: "weekend",
-    name: "Weekend",
-    area: "Weekend",
-    tagline: "Branded experiences that sell the product",
-    summary:
-      "Weekend turns a test drive into a full branded experience for automakers: an extended drive paired with a hotel stay, a scavenger hunt, and gift cards. It is a standalone, multi-tenant platform any automaker can run under its own name.",
-    highlights: [
-      "Packages a test drive into a memorable multi-day brand experience",
-      "Multi-tenant, so any automaker can run it as 'A Weekend With [their brand]'",
-      "Orchestrates the whole journey: the drive, the stay, activities, and rewards",
-    ],
-    audience: "Automaker brands running experiential marketing",
-    potentialUses: [
-      "The experience-orchestration engine adapts to any experiential marketing: hospitality, luxury, real-estate previews, and resort packages",
-      "It is the foundation the Porsche program is built on",
-    ],
-    status: "in_flight",
-  },
-  {
     id: "porsche-weekend",
     name: "Porsche Weekend",
     area: "Porsche Weekend",
