@@ -29,7 +29,8 @@ const PRODUCTS: { area: string; dir: string | null; createdOn?: string }[] = [
   { area: "Auto", dir: "wolfpack-auto" },
   { area: "Instinct", dir: "wolfpack-apex" },
   { area: "LMS", dir: "wolfpack-lms" },
-  { area: "Weekend", dir: "wolfpack-weekend" },
+  // Weekend is intentionally excluded: it duplicates Porsche Weekend (its live
+  // instance), so it was removed from /products and de-duped here too.
   { area: "Aidan Mulready", dir: "wolfpack-aidan-mulready" },
   { area: "Beyond", dir: "wolfpack-beyond" },
   { area: "Porsche Weekend", dir: "wolfpack-porsche-weekend" },
