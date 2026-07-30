@@ -41,6 +41,9 @@ export interface Product {
   potentialUses: string[];
   /** Lifecycle status. */
   status: ProductStatus;
+  /** Public URL of the live product, when one exists. Omitted when there is no
+   *  public site to link (internal-only or not yet published). */
+  url?: string;
 }
 
 /**
@@ -52,6 +55,7 @@ export const PRODUCTS: Product[] = [
     id: "instinct",
     name: "Instinct",
     area: "Instinct",
+    url: "https://wolfpack-instinct.vercel.app",
     tagline: "The agency's internal operating system",
     summary:
       "Instinct is the system the Wolfpack team runs on day to day: briefing, an AI assistant, knowledge, HR, clients, sites, and financials in one place. Its assistant answers from the company's own data first (email, calendar, documents, meetings) and only reaches for AI when it needs to, so answers stay grounded in what is actually true for the business.",
@@ -71,6 +75,7 @@ export const PRODUCTS: Product[] = [
     id: "auto",
     name: "Auto",
     area: "Auto",
+    url: "https://wolfpack-auto.vercel.app",
     tagline: "A modern operating system for car dealerships",
     summary:
       "Wolfpack Auto is a full dealer operating system: inventory, leads, financing and F&I desking, service, accounting and payroll, and analytics, all in one multi-tenant platform. It gives independent and mid-market dealers the kind of end-to-end system usually reserved for the largest players.",
@@ -109,6 +114,7 @@ export const PRODUCTS: Product[] = [
     id: "ogiam",
     name: "OGIAM",
     area: "OGIAM",
+    url: "https://ogiam.com",
     tagline: "A dependable AI agent workforce",
     summary:
       "OGIAM runs production AI agents that are deterministic first, grounded in a company's own data, and cost-controlled. Agents follow a shared rulebook that is enforced by tooling rather than trusted to memory, and they are built to drop into a company's existing CRM and prove their value on real work.",
@@ -166,6 +172,7 @@ export const PRODUCTS: Product[] = [
     id: "porsche-weekend",
     name: "Porsche Weekend",
     area: "Porsche Weekend",
+    url: "https://weekendwithporsche.com",
     tagline: "A Weekend with Porsche, run end to end",
     summary:
       "Porsche Weekend is the Porsche build of the Weekend platform, plus an Experience OS that lets Porsche Centers run the program themselves: inviting guests, managing their journey, sending communications, and seeing results. It is currently a private preview for Porsche.",
@@ -185,6 +192,7 @@ export const PRODUCTS: Product[] = [
     id: "lms",
     name: "LMS",
     area: "LMS",
+    url: "https://wolfpack-lms.vercel.app",
     tagline: "Training that adapts to the learner",
     summary:
       "Wolfpack LMS is a learning platform with an AI tutor that answers from the course material rather than the open internet, works with standard training formats, and closes the loop with analytics that show what learners actually absorb.",
@@ -204,6 +212,7 @@ export const PRODUCTS: Product[] = [
     id: "aidan-mulready",
     name: "Aidan Mulready",
     area: "Aidan Mulready",
+    url: "https://aidanmulready.com",
     tagline: "A client site on the agency's production-grade substrate",
     summary:
       "Aidan Mulready is a client site built on Wolfpack's reusable site template, which ships with quality and safety built in from day one: automated QA, safe canary deploys with auto-rollback, analytics, and content controls. It shows how quickly the agency can stand up a polished, resilient client presence.",
