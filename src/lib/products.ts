@@ -174,7 +174,7 @@ export const PRODUCTS: Product[] = [
     name: "Porsche Extended Ownership Experience",
     area: "Porsche Extended Ownership Experience",
     url: "https://weekendwithporsche.com",
-    tagline: "A Weekend with Porsche, run end to end",
+    tagline: "A Weekend with Porsche",
     summary:
       "The Porsche Extended Ownership Experience pairs a branded owner experience (an extended drive plus a curated program) with an Experience OS that lets Porsche Centers run it themselves: inviting guests, managing their journey, sending communications, and seeing results. It is currently a private preview for Porsche.",
     highlights: [
