@@ -31,6 +31,9 @@ export type InstinctEventType =
   | "releases.published"
   // Products (the /products catalog). `viewed` fires when the page/API is read.
   | "products.viewed"
+  // Engineering wiki. `viewed` on read; `published` when a page is created/edited.
+  | "engineering.viewed"
+  | "engineering.published"
   // Documents (generated docs page) - edit/delete. Separate from the legacy
   // knowledge.doc_* events so the learning loop can distinguish generator
   // churn from human curation.

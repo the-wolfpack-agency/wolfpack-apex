@@ -82,6 +82,12 @@ const DOMAIN_MAP: DomainEntry[] = [
     keywords: ["product", "products", "catalog", "what we built", "what have we built", "portfolio", "offerings", "engagements", "in prod", "in flight", "use case", "use cases", "potential uses"],
   },
   {
+    domain: "engineering",
+    label: "Engineering",
+    href: "/engineering",
+    keywords: ["engineering", "wiki", "how we build", "workflow", "deployment", "tech stack", "technology", "languages", "tools", "compliance", "testing", "tenets", "rules", "agent capabilities", "what can the agents do"],
+  },
+  {
     domain: "discussions",
     label: "Discussions",
     href: "/discussions",

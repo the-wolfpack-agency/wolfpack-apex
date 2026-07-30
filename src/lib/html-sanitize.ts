@@ -171,6 +171,26 @@ export function sanitizeHtml(
   });
 }
 
+/**
+ * Sanitize with an explicit tag/attribute allow-list and no `USE_PROFILES`
+ * override. `sanitizeHtml` forces the DOMPurify html profile, which drops some
+ * safe attributes (e.g. `target`); callers that render their own trusted markup
+ * and need those attributes use this. Same lazily-loaded DOMPurify (so importing
+ * this module never pulls jsdom's ESM sub-deps into build-time collection).
+ */
+export function sanitizeHtmlStrict(
+  html: string,
+  allowedTags: string[],
+  allowedAttr: string[],
+): string {
+  if (!html) return "";
+  const DOMPurify = loadDomPurify();
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: allowedTags,
+    ALLOWED_ATTR: allowedAttr,
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* htmlToText — parser-based plain-text extraction                     */
 /* ------------------------------------------------------------------ */
