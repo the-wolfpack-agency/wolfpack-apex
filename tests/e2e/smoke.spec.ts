@@ -35,6 +35,7 @@ const PROBES: SmokeProbe[] = [
   { path: "/tasks", expectText: "Task" },
   { path: "/releases", expectText: "Releases" },
   { path: "/products", expectText: "Products" },
+  { path: "/engineering", expectText: "Engineering" },
   { path: "/notifications", expectText: "Notification" },
   { path: "/settings", expectText: "Setting" },
   { path: "/admin/audit", expectText: "Audit" },

@@ -64,6 +64,10 @@ export const CAPABILITIES = {
   // Products (the /products catalog + current-engagements view)
   "products.view": "View the product catalog",
 
+  // Engineering (the /engineering wiki)
+  "engineering.view": "View the engineering wiki",
+  "engineering.manage": "Create and edit engineering wiki pages",
+
   // Reports
   "reports.view": "View reports",
   "reports.generate": "Generate new reports",

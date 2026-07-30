@@ -48,6 +48,9 @@ const SELF_SERVICE: readonly Capability[] = [
   // The product catalog is org-wide reading too: every seat should understand
   // what the team has built and what is in flight.
   "products.view",
+  // The engineering wiki is org-wide reading: it explains how the systems work
+  // to every team member. Authoring (engineering.manage) stays with CTO/CEO.
+  "engineering.view",
 ];
 
 // ──────────────────────────────────────────────────────────────────────────

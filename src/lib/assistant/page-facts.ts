@@ -99,6 +99,23 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["releases", "dashboard"],
   },
+  engineering: {
+    domain: "engineering",
+    route: "/engineering",
+    title: "Engineering",
+    purpose: "The OGIAM Engineering wiki: a plain-language explanation of how the systems are built, the workflow, tools, stack, compliance, testing, tenets, and what the agents can do.",
+    what_you_can_do: [
+      "Read how a change goes from idea to production, and how we test at every layer.",
+      "See the exact, code-grounded list of what the agents can do.",
+      "See the languages, stack, and tools we use, and our AI-efficiency approach.",
+      "Read the core tenets and rules and the compliance we cover.",
+    ],
+    how_to: [
+      "Open Engineering from the left nav and browse the page tree on the left.",
+      "The wiki grows over time: new pages can be added without a code change.",
+    ],
+    related_pages: ["products", "dashboard"],
+  },
   assistant: {
     domain: "assistant",
     route: "/assistant",
