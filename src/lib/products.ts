@@ -112,8 +112,8 @@ export const PRODUCTS: Product[] = [
   },
   {
     id: "ogiam",
-    name: "OGIAM",
-    area: "OGIAM",
+    name: "OGIAM IAM",
+    area: "OGIAM IAM",
     url: "https://ogiam.com",
     tagline: "A dependable AI agent workforce",
     summary:
