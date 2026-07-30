@@ -37,7 +37,9 @@ const PRODUCTS: { area: string; dir: string | null; createdOn?: string; slug?: s
   // pinned to the original so the existing instinct_releases rows upsert in place
   // (no duplicate milestone) rather than creating a new versioned entry.
   { area: "Porsche Extended Ownership Experience", dir: "wolfpack-porsche-weekend", slug: "porsche-weekend" },
-  { area: "OGIAM", dir: null, createdOn: "2026-06-15" },
+  // Display name "OGIAM IAM" (the product), distinct from OGIAM the tech branch.
+  // Slug pinned to the original so the existing milestone row upserts in place.
+  { area: "OGIAM IAM", dir: null, createdOn: "2026-06-15", slug: "ogiam" },
 ];
 
 /** Folders within a repo that may hold reports/handoffs. */
