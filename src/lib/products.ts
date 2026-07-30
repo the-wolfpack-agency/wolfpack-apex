@@ -134,6 +134,7 @@ export const PRODUCTS: Product[] = [
     id: "beyond",
     name: "Beyond",
     area: "Beyond",
+    url: "https://beyond-sku.vercel.app",
     tagline: "A content and commerce operating system for brands",
     summary:
       "Beyond gives a brand one place to manage its products, author interactive guides, and run public storefronts, with AI image generation built in. New capabilities mount on a shared backbone, so the platform grows without rebuilding the foundation each time.",
