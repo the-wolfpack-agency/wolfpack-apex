@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Lexend+Peta:wght@300;400;500;600;700&family=Ubuntu+Mono:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600;700&family=Ubuntu+Mono:wght@400;700&display=swap');
 @import "tailwindcss";
 
 :root {
@@ -34,7 +34,7 @@
   --color-border: var(--wp-dark-border);
   --color-dim: var(--wp-text-dim);
   --color-muted: var(--wp-text-muted);
-  --font-sans: 'Lexend Peta', sans-serif;
+  --font-sans: 'Jost', sans-serif;
   --font-mono: 'Ubuntu Mono', monospace;
 }
 
@@ -56,7 +56,7 @@ body {
     var(--wp-dark);
   background-attachment: fixed, fixed, fixed, fixed, scroll;
   color: var(--wp-text);
-  font-family: 'Lexend Peta', sans-serif;
+  font-family: 'Jost', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
