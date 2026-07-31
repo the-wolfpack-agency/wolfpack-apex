@@ -274,6 +274,19 @@ export function ReleaseGatePanel({ testId = "release-gate-panel" }: { testId?: s
 
   return (
     <GlassPanel testId={testId} style={{ marginBottom: "1rem" }}>
+      <style>{`
+        .rg-pr-head { display: flex; align-items: center; gap: 0.6rem; }
+        .rg-pr-title { flex: 1; min-width: 0; }
+        .rg-pr-meta { flex-shrink: 0; }
+        /* On a phone the status pill + title + author cannot share one row, so
+           the title collided with the meta. Stack: pill + author on the first
+           line, the title full-width below. */
+        @media (max-width: 640px) {
+          .rg-pr-head { flex-wrap: wrap; row-gap: 0.2rem; }
+          .rg-pr-title { flex: 1 1 100%; order: 3; }
+          .rg-pr-meta { margin-left: auto; }
+        }
+      `}</style>
       <SectionHeader
         title="Production release gate"
         subtitle="What is blocking a production deploy right now"
@@ -358,17 +371,18 @@ export function ReleaseGatePanel({ testId = "release-gate-panel" }: { testId?: s
                         border: "1px solid var(--wp-dark-border, #333)",
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                      <div className="rg-pr-head">
                         <StatusPill status={STATE_LABEL[c.state]} tone={STATE_TONE[c.state]} />
                         <a
+                          className="rg-pr-title"
                           href={c.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          style={{ flex: 1, minWidth: 0, color: "var(--wp-text, #eee)", textDecoration: "none", fontSize: "0.84rem" }}
+                          style={{ color: "var(--wp-text, #eee)", textDecoration: "none", fontSize: "0.84rem" }}
                         >
                           #{c.number} {c.title}
                         </a>
-                        <span style={{ flexShrink: 0, fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>
+                        <span className="rg-pr-meta" style={{ fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>
                           {c.author} · blocking {ageLabel(c.ageHours)}
                         </span>
                       </div>
