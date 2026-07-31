@@ -325,3 +325,72 @@ describe("runDeviceMatrix — degrade guard", () => {
     expect(DEVICE_MATRIX_EVENT).toBe("platform.device_matrix_run");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cut-off text / overlap / buried-content heuristics
+// ---------------------------------------------------------------------------
+
+describe("assessLayout — cut-off text (clipped)", () => {
+  it("a clipped element (content wider than box) -> medium/ux_gap", () => {
+    const out = assessLayout(
+      obs({ clipped: [{ label: "a #198 Change browser tab title", contentWidth: 260, boxWidth: 90 }] }),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ severity: "medium", category: "ux_gap", title: "Text is cut off" });
+    expect(out[0].detail).toContain("260px");
+    expect(out[0].detail).toContain("90px");
+  });
+
+  it("no clipped array -> no finding", () => {
+    expect(assessLayout(obs())).toEqual([]);
+    expect(assessLayout(obs({ clipped: [] }))).toEqual([]);
+  });
+
+  it("emits one finding per clipped element", () => {
+    const out = assessLayout(
+      obs({
+        clipped: [
+          { label: "span one", contentWidth: 200, boxWidth: 100 },
+          { label: "span two", contentWidth: 300, boxWidth: 120 },
+        ],
+      }),
+    );
+    expect(out.filter((f) => f.title === "Text is cut off")).toHaveLength(2);
+  });
+});
+
+describe("assessLayout — overlapping elements", () => {
+  it("an overlap pair -> high/bug", () => {
+    const out = assessLayout(obs({ overlaps: [{ a: "span Status", b: "a Title text" }] }));
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ severity: "high", category: "bug", title: "Elements overlap" });
+    expect(out[0].detail).toContain("Status");
+    expect(out[0].detail).toContain("Title text");
+  });
+
+  it("no overlaps -> no finding", () => {
+    expect(assessLayout(obs({ overlaps: [] }))).toEqual([]);
+  });
+});
+
+describe("assessLayout — content buried below the fold", () => {
+  it("content top beyond one viewport height -> high/ux_gap", () => {
+    const out = assessLayout(obs({ viewportHeight: 844, contentTopPx: 900 }));
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      severity: "high",
+      category: "ux_gap",
+      title: "Primary content buried below the fold",
+    });
+    expect(out[0].detail).toContain("900px");
+  });
+
+  it("content within the first viewport does NOT flag", () => {
+    expect(assessLayout(obs({ viewportHeight: 844, contentTopPx: 300 }))).toEqual([]);
+    expect(assessLayout(obs({ viewportHeight: 844, contentTopPx: 844 }))).toEqual([]);
+  });
+
+  it("null contentTopPx (no content selector probed) does NOT flag", () => {
+    expect(assessLayout(obs({ contentTopPx: null }))).toEqual([]);
+  });
+});

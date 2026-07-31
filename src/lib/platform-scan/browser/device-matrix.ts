@@ -110,6 +110,17 @@ export interface LayoutObservation {
   cspViolations: string[];
   /** In-page requests that returned >= 400. */
   failedRequests: { url: string; status: number }[];
+  /** Text elements that clip their content (overflow hidden / ellipsis) with
+   *  content wider than the box, so text is visibly cut off. Optional so older
+   *  observations (and unit tests) that predate the check still construct. */
+  clipped?: { label: string; contentWidth: number; boxWidth: number }[];
+  /** Pairs of visible, non-positioned elements whose boxes significantly overlap
+   *  (drawn on top of each other). Optional; empty/undefined means none found. */
+  overlaps?: { a: string; b: string }[];
+  /** Absolute document-top (px) of the primary content element (the first
+   *  must-be-visible selector). null when no such selector was probed. Beyond one
+   *  viewport height = content buried below the fold. */
+  contentTopPx?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +170,12 @@ export function deviceFindingToScanFinding(
 /** Sub-pixel tolerance so a fractional rounding difference (a 390.0 viewport vs a
  *  390.4 scrollWidth from a hairline border) never fires a false overflow. */
 const OVERFLOW_TOLERANCE_PX = 1;
+/** How many px an element's content must exceed its box before it counts as
+ *  clipped/cut-off text (small tolerance for sub-pixel rounding). */
+const CLIP_TOLERANCE_PX = 6;
+/** Primary content whose top starts beyond this multiple of the viewport height
+ *  is "below the fold": you scroll past a wall of chrome/nav before reaching it. */
+const BURIED_TOP_FACTOR = 1.0;
 
 /**
  * Assess ONE device's layout observation into zero or more findings. PURE: same
@@ -250,6 +267,52 @@ export function assessLayout(obs: LayoutObservation): DeviceFinding[] {
         },
       });
     }
+  }
+
+  // 3b. Cut-off text — an element that clips its content (overflow hidden /
+  //     ellipsis) while its content is wider than the box, so text is visibly
+  //     truncated. The "the label/title is cut off on mobile" class. Medium:
+  //     lossy but not blank.
+  for (const c of obs.clipped ?? []) {
+    findings.push({
+      id: `device-matrix:${device}:clipped:${c.label}`,
+      device,
+      severity: "medium",
+      category: "ux_gap",
+      title: "Text is cut off",
+      detail: `On ${device} (${viewportWidth}px) "${c.label}" is truncated — its content is ${c.contentWidth}px wide but the box is only ${c.boxWidth}px, so text is cut off.`,
+      evidence: { device, label: c.label, contentWidth: c.contentWidth, boxWidth: c.boxWidth },
+    });
+  }
+
+  // 3c. Overlapping elements — two visible, non-positioned text/interactive boxes
+  //     that significantly intersect, i.e. content drawn on top of content. The
+  //     "the status pill sits on the title" / collided-card class.
+  for (const o of obs.overlaps ?? []) {
+    findings.push({
+      id: `device-matrix:${device}:overlap:${o.a}|${o.b}`,
+      device,
+      severity: "high",
+      category: "bug",
+      title: "Elements overlap",
+      detail: `On ${device} (${viewportWidth}px) "${o.a}" and "${o.b}" overlap — they are drawn on top of each other, so the content collides.`,
+      evidence: { device, a: o.a, b: o.b },
+    });
+  }
+
+  // 3d. Primary content buried below the fold — the main content starts beyond
+  //     one viewport height, so the user scrolls past a wall of nav/chrome before
+  //     reaching anything (the wiki-nav-buried class on mobile).
+  if (obs.contentTopPx != null && obs.contentTopPx > obs.viewportHeight * BURIED_TOP_FACTOR) {
+    findings.push({
+      id: `device-matrix:${device}:buried-content`,
+      device,
+      severity: "high",
+      category: "ux_gap",
+      title: "Primary content buried below the fold",
+      detail: `On ${device} (${viewportWidth}px) the main content starts ${obs.contentTopPx}px down, past the ${obs.viewportHeight}px viewport — the user must scroll before reaching any content.`,
+      evidence: { device, contentTopPx: obs.contentTopPx, viewportHeight: obs.viewportHeight },
+    });
   }
 
   // 4. CSP violations — a hard signal the page is shipping resources the policy
@@ -574,6 +637,9 @@ async function runOneDevice(
       consoleErrors,
       cspViolations: measured.cspViolations,
       failedRequests,
+      clipped: measured.clipped,
+      overlaps: measured.overlaps,
+      contentTopPx: measured.contentTopPx,
     };
 
     return assessLayout(observation);
@@ -640,12 +706,61 @@ const MEASURE_SCRIPT = `(selectors) => {
       },
     };
   });
+  const norm = (el) => (el.tagName.toLowerCase() + " " + (el.textContent || "").replace(/\\s+/g, " ").trim().slice(0, 32)).trim();
+  // Buried: absolute document-top of the first must-be-visible element.
+  var contentTopPx = null;
+  for (const s of selectors) {
+    if (!s.mustBeVisible) continue;
+    let el = null;
+    try { el = document.querySelector(s.selector); } catch (_) { el = null; }
+    if (el) { contentTopPx = Math.round(el.getBoundingClientRect().top + window.scrollY); break; }
+  }
+  // Cut-off text: elements that clip their content (overflow hidden / ellipsis)
+  // while the content is wider than the box.
+  const clipped = [];
+  const textEls = Array.prototype.slice.call(document.querySelectorAll("a,button,span,strong,em,h1,h2,h3,h4,h5,p,li,td,th,label,div")).slice(0, 800);
+  for (let i = 0; i < textEls.length && clipped.length < 12; i++) {
+    const el = textEls[i];
+    if (!(el.textContent || "").trim()) continue;
+    const cs = getComputedStyle(el);
+    if (cs.overflow !== "hidden" && cs.overflowX !== "hidden" && cs.textOverflow !== "ellipsis") continue;
+    if (el.scrollWidth > el.clientWidth + ${CLIP_TOLERANCE_PX} && el.clientWidth > 24) {
+      clipped.push({ label: norm(el), contentWidth: el.scrollWidth, boxWidth: el.clientWidth });
+    }
+  }
+  // Overlap: visible, non-positioned text/interactive boxes that significantly
+  // intersect (drawn on top of each other). Bounded to keep the O(n^2) cheap.
+  const overlaps = [];
+  const boxes = [];
+  const oEls = Array.prototype.slice.call(document.querySelectorAll("a,button,span,strong,h1,h2,h3,h4,input,select,label")).slice(0, 160);
+  for (const el of oEls) {
+    const cs = getComputedStyle(el);
+    if (cs.position === "absolute" || cs.position === "fixed" || cs.display === "none" || cs.visibility === "hidden") continue;
+    if (!(el.textContent || "").trim() && el.tagName !== "INPUT" && el.tagName !== "SELECT") continue;
+    const r = el.getBoundingClientRect();
+    if (r.width > 4 && r.height > 4 && r.width < 2000 && r.height < 2000) boxes.push({ el: el, r: r });
+  }
+  outer: for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i], b = boxes[j];
+      if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
+      const ix = Math.max(0, Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left));
+      const iy = Math.max(0, Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top));
+      const area = ix * iy;
+      if (area <= 0) continue;
+      const minArea = Math.min(a.r.width * a.r.height, b.r.width * b.r.height);
+      if (area > minArea * 0.4) { overlaps.push({ a: norm(a.el), b: norm(b.el) }); if (overlaps.length >= 10) break outer; }
+    }
+  }
   const w = window;
   return {
     documentScrollWidth: doc ? doc.scrollWidth : 0,
     innerWidth: window.innerWidth,
     probed: probed,
     cspViolations: (w.__deviceMatrixCsp || []).slice(),
+    clipped: clipped,
+    overlaps: overlaps,
+    contentTopPx: contentTopPx,
   };
 }`;
 
@@ -656,6 +771,9 @@ export interface DomMeasure {
   innerWidth: number;
   probed: ProbedElement[];
   cspViolations: string[];
+  clipped: { label: string; contentWidth: number; boxWidth: number }[];
+  overlaps: { a: string; b: string }[];
+  contentTopPx: number | null;
 }
 
 /**

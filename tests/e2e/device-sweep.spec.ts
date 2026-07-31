@@ -74,6 +74,9 @@ test.describe("authenticated device sweep", () => {
           documentScrollWidth: dom.documentScrollWidth,
           innerWidth: dom.innerWidth,
           probed: dom.probed,
+          clipped: dom.clipped,
+          overlaps: dom.overlaps,
+          contentTopPx: dom.contentTopPx,
           // Layout-only sweep: console/CSP/network noise is left to the smoke test,
           // so a real page's benign 401s do not drown the layout signal.
           consoleErrors: [],
