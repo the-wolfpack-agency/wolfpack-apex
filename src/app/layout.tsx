@@ -3,8 +3,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "Wolfpack Instinct",
-    template: "%s | Wolfpack Instinct",
+    default: "OGIAM Instinct",
+    template: "%s | OGIAM Instinct",
   },
   description: "Team intelligence platform for Wolfpack Agency",
   // Icons come from the app/ file convention (favicon.ico, icon.png,
