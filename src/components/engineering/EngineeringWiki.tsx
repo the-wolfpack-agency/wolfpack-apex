@@ -93,6 +93,9 @@ export default function EngineeringWiki({ pages }: EngineeringWikiProps) {
 
   const defaultSlug = tree[0]?.slug ?? pages[0]?.slug ?? null;
   const [selectedSlug, setSelectedSlug] = useState<string | null>(defaultSlug);
+  // On mobile the sidebar is collapsed by default so the content is what you
+  // land on, not a full screen of nav. Selecting a page closes it.
+  const [navOpen, setNavOpen] = useState(false);
 
   if (pages.length === 0) {
     return (
@@ -125,8 +128,39 @@ export default function EngineeringWiki({ pages }: EngineeringWikiProps) {
   }
 
   return (
-    <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap" }}>
+    <div className="wiki-layout">
       <style>{`
+        .wiki-layout { display: flex; gap: 1.5rem; align-items: flex-start; }
+        .wiki-nav {
+          flex: 0 0 240px; min-width: 200px; display: flex; flex-direction: column;
+          gap: 0.1rem; align-self: flex-start;
+          border-right: 1px solid var(--wp-dark-border, rgba(255,255,255,0.1));
+          padding-right: 0.5rem;
+        }
+        .wiki-article { flex: 1 1 auto; min-width: 0; width: 100%; }
+        .wiki-nav-toggle { display: none; }
+        /* Mobile: the 240px sidebar wasted space and buried the content below a
+           long page list. Stack the layout, collapse the nav behind a toggle,
+           and show the content first. */
+        @media (max-width: 760px) {
+          .wiki-layout { flex-direction: column; gap: 0.85rem; }
+          .wiki-nav-toggle {
+            display: flex; align-items: center; justify-content: space-between;
+            width: 100%; box-sizing: border-box; cursor: pointer; gap: 0.75rem;
+            background: var(--wp-dark-surface, rgba(255,255,255,0.05));
+            border: 1px solid var(--wp-dark-border, rgba(255,255,255,0.14));
+            border-radius: 8px; padding: 0.65rem 0.9rem; text-align: left;
+            color: var(--wp-gold, #e8b528); font-weight: 700; font-size: 0.95rem;
+          }
+          .wiki-nav-toggle .wiki-nav-toggle-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .wiki-nav {
+            flex: 1 1 auto; width: 100%; box-sizing: border-box; min-width: 0;
+            border-right: none; padding-right: 0;
+            border-bottom: 1px solid var(--wp-dark-border, rgba(255,255,255,0.1));
+            padding-bottom: 0.5rem;
+          }
+          .wiki-nav[data-open="false"] { display: none; }
+        }
         .wiki-md {
           color: var(--wp-text, #e8eaed);
           font-size: 0.95rem;
@@ -203,18 +237,25 @@ export default function EngineeringWiki({ pages }: EngineeringWikiProps) {
         }
       `}</style>
 
+      <button
+        type="button"
+        className="wiki-nav-toggle"
+        data-testid="wiki-nav-toggle"
+        aria-expanded={navOpen}
+        aria-controls="wiki-nav"
+        onClick={() => setNavOpen((o) => !o)}
+      >
+        <span className="wiki-nav-toggle-label">
+          {navOpen ? "Hide pages" : page ? page.title : "Pages"}
+        </span>
+        <span aria-hidden="true">{navOpen ? "✕" : "☰"}</span>
+      </button>
+
       <nav
+        id="wiki-nav"
         aria-label="Engineering pages"
-        style={{
-          flex: "0 0 240px",
-          minWidth: 200,
-          display: "flex",
-          flexDirection: "column",
-          gap: "0.1rem",
-          alignSelf: "flex-start",
-          borderRight: "1px solid var(--wp-dark-border, rgba(255,255,255,0.1))",
-          paddingRight: "0.5rem",
-        }}
+        className="wiki-nav"
+        data-open={navOpen ? "true" : "false"}
       >
         {tree.map((node) => (
           <NavNode
@@ -222,12 +263,15 @@ export default function EngineeringWiki({ pages }: EngineeringWikiProps) {
             node={node}
             depth={0}
             selectedSlug={activeSlug}
-            onSelect={setSelectedSlug}
+            onSelect={(slug) => {
+              setSelectedSlug(slug);
+              setNavOpen(false);
+            }}
           />
         ))}
       </nav>
 
-      <article style={{ flex: "1 1 320px", minWidth: 0 }}>
+      <article className="wiki-article">
         {page ? (
           <>
             {crumbs.length > 0 ? (
