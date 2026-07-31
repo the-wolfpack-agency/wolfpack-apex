@@ -731,6 +731,11 @@ export type InstinctEventType =
   // UX/accessibility posture grade for a target, trended over time like the
   // security posture. { platform, grade, ux, a11y, total }
   | "platform.ux_posture_scored"
+  // Post-deploy multi-device UI verification: a target URL was loaded at each
+  // device viewport (phone/tablet/desktop) and checked for responsive/layout
+  // regressions (horizontal overflow, elements past the edge, buried content).
+  // { url, deviceCount, highCount }
+  | "platform.device_matrix_run"
   // Bring-your-own-agent gate API: an EXTERNAL agent (any model/framework) asked the
   // OGIAM gate to authorize an action via an API key. Every external decision is a
   // learning surface. authorized { agent, tool, outcome } / blocked { reason }
