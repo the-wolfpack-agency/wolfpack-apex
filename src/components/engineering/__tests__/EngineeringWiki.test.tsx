@@ -77,6 +77,19 @@ describe("EngineeringWiki", () => {
     expect(screen.getByTestId("wiki-empty")).toBeInTheDocument();
   });
 
+  it("toggles the mobile nav and collapses it when a page is selected", () => {
+    render(<EngineeringWiki pages={PAGES} />);
+    const toggle = screen.getByTestId("wiki-nav-toggle");
+    // Collapsed by default (content-first on mobile).
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // Opens the nav.
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    // Selecting a page collapses the nav again (so content is shown on mobile).
+    fireEvent.click(screen.getByTestId("wiki-nav-tools"));
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("shows the AgenticQA pipeline diagram only on the testing-and-quality page", () => {
     render(<EngineeringWiki pages={PAGES} />);
     // Default page (overview) has no diagram.
