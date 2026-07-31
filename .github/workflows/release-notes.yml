@@ -1,0 +1,86 @@
+# Auto-generate + email release notes on demand.
+#
+# Runs the existing generator (scripts/generate-release-notes.ts): reads commits
+# since a ref, groups them into plain-English entries via the AI gateway (with a
+# deterministic fallback so it never fails), publishes the release to
+# instinct_releases (shows on /releases), and emails the team via Microsoft Graph.
+#
+# This exists because generation needs git history, which the serverless runtime
+# does not have; CI is the right place to run it. Trigger it from the Actions tab
+# (Run workflow) or on a published GitHub Release.
+#
+# Required repo secrets (add once in Settings > Secrets and variables > Actions):
+#   DATABASE_URL                     - Neon prod connection string (publishes the release)
+#   AZURE_OPENAI_ENDPOINT            - AI grouping (falls back to commit-per-entry if absent)
+#   AZURE_OPENAI_API_KEY
+#   AZURE_OPENAI_DEPLOYMENT_STANDARD
+#   MICROSOFT_CLIENT_ID              - team email via Graph (skips email if absent)
+#   MICROSOFT_CLIENT_SECRET
+#   MICROSOFT_TENANT_ID
+name: Release notes
+
+on:
+  workflow_dispatch:
+    inputs:
+      since:
+        description: "Git ref to diff from (default: last tag)"
+        required: false
+        type: string
+      version:
+        description: "Release version/label (default: today's date)"
+        required: false
+        type: string
+      title:
+        description: "Release title"
+        required: false
+        type: string
+      dry_run:
+        description: "Preview only (do not publish or email)"
+        required: false
+        type: boolean
+        default: false
+      no_email:
+        description: "Publish but do not email the team"
+        required: false
+        type: boolean
+        default: false
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-notes
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+        with:
+          fetch-depth: 0 # full history so --since can diff
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        with:
+          node-version: 20
+          cache: "npm"
+      - run: npm ci
+      - name: Generate release notes
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_DEPLOYMENT_STANDARD: ${{ secrets.AZURE_OPENAI_DEPLOYMENT_STANDARD }}
+          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+          MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.since }}" ]; then ARGS="$ARGS --since=${{ inputs.since }}"; fi
+          if [ -n "${{ inputs.version }}" ]; then ARGS="$ARGS --version=${{ inputs.version }}"; fi
+          if [ -n "${{ inputs.title }}" ]; then ARGS="$ARGS --title=${{ inputs.title }}"; fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ "${{ inputs.no_email }}" = "true" ]; then ARGS="$ARGS --no-email"; fi
+          echo "Running: generate-release-notes$ARGS"
+          npx tsx scripts/generate-release-notes.ts $ARGS
