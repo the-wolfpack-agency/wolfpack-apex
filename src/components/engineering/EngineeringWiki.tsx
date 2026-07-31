@@ -138,9 +138,14 @@ export default function EngineeringWiki({ pages }: EngineeringWikiProps) {
         }
         .wiki-md h4 { font-size: 1rem; }
         .wiki-md h5 { font-size: 0.92rem; }
-        .wiki-md p { margin: 0.6rem 0; }
-        .wiki-md ul, .wiki-md ol { margin: 0.6rem 0; padding-left: 1.5rem; }
-        .wiki-md li { margin: 0.25rem 0; }
+        .wiki-md p { margin: 0.7rem 0; }
+        /* Restore list markers: Tailwind Preflight resets list-style to none
+           globally, which flattened these into a wall of text. */
+        .wiki-md ul { list-style: disc outside; margin: 0.7rem 0; padding-left: 1.4rem; }
+        .wiki-md ol { list-style: decimal outside; margin: 0.7rem 0; padding-left: 1.6rem; }
+        .wiki-md li { margin: 0.4rem 0; padding-left: 0.25rem; line-height: 1.6; }
+        .wiki-md li::marker { color: var(--wp-gold, #e8b528); font-weight: 700; }
+        .wiki-md ul ul, .wiki-md ul ol, .wiki-md ol ul, .wiki-md ol ol { margin: 0.35rem 0; }
         .wiki-md a { color: var(--wp-gold, #e8b528); text-decoration: underline; }
         .wiki-md code {
           background: var(--wp-dark-surface, rgba(255,255,255,0.06));
