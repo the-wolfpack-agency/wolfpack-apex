@@ -562,15 +562,7 @@ async function runOneDevice(
     await page.waitForLoadState("networkidle").catch(() => {});
 
     const selectors = buildProbeList(opts);
-    // page.evaluate(stringFn, arg) evaluates the string as an EXPRESSION and
-    // ignores arg, so the function is never called. Inline the selectors and
-    // self-invoke so the measure function actually runs and returns the object.
-    const measured = await page.evaluate<{
-      documentScrollWidth: number;
-      innerWidth: number;
-      probed: ProbedElement[];
-      cspViolations: string[];
-    }>(`(${MEASURE_SCRIPT})(${JSON.stringify(selectors)})`);
+    const measured = await measureLayoutDom(page, selectors);
 
     const observation: LayoutObservation = {
       device: device.name,
@@ -656,6 +648,33 @@ const MEASURE_SCRIPT = `(selectors) => {
     cspViolations: (w.__deviceMatrixCsp || []).slice(),
   };
 }`;
+
+/** The DOM half of a LayoutObservation (everything measurable inside the page,
+ *  before the caller adds device + console/network context). */
+export interface DomMeasure {
+  documentScrollWidth: number;
+  innerWidth: number;
+  probed: ProbedElement[];
+  cspViolations: string[];
+}
+
+/**
+ * Run the in-page layout measure over `selectors` on an ALREADY-NAVIGATED page,
+ * returning the DOM half of a LayoutObservation. Exported so an authenticated
+ * post-deploy sweep (a real signed-in Playwright page) reuses the EXACT same
+ * measurement + `assessLayout` that runDeviceMatrix uses, instead of stubbing a
+ * session. The string is self-invoked with inlined selectors because
+ * page.evaluate(stringFn, arg) evaluates the string as an expression and drops
+ * arg (the bug that made every measure return undefined before).
+ */
+export async function measureLayoutDom(
+  page: { evaluate: (script: string) => Promise<unknown> },
+  selectors: { selector: string; mustBeVisible?: boolean }[],
+): Promise<DomMeasure> {
+  return (await page.evaluate(
+    `(${MEASURE_SCRIPT})(${JSON.stringify(selectors)})`,
+  )) as DomMeasure;
+}
 
 /** Emit the analytics event. Best-effort + no-op-safe: the injected/real
  *  trackEvent already no-ops without a DATABASE_URL, and any throw is swallowed
