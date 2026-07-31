@@ -53,6 +53,32 @@ const PAGES: WikiPage[] = [
 ];
 
 describe("EngineeringWiki", () => {
+  beforeEach(() => {
+    // Reset the URL between tests so the ?page= deep-link state does not leak.
+    window.history.replaceState(null, "", "/engineering");
+  });
+
+  it("reflects the selected page in the URL and reads it back on mount", () => {
+    const { unmount } = render(<EngineeringWiki pages={PAGES} />);
+    // Selecting a page deep-links it.
+    fireEvent.click(screen.getByTestId("wiki-nav-tools"));
+    expect(window.location.search).toContain("page=tools");
+    unmount();
+    // A fresh mount with that URL opens the same page.
+    render(<EngineeringWiki pages={PAGES} />);
+    const content = screen.getByTestId("wiki-content");
+    expect(within(content).getByText(/TypeScript/)).toBeInTheDocument();
+  });
+
+  it("copies a shareable link to the current page", async () => {
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(<EngineeringWiki pages={PAGES} />);
+    fireEvent.click(screen.getByTestId("wiki-nav-tools"));
+    fireEvent.click(screen.getByTestId("wiki-copy-link"));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("/engineering?page=tools"));
+  });
+
   it("renders nav buttons for both pages", () => {
     render(<EngineeringWiki pages={PAGES} />);
     expect(screen.getByTestId("wiki-nav-overview")).toBeInTheDocument();
