@@ -17,7 +17,7 @@ interface Seed {
   body: string;
 }
 
-const PAGES: Seed[] = [
+export const PAGES: Seed[] = [
   {
     slug: "overview",
     parentSlug: null,
@@ -53,26 +53,39 @@ See **What the agents can do** for the exact, code-grounded list of their abilit
     title: "What the agents can do",
     body: `This is the ground truth of what the agents can actually do, based on the code. They inherit a 60-tool vocabulary through the shared dispatcher and act on it as their owner, gated and audited by OGIAM. In practice they can autonomously:
 
-## Communicate
-Email, Teams messages, and threads. Run the calendar and meetings (check availability, book, prepare for a meeting). Manage tasks, goals, and OKRs, and log time.
+## Communicate and coordinate
+- Send and manage **email**, **Teams messages**, and threads.
+- Run the **calendar and meetings**: check availability, book, and prepare for a meeting.
+- Manage **tasks, goals, and OKRs**, and log time.
 
 ## Operate any connected system
-Full CRM / external-record CRUD (create, get, update, search, filter, aggregate records) over 5 connector auth types (NextAuth, OAuth, OAuth-password, static bearer, username/password) via the REST connector and vendor presets. This is the "drop into a client's system" reach.
+- Full **CRM / external-record CRUD**: create, get, update, search, filter, and aggregate records.
+- Works across **5 connector auth types** (NextAuth, OAuth, OAuth-password, static bearer, username / password) via the REST connector and vendor presets.
+- This is the "drop into a client's system" reach.
 
 ## Finance
-Read financial metrics, scan invoices and receipts, and run cross-tool insights.
+- Read **financial metrics**.
+- Scan **invoices and receipts**.
+- Run **cross-tool insights** across systems.
 
 ## Knowledge
-Search and ingest the Brain, scan HR documents, and save team facts.
+- Search and ingest the **Brain** (our knowledge store).
+- Scan **HR documents**.
+- Save **team facts** for reuse.
 
 ## Dev and ops signals
-Query GitHub issues and pull requests, Vercel deployments, and recent workflow runs.
+- Query **GitHub** issues and pull requests.
+- Check **Vercel** deployments and recent workflow runs.
 
 ## Orchestrate and stay safe
-Delegate to other agents and run learned procedures, escalating gate-blocks to a human, under a per-capability enforce / monitor posture.
+- **Delegate** to other agents and run learned procedures.
+- **Escalate** gate-blocks to a human.
+- Operate under a per-capability **enforce / monitor** posture.
 
 ## How the gate keeps this safe
-Every agent action is proposed, then a deterministic policy engine decides (allow, escalate, or block), executes, and records it to a hash-chained, tamper-evident ledger. Agents act with short-lived, scope-limited tokens as their owner, never elevated. High-risk or destructive actions are intercepted and escalated to a human.`,
+- Every action is **proposed**, then a deterministic policy engine **decides** (allow, escalate, or block), **executes**, and **records** it to a hash-chained, tamper-evident ledger.
+- Agents act with **short-lived, scope-limited tokens** as their owner, never elevated.
+- **High-risk or destructive actions** are intercepted and escalated to a human.`,
   },
   {
     slug: "how-we-build",
@@ -232,7 +245,11 @@ async function main(): Promise<void> {
   console.log(`[seed-engineering] upserted ${n} page(s).`);
 }
 
-main().catch((err) => {
-  console.error("[seed-engineering] failed:", err);
-  process.exit(1);
-});
+// Only run when invoked directly (npm run engineering:seed), not when this
+// module is imported for its exported PAGES (e.g. by a verification harness).
+if (process.argv[1]?.includes("seed-engineering-wiki")) {
+  main().catch((err) => {
+    console.error("[seed-engineering] failed:", err);
+    process.exit(1);
+  });
+}
