@@ -122,7 +122,10 @@ Nothing reaches production without passing the same automated checks twice (loca
     parentSlug: "how-we-build",
     position: 1,
     title: "Testing and quality",
-    body: `## How we test
+    body: `## How a change is verified
+Every change runs the pipeline shown above: a sequence of automated gates, from a local check to a live-site verification. A change only reaches production by passing all of them. A failure at any gate stops it and returns it to its author, so bad code cannot reach a client. This is what AgenticQA does: deterministic tooling verifies AI (and human) output before it ships.
+
+## The test layers
 We test at every layer, because failures hide in the seams between them.
 
 - **Contract tests**: every API asserts the real outcomes (200, 401, 403, 400), not just "did not crash".
@@ -132,8 +135,16 @@ We test at every layer, because failures hide in the seams between them.
 - **End-to-end tests through the UI**: a real browser drives the deployed app and asserts pages load, there are no security-policy violations, and the key content actually renders.
 - **Multi-device checks**: pages are verified across phone, tablet, and desktop widths so a layout does not break on a screen size we did not consider.
 
-## The gate
-The canonical command runs lint, type-check, tests, and a build; the same script runs in CI and gates every merge. Security scanning and a dependency audit also gate merges.`,
+## Pass or fail, at every gate
+| Gate | What it verifies | On pass | On fail |
+| --- | --- | --- | --- |
+| Local verify | Lint, types, tests, build | Open a pull request | Fix before pushing |
+| CI gate | The full suite on a clean machine | Continue to review | Merge is blocked |
+| Security & dependencies | Static scan + dependency audit | Continue to review | Merge is blocked |
+| Human review | A person approves the change | Merge and deploy | Returned to author |
+| Live verification | Real URL, including mobile | Done | Roll back and fix |
+
+The decision at each gate is made by deterministic tooling, not opinion, so the same change always gets the same verdict.`,
   },
   {
     slug: "core-tenets",

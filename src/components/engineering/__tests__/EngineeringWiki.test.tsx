@@ -38,6 +38,18 @@ const PAGES: WikiPage[] = [
     createdBy: null,
     updatedAt: "",
   },
+  {
+    id: "3",
+    slug: "testing-and-quality",
+    parentSlug: null,
+    title: "Testing and quality",
+    body: "## How a change is verified",
+    bodyHtml: "<h2>How a change is verified</h2>",
+    position: 1,
+    published: true,
+    createdBy: null,
+    updatedAt: "",
+  },
 ];
 
 describe("EngineeringWiki", () => {
@@ -63,5 +75,13 @@ describe("EngineeringWiki", () => {
   it("renders the empty state when there are no pages", () => {
     render(<EngineeringWiki pages={[]} />);
     expect(screen.getByTestId("wiki-empty")).toBeInTheDocument();
+  });
+
+  it("shows the AgenticQA pipeline diagram only on the testing-and-quality page", () => {
+    render(<EngineeringWiki pages={PAGES} />);
+    // Default page (overview) has no diagram.
+    expect(screen.queryByTestId("agenticqa-pipeline")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("wiki-nav-testing-and-quality"));
+    expect(screen.getByTestId("agenticqa-pipeline")).toBeInTheDocument();
   });
 });
