@@ -7,7 +7,9 @@ export const metadata: Metadata = {
     template: "%s | Wolfpack Instinct",
   },
   description: "Team intelligence platform for Wolfpack Agency",
-  icons: { icon: "/favicon.ico" },
+  // Icons come from the app/ file convention (favicon.ico, icon.png,
+  // apple-icon.png), all generated from public/ogiam-icon.png via
+  // `npm run icons:generate`. No hardcoded path so a logo change is one command.
 };
 
 export default function RootLayout({
