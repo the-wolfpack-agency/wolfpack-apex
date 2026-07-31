@@ -10,7 +10,7 @@
  * fetch; this component just takes the page list.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { WikiPage, WikiPageNode } from "@/lib/engineering-tree";
 import { buildTree } from "@/lib/engineering-tree";
@@ -44,10 +44,18 @@ function NavNode({
   const isSelected = node.slug === selectedSlug;
   return (
     <>
-      <button
-        type="button"
+      {/* Real anchor so every page is linkable: hover shows the URL, right-click
+          copies it, cmd/ctrl-click opens it in a new tab. onClick keeps the SPA
+          behavior for a normal click. */}
+      <a
+        href={`?page=${node.slug}`}
         data-testid={`wiki-nav-${node.slug}`}
-        onClick={() => onSelect(node.slug)}
+        onClick={(e) => {
+          // Let modified clicks (new tab/window) use the real href.
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+          e.preventDefault();
+          onSelect(node.slug);
+        }}
         aria-current={isSelected ? "page" : undefined}
         style={{
           all: "unset",
@@ -55,6 +63,7 @@ function NavNode({
           display: "block",
           width: "100%",
           cursor: "pointer",
+          textDecoration: "none",
           padding: "0.4rem 0.6rem",
           paddingLeft: `${0.6 + depth * 0.9}rem`,
           borderLeft: isSelected
@@ -69,7 +78,7 @@ function NavNode({
         }}
       >
         {node.title}
-      </button>
+      </a>
       {node.children.map((child) => (
         <NavNode
           key={child.slug}
@@ -96,6 +105,20 @@ export default function EngineeringWiki({ pages }: EngineeringWikiProps) {
   // On mobile the sidebar is collapsed by default so the content is what you
   // land on, not a full screen of nav. Selecting a page closes it.
   const [navOpen, setNavOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // Deep-linking: the selected page is reflected in the URL (?page=<slug>) so a
+  // page can be shared/bookmarked, and back/forward move between pages. Reads
+  // the URL on mount and on popstate.
+  useEffect(() => {
+    const applyFromUrl = () => {
+      const s = new URLSearchParams(window.location.search).get("page");
+      if (s && bySlug.has(s)) setSelectedSlug(s);
+    };
+    applyFromUrl();
+    window.addEventListener("popstate", applyFromUrl);
+    return () => window.removeEventListener("popstate", applyFromUrl);
+  }, [bySlug]);
 
   if (pages.length === 0) {
     return (
@@ -126,6 +149,27 @@ export default function EngineeringWiki({ pages }: EngineeringWikiProps) {
       parent = parent.parentSlug ? bySlug.get(parent.parentSlug) : undefined;
     }
   }
+
+  const selectPage = (slug: string) => {
+    setSelectedSlug(slug);
+    setNavOpen(false);
+    if (typeof window !== "undefined") {
+      window.history.pushState(null, "", `?page=${encodeURIComponent(slug)}`);
+    }
+  };
+
+  const copyLink = async () => {
+    if (typeof window === "undefined" || !activeSlug) return;
+    const url = `${window.location.origin}/engineering?page=${encodeURIComponent(activeSlug)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // Clipboard blocked (insecure context / permissions); the URL bar still
+      // reflects the page, so linking works regardless.
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
 
   return (
     <div className="wiki-layout">
@@ -263,10 +307,7 @@ export default function EngineeringWiki({ pages }: EngineeringWikiProps) {
             node={node}
             depth={0}
             selectedSlug={activeSlug}
-            onSelect={(slug) => {
-              setSelectedSlug(slug);
-              setNavOpen(false);
-            }}
+            onSelect={selectPage}
           />
         ))}
       </nav>
@@ -285,16 +326,46 @@ export default function EngineeringWiki({ pages }: EngineeringWikiProps) {
                 {crumbs.join(" / ")}
               </div>
             ) : null}
-            <h1
+            <div
               style={{
+                display: "flex",
+                alignItems: "baseline",
+                justifyContent: "space-between",
+                gap: "1rem",
                 margin: "0 0 0.8rem",
-                fontSize: "1.5rem",
-                fontWeight: 800,
-                color: "var(--wp-text, #e8eaed)",
+                flexWrap: "wrap",
               }}
             >
-              {page.title}
-            </h1>
+              <h1
+                style={{
+                  margin: 0,
+                  fontSize: "1.5rem",
+                  fontWeight: 800,
+                  color: "var(--wp-text, #e8eaed)",
+                }}
+              >
+                {page.title}
+              </h1>
+              <button
+                type="button"
+                data-testid="wiki-copy-link"
+                onClick={copyLink}
+                title="Copy a link to this page"
+                style={{
+                  all: "unset",
+                  cursor: "pointer",
+                  fontSize: "0.78rem",
+                  fontWeight: 700,
+                  color: copied ? "var(--wp-success, #3fb950)" : "var(--wp-gold, #e8b528)",
+                  border: "1px solid var(--wp-dark-border, rgba(255,255,255,0.14))",
+                  borderRadius: 6,
+                  padding: "0.25rem 0.6rem",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {copied ? "Link copied" : "Copy link"}
+              </button>
+            </div>
             {PAGE_DIAGRAMS[page.slug] ?? null}
             <div
               className="wiki-md"
