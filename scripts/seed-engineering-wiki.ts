@@ -118,7 +118,10 @@ The sub-pages cover the deployment workflow, how we test, and the core tenets th
 10. Record what was learned.
 
 ## Why it is safe
-Nothing reaches production without passing the same automated checks twice (local and CI), a human approval, and a post-deploy verification. When the agent write-loop lands, agents follow this exact path under the gate, so it is at least as safe as a person doing it by hand.`,
+Nothing reaches production without passing the same automated checks twice (local and CI), a human approval, and a post-deploy verification. When the agent write-loop lands, agents follow this exact path under the gate, so it is at least as safe as a person doing it by hand.
+
+## Keeping the team informed
+Release notes are generated from the actual commits, not written by hand: the changes since the last release are grouped into plain-English entries (what changed and how to use it), published to the Releases page, and emailed to the team. It runs on demand with one click, so everyone hears about a new feature without anyone stopping to write an announcement.`,
   },
   {
     slug: "testing-and-quality",
@@ -147,7 +150,10 @@ We test at every layer, because failures hide in the seams between them.
 | Human review | A person approves the change | Merge and deploy | Returned to author |
 | Live verification | Real URL, including mobile | Done | Roll back and fix |
 
-The decision at each gate is made by deterministic tooling, not opinion, so the same change always gets the same verdict.`,
+The decision at each gate is made by deterministic tooling, not opinion, so the same change always gets the same verdict.
+
+## Verifying across devices
+Most of the bugs that used to reach the team were layout problems on a screen size we did not check: content squished or buried on a phone, a page scrolling sideways, an element running off the edge. We now verify every important page across **phone, tablet, and desktop** widths automatically. The check loads the real page at each size and flags horizontal overflow, elements past the edge, content that is missing or has collapsed to nothing, and console or security-policy errors. A high-severity finding fails the check, so a broken mobile layout is caught before it ships instead of after a client sees it.`,
   },
   {
     slug: "core-tenets",
