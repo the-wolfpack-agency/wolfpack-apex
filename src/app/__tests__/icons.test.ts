@@ -42,4 +42,15 @@ describe("app icons", () => {
   it("keeps the source logo the icons are derived from", () => {
     expect(existsSync(p("public/ogiam-icon.png"))).toBe(true);
   });
+
+  it("clips icons to a circle: transparent corners (no white border), opaque center", async () => {
+    const { data, info } = await sharp(p("src/app/icon.png")).raw().toBuffer({ resolveWithObject: true });
+    expect(info.channels).toBe(4);
+    const alphaAt = (x: number, y: number) => data[(y * info.width + x) * info.channels + 3];
+    // Corners are outside the circle -> fully transparent (the source's white square is clipped away).
+    expect(alphaAt(1, 1)).toBe(0);
+    expect(alphaAt(info.width - 2, 1)).toBe(0);
+    // Center is the mark -> fully opaque.
+    expect(alphaAt(info.width >> 1, info.height >> 1)).toBe(255);
+  });
 });

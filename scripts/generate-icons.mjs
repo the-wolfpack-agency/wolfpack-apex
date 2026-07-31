@@ -24,11 +24,24 @@ import { dirname, join } from "node:path";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = join(ROOT, "public/ogiam-icon.png");
 
-/** Square PNG buffer at `size`, centered cover crop (source is a centered mark).
- *  Force RGBA (ensureAlpha + non-palette): Turbopack's ICO decoder rejects
- *  palette/RGB PNGs embedded in the .ico ("PNG is not in RGBA format"). */
+/** Circular alpha mask at `size` (white disc on transparent). */
+const circleMask = (size) =>
+  Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">` +
+      `<circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="#fff"/></svg>`,
+  );
+
+/** Square RGBA PNG at `size`, clipped to a circle. The source is a dark disc on
+ *  an OPAQUE WHITE square; clipping makes the corners transparent so there is no
+ *  white border in the browser tab. Force RGBA (ensureAlpha + non-palette):
+ *  Turbopack's ICO decoder rejects palette/RGB PNGs embedded in the .ico. */
 const png = (size) =>
-  sharp(SRC).resize(size, size, { fit: "cover" }).ensureAlpha().png({ palette: false }).toBuffer();
+  sharp(SRC)
+    .resize(size, size, { fit: "cover" })
+    .ensureAlpha()
+    .composite([{ input: circleMask(size), blend: "dest-in" }])
+    .png({ palette: false })
+    .toBuffer();
 
 /** Wrap PNG buffers into a valid multi-image ICO (PNG-in-ICO; supported by all
  *  modern browsers). Header + one 16-byte directory entry per image + PNG data. */
