@@ -11,8 +11,19 @@
  */
 
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import type { WikiPage, WikiPageNode } from "@/lib/engineering-tree";
 import { buildTree } from "@/lib/engineering-tree";
+import AgenticQAPipeline from "./AgenticQAPipeline";
+
+/**
+ * Curated visual diagrams keyed by page slug. A page can pair a hand-built,
+ * dependency-free diagram with its Markdown body (the renderer only emits text
+ * HTML, so visuals live here as components). Rendered above the page body.
+ */
+const PAGE_DIAGRAMS: Record<string, ReactNode> = {
+  "testing-and-quality": <AgenticQAPipeline />,
+};
 
 interface EngineeringWikiProps {
   pages: WikiPage[];
@@ -240,6 +251,7 @@ export default function EngineeringWiki({ pages }: EngineeringWikiProps) {
             >
               {page.title}
             </h1>
+            {PAGE_DIAGRAMS[page.slug] ?? null}
             <div
               className="wiki-md"
               data-testid="wiki-content"

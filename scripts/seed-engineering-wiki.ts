@@ -33,6 +33,9 @@ Use the pages on the left to explore what the agents can do, how a change goes f
 - An enforced gate sits between any AI and our code and data, so the AI does the work but cannot cause harm.
 - Every change is tested at multiple layers and verified on the live site before it reaches a client.
 
+## See the products
+Our public, client-facing site for all of these products is [ogiam.com](https://ogiam.com). It is the marketing home where clients and prospects see what we offer.
+
 ## How to read it
 Each page is short and jargon-light. Pages nest into sections, and the wiki grows over time as we add pages. If something here is unclear, that is a gap worth filling: tell the team and we will add a page.`,
   },
@@ -122,7 +125,10 @@ Nothing reaches production without passing the same automated checks twice (loca
     parentSlug: "how-we-build",
     position: 1,
     title: "Testing and quality",
-    body: `## How we test
+    body: `## How a change is verified
+Every change runs the pipeline shown above: a sequence of automated gates, from a local check to a live-site verification. A change only reaches production by passing all of them. A failure at any gate stops it and returns it to its author, so bad code cannot reach a client. This is what AgenticQA does: deterministic tooling verifies AI (and human) output before it ships.
+
+## The test layers
 We test at every layer, because failures hide in the seams between them.
 
 - **Contract tests**: every API asserts the real outcomes (200, 401, 403, 400), not just "did not crash".
@@ -132,8 +138,16 @@ We test at every layer, because failures hide in the seams between them.
 - **End-to-end tests through the UI**: a real browser drives the deployed app and asserts pages load, there are no security-policy violations, and the key content actually renders.
 - **Multi-device checks**: pages are verified across phone, tablet, and desktop widths so a layout does not break on a screen size we did not consider.
 
-## The gate
-The canonical command runs lint, type-check, tests, and a build; the same script runs in CI and gates every merge. Security scanning and a dependency audit also gate merges.`,
+## Pass or fail, at every gate
+| Gate | What it verifies | On pass | On fail |
+| --- | --- | --- | --- |
+| Local verify | Lint, types, tests, build | Open a pull request | Fix before pushing |
+| CI gate | The full suite on a clean machine | Continue to review | Merge is blocked |
+| Security & dependencies | Static scan + dependency audit | Continue to review | Merge is blocked |
+| Human review | A person approves the change | Merge and deploy | Returned to author |
+| Live verification | Real URL, including mobile | Done | Roll back and fix |
+
+The decision at each gate is made by deterministic tooling, not opinion, so the same change always gets the same verdict.`,
   },
   {
     slug: "core-tenets",
@@ -150,9 +164,30 @@ The canonical command runs lint, type-check, tests, and a build; the same script
 7. **No unchecked risk.** External integrations return typed errors instead of throwing; secrets never live in code; least privilege everywhere.`,
   },
   {
-    slug: "our-stack",
+    slug: "single-source-of-truth",
     parentSlug: null,
     position: 3,
+    title: "Single source of truth",
+    body: `## Documentation that cannot drift
+Our reference material is generated from the actual code and data, not written and maintained separately alongside it. The code is the single source of truth; the documentation derives from it. If the two ever disagree, the code is right by definition and the document is the bug to fix.
+
+## Why this keeps us honest and accurate
+- Hand-maintained docs drift. The system changes, the doc does not, and it quietly becomes fiction that misleads the next person.
+- Deriving docs from the source closes that gap: what you read here reflects what the system actually does today, not what someone intended months ago.
+
+## How we do it
+- The **Releases** timeline is built from real repository history (creation dates, lines of code, and the release reports we ship), not typed by hand.
+- **What the agents can do** is grounded in the code's tool registry, the true tool vocabulary, not an aspirational wish list.
+- **Capabilities, analytics events, and the API surface** each have one canonical definition in code that everything else references. Duplicating one is treated as a bug.
+- This wiki is written against the codebase and re-generated as the system evolves.
+
+## The rule
+If a fact matters, it has exactly one home, in code or data, and every view of it points back to that home. We reference, we do not duplicate.`,
+  },
+  {
+    slug: "our-stack",
+    parentSlug: null,
+    position: 4,
     title: "Our stack",
     body: `## What we build with
 Our systems share a common foundation, so a pattern proven in one product carries to the next. The sub-pages cover the languages and stack, the tools we use, and how we get the most out of AI efficiently.`,
@@ -181,8 +216,8 @@ Our systems share a common foundation, so a pattern proven in one product carrie
     title: "Tools we use",
     body: `## Build and verify
 - One **shared verify script** (lint, type-check, tests, build) run identically locally and in CI.
-- **GitHub Actions** for CI gates; **GitHub** for source and pull requests.
-- **Vercel** for hosting and deploys.
+- **GitHub Actions** for CI gates; [**GitHub**](https://github.com/the-wolfpack-agency) for source and pull requests.
+- [**Vercel**](https://vercel.com/nhomyks-projects) for hosting and deploys.
 - **Playwright** for end-to-end and multi-device browser testing.
 - **Jest** for unit, contract, and UI tests.
 
@@ -205,7 +240,7 @@ Our systems share a common foundation, so a pattern proven in one product carrie
   {
     slug: "compliance-and-security",
     parentSlug: null,
-    position: 4,
+    position: 5,
     title: "Compliance and security",
     body: `## Compliance and security
 We build for enterprise trust from day one.
