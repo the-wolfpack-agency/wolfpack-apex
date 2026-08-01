@@ -24,7 +24,8 @@
     "release:notes": "npx tsx scripts/generate-release-notes.ts",
     "release:backfill": "npx tsx scripts/backfill-release-notes.ts",
     "engineering:seed": "npx tsx scripts/seed-engineering-wiki.ts",
-    "icons:generate": "node scripts/generate-icons.mjs"
+    "icons:generate": "node scripts/generate-icons.mjs",
+    "branch:check": "npx tsx scripts/check-branch-base.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
