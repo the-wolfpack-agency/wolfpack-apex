@@ -94,6 +94,8 @@ export interface StudioShellProps {
     share: ReactNode;
     versions: ReactNode;
     comments: ReactNode;
+    /** The contract this build is judged against, and how it did. */
+    acceptance: ReactNode;
   };
   /** Fires for every studio.* analytics event. */
   onAnalytics?: (
@@ -203,6 +205,7 @@ const TAB_IDS = [
   "share",
   "versions",
   "comments",
+  "acceptance",
 ] as const;
 export type StudioTabId = (typeof TAB_IDS)[number];
 
@@ -217,6 +220,7 @@ const TAB_ICONS: Record<StudioTabId, string> = {
   share: "⤴",
   versions: "⟲",
   comments: "❝",
+  acceptance: "✓",
 };
 
 const TAB_LABELS: Record<StudioTabId, string> = {
@@ -230,6 +234,7 @@ const TAB_LABELS: Record<StudioTabId, string> = {
   share: "Share",
   versions: "Versions",
   comments: "Comments",
+  acceptance: "Acceptance",
 };
 
 export default function StudioShell({

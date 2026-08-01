@@ -50,6 +50,7 @@ import VersionHistoryPanel, {
   type BriefVersionEntryView,
 } from "@/components/sites/VersionHistoryPanel";
 import CommentsPane from "@/components/sites/CommentsPane";
+import AcceptancePanel from "@/components/sites/AcceptancePanel";
 import { ThemeEditor } from "@/components/sites/ThemeEditor";
 import StudioShell, {
   type StudioAnalyticsEvent,
@@ -1083,6 +1084,12 @@ export default function SiteDetailPage({
     </div>
   );
 
+  const acceptanceTab = (
+    <div data-testid="studio-tab-acceptance" style={{ padding: 16 }}>
+      <AcceptancePanel siteId={id} />
+    </div>
+  );
+
   return (
     <StudioShell
       siteId={id}
@@ -1107,6 +1114,7 @@ export default function SiteDetailPage({
         share: shareTab,
         versions: versionsTab,
         comments: commentsTab,
+        acceptance: acceptanceTab,
       }}
     />
   );

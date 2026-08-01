@@ -1347,6 +1347,15 @@ export type InstinctEventType =
   | "site.deploy_failed"
   | "site.canary_passed"
   | "site.canary_failed"
+  // Acceptance: was the deployed build actually what was asked for. The
+  // criteria event carries how completely the intake was specified, and the
+  // three outcomes are kept apart on purpose — "degraded" means a check could
+  // not be performed, which is a different problem from a check that failed.
+  | "site.acceptance_criteria_saved"
+  | "site.acceptance_queued"
+  | "site.acceptance_passed"
+  | "site.acceptance_failed"
+  | "site.acceptance_degraded"
   | "site.preview_viewed"
   | "site.link_shared"
   | "site.deleted"

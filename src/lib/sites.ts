@@ -870,6 +870,20 @@ export interface SiteDeployRow {
  * diagnostic endpoint so operators can see WHY a deploy failed instead
  * of staring at a generic "Internal server error" banner.
  */
+/**
+ * Which project a deploy belongs to. The deploy webhook knows only a deploy id,
+ * and acceptance is recorded against the project, so this is the one hop
+ * between them. Returns null for an unknown deploy rather than throwing: a
+ * replayed or stale webhook is a condition to report, not an exception.
+ */
+export async function getDeployProjectId(deployId: string): Promise<string | null> {
+  const { rows } = await safeQuery<{ project_id: string }>(
+    `SELECT project_id FROM instinct_site_deploys WHERE id = $1`,
+    [deployId],
+  );
+  return rows[0]?.project_id ?? null;
+}
+
 export async function listSiteDeploys(
   projectId: string,
   limit = 20,

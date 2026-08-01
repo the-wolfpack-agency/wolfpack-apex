@@ -68,6 +68,24 @@ describe("repo-wide tenant isolation guardrail", () => {
     expect(classifyFilter("src/lib/finance/ok.ts", pkPinned, "instinct_invoices")).toBe("pk-pinned-upstream");
   });
 
+  it("recognises a cross-workspace queue claim, and still catches one that hides the workspace", () => {
+    // A worker claims the oldest queued row across every tenant and hands back
+    // the workspace so each downstream write is scoped: the same shape as the
+    // cross-workspace SELECTs already understood, written as an UPDATE so two
+    // workers cannot claim the same row.
+    const claim = `UPDATE instinct_invoices SET status = 'running' WHERE id = (
+        SELECT id FROM instinct_invoices WHERE status = 'queued' ORDER BY created_at LIMIT 1
+      ) RETURNING id, workspace_id, status`;
+    expect(classifyFilter("src/lib/queue/store.ts", claim, "instinct_invoices")).toBe("system-cross-workspace");
+
+    // The teeth: the same claim that does NOT return the workspace gives the
+    // caller no way to scope what it does next, and stays unclassified.
+    const blind = `UPDATE instinct_invoices SET status = 'running' WHERE id = (
+        SELECT id FROM instinct_invoices WHERE status = 'queued' ORDER BY created_at LIMIT 1
+      ) RETURNING status`;
+    expect(classifyFilter("src/lib/queue/store.ts", blind, "instinct_invoices")).toBe("unclassified");
+  });
+
   it("the job-codes dossier (the leak this work fixed) is scoped to a workspace", () => {
     // Regression anchor: both tenant-owned sources in the dossier carry a
     // workspace_id predicate. (The cache + analytics events have no workspace_id
