@@ -1,0 +1,29 @@
+<!doctype html>
+<!--
+  A faithful conversion. Different class names, extra wrapper elements, a
+  different stylesheet; same tags, same copy, same measurements.
+
+  Tags are part of the join key on purpose: an <h1> rendered as a <div> is a
+  different document to a screen reader and to search, so it is drift, not a
+  restructuring. Everything else here is deliberately unlike the prototype, and
+  this must still come back clean or the tool is reporting structure when it is
+  supposed to be reporting design.
+-->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="_shared.css">
+<style>
+  .site-top   { height: 66px; font-size: 16px; padding: 22px 24px; }
+  .masthead   { height: 320px; font-size: 59px; padding: 40px 24px; }
+  .intro      { font-size: 18px; line-height: 28px; padding: 16px 24px; }
+  .panel      { width: 482px; height: 200px; font-size: 21px; padding: 20px; }
+  .site-foot  { font-size: 14px; padding: 12px 24px; }
+</style></head>
+<body>
+  <header><div class="site-top">Dealer Dashboard</div></header>
+  <section><h1 class="masthead">A Weekend with Porsche</h1></section>
+  <main>
+    <p class="intro">Invite a qualified guest to live with a Porsche for 24 to 48 hours.</p>
+    <article><h2 class="panel">Existing Guests</h2></article>
+    <article><h2 class="panel">Add New Guest</h2></article>
+  </main>
+  <footer><div class="site-foot">Porsche Center workspace</div></footer>
+</body></html>

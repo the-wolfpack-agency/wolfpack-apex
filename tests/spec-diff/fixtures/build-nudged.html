@@ -1,0 +1,20 @@
+<!doctype html>
+<!--
+  Geometry off by a few pixels and nothing else: the card is 6px narrow and the
+  header 4px tall. Present so the tolerance can be shown to be load-bearing —
+  strict runs report it, a run with a wider allowance does not. Without this the
+  clean result on the faithful build could equally be a tool that never fires.
+-->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="_shared.css">
+<style>
+  .header { height: 70px; }
+  .card   { width: 476px; }
+</style></head>
+<body>
+  <div class="header">Dealer Dashboard</div>
+  <h1 class="hero">A Weekend with Porsche</h1>
+  <p class="lede">Invite a qualified guest to live with a Porsche for 24 to 48 hours.</p>
+  <h2 class="card">Existing Guests</h2>
+  <h2 class="card">Add New Guest</h2>
+  <div class="foot">Porsche Center workspace</div>
+</body></html>

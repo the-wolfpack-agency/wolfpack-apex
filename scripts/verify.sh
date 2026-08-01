@@ -139,6 +139,12 @@ if stage_enabled e2e; then
     skip_stage "qr-download-decode" "VERIFY_SKIP_E2E=1"
   else
     run_stage "qr-download-decode" npm run test:qr-download
+    # Fixture-in/verdict-out guard for the spec-diff measurement chain. Same
+    # posture as the QR decode guard above: a real browser, no dev server, no
+    # DB. It is the only test that proves the probes read a real DOM correctly;
+    # jsdom has no layout engine, so every box there measures 0x0 and an
+    # assertion about a 66px header would pass for the wrong reason.
+    run_stage "spec-diff-fidelity" npm run test:spec-diff
   fi
 
   if [ "${VERIFY_SKIP_BUILD:-0}" = "1" ]; then

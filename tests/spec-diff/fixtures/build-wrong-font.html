@@ -1,0 +1,18 @@
+<!doctype html>
+<!--
+  Correct geometry, wrong typeface. Declared family names lie: two builds can
+  both claim the same family while shipping cuts with different glyph advances,
+  which silently rewraps every paragraph. The font probe measures advance width
+  rather than trusting the name, so a different cut is caught even when the
+  boxes are all the right size.
+-->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="_shared.css">
+<style> body { font-family: Georgia; } </style></head>
+<body>
+  <div class="header">Dealer Dashboard</div>
+  <h1 class="hero">A Weekend with Porsche</h1>
+  <p class="lede">Invite a qualified guest to live with a Porsche for 24 to 48 hours.</p>
+  <h2 class="card">Existing Guests</h2>
+  <h2 class="card">Add New Guest</h2>
+  <div class="foot">Porsche Center workspace</div>
+</body></html>

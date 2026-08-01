@@ -1,0 +1,14 @@
+<!doctype html>
+<!--
+  A build that shares NOTHING with the prototype. Here for one assertion: with
+  no elements in common there are zero comparisons, therefore zero differences,
+  and a naive reading calls that a perfect match. It is a broken comparison
+  wearing a passing costume, and the verdict must be "could not be checked",
+  never "accepted".
+-->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="_shared.css"></head>
+<body>
+  <div class="header">Some Other Product</div>
+  <h1 class="hero">Nothing In Common Here</h1>
+  <p class="lede">This page shares no copy at all with the prototype it claims to implement.</p>
+</body></html>

@@ -1,0 +1,21 @@
+<!doctype html>
+<!--
+  The prototype: the source of truth a build is measured against.
+
+  Every measured element carries its OWN text, because that is what the probe
+  indexes (a wrapper that merely contains other text is skipped, or a section
+  would be counted once per descendant and drown the report). The join key is
+  tag + own text, so a conversion is free to change classes and nesting; it is
+  not free to move the header six pixels or set the hero nineteen pixels small,
+  which is the class of drift that used to ship because two screenshots looked
+  about the same.
+-->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="_shared.css"></head>
+<body>
+  <div class="header">Dealer Dashboard</div>
+  <h1 class="hero">A Weekend with Porsche</h1>
+  <p class="lede">Invite a qualified guest to live with a Porsche for 24 to 48 hours.</p>
+  <h2 class="card">Existing Guests</h2>
+  <h2 class="card">Add New Guest</h2>
+  <div class="foot">Porsche Center workspace</div>
+</body></html>
