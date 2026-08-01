@@ -1,8 +1,14 @@
 "use client";
 
 import { useState, FormEvent, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { setInstinctSession, authHeaders } from "@/lib/client-auth";
+import { useSearchParams } from "next/navigation";
+import { setInstinctSession, clearInstinctSession, authHeaders } from "@/lib/client-auth";
+import { hardNavigate } from "@/lib/client-navigate";
+
+/** How long a post-login navigation may take before we admit it failed and
+ *  give the user a way out. Generous: a cold serverless render is slow, and a
+ *  premature error message on a working sign-in is its own bug. */
+const NAVIGATION_TIMEOUT_MS = 8000;
 
 /* useSearchParams must live inside a <Suspense> boundary so Next.js
    can prerender /login at build time without bailing out to client-
@@ -17,7 +23,6 @@ export default function LoginPage() {
 }
 
 function LoginContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const initialEmail = searchParams?.get("email") ?? "";
   const justInvited = searchParams?.get("invited") === "1";
@@ -63,7 +68,7 @@ function LoginContent() {
         setMsLoading(false);
         return;
       }
-      window.location.assign(authUrl);
+      hardNavigate(authUrl);
     } catch {
       setError("Network error. Try the password form.");
       setMsLoading(false);
@@ -98,6 +103,13 @@ function LoginContent() {
         return;
       }
 
+      /* Clear any prior client session BEFORE writing the new one.
+         getInstinctToken() reads instinct_token then apex_token, so a legacy
+         key left behind can shadow nothing today — but a half-written session
+         (new token, stale user) is a real state, and the browser that reaches
+         this line is exactly the one carrying leftovers. Costs nothing on a
+         clean browser, which is the one that already worked. */
+      clearInstinctSession();
       setInstinctSession(data.token, data.user);
 
       // Track page view
@@ -118,7 +130,28 @@ function LoginContent() {
         nextRaw && nextRaw.startsWith("/") && !nextRaw.startsWith("//")
           ? nextRaw
           : "/assistant";
-      router.push(next);
+
+      /* HARD navigation, not router.push.
+         Sign-in changes the auth cookies, and a soft navigation reuses the
+         router cache and the RSC payloads fetched before those cookies
+         existed. A hard load makes the browser send the new cookies on a
+         fresh document request, so the destination cannot render against the
+         session the user just replaced. It also cannot silently no-op the way
+         a soft push can when the destination fails to resolve — which is the
+         state that leaves this button reading "Signing in..." with nothing
+         else on screen. */
+      hardNavigate(next);
+
+      /* Navigation is not instant and the button has no other exit. If we are
+         still here after a beat, the redirect did not take, and the user needs
+         to be told rather than left holding a dead control. This is a
+         backstop, not the fix for any particular cause. */
+      window.setTimeout(() => {
+        setLoading(false);
+        setError(
+          "Signed in, but the app did not open. Reload the page — if it keeps happening, clear this site's data and try again.",
+        );
+      }, NAVIGATION_TIMEOUT_MS);
     } catch {
       setError("Network error. Please try again.");
       setLoading(false);
