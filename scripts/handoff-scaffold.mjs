@@ -176,6 +176,35 @@ function buildHandoff(date, latest, commits) {
   sections.push("");
   sections.push("---");
   sections.push("");
+  // Prompt retrospective. Placed BEFORE the blockers so it is read while the
+  // session is still fresh, and scaffolded as a filled-in template rather than
+  // an empty heading — an empty heading is a section that gets skipped.
+  // The taxonomy and the analysis live in src/lib/session-retro.ts, tested.
+  sections.push("## Prompt Retrospective (FILL IN — one line each)");
+  sections.push("");
+  sections.push("_What would have got this session done in fewer rounds? The value is the");
+  sections.push("PATTERN across sessions, not the score of any one. Tick the causes that");
+  sections.push("applied; leave the rest._");
+  sections.push("");
+  sections.push("- **The ask:** _(what was requested, in the operator's words)_");
+  sections.push("- **Rounds to done:** _(count of operator messages)_");
+  sections.push("");
+  sections.push("| Cause | Applied? | The sentence that would have carried it |");
+  sections.push("| --- | --- | --- |");
+  sections.push("| unstated-target | | Name the repo and branch in the first sentence. |");
+  sections.push("| unstated-constraint | | State the constraint up front rather than as a correction. |");
+  sections.push("| unstated-done | | Say what you will check to decide it is done. |");
+  sections.push("| assumed-context | | Paste the fact, or say where to find it. |");
+  sections.push("| scope-discovered | | Nothing — this is the good kind of round. |");
+  sections.push("| agent-error | | Nothing — this one is the agent's, and belongs in a guardrail. |");
+  sections.push("");
+  sections.push("**The one-shot version of this request:**");
+  sections.push("");
+  sections.push("> _(Rewrite the ask so it would have worked first time. This line is the");
+  sections.push("> deliverable — it is what gets reused.)_");
+  sections.push("");
+  sections.push("---");
+  sections.push("");
   sections.push("## Known Blockers");
   sections.push("");
   sections.push("- ");
