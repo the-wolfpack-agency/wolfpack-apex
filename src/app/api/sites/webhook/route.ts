@@ -17,9 +17,10 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { recordDeployResult } from "@/lib/sites";
+import { recordDeployResult, getDeployProjectId } from "@/lib/sites";
 import { trackEvent } from "@/lib/analytics";
 import { sanitizeForLog } from "@/lib/log-sanitize";
+import { enqueueAcceptanceRun, resolveAcceptanceWorkspace } from "@/lib/site-acceptance/store";
 
 export async function POST(req: NextRequest) {
   const expected = process.env.WOLFPACK_SITES_WEBHOOK_SECRET;
@@ -57,7 +58,40 @@ export async function POST(req: NextRequest) {
       logExcerpt: body.logExcerpt,
       findings: body.findings,
     });
-    return NextResponse.json({ ok: true });
+
+    // A successful deploy is the moment the build becomes checkable, so queue it
+    // for acceptance HERE rather than leaving "was it right" to someone opening
+    // the preview and comparing by eye.
+    //
+    // Queued, not run: the comparison drives a real browser across several
+    // viewports and would hold this webhook open long past the calling
+    // workflow's patience. The row exists either way, so an attempt that never
+    // runs is visible as queued rather than absent — the whole point of the
+    // layer is that "nobody checked" can never look like "it passed".
+    let acceptanceQueued = false;
+    if (body.status === "success") {
+      try {
+        const projectId = await getDeployProjectId(body.deployId);
+        if (projectId) {
+          const workspaceId = await resolveAcceptanceWorkspace(projectId);
+          await enqueueAcceptanceRun(workspaceId, projectId, body.deployId, body.previewUrl ?? null);
+          acceptanceQueued = true;
+          trackEvent("site.acceptance_queued", "system", "system", {
+            project_id: projectId,
+            deploy_id: body.deployId,
+            has_preview_url: Boolean(body.previewUrl),
+          });
+        }
+      } catch (err) {
+        // The deploy result is already recorded and is the caller's answer.
+        // Failing to queue the check must not turn a successful deploy into a
+        // webhook error the workflow retries; the response says it did not
+        // happen so the condition is visible rather than assumed.
+        console.error("[sites/webhook] acceptance enqueue", sanitizeForLog((err as Error).message));
+      }
+    }
+
+    return NextResponse.json({ ok: true, acceptanceQueued });
   } catch (err) {
     console.error("[sites/webhook]", sanitizeForLog((err as Error).message));
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

@@ -210,8 +210,24 @@ function selectList(sql: string): string {
   const i = sql.search(/\bFROM\b/i);
   return i < 0 ? "" : sql.slice(0, i);
 }
+/**
+ * The RETURNING column list of a writing statement.
+ *
+ * A queue claim is the same shape as the cross-workspace SELECTs this scan
+ * already understands — enumerate across every tenant, hand back the workspace
+ * so each downstream write is scoped — except it is written as
+ * `UPDATE … SET status='running' … RETURNING workspace_id`, which takes the row
+ * and marks it claimed in one statement so two workers cannot both take it.
+ * Looking only at the column list before FROM misses that, and the claim would
+ * be reported as an unclassified leak while the genuinely equivalent SELECT
+ * form passes. This is the same evidence, in the other clause.
+ */
+function returningRegion(sql: string): string {
+  const parts = sql.split(/\bRETURNING\b/i);
+  return parts.length > 1 ? parts.slice(1).join(" RETURNING ") : "";
+}
 function selectsWorkspaceId(sql: string): boolean {
-  return /\bworkspace_id\b/.test(selectList(sql));
+  return /\bworkspace_id\b/.test(selectList(sql)) || /\bworkspace_id\b/.test(returningRegion(sql));
 }
 /** WHERE pins by the primary key `id = $n` (note: \bid\b never matches user_id). */
 function pinsByPrimaryKey(sql: string): boolean {

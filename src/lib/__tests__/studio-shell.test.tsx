@@ -76,6 +76,7 @@ function renderShell(overrides: Partial<React.ComponentProps<typeof StudioShell>
         share: <div data-testid="share-tab-body">share body</div>,
         versions: <div data-testid="versions-tab-body">versions body</div>,
         comments: <div data-testid="comments-tab-body">comments body</div>,
+        acceptance: <div data-testid="acceptance-tab-body">acceptance body</div>,
       }}
       {...overrides}
     />,
