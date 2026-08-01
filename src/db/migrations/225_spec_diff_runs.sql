@@ -20,7 +20,10 @@
 
 CREATE TABLE IF NOT EXISTS instinct_spec_diff_runs (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id   UUID NOT NULL,
+  -- TEXT, not UUID: workspace ids in this schema are TEXT throughout (the
+  -- workspace-id-type contract test enforces it), and the API falls back to the
+  -- literal 'default' workspace, which is not a UUID.
+  workspace_id   TEXT NOT NULL,
   -- What was compared. Both are external URLs, validated by the SSRF guard
   -- before any navigation happens.
   spec_url       TEXT NOT NULL,
