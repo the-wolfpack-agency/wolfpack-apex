@@ -1,0 +1,26 @@
+<!doctype html>
+<!--
+  The build that used to ship. Same copy, same tags, wrong numbers, and every
+  one of these is a real defect from the conversion this tooling was built
+  after:
+    header  height 72px  instead of 66  (+6, and it pushes everything below down)
+    hero    height 257px instead of 320 (-63)
+    hero    font-size 40px instead of 59 (-19)  <- the "19px heading"
+    card    width 460px instead of 482 (-22)
+  Small enough that nobody catches them in a screenshot. Large enough that the
+  page is visibly not the prototype.
+-->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="_shared.css">
+<style>
+  .header { height: 72px; }
+  .hero   { height: 257px; font-size: 40px; }
+  .card   { width: 460px; }
+</style></head>
+<body>
+  <div class="header">Dealer Dashboard</div>
+  <h1 class="hero">A Weekend with Porsche</h1>
+  <p class="lede">Invite a qualified guest to live with a Porsche for 24 to 48 hours.</p>
+  <h2 class="card">Existing Guests</h2>
+  <h2 class="card">Add New Guest</h2>
+  <div class="foot">Porsche Center workspace</div>
+</body></html>

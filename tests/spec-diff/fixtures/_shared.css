@@ -1,0 +1,9 @@
+/* Measurements the prototype promises. A faithful build must reproduce these
+   numbers; it does not have to reproduce the markup or the class names. */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: Arial; width: 1200px; }
+.header { height: 66px; font-size: 16px; padding: 22px 24px; }
+.hero { height: 320px; font-size: 59px; padding: 40px 24px; }
+.lede { font-size: 18px; line-height: 28px; padding: 16px 24px; }
+.card { width: 482px; height: 200px; font-size: 21px; padding: 20px; }
+.foot { font-size: 14px; padding: 12px 24px; }

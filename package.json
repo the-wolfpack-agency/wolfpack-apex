@@ -25,7 +25,8 @@
     "release:backfill": "npx tsx scripts/backfill-release-notes.ts",
     "engineering:seed": "npx tsx scripts/seed-engineering-wiki.ts",
     "icons:generate": "node scripts/generate-icons.mjs",
-    "branch:check": "npx tsx scripts/check-branch-base.ts"
+    "branch:check": "npx tsx scripts/check-branch-base.ts",
+    "test:spec-diff": "playwright test --config=playwright.specdiff.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
