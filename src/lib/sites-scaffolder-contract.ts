@@ -11,14 +11,16 @@
  *
  * THE DRIFT THIS EXISTS TO STOP BEING SILENT
  *
- * `SUPPORTED_SECTION_TYPES` in sites-schema.ts lists 12 types. The scaffolder
- * validates against its own hard-coded list of 8 and calls `process.exit(1)` on
- * anything else. So a brief containing video, testimonial, pricing or faq
- * renders correctly in the studio preview, is accepted by this repo's API, and
- * then fails the deploy outright. The comment at the top of sites.ts claims the
- * two schemas "mirror one-to-one so any brief stored here is guaranteed to
- * scaffold there". That has not been true since those four types were added
- * here without being added there.
+ * The two lists were out of step for months. This repo listed 12 types; the
+ * scaffolder validated against its own hard-coded 8 and called `process.exit(1)`
+ * on anything else, so a brief containing video, testimonial, pricing or faq
+ * rendered correctly in the studio preview, was accepted by this repo's API,
+ * and then failed the deploy outright. wolfpack-site-template PR #1 closed the
+ * gap by implementing the four, so the sets match today.
+ *
+ * They match today. That is precisely why this file still exists: the sets
+ * being equal is a fact to be re-checked on every change, not a state to be
+ * assumed. `unbuildableSectionTypes()` returning empty is a MEASUREMENT.
  *
  * This file records the target's real capability so the gap is a value in the
  * code with a test on it, rather than a surprise at deploy time. It is a MIRROR
@@ -42,6 +44,13 @@ export const SCAFFOLDER_SECTION_TYPES: readonly SectionType[] = [
   "stats",
   "gallery",
   "quote",
+  // Added by wolfpack-site-template PR #1, which also fixed a codegen
+  // injection in the same generator. The gap these four represented is closed:
+  // the studio and the deploy target now build the same set.
+  "video",
+  "testimonial",
+  "pricing",
+  "faq",
 ] as const;
 
 /** Where the mirrored list came from, so a reviewer can check it in one hop. */
@@ -52,9 +61,9 @@ export const SCAFFOLDER_SOURCE = {
 } as const;
 
 /**
- * Types the studio offers that the deploy target cannot build. Non-empty today,
- * and that is the point: an empty array would be a claim, and this is a
- * measurement.
+ * Types the studio offers that the deploy target cannot build. Empty today,
+ * because the template caught up. It is still computed rather than asserted, so
+ * the next type added on one side and not the other shows up here.
  */
 export function unbuildableSectionTypes(): SectionType[] {
   return SUPPORTED_SECTION_TYPES.filter((t) => !SCAFFOLDER_SECTION_TYPES.includes(t));
