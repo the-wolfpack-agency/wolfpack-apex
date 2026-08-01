@@ -6,6 +6,11 @@
  * later a GitHub workflow fails inside the scaffolder with a message nobody in
  * Instinct ever sees. Same outcome, one of them diagnosable.
  *
+ * Those four types build now (wolfpack-site-template PR #1), so these tests use
+ * a type the target genuinely cannot build. That is not a contrivance: a brief
+ * is JSONB written by an older schema, so a stored type this build no longer
+ * knows is exactly what reaches the guard in production.
+ *
  * Asserting the refusal happens BEFORE the deploy row is written matters as
  * much as the refusal itself: a half-started deploy leaves the project sitting
  * at "Deploying…" until the reaper expires it.
@@ -54,13 +59,19 @@ function projectWithSections(types: SectionType[]) {
 beforeEach(() => jest.clearAllMocks());
 
 it("refuses a brief with a section the template cannot build, and names it", async () => {
-  projectWithSections(["hero", "pricing", "faq"]);
-  await expect(triggerDeploy("site_1", "u1", "cto")).rejects.toThrow(/pricing, faq/);
+  projectWithSections(["hero", "carousel", "marquee"] as unknown as SectionType[]);
+  await expect(triggerDeploy("site_1", "u1", "cto")).rejects.toThrow(/carousel, marquee/);
   await expect(triggerDeploy("site_1", "u1", "cto")).rejects.toThrow(/wolfpack-site-template/);
 });
 
+it("lets the four types that used to deploy-fail straight through", async () => {
+  // The regression that matters most: these previously threw here.
+  projectWithSections(["video", "testimonial", "pricing", "faq"]);
+  await expect(triggerDeploy("site_1", "u1", "cto")).rejects.not.toThrow(/cannot build yet/);
+});
+
 it("does not open a deploy row for a build it is going to refuse", async () => {
-  projectWithSections(["pricing"]);
+  projectWithSections(["carousel"] as unknown as SectionType[]);
   await expect(triggerDeploy("site_1", "u1", "cto")).rejects.toThrow();
   // A pending row with no workflow behind it is what leaves the UI stuck at
   // "Deploying…" until the reaper expires it.
@@ -70,19 +81,19 @@ it("does not open a deploy row for a build it is going to refuse", async () => {
 });
 
 it("records the refusal for the learning loop, with the offending types", async () => {
-  projectWithSections(["video"]);
+  projectWithSections(["carousel"] as unknown as SectionType[]);
   await expect(triggerDeploy("site_1", "u1", "cto")).rejects.toThrow();
   expect(trackEvent).toHaveBeenCalledWith(
     "site.deploy_failed",
     "u1",
     "cto",
-    expect.objectContaining({ reason: "section_type_not_supported_by_template", unsupported: "video" }),
+    expect.objectContaining({ reason: "section_type_not_supported_by_template", unsupported: "carousel" }),
   );
 });
 
 it("lets a buildable brief through to the rest of the deploy path", async () => {
   // Proves the guard is specific rather than a blanket refusal. It gets past
   // the check and fails later on env preflight, which is a different message.
-  projectWithSections(["hero", "text", "cards", "stats", "gallery", "quote", "callout", "banner"]);
+  projectWithSections(["hero", "text", "cards", "stats", "gallery", "quote", "callout", "banner", "video", "pricing"]);
   await expect(triggerDeploy("site_1", "u1", "cto")).rejects.not.toThrow(/cannot build yet/);
 });
