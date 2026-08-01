@@ -62,6 +62,32 @@ export type InlineEditMessage =
       /** Source of truth lives in the parent; the iframe re-renders. */
       brief: unknown;
     }
+  /**
+   * The operator clicked something in the preview and wants to work on it.
+   *
+   * Carries the element's MEASURED current values, not just its identity. The
+   * style gate (src/lib/studio/style-intent.ts) needs the value it is stepping
+   * from, and the only place that knows it is the iframe that rendered it — a
+   * section can carry a token, a theme default, or a number inherited from a
+   * prototype conversion, and the parent cannot tell which without measuring.
+   * Sending it with the selection removes a round trip and, more importantly,
+   * removes the chance of the parent stepping from a value that is not on
+   * screen.
+   *
+   * `measured` is UNTRUSTED. It crosses a window boundary, so the validator
+   * below keeps only the known token names and only finite numbers.
+   */
+  | {
+      origin: typeof INSTINCT_EDIT_ORIGIN;
+      type: "element.select";
+      pageIndex: number;
+      sectionIndex: number;
+      sectionType: string;
+      /** Which part of the section was clicked, for the inspector's label. */
+      part: "heading" | "body" | "item" | "media" | "container";
+      /** Computed values, keyed by adjustable-token name. */
+      measured: Record<string, number>;
+    }
   | {
       origin: typeof INSTINCT_EDIT_ORIGIN;
       type: "hover";
@@ -201,6 +227,23 @@ export function isInstinctEditMessage(m: unknown): m is InlineEditMessage {
         typeof obj.pageIndex === "number" &&
         typeof obj.sectionIndex === "number" &&
         typeof obj.sectionType === "string"
+      );
+    }
+    case "element.select": {
+      return (
+        Number.isInteger(obj.pageIndex) &&
+        (obj.pageIndex as number) >= 0 &&
+        Number.isInteger(obj.sectionIndex) &&
+        (obj.sectionIndex as number) >= 0 &&
+        typeof obj.sectionType === "string" &&
+        typeof obj.part === "string" &&
+        ["heading", "body", "item", "media", "container"].includes(obj.part as string) &&
+        // Only the envelope here. The VALUES are sanitised by
+        // sanitizeMeasured, because a plain object from another window can
+        // carry anything, including a __proto__ key.
+        typeof obj.measured === "object" &&
+        obj.measured !== null &&
+        !Array.isArray(obj.measured)
       );
     }
     case "section.reorder": {
