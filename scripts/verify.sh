@@ -5,6 +5,7 @@
 #
 # Env knobs:
 #   VERIFY_SKIP_BUILD=1   - skip `next build` (fast inner loop)
+#   VERIFY_SKIP_BRANCH=1  - skip the branch-base advisory (see below)
 #   VERIFY_SKIP_E2E=1     - skip the e2e-smoke + qr-download stages explicitly
 #   CI=true               - e2e-smoke only runs in CI; skipped locally otherwise
 #
@@ -116,6 +117,16 @@ if [ "${VERIFY_DRY_RUN:-0}" = "1" ]; then
 fi
 
 # --- run the selected stages -----------------------------------------------
+# Branch hygiene first, because it is the cheapest stage and the one whose
+# failure wastes the most: this repo squash-merges, so a branch that still holds
+# its own already-merged commits produces a conflicted PR, and work stacked onto
+# a branch whose PR merges first is silently orphaned. Both cost a session
+# before this existed. ADVISORY: it prints and moves on, never failing a push,
+# because a false positive here must not stop someone shipping.
+if [ "${VERIFY_SKIP_BRANCH:-0}" != "1" ] && [ "${CI:-}" != "true" ]; then
+  npx tsx scripts/check-branch-base.ts || true
+fi
+
 stage_enabled lint      && run_stage "lint"       npm run lint
 stage_enabled typecheck && run_stage "typecheck"  npx tsc --noEmit
 stage_enabled unit      && run_stage "unit-tests" run_unit_tests
