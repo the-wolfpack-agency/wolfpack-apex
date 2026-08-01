@@ -2,9 +2,17 @@
  * Sites library — Instinct's Sites tab.
  *
  * Powers the Max + Meghan workflow: drag a brief into Instinct → get a
- * hosted preview URL on the-wolfpack-agency org. The brief schema mirrors
- * the wolfpack-site-template scaffolder one-to-one so any brief stored
- * here is guaranteed to scaffold there.
+ * hosted preview URL on the-wolfpack-agency org. The brief is written to
+ * `briefs/<slug>.json` in a repo generated from wolfpack-site-template, whose
+ * `scripts/scaffold-client-site.mjs` turns it into pages.
+ *
+ * That means two renderers for one brief: the preview in this repo, and the
+ * scaffolder's output. This header used to claim the two schemas mirror each
+ * other one-to-one "so any brief stored here is guaranteed to scaffold there".
+ * That stopped being true when video, testimonial, pricing and faq were added
+ * here and not there. See sites-scaffolder-contract.ts, which records the
+ * target's real capability and is what triggerDeploy now checks before
+ * dispatching.
  *
  * Closed-loop: every CRUD action emits a tracked event so the brain
  * learns which briefs convert to deploys, which sections get edited most,
@@ -24,6 +32,7 @@ import {
   defaultGithubClient,
 } from "@/lib/github-client";
 import { setRepoSecret } from "@/lib/github-secrets";
+import { canScaffold, SCAFFOLDER_SOURCE } from "@/lib/sites-scaffolder-contract";
 
 /* ----------------------------- Types + validation --------------------- */
 // Re-exported from sites-schema.ts so client components can import the
@@ -600,6 +609,28 @@ export async function triggerDeploy(
   // "Client has not approved this preview yet." Gate is intentionally
   // OFF for this wave — data model + UI shipped first so approvals
   // accumulate before we start blocking deploys on them.
+
+  // Refuse a brief the deploy target cannot build, here, where the message can
+  // name the sections. The scaffolder in wolfpack-site-template validates
+  // against its own list and calls process.exit(1) on an unknown type, so
+  // without this the operator authors a pricing section, sees it render in the
+  // preview, clicks Publish, and gets an opaque failed workflow several minutes
+  // later. Same outcome either way; only one of them is diagnosable.
+  const authoredTypes = (project.brief.pages ?? []).flatMap((p) => (p.sections ?? []).map((s) => s.type));
+  const scaffoldable = canScaffold(authoredTypes);
+  if (!scaffoldable.ok) {
+    trackEvent("site.deploy_failed", triggeredBy, userRole, {
+      project_id: projectId,
+      reason: "section_type_not_supported_by_template",
+      unsupported: scaffoldable.unsupported.join(","),
+    });
+    throw new Error(
+      `Deploy aborted: this site uses section type(s) the site template cannot build yet ` +
+        `(${scaffoldable.unsupported.join(", ")}). They render in the preview here but the ` +
+        `scaffolder in ${SCAFFOLDER_SOURCE.repo} does not implement them. Remove those ` +
+        `sections, or add them to ${SCAFFOLDER_SOURCE.file} first.`,
+    );
+  }
 
   const deployId = `deploy_${randomUUID()}`;
   await safeQuery(
