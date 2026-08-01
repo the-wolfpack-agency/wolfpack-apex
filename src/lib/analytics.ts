@@ -862,6 +862,13 @@ export type InstinctEventType =
   | "pentest.auth_bypass_completed"
   // pentest.injection_completed { platform, cases, confirmed }
   | "pentest.injection_completed"
+  // spec_diff.*  { spec_url, target_url, clean, total_diffs, font_mismatch }: a
+  // prototype was compared against its implementation. Conversion fidelity
+  // becomes data: which pages drift, by how much, and whether a re-run closed it.
+  | "spec_diff.started"
+  | "spec_diff.completed"
+  | "spec_diff.failed"
+  | "spec_diff.blocked_url"
   | "platform.scan_started"
   | "platform.scan_finding_detected"
   | "platform.scan_completed"
