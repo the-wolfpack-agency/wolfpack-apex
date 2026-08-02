@@ -1,42 +1,54 @@
 /**
  * Every table declares whether it is tenant-scoped.
  *
- * WHY THIS IS THE GAP THAT MATTERS NOW
+ * THE ARCHITECTURE THIS ASSUMES (decided 2026-08-02)
  *
- * Instinct is becoming a product other companies run. The repo already has a
- * strong tenant-isolation scan, and it validates 53 workspace-scoped tables
- * rigorously: every query must carry a visible workspace_id predicate, and
- * unclassified must be zero.
+ * Instinct is sold as a product, and each client gets THEIR OWN DATABASE. A
+ * client's data never shares a database with another client's, so the boundary
+ * between companies is the database itself, not a predicate in a query.
  *
- * It is structurally blind to the rest. A table with NO workspace_id column
- * cannot fail a scan that checks for a workspace_id predicate — there is
- * nothing to check. So 149 of 202 tables are invisible to it, and the scan
- * reports clean while they sit in one global namespace.
+ * That decision is what this file is about, and it changes what this test
+ * means. An earlier version of this header said a missing workspace_id becomes
+ * exploitable "the day a second company runs it". Under one-database-per-client
+ * that is no longer true, and leaving it would have made this guardrail assert
+ * a threat model that had been ruled out — which is precisely the kind of
+ * confidently-wrong control the rest of this work has been removing.
  *
- * That is the same shape as every other finding in this codebase: a control
- * that reports success because it is incapable of reporting anything else.
+ * WHAT THE REGISTER IS STILL FOR
  *
- * WHAT IS AND IS NOT TRUE TODAY
+ * Two things, both weaker than the original claim and both real:
  *
- * Not exploitable. Instinct runs single-tenant, so one namespace is the
- * correct namespace and nothing is currently exposed to anyone.
+ *   1. Intra-company separation. One client company can run several workspaces
+ *      (teams, departments, brands). workspace_id is what keeps those apart
+ *      INSIDE their own database, and 53 tables already rely on it. A new table
+ *      without it silently opts out of that.
  *
- * It becomes exploitable on the day a second company runs it. Found while
- * tracing a real one: /api/clients/[id]/assets/[assetId]/raw serves asset
- * BYTES, and getAssetById() looks the row up by id alone. The route checks the
- * asset belongs to the client slug in the path and never that the client
- * belongs to the caller. With one tenant that is fine. With two it is a
- * document disclosure.
+ *   2. Drift. A table that HAS workspace_id must not quietly lose it and fall
+ *      off the tenant-isolation scan's radar, which only checks tables that
+ *      have the column. That scan cannot see this class of change; this can.
  *
- * WHAT THIS TEST DOES, AND DELIBERATELY DOES NOT DO
+ * WHAT IS NO LONGER CLAIMED
  *
- * It does not fix 149 tables. That is a migration programme with backfills and
- * query changes, and pretending otherwise would be worse than saying so.
+ * The 149 tables are not a cross-company exposure and not a migration
+ * programme. Under separate databases they are correct as they are. The count
+ * below is inventory, not debt, and it is not expected to reach zero.
  *
- * It makes the debt COUNTABLE and stops it growing: a new table must carry
- * workspace_id or be added here on purpose, which is a decision someone makes
- * rather than a default they inherit. The list may only shrink, and a stale
- * entry fails too, so it cannot rot into permission.
+ * WHAT THE ARCHITECTURE MOVES THE RISK TO
+ *
+ * Recorded here because it is the thing to get right, and it is not obvious
+ * from the code:
+ *
+ *   - Tenant resolution must be UN-SPOOFABLE. The database a request uses has
+ *     to be derived from the authenticated session claim, never from a
+ *     subdomain, header or body field the caller controls. That is the one way
+ *     this architecture fails as badly as a shared database would.
+ *   - Migration fan-out must be resumable and report per-client status. N
+ *     databases means a failure on client seven leaves the estate split-brain.
+ *   - Connection limits. One pool per tenant inside a serverless function will
+ *     exhaust Neon's per-project cap; pools need to be lazy and bounded.
+ *
+ * There is exactly one `new Pool()` in this codebase (src/lib/db.ts), so the
+ * routing change is contained to one file and none of the 353 query sites move.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -46,10 +58,9 @@ const MIGRATIONS = join(__dirname, "..", "..", "..", "db", "migrations");
 /**
  * Tables with no workspace_id column, as of 2026-08-02.
  *
- * Ordered by what is at stake if this platform is ever run by two companies:
- * credentials first, then personal data, then client work, then knowledge.
- * The count is the number to drive down; the names are so a reviewer can see
- * WHICH ones without running anything.
+ * Inventory, not debt. Under one-database-per-client these are correct as they
+ * are; the list exists so that adding to it is a decision rather than an
+ * accident, and so a reviewer can see WHICH tables without running anything.
  */
 const NO_WORKSPACE_COLUMN: readonly string[] = [
   "apex_benefit_documents",
@@ -239,7 +250,7 @@ describe("every table declares whether it is tenant-scoped", () => {
   it("has no NEW table without a workspace_id column", () => {
     const added = unscoped.filter((t) => !NO_WORKSPACE_COLUMN.includes(t));
     expect({
-      hint: "A new table needs workspace_id to be safe when a second company runs this platform. If it is genuinely global reference data, add it to NO_WORKSPACE_COLUMN on purpose.",
+      hint: "Does this table need to be separated per WORKSPACE inside one client's database? If yes it needs workspace_id. If it is instance-wide, add it to NO_WORKSPACE_COLUMN on purpose. Cross-CLIENT separation is handled by the database, not this column.",
       added,
     }).toEqual({ hint: expect.any(String), added: [] });
   });
@@ -252,9 +263,10 @@ describe("every table declares whether it is tenant-scoped", () => {
     });
   });
 
-  it("records the debt as a number, so the direction is visible", () => {
-    // Update deliberately, downward. This is the metric that says whether
-    // Instinct is ready to be run by someone else.
+  it("records the count, so a change to it is deliberate", () => {
+    // Not a debt figure and not expected to reach zero. It moves when someone
+    // decides a table is instance-wide, and that decision should be visible in
+    // a diff rather than inferred later.
     expect(NO_WORKSPACE_COLUMN.length).toBe(149);
   });
 
