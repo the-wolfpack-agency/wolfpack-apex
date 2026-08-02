@@ -8,7 +8,7 @@
  * — same contract as the rest of the lib.
  */
 
-import { pool, safeQuery, writeQuery, WriteQueryError } from "@/lib/db";
+import { activePool, safeQuery, writeQuery, WriteQueryError } from "@/lib/db";
 import type { ParsedPrinciple } from "@/lib/principles/parser";
 import { slugifyForStore } from "@/lib/principles/parser-slug";
 
@@ -219,7 +219,7 @@ export async function syncPrinciplesFromParsed(args: {
   const unchanged: PrincipleRecord[] = [];
   const retired: PrincipleRecord[] = [];
 
-  const client = await pool.connect();
+  const client = await activePool().connect();
   try {
     await client.query("BEGIN");
 
@@ -680,7 +680,7 @@ export async function createPrincipleNative(
     ? input.scoreboardWeight
     : 1;
 
-  const client = await pool.connect();
+  const client = await activePool().connect();
   try {
     await client.query("BEGIN");
     const dup = await client.query(
@@ -781,7 +781,7 @@ export async function patchPrincipleNative(
   }
   if (patch.effectiveAt !== undefined) add("effective_at", patch.effectiveAt);
 
-  const client = await pool.connect();
+  const client = await activePool().connect();
   try {
     await client.query("BEGIN");
 

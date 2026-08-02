@@ -7,7 +7,9 @@
  */
 
 const mockConnect = jest.fn();
-jest.mock("@/lib/db", () => ({ pool: { connect: (...a: unknown[]) => mockConnect(...a) } }));
+// activePool() is what the module actually calls; it closes over the
+// module-internal pool, so the `pool` export alone is not enough.
+jest.mock("@/lib/db", () => ({ pool: { connect: (...a: unknown[]) => mockConnect(...a) }, activePool: () => ({ connect: (...a: unknown[]) => mockConnect(...a) }) }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
 
 import {

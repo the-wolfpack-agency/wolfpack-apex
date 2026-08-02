@@ -7,7 +7,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
-jest.mock("@/lib/db", () => ({ pool: { connect: jest.fn() } }));
+// activePool() is what the module actually calls; it closes over the
+// module-internal pool, so the `pool` export alone is not enough.
+jest.mock("@/lib/db", () => ({ pool: { connect: jest.fn() }, activePool: () => ({ connect: jest.fn() }) }));
 
 import { isForwardMigration, discoverMigrations } from "@/db/migrate";
 

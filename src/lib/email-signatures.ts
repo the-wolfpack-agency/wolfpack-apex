@@ -24,7 +24,7 @@
  * in this codebase before, see feedback_no_silent_data_loss).
  */
 
-import { pool, safeQuery, writeQuery, WriteQueryError } from "@/lib/db";
+import { activePool, safeQuery, writeQuery, WriteQueryError } from "@/lib/db";
 import type { PoolClient } from "pg";
 
 export type SignatureBodyFormat = "text" | "html";
@@ -201,7 +201,7 @@ export async function createSignature(args: {
   const { label, body, bodyFormat } = validateSignatureInput(args);
   const isDefault = !!args.isDefault;
 
-  const client = await pool.connect();
+  const client = await activePool().connect();
   try {
     await client.query("BEGIN");
     if (isDefault) {
@@ -294,7 +294,7 @@ export async function updateSignature(
   params.push(userId);
   const userIdx = params.length;
 
-  const client = await pool.connect();
+  const client = await activePool().connect();
   try {
     await client.query("BEGIN");
     if (promoteToDefault) {

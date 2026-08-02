@@ -11,7 +11,7 @@
  *   - set throws WriteQueryError so callers know writes aren't durable.
  */
 
-import { pool, safeQuery, WriteQueryError } from "@/lib/db";
+import { activePool, safeQuery, WriteQueryError } from "@/lib/db";
 
 export interface UserNavPrefs {
   userId: string;
@@ -159,7 +159,7 @@ export async function setNavPrefs(
   if (!userId) throw new Error("userId is required");
   const cleaned = validateHiddenHrefs(hiddenHrefs);
 
-  const client = await pool.connect();
+  const client = await activePool().connect();
   try {
     const result = await client.query<NavPrefsRow>(
       `INSERT INTO instinct_user_nav_prefs (user_id, hidden_hrefs, updated_at)

@@ -25,6 +25,10 @@ jest.mock("@/lib/db", () => ({
   query: (...args: any[]) => plaudMockQuery(...args),
   safeQuery: (...args: any[]) => plaudMockSafeQuery(...args),
   pool: { query: jest.fn() },
+  // activePool() replaced direct pool use so every query is routed to the
+  // tenant's database. The mock must expose it or the module under test
+  // calls undefined.
+  activePool: () => ({ query: jest.fn() }),
 }));
 
 // Triple-write fires Qdrant + Neo4j writes — stub them so tests are

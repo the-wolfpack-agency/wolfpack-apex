@@ -16,7 +16,7 @@
  * sync hook + xlsx importer can call it without re-emitting events.
  */
 
-import { pool, safeQuery, writeQuery, WriteQueryError } from "@/lib/db";
+import { activePool, safeQuery, writeQuery, WriteQueryError } from "@/lib/db";
 
 export type CategoryKind = "fixed" | "variable";
 
@@ -607,7 +607,7 @@ export async function bulkCreateLines(
       "no_database",
     );
   }
-  const client = await pool.connect();
+  const client = await activePool().connect();
   try {
     await client.query("BEGIN");
     let n = 0;

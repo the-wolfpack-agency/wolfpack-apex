@@ -20,7 +20,7 @@
  */
 
 import { createHash } from "crypto";
-import { pool } from "@/lib/db";
+import { activePool } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { redactText } from "@/lib/ai/redaction";
 import type { OgiamAction, OgiamDecision, OgiamPrincipal } from "./types";
@@ -83,7 +83,7 @@ export async function recordActionOutcome(
 
   let client;
   try {
-    client = await pool.connect();
+    client = await activePool().connect();
   } catch (err) {
     console.warn("[ogiam] outcome connect failed:", (err as Error).message);
     return;
@@ -182,7 +182,7 @@ export async function recordDecision(
 
   let client;
   try {
-    client = await pool.connect();
+    client = await activePool().connect();
   } catch (err) {
     console.warn("[ogiam] ledger connect failed:", (err as Error).message);
     return null;

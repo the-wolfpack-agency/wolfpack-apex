@@ -7,34 +7,12 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool, type PoolClient, type PoolConfig, type QueryResult } from "pg";
+import { normalizeDatabaseUrlSsl } from "@/lib/db-url";
+import { connectionStringFor, dbMode, TenantResolutionError } from "@/lib/db/tenant";
+import { getTenantPool } from "@/lib/db/pools";
 
-/**
- * Normalize the connection string to explicitly request
- * `sslmode=verify-full`. pg-connection-string v3.0.0 / pg v9.0.0 will
- * change the meaning of `sslmode=require` (and `prefer` / `verify-ca`)
- * to libpq-compatible weaker semantics; the library currently emits
- * a SECURITY WARNING on every boot when those modes are seen. Setting
- * verify-full explicitly preserves today's strict-cert behaviour
- * across the upcoming upgrade and silences the warning.
- *
- * Pure for unit testing; returns undefined when input is undefined so
- * shadow mode keeps working.
- */
-export function normalizeDatabaseUrlSsl(
-  url: string | undefined,
-): string | undefined {
-  if (!url) return url;
-  /* If sslmode is already verify-full, pass through unchanged. */
-  if (/[?&]sslmode=verify-full(\b|&|$)/i.test(url)) return url;
-  /* Replace any other sslmode value (require/prefer/verify-ca/disable). */
-  if (/[?&]sslmode=[^&]+/i.test(url)) {
-    return url.replace(/(?<=[?&])sslmode=[^&]+/i, "sslmode=verify-full");
-  }
-  /* No sslmode in URL — append. Pick the right separator based on
-     whether a query string already exists. */
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}sslmode=verify-full`;
-}
+export { normalizeDatabaseUrlSsl };
+
 
 const normalizedUrl = normalizeDatabaseUrlSsl(process.env.DATABASE_URL);
 
@@ -95,6 +73,89 @@ interface WorkspaceScope {
 }
 const scopeStore = new AsyncLocalStorage<WorkspaceScope>();
 
+/**
+ * WHICH DATABASE THIS REQUEST BELONGS TO.
+ *
+ * Instinct is sold per client and each client gets their own database, so the
+ * boundary between two companies is the database rather than a predicate. That
+ * only holds if the database is chosen from something the caller cannot
+ * influence, which is why withTenant() is the only door and it takes a tenant
+ * id the caller has already verified from the session.
+ *
+ * Separate from the workspace scope on purpose. A workspace separates teams
+ * INSIDE one client's database; a tenant separates clients. Conflating them
+ * would mean a workspace id from a request body could pick a database.
+ */
+const tenantStore = new AsyncLocalStorage<{ tenantId: string }>();
+
+/** The tenant this request resolved to, if any. */
+export function activeTenant(): string | undefined {
+  return tenantStore.getStore()?.tenantId;
+}
+
+/**
+ * Run `fn` against one client's database.
+ *
+ * The tenant id MUST come from the verified session claim. Never from a
+ * subdomain, header, body field or query parameter — that is the single way
+ * this architecture fails as badly as a shared database would, and no code
+ * below this line can tell the difference, so the route-layer guardrail
+ * enforces it instead.
+ *
+ * Nesting to a DIFFERENT tenant throws. A request that has begun reading one
+ * client's data has no legitimate reason to reach into another's, and the
+ * alternative — quietly using the inner or outer one — is a coin flip over
+ * whose data gets returned.
+ */
+export async function withTenant<R>(tenantId: string, fn: () => Promise<R>): Promise<R> {
+  const existing = tenantStore.getStore();
+  if (existing) {
+    if (existing.tenantId !== tenantId) {
+      throw new TenantResolutionError(
+        `tenant nesting mismatch: already serving '${existing.tenantId}', refused re-scope to '${tenantId}'`,
+      );
+    }
+    return fn();
+  }
+  return tenantStore.run({ tenantId }, fn);
+}
+
+/**
+ * The pool this request must use.
+ *
+ * In single mode this is the process-wide pool and nothing changes. In routed
+ * mode it is the tenant's pool, and a request with no tenant in scope THROWS
+ * rather than falling back — a fallback would turn every bug that loses the
+ * tenant into a successful, silent read of another client's data.
+ */
+/**
+ * Is a database reachable for THIS request?
+ *
+ * Shadow mode keyed on DATABASE_URL alone was correct when there was one
+ * database. In routed mode DATABASE_URL is legitimately unset while every
+ * tenant has their own, so the old check would have put the entire product into
+ * shadow mode and returned empty rows for everything — silently, and looking
+ * exactly like a client with no data.
+ */
+export function hasDatabase(): boolean {
+  if (dbMode() === "single") return Boolean(process.env.DATABASE_URL);
+  try {
+    return Boolean(connectionStringFor(activeTenant()));
+  } catch {
+    return false;
+  }
+}
+
+export function activePool(): Pool {
+  if (dbMode() === "single") return pool;
+  const tenantId = activeTenant();
+  const connectionString = connectionStringFor(tenantId);
+  if (!connectionString) {
+    throw new TenantResolutionError("routed mode resolved no connection string");
+  }
+  return getTenantPool(tenantId as string, connectionString);
+}
+
 /** The active workspace scope, if the caller is inside withWorkspaceScope. */
 export function activeWorkspaceScope(): { workspaceId: string } | undefined {
   const s = scopeStore.getStore();
@@ -108,14 +169,14 @@ export async function query<T extends Record<string, unknown> = Record<string, u
   // Inside a workspace scope, run on the scoped tx client so RLS sees the GUC.
   // Outside (the default everywhere today), use the pool exactly as before.
   const scope = scopeStore.getStore();
-  return (scope ? scope.client : pool).query<T>(text, params);
+  return (scope ? scope.client : activePool()).query<T>(text, params);
 }
 
 export async function safeQuery<T = Record<string, unknown>>(
   text: string,
   params?: unknown[],
 ): Promise<{ rows: T[]; fromCache: boolean }> {
-  if (!process.env.DATABASE_URL) {
+  if (!hasDatabase()) {
     return { rows: [], fromCache: true };
   }
   try {
@@ -183,9 +244,9 @@ export async function writeQuery<T = Record<string, unknown>>(
   params?: unknown[],
   opts?: { expectRows?: number },
 ): Promise<{ rows: T[] }> {
-  if (!process.env.DATABASE_URL) {
+  if (!hasDatabase()) {
     throw new WriteQueryError(
-      "writeQuery called without DATABASE_URL — writes require a real database.",
+      "writeQuery called with no database for this request — writes require a real database, and in routed mode a resolved tenant.",
       "no_database",
     );
   }
@@ -247,13 +308,16 @@ export interface TxClient {
 export async function withTransaction<R>(
   fn: (tx: TxClient) => Promise<R>,
 ): Promise<R> {
-  if (!process.env.DATABASE_URL) {
+  if (!hasDatabase()) {
     throw new WriteQueryError(
-      "withTransaction called without DATABASE_URL — writes require a real database.",
+      "withTransaction called with no database for this request — writes require a real database, and in routed mode a resolved tenant.",
       "no_database",
     );
   }
-  const client: PoolClient = await pool.connect();
+  // activePool(), not the process pool: a transaction that opened against the
+  // wrong database is precisely the failure this whole design exists to stop,
+  // and it would commit successfully.
+  const client: PoolClient = await activePool().connect();
   const tx: TxClient = {
     async write<T = Record<string, unknown>>(
       text: string,
@@ -337,11 +401,11 @@ export async function withWorkspaceScope<R>(
     // Already scoped to the same workspace on an open client — just run.
     return fn();
   }
-  // Shadow mode: no DB. Run fn with pool/shadow semantics (no scoped client).
-  if (!process.env.DATABASE_URL) {
+  // Shadow mode: no DB for this request. Run fn with pool/shadow semantics.
+  if (!hasDatabase()) {
     return fn();
   }
-  const client: PoolClient = await pool.connect();
+  const client: PoolClient = await activePool().connect();
   try {
     await client.query("BEGIN");
     // set_config(name, value, is_local=true) is the parameterized form of

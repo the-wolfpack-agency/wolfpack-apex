@@ -41,7 +41,7 @@
 
 import { createHash } from "crypto";
 import type { PoolClient } from "pg";
-import { pool, safeQuery } from "@/lib/db";
+import { activePool, safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 
 // ---------------------------------------------------------------------------
@@ -269,7 +269,7 @@ export async function recordAudit(entry: AuditEntryInput): Promise<RecordResult>
   const redactedBefore = entry.beforeState === undefined ? null : redactPII(entry.beforeState);
   const redactedAfter = entry.afterState === undefined ? null : redactPII(entry.afterState);
 
-  const client: PoolClient = await pool.connect();
+  const client: PoolClient = await activePool().connect();
   try {
     await client.query("BEGIN");
 
