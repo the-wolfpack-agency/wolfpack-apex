@@ -20,10 +20,20 @@
  * reconciles this against an invoice, finds it wrong, and stops trusting the
  * whole surface.
  *
- * A MODEL THAT IS NOT CONFIGURED SAYS WHICH VARIABLE IS MISSING
+ * THE LIST IS WHAT THIS PLATFORM CAN REACH, AND NOTHING ELSE
  *
- * "Unavailable" sends someone digging. The env var name is the fix, so it is
- * what gets shown.
+ * This panel used to list every registered model and name the missing variable
+ * for the unconfigured ones, on the reasoning that "Unavailable" sends someone
+ * digging. What that produced in practice was seven rows where four models are
+ * reachable, because the unconfigured ones were the OpenAI-hosted twins of
+ * Azure models that ARE configured, each carrying a price nothing would ever be
+ * billed at. A duplicate that cannot serve a request is not information, it is
+ * a longer list.
+ *
+ * The registry still holds them, which is what makes swapping a provider a
+ * one-line change. The panel is titled "models this platform can reach" and now
+ * means it. Whether a specific model is reachable is a different question, and
+ * the button below answers it properly by asking the model.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -242,7 +252,16 @@ export default function AiRouterPage() {
             )}
           </div>
           <ul style={list} data-testid="router-models">
-            {data.models.map((m) => (
+            {/* Only what the platform can actually reach. The unconfigured rows
+                were the OpenAI-hosted twins of Azure models that ARE configured
+                (gpt-4o next to azure-gpt-4o), so the list read as seven models
+                when it is four, and the duplicates carried prices nothing would
+                ever be billed at. The registry still holds them, because that is
+                what makes swapping a provider a one-line change; this panel is
+                titled "models this platform can reach" and now means it. */}
+            {data.models
+              .filter((m) => m.available)
+              .map((m) => (
               <li key={m.modelId} style={row}>
                 <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
                   <StatusPill
@@ -260,8 +279,8 @@ export default function AiRouterPage() {
                   ${m.inputPricePer1kUsd}/1k in, ${m.outputPricePer1kUsd}/1k out
                   {m.blockedBy ? ` — ${m.blockedBy}` : ""}
                 </p>
-              </li>
-            ))}
+                </li>
+              ))}
           </ul>
         </GlassPanel>
       )}

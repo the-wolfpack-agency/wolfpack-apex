@@ -197,6 +197,13 @@ function ReleaseCard({ release, defaultOpen }: { release: Release; defaultOpen: 
 
 /** Product-creation milestones are versioned "<area>-created". */
 const isMilestone = (r: Release) => r.version.endsWith("-created");
+/**
+ * A dated measurement of the whole codebase, published by
+ * scripts/publish-loc-snapshot.ts. Distinct from a creation milestone: a
+ * milestone records what a product was worth at its first commit and never
+ * moves again, a snapshot records where everything stands today.
+ */
+const isLocSnapshot = (r: Release) => r.version.startsWith("loc-snapshot-");
 
 export default function ReleaseTimeline({ releases }: { releases: Release[] }) {
   const [view, setView] = useState<"releases" | "products">("releases");
@@ -216,12 +223,28 @@ export default function ReleaseTimeline({ releases }: { releases: Release[] }) {
   const regular = useMemo(() => releases.filter((r) => !isMilestone(r)), [releases]);
 
   // Headline stats for the analytics strip.
-  const totalLoc = useMemo(
-    () => milestones.reduce((sum, m) => sum + (m.entries[0]?.loc ?? 0), 0),
-    [milestones],
-  );
+  //
+  // The tile reads the NEWEST snapshot when one exists, and only falls back to
+  // summing creation milestones when none does. Summing milestones was giving a
+  // number frozen at each product's first commit, so the headline said 1,802,656
+  // while the snapshot published the same day said 1,828,902. Two different
+  // numbers for the same thing on one screen is worse than either being wrong,
+  // because it makes the reader distrust both.
+  const latestSnapshot = useMemo(() => {
+    const snaps = releases.filter(isLocSnapshot);
+    if (snaps.length === 0) return null;
+    return snaps.reduce((newest, r) => (r.released_on > newest.released_on ? r : newest));
+  }, [releases]);
+
+  const totalLoc = useMemo(() => {
+    if (latestSnapshot) return latestSnapshot.entries.reduce((sum, e) => sum + (e.loc ?? 0), 0);
+    return milestones.reduce((sum, m) => sum + (m.entries[0]?.loc ?? 0), 0);
+  }, [latestSnapshot, milestones]);
+
+  // A snapshot's rows are measurements, not features. Counting them would say
+  // seven things shipped every time the codebase was measured.
   const featureCount = useMemo(
-    () => regular.reduce((sum, r) => sum + r.entries.length, 0),
+    () => regular.filter((r) => !isLocSnapshot(r)).reduce((sum, r) => sum + r.entries.length, 0),
     [regular],
   );
 
@@ -297,7 +320,12 @@ export default function ReleaseTimeline({ releases }: { releases: Release[] }) {
 
   const stats: { label: string; value: string }[] = [
     { label: "Products", value: String(milestones.length) },
-    { label: "Lines of code", value: totalLoc ? `~${totalLoc.toLocaleString()}` : "0" },
+    {
+      label: "Lines of code",
+      // No "~" against a snapshot: it is a counted figure, and the tilde
+      // invited exactly the mismatch this was reported for.
+      value: totalLoc ? `${latestSnapshot ? "" : "~"}${totalLoc.toLocaleString()}` : "0",
+    },
     { label: "Releases", value: String(regular.length) },
     { label: "Features shipped", value: String(featureCount) },
   ];
