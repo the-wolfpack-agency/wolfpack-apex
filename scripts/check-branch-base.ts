@@ -86,6 +86,10 @@ function main(): number {
       })
     : [];
   const behind = Number(tryGit(["rev-list", "--count", `HEAD..${BASE}`]) ?? "0") || 0;
+  // A stash belongs to whoever left it, and the next `git stash pop` in any
+  // session takes the top of the stack regardless of who that was.
+  const stashRaw = tryGit(["stash", "list"]);
+  const stashCount = stashRaw ? stashRaw.split("\n").filter(Boolean).length : 0;
 
   // The squash-merge fingerprint, asked as a prefix question (see absorbedPrefix):
   // at commit i, do the files commits 0..i touched already read identically in
@@ -107,6 +111,7 @@ function main(): number {
     baseBranch: BASE,
     ahead,
     behind,
+    stashCount,
     absorbedShas,
     openPr: openPrForBranch(branch),
   });
