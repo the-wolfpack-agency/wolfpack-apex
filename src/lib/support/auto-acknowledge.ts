@@ -57,6 +57,8 @@ import {
 } from "./repo";
 import { findMatchingPatterns } from "./pattern-library";
 import type { SupportPattern, SupportTicket } from "./types";
+import { renderPrompt } from "@/lib/prompts/registry";
+import { SUPPORT_AUTO_ACKNOWLEDGE } from "@/lib/prompts/definitions/support";
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                           */
@@ -111,19 +113,8 @@ const FORBIDDEN_OUTPUT_PHRASES: readonly string[] = [
 ];
 
  
-const SYSTEM_PROMPT = [
-  "You are auto-replying to a support email. NEVER assert facts about the user's account state. NEVER claim a fix has been or will be performed. Only acknowledge receipt + offer GENERAL self-serve steps from the provided pattern template + commit to human follow-up.",
-  "",
-  "Output: a polite acknowledgement, no more than 180 words. Echo what the user described in 1 sentence. Then list 2-4 self-serve steps from the pattern template. Then say a Wolfpack team member will follow up. Sign off as 'The Wolfpack Team'.",
-  "",
-  "Hard rules:",
-  "1. Never claim the user's account, license, mailbox, or service is in any specific state. You do not have visibility into their account; do not pretend you do.",
-  "2. Never claim anything has been fixed, resolved, reset, unlocked, or changed. The auto-ack is informational only.",
-  "3. Never promise a specific timeline for the follow-up. Use language like 'a Wolfpack team member will follow up shortly'.",
-  "4. Never invite the customer to reply with credentials, passwords, MFA codes, or account secrets.",
-  "5. Use a warm professional tone. No em dashes. No exclamation points. No emojis.",
-  "6. Output the email body only. No subject line, no greeting prefix outside the body, no commentary outside the body.",
-].join("\n");
+/* Prompt lives in the registry: src/lib/prompts/definitions/support.ts. */
+const SYSTEM_PROMPT: string = renderPrompt(SUPPORT_AUTO_ACKNOWLEDGE, {});
  
 
 /**

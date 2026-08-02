@@ -28,6 +28,8 @@ import {
   cacheResponse,
   lookupCachedResponse,
 } from "@/lib/ai/response-cache";
+import { renderPrompt } from "@/lib/prompts/registry";
+import { SUPPORT_CATEGORIZE } from "@/lib/prompts/definitions/support";
 
 export type SupportCategory =
   | "m365"
@@ -81,25 +83,10 @@ export interface CategorizeResult {
 const CONFIDENCE_FLOOR = 0.6;
 
  
-const SYSTEM_PROMPT = `You are a support-ticket classifier for the Wolfpack Agency operator team. Your job is to read one ticket and pick exactly one category from this list:
-
-- "m365": Microsoft 365 issues (email, Outlook, calendar, Teams, OneDrive, SharePoint, Entra ID / Azure AD sign-in errors like AADSTSxxxxx, MFA, license assignment).
-- "azure": Azure cloud issues that are NOT m365 sign-in (App Service, Functions, Storage, networking, Resource Manager, billing on Azure subscriptions).
-- "instinct": Issues with the Wolfpack Instinct platform itself (the operator-facing app, dashboards, automations, sites, HR features, support feature, login to Instinct).
-- "wolfpack-auto": Issues with the Wolfpack Auto dealer platform (inventory, leads, dealer onboarding, AgenticQA pipeline running on Auto).
-- "porsche-classes": Questions about the Porsche academy class scheduling or registrations.
-- "billing": License costs, invoices, payment methods, subscription changes, refunds.
-- "urgent": ANY indication of an active security incident, suspected breach, account takeover, ransomware, data loss, or a user fully locked out of their account RIGHT NOW. This category overrides the others when those signals are present.
-- "general": anything that does not clearly fit one of the above.
-
-Rules:
-1. Return ONLY a JSON object with the keys category, confidence, reasoning. No prose, no markdown fences.
-2. confidence is a number from 0.0 to 1.0 representing how sure you are.
-3. reasoning is one short sentence (under 140 chars) explaining the choice.
-4. If the ticket mentions an active breach, lockout that is happening now, ransomware, data loss, or imminent security risk, choose "urgent" even if it would also fit another bucket.
-5. If you are not sure, return "general" with confidence below 0.6 — do not guess wildly.
-
-Output exactly: {"category":"...","confidence":0.0,"reasoning":"..."}`;
+/* Prompt lives in the registry: src/lib/prompts/definitions/support.ts.
+   It has an id an eval can score and a version a regression can be bisected
+   against, neither of which a string constant here can offer. */
+const SYSTEM_PROMPT: string = renderPrompt(SUPPORT_CATEGORIZE, {});
  
 
 /**

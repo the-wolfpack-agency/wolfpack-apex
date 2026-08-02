@@ -87,6 +87,18 @@ export interface PoliteFetchOptions {
   /** Injected sleep; defaults to a real setTimeout. Tests pass a no-op / fake-clock
    *  advancer so there are NO real timers. Resolves after `ms`. */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Injected randomness for the backoff jitter; defaults to Math.random.
+   *
+   * `now` and `sleep` were already injectable so a test could run with no real
+   * timers, and then the jitter was left on Math.random — which made the class
+   * testable except for the one input that decides how long it waits. Full
+   * jitter multiplies by rand(), so a draw near zero rounds the backoff to 0,
+   * and a test asserting "some backoff happened" fails roughly once in 500
+   * runs. That is a CI flake nobody can reproduce locally, which is the worst
+   * kind.
+   */
+  rand?: () => number;
   /** Called when a request backs off, so the caller can fire
    *  `platform.scan_throttled`. Best-effort; never awaited, never throws. */
   onThrottle?: (info: ThrottleInfo) => void;
@@ -218,6 +230,7 @@ export class PoliteFetcher {
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly rand: () => number;
   private readonly onThrottle?: (info: ThrottleInfo) => void;
   private readonly hosts = new Map<string, HostState>();
 
@@ -230,6 +243,7 @@ export class PoliteFetcher {
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.now = opts.now ?? Date.now;
     this.sleep = opts.sleep ?? realSleep;
+    this.rand = opts.rand ?? Math.random;
     this.onThrottle = opts.onThrottle;
   }
 
@@ -285,6 +299,7 @@ export class PoliteFetcher {
         const backoffMs = computeBackoffMs(attempt, retryAfterMs, {
           baseBackoffMs: this.baseBackoffMs,
           maxBackoffMs: this.maxBackoffMs,
+          rand: this.rand,
         });
 
         // Fire-and-forget analytics; never let it break the scan.
