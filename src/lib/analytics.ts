@@ -2528,6 +2528,38 @@ export type InstinctEventType =
   //                   output_tokens, cost_usd, latency_ms, fallback_used,
   //                   sensitivity? }
   | "ai.completion"
+  // Model reachability probe (src/lib/ai/models/probe.ts), run from
+  // /admin/ai-router or `npm run models:probe`.
+  //
+  // WHY THIS IS A SEPARATE STREAM FROM ai.completion
+  //
+  // The availability list reports a model as ready when its env vars are
+  // non-empty, which cannot tell a working deployment from a typo, a deleted
+  // deployment or a rotated key. The probe is the only signal that distinguishes
+  // them, and it is deliberately operator-triggered rather than automatic
+  // (it is a real inference call).
+  //
+  //   ai.model_probe_run          { models_probed, reachable, broken,
+  //                                 not_configured, refused }
+  //     - one row per probe run. `broken` is the number that matters: models
+  //       the availability list would show as green that did not answer.
+  //
+  //   ai.model_probe_unreachable  { model_id, status, outcome }
+  //     - one row per configured-but-not-answering model. Never carries the
+  //       response body, which can echo a key back.
+  // Brief review (src/lib/agents/prompt-review.ts). Deterministic, no model
+  // call, so it can run on every brief rather than the ones someone remembered
+  // to check.
+  //
+  //   agent.brief_reviewed  { findings, dimensions, chars }
+  //     - `dimensions` is a comma-joined list of what the brief left unsaid.
+  //       Aggregated over time this says which fact THIS team most often omits,
+  //       which is a more useful answer than any single review. The brief text
+  //       itself is never recorded: it can carry client detail, and the finding
+  //       is the signal.
+  | "agent.brief_reviewed"
+  | "ai.model_probe_run"
+  | "ai.model_probe_unreachable"
   // Assistant context resolver (src/lib/assistant/context-resolver.ts).
   // Combines SharePoint search hits + MS Project / Planner / To Do tasks
   // into a single prompt block injected into the LLM call so answers

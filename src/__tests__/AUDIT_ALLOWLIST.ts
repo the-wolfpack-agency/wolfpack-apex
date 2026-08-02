@@ -1006,6 +1006,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/cron/agent-drift/route.ts",
     reason: "scheduled drift sweep; any auto-pause is recorded in instinct_agent_drift_events and agent.auto_paused analytics, and the drift-check route audits an interactive pause",
   },
+  {
+    route: "src/app/api/admin/prompt-review/route.ts",
+    reason: "pure function over the request body; nothing is written and the brief is deliberately never stored. It is a POST only because a brief belongs in a body rather than a query string, which lands in access logs and referrer headers. An audit entry here would either record nothing useful or record the brief itself, which is the one thing the surface promises not to keep",
+  },
 ];
 
 export const AUDIT_ALLOWLIST_ROUTES: ReadonlySet<string> = new Set(

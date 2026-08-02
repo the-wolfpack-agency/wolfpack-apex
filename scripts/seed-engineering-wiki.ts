@@ -293,6 +293,72 @@ that is not a green build. The alternative is a tick that means "we did not
 look", which is the one outcome worse than a red one.`,
   },
   {
+    slug: "model-router",
+    parentSlug: "agents",
+    position: 3,
+    title: "The model router, and how it keeps agents honest",
+    body: `## Why there is a router at all
+Every AI feature has to pick a model before it can do anything. If each feature picks its own, three things follow: the same work costs different amounts depending on which feature does it, nobody can say what the platform spends, and swapping a model means editing every place that named one.
+
+The router is the single place that choice happens. A feature says what it needs — a capability tier and, where it can, a rough size — and the router returns a specific model and a recorded reason.
+
+## What a client gets from it
+A client can plug in their own model, or use ours. Either way the request goes through the same gate.
+
+That is the point. Our safety controls only mean something if they hold for a model we did not build and cannot inspect. A client's own model running through the same containment, the same egress allowlist and the same audit trail is how the claim stays tested rather than asserted.
+
+## Capability tier and cost posture are two different questions
+- **Capability tier** — how much the task actually needs: small, large, or reasoning.
+- **Cost posture** — how much you are willing to pay for it: cheap, standard, premium.
+
+Keeping them apart matters. A cheap posture cannot silently downgrade a task that genuinely needs a capable model, and a premium posture does not spend more on work that a small model does perfectly well.
+
+## Available does not mean working
+The router page lists which models the platform can reach. Until recently that list meant one thing only: the environment variables are filled in. A deployment name with a typo, a deleted deployment, a rotated key and a working model all looked identical — all green.
+
+**Test each model** on the router page settles it. It sends a one-token request to every configured model and reports which ones answered. A rate limit counts as answering, because it proves the model is there. The provider's response is never shown back, since a rejection message can echo the key that was rejected.
+
+Run it after a deployment, after a key rotation, and before a client demo. From a terminal it is \`npm run models:probe\`, which exits non-zero when a model the list shows as ready did not answer, so a scheduled job can watch it.
+
+## How the router and the agents fit together
+They are two halves of the same guarantee, and neither is worth much alone.
+
+- The **agents** decide what to do. The gate decides whether they may, executes it, and records it.
+- The **router** decides which model does the thinking, at what capability and what price.
+
+An agent with no router is a fixed bet on one vendor: no cost control, no way to compare models, and a migration project the day that vendor changes its terms. A router with no gate is a cheaper way to run unchecked code.
+
+Together they answer the question a client actually asks before adopting AI: *what stops this from doing something we cannot undo, and what stops it from costing whatever it likes?* The gate answers the first. The router answers the second. Every decision from both is recorded, so the answer is evidence rather than a promise.
+
+## What it means for testing our own models
+Because the router is the single choice point, it is also the only place that can compare models fairly: same task, same gate, same accounting. As more models are configured, that turns into a straight readout of which one is more accurate, cheaper and safer for a given kind of work — measured on real tasks rather than on a vendor's benchmark.
+
+## Where to look
+- **Model router** page under the admin area: what was chosen, why, what it is estimated to have cost, and which models are reachable.
+- \`npm run router:exercise\` proves the router switches correctly. It costs nothing, because it never calls a model.
+- \`npm run models:probe\` proves the models it picks are really there. That one cannot be established without calling them.`,
+  },
+  {
+    slug: "brief-review",
+    parentSlug: "how-we-build",
+    position: 6,
+    title: "Reviewing a brief before the work starts",
+    body: `## The problem it solves
+Most expensive round trips on a task are not caused by a hard problem. They are caused by a fact the brief did not carry, and the same handful recur: where it has to work, how you would know it worked, what must not change, and what already exists that should be reused.
+
+## What it does
+Paste a brief on the Agent fleet page and it reports which of those facts are missing, each with the one question that would supply it. It runs before the work, not as a retrospective afterwards, because that is where the saving is.
+
+## What it deliberately is not
+- **Not a score.** There is no grade or percentage. A number invites people to optimise the number rather than write a better brief.
+- **Not a model call.** The rules are deterministic, so they can be read, argued with and unit-tested, and they cost nothing to run on every brief.
+- **Not a rewrite.** It appends questions rather than filling in answers, because a confident wrong assumption written back in your own voice is worse than the gap it replaced.
+- **Not stored.** The brief text is never saved. Only the shape of the result is recorded, so the team can eventually answer "which fact do we most often leave out" without keeping text that names clients.
+
+## The line it has to hold
+A checker that fires on every input is one nobody reads, and it makes a careful brief feel the same as a careless one. A brief that names its target, its done condition and its boundary comes back clean, and there is a test that keeps it that way.`,
+  },
+  {
     slug: "agent-containment",
     parentSlug: "how-we-build",
     position: 5,

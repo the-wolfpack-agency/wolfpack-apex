@@ -362,7 +362,7 @@ export interface DeviceMatrixBrowser {
   close(): Promise<void>;
 }
 export interface DeviceMatrixContext {
-  addInitScript(script: string): Promise<void>;
+  addInitScript(script: string | ((arg: never) => void), arg?: unknown): Promise<void>;
   route(
     pattern: string,
     handler: (route: DeviceMatrixRoute) => Promise<void> | void,
@@ -383,7 +383,7 @@ export interface DeviceMatrixRoute {
 export interface DeviceMatrixPage {
   on(event: "console", handler: (msg: { type(): string; text(): string }) => void): void;
   on(event: "response", handler: (res: { status(): number; url(): string }) => void): void;
-  addInitScript(script: string): Promise<void>;
+  addInitScript(script: string | ((arg: never) => void), arg?: unknown): Promise<void>;
   goto(
     url: string,
     options?: { waitUntil?: string; timeout?: number },
@@ -520,7 +520,13 @@ async function runOneDevice(
     // (a) Auth stub — seed localStorage BEFORE any page script runs so an
     //     auth-gated page sees an established session.
     if (opts.session) {
-      await context.addInitScript(buildSessionInitScript(opts.session));
+      await context.addInitScript((entries: Record<string, string>) => {
+        try {
+          for (const k in entries) window.localStorage.setItem(k, entries[k]);
+        } catch {
+          /* a storage-disabled context is not a scan failure */
+        }
+      }, sessionEntries(opts.session));
     }
 
     // (b) API stubs — fulfill matching requests with canned JSON so auth-gated
@@ -601,14 +607,25 @@ function buildProbeList(
   return out;
 }
 
-/** Build the addInitScript body that seeds the session into localStorage. Passed
- *  as a string so it needs no closure serialization. */
-function buildSessionInitScript(session: DeviceMatrixSession): string {
+/**
+ * The localStorage entries that seed a session. DATA, not code.
+ *
+ * This used to return a source string with JSON.stringify(entries) spliced into
+ * the middle of it, which made every session value part of a program. A token
+ * or a user object is attacker-influenced in the general case, and JSON escaping
+ * is not code escaping: U+2028 and U+2029 are legal in JSON and were not legal
+ * in a JS string literal until ES2019, so the same bytes that are fine as data
+ * can end a statement early as code.
+ *
+ * Playwright takes a function and an argument, serializing the argument
+ * separately, which is the shape capture.ts already uses. Nothing here is
+ * concatenated into source any more, so there is no escaping to get right.
+ */
+function sessionEntries(session: DeviceMatrixSession): Record<string, string> {
   const entries: Record<string, string> = { ...(session.localStorage ?? {}) };
   if (session.token) entries.token = session.token;
   if (session.user) entries.user = JSON.stringify(session.user);
-  const json = JSON.stringify(entries);
-  return `(() => { try { const e = ${json}; for (const k in e) { window.localStorage.setItem(k, e[k]); } } catch (_) {} })();`;
+  return entries;
 }
 
 /** In-page CSP-violation trap, self-contained (same idea as capture.ts). */

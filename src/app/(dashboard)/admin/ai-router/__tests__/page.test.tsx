@@ -11,7 +11,7 @@
  * act on it.
  */
 import "@testing-library/jest-dom";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import Page from "../page";
 
 const mockPush = jest.fn();
@@ -169,5 +169,72 @@ describe("what it shows", () => {
     respond(insights());
     render(<Page />);
     expect(await screen.findByText(/belongs in a deployment with a review/i)).toBeInTheDocument();
+  });
+});
+
+describe("testing whether a model actually answers", () => {
+  const PROBE = {
+    results: [
+      { modelId: "gpt-4o-mini", outcome: "reachable", latencyMs: 210, status: 200, detail: null },
+      { modelId: "azure-deepseek-v3", outcome: "unreachable", latencyMs: 88, status: 404, detail: "check the deployment name" },
+      { modelId: "o4-mini", outcome: "not-configured", latencyMs: null, status: null, detail: null },
+    ],
+    reachable: 1,
+    brokenlyConfigured: ["azure-deepseek-v3"],
+    headline: "1 model is configured but not answering: azure-deepseek-v3.",
+  };
+
+  /** Insights on load, probe report on the POST. */
+  function respondBoth() {
+    mockFetch.mockImplementation(async (url: string, init?: { method?: string }) =>
+      init?.method === "POST"
+        ? { ok: true, status: 200, json: async () => PROBE }
+        : { ok: true, status: 200, json: async () => insights() },
+    );
+  }
+
+  it("does NOT probe on page load", async () => {
+    // A probe is a real inference call against every configured provider. A
+    // page that spends money to render itself is a page nobody can leave open.
+    respond(insights());
+    render(<Page />);
+    await screen.findByTestId("router-models");
+    expect(mockFetch.mock.calls.every((c) => c[1]?.method !== "POST")).toBe(true);
+  });
+
+  it("says what Available does and does not prove, next to the button", async () => {
+    respond(insights());
+    render(<Page />);
+    const btn = await screen.findByTestId("router-probe-run");
+    expect(btn).toBeInTheDocument();
+    expect(screen.getByText(/rotated key/i)).toBeInTheDocument();
+  });
+
+  it("names the model that did not answer, not just a count", async () => {
+    respondBoth();
+    render(<Page />);
+    fireEvent.click(await screen.findByTestId("router-probe-run"));
+    const result = await screen.findByTestId("router-probe-result");
+    expect(result).toHaveTextContent(/azure-deepseek-v3/);
+    expect(result).toHaveTextContent(/check the deployment name/);
+  });
+
+  it("hides models nobody configured, so the real failure is not buried", async () => {
+    respondBoth();
+    render(<Page />);
+    fireEvent.click(await screen.findByTestId("router-probe-run"));
+    const result = await screen.findByTestId("router-probe-result");
+    expect(result).not.toHaveTextContent(/o4-mini/);
+  });
+
+  it("surfaces a failed test rather than leaving the button spinning", async () => {
+    mockFetch.mockImplementation(async (url: string, init?: { method?: string }) =>
+      init?.method === "POST"
+        ? { ok: false, status: 500, json: async () => ({}) }
+        : { ok: true, status: 200, json: async () => insights() },
+    );
+    render(<Page />);
+    fireEvent.click(await screen.findByTestId("router-probe-run"));
+    expect(await screen.findByTestId("router-probe-error")).toHaveTextContent(/HTTP 500/);
   });
 });
