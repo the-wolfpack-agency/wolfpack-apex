@@ -19,6 +19,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { fetchWithRefresh, jsonHeaders, getInstinctUser } from "@/lib/client-auth";
 import ApprovalList from "@/components/agents/ApprovalList";
+import AgentIdentityCard from "@/components/agents/AgentIdentityCard";
 import ApprovalHistory from "@/components/agents/ApprovalHistory";
 import {
   GlassPanel,
@@ -2109,6 +2110,34 @@ export default function AgentProfilePage({
           ledger, the assigned-work list, the agent record). The decision
           activity series drives the sparkline. Always mounted (across every
           tab) so the trust surface is visible the moment the page loads. */}
+      {/* WHO THIS IS, for the person who has to approve it.
+          Placed above the metrics because the questions someone actually asks
+          come in this order: what is it allowed to touch, and has it behaved.
+          The technical detail below answers "how", which only matters once
+          those two are settled. Every sentence comes from lib/agents/persona,
+          so the wording is tested alongside the rule that produces it. */}
+      {agent && (
+        <div style={{ marginTop: "1.5rem" }}>
+          <AgentIdentityCard
+            testId="agent-identity-card"
+            agent={{
+              id: agent.id,
+              name: agent.name,
+              role: agent.role,
+              state: agent.state,
+              description: agent.description,
+              // The detail record does not carry bound connectors; the card
+              // then says "not connected to any of your systems", which would
+              // be WRONG rather than merely incomplete. Passing undefined is
+              // the honest input, and describeCapabilities treats it the same
+              // as an empty list — so this is the one thing to revisit when the
+              // detail endpoint returns them.
+              connections: undefined,
+            }}
+          />
+        </div>
+      )}
+
       <div data-testid="agent-metrics" style={{ marginTop: "1.5rem" }}>
         <GlassPanel testId="agent-metrics-panel" glow="blue" padded>
           <ConsoleGrid minColWidth={170} gap={18} testId="agent-metrics-grid">
