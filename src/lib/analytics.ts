@@ -690,6 +690,12 @@ export type InstinctEventType =
   | "agent.connection_unbound"
   // agent.connector_scope_denied { connector, workspace_id } — least-privilege: an agent targeted a connector it is NOT bound to (instinct_agent_connections); refused before any connector was built.
   | "agent.connector_scope_denied"
+  // Containment. Deliberately anchored in the agent block rather than beside
+  // the site events, so this and the egress-blocked event added in the
+  // enforce-egress-allowlist branch do not edit the same lines and conflict.
+  | "containment.agents_stopped"
+  | "containment.agents_resumed"
+  | "containment.step_refused"
   // Platform scan: an agent crawls a TARGET external platform's routes and
   // classifies each into a finding (bug / ux gap / broken journey / security /
   // performance). This is how an agent familiarizes with a client platform and

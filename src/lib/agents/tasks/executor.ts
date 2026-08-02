@@ -56,6 +56,8 @@ import {
   type ReasonResult,
 } from "./reasoning";
 import type { TaskStatus, TaskStep } from "./types";
+import { decideStep, resolveBudget } from "@/lib/containment/budget";
+import { readContainmentState, readRunSpend, startRunSpend, markBreached } from "@/lib/containment/state";
 
 export interface ExecutableTask {
   id: string;
@@ -635,8 +637,42 @@ export async function runAgentTask(
     }
   };
 
+  // Open the spend ledger for this run so the ceiling is enforceable and, just
+  // as importantly, auditable: the budget it was given is stored beside what it
+  // spent, so a later reader can tell whether a run was stopped by the default
+  // or by a limit someone deliberately raised.
+  const runBudget = resolveBudget(null);
+  await startRunSpend(task.workspaceId, task.id, task.agentId ?? null, runBudget).catch(() => {
+    /* An unopened ledger reads as unreadable below, which pauses the run. That
+       is the correct outcome, and better than throwing here. */
+  });
+
   for (let i = 0; i < instructions.length; i++) {
     const instruction = instructions[i];
+
+    // Check BEFORE the step, never after. What is being bounded is what the
+    // agent DOES, not what it later admits to. Both reads fail closed: an
+    // unreadable switch and an unreadable ledger each pause the run, because a
+    // delayed run costs minutes and a run that should have stopped costs
+    // whatever it does next.
+    const [state, spent] = await Promise.all([
+      readContainmentState(task.workspaceId),
+      readRunSpend(task.workspaceId, task.id),
+    ]);
+    const decision = decideStep(runBudget, spent, state);
+    if (!decision.proceed) {
+      steps.push({ index: i, instruction, tool: null, outcome: "error", detail: truncate(decision.reason) });
+      await markBreached(task.workspaceId, task.id, decision.breached).catch(() => {});
+      trackEvent("containment.step_refused", task.agentId ?? "agent", "agent", {
+        task_id: task.id,
+        step_index: i,
+        breached: decision.breached,
+      });
+      status = "blocked";
+      blocked = true;
+      break;
+    }
+
     // Expose the prior steps' outputs to THIS dispatch. A shallow copy so a tool
     // (or the form path below) cannot mutate the accumulator. Set only when there
     // is something to carry, so a normal first step looks exactly as before.
