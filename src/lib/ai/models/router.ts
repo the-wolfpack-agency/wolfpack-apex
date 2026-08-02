@@ -28,6 +28,7 @@
 
 import { trackEvent } from "@/lib/analytics";
 
+import { isClientModel } from "./client-models";
 import {
   MODEL_REGISTRY,
   TIER_ORDER,
@@ -142,6 +143,7 @@ function withEstimate(
 function resolvePins(
   opts: SelectOptions,
   env: NodeJS.ProcessEnv,
+  catalogue: readonly ModelSpec[],
 ): { model?: ModelSpec; reason?: string; fallbackFrom?: string } {
   const pins: { id: string | undefined; reason: string }[] = [
     { id: opts.agentPin, reason: "agent_pin" },
@@ -152,8 +154,11 @@ function resolvePins(
   let firstUnusable: string | undefined;
   for (const pin of pins) {
     if (!pin.id) continue;
-    const model = getModel(pin.id);
-    if (model && isModelAvailable(model, env)) {
+    // Look in the CATALOGUE, not just the Wolfpack registry: a client that has
+    // plugged in their own model must be able to pin it, or "bring your own
+    // model" means "bring your own model and never have it chosen".
+    const model = catalogue.find((m) => m.id === pin.id) ?? getModel(pin.id);
+    if (model && (isClientModel(model) || isModelAvailable(model, env))) {
       return { model, reason: pin.reason };
     }
     // Pin set but unknown or unavailable: remember the highest-precedence one
@@ -170,21 +175,34 @@ function resolvePins(
  * @param env  injectable environment (defaults to process.env). Tests pass a
  *             fake object so availability is hermetic.
  */
+/**
+ * The models this decision may choose from.
+ *
+ * Defaults to the Wolfpack registry, so every existing caller is unchanged. A
+ * caller serving a client that has plugged in their own models passes the
+ * merged catalogue instead — and everything downstream (the gate, the
+ * containment budget, the behaviour eval, the audit trail) applies identically,
+ * because none of it knows or cares where a model came from. That is the point:
+ * a control that only works on our own models is not a control.
+ */
 export function selectModel(
   opts: SelectOptions = {},
   env: NodeJS.ProcessEnv = process.env,
+  catalogue: readonly ModelSpec[] = MODEL_REGISTRY,
 ): ModelSelection {
   const requiredTier: CapabilityTier = opts.requiredTier ?? "small";
   const minContext = opts.minContextTokens ?? 0;
 
   // Step 1: pins.
-  const pin = resolvePins(opts, env);
+  const pin = resolvePins(opts, env, catalogue);
   if (pin.model && pin.reason) {
     return withEstimate({ model: pin.model, reason: pin.reason }, opts);
   }
   const fallbackFrom = pin.fallbackFrom;
 
-  const available = MODEL_REGISTRY.filter((m) => isModelAvailable(m, env));
+  // A client model is available when its config is present; there is no env var
+  // to check because it was not deployed by us.
+  const available = catalogue.filter((m) => isClientModel(m) || isModelAvailable(m, env));
 
   // Step 2: cost-based among capable + context-fitting + available.
   const capable = available.filter(
@@ -220,7 +238,7 @@ export function selectModel(
 
   // Step 4: nothing available anywhere - return the cheapest registry model
   // regardless of availability. Never throw; the caller decides.
-  const last = cheapest(MODEL_REGISTRY, opts)!;
+  const last = cheapest(catalogue, opts) ?? cheapest(MODEL_REGISTRY, opts)!;
   return withEstimate(
     {
       model: last,
