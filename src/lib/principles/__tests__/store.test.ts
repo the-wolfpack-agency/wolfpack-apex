@@ -15,6 +15,10 @@ jest.mock("@/lib/db", () => {
     safeQuery: (...a: any[]) => mockSafeQuery(...a),
     writeQuery: (...a: any[]) => mockWriteQuery(...a),
     pool: { connect: () => mockPoolConnect() },
+    // activePool() replaced direct pool use so every query is routed to the
+    // tenant's database. The mock must expose it or the module under test
+    // calls undefined.
+    activePool: () => ({ connect: () => mockPoolConnect() }),
   };
 });
 

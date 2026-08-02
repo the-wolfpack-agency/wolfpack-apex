@@ -61,6 +61,10 @@ jest.mock("@/lib/db", () => ({
     return { rows: [], fromCache: false };
   }),
   pool: {},
+  // activePool() replaced direct pool use so every query is routed to the
+  // tenant's database. The mock must expose it or the module under test
+  // calls undefined.
+  activePool: () => ({}),
 }));
 
 jest.mock("@/lib/analytics", () => ({

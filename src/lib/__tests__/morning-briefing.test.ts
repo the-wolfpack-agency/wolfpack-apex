@@ -27,6 +27,10 @@ jest.mock("@/lib/db", () => ({
   query: jest.fn(),
   safeQuery: (...args: any[]) => mockSafeQuery(...args),
   pool: { query: jest.fn() },
+  // activePool() replaced direct pool use so every query is routed to the
+  // tenant's database. The mock must expose it or the module under test
+  // calls undefined.
+  activePool: () => ({ query: jest.fn() }),
 }));
 
 // Mock quickbooks to return demo data (with connected status for CEO tests)

@@ -26,6 +26,12 @@ jest.mock("@/lib/db", () => {
     pool: {
       connect: () => mockPoolConnect(),
     },
+    // Overriding the `pool` EXPORT is not enough: activePool() closes over the
+    // module-internal pool, so it must be overridden directly or the real one
+    // is used and the test opens a socket.
+    activePool: () => ({
+      connect: () => mockPoolConnect(),
+    }),
   };
 });
 

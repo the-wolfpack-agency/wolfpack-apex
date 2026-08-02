@@ -18,6 +18,10 @@
 const mockConnect = jest.fn();
 jest.mock("@/lib/db", () => ({
   pool: { connect: (...a: unknown[]) => mockConnect(...a) },
+  // activePool() replaced direct pool use so every query is routed to the
+  // tenant's database. The mock must expose it or the module under test
+  // calls undefined.
+  activePool: () => ({ connect: (...a: unknown[]) => mockConnect(...a) }),
 }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
 

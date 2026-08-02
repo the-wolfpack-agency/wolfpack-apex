@@ -19,6 +19,10 @@ jest.mock("@/lib/db", () => ({
   query: (...args: any[]) => mockQueryCal(...args),
   safeQuery: jest.fn(),
   pool: { query: jest.fn() },
+  // activePool() replaced direct pool use so every query is routed to the
+  // tenant's database. The mock must expose it or the module under test
+  // calls undefined.
+  activePool: () => ({ query: jest.fn() }),
 }));
 
 jest.mock("@/lib/microsoft-graph", () => ({

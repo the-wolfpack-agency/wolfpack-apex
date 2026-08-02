@@ -14,7 +14,7 @@
  * Shadow-mode (no DATABASE_URL): get returns null, set throws.
  */
 
-import { pool, safeQuery, writeQuery, WriteQueryError } from "@/lib/db";
+import { activePool, safeQuery, writeQuery, WriteQueryError } from "@/lib/db";
 
 export interface PrinciplesConfigRecord {
   docUrl: string | null;
@@ -76,7 +76,7 @@ export async function setPrinciplesConfig(args: {
       "no_database",
     );
   }
-  const client = await pool.connect();
+  const client = await activePool().connect();
   try {
     const existing = await client.query<ConfigRow>(
       `SELECT doc_url, owner_user_id, updated_by, updated_at
