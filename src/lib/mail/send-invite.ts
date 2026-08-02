@@ -98,7 +98,7 @@ export function buildInviteEmailBody(args: InviteEmailArgs): {
   </p>
 
   <p style="margin:24px 0">
-    <a href="${args.acceptUrl}" style="display:inline-block;background:#f1c233;color:#212124;padding:14px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px">Set your password</a>
+    <a href="${escapeHtml(args.acceptUrl)}" style="display:inline-block;background:#f1c233;color:#212124;padding:14px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px">Set your password</a>
   </p>
 
   <p style="color:#5e6e80;font-size:13px;margin:24px 0 0 0">

@@ -92,7 +92,15 @@ describe("JournalPage", () => {
     expect(screen.getByTestId("journal-density-comfortable")).toBeInTheDocument();
 
     // Two day groups rendered.
-    const todayKey = new Date().toISOString().slice(0, 10);
+    //
+    // The expected key comes from the SAME helper that built the fixture, not
+    // from the clock. isoOffset sets a LOCAL 10:30 and then serialises to UTC,
+    // so in any timezone behind UTC the fixture's newest event lands on the
+    // previous UTC day for the last few hours of local time — and an assertion
+    // built from `new Date().toISOString()` looks for a group that does not
+    // exist. It failed at 00:11 UTC on 2026-08-02 for exactly that reason, and
+    // would have failed CI in the same window every day.
+    const todayKey = isoOffset(0).slice(0, 10);
     expect(screen.getByTestId(`journal-day-${todayKey}`)).toBeInTheDocument();
   });
 

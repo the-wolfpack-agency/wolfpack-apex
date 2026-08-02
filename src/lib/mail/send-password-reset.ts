@@ -60,7 +60,7 @@ export function buildResetEmailBody(args: ResetEmailArgs): {
     Hi ${escapeHtml(args.name)}, a password reset was requested for your Wolfpack Instinct account.
   </p>
   <p style="margin:24px 0">
-    <a href="${args.resetUrl}" style="display:inline-block;background:#f1c233;color:#212124;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Set a new password</a>
+    <a href="${escapeHtml(args.resetUrl)}" style="display:inline-block;background:#f1c233;color:#212124;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Set a new password</a>
   </p>
   <p style="color:#5e6e80;font-size:13px;margin:24px 0 0 0">
     Or paste this link into your browser:<br/>
