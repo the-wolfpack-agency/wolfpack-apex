@@ -8,6 +8,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { guardedFetch } from "@/lib/containment/guarded-fetch";
 
 import type {
   AICompleteRequest,
@@ -54,7 +55,9 @@ export class AnthropicProvider implements AIProvider {
     if (!apiKey) {
       throw new Error("ANTHROPIC_API_KEY not configured");
     }
-    this.clientCache = new Anthropic({ apiKey, maxRetries: 0 });
+    // The SDK does its own fetching, so the allowlist goes in as its fetch.
+    // Same rule as the Azure provider, one implementation, no second copy.
+    this.clientCache = new Anthropic({ apiKey, maxRetries: 0, fetch: guardedFetch("model-api") });
     return this.clientCache;
   }
 

@@ -50,7 +50,19 @@ export type EgressCapability =
  * passes them as `extraHosts` and the ownership check is what authorises them.
  */
 export const EGRESS_ALLOWLIST: Readonly<Record<EgressCapability, readonly string[]>> = {
-  "model-api": ["api.anthropic.com", "openai.azure.com", "cognitiveservices.azure.com"],
+  // Azure exposes model endpoints under three different hostnames depending on
+  // how the resource was created: the classic OpenAI resource, Cognitive
+  // Services, and AI Foundry. All three are in use. The Foundry one was missing
+  // from the first version of this list and the provider's own tests caught it
+  // the moment the guard was wired in — which is the failure mode a
+  // refuse-everything guard has, and why the tests assert that real endpoints
+  // are ALLOWED rather than only that bad ones are refused.
+  "model-api": [
+    "api.anthropic.com",
+    "openai.azure.com",
+    "cognitiveservices.azure.com",
+    "services.ai.azure.com",
+  ],
   "source-control": ["api.github.com", "github.com", "raw.githubusercontent.com"],
   deploy: ["api.vercel.com", "vercel.com"],
   "target-scan": [],

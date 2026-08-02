@@ -42,6 +42,7 @@ import type {
   AIModelTier,
   AIProvider,
 } from "./types";
+import { guardedFetch, EgressBlockedError } from "@/lib/containment/guarded-fetch";
 
 const DEFAULT_TIER_TO_DEPLOYMENT: Record<AIModelTier, string> = {
   cheap: "gpt-4o-mini",
@@ -267,7 +268,7 @@ export class AzureOpenAIProvider implements AIProvider {
     const start = Date.now();
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await guardedFetch("model-api")(url, {
         method: "POST",
         headers: {
           "api-key": apiKey,
@@ -276,6 +277,13 @@ export class AzureOpenAIProvider implements AIProvider {
         body: JSON.stringify(body),
       });
     } catch (err) {
+      // An egress refusal is a POLICY decision, not a network blip. Masking it
+      // as a retryable 503 would send the call to another provider and hide the
+      // fact that this one tried to reach a host it is not allowed to — which
+      // is precisely the signal worth keeping. Rethrown unchanged so it reaches
+      // the caller as what it is.
+      if (err instanceof EgressBlockedError) throw err;
+
       // Network-level failure: surface as 5xx so the router treats it as
       // retryable and falls back to Anthropic.
       const message = err instanceof Error ? err.message : String(err);
