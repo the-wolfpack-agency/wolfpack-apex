@@ -80,6 +80,24 @@ const entries: ReleaseEntry[] = [
     category: "feature",
   },
   {
+    title: "You can now prove a model answers, not just that someone set a variable",
+    description:
+      "The model router page listed which models the platform can reach, but Available only ever meant the environment variables were filled in. A deployment name with a typo, a deleted deployment, a rotated key and a working model all showed as green, so the first sign of a broken deployment was a 404 in production on whichever feature happened to route there. Test each model sends a one-token request to every configured model and reports which answered. A rate limit counts as answering, because it proves the model is there. The provider's reply is never shown back, since a rejection message can echo the key that was rejected.",
+    how_to_use:
+      "Open the Model router page under the admin area and press Test each model. Do it after a deployment, after a key rotation, and before a client demo. From a terminal it is `npm run models:probe`, which exits non-zero when a model the list shows as ready did not answer, so a scheduled job can watch it.",
+    area: AREA,
+    category: "feature",
+  },
+  {
+    title: "A brief can be checked for what it left unsaid before the work starts",
+    description:
+      "Most expensive back-and-forth on a task is not caused by a hard problem. It is caused by a fact the brief did not carry, and the same handful recur: where it has to work, how you would know it worked, what must not change, and what already exists that should be reused. Paste a brief on the Agent fleet page and it names which of those are missing, each with the one question that would supply it. There is no score, because a number invites optimising the number. It appends questions rather than filling in answers, because a confident wrong assumption written back in your own voice is worse than the gap. The brief itself is never stored.",
+    how_to_use:
+      "Open the Agent fleet page, paste the brief you were about to send into the box at the top, and press Review it. A brief that already names its target, its done condition and its boundary comes back with nothing to add.",
+    area: AREA,
+    category: "feature",
+  },
+  {
     title: "Prompts are versioned artifacts with a stated scope",
     description:
       "System prompts were string constants scattered across a dozen files, which meant a change read as a string edit in review, a regression had no earlier version to compare against, and nothing could be scored because there was no stable identifier. Prompts now have an identifier, a version, typed inputs and an explicit scope, and the registry refuses to accept one that does not say what it may not touch. Two support prompts are migrated and a build check prevents new inline prompts from appearing.",
@@ -126,7 +144,7 @@ async function main(): Promise<void> {
     version: "instinct-2026-08-02",
     title: "Wolfpack Instinct: Release Report 2026-08-02",
     summary:
-      "Two weeks of work on making generated sites verifiable and agents contained. Sites are now measured against their prototypes and judged against written acceptance criteria before anyone looks at them; a code-injection hole in the site generator was found and closed across every client repository; and agent work runs inside an allowlist, a budget and a stop, with the boundary proven before each batch rather than assumed. Plus the sign-in fix, prompt versioning, and the development guardrails that came out of the incidents along the way.",
+      "Two weeks of work on making generated sites verifiable, agents contained, and the AI underneath both accountable. Sites are now measured against their prototypes and judged against written acceptance criteria before anyone looks at them; a code-injection hole in the site generator was found and closed across every client repository; and agent work runs inside an allowlist, a budget and a stop, with the boundary proven before each batch rather than assumed. The model router can now be asked whether each configured model actually answers, rather than only whether someone filled in its settings, and a brief can be checked for what it left unsaid before anyone starts on it. Plus the sign-in fix, prompt versioning, and the development guardrails that came out of the incidents along the way.",
     released_on: "2026-08-02",
     entries,
     published: true,
