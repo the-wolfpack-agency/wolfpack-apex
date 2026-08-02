@@ -22,6 +22,7 @@ import { tryDispatchTool } from "@/lib/assistant/tools";
 import { notify } from "@/lib/notifications/in-app";
 import { trackEvent } from "@/lib/analytics";
 import { toRunRecord } from "@/lib/agents/evals/from-run";
+import { tierForTask, estimateTokens } from "./tier-for-task";
 import { scoreRun } from "@/lib/agents/evals/behavior-eval";
 import { getConstitution, CONSTITUTION_VERSION } from "@/lib/constitution";
 import { safeQuery } from "@/lib/db";
@@ -629,14 +630,48 @@ export async function runAgentTask(
     // still guard the whole block so a router/analytics hiccup can never break
     // or slow the task beyond this best-effort call.
     try {
+      // TIER FROM THE WORK, NOT HARDCODED.
+      //
+      // This asked for "large" unconditionally, so the cheap model could never
+      // be selected however cheap it was — production reported 0% served by the
+      // cheapest tier while gpt-4o ran everything at roughly thirty times the
+      // input price. A cost-aware router whose caller always demands the
+      // expensive tier is cost-aware in name only.
+      //
+      // Conservative: large stays the default, and a task drops to small only
+      // on positive evidence that it is mechanical.
+      const shape = {
+        inherited,
+        groundingSnippets: grounding.snippets.length,
+        stepCount: instructions.length,
+        instructionChars: instructions.join(" ").length,
+      };
+      const tierChoice = tierForTask(shape);
+
+      // Token estimates so the decision can be COSTED. Without them every
+      // decision carried no estimate and the cost page read $0.00, which looks
+      // like free rather than like unmeasured.
+      const estimate = estimateTokens({
+        goalChars: task.goal.length,
+        instructionChars: shape.instructionChars,
+        groundingChars: grounding.snippets.join(" ").length,
+      });
+
       modelSelection = chooseModel({
-        requiredTier: "large",
+        requiredTier: tierChoice.tier,
         agentPin: deps.agentPin,
+        ...estimate,
       });
       recordModelChoice(modelSelection, {
         userId: task.agentId,
         userRole: task.role,
-        extra: { task_id: task.id, brain_grounded: grounding.used },
+        extra: {
+          task_id: task.id,
+          brain_grounded: grounding.used,
+          // Recorded so an operator can tell a deliberate downgrade from a bug.
+          tier_reason: tierChoice.reason,
+          tier_requested: tierChoice.tier,
+        },
       });
     } catch {
       /* model routing is best effort; the task runs regardless */
