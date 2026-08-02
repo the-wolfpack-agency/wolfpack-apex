@@ -59,7 +59,7 @@ import {
 } from "./reasoning";
 import type { TaskStatus, TaskStep } from "./types";
 import { decideStep, resolveBudget } from "@/lib/containment/budget";
-import { readContainmentState, readRunSpend, startRunSpend, markBreached } from "@/lib/containment/state";
+import { readContainmentState, readRunSpend, startRunSpend, markBreached, addRunSpend } from "@/lib/containment/state";
 
 export interface ExecutableTask {
   id: string;
@@ -204,6 +204,20 @@ function truncate(s: string, n = 240): string {
  * MOST RECENT N, which is what a "summarize the results" style step needs.
  */
 const PRIOR_RESULTS_CAP = 5;
+
+/**
+ * Budget dimensions with no meter behind them.
+ *
+ * decideStep compares recorded spend against every ceiling in RunBudget, but
+ * only duration is actually measured per step. A ceiling with no meter is not
+ * an enforced limit, it is a number in a config file, and the difference has to
+ * be visible: reported here rather than left to look like a run that simply
+ * never got close.
+ *
+ * Delete an entry the day its meter lands, and the ledger will start binding it
+ * with no other change.
+ */
+const UNMETERED_BUDGETS: readonly string[] = ["maxTokens", "maxEgressCalls", "maxSpendCents"];
 
 /** True when a dispatch failure is the OGIAM enforce gate refusing the step. */
 function isGateBlock(result: { ok: boolean; code?: string; message?: string }): boolean {
@@ -689,14 +703,36 @@ export async function runAgentTask(
     agentCtx.priorResults =
       priorResults.length > 0 ? priorResults.slice() : undefined;
 
+    const stepStartedAt = Date.now();
     let res;
     try {
       res = await dispatch(instruction, agentCtx);
     } catch (err) {
+      // Record the time even on a throw. A step that ran for a minute and then
+      // failed still consumed a minute, and a ledger that only counts successes
+      // is a ledger a failing loop can spend forever against.
+      await addRunSpend(task.workspaceId, task.id, { durationMs: Date.now() - stepStartedAt }).catch(() => {});
       steps.push({ index: i, instruction, tool: null, outcome: "error", detail: truncate((err as Error).message) });
       status = "failed";
       break;
     }
+
+    // THE LEDGER MUST ACTUALLY MOVE.
+    //
+    // startRunSpend opened it, readRunSpend read it and decideStep decided
+    // against it — but nothing ever added to it, so recorded spend was
+    // permanently zero and NO budget could ever be exceeded. Every run had an
+    // unlimited allowance while the control reported healthy. Found by the
+    // no-inert-controls sweep, which noticed addRunSpend had no caller.
+    //
+    // Only duration is recorded, because only duration is measured. Tokens,
+    // egress calls and money are not metered per step anywhere yet, and
+    // inventing a number for them would rebuild the same lie one layer up:
+    // a figure that looks like enforcement and is not. They stay at zero AND
+    // are reported as unmetered below, so "that budget does not bind" is
+    // answerable from data rather than something you have to read the code to
+    // discover.
+    await addRunSpend(task.workspaceId, task.id, { durationMs: Date.now() - stepStartedAt }).catch(() => {});
 
     if (res === null) {
       // DETERMINISTIC-FIRST fallback: no tool matched, so reason about the
@@ -993,6 +1029,10 @@ export async function runAgentTask(
     agent_id: task.agentId,
     task_id: task.id,
     status,
+    // Which budget dimensions are NOT metered, so a ceiling that cannot bind is
+    // visible in the data instead of looking like a run that never approached
+    // it. Duration is the only one measured today.
+    unmetered_budgets: UNMETERED_BUDGETS.join(","),
     step_count: steps.length,
     ran_count: ran,
     blocked,
