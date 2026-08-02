@@ -93,7 +93,12 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Agents", href: "/admin/agents", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m16-6h2m-2 6h2M7 7h10v10H7V7zm3 3h4v4h-4z" },
   { label: "Financials", href: "/financials", roles: ["ceo", "cto", "evp"], icon: "M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
   { label: "Analytics", href: "/analytics", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
-  { label: "Tools", href: "/tools", icon: "M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l5.653-4.655m2.588 2.588l6.294-6.294a2.25 2.25 0 00-3.182-3.182l-6.294 6.294m2.588 2.588l-2.588-2.588" },
+  /* Tools is intentionally hidden from the left nav (2026-08-02, operator
+     request), following the same pattern as /emails above: the route still
+     exists and is reachable by direct link, it just does not take a slot in
+     the rail. Re-add the entry to bring it back — nothing else needs changing,
+     and NON_HIDEABLE below deliberately does not list it. */
+  // { label: "Tools", href: "/tools", icon: "M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l5.653-4.655m2.588 2.588l6.294-6.294a2.25 2.25 0 00-3.182-3.182l-6.294 6.294m2.588 2.588l-2.588-2.588" },
   /* Site Analytics: ogiam.com usage (where + when), ingested into our own
      platform and rendered with the reused HourHeatmap. Admin-scoped. */
   { label: "Site Analytics", href: "/admin/site-analytics", roles: ["ceo", "cto", "evp"], icon: "M3 3v18h18M7 14l3-3 3 3 5-5" },

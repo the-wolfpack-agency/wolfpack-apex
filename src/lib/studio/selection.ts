@@ -94,39 +94,63 @@ export function adjustableTokensFor(selection: Selection): AdjustableToken[] {
   return (Object.keys(ADJUSTABLE) as AdjustableToken[]).filter((t) => currentValueFor(selection, t) !== null);
 }
 
+/**
+ * Map the preview's existing editable-field vocabulary onto a selection part.
+ *
+ * The preview page already decorates each editable node with a `field`
+ * ("heading", "body", "cta.label", "attribution", …) as part of the inline-edit
+ * delegation it has had since Path C. Reusing that vocabulary means the click
+ * emitter is a few lines on top of handlers that already exist, rather than a
+ * second traversal with its own idea of what is selectable — two traversals
+ * that disagree is how a click selects one thing and edits another.
+ *
+ * Unknown fields map to "container" rather than being dropped: an operator who
+ * clicked something should get a selection, and the worst case is an inspector
+ * offering only layout tokens.
+ */
+export function partForField(field: string): SelectionPart {
+  if (field === "heading") return "heading";
+  if (field === "body" || field === "attribution" || field === "quote" || field === "tagline") return "body";
+  if (field.startsWith("cta.")) return "item";
+  if (field === "image" || field === "media" || field === "backgroundImage") return "media";
+  return "container";
+}
+
 /** A label for the inspector header, so the operator can see what is selected. */
 export function describeSelection(selection: Selection): string {
   return `${selection.sectionType} · ${selection.part} (section ${selection.sectionIndex})`;
 }
 
 /**
- * The probe the preview iframe runs on click.
+ * Read the rendered values off a computed style.
  *
- * Returned as a plain function rather than executed here because it runs in
- * the OTHER window. It reads computed style the same way the spec-diff probe
- * does — measuring what is rendered rather than trusting what was authored,
- * which is the only way to get a number for a section that inherited its type
- * scale from the theme or carried it over from a prototype.
+ * Takes a property READER rather than an element. A structural element type
+ * that a real HTMLElement satisfies AND a test fake can implement does not
+ * exist here — CSSStyleDeclaration carries methods, so it is not assignable to
+ * a plain record — and widening the type until both fit would have meant
+ * casting at the call site, which is where a type stops being a check.
+ *
+ * A reader is also closer to how CSS is actually queried: kebab-case property
+ * names through getPropertyValue, which is the same API the spec-diff probe
+ * uses. Measuring what is RENDERED is the point — a section can inherit its
+ * type scale from the theme or carry a number over from a prototype
+ * conversion, and only the rendered value tells you which.
  */
-export function measureElement(el: {
-  getBoundingClientRect(): { width: number };
-  ownerDocument?: { defaultView?: { getComputedStyle(e: unknown): Record<string, string> } | null } | null;
-}): Partial<Record<AdjustableToken, number>> {
-  const view = el.ownerDocument?.defaultView;
-  if (!view) return Object.create(null);
-  const s = view.getComputedStyle(el);
-  const num = (v: string | undefined): number => Number.parseFloat(v ?? "");
+export function measureComputed(read: (property: string) => string): Partial<Record<AdjustableToken, number>> {
+  const num = (v: string): number => Number.parseFloat(v);
+  const fontSize = num(read("font-size"));
+  const rawLineHeight = num(read("line-height"));
 
-  const raw: Record<string, number> = {
-    fontSize: num(s.fontSize),
+  return sanitizeMeasured({
+    fontSize,
     // "normal" parses to NaN and is dropped by sanitizeMeasured, which is
-    // right: an unset line-height has no value to step from.
-    lineHeight: num(s.lineHeight) / (num(s.fontSize) || 1),
-    letterSpacing: num(s.letterSpacing),
-    spaceY: num(s.paddingTop),
-    spaceX: num(s.paddingLeft),
-    radius: num(s.borderTopLeftRadius),
-    maxWidth: num(s.maxWidth),
-  };
-  return sanitizeMeasured(raw);
+    // right: an unset line-height has no value to step from. Expressed as a
+    // ratio because that is what the scale is in.
+    lineHeight: Number.isFinite(rawLineHeight) && Number.isFinite(fontSize) && fontSize > 0 ? rawLineHeight / fontSize : Number.NaN,
+    letterSpacing: num(read("letter-spacing")),
+    spaceY: num(read("padding-top")),
+    spaceX: num(read("padding-left")),
+    radius: num(read("border-top-left-radius")),
+    maxWidth: num(read("max-width")),
+  });
 }
