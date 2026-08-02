@@ -54,6 +54,48 @@ export interface ProbeReport {
   headline: string;
 }
 
+/**
+ * Foundry or classic, decided on the parsed URL rather than on the string.
+ *
+ * The first version tested /\.services\.ai\.azure\.com/ against the whole
+ * endpoint, unanchored. That matches anywhere: an endpoint of
+ * https://attacker.example/?x=.services.ai.azure.com would be treated as
+ * Foundry. Here that only picks the wrong request shape rather than the wrong
+ * host, so nothing leaks - but a substring test against a URL is the exact
+ * pattern that becomes an SSRF the moment someone copies it somewhere it
+ * decides trust, and ssrf-guard.ts in this repo already matches hosts on a dot
+ * boundary for that reason. Matching the discipline is cheaper than relying on
+ * this call site staying harmless.
+ *
+ * Returns null for anything that is not a parseable https URL, so a malformed
+ * endpoint is reported as not-configured rather than probed on a guess.
+ */
+const FOUNDRY_HOST = "services.ai.azure.com";
+
+function endsWithModelsPath(endpoint: string): boolean {
+  try {
+    return /\/models\/?$/.test(new URL(endpoint).pathname);
+  } catch {
+    return false;
+  }
+}
+
+export function endpointShape(endpoint: string): "foundry" | "classic" | null {
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:") return null;
+  const host = url.hostname.toLowerCase();
+  // Dot boundary, so notservices.ai.azure.com and
+  // services.ai.azure.com.attacker.example are both classic, not Foundry.
+  if (host === FOUNDRY_HOST || host.endsWith(`.${FOUNDRY_HOST}`)) return "foundry";
+  if (/\/models\/?$/.test(url.pathname)) return "foundry";
+  return "classic";
+}
+
 /** Where a probe for this model should be sent. Mirrors the provider's own
  *  detection so the probe tests the URL the provider would really use. */
 export function probeTargetFor(spec: ModelSpec, env: NodeJS.ProcessEnv): { url: string; body: Record<string, unknown> } | null {
@@ -69,9 +111,10 @@ export function probeTargetFor(spec: ModelSpec, env: NodeJS.ProcessEnv): { url: 
   const endpoint = (env[spec.endpointEnvVar ?? "AZURE_OPENAI_ENDPOINT"] ?? "").replace(/\/+$/, "");
   if (!endpoint || !deployment) return null;
 
-  const foundry = /\.services\.ai\.azure\.com/i.test(endpoint) || /\/models$/i.test(endpoint);
-  if (foundry) {
-    const base = /\/models$/i.test(endpoint) ? endpoint : `${endpoint}/models`;
+  const shape = endpointShape(endpoint);
+  if (shape === null) return null;
+  if (shape === "foundry") {
+    const base = endsWithModelsPath(endpoint) ? endpoint : `${endpoint}/models`;
     return {
       url: `${base}/chat/completions?api-version=2024-05-01-preview`,
       // Foundry's inference router takes the deployment in the BODY.

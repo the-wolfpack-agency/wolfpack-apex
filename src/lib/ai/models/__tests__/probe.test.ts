@@ -6,7 +6,7 @@
  * tests are mostly about turning each of those into a sentence an operator can
  * act on.
  */
-import { explainStatus, probeAllModels, probeModel, probeTargetFor } from "../probe";
+import { endpointShape, explainStatus, probeAllModels, probeModel, probeTargetFor } from "../probe";
 import { MODEL_REGISTRY } from "../registry";
 import { fakeFetch } from "@/lib/platform-scan/__tests__/fake-fetch";
 
@@ -56,6 +56,44 @@ describe("it probes the URL the provider would really use", () => {
     // that precisely.
     expect(Object.keys(target.body).sort()).toEqual(["max_tokens", "messages"]);
     expect(target.body.messages).toEqual([{ role: "user", content: "ping" }]);
+  });
+});
+
+describe("Foundry is decided on the host, not on a substring", () => {
+  // CodeQL flagged the first version as a missing regexp anchor, and it was
+  // right: /\.services\.ai\.azure\.com/ against the whole endpoint matches
+  // anywhere in it. Here it only picks the wrong request shape, but a substring
+  // test against a URL is the pattern that becomes an SSRF the moment it is
+  // copied somewhere that decides trust.
+  it.each([
+    ["https://acme.services.ai.azure.com", "foundry"],
+    ["https://services.ai.azure.com", "foundry"],
+    ["https://acme.openai.azure.com", "classic"],
+  ])("%s is %s", (endpoint, expected) => {
+    expect(endpointShape(endpoint)).toBe(expected);
+  });
+
+  it.each([
+    "https://attacker.example/?x=.services.ai.azure.com",
+    "https://attacker.example/.services.ai.azure.com",
+    "https://services.ai.azure.com.attacker.example",
+    "https://notservices.ai.azure.com",
+  ])("does not read Foundry out of %s", (endpoint) => {
+    expect(endpointShape(endpoint)).toBe("classic");
+  });
+
+  it("refuses anything that is not a parseable https URL", () => {
+    // Reported as not-configured rather than probed on a guess.
+    expect(endpointShape("not a url")).toBeNull();
+    expect(endpointShape("http://acme.openai.azure.com")).toBeNull();
+  });
+
+  it("still honours an explicit /models path on an ordinary host", () => {
+    // A self-hosted Foundry-compatible gateway is a real deployment, and the
+    // path is the signal there. Read from the PATHNAME, so a query string
+    // cannot fake it.
+    expect(endpointShape("https://gw.internal.example/models")).toBe("foundry");
+    expect(endpointShape("https://gw.internal.example/?a=/models")).toBe("classic");
   });
 });
 
