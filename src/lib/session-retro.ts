@@ -35,6 +35,7 @@ export type FrictionCause =
   | "unstated-done"
   | "assumed-context"
   | "scope-discovered"
+  | "directive-echo"
   | "agent-error";
 
 export interface FrictionTaxonomyEntry {
@@ -76,6 +77,13 @@ export const FRICTION_TAXONOMY: readonly FrictionTaxonomyEntry[] = [
     cause: "scope-discovered",
     meaning: "the work grew because the codebase turned out to be different than expected",
     ask: "Nothing. This is the good kind of round — the discovery was the value.",
+    agentFault: false,
+  },
+  {
+    cause: "directive-echo",
+    meaning:
+      "the request restated standing rules that are already loaded automatically every session, which costs tokens without changing behaviour",
+    ask: "State only what is DIFFERENT about this task. The standing directives are already in context.",
     agentFault: false,
   },
   {
