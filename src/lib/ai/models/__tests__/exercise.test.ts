@@ -147,3 +147,34 @@ describe("a redacted env is not a configured one", () => {
     expect(report.availableModels).toEqual([]);
   });
 });
+
+describe("a Foundry-served model is judged against ITS OWN resource", () => {
+  const FOUNDRY = {
+    AZURE_AI_FOUNDRY_ENDPOINT: "https://acme.services.ai.azure.com/models",
+    AZURE_AI_FOUNDRY_API_KEY: "k",
+    AZURE_FOUNDRY_DEPLOYMENT_DEEPSEEK: "deepseek-v3",
+  };
+
+  it("is available on its own endpoint with NO classic Azure OpenAI resource", () => {
+    // The bug this prevents: checking AZURE_OPENAI_* for a model that does not
+    // live there answers a question about the wrong resource, in both
+    // directions.
+    const report = runExercise(env(FOUNDRY));
+    expect(report.availableModels.map((m) => m.id)).toContain("azure-deepseek-v3");
+  });
+
+  it("is NOT available when only the classic resource is configured", () => {
+    const report = runExercise(env({ ...AZURE_BASE, AZURE_OPENAI_DEPLOYMENT_CHEAP: "cheap" }));
+    expect(report.availableModels.map((m) => m.id)).not.toContain("azure-deepseek-v3");
+  });
+
+  it("proves switching across BRANDS, not just tiers", () => {
+    // The stronger claim. Two Azure OpenAI deployments share a client, a wire
+    // format and an auth path; a different family exercises the abstraction.
+    const report = runExercise(env({ ...AZURE_BASE, AZURE_OPENAI_DEPLOYMENT_CHEAP: "cheap", ...FOUNDRY }));
+    expect(report.switchingProven).toBe(true);
+    expect(report.availableModels.map((m) => m.id)).toEqual(
+      expect.arrayContaining(["azure-gpt-4o-mini", "azure-deepseek-v3"]),
+    );
+  });
+});
