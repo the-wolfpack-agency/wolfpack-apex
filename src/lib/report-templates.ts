@@ -1348,6 +1348,37 @@ export async function generateReport(
 /**
  * Convert markdown to branded HTML with Wolfpack styling.
  */
+
+/**
+ * A URL that is safe to place inside a double-quoted href.
+ *
+ * Allow-list rather than deny-list: javascript:, data:, vbscript: and whatever
+ * the next one turns out to be all fail the same way, because only http, https,
+ * mailto, tel and same-document/relative targets pass.
+ *
+ * The input has already been entity-escaped for & < > by the caller, so this
+ * additionally encodes the quote characters that escaper does not touch. That
+ * is the specific gap that made the injection possible.
+ */
+export function safeLinkHref(rawUrl: string): string {
+  const url = rawUrl.trim();
+  // The escaper upstream turned & into &amp;; decode it to judge the scheme,
+  // then re-encode on the way out so the attribute stays well-formed.
+  const decoded = url.replace(/&amp;/g, "&");
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(decoded)?.[1]?.toLowerCase();
+  const relative = !scheme && (decoded.startsWith("/") || decoded.startsWith("#") || decoded.startsWith("."));
+  const allowed = scheme === "http" || scheme === "https" || scheme === "mailto" || scheme === "tel";
+  if (!allowed && !relative && scheme) return "#";
+  if (!allowed && !relative && !decoded) return "#";
+
+  return decoded
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 export function renderReportHtml(markdown: string): string {
   // Convert markdown to HTML (simple but effective)
   let html = markdown;
@@ -1407,8 +1438,21 @@ export function renderReportHtml(markdown: string): string {
   // Clean up empty paragraphs
   html = html.replace(/<p>\s*<\/p>/g, "");
 
-  // Links
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="wp-link">$1</a>');
+  // Links.
+  //
+  // The URL lands inside a double-quoted attribute, and the escaper above only
+  // handles & < >. A quote in the URL therefore CLOSED the attribute and opened
+  // a new one: `[click](" onmouseover="alert(1))` rendered a live event handler
+  // in the report. Found by feeding the renderer hostile input rather than by
+  // reading it (generator-injection.test.ts).
+  //
+  // Two controls, because either alone is thin. The scheme is allow-listed, so
+  // javascript: and data: cannot be the target at all; and the remaining quote
+  // characters are encoded, so nothing can leave the attribute even if a future
+  // scheme is added. Anything that fails both becomes an inert "#".
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label: string, rawUrl: string) => {
+    return `<a href="${safeLinkHref(rawUrl)}" class="wp-link">${label}</a>`;
+  });
 
   const date = new Date().toISOString().slice(0, 10);
 
