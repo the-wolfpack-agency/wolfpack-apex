@@ -27,7 +27,7 @@
 import { query } from "@/lib/db";
 import { POLICY_PROFILES } from "@/lib/ai/policy";
 import { MODEL_REGISTRY, isModelAvailable } from "./registry";
-import type { CapabilityTier, ModelProvider } from "./types";
+import type { CapabilityTier, ModelProvider, ModelSpec } from "./types";
 import { regionOfModel, modelRegionEnvVar } from "@/lib/ai/residency";
 import { allModelVersions } from "./version-store";
 
@@ -159,19 +159,45 @@ export function describeReason(reason: string): string {
  * today if its key was removed — both matter and neither is visible in the
  * event stream.
  */
+/**
+ * Every variable this model needs and does not have.
+ *
+ * ALL of them, not the first. The earlier version reported one at a time and
+ * checked the CLASSIC AZURE_OPENAI_* pair for every Azure model — so a
+ * Foundry-served model like DeepSeek, which lives on its own endpoint with its
+ * own key, was reported as needing only its deployment name. Someone would set
+ * that variable, redeploy, and see "Not Configured" again with no new
+ * information. A diagnostic that leads you through whack-a-mole is worse than
+ * one that says nothing, because you trust it.
+ *
+ * Derived from the SPEC's own requirements rather than from a hardcoded list,
+ * so a model added later cannot be described by a rule written before it.
+ */
+export function describeMissingConfig(
+  spec: ModelSpec,
+  env: Record<string, string | undefined>,
+): string {
+  if (spec.provider === "openai") {
+    return "OPENAI_API_KEY is not set";
+  }
+  const required = [
+    spec.endpointEnvVar ?? "AZURE_OPENAI_ENDPOINT",
+    spec.apiKeyEnvVar ?? "AZURE_OPENAI_API_KEY",
+    ...(spec.deploymentEnvVar ? [spec.deploymentEnvVar] : []),
+  ];
+  const missing = required.filter((name) => !(env[name] ?? "").trim());
+  if (missing.length === 0) return "not configured";
+  return missing.length === 1
+    ? `${missing[0]} is not set`
+    : `${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]} are not set`;
+}
+
 export function modelAvailability(
   env: Record<string, string | undefined> = process.env,
 ): ModelAvailability[] {
   return MODEL_REGISTRY.map((spec) => {
     const available = isModelAvailable(spec, env);
-    let blockedBy: string | null = null;
-    if (!available) {
-      if (spec.provider === "openai") blockedBy = "OPENAI_API_KEY is not set";
-      else if (!env.AZURE_OPENAI_ENDPOINT || !env.AZURE_OPENAI_API_KEY)
-        blockedBy = "AZURE_OPENAI_ENDPOINT or AZURE_OPENAI_API_KEY is not set";
-      else if (spec.deploymentEnvVar) blockedBy = `${spec.deploymentEnvVar} is not set`;
-      else blockedBy = "not configured";
-    }
+    const blockedBy = available ? null : describeMissingConfig(spec, env);
     return {
       modelId: spec.id,
       provider: spec.provider,
