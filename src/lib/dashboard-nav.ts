@@ -99,6 +99,12 @@ export const NAV_ITEMS: NavItem[] = [
      the rail. Re-add the entry to bring it back — nothing else needs changing,
      and NON_HIDEABLE below deliberately does not list it. */
   // { label: "Tools", href: "/tools", icon: "M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l5.653-4.655m2.588 2.588l6.294-6.294a2.25 2.25 0 00-3.182-3.182l-6.294 6.294m2.588 2.588l-2.588-2.588" },
+  /* Model Router: which models this platform can reach, which one the router
+     chose for each call, and what that is estimated to have cost. The routing
+     engine (lib/ai/models) has run for a while with no surface at all; a
+     routing engine nobody can see is a set of defaults nobody is checking.
+     Same role gate as Agents. */
+  { label: "Model Router", href: "/admin/ai-router", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M13 10V3L4 14h7v7l9-11h-7z" },
   /* Compliance Scan: point it at an ownership-verified client site and get back
      what a visitor, a regulator, or a lawyer would look for, plus every host the
      page contacts that nothing accounts for. Same role gate as Agents, because

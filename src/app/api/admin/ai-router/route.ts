@@ -1,0 +1,32 @@
+/**
+ * What the model router is doing, and which models it could use.
+ *
+ * Read-only. Everything is derived from decisions the router already logs, so
+ * this adds no telemetry and costs nothing to switch on.
+ *
+ * DELIBERATELY NOT A CONFIGURATION ENDPOINT
+ *
+ * Availability is read from the environment, never written to it. Letting a
+ * request change which models are reachable would make an HTTP call able to
+ * redirect every AI call in the platform to a different provider, which is a
+ * change that belongs in a deployment with a review, not in a form post.
+ */
+import { NextRequest, NextResponse } from "next/server";
+import { requireCapability } from "@/lib/auth/require-capability";
+import { getRouterInsights } from "@/lib/ai/models/insights";
+
+export const runtime = "nodejs";
+
+/** Clamped so a caller cannot ask for an unbounded scan of the event table. */
+const MAX_DAYS = 180;
+const DEFAULT_DAYS = 30;
+
+export async function GET(req: NextRequest) {
+  const auth = await requireCapability(req, "settings.manage_team");
+  if (!auth.ok) return auth.response;
+
+  const raw = Number(req.nextUrl.searchParams.get("days"));
+  const days = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), MAX_DAYS) : DEFAULT_DAYS;
+
+  return NextResponse.json(await getRouterInsights(days), { status: 200 });
+}
