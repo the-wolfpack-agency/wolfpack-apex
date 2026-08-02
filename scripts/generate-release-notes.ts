@@ -20,7 +20,7 @@
  *   --no-email  write the release but skip the team email
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
 import { createRelease, type ReleaseEntry } from "@/lib/releases";
 import { isGraphMailConfigured, sendViaGraph } from "@/lib/mail/send-via-graph";
@@ -48,8 +48,18 @@ function parseArgs(argv: string[]): Args {
   };
 }
 
-function git(cmd: string): string {
-  return execSync(`git ${cmd}`, { encoding: "utf8" }).trim();
+/**
+ * Run git with an ARGUMENT LIST, never a command string.
+ *
+ * The previous shape was execSync(`git ${cmd}`), which hands the whole thing to
+ * a shell. `--since` comes from argv, so `--since='x; rm -rf ~'` was a shell
+ * command rather than a revision. It needed someone able to pass a flag to this
+ * script to be a problem, which is a narrow door, but it is a door with nothing
+ * behind it: git takes a list perfectly well, and execFileSync with no shell
+ * means the argument cannot be anything except an argument.
+ */
+function git(args: string[]): string {
+  return execFileSync("git", args, { encoding: "utf8" }).trim();
 }
 
 /** Commit subjects since `since` (or the last tag, or the last 40 commits). */
@@ -61,14 +71,16 @@ function commitsSince(since?: string): string[] {
     } else {
       const lastTag = (() => {
         try {
-          return git("describe --tags --abbrev=0");
+          return git(["describe", "--tags", "--abbrev=0"]);
         } catch {
           return "";
         }
       })();
-      range = lastTag ? `${lastTag}..HEAD` : "-n 40";
+      range = lastTag ? `${lastTag}..HEAD` : "";
     }
-    const raw = git(`log ${range} --pretty=%s`);
+    // The range is one argument, or absent. Splitting it into the arg list is
+    // what keeps a revision a revision.
+    const raw = git(["log", ...(range ? [range] : ["-n", "40"]), "--pretty=%s"]);
     return raw
       .split("\n")
       .map((s) => s.trim())

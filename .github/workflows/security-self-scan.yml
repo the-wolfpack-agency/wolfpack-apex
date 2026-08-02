@@ -94,7 +94,11 @@ jobs:
       - name: Install AgenticQA
         if: steps.pat-check.outputs.configured == 'true'
         run: |
-          python -m pip install --upgrade pip
+          # Pinned: an unpinned `--upgrade pip` means the toolchain that
+          # installs our scanner is whatever shipped that morning, which is the
+          # one dependency a security workflow should not be casual about.
+          # Bump deliberately, the same way any other dependency moves.
+          python -m pip install --upgrade "pip==26.2"
           pip install -e ./vendor/agenticqa-tool/AgenticQA/
 
       - name: Run security scan
@@ -397,7 +401,11 @@ jobs:
       - name: Install AgenticQA
         if: steps.pat-check.outputs.configured == 'true'
         run: |
-          python -m pip install --upgrade pip
+          # Pinned: an unpinned `--upgrade pip` means the toolchain that
+          # installs our scanner is whatever shipped that morning, which is the
+          # one dependency a security workflow should not be casual about.
+          # Bump deliberately, the same way any other dependency moves.
+          python -m pip install --upgrade "pip==26.2"
           pip install -e ./vendor/agenticqa-tool/AgenticQA/
 
       - name: Download scan results
