@@ -62,12 +62,16 @@ export const PRODUCTS: Product[] = [
     highlights: [
       "One home for briefing, clients, HR, sites, knowledge, and financials",
       "An AI assistant grounded in your own Microsoft 365 data, not generic web answers",
+      "Builds sites from a wireframe and then measures the result against it, so 'does this match the design' is a number rather than an opinion",
+      "Runs AI agents inside a proven boundary: a named list of what they may reach, a ceiling on what one run may spend, and a stop that takes effect immediately",
       "Every action feeds a learning loop, so the system gets more useful over time",
     ],
     audience: "The whole Wolfpack team",
     potentialUses: [
       "The assistant, knowledge base, and learning 'Brain' pattern can power any company's internal operations hub",
       "The client, HR, and financial modules adapt to any professional-services firm that runs on Microsoft 365",
+      "The design-conformance engine works on any site with a prototype to compare against, independent of how it was built",
+      "The agent containment layer — allowlist, budget, kill switch, and a boundary check that runs before the work does — applies to any team putting AI agents near production systems",
     ],
     status: "live",
   },
