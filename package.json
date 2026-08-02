@@ -27,7 +27,8 @@
     "icons:generate": "node scripts/generate-icons.mjs",
     "branch:check": "npx tsx scripts/check-branch-base.ts",
     "test:spec-diff": "playwright test --config=playwright.specdiff.config.ts",
-    "router:exercise": "npx tsx scripts/router-exercise.ts"
+    "router:exercise": "npx tsx scripts/router-exercise.ts",
+    "models:probe": "npx tsx scripts/model-probe.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

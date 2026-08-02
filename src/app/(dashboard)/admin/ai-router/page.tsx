@@ -31,6 +31,7 @@ import { useRouter } from "next/navigation";
 import { getInstinctUser, fetchWithRefresh } from "@/lib/client-auth";
 import { GlassPanel, MetricTile, SectionHeader, StatusPill, ConsoleGrid } from "@/components/console";
 import type { RouterInsights } from "@/lib/ai/models/insights";
+import type { ProbeReport } from "@/lib/ai/models/probe";
 
 /** Accept only well-shaped payloads. A response that is not what we expect must
  *  render as "nothing recorded" rather than throw and blank the page: version
@@ -60,6 +61,28 @@ export default function AiRouterPage() {
   const [data, setData] = useState<RouterInsights | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [probe, setProbe] = useState<ProbeReport | null>(null);
+  const [probing, setProbing] = useState(false);
+  const [probeError, setProbeError] = useState<string | null>(null);
+
+  // Deliberately a click and not an effect. A probe is a real inference call
+  // against every configured provider, so it happens because someone asked.
+  const runProbe = useCallback(async () => {
+    setProbing(true);
+    setProbeError(null);
+    try {
+      const res = await fetchWithRefresh("/api/admin/ai-router/probe", { method: "POST" });
+      if (!res.ok) {
+        setProbeError(`The test could not run (HTTP ${res.status}).`);
+        return;
+      }
+      setProbe((await res.json()) as ProbeReport);
+    } catch {
+      setProbeError("The test could not run.");
+    } finally {
+      setProbing(false);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -179,6 +202,45 @@ export default function AiRouterPage() {
           title="Models this platform can reach"
           subtitle="Availability is read from the deployment's configuration. It is not editable here: changing which models serve every AI call belongs in a deployment with a review, not a form."
         >
+          <div style={{ marginBottom: "0.9rem" }}>
+            <button type="button" onClick={() => void runProbe()} disabled={probing} style={button} data-testid="router-probe-run">
+              {probing ? "Testing…" : "Test each model"}
+            </button>
+            <p style={{ ...dim, margin: "0.45rem 0 0", fontSize: "0.85rem" }}>
+              &ldquo;Available&rdquo; below means the configuration is present. It cannot tell a working deployment from a
+              typo, a deleted deployment or a rotated key. This sends a one-token request to each configured model and
+              reports which ones answered. It costs a fraction of a cent.
+            </p>
+            {probeError && (
+              <p role="alert" style={{ ...dim, margin: "0.45rem 0 0" }} data-testid="router-probe-error">
+                {probeError}
+              </p>
+            )}
+            {probe && (
+              <div style={notice} data-testid="router-probe-result">
+                <p style={{ margin: 0 }}>{probe.headline}</p>
+                <ul style={{ ...list, marginTop: "0.6rem" }}>
+                  {probe.results
+                    .filter((r) => r.outcome !== "not-configured")
+                    .map((r) => (
+                      <li key={r.modelId} style={row}>
+                        <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
+                          <StatusPill
+                            status={r.outcome}
+                            label={r.outcome === "reachable" ? "Answered" : "Did not answer"}
+                            tone={r.outcome === "reachable" ? "success" : "error"}
+                            size="sm"
+                          />
+                          <strong>{r.modelId}</strong>
+                          {r.latencyMs !== null && <span style={dim}>{r.latencyMs}ms</span>}
+                        </div>
+                        {r.detail && <p style={{ ...dim, margin: "0.3rem 0 0", fontSize: "0.85rem" }}>{r.detail}</p>}
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            )}
+          </div>
           <ul style={list} data-testid="router-models">
             {data.models.map((m) => (
               <li key={m.modelId} style={row}>
@@ -213,6 +275,15 @@ const row: React.CSSProperties = {
   border: "1px solid var(--wp-border, rgba(255,255,255,0.1))",
   borderRadius: "0.6rem",
   padding: "0.65rem 0.8rem",
+};
+const button: React.CSSProperties = {
+  background: "var(--wp-accent, rgba(255,255,255,0.12))",
+  color: "var(--wp-text, #fff)",
+  border: "1px solid var(--wp-border, rgba(255,255,255,0.2))",
+  borderRadius: "0.5rem",
+  padding: "0.5rem 0.9rem",
+  cursor: "pointer",
+  fontSize: "0.9rem",
 };
 const notice: React.CSSProperties = {
   marginTop: "0.9rem",
