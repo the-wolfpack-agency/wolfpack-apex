@@ -122,3 +122,28 @@ describe("it catches the router misbehaving", () => {
     expect(reasons.has("agent_pin")).toBe(true);
   });
 });
+
+describe("a redacted env is not a configured one", () => {
+  it("does not count a vercel [SENSITIVE] placeholder as a real value", () => {
+    // `vercel env pull` writes this for every sensitive variable. Reading it as
+    // configured would make the exercise print "switching proven: YES" from
+    // placeholder text — the exact false confidence it exists to prevent,
+    // produced by itself.
+    const report = runExercise(
+      env({
+        AZURE_OPENAI_ENDPOINT: "[SENSITIVE]",
+        AZURE_OPENAI_API_KEY: "[SENSITIVE]",
+        AZURE_OPENAI_DEPLOYMENT_CHEAP: "gpt-4o-mini",
+        AZURE_OPENAI_DEPLOYMENT_STANDARD: "gpt-4o",
+      }),
+    );
+    expect(report.availableModels).toEqual([]);
+    expect(report.switchingProven).toBe(false);
+    expect(report.headline).toMatch(/proves nothing about switching/);
+  });
+
+  it.each(["changeme", "TODO", "  ", "[REDACTED]"])("treats %j as unset", (value) => {
+    const report = runExercise(env({ AZURE_OPENAI_ENDPOINT: value, AZURE_OPENAI_API_KEY: value }));
+    expect(report.availableModels).toEqual([]);
+  });
+});

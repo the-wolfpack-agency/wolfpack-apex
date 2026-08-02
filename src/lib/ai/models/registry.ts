@@ -159,6 +159,23 @@ export function isModelAvailable(
   }
 }
 
+/**
+ * A configured value, and not a placeholder standing in for one.
+ *
+ * `vercel env pull` writes "[SENSITIVE]" for every variable marked sensitive —
+ * which AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY both are. A plain
+ * non-empty check reads that as configured, so running the router exercise
+ * against a pulled .env would report models as AVAILABLE and print
+ * "switching proven: YES" on the strength of literal placeholder text.
+ *
+ * That is the exact false confidence the exercise exists to prevent, produced
+ * by the exercise itself. Placeholders are treated as unset.
+ */
+const PLACEHOLDERS = new Set(["[sensitive]", "[redacted]", "changeme", "todo", "xxx", "your-key-here"]);
+
 function hasValue(v: string | undefined): boolean {
-  return typeof v === "string" && v.length > 0;
+  if (typeof v !== "string") return false;
+  const trimmed = v.trim();
+  if (trimmed.length === 0) return false;
+  return !PLACEHOLDERS.has(trimmed.toLowerCase());
 }
