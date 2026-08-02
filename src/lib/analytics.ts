@@ -753,6 +753,16 @@ export type InstinctEventType =
   // Ingest abuse protection: an observation/findings/traces ingest was refused for
   // exceeding a rate or payload cap. { reason, workspace_id }
   | "platform.scan_ingest_rejected"
+  // Outbound-traffic anomaly detection: a target's third-party requests were
+  // compared against what the site DECLARES it contacts (its own CSP, recorded
+  // integrations) and against the previous scan's baseline.
+  // { target_id, third_parties, unexplained, novel, baseline_updated, caveat_count }
+  | "platform.anomaly_run_completed"
+  // One per host nothing accounts for. Per-host rather than rolled up, so the
+  // learning loop can answer "which vendors keep turning up unannounced across
+  // our whole client base" without re-reading every stored report.
+  // { target_id, host, vendor, kind, severity, novelty, before_consent, with_credentials }
+  | "platform.unexplained_host_detected"
   // Gate self-verification: a batch of decisions was run to PROVE the gate is correct,
   // fast, and auditable. { correct, total, p50_ms, p95_ms, chain_verified }
   | "platform.gate_selftest_run"
