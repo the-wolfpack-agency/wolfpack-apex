@@ -29,13 +29,21 @@ beforeEach(() => {
   fetchMockFP.mockReset();
 });
 
+/** Real fetch sets `ok` for 2xx ONLY, never for a 3xx. These fakes said
+ *  `status < 400`, so a redirect would have read as success. No test here
+ *  currently uses a 3xx, so it was a trap rather than a live bug — corrected
+ *  alongside the same mistake found in the compliance collector (PR #224). */
+function isOk(status: number): boolean {
+  return status >= 200 && status < 300;
+}
+
 function mockFetch(map: Record<string, { json?: unknown; status?: number }>) {
   fetchMockFP.mockImplementation(async (url: string, init?: { method?: string }) => {
     const method = init?.method ?? "GET";
     const key = `${method} ${url.split("?")[0]}`;
     const entry = map[key] ?? map[url] ?? { json: { items: [] }, status: 200 };
     return {
-      ok: (entry.status ?? 200) < 400,
+      ok: isOk(entry.status ?? 200),
       status: entry.status ?? 200,
       json: async () => entry.json ?? {},
     };

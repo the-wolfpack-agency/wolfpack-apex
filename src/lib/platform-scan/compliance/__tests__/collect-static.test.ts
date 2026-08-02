@@ -15,44 +15,17 @@ import {
   extractReferences,
   extractTitle,
 } from "../collect-static";
+// One shared fetch double instead of a hand-rolled one per suite. Three bugs in
+// three PRs came from fakes that modelled the contract wrongly; see its header.
+import { fakeFetch, htmlResponse as html, redirectTo } from "../../__tests__/fake-fetch";
 
 const PAGE = "https://client.example.com/pricing";
 
-/** A fetch stub. Headers is a real Headers so the code path matches production. */
-function fetchOk(html: string, init: { headers?: Record<string, string>; status?: number; url?: string } = {}) {
-  return jest.fn(async () => ({
-    ok: (init.status ?? 200) < 400,
-    status: init.status ?? 200,
-    url: init.url ?? PAGE,
-    headers: new Headers(init.headers ?? {}),
-    text: async () => html,
-  })) as unknown as typeof fetch;
+/** A single 200 with an HTML body. */
+function fetchOk(body: string, init: { headers?: Record<string, string>; status?: number; url?: string } = {}) {
+  return fakeFetch({ status: init.status ?? 200, headers: init.headers, body, url: init.url });
 }
-
-/** One response in a redirect chain. */
-function html(body: string, headers: Record<string, string> = {}) {
-  return { status: 200, headers, body };
-}
-function redirectTo(location: string, status = 302) {
-  return { status, headers: { location }, body: "" };
-}
-/** Serves each response in order, so a redirect chain is actually exercised
- *  rather than simulated by setting res.url. */
-function fetchChain(steps: { status: number; headers: Record<string, string>; body: string }[]) {
-  let i = 0;
-  return jest.fn(async (url: string) => {
-    const step = steps[Math.min(i++, steps.length - 1)];
-    return {
-      // Real fetch sets ok for 2xx ONLY. A fake that says a 302 is ok teaches
-      // the code the wrong thing and then agrees with it.
-      ok: step.status >= 200 && step.status < 300,
-      status: step.status,
-      url,
-      headers: new Headers(step.headers),
-      text: async () => step.body,
-    };
-  }) as unknown as typeof fetch;
-}
+const fetchChain = fakeFetch;
 
 describe("extractTitle / extractHtmlLang", () => {
   it("reads a title and collapses its whitespace", () => {
@@ -218,28 +191,36 @@ describe("collectStatic", () => {
   });
 
   it("returns a page-did-not-load result instead of throwing when the site is down", async () => {
-    const failing = jest.fn(async () => {
-      throw new Error("ECONNREFUSED");
-    }) as unknown as typeof fetch;
-    const res = await collectStatic(PAGE, { fetchImpl: failing });
+    const res = await collectStatic(PAGE, { fetchImpl: fakeFetch([], { throws: new Error("ECONNREFUSED") }) });
     expect(res.facts.pageLoaded).toBe(false);
     expect(res.error).toBe("ECONNREFUSED");
   });
 
   it("reports a timeout as a timeout, not as a clean empty page", async () => {
-    const hanging = jest.fn(async (_u: string, init: RequestInit = {}) => {
-      await new Promise((_r, reject) => init.signal?.addEventListener("abort", () => reject(new Error("The operation was aborted"))));
-      throw new Error("unreachable");
-    }) as unknown as typeof fetch;
-    const res = await collectStatic(PAGE, { fetchImpl: hanging, timeoutMs: 5 });
+    // 250ms, not 5ms. The SSRF guard resolves DNS before the fetch is issued
+    // (~30ms), so a 5ms budget expired during the guard and the request was
+    // never made — the test then depended on how the fake handled an
+    // already-aborted signal, which is what hung CI. The budget has to outlast
+    // the guard for this test to be about the FETCH timing out.
+    const res = await collectStatic(PAGE, { fetchImpl: fakeFetch([], { hang: true }), timeoutMs: 250 });
     expect(res.facts.pageLoaded).toBe(false);
     expect(res.error).toMatch(/timed out/);
+  });
+
+  it("gives up before issuing a request when the budget is already spent", async () => {
+    // The guard resolves DNS, which no fetch abort signal covers. Without a
+    // budget check around it, a slow or hostile resolver runs past the whole
+    // scan and, on a serverless function, past its execution limit.
+    const f = fakeFetch(html("<html></html>"));
+    const res = await collectStatic(PAGE, { fetchImpl: f, timeoutMs: 1 });
+    expect(res.error).toMatch(/timed out/);
+    expect(f).not.toHaveBeenCalled();
   });
 
   it("identifies itself, so a site owner can see who is fetching them", async () => {
     const f = fetchOk("<html></html>");
     await collectStatic(PAGE, { fetchImpl: f });
-    const headers = (f as unknown as jest.Mock).mock.calls[0][1].headers;
+    const headers = f.mock.calls[0][1].headers;
     expect(headers["user-agent"]).toMatch(/Instinct-ComplianceScanner/);
   });
 
@@ -286,23 +267,17 @@ describe("it will not be redirected somewhere it should not go", () => {
   });
 
   it("stops a redirect loop instead of following it forever", async () => {
-    const loop = jest.fn(async (url: string) => ({
-      ok: false,
-      status: 302,
-      url,
-      headers: new Headers({ location: "https://client.example.com/loop" }),
-      text: async () => "",
-    })) as unknown as typeof fetch;
+    const loop = fakeFetch(redirectTo("https://client.example.com/loop"));
     const res = await collectStatic(PAGE, { fetchImpl: loop });
     expect(res.error).toMatch(/more than \d+ redirects/);
-    expect((loop as unknown as jest.Mock).mock.calls.length).toBeLessThanOrEqual(STATIC_SCAN_MAX_REDIRECTS + 1);
+    expect(loop.mock.calls.length).toBeLessThanOrEqual(STATIC_SCAN_MAX_REDIRECTS + 1);
   });
 
   it("asks the fetch NOT to follow redirects itself", async () => {
     // If the fetch implementation follows them, the per-hop check never runs.
-    const f = fetchChain([html("<html></html>")]);
+    const f = fakeFetch(html("<html></html>"));
     await collectStatic(PAGE, { fetchImpl: f });
-    expect((f as unknown as jest.Mock).mock.calls[0][1].redirect).toBe("manual");
+    expect(f.mock.calls[0][1].redirect).toBe("manual");
   });
 
   it("treats a redirect with no Location as the end of the chain", async () => {

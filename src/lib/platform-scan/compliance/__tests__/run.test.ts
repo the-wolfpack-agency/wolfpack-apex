@@ -13,6 +13,8 @@ jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
 
 import { runSiteScan, downgradeForTier, type ScanTier } from "../run";
 import type { ComplianceFinding } from "../findings";
+// Shared fetch double: `ok` for 2xx only, aborted signals reject immediately.
+import { fakeFetch, htmlResponse, redirectTo } from "../../__tests__/fake-fetch";
 
 const PAGE = "https://client.example.com/";
 const ACTOR = { userId: "u1", role: "admin" };
@@ -20,13 +22,7 @@ const ACTOR = { userId: "u1", role: "admin" };
 const ALLOW = jest.fn(async () => ({ allowed: true as const, decision: {} as never }));
 
 function fetchHtml(html: string, headers: Record<string, string> = {}) {
-  return jest.fn(async () => ({
-    ok: true,
-    status: 200,
-    url: PAGE,
-    headers: new Headers(headers),
-    text: async () => html,
-  })) as unknown as typeof fetch;
+  return fakeFetch(htmlResponse(html, headers));
 }
 
 function baseInput() {
@@ -51,9 +47,10 @@ describe("the gate", () => {
       order.push("authorize");
       return { allowed: true as const, decision: {} as never };
     });
-    const fetchImpl = jest.fn(async () => {
+    const inner = fakeFetch(htmlResponse("<html></html>"));
+    const fetchImpl = ((url: string, init?: RequestInit) => {
       order.push("fetch");
-      return { ok: true, status: 200, url: PAGE, headers: new Headers(), text: async () => "<html></html>" };
+      return inner(url, init);
     }) as unknown as typeof fetch;
 
     await runSiteScan(baseInput(), {
@@ -161,10 +158,10 @@ describe("the report", () => {
   it("still returns a report when the site is down", async () => {
     // A report that says what it could not establish is useful. A thrown error
     // is not.
-    const failing = jest.fn(async () => {
-      throw new Error("ECONNREFUSED");
-    }) as unknown as typeof fetch;
-    const res = await runSiteScan(baseInput(), { ...baseDeps(""), staticDeps: { fetchImpl: failing } });
+    const res = await runSiteScan(baseInput(), {
+      ...baseDeps(""),
+      staticDeps: { fetchImpl: fakeFetch([], { throws: new Error("ECONNREFUSED") }) },
+    });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.report.error).toBe("ECONNREFUSED");
@@ -175,18 +172,10 @@ describe("the report", () => {
   it("names the URL it actually landed on after a redirect", async () => {
     // The collector follows redirects itself so it can check each hop, so this
     // exercises a real 302 rather than setting res.url on a 200.
-    let hop = 0;
-    const fetchImpl = jest.fn(async (url: string) =>
-      hop++ === 0
-        ? {
-            ok: false,
-            status: 302,
-            url,
-            headers: new Headers({ location: "https://www.elsewhere.example.org/" }),
-            text: async () => "",
-          }
-        : { ok: true, status: 200, url, headers: new Headers(), text: async () => "<html></html>" },
-    ) as unknown as typeof fetch;
+    const fetchImpl = fakeFetch([
+      redirectTo("https://www.elsewhere.example.org/"),
+      htmlResponse("<html></html>"),
+    ]);
     const res = await runSiteScan(baseInput(), { ...baseDeps(""), staticDeps: { fetchImpl } });
     expect(res.ok).toBe(true);
     if (!res.ok) return;

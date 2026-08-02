@@ -179,6 +179,15 @@ function emptyFacts(headers: Record<string, string> = {}): PageFacts {
   };
 }
 
+/** Raised when the scan's own budget ran out. Distinct from a fetch AbortError
+ *  only in where it came from; both are reported to the caller as a timeout. */
+class TimedOutError extends Error {
+  constructor() {
+    super("scan budget exhausted");
+    this.name = "TimedOutError";
+  }
+}
+
 function isRedirect(status: number): boolean {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
@@ -204,7 +213,13 @@ async function fetchFollowingSafely(
 ): Promise<{ res: Response; finalUrl: string }> {
   let url = startUrl;
   for (let hop = 0; hop <= STATIC_SCAN_MAX_REDIRECTS; hop++) {
+    // The guard resolves DNS, which is NOT covered by the fetch's abort signal:
+    // a slow or hostile resolver would run past the whole scan budget and, on a
+    // serverless function, past its execution limit — with no report produced.
+    // The budget is checked either side of it so the timeout means what it says.
+    if (signal.aborted) throw new TimedOutError();
     await assertScannableUrl(url);
+    if (signal.aborted) throw new TimedOutError();
     const res = await fetchImpl(url, {
       method: "GET",
       redirect: "manual",
@@ -286,7 +301,9 @@ export async function collectStatic(pageUrl: string, deps: StaticCollectDeps = {
     if (err instanceof SsrfBlockedError) {
       return { facts: emptyFacts(), observations: [], error: `blocked: ${err.message}`, finalUrl: pageUrl };
     }
-    const aborted = err instanceof Error && (err.name === "AbortError" || /abort/i.test(err.message));
+    const aborted =
+      err instanceof TimedOutError ||
+      (err instanceof Error && (err.name === "AbortError" || /abort/i.test(err.message)));
     return {
       facts: emptyFacts(),
       observations: [],
