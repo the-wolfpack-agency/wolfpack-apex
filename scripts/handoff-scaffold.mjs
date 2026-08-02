@@ -196,6 +196,7 @@ function buildHandoff(date, latest, commits) {
   sections.push("| unstated-done | | Say what you will check to decide it is done. |");
   sections.push("| assumed-context | | Paste the fact, or say where to find it. |");
   sections.push("| scope-discovered | | Nothing — this is the good kind of round. |");
+  sections.push("| directive-echo | | State only what is DIFFERENT about this task. The standing directives are already in context. |");
   sections.push("| agent-error | | Nothing — this one is the agent's, and belongs in a guardrail. |");
   sections.push("");
   sections.push("**The one-shot version of this request:**");
