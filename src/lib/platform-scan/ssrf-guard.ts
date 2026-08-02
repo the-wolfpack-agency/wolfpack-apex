@@ -46,8 +46,20 @@ export function isPrivateIPv6(ip: string): boolean {
   if (x === "::1" || x === "::") return true;
   // IPv4-mapped (::ffff:a.b.c.d) -> check the embedded v4.
   if (x.startsWith("::ffff:")) {
-    const v4 = x.slice("::ffff:".length);
-    if (net.isIPv4(v4)) return isPrivateIPv4(v4);
+    const rest = x.slice("::ffff:".length);
+    if (net.isIPv4(rest)) return isPrivateIPv4(rest);
+    // ...but URL.hostname NORMALISES the dotted form to hex, so
+    // "::ffff:169.254.169.254" arrives as "::ffff:a9fe:a9fe" and the check
+    // above never fires. Decode the two hex groups back to a dotted quad.
+    // Without this, the AWS metadata endpoint was reachable in IPv4-mapped
+    // form. Found 2026-08-02 while testing redirect handling.
+    const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(rest);
+    if (hex) {
+      const hi = parseInt(hex[1], 16);
+      const lo = parseInt(hex[2], 16);
+      const v4 = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+      return isPrivateIPv4(v4);
+    }
   }
   // Unique-local (fc00::/7) and link-local (fe80::/10).
   return x.startsWith("fc") || x.startsWith("fd") || x.startsWith("fe8") || x.startsWith("fe9") || x.startsWith("fea") || x.startsWith("feb");
@@ -75,7 +87,12 @@ export async function assertScannableUrl(raw: string): Promise<void> {
   if (u.protocol !== "https:" && u.protocol !== "http:") {
     throw new SsrfBlockedError(`blocked scan scheme: ${u.protocol}`);
   }
-  const host = u.hostname.toLowerCase();
+  // URL.hostname keeps the brackets around an IPv6 literal ("[::1]"), and
+  // net.isIP does not recognise that form — so every IPv6 literal, loopback and
+  // link-local included, walked straight through this guard. Strip them before
+  // any check. Found by a redirect test in the compliance scanner; it affected
+  // every caller of this function, not just that one.
+  const host = u.hostname.toLowerCase().replace(/^\[(.+)\]$/, "$1");
   if (BLOCKED_HOSTNAMES.has(host) || host.endsWith(".local") || host.endsWith(".internal")) {
     throw new SsrfBlockedError(`blocked internal host: ${host}`);
   }

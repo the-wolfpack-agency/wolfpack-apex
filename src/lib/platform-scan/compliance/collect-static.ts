@@ -29,6 +29,7 @@
  * than inventing a second set of numbers for the same job.
  */
 import { resolveHref } from "@/lib/brand-url-import";
+import { assertScannableUrl, SsrfBlockedError } from "../ssrf-guard";
 import { hostOf } from "../network/observations";
 import type { NetworkObservation } from "../network/observations";
 import type { PageFacts } from "./findings";
@@ -36,6 +37,8 @@ import { normalizeHeaders } from "./collect";
 
 export const STATIC_SCAN_TIMEOUT_MS = 15_000;
 export const STATIC_SCAN_MAX_BYTES = 3 * 1024 * 1024;
+/** Mirrors BRAND_SCRAPE_MAX_REDIRECTS rather than inventing a second number. */
+export const STATIC_SCAN_MAX_REDIRECTS = 3;
 export const STATIC_SCAN_USER_AGENT =
   "Instinct-ComplianceScanner/1.0 (+https://wolfpack-instinct.vercel.app/about)";
 
@@ -176,12 +179,61 @@ function emptyFacts(headers: Record<string, string> = {}): PageFacts {
   };
 }
 
+function isRedirect(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+}
+
+/**
+ * Fetch, following redirects OURSELVES so every hop is checked.
+ *
+ * `redirect: "follow"` would hand the decision to the fetch implementation, and
+ * the scanned site chooses where it points. A client site that is already
+ * compromised — exactly the case this scanner exists to catch — could answer
+ * with a 302 to a cloud metadata endpoint, and we would fetch it and put the
+ * response in a report. Validating only the URL we started with does not close
+ * that, because the dangerous URL is one the site supplies afterwards.
+ *
+ * So: manual redirects, and assertScannableUrl on every hop including the first.
+ * That guard resolves DNS, so a public hostname pointing at a private address is
+ * refused too.
+ */
+async function fetchFollowingSafely(
+  startUrl: string,
+  fetchImpl: typeof fetch,
+  signal: AbortSignal,
+): Promise<{ res: Response; finalUrl: string }> {
+  let url = startUrl;
+  for (let hop = 0; hop <= STATIC_SCAN_MAX_REDIRECTS; hop++) {
+    await assertScannableUrl(url);
+    const res = await fetchImpl(url, {
+      method: "GET",
+      redirect: "manual",
+      signal,
+      headers: { "user-agent": STATIC_SCAN_USER_AGENT, accept: "text/html,application/xhtml+xml" },
+    });
+    if (!isRedirect(res.status)) return { res, finalUrl: url };
+    const location = res.headers.get("location");
+    // A redirect with no Location is malformed; treat what we have as final
+    // rather than guessing where it meant to send us.
+    if (!location) return { res, finalUrl: url };
+    let next: string;
+    try {
+      next = new URL(location, url).toString();
+    } catch {
+      throw new SsrfBlockedError(`unreadable redirect target: ${location}`);
+    }
+    url = next;
+  }
+  throw new SsrfBlockedError(`more than ${STATIC_SCAN_MAX_REDIRECTS} redirects from ${startUrl}`);
+}
+
 /**
  * Fetch one page and gather what the checks need.
  *
- * Never throws. A site that is down, slow, or hostile produces a result saying
- * the page did not load, which every check turns into "unverifiable". A throw
- * would produce no report at all instead of a truthful one.
+ * Never throws. A site that is down, slow, hostile, or redirecting somewhere it
+ * should not produces a result saying the page did not load, which every check
+ * turns into "unverifiable". A throw would produce no report at all instead of a
+ * truthful one.
  */
 export async function collectStatic(pageUrl: string, deps: StaticCollectDeps = {}): Promise<StaticCollectResult> {
   const fetchImpl = deps.fetchImpl ?? fetch;
@@ -190,15 +242,9 @@ export async function collectStatic(pageUrl: string, deps: StaticCollectDeps = {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetchImpl(pageUrl, {
-      method: "GET",
-      redirect: "follow",
-      signal: controller.signal,
-      headers: { "user-agent": STATIC_SCAN_USER_AGENT, accept: "text/html,application/xhtml+xml" },
-    });
+    const { res, finalUrl } = await fetchFollowingSafely(pageUrl, fetchImpl, controller.signal);
 
     const headers = normalizeHeaders(Object.fromEntries(res.headers as unknown as Iterable<[string, string]>));
-    const finalUrl = res.url || pageUrl;
 
     if (!res.ok) {
       // Headers still arrived, so the security-header check CAN be answered.
@@ -234,6 +280,12 @@ export async function collectStatic(pageUrl: string, deps: StaticCollectDeps = {
       finalUrl,
     };
   } catch (err) {
+    // A blocked target is reported as a refusal, not as a site that happens to
+    // be down. Whoever reads the report needs to know we declined to look,
+    // rather than believing we looked and found nothing.
+    if (err instanceof SsrfBlockedError) {
+      return { facts: emptyFacts(), observations: [], error: `blocked: ${err.message}`, finalUrl: pageUrl };
+    }
     const aborted = err instanceof Error && (err.name === "AbortError" || /abort/i.test(err.message));
     return {
       facts: emptyFacts(),

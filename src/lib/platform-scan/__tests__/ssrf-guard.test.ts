@@ -6,6 +6,7 @@ import {
   assertScannableUrl,
   SsrfBlockedError,
   isPrivateIp,
+  isPrivateIPv6,
 } from "@/lib/platform-scan/ssrf-guard";
 
 describe("isPrivateIp", () => {
@@ -54,6 +55,42 @@ describe("assertScannableUrl", () => {
 
   it("rejects an unparseable URL", async () => {
     await expect(assertScannableUrl("not a url")).rejects.toBeInstanceOf(SsrfBlockedError);
+  });
+
+  it("blocks an IPv6 literal, which URL.hostname wraps in brackets", async () => {
+    // The regression this pins: URL.hostname returns "[::1]", not "::1", and
+    // net.isIP does not recognise the bracketed form. Every IPv6 literal —
+    // loopback, unspecified, unique-local, link-local — passed straight through
+    // this guard until 2026-08-02. isPrivateIPv6 already stripped brackets, but
+    // isPrivateIp gated on net.isIPv6 first, so that stripping never ran.
+    for (const url of [
+      "http://[::1]/",
+      "http://[::]/",
+      "http://[fc00::1]/",
+      "http://[fd12:3456::1]/",
+      "http://[fe80::1]/",
+      "http://[::ffff:127.0.0.1]/",
+      "http://[::ffff:169.254.169.254]/",
+    ]) {
+      await expect(assertScannableUrl(url)).rejects.toBeInstanceOf(SsrfBlockedError);
+    }
+  });
+
+  it("blocks an IPv4-mapped address in the HEX form URL.hostname produces", async () => {
+    // The second half of the same bug. URL.hostname normalises
+    // "::ffff:169.254.169.254" to "::ffff:a9fe:a9fe", so the dotted-quad branch
+    // never fired and the AWS metadata endpoint was reachable this way.
+    expect(isPrivateIPv6("::ffff:a9fe:a9fe")).toBe(true); // 169.254.169.254
+    expect(isPrivateIPv6("::ffff:7f00:1")).toBe(true); // 127.0.0.1
+    expect(isPrivateIPv6("::ffff:a00:1")).toBe(true); // 10.0.0.1
+    expect(isPrivateIPv6("::ffff:c0a8:1")).toBe(true); // 192.168.0.1
+    // A public address in the same form is still allowed.
+    expect(isPrivateIPv6("::ffff:0808:0808")).toBe(false); // 8.8.8.8
+  });
+
+  it("still allows a public IPv6 literal", async () => {
+    // Blocking every IPv6 address would be a different bug. Google public DNS.
+    await expect(assertScannableUrl("http://[2001:4860:4860::8888]/")).resolves.toBeUndefined();
   });
 
   it("allows a normal public https target", async () => {

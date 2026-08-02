@@ -173,13 +173,20 @@ describe("the report", () => {
   });
 
   it("names the URL it actually landed on after a redirect", async () => {
-    const fetchImpl = jest.fn(async () => ({
-      ok: true,
-      status: 200,
-      url: "https://www.elsewhere.example.org/",
-      headers: new Headers(),
-      text: async () => "<html></html>",
-    })) as unknown as typeof fetch;
+    // The collector follows redirects itself so it can check each hop, so this
+    // exercises a real 302 rather than setting res.url on a 200.
+    let hop = 0;
+    const fetchImpl = jest.fn(async (url: string) =>
+      hop++ === 0
+        ? {
+            ok: false,
+            status: 302,
+            url,
+            headers: new Headers({ location: "https://www.elsewhere.example.org/" }),
+            text: async () => "",
+          }
+        : { ok: true, status: 200, url, headers: new Headers(), text: async () => "<html></html>" },
+    ) as unknown as typeof fetch;
     const res = await runSiteScan(baseInput(), { ...baseDeps(""), staticDeps: { fetchImpl } });
     expect(res.ok).toBe(true);
     if (!res.ok) return;

@@ -8,6 +8,7 @@
  */
 import {
   collectStatic,
+  STATIC_SCAN_MAX_REDIRECTS,
   detectConsentPlatform,
   extractHtmlLang,
   extractLinks,
@@ -26,6 +27,31 @@ function fetchOk(html: string, init: { headers?: Record<string, string>; status?
     headers: new Headers(init.headers ?? {}),
     text: async () => html,
   })) as unknown as typeof fetch;
+}
+
+/** One response in a redirect chain. */
+function html(body: string, headers: Record<string, string> = {}) {
+  return { status: 200, headers, body };
+}
+function redirectTo(location: string, status = 302) {
+  return { status, headers: { location }, body: "" };
+}
+/** Serves each response in order, so a redirect chain is actually exercised
+ *  rather than simulated by setting res.url. */
+function fetchChain(steps: { status: number; headers: Record<string, string>; body: string }[]) {
+  let i = 0;
+  return jest.fn(async (url: string) => {
+    const step = steps[Math.min(i++, steps.length - 1)];
+    return {
+      // Real fetch sets ok for 2xx ONLY. A fake that says a 302 is ok teaches
+      // the code the wrong thing and then agrees with it.
+      ok: step.status >= 200 && step.status < 300,
+      status: step.status,
+      url,
+      headers: new Headers(step.headers),
+      text: async () => step.body,
+    };
+  }) as unknown as typeof fetch;
 }
 
 describe("extractTitle / extractHtmlLang", () => {
@@ -172,16 +198,23 @@ describe("collectStatic", () => {
     // A scan of a site that redirects elsewhere has scanned somewhere else, and
     // a report that names the original URL would be about the wrong site.
     const res = await collectStatic(PAGE, {
-      fetchImpl: fetchOk("<html></html>", { url: "https://elsewhere.example.org/" }),
+      fetchImpl: fetchChain([redirectTo("https://elsewhere.example.org/"), html("<html></html>")]),
     });
     expect(res.finalUrl).toBe("https://elsewhere.example.org/");
   });
 
   it("resolves references against the FINAL url, not the requested one", async () => {
     const res = await collectStatic(PAGE, {
-      fetchImpl: fetchOk('<script src="/a.js"></script>', { url: "https://elsewhere.example.org/x/" }),
+      fetchImpl: fetchChain([redirectTo("https://elsewhere.example.org/x/"), html('<script src="/a.js"></script>')]),
     });
     expect(res.observations[0].url).toBe("https://elsewhere.example.org/a.js");
+  });
+
+  it("resolves a relative Location against the URL that sent it", async () => {
+    const res = await collectStatic(PAGE, {
+      fetchImpl: fetchChain([redirectTo("/en/pricing"), html("<html></html>")]),
+    });
+    expect(res.finalUrl).toBe("https://client.example.com/en/pricing");
   });
 
   it("returns a page-did-not-load result instead of throwing when the site is down", async () => {
@@ -214,5 +247,69 @@ describe("collectStatic", () => {
     const huge = "<html>" + "x".repeat(4 * 1024 * 1024) + "</html>";
     const res = await collectStatic(PAGE, { fetchImpl: fetchOk(huge) });
     expect(res.facts.pageLoaded).toBe(true);
+  });
+});
+
+describe("it will not be redirected somewhere it should not go", () => {
+  it("refuses a redirect to a private address, and says it was blocked", async () => {
+    // The attack this closes: a client site that is ALREADY compromised - the
+    // exact case this scanner exists to catch - answers with a 302 to a cloud
+    // metadata endpoint. Checking only the URL we started with does not help,
+    // because the dangerous URL is the one the site supplies afterwards.
+    const res = await collectStatic(PAGE, {
+      fetchImpl: fetchChain([redirectTo("http://169.254.169.254/latest/meta-data/"), html("SECRETS")]),
+    });
+    expect(res.facts.pageLoaded).toBe(false);
+    expect(res.error).toMatch(/^blocked:/);
+    // Reported as a refusal, not as a site that happens to be down: whoever
+    // reads this needs to know we declined to look.
+    expect(res.error).not.toMatch(/timed out|fetch failed/);
+  });
+
+  it.each([
+    ["http://127.0.0.1/", "loopback"],
+    ["http://localhost/admin", "localhost"],
+    ["http://[::1]/", "ipv6 loopback"],
+    ["http://10.0.0.5/", "private range"],
+    ["file:///etc/passwd", "non-http scheme"],
+  ])("refuses a redirect to %s (%s)", async (target) => {
+    const res = await collectStatic(PAGE, { fetchImpl: fetchChain([redirectTo(target), html("SECRETS")]) });
+    expect(res.error).toMatch(/^blocked:/);
+  });
+
+  it("never returns the body of a blocked hop", async () => {
+    const res = await collectStatic(PAGE, {
+      fetchImpl: fetchChain([redirectTo("http://169.254.169.254/"), html("<title>SECRETS</title>")]),
+    });
+    expect(res.facts.title).toBeNull();
+    expect(res.observations).toEqual([]);
+  });
+
+  it("stops a redirect loop instead of following it forever", async () => {
+    const loop = jest.fn(async (url: string) => ({
+      ok: false,
+      status: 302,
+      url,
+      headers: new Headers({ location: "https://client.example.com/loop" }),
+      text: async () => "",
+    })) as unknown as typeof fetch;
+    const res = await collectStatic(PAGE, { fetchImpl: loop });
+    expect(res.error).toMatch(/more than \d+ redirects/);
+    expect((loop as unknown as jest.Mock).mock.calls.length).toBeLessThanOrEqual(STATIC_SCAN_MAX_REDIRECTS + 1);
+  });
+
+  it("asks the fetch NOT to follow redirects itself", async () => {
+    // If the fetch implementation follows them, the per-hop check never runs.
+    const f = fetchChain([html("<html></html>")]);
+    await collectStatic(PAGE, { fetchImpl: f });
+    expect((f as unknown as jest.Mock).mock.calls[0][1].redirect).toBe("manual");
+  });
+
+  it("treats a redirect with no Location as the end of the chain", async () => {
+    const res = await collectStatic(PAGE, {
+      fetchImpl: fetchChain([{ status: 302, headers: {}, body: "" }]),
+    });
+    expect(res.finalUrl).toBe(PAGE);
+    expect(res.error).toBe("HTTP 302");
   });
 });
