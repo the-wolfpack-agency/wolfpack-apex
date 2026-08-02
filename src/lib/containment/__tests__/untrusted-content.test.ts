@@ -53,12 +53,9 @@ const EMITS_JSX = /`[^`]*<[a-zA-Z][^`]*\$\{/;
 const UNAUDITED_GENERATORS: readonly string[] = [
   "lib/brand-url-import.ts",
   "lib/compliance/export.ts",
-  "lib/favicon-generator.ts",
   "lib/integrations/microsoft-onenote.ts",
   "lib/principles/sharepoint-write.ts",
   "lib/programs/budget-xlsx.ts",
-  "lib/qr/svg.ts",
-  "lib/report-templates.ts",
   "lib/site-forms.ts",
 ];
 
@@ -73,6 +70,12 @@ const AUDITED: Readonly<Record<string, string>> = {
   "lib/mail/send-password-reset.ts": "FIXED: same raw href as send-invite; the reset URL was escaped for display and emitted bare inside the anchor.",
   "lib/agents/invite-email.ts": "FIXED: same raw href as send-invite; the agent activation URL was escaped for display and emitted bare inside the anchor.",
   "lib/dev/branch-base.ts": "SAFE: builds console output, not markup; the detector matched a '<' in a plain string.",
+  "lib/report-templates.ts":
+    "FIXED, found by running it (generator-injection.test.ts): the markdown link URL landed inside href=\"...\" and the escaper handled & < > but NOT the quote, so `[click](\" onmouseover=\"alert(1))` rendered a live handler. Now scheme-allow-listed (javascript:/data: become #) and quote-encoded. Body text was already escape-first and safe.",
+  "lib/qr/svg.ts":
+    "SAFE, verified by running it: the input is encoded into QR modules and never interpolated into the document, so hostile text does not appear in the output at all.",
+  "lib/favicon-generator.ts":
+    "SAFE, verified by running it: resolveMonogram strips to alphanumerics before it reaches the SVG, and a colour that is not a colour is replaced with a default rather than interpolated into the fill attribute.",
   "lib/html-sanitize.ts": "SAFE: this IS the sanitizer. Its template wraps input for DOMPurify to parse, which is the point.",
 };
 
@@ -117,8 +120,10 @@ describe("untrusted content never becomes syntax", () => {
   });
 
   it("records the outstanding audit as a number, so the trend is visible", () => {
-    // 15 -> 9. Update deliberately; the direction is the point.
-    expect(UNAUDITED_GENERATORS.length).toBe(9);
+    // 15 -> 9 -> 6. Update deliberately; the direction is the point.
+    // The 9 -> 6 pass audited by EXECUTION, not by reading, and found one real
+    // injection in report-templates.
+    expect(UNAUDITED_GENERATORS.length).toBe(6);
   });
 
   it("counts an audited file as covered, and keeps its evidence", () => {
