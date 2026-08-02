@@ -41,6 +41,8 @@ import {
 } from "@/components/console";
 import { ReleaseGatePanel } from "@/components/deploy/ReleaseGatePanel";
 import { ModelRegressionPanel } from "@/components/agents/ModelRegressionPanel";
+import FleetBehaviorPanel from "@/components/agents/FleetBehaviorPanel";
+import type { AgentBehaviorSummary } from "@/lib/agents/evals/behavior-summary";
 
 type AgentState = "invited" | "active" | "paused" | "revoked";
 
@@ -487,6 +489,14 @@ export default function AgentsPage() {
           unauth redirect path. */}
       {!loading && <ReleaseGatePanel testId="agents-release-gate" />}
 
+      {/* How the fleet has BEHAVED, as distinct from whether it succeeded. The
+          roster above answers "what exists and is it running"; this answers the
+          question someone actually has before handing an agent a client system:
+          did it stay inside its limits, and did it tell the truth about what it
+          did. Same !loading gate as the panels around it, so it never mounts on
+          the unauth redirect path. */}
+      {!loading && <FleetBehaviorSection nameFor={(id) => agents.find((a) => a.id === id)?.name} />}
+
       {/* Agent evals: model-version regression watch. Answers the founding
           question the rest of the fleet surface could not, did the newest model
           make any agent measurably worse at its task. Gated on !loading so it
@@ -889,6 +899,76 @@ export default function AgentsPage() {
           </ConsoleGrid>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Accept only well-shaped rows.
+ *
+ * This renders inside the fleet page, so a payload that is not the shape we
+ * expect must degrade to "nothing to report" rather than throw: an unguarded
+ * `.length` on a missing field white-screens the whole roster. That is not
+ * hypothetical during a deploy, when an old client can briefly meet a new
+ * server or the reverse, and it is the blank-page failure this codebase has
+ * already lived through once.
+ *
+ * Dropping a malformed row is safe here BECAUSE the panel's empty state says
+ * plainly that it is an absence of evidence and not a clean bill of health.
+ */
+function normalizeBehavior(raw: unknown): { days: number; agents: AgentBehaviorSummary[] } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const body = raw as { days?: unknown; agents?: unknown };
+  const rows = Array.isArray(body.agents) ? body.agents : [];
+  const agents = rows.filter(
+    (a): a is AgentBehaviorSummary =>
+      Boolean(a) &&
+      typeof a === "object" &&
+      typeof (a as AgentBehaviorSummary).agentId === "string" &&
+      typeof (a as AgentBehaviorSummary).headline === "string" &&
+      Array.isArray((a as AgentBehaviorSummary).findingKinds),
+  );
+  return { days: typeof body.days === "number" ? body.days : 30, agents };
+}
+
+/**
+ * Behaviour panel plus its own fetch.
+ *
+ * Self-contained so a failure here cannot affect the roster: the fleet page
+ * must still render if the behaviour read is unavailable. The panel renders an
+ * explicit "nothing to report yet, which is not a clean bill of health" state,
+ * so a failed load never reads as reassurance.
+ */
+function FleetBehaviorSection({ nameFor }: { nameFor: (agentId: string) => string | undefined }) {
+  const [behavior, setBehavior] = useState<{ days: number; agents: AgentBehaviorSummary[] } | null>(null);
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetchWithRefresh("/api/admin/agents/behavior");
+        const body = res.ok ? normalizeBehavior(await res.json()) : null;
+        if (!cancelled) setBehavior(body);
+      } catch {
+        if (!cancelled) setBehavior(null);
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <div style={{ marginBottom: "1.5rem" }}>
+      <FleetBehaviorPanel
+        agents={behavior?.agents ?? []}
+        days={behavior?.days ?? 30}
+        loading={busy}
+        nameFor={nameFor}
+      />
     </div>
   );
 }
