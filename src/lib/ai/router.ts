@@ -26,6 +26,7 @@
  */
 
 import { trackEvent } from "@/lib/analytics";
+import { bridgeSelection } from "./model-bridge";
 import { applyConstitutionToRequest } from "@/lib/constitution";
 import { getObsClient } from "@/lib/obs";
 
@@ -79,6 +80,22 @@ function pickPrimary(
   registry: ProviderRegistry,
 ): AIProvider {
   const override = readPrimaryOverride();
+
+  // Ask the SELECTION router first, unless an operator pinned a provider.
+  //
+  // Without this the two routers disagree: the executor records "we chose
+  // azure-gpt-4o" while this function independently decides Azure or Anthropic,
+  // and /admin/ai-router reports a model that may not have done the work.
+  //
+  // It only ever refines. bridgeSelection returns null whenever selection had
+  // no real choice, named an unsupported tier, or picked a client-supplied
+  // model — and the original logic below then runs untouched. There is no path
+  // where this makes a call fail that would otherwise have succeeded.
+  if (override === "auto") {
+    const bridged = bridgeSelection(req.model_tier, registry);
+    if (bridged) return bridged.provider;
+  }
+
   if (override === "azure-openai" && registry.azure.supportsTier(req.model_tier)) {
     return registry.azure;
   }
@@ -235,6 +252,9 @@ class RouterClient implements AIClient {
     // which model version answers. No-op for the other call sites.
     const cReq = applyConstitutionToRequest(req);
 
+    // Resolved once and reused, so the provider we call and the model id we
+    // report come from the SAME decision rather than two independent ones.
+    const bridged = readPrimaryOverride() === "auto" ? bridgeSelection(cReq.model_tier, this.registry) : null;
     const primary = pickPrimary(cReq, this.registry);
     const obs = getObsClient();
     let response: AICompleteResponse;
@@ -309,7 +329,7 @@ class RouterClient implements AIClient {
       }
     }
 
-    emitCompletionEvent(cReq, response, fallbackUsed);
+    emitCompletionEvent(cReq, response, fallbackUsed, bridged?.spec.id);
     return response;
   }
 }
@@ -318,6 +338,7 @@ function emitCompletionEvent(
   req: AICompleteRequest,
   response: AICompleteResponse,
   fallbackUsed: boolean,
+  selectedModelId?: string,
 ): void {
   const feature = req.metadata?.feature ?? "unknown";
   const userId = req.metadata?.user_id ?? "system";
@@ -327,6 +348,10 @@ function emitCompletionEvent(
     provider: response.provider_used,
     model: response.model_used,
     tier: req.model_tier,
+    // What the SELECTION router would have picked, recorded alongside what
+    // actually ran so the two are joinable and any divergence is visible in
+    // data rather than only discoverable by reading both routers.
+    ...(selectedModelId ? { selected_model_id: selectedModelId } : {}),
     input_tokens: response.input_tokens,
     output_tokens: response.output_tokens,
     cost_usd: response.cost_usd,
