@@ -38,6 +38,7 @@ import {
   getInstinctToken,
 } from "@/lib/client-auth";
 import { validateBrief, type SiteBrief } from "@/lib/sites-schema";
+import { measureComputed, partForField } from "@/lib/studio/selection";
 import { RenderBrief } from "@/components/sites/render-brief";
 import { buildSeoMetaTags, type SeoMetaTag } from "@/lib/seo-head";
 import {
@@ -494,6 +495,29 @@ export function InlineEditOverlay({
           // For CTA links, prevent navigation while editing.
           if (entry.field === "cta.label" || entry.field === "cta.href") {
             ev.preventDefault();
+          }
+          // Tell the parent WHAT was selected and what its rendered values are,
+          // so the inspector can bind and a prompted style change has a value
+          // to step from. Measured here because only this window rendered it:
+          // a section can carry an explicit token, a theme default, or a number
+          // inherited from a prototype conversion, and the parent cannot tell
+          // which without measuring. Best-effort — a failure here must never
+          // stop the inline edit below from opening.
+          try {
+            window.parent.postMessage(
+              {
+                origin: INSTINCT_EDIT_ORIGIN,
+                type: "element.select",
+                pageIndex,
+                sectionIndex,
+                sectionType,
+                part: partForField(entry.field),
+                measured: measureComputed((prop) => window.getComputedStyle(target).getPropertyValue(prop)),
+              } satisfies InlineEditMessage,
+              window.location.origin,
+            );
+          } catch {
+            /* non-fatal: selection is an enhancement, editing is the feature */
           }
           beginInlineEdit({
             el: target,

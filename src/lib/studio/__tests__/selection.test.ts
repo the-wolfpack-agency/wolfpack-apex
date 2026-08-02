@@ -5,7 +5,7 @@
  * indices all have to die at this boundary, because everything past it assumes
  * a Selection is real.
  */
-import { sanitizeMeasured, selectionFromMessage, currentValueFor, adjustableTokensFor, describeSelection, measureElement, type Selection } from "../selection";
+import { sanitizeMeasured, selectionFromMessage, currentValueFor, adjustableTokensFor, describeSelection, measureComputed, partForField, type Selection } from "../selection";
 import { resolveIntent } from "../style-intent";
 
 const message = (over: Record<string, unknown> = {}) => ({
@@ -132,29 +132,61 @@ describe("selection feeding the style gate", () => {
   });
 });
 
-describe("measureElement", () => {
-  const fakeEl = (style: Record<string, string>) => ({
-    getBoundingClientRect: () => ({ width: 100 }),
-    ownerDocument: { defaultView: { getComputedStyle: () => style } },
-  });
+describe("measureComputed", () => {
+  const reader = (style: Record<string, string>) => (p: string) => style[p] ?? "";
 
   it("reads what is rendered, not what was authored", () => {
     // A section can inherit its type scale from the theme or carry a number
     // over from a prototype conversion. Measuring is the only way to know.
-    const out = measureElement(fakeEl({ fontSize: "24px", lineHeight: "36px", paddingTop: "16px", paddingLeft: "24px", borderTopLeftRadius: "8px", maxWidth: "1190px", letterSpacing: "0.02em" }));
+    const out = measureComputed(
+      reader({
+        "font-size": "24px",
+        "line-height": "36px",
+        "padding-top": "16px",
+        "padding-left": "24px",
+        "border-top-left-radius": "8px",
+        "max-width": "1190px",
+        "letter-spacing": "0.02em",
+      }),
+    );
     expect(out.fontSize).toBe(24);
     expect(out.lineHeight).toBeCloseTo(1.5, 5);
     expect(out).toMatchObject({ spaceY: 16, spaceX: 24, radius: 8, maxWidth: 1190 });
   });
 
   it("drops an unset line-height instead of inventing one", () => {
-    const out = measureElement(fakeEl({ fontSize: "16px", lineHeight: "normal", paddingTop: "0px" }));
+    const out = measureComputed(reader({ "font-size": "16px", "line-height": "normal", "padding-top": "0px" }));
     expect(out.lineHeight).toBeUndefined();
     expect(out.fontSize).toBe(16);
   });
 
-  it("returns nothing when there is no window to measure in", () => {
-    expect(measureElement({ getBoundingClientRect: () => ({ width: 0 }), ownerDocument: null })).toEqual({});
+  it("drops everything unreadable rather than reporting zeros", () => {
+    // "" parses to NaN. Reporting 0 would let the gate step from a value that
+    // is not on screen, which is the thing currentValueFor refuses to do.
+    expect(measureComputed(() => "")).toEqual({});
+  });
+
+  it("does not divide by a zero font-size", () => {
+    expect(measureComputed(reader({ "font-size": "0px", "line-height": "20px" })).lineHeight).toBeUndefined();
+  });
+});
+
+describe("partForField", () => {
+  it("maps the preview's existing field vocabulary", () => {
+    // Reusing the vocabulary the inline-edit delegation already uses is what
+    // keeps click-to-select and click-to-edit pointing at the same node.
+    expect(partForField("heading")).toBe("heading");
+    expect(partForField("body")).toBe("body");
+    expect(partForField("attribution")).toBe("body");
+    expect(partForField("cta.label")).toBe("item");
+    expect(partForField("backgroundImage")).toBe("media");
+  });
+
+  it("falls back to container rather than dropping an unknown field", () => {
+    // An operator who clicked something must get a selection. The worst case
+    // is an inspector offering only layout tokens, not a dead click.
+    expect(partForField("something-new")).toBe("container");
+    expect(partForField("")).toBe("container");
   });
 });
 
