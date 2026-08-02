@@ -44,10 +44,18 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 describe("fetch doubles model the real contract", () => {
+  // Files that contain the pattern ON PURPOSE, to prove something about it.
+  // Named explicitly rather than skipped by a blanket rule, so adding one is a
+  // deliberate act a reviewer can see.
+  const SELF_REFERENTIAL = new Set([
+    // Asserts the regex matches what it claims to.
+    __filename,
+    // Reproduces the exact defect and shows real fetch disagrees with it.
+    path.join(__dirname, "fake-fetch.contract.test.ts"),
+  ]);
+
   const offenders = walk(SRC)
-    // This file necessarily contains the pattern: its third test asserts the
-    // regex actually matches what it claims to. The detector is not an offender.
-    .filter((f) => f !== __filename)
+    .filter((f) => !SELF_REFERENTIAL.has(f))
     .filter((f) => WRONG_OK.test(fs.readFileSync(f, "utf-8")))
     .map((f) => path.relative(SRC, f))
     .sort();

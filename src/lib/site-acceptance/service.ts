@@ -11,6 +11,18 @@ import { trackEvent } from "@/lib/analytics";
 import { assertScannableUrl } from "@/lib/platform-scan/ssrf-guard";
 import { runSpecDiff } from "@/lib/spec-diff/run";
 import { createSpecDiffBrowser } from "@/lib/spec-diff/browser";
+
+/** Matched by name; see the check below for why not instanceof. */
+const BROWSER_UNAVAILABLE = "BrowserUnavailableError";
+
+/** Host only: a deployed URL can carry a preview token in its path. */
+function safeHostOf(raw: string): string {
+  try {
+    return new URL(raw).host;
+  } catch {
+    return "unparseable";
+  }
+}
 import { saveSpecDiffRun } from "@/lib/spec-diff/store";
 import { runAcceptance, statusFromVerdict, type AcceptanceRunDeps, type LayoutComparison } from "./run";
 import { parseCriteria, type AcceptanceCriteria } from "./criteria";
@@ -41,6 +53,20 @@ export function makeLayoutComparator(workspaceId: string, createdBy: string | nu
     try {
       browser = await createSpecDiffBrowser();
     } catch (err) {
+      // Reported with a stable prefix so the degrade reason downstream can tell
+      // "we never looked" apart from "we looked and it went wrong". A gate that
+      // has never once run is a different problem from a gate that is failing,
+      // and only one of them is about the site being measured.
+      // Checked by NAME, not instanceof. Next can load a module in more than
+      // one bundle, and a jest.mock of the browser module that omits the class
+      // makes `instanceof` throw outright rather than return false. Neither
+      // should be able to turn a degrade report into a crash.
+      if (err instanceof Error && err.name === BROWSER_UNAVAILABLE) {
+        trackEvent("site.acceptance_degraded", "system", "system", {
+          deployed_url_host: safeHostOf(input.deployedUrl),
+          reason: "browser_unavailable",
+        });
+      }
       return { error: `browser unavailable: ${err instanceof Error ? err.message : "unknown"}` };
     }
     try {

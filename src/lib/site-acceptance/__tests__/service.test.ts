@@ -6,7 +6,19 @@
  */
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
 jest.mock("@/lib/platform-scan/ssrf-guard", () => ({ assertScannableUrl: jest.fn(async () => undefined) }));
-jest.mock("@/lib/spec-diff/browser", () => ({ createSpecDiffBrowser: jest.fn() }));
+// The mock mirrors the module's real exports. An incomplete module mock is the
+// same failure as an incomplete fetch fake: the double stops modelling the
+// thing it doubles, and the code is then tested against a fiction.
+jest.mock("@/lib/spec-diff/browser", () => ({
+  createSpecDiffBrowser: jest.fn(),
+  specDiffBrowserSource: jest.fn(() => "local-launch"),
+  BrowserUnavailableError: class BrowserUnavailableError extends Error {
+    constructor(source: string, cause: unknown) {
+      super(`no browser available (${source}): ${String(cause)}`);
+      this.name = "BrowserUnavailableError";
+    }
+  },
+}));
 jest.mock("@/lib/spec-diff/run", () => ({ runSpecDiff: jest.fn() }));
 jest.mock("@/lib/spec-diff/store", () => ({ saveSpecDiffRun: jest.fn() }));
 jest.mock("../store", () => ({

@@ -24,9 +24,56 @@ export interface SpecDiffBrowserHandle {
 /** How long to let fonts and mount effects settle before measuring. */
 const SETTLE_MS = 1500;
 
+/**
+ * Where the browser comes from.
+ *
+ * `chromium.launch()` needs a chromium BINARY on the machine, and a Vercel
+ * function does not have one. Every production run of the acceptance gate
+ * therefore degraded, on a ten-minute cron, since the day it shipped — cleanly
+ * and silently, which is the worst combination: a gate that reports a tidy
+ * "unavailable" forever looks healthier than one that crashes, and nobody
+ * investigates a control that never complains.
+ *
+ * Found by the route-runtime-capability guardrail, not by anyone noticing.
+ *
+ * The fix reuses the engine selection the screenshot tool already ships: when
+ * BROWSER_WS_ENDPOINT names an in-house browser pool, connect to it over CDP.
+ * Same variable, same infrastructure, no new dependency and no second pattern
+ * to keep in step. Without it the local launch is still used, which is correct
+ * for CI and a developer machine and honest everywhere else.
+ */
+export type SpecDiffBrowserSource = "remote-cdp" | "local-launch";
+
+export function specDiffBrowserSource(): SpecDiffBrowserSource {
+  return process.env.BROWSER_WS_ENDPOINT ? "remote-cdp" : "local-launch";
+}
+
+/** Thrown when no browser could be obtained. Typed so a caller can report "we
+ *  never measured" as its own outcome instead of folding it in with "the
+ *  measurement failed" — they call for completely different actions. */
+export class BrowserUnavailableError extends Error {
+  readonly source: SpecDiffBrowserSource;
+  constructor(source: SpecDiffBrowserSource, cause: unknown) {
+    super(`no browser available (${source}): ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = "BrowserUnavailableError";
+    this.source = source;
+  }
+}
+
 export async function createSpecDiffBrowser(): Promise<SpecDiffBrowserHandle> {
-  const { chromium } = (await import("playwright")) as typeof import("playwright");
-  const browser = await chromium.launch({ args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+  const source = specDiffBrowserSource();
+  const endpoint = process.env.BROWSER_WS_ENDPOINT;
+
+  let browser: Awaited<ReturnType<typeof import("playwright").chromium.launch>>;
+  try {
+    const { chromium } = (await import("playwright")) as typeof import("playwright");
+    browser =
+      source === "remote-cdp" && endpoint
+        ? await chromium.connectOverCDP(endpoint, { timeout: 20_000 })
+        : await chromium.launch({ args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+  } catch (err) {
+    throw new BrowserUnavailableError(source, err);
+  }
   const context = await browser.newContext();
 
   return {
