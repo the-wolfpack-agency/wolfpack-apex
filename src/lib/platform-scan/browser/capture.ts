@@ -55,6 +55,14 @@ export interface ScanResponse {
 
 export interface ScanGotoResult {
   status(): number;
+  /**
+   * Response headers, lowercased by the browser. A METHOD, not a property,
+   * because that is what Playwright's Response actually exposes — a fake that
+   * models it as a property will pass its own tests and fail in production.
+   * Optional so existing callers and fakes that never needed it still satisfy
+   * this interface.
+   */
+  headers?(): Record<string, string>;
 }
 
 export interface ScanPage {
