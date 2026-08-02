@@ -19,6 +19,8 @@ import { trackEvent } from "@/lib/analytics";
 import { validateBrief, BriefValidationError, type SiteBrief } from "@/lib/sites";
 import { htmlToText } from "@/lib/html-sanitize";
 
+import { renderPrompt } from "@/lib/prompts/registry";
+import { BRIEF_EXTRACT } from "@/lib/prompts/definitions/documents";
 export interface ParseResult {
   brief: SiteBrief;
   source: "heuristic" | "ai";
@@ -155,33 +157,8 @@ export function heuristicParse(
 
 /* ------------------------------- AI pass ----------------------------- */
 
-const SYSTEM_PROMPT = `You are a content extractor for the Wolfpack site template. Given a design brief or marketing document, output a JSON brief that conforms exactly to this TypeScript shape:
-
-interface SiteBrief {
-  client: string;            // lowercase slug, a-z 0-9 -
-  product: { name: string; tagline?: string; supportEmail?: string };
-  pages: Array<{
-    route: string;           // starts with /
-    title?: string;
-    sections: Array<
-      | { type: "hero"; heading: string; body?: string; cta?: { label: string; href: string }; backgroundImage?: string }
-      | { type: "text"; heading?: string; body: string }
-      | { type: "callout"; body: string }
-      | { type: "banner"; heading: string; body?: string }
-      | { type: "stats"; heading?: string; items: Array<{ label: string; value: number; suffix?: string; prefix?: string }> }
-      | { type: "cards"; heading?: string; items: Array<{ title: string; body?: string; badge?: string; accent?: boolean }> }
-      | { type: "gallery"; heading?: string; images: Array<{ src: string; alt?: string }> }
-      | { type: "quote"; body: string; attribution?: string }
-    >;
-  }>;
-  contactForm?: { fields: string[] };
-}
-
-RULES:
-- stats.items[].value MUST be a number (no strings, no units; put units in suffix)
-- gallery.images MUST be an array even if empty
-- Use only the section types listed above
-- Output ONLY valid JSON, no markdown, no commentary, no \`\`\` fences`;
+/** Registered as brief.extract. Text unchanged; see src/lib/prompts. */
+const SYSTEM_PROMPT = renderPrompt(BRIEF_EXTRACT, {});
 
 export interface AICaller {
   (systemPrompt: string, userText: string): Promise<{ content: string; tokensUsed: number } | null>;

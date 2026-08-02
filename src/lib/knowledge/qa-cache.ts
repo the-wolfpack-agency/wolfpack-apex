@@ -39,6 +39,8 @@ import { getAIClient } from "@/lib/ai";
 import { getObsClient } from "@/lib/obs";
 import { getRelevantContext } from "@/lib/assistant/context-resolver";
 
+import { renderPrompt } from "@/lib/prompts/registry";
+import { KNOWLEDGE_ANSWER, SUPPORT_SELF_SERVE_ANSWER } from "@/lib/prompts/definitions/documents";
 /* ------------------------------------------------------------------ */
 /* Public types                                                        */
 /* ------------------------------------------------------------------ */
@@ -303,9 +305,11 @@ export async function recordFeedback(qaId: string, helpful: boolean): Promise<vo
 /* LLM fallback                                                        */
 /* ------------------------------------------------------------------ */
 
-const KNOWLEDGE_SYSTEM_PROMPT = `You are answering questions for the Wolfpack Agency team. You have access to internal documentation and runbooks. Be concise and direct (under 200 words). If you don't know, say so plainly — never invent. Cite the source when possible.`;
+/** Registered as knowledge.answer. Text unchanged; see src/lib/prompts. */
+const KNOWLEDGE_SYSTEM_PROMPT = renderPrompt(KNOWLEDGE_ANSWER, {});
 
-const ASSISTANT_SUPPORT_SYSTEM_PROMPT = `You are the Wolfpack Instinct support assistant. The wolfpack member asking has not yet filed a ticket — your job is to answer common questions so they can self-serve. If the question is unclear, ambiguous, or you do not have enough context to answer with confidence, say so explicitly and recommend they submit a support ticket. Be concise (under 200 words).`;
+/** Registered as support.self_serve_answer. Text unchanged. */
+const ASSISTANT_SUPPORT_SYSTEM_PROMPT = renderPrompt(SUPPORT_SELF_SERVE_ANSWER, {});
 
 function pickSystemPrompt(surface: QASurface): string {
   return surface === "assistant_support"

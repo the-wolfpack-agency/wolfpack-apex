@@ -34,6 +34,8 @@ import {
   type DocumentType,
 } from "./types";
 
+import { renderPrompt } from "@/lib/prompts/registry";
+import { DOCUMENT_CLASSIFY } from "@/lib/prompts/definitions/documents";
 /* ------------------------------ Constants ----------------------------- */
 
 /** Pinned model id. Matches brief-from-image.ts so the cost-usd calc and
@@ -164,37 +166,9 @@ export const defaultVisionCaller: VisionCaller = async ({
 
 /* ----------------------------- System prompt -------------------------- */
 
-const SYSTEM_PROMPT = `You are a document classifier. Look at the supplied image or PDF and decide what kind of document it is.
-
-You MUST classify the document as exactly one of these types:
-- "receipt"       — point-of-sale or restaurant receipt
-- "invoice"       — vendor invoice, bill, or statement of charges
-- "tax_w2"        — US IRS Form W-2 (Wage and Tax Statement)
-- "tax_1099"      — US IRS Form 1099 (any 1099-* variant: MISC, NEC, INT, DIV, K, R, etc.)
-- "id_document"   — government-issued ID (driver's license, passport, state ID, etc.)
-- "unknown"       — does not clearly fit any of the above
-
-Output ONLY valid JSON matching this TypeScript shape exactly. No markdown fences. No commentary.
-
-interface ClassifierCandidate {
-  type: "receipt" | "invoice" | "tax_w2" | "tax_1099" | "id_document" | "unknown";
-  confidence: number; // 0..1
-}
-
-interface DocumentClassification {
-  type: "receipt" | "invoice" | "tax_w2" | "tax_1099" | "id_document" | "unknown";
-  confidence: number;            // 0..1, your top guess
-  alternates: ClassifierCandidate[]; // up to 3, ordered by descending confidence, MUST NOT include the top-pick type
-  rationale: string;             // <= 240 characters, plain English
-}
-
-RULES:
-- confidence values are in [0,1] inclusive. Never exceed 1.0.
-- alternates is an array with 0 to 3 entries — pick the next most plausible types.
-- Do NOT repeat the top-pick type in alternates.
-- rationale must be <= 240 characters. State the 1-2 visual cues that drove your decision.
-- If you cannot identify the document, return type="unknown" with confidence reflecting your certainty that it is genuinely unidentifiable.
-- Do not invent fields. Do not include the model id. Do not include cost or latency.`;
+/** Registered as document.classify. Moved to src/lib/prompts so it has an id
+ *  an eval can score and a declared scope; the text is unchanged. */
+const SYSTEM_PROMPT = renderPrompt(DOCUMENT_CLASSIFY, {});
 
 const USER_TEXT =
   "Classify this document. Return only JSON matching DocumentClassification.";
