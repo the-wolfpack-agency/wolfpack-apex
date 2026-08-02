@@ -52,6 +52,11 @@ export interface AgentIdentityCardProps {
   boundaryProven?: boolean;
   model?: { id: string; clientSupplied: boolean };
   testId?: string;
+  /** Preserves an existing test id on the lifecycle pill where this card
+   *  replaces an older one, so surrounding tests keep their handle. */
+  stateTestId?: string;
+  /** Render without the panel chrome, for use inside a card the caller owns. */
+  bare?: boolean;
 }
 
 /** Neutral for unknown. Deliberately not a softer green: not knowing is not a pass. */
@@ -73,6 +78,8 @@ export default function AgentIdentityCard({
   boundaryProven,
   model,
   testId,
+  stateTestId,
+  bare,
 }: AgentIdentityCardProps) {
   const state = describeState(agent.state);
   const trust = trustLine({
@@ -83,8 +90,8 @@ export default function AgentIdentityCard({
   });
   const hue = hueFor(agent.id);
 
-  return (
-    <GlassPanel testId={testId ?? `agent-card-${agent.id}`}>
+  const body = (
+    <div data-testid={bare ? (testId ?? `agent-card-${agent.id}`) : undefined}>
       <div style={{ display: "flex", gap: "0.9rem", alignItems: "flex-start" }}>
         {/*
           Identity, not endorsement. The same shape and weight whatever the
@@ -116,7 +123,7 @@ export default function AgentIdentityCard({
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", gap: "0.55rem", alignItems: "center", flexWrap: "wrap" }}>
             <strong style={{ fontSize: "1.05rem" }}>{agent.name}</strong>
-            <StatusPill status={agent.state} label={state.label} size="sm" />
+            <StatusPill status={agent.state} label={state.label} size="sm" testId={stateTestId} />
             {/* The one place colour carries a judgement. */}
             <StatusPill
               status={trust.tone}
@@ -148,8 +155,11 @@ export default function AgentIdentityCard({
           )}
         </div>
       </div>
-    </GlassPanel>
+    </div>
   );
+
+  if (bare) return body;
+  return <GlassPanel testId={testId ?? `agent-card-${agent.id}`}>{body}</GlassPanel>;
 }
 
 const dim: React.CSSProperties = { color: "var(--wp-text-dim)", fontSize: "0.9rem" };
