@@ -94,7 +94,7 @@ async function main(): Promise<void> {
   if (unreadable.length) console.log(`  unreadable: ${unreadable.join(", ")}`);
 
   if (DRY) {
-    console.log("[loc] DRY RUN — nothing written");
+    console.log("[loc] DRY RUN: nothing written");
     return;
   }
 

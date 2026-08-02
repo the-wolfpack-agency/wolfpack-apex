@@ -91,6 +91,37 @@ describe("sequencing is only asked of a brief that has several parts", () => {
   });
 });
 
+describe("who decides, asked only where a decision is likely", () => {
+  // Added after a real loop. A check stayed red because the font cut is a brand
+  // decision that changes public-site typography, and three rounds went into
+  // treating it as a defect. blocking-input is about a credential, which is a
+  // thing to FETCH; this is about authority, which is a thing to ASK FOR.
+  it("asks a brief that touches design or brand", () => {
+    expect(dims("Get the admin design matching the prototype")).toContain("decision-owner");
+    expect(dims("Pick a font for the client site")).toContain("decision-owner");
+  });
+
+  it("asks a brief that touches money or a client commitment", () => {
+    expect(dims("Work out the pricing for this client")).toContain("decision-owner");
+  });
+
+  it("does NOT ask a purely mechanical brief", () => {
+    // "Fix the failing test" has no decision in it. Asking would be the
+    // checker inventing work, which is the failure mode it exists to avoid.
+    expect(dims("Fix the failing test in src/lib/db.ts")).not.toContain("decision-owner");
+    expect(dims("Bump the timeout in the e2e helper to 45 seconds")).not.toContain("decision-owner");
+  });
+
+  it("stops asking once the brief says what to do at a judgement", () => {
+    expect(dims("Get the admin design matching the prototype. Stop and ask me if a brand choice comes up.")).not.toContain(
+      "decision-owner",
+    );
+    expect(dims("Get the admin design matching the prototype, proceed on a stated assumption if unsure.")).not.toContain(
+      "decision-owner",
+    );
+  });
+});
+
 describe("what it hands back", () => {
   it("appends questions instead of rewriting the brief", () => {
     // Rewriting would mean inventing the answers, and a confident wrong

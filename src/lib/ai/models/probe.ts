@@ -5,7 +5,7 @@
  *
  * /admin/ai-router reports a model as "Available" when its environment
  * variables are non-empty. That is a statement about configuration, not about
- * reachability — a deployment name with a typo, a deleted deployment, a rotated
+ * reachability. A deployment name with a typo, a deleted deployment, a rotated
  * key and a working model all look identical.
  *
  * Someone reading that page sees green and concludes the model works. The first
@@ -16,15 +16,15 @@
  * WHY IT IS EXPLICIT AND NOT AUTOMATIC
  *
  * A probe is a real inference call. It costs a fraction of a cent and it counts
- * against a rate limit, so it runs when an operator asks — after a deployment,
- * after a key rotation, before a client demo — and never on page load. A
+ * against a rate limit, so it runs when an operator asks (after a deployment,
+ * after a key rotation, before a client demo) and never on page load. A
  * dashboard that quietly bills you to render itself is a bad dashboard.
  *
  * WHAT IT SENDS
  *
  * The smallest thing that proves the path: a two-word prompt with a one-token
  * ceiling. It never sends anything about the workspace, a client, or a user,
- * because a reachability check has no business carrying data — and a probe that
+ * because a reachability check has no business carrying data, and a probe that
  * leaked context would be a worse bug than the one it detects.
  */
 import { MODEL_REGISTRY, isModelAvailable } from "./registry";
@@ -132,11 +132,11 @@ export function probeTargetFor(spec: ModelSpec, env: NodeJS.ProcessEnv): { url: 
  *  that may contain a key or a prompt. */
 export function explainStatus(status: number, modelId: string): string {
   if (status === 404) {
-    return `the deployment named for ${modelId} does not exist at that endpoint — check the deployment name, not the model name`;
+    return `the deployment named for ${modelId} does not exist at that endpoint. Check the deployment name, not the model name`;
   }
-  if (status === 401 || status === 403) return "the key was rejected — it may be rotated, wrong, or for another resource";
-  if (status === 429) return "rate limited — the model exists and is reachable, but the quota is exhausted";
-  if (status >= 500) return "the provider returned a server error — the model may exist but is not serving right now";
+  if (status === 401 || status === 403) return "the key was rejected. It may be rotated, wrong, or for another resource";
+  if (status === 429) return "rate limited. The model exists and is reachable, but the quota is exhausted";
+  if (status >= 500) return "the provider returned a server error. The model may exist but is not serving right now";
   return `the provider refused with HTTP ${status}`;
 }
 

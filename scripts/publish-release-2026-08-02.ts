@@ -7,7 +7,7 @@
  * feature breakdowns, and a documented fallback to commit-titles-only when the
  * gateway is unavailable. Run from a machine without gateway credentials it
  * takes that fallback, and the result is a release report whose every entry has
- * an empty description — technically a release, practically a changelog nobody
+ * an empty description. Technically a release, practically a changelog nobody
  * can read.
  *
  * So the entries below are written by hand, and go through the SAME
@@ -152,13 +152,13 @@ async function main(): Promise<void> {
   };
 
   if (DRY) {
-    console.log(`[release] DRY RUN — ${entries.length} entries, would upsert ${input.version}`);
+    console.log(`[release] DRY RUN: ${entries.length} entries, would upsert ${input.version}`);
     for (const e of entries) console.log(`  - [${e.category}] ${e.title}`);
     return;
   }
 
   const rel = await createRelease(input);
-  console.log(`[release] published ${rel.version} (${entries.length} entries) — ${rel.title}`);
+  console.log(`[release] published ${rel.version} (${entries.length} entries): ${rel.title}`);
 }
 
 main().catch((err) => {
