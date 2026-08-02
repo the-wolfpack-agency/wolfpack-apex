@@ -26,6 +26,23 @@ jest.mock("@/lib/db", () => ({
 import "@/lib/assistant/tools";
 import { runAgentTask } from "@/lib/agents/tasks/executor";
 
+/* Containment gate: these suites exercise the executor's own behaviour, not the
+   stop or the budget, so they declare an enabled workspace with a fresh ledger.
+   Saying it out loud beats a gate that silently does not apply — the executor
+   fails closed by design, and a suite that did not opt in would be testing the
+   refusal path without meaning to. Containment itself is covered in
+   src/lib/containment/__tests__. */
+import { _setContainmentStateForTests, _setRunSpendForTests } from "@/lib/containment/state";
+beforeEach(() => {
+  _setContainmentStateForTests({ agentsEnabled: true, readable: true });
+  _setRunSpendForTests({ tokens: 0, durationMs: 0, egressCalls: 0, spendCents: 0 });
+});
+afterAll(() => {
+  _setContainmentStateForTests(null);
+  _setRunSpendForTests(null);
+});
+
+
 test("draft a follow-up routes to op_draft_email and POSTs /api/mail/draft on the owner's behalf", async () => {
   const mintToken = jest.fn().mockResolvedValue("onbehalf-token-draft");
   // 'ceo' holds emails.send (compose authority).

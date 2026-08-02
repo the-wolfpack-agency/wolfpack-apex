@@ -46,6 +46,21 @@ import {
 import { computeBehaviorMetrics } from "@/lib/agents/drift/metrics";
 import { computeDrift } from "@/lib/agents/drift/detect";
 
+/* Containment gate: this proof exercises the governance gate and learning loop,
+   not the containment stop, so it declares an enabled workspace with a fresh
+   ledger. The executor fails closed by design, so a suite that did not opt in
+   would silently be testing the refusal path instead of what it claims to. */
+import { _setContainmentStateForTests, _setRunSpendForTests } from "@/lib/containment/state";
+beforeEach(() => {
+  _setContainmentStateForTests({ agentsEnabled: true, readable: true });
+  _setRunSpendForTests({ tokens: 0, durationMs: 0, egressCalls: 0, spendCents: 0 });
+});
+afterAll(() => {
+  _setContainmentStateForTests(null);
+  _setRunSpendForTests(null);
+});
+
+
 /* The narration the test accumulates from real outputs, written to the demo
    artifact at the end. Each push is tied to a value an assertion verified. */
 const narration: string[] = [];
