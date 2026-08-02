@@ -35,6 +35,14 @@ jest.mock("@/lib/client-auth", () => ({
 
 import { GenerateImageModal } from "@/components/sites/GenerateImageModal";
 
+/** Real fetch sets `ok` for 2xx ONLY, never for a 3xx. These fakes said
+ *  `status < 400`, so a redirect would have read as success. No test here
+ *  currently uses a 3xx, so it was a trap rather than a live bug — corrected
+ *  alongside the same mistake found in the compliance collector (PR #224). */
+function isOk(status: number): boolean {
+  return status >= 200 && status < 300;
+}
+
 function makeFetchImpl(
   responses: Array<{ status?: number; json: Record<string, unknown> }>,
 ) {
@@ -43,7 +51,7 @@ function makeFetchImpl(
     const r = responses[Math.min(call, responses.length - 1)];
     call += 1;
     return {
-      ok: (r.status ?? 200) < 400,
+      ok: isOk(r.status ?? 200),
       status: r.status ?? 200,
       json: async () => r.json,
     } as unknown as Response;

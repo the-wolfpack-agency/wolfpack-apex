@@ -32,6 +32,14 @@ beforeEach(() => {
  * strict mode can double-invoke effects under jsdom; mockResolvedValueOnce
  * would be consumed twice.
  */
+/** Real fetch sets `ok` for 2xx ONLY, never for a 3xx. These fakes said
+ *  `status < 400`, so a redirect would have read as success. No test here
+ *  currently uses a 3xx, so it was a trap rather than a live bug — corrected
+ *  alongside the same mistake found in the compliance collector (PR #224). */
+function isOk(status: number): boolean {
+  return status >= 200 && status < 300;
+}
+
 function mockByUrl(map: Record<string, { status?: number; body?: unknown }>) {
   fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === "string" ? input : (input as URL).toString?.() ?? String(input);
@@ -39,7 +47,7 @@ function mockByUrl(map: Record<string, { status?: number; body?: unknown }>) {
     const key = `${method} ${url.split("?")[0]}`;
     const hit = map[key] ?? map[url] ?? { status: 200, body: {} };
     return {
-      ok: (hit.status ?? 200) < 400,
+      ok: isOk(hit.status ?? 200),
       status: hit.status ?? 200,
       json: async () => hit.body ?? {},
     };

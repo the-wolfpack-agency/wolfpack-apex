@@ -99,6 +99,12 @@ export const NAV_ITEMS: NavItem[] = [
      the rail. Re-add the entry to bring it back — nothing else needs changing,
      and NON_HIDEABLE below deliberately does not list it. */
   // { label: "Tools", href: "/tools", icon: "M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l5.653-4.655m2.588 2.588l6.294-6.294a2.25 2.25 0 00-3.182-3.182l-6.294 6.294m2.588 2.588l-2.588-2.588" },
+  /* Compliance Scan: point it at an ownership-verified client site and get back
+     what a visitor, a regulator, or a lawyer would look for, plus every host the
+     page contacts that nothing accounts for. Same role gate as Agents, because
+     it reaches out to a client system and the ownership floor is enforced under
+     settings.manage_team. */
+  { label: "Compliance Scan", href: "/admin/compliance-scan", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" },
   /* Site Analytics: ogiam.com usage (where + when), ingested into our own
      platform and rendered with the reused HourHeatmap. Admin-scoped. */
   { label: "Site Analytics", href: "/admin/site-analytics", roles: ["ceo", "cto", "evp"], icon: "M3 3v18h18M7 14l3-3 3 3 5-5" },

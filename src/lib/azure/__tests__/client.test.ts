@@ -73,6 +73,14 @@ afterEach(() => {
   jest.resetAllMocks();
 });
 
+/** Real fetch sets `ok` for 2xx ONLY, never for a 3xx. These fakes said
+ *  `status < 400`, so a redirect would have read as success. No test here
+ *  currently uses a 3xx, so it was a trap rather than a live bug — corrected
+ *  alongside the same mistake found in the compliance collector (PR #224). */
+function isOk(status: number): boolean {
+  return status >= 200 && status < 300;
+}
+
 function mockFetchOnce(opts: {
   status?: number;
   ok?: boolean;
@@ -84,7 +92,7 @@ function mockFetchOnce(opts: {
   global.fetch = jest.fn(async () => {
     if (opts.throws) throw opts.throws;
     return {
-      ok: opts.ok ?? (opts.status ?? 200) < 400,
+      ok: opts.ok ?? isOk(opts.status ?? 200),
       status: opts.status ?? 200,
       headers: new Headers(opts.headers ?? {}),
       json: async () => opts.body ?? {},
