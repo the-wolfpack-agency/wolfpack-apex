@@ -1351,6 +1351,11 @@ export type InstinctEventType =
   // criteria event carries how completely the intake was specified, and the
   // three outcomes are kept apart on purpose — "degraded" means a check could
   // not be performed, which is a different problem from a check that failed.
+  // Containment: an outbound call refused because its host was not on the
+  // capability's allowlist. Recorded rather than only logged, because both 2026
+  // AI incidents were cases where something reached an unexpected host and
+  // nobody noticed while it was happening.
+  | "containment.egress_blocked"
   | "site.acceptance_criteria_saved"
   | "site.acceptance_queued"
   | "site.acceptance_passed"

@@ -247,7 +247,12 @@ describe("router — failover", () => {
   });
 
   it("Azure 5xx falls back to Anthropic and reports fallback_used=true", async () => {
-    process.env.AZURE_OPENAI_ENDPOINT = "https://example.azure.com";
+    // A realistically shaped Azure endpoint. "example.azure.com" is not one:
+    // real resources live under <name>.openai.azure.com, and since the egress
+    // allowlist was wired into the provider a fixture that does not look like a
+    // real endpoint is correctly refused. Making the fixture realistic is the
+    // fix; adding a test hostname to a production allowlist would not be.
+    process.env.AZURE_OPENAI_ENDPOINT = "https://test-resource.openai.azure.com";
     process.env.AZURE_OPENAI_API_KEY = "akey";
     _resetAIClientForTests(null);
     mockFetch.mockResolvedValueOnce(azureFail(503, "azure down"));
@@ -266,7 +271,7 @@ describe("router — failover", () => {
   });
 
   it("both providers fail: throws and emits no analytics event", async () => {
-    process.env.AZURE_OPENAI_ENDPOINT = "https://example.azure.com";
+    process.env.AZURE_OPENAI_ENDPOINT = "https://test-resource.openai.azure.com";
     process.env.AZURE_OPENAI_API_KEY = "akey";
     _resetAIClientForTests(null);
     mockFetch.mockResolvedValueOnce(azureFail(503, "azure down"));
@@ -290,7 +295,7 @@ describe("router — failover", () => {
 
 describe("router — Azure as primary when configured", () => {
   it("Azure is primary for ALL traffic when AZURE env vars are set", async () => {
-    process.env.AZURE_OPENAI_ENDPOINT = "https://example.azure.com";
+    process.env.AZURE_OPENAI_ENDPOINT = "https://test-resource.openai.azure.com";
     process.env.AZURE_OPENAI_API_KEY = "akey";
     _resetAIClientForTests(null);
     mockFetch.mockResolvedValueOnce(azureOk("ok"));
@@ -320,7 +325,7 @@ describe("router — Azure as primary when configured", () => {
   });
 
   it("AI_PROVIDER_PRIMARY=anthropic forces Anthropic primary even when Azure configured", async () => {
-    process.env.AZURE_OPENAI_ENDPOINT = "https://example.azure.com";
+    process.env.AZURE_OPENAI_ENDPOINT = "https://test-resource.openai.azure.com";
     process.env.AZURE_OPENAI_API_KEY = "akey";
     process.env.AI_PROVIDER_PRIMARY = "anthropic";
     _resetAIClientForTests(null);
