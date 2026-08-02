@@ -244,6 +244,10 @@ describe("PoliteFetcher backoff + retry", () => {
       baseBackoffMs: 500,
       now: clk.now,
       sleep: clk.sleep,
+      // Pin the jitter. Full jitter multiplies the exponential by rand(), so a
+      // draw near zero rounds the backoff to 0 and the "some backoff happened"
+      // assertion below fails — roughly once in 500 runs, only ever in CI.
+      rand: () => 0.5,
       onThrottle,
     });
 
@@ -251,7 +255,9 @@ describe("PoliteFetcher backoff + retry", () => {
     expect(r.status).toBe(200);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(onThrottle).toHaveBeenCalledWith(expect.objectContaining({ reason: "503", attempt: 1 }));
-    expect(clk.current).toBeGreaterThan(0); // some backoff happened
+    // base 500 * 2^0 * 0.5 = 250, exactly. Asserting the VALUE rather than
+    // "> 0" is what the injected rand buys.
+    expect(clk.current).toBe(250);
   });
 
   it("exceeds max retries: returns the LAST throttling response, no infinite loop", async () => {
