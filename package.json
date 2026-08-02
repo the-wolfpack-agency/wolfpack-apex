@@ -30,7 +30,7 @@
     "router:exercise": "npx tsx scripts/router-exercise.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.92.0",
+    "@anthropic-ai/sdk": "^0.115.0",
     "@react-pdf/renderer": "^4.5.1",
     "@sparticuz/chromium": "^149.0.0",
     "@types/bcryptjs": "^3.0.0",
@@ -47,10 +47,10 @@
     "mammoth": "^1.12.0",
     "next": "^16.2.11",
     "pg": "^8.20.0",
-    "playwright-core": "^1.61.1",
+    "playwright-core": "^1.62.1",
     "qrcode-generator": "^2.0.4",
-    "react": "19.2.5",
-    "react-dom": "19.2.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "unpdf": "^1.6.2",
     "uuid": "^14.0.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
@@ -71,7 +71,7 @@
     "brace-expansion@^5.0.0": "^5.0.8"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -83,7 +83,7 @@
     "@types/react-dom": "^19",
     "axe-core": "^4.11.2",
     "eslint": "^9",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "16.2.12",
     "fake-indexeddb": "^6.2.5",
     "jest": "^30.3.0",
     "jest-environment-jsdom": "^30.3.0",
