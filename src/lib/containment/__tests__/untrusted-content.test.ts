@@ -51,22 +51,30 @@ const EMITS_JSX = /`[^`]*<[a-zA-Z][^`]*\$\{/;
  * system.
  */
 const UNAUDITED_GENERATORS: readonly string[] = [
-  "lib/agents/invite-email.ts",
   "lib/brand-url-import.ts",
   "lib/compliance/export.ts",
-  "lib/dev/branch-base.ts",
   "lib/favicon-generator.ts",
-  "lib/html-sanitize.ts",
   "lib/integrations/microsoft-onenote.ts",
-  "lib/mail/send-invite.ts",
-  "lib/mail/send-password-reset.ts",
-  "lib/markdown.ts",
   "lib/principles/sharepoint-write.ts",
   "lib/programs/budget-xlsx.ts",
   "lib/qr/svg.ts",
   "lib/report-templates.ts",
   "lib/site-forms.ts",
 ];
+
+/**
+ * Audited, with what was found. An entry here is a claim someone checked, so
+ * each records the evidence rather than a verdict.
+ */
+const AUDITED: Readonly<Record<string, string>> = {
+  "lib/markdown.ts":
+    "SAFE, verified by running it: escaping happens before inline formatting, so a quote in a link target arrives as &quot; and stays inside the attribute value. Hypothesised an attribute breakout, tested it, and was wrong.",
+  "lib/mail/send-invite.ts": "FIXED: href was raw while the same URL was escaped for display. Not exploitable (base is env, not a request header) but the inconsistency was the tell.",
+  "lib/mail/send-password-reset.ts": "FIXED: same raw href as send-invite; the reset URL was escaped for display and emitted bare inside the anchor.",
+  "lib/agents/invite-email.ts": "FIXED: same raw href as send-invite; the agent activation URL was escaped for display and emitted bare inside the anchor.",
+  "lib/dev/branch-base.ts": "SAFE: builds console output, not markup; the detector matched a '<' in a plain string.",
+  "lib/html-sanitize.ts": "SAFE: this IS the sanitizer. Its template wraps input for DOMPurify to parse, which is the point.",
+};
 
 function walk(dir: string, prefix = ""): string[] {
   const out: string[] = [];
@@ -92,7 +100,8 @@ describe("untrusted content never becomes syntax", () => {
   it("no NEW file builds markup from a template literal", () => {
     // The ratchet. A new generator is the moment to decide how it handles
     // untrusted text; adding one silently is what this prevents.
-    const unlisted = candidates.filter((f) => !UNAUDITED_GENERATORS.includes(f));
+    const covered = [...UNAUDITED_GENERATORS, ...Object.keys(AUDITED)];
+    const unlisted = candidates.filter((f) => !covered.includes(f));
     expect(
       unlisted.map(
         (f) =>
@@ -103,13 +112,24 @@ describe("untrusted content never becomes syntax", () => {
 
   it("has no stale entry, so the debt cannot be overstated", () => {
     // A list that never shrinks reads as progress that never happened.
-    const stale = UNAUDITED_GENERATORS.filter((f) => !candidates.includes(f));
+    const stale = [...UNAUDITED_GENERATORS, ...Object.keys(AUDITED)].filter((f) => !candidates.includes(f));
     expect(stale.map((f) => `${f} no longer emits markup — remove it from UNAUDITED_GENERATORS`)).toEqual([]);
   });
 
   it("records the outstanding audit as a number, so the trend is visible", () => {
-    // Update deliberately when it changes. The direction is the point.
-    expect(UNAUDITED_GENERATORS.length).toBe(15);
+    // 15 -> 9. Update deliberately; the direction is the point.
+    expect(UNAUDITED_GENERATORS.length).toBe(9);
+  });
+
+  it("counts an audited file as covered, and keeps its evidence", () => {
+    // Audited and unaudited together must cover everything the detector finds,
+    // or a file has quietly fallen off both lists.
+    const covered = [...UNAUDITED_GENERATORS, ...Object.keys(AUDITED)].sort();
+    expect(candidates.filter((c) => !covered.includes(c))).toEqual([]);
+    for (const [file, evidence] of Object.entries(AUDITED)) {
+      // "safe" on its own is a verdict. The evidence is what makes it checkable.
+      expect({ file, ok: evidence.length > 60 }).toEqual({ file, ok: true });
+    }
   });
 });
 
