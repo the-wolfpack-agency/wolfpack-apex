@@ -33,6 +33,18 @@ export interface BranchCommit {
 }
 
 export interface BranchFacts {
+  /**
+   * Entries on the stash stack.
+   *
+   * A parked stash is a landmine, not a note-to-self. `git stash pop` in any
+   * later session takes whatever is on top — including someone else's — and a
+   * mismatched pop leaves conflict markers strewn across files nobody in that
+   * session touched. That happened on 2026-08-02: a stash named
+   * "polluted-origin-main-content-from-botched-checkout" collided with an
+   * unrelated pop and left markers in package-lock.json, executor.ts,
+   * template.ts and constitution/generated.ts.
+   */
+  stashCount?: number;
   /** The branch being checked, e.g. "feat/thing". */
   branch: string;
   /** What it will merge into, e.g. "origin/main". */
@@ -55,7 +67,7 @@ export interface BranchFacts {
 export type FindingLevel = "ok" | "warn" | "act";
 
 export interface Finding {
-  id: "fully-absorbed" | "squash-remnants" | "stacked-on-open-pr" | "behind-base" | "clean";
+  id: "fully-absorbed" | "squash-remnants" | "stacked-on-open-pr" | "behind-base" | "parked-stash" | "clean";
   level: FindingLevel;
   /** What is true, in one line. */
   detail: string;
@@ -117,6 +129,17 @@ export function classifyBranch(facts: BranchFacts): BranchVerdict {
       detail: behind > 0 ? `no commits of your own; ${behind} behind ${baseBranch}` : `up to date with ${baseBranch}`,
       commands: behind > 0 ? [`git reset --hard ${baseBranch}`] : [],
     });
+    // A parked stash is dangerous on a clean branch too — arguably more so,
+    // because a clean branch is where someone reaches for `git stash pop`.
+    if ((facts.stashCount ?? 0) > 0) {
+      findings.push({
+        id: "parked-stash",
+        level: "warn",
+        detail: `${facts.stashCount} stash entr(ies) on the stack`,
+        because: "a later `git stash pop` takes whatever is on top, including someone else's",
+        commands: ["git stash list"],
+      });
+    }
     return { findings, needsAction: false };
   }
 
@@ -154,6 +177,21 @@ export function classifyBranch(facts: BranchFacts): BranchVerdict {
       commands: [
         `git switch -c <new-branch> ${baseBranch}`,
         `git cherry-pick ${shortSha(fresh[fresh.length - 1].sha)}  # the follow-up, onto its own PR`,
+      ],
+    });
+  }
+
+  if ((facts.stashCount ?? 0) > 0) {
+    findings.push({
+      id: "parked-stash",
+      level: "warn",
+      detail: `${facts.stashCount} stash entr(ies) on the stack`,
+      because:
+        "a later `git stash pop` takes whatever is on top, including someone else's, and a mismatched pop scatters conflict markers through files this session never touched",
+      commands: [
+        "git stash list",
+        "git tag -a archived-stash/<what-it-is> stash@{0} -m 'why'  # preserve",
+        "git stash drop stash@{0}                                    # then clear",
       ],
     });
   }

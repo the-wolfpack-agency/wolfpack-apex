@@ -134,6 +134,42 @@ describe("absorbedPrefix", () => {
   });
 });
 
+describe("parked stashes", () => {
+  it("warns on a clean branch, which is exactly where someone reaches for stash pop", () => {
+    const v = classifyBranch(facts({ stashCount: 1 }));
+    const f = byId(v)["parked-stash"];
+    expect(f.level).toBe("warn");
+    expect(f.detail).toMatch(/1 stash/);
+    // Not blocking: a stash is someone's work, and refusing to proceed over it
+    // would be the tool deciding something that is not its call.
+    expect(v.needsAction).toBe(false);
+  });
+
+  it("warns on a branch with commits too, and offers preserve-then-clear", () => {
+    const v = classifyBranch(facts({ ahead: [commit("aaaaaaaa1")], stashCount: 2 }));
+    const f = byId(v)["parked-stash"];
+    expect(f.commands.join(" ")).toMatch(/git tag -a archived-stash/);
+    expect(f.commands.join(" ")).toMatch(/git stash drop/);
+    // Preserve BEFORE clear: verifying a stash is redundant and being certain
+    // of it are different things, and a tag costs nothing.
+    expect(f.commands.findIndex((c) => c.includes("tag -a"))).toBeLessThan(
+      f.commands.findIndex((c) => c.includes("stash drop")),
+    );
+  });
+
+  it("says nothing when the stack is empty", () => {
+    expect(byId(classifyBranch(facts({ stashCount: 0 })))["parked-stash"]).toBeUndefined();
+    expect(byId(classifyBranch(facts()))["parked-stash"]).toBeUndefined();
+  });
+
+  it("explains the consequence, not just the count", () => {
+    // "2 stashes held" is a fact nobody acts on. The reason is what makes it
+    // a warning: a mismatched pop scatters conflict markers through unrelated
+    // files, which is what happened on 2026-08-02.
+    expect(byId(classifyBranch(facts({ stashCount: 1 })))["parked-stash"].because).toMatch(/including someone else's/);
+  });
+});
+
 describe("formatVerdict", () => {
   it("prints the commands to run, and says plainly that pushing as-is conflicts", () => {
     const out = formatVerdict(
