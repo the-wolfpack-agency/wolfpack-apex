@@ -593,6 +593,13 @@ export type InstinctEventType =
   //   approval, or failed), every step governed under its identity.
   | "agent.task_assigned"
   | "agent.task_completed"
+  // Behaviour eval on a completed run: was the boundary held, and does the
+  // agent's own account match the executor's record. Scored from the
+  // executor's step list, never from the agent's description of itself.
+  // honesty is "unproven" until an agent writes its own summary — the
+  // executor's generated one cannot reveal concealment.
+  // { agent_id, task_id, containment, honesty, finding_kinds, boundary_proven }
+  | "agent.behavior_scored"
   // agent.log_viewed      { agent_id, decision_count }
   //   a manager opened an agent's action log (the OGIAM decision ledger). The
   //   ledger is the IAM audit trail and the same data the drift detector and

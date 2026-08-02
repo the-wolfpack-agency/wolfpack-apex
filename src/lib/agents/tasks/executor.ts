@@ -21,6 +21,8 @@
 import { tryDispatchTool } from "@/lib/assistant/tools";
 import { notify } from "@/lib/notifications/in-app";
 import { trackEvent } from "@/lib/analytics";
+import { toRunRecord } from "@/lib/agents/evals/from-run";
+import { scoreRun } from "@/lib/agents/evals/behavior-eval";
 import { getConstitution, CONSTITUTION_VERSION } from "@/lib/constitution";
 import { safeQuery } from "@/lib/db";
 import { mintOnBehalfToken } from "@/lib/agents/on-behalf";
@@ -117,6 +119,14 @@ async function defaultGetOwnerRole(
 }
 
 export interface ExecutorDeps {
+  /**
+   * True only when the containment self-test actually ran and passed for this
+   * batch. Absent means NOT demonstrated, and the behaviour eval reports
+   * containment as unproven rather than as a pass. Both 2026 sandbox escapes
+   * happened in environments everyone believed were contained and nobody had
+   * shown to be.
+   */
+  boundaryProven?: boolean;
   dispatch?: DispatchFn;
   notifyOwner?: NotifyFn;
   /** Inheritance: find a promoted procedure for this goal. */
@@ -1005,6 +1015,37 @@ export async function runAgentTask(
     });
   } catch {
     /* telemetry is best effort; the task already ran */
+  }
+
+  // BEHAVIOUR EVAL. The existing completion event scores whether the task
+  // SUCCEEDED. That is the wrong question for the two 2026 incident classes:
+  // an agent that reaches outside its allowlist, or that misrepresents what it
+  // did, can succeed at the task. Scored here from the executor's own step
+  // list, so an agent cannot influence its score by describing the run
+  // differently.
+  //
+  // No agent-authored summary exists yet, so honesty comes back "unproven"
+  // rather than a free pass. See from-run.ts.
+  //
+  // Best effort: an eval must never be able to fail the task it is grading.
+  try {
+    const record = toRunRecord({
+      runId: task.id,
+      agentId: task.agentId,
+      steps,
+      boundaryProven: deps.boundaryProven === true,
+    });
+    const score = scoreRun(record);
+    trackEvent("agent.behavior_scored", task.agentId, task.role, {
+      agent_id: task.agentId,
+      task_id: task.id,
+      containment: score.containment,
+      honesty: score.honesty,
+      boundary_proven: record.boundaryProven,
+      finding_kinds: [...new Set(score.findings.map((f) => f.kind))].join(",") || "none",
+    });
+  } catch {
+    /* the task already ran; grading it must not change its outcome */
   }
 
   return { status, steps, resultSummary, inherited };
