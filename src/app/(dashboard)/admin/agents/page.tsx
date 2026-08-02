@@ -42,6 +42,7 @@ import {
 import { ReleaseGatePanel } from "@/components/deploy/ReleaseGatePanel";
 import { ModelRegressionPanel } from "@/components/agents/ModelRegressionPanel";
 import FleetBehaviorPanel from "@/components/agents/FleetBehaviorPanel";
+import AgentIdentityCard from "@/components/agents/AgentIdentityCard";
 import type { AgentBehaviorSummary } from "@/lib/agents/evals/behavior-summary";
 
 type AgentState = "invited" | "active" | "paused" | "revoked";
@@ -778,121 +779,25 @@ export default function AgentsPage() {
                   padded
                   style={{ height: "100%", cursor: "pointer" }}
                 >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "baseline",
-                      justifyContent: "space-between",
-                      flexWrap: "wrap",
-                      gap: "0.5rem",
+                  {/* The roster is where a non-technical stakeholder lands, so
+                      it reads in plain language rather than in fields. Same
+                      component as the detail page, rendered bare because the
+                      Link already owns the panel. `bare` keeps the existing
+                      agent-state-chip test id so the surrounding assertions
+                      still have their handle. */}
+                  <AgentIdentityCard
+                    bare
+                    testId={`agent-card-${a.id}`}
+                    stateTestId={`agent-state-chip-${a.id}`}
+                    agent={{
+                      id: a.id,
+                      name: a.name,
+                      role: a.role,
+                      state: a.state,
+                      description: a.description,
+                      connections: a.connections,
                     }}
-                  >
-                    <div style={{ fontSize: "0.98rem", color: "var(--wp-text, #eee)", minWidth: 0 }}>
-                      <strong>{a.name}</strong>
-                      <span
-                        style={{
-                          marginLeft: "0.5rem",
-                          fontSize: "0.78rem",
-                          color: "var(--wp-text-dim, #aaa)",
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        {a.role}
-                      </span>
-                    </div>
-                    <StatusPill
-                      status={statusForState(a.state)}
-                      label={a.state}
-                      size="md"
-                      testId={`agent-state-chip-${a.id}`}
-                    />
-                  </div>
-
-                  <div
-                    style={{
-                      marginTop: "0.5rem",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: "0.5rem",
-                      fontSize: "0.78rem",
-                      color: "var(--wp-text-muted, #6b7280)",
-                    }}
-                  >
-                    <span>owner: {a.ownerUserId ?? "unassigned"}</span>
-                    <span title={a.createdAt}>{relativeTime(a.createdAt)}</span>
-                  </div>
-
-                  {a.description && (
-                    <div
-                      style={{
-                        marginTop: "0.4rem",
-                        fontSize: "0.8rem",
-                        color: "var(--wp-text-dim, #aaa)",
-                      }}
-                    >
-                      {a.description}
-                    </div>
-                  )}
-
-                  {/* Bound services: the systems this agent operates, rendered
-                      as small chips so the roster shows at a glance which agent
-                      is a Salesforce / Jira / ... agent. A muted hint stands in
-                      when the agent has nothing connected yet. */}
-                  {a.connections && a.connections.length > 0 ? (
-                    <div
-                      data-testid={`agent-services-${a.id}`}
-                      style={{
-                        marginTop: "0.6rem",
-                        display: "flex",
-                        gap: "0.35rem",
-                        flexWrap: "wrap",
-                        alignItems: "center",
-                      }}
-                    >
-                      {a.connections.map((conn) => (
-                        <span
-                          key={conn}
-                          style={{
-                            padding: "0.1rem 0.5rem",
-                            borderRadius: "10px",
-                            fontSize: "0.7rem",
-                            fontWeight: 600,
-                            fontFamily: "var(--wp-mono, monospace)",
-                            background: "rgba(34,197,94,0.12)",
-                            color: "var(--wp-success, #22c55e)",
-                            border: "1px solid var(--wp-success, #22c55e)",
-                          }}
-                        >
-                          {conn}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <div
-                      data-testid={`agent-services-${a.id}`}
-                      style={{
-                        marginTop: "0.6rem",
-                        fontSize: "0.72rem",
-                        color: "var(--wp-text-muted, #6b7280)",
-                        fontStyle: "italic",
-                      }}
-                    >
-                      no service connected
-                    </div>
-                  )}
-
-                  <div
-                    aria-hidden
-                    style={{
-                      marginTop: "0.7rem",
-                      fontSize: "0.76rem",
-                      fontWeight: 600,
-                      color: "var(--wp-gold, #f1c233)",
-                    }}
-                  >
-                    Open agent →
-                  </div>
+                  />
                 </GlassPanel>
               </Link>
             ))}

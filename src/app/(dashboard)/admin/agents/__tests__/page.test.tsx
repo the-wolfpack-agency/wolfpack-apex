@@ -99,7 +99,10 @@ describe("/admin/agents: roster", () => {
     const row = screen.getByTestId(`agent-row-${agent.id}`);
     expect(row).toHaveTextContent("Research Scout");
     expect(row).toHaveTextContent("dev");
-    expect(screen.getByTestId(`agent-state-chip-${agent.id}`)).toHaveTextContent("active");
+    // "Working", not "active": the roster is where a non-technical stakeholder
+    // lands, so the lifecycle reads in plain language. The chip keeps its test
+    // id so this assertion still points at the same element.
+    expect(screen.getByTestId(`agent-state-chip-${agent.id}`)).toHaveTextContent("Working");
     expect(screen.getByTestId("agents-roster")).toBeInTheDocument();
     // The roster page framing makes clear these are AI principals.
     expect(screen.getByTestId("admin-agents-page")).toHaveTextContent(/AI principals/i);
@@ -164,14 +167,13 @@ describe("/admin/agents: roster", () => {
       render(<AgentsPage />);
     });
 
-    await waitFor(() =>
-      expect(screen.getByTestId("agent-services-ag-sf")).toBeInTheDocument(),
-    );
-    const services = screen.getByTestId("agent-services-ag-sf");
-    expect(services).toHaveTextContent("salesforce");
-    expect(services).toHaveTextContent("jira");
-    // The chips are the services, not the no-service hint.
-    expect(services).not.toHaveTextContent(/no service/i);
+    // Same intent as before — the systems this agent can reach are visible on
+    // the card — but stated concretely enough for someone to approve or refuse
+    // rather than as raw connector names.
+    const services = await screen.findByTestId("agent-capabilities");
+    expect(services).toHaveTextContent(/your Salesforce records/);
+    expect(services).toHaveTextContent(/your Jira issues/);
+    expect(services).not.toHaveTextContent(/not connected to any of your systems/i);
   });
 
   it("shows the no-service hint for an agent with no connections", async () => {
@@ -182,10 +184,10 @@ describe("/admin/agents: roster", () => {
       render(<AgentsPage />);
     });
 
-    await waitFor(() =>
-      expect(screen.getByTestId("agent-services-ag-bare")).toBeInTheDocument(),
-    );
-    expect(screen.getByTestId("agent-services-ag-bare")).toHaveTextContent(/no service/i);
+    // An agent bound to nothing is a genuinely reassuring fact, so it is said
+    // rather than left blank.
+    const services = await screen.findByTestId("agent-capabilities");
+    expect(services).toHaveTextContent(/not connected to any of your systems/i);
   });
 
   it("links to the shared agent-memory view", async () => {
