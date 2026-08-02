@@ -13,8 +13,21 @@
  */
 
 import { EMBED_DIM } from "./embedder";
+import { resolveServiceUrl } from "@/lib/config/local-default";
 
-const QDRANT_URL = process.env.QDRANT_URL || "http://localhost:6333";
+/**
+ * Resolved per call, not at module load, and never as loopback in a deployed
+ * function — 127.0.0.1 there is this container, so the request fails with a
+ * network error that reads as "Qdrant is down" when the truth is that
+ * QDRANT_URL is unset. Same shape as the DMS driver incident (2026-08-02).
+ *
+ * QDRANT_URL is a documented deployment blocker, so this should never fire in
+ * production; it fires when the variable has been emptied rather than set,
+ * which is exactly the state a redacted `vercel env pull` leaves behind.
+ */
+function qdrantEndpoint() {
+  return resolveServiceUrl("QDRANT_URL", "http://localhost:6333");
+}
 const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
 export const BRAIN_COLLECTION = process.env.BRAIN_QDRANT_COLLECTION || "apex_brain";
 
@@ -46,9 +59,16 @@ export interface SemanticHit {
 }
 
 async function qd<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+  const endpoint = qdrantEndpoint();
+  if (!endpoint.configured) {
+    // Thrown, not swallowed: every caller here already wraps in try/catch and
+    // degrades to Postgres-only, so this surfaces as a named configuration
+    // fault in the logs instead of an ECONNREFUSED nobody can interpret.
+    throw new Error(`qdrant not configured: ${endpoint.reason}`);
+  }
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (QDRANT_API_KEY) headers["api-key"] = QDRANT_API_KEY;
-  const res = await fetch(`${QDRANT_URL}${path}`, {
+  const res = await fetch(`${endpoint.url}${path}`, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,

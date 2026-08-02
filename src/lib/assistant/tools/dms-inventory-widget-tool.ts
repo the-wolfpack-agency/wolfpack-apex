@@ -22,11 +22,21 @@
 import { z } from "zod";
 import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
+import { resolveServiceUrl } from "@/lib/config/local-default";
 import type { ToolDef, ToolResult } from "./types";
 import type { WidgetSpec } from "@/lib/assistant/widgets/types";
 
-const DMS_DRIVER_URL =
-  process.env.DMS_DRIVER_URL ?? "http://127.0.0.1:7421";
+/**
+ * Resolved per call, not at module load.
+ *
+ * A module-level constant is captured once when the lambda cold-starts, so a
+ * variable added later needs a redeploy to take effect and a test cannot vary
+ * it. It also made the loopback fallback invisible: the value was baked in
+ * before anything could ask whether it made sense here.
+ */
+function dmsDriver() {
+  return resolveServiceUrl("DMS_DRIVER_URL", "http://127.0.0.1:7421");
+}
 const DMS_DRIVER_TOKEN = process.env.DMS_DRIVER_TOKEN ?? "";
 /* Default vendor for the MVP demo. Future: parse vendor from the
  * intent ("show me CDK inventory of Hondas") or pull from the
@@ -122,6 +132,26 @@ export const dmsInventoryWidgetTool: ToolDef<Params, DmsWidgetData> = {
   matchIntent: matchDmsIntent,
   async handler(params, ctx): Promise<ToolResult<DmsWidgetData>> {
     const started = Date.now();
+
+    // Not configured is not the same as unreachable. Dialling the loopback
+    // default in a deployed function produced ECONNREFUSED and told the
+    // operator the driver was down, when the truth was that nobody had pointed
+    // us at one. (Vercel usage alert, 2026-08-02.)
+    const driver = dmsDriver();
+    if (!driver.configured) {
+      trackEvent("assistant.widget_offered", ctx.userId, ctx.userRole, {
+        widget_kind: "dms_inventory",
+        vendor: DEFAULT_VENDOR,
+        item_count: 0,
+        duration_ms: 0,
+        not_configured: true,
+      });
+      return {
+        ok: false,
+        code: "internal",
+        message: `No DMS driver is configured, so there is no inventory to search. ${driver.reason}`,
+      };
+    }
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
@@ -136,7 +166,7 @@ export const dmsInventoryWidgetTool: ToolDef<Params, DmsWidgetData> = {
 
     try {
       const res = await fetch(
-        `${DMS_DRIVER_URL}/dms/${DEFAULT_VENDOR}/inventory-search`,
+        `${driver.url}/dms/${DEFAULT_VENDOR}/inventory-search`,
         {
           method: "POST",
           headers,
