@@ -35,8 +35,6 @@ const KNOWN_INLINE_PROMPTS: readonly string[] = [
   "document-recognition/classifier.ts",
   "insights/meeting-prep-synthesize.ts",
   "knowledge/qa-cache.ts",
-  "support/auto-acknowledge.ts",
-  "support/categorizer.ts",
   "support/pattern-library.ts",
 ];
 
@@ -81,6 +79,7 @@ describe("inline system prompts are a shrinking list", () => {
 
   it("records the debt as a number, so the trend is visible", () => {
     // Update this deliberately when it changes. The direction is the point.
-    expect(KNOWN_INLINE_PROMPTS.length).toBe(12);
+    // 12 -> 10: support.categorize and support.auto_acknowledge are registered.
+    expect(KNOWN_INLINE_PROMPTS.length).toBe(10);
   });
 });
