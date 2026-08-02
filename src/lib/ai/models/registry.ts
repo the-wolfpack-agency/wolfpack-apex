@@ -76,6 +76,45 @@ export const MODEL_REGISTRY: readonly ModelSpec[] = Object.freeze([
     inputPricePer1kUsd: AZURE_GPT_4O_MINI_INPUT_PER_1K,
     outputPricePer1kUsd: AZURE_GPT_4O_MINI_OUTPUT_PER_1K,
   },
+  // --- Azure AI Foundry, serverless (a different brand, same tenant) -------
+  //
+  // These are Models-as-a-Service deployments on *.services.ai.azure.com. They
+  // matter for two reasons beyond price.
+  //
+  // First, procurement: a genuinely different model family without leaving the
+  // Azure compliance boundary — one tenant, one DPA, data residency you choose.
+  // Calling a vendor's public API directly means a second vendor relationship
+  // and traffic leaving Azure, which is what an enterprise review asks about.
+  //
+  // Second, honesty: our safety controls claim to be model-agnostic, and a
+  // stranger's model running through the same gate is the only way to keep that
+  // claim tested rather than asserted.
+  //
+  // Prices are list at time of writing and WILL drift. They order the router's
+  // choices, so a stale figure means a suboptimal pick, never a wrong call.
+  {
+    id: "azure-deepseek-v3",
+    provider: "azure",
+    endpointEnvVar: "AZURE_AI_FOUNDRY_ENDPOINT",
+    apiKeyEnvVar: "AZURE_AI_FOUNDRY_API_KEY",
+    deploymentEnvVar: "AZURE_FOUNDRY_DEPLOYMENT_DEEPSEEK",
+    capabilityTier: "large",
+    contextWindow: 128_000,
+    inputPricePer1kUsd: 0.00114,
+    outputPricePer1kUsd: 0.00456,
+  },
+  {
+    id: "azure-llama-3.3-70b",
+    provider: "azure",
+    endpointEnvVar: "AZURE_AI_FOUNDRY_ENDPOINT",
+    apiKeyEnvVar: "AZURE_AI_FOUNDRY_API_KEY",
+    deploymentEnvVar: "AZURE_FOUNDRY_DEPLOYMENT_LLAMA",
+    capabilityTier: "large",
+    contextWindow: 128_000,
+    inputPricePer1kUsd: 0.00071,
+    outputPricePer1kUsd: 0.00071,
+  },
+
   // --- large tier ---------------------------------------------------------
   {
     id: "gpt-4o",
@@ -140,10 +179,14 @@ export function isModelAvailable(
     case "openai":
       return hasValue(env.OPENAI_API_KEY);
     case "azure": {
-      const base =
-        hasValue(env.AZURE_OPENAI_ENDPOINT) &&
-        hasValue(env.AZURE_OPENAI_API_KEY);
-      if (!base) return false;
+      // A Foundry-served model carries its own endpoint and key. Checking the
+      // classic AZURE_OPENAI_* pair for it would report DeepSeek as
+      // unavailable whenever the OpenAI resource happened to be unconfigured,
+      // and available whenever it happened to be set — in both cases answering
+      // a question about the wrong resource.
+      const endpointVar = spec.endpointEnvVar ?? "AZURE_OPENAI_ENDPOINT";
+      const keyVar = spec.apiKeyEnvVar ?? "AZURE_OPENAI_API_KEY";
+      if (!hasValue(env[endpointVar]) || !hasValue(env[keyVar])) return false;
       if (spec.deploymentEnvVar) {
         return hasValue(env[spec.deploymentEnvVar]);
       }

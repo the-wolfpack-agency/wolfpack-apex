@@ -201,6 +201,14 @@ export function missingConfigForSwitching(env: NodeJS.ProcessEnv = process.env):
       "Create a gpt-4o deployment and set AZURE_OPENAI_DEPLOYMENT_STANDARD to its deployment name — this gives the router a large-tier option to switch UP to.",
     );
   }
+  // Foundry-served models are a different BRAND, which is a stronger proof
+  // than a second tier from the same vendor: two Azure OpenAI deployments share
+  // a client, a wire format and an auth path.
+  if (azureBase && !env.AZURE_AI_FOUNDRY_ENDPOINT) {
+    steps.push(
+      "Optional but stronger: deploy a non-OpenAI model (DeepSeek, Llama, Mistral) in Azure AI Foundry and set AZURE_AI_FOUNDRY_ENDPOINT, AZURE_AI_FOUNDRY_API_KEY, and AZURE_FOUNDRY_DEPLOYMENT_DEEPSEEK or AZURE_FOUNDRY_DEPLOYMENT_LLAMA — this proves the router switches across model FAMILIES, not just tiers of one vendor.",
+    );
+  }
   if (tiers.size < 2 && steps.length === 0) {
     steps.push("Two models are configured but at the same tier; the router needs models at different tiers to switch between.");
   }

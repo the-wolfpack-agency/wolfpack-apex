@@ -44,6 +44,19 @@ export interface ModelSpec {
    * set. OpenAI models leave this undefined.
    */
   deploymentEnvVar?: string;
+  /**
+   * For a model served from a DIFFERENT Azure endpoint than the classic OpenAI
+   * resource — an AI Foundry serverless deployment such as DeepSeek, Llama or
+   * Mistral. Those live on *.services.ai.azure.com and carry their own key, so
+   * a single shared AZURE_OPENAI_ENDPOINT cannot address them.
+   *
+   * Left undefined for classic Azure OpenAI models, which share the resource
+   * endpoint. The provider already speaks both URL shapes and detects which
+   * from the hostname, so this is the only thing that was missing.
+   */
+  endpointEnvVar?: string;
+  /** Key for that endpoint, when it differs from AZURE_OPENAI_API_KEY. */
+  apiKeyEnvVar?: string;
   /** Capability floor this model satisfies. */
   capabilityTier: CapabilityTier;
   /** Max context window in tokens. Used to filter on minContextTokens. */

@@ -39,7 +39,11 @@ const ENV_KEYS = [
   "OPENAI_API_KEY",
   "AZURE_OPENAI_ENDPOINT",
   "AZURE_OPENAI_API_KEY",
-  ...new Set(MODEL_REGISTRY.map((m) => m.deploymentEnvVar).filter((v): v is string => Boolean(v))),
+  ...new Set(
+    MODEL_REGISTRY.flatMap((m) => [m.deploymentEnvVar, m.endpointEnvVar, m.apiKeyEnvVar]).filter(
+      (v): v is string => Boolean(v),
+    ),
+  ),
 ];
 
 beforeEach(() => {
@@ -68,6 +72,23 @@ afterEach(() => {
   }
 });
 
+
+/**
+ * Set every variable the registry asks for, derived FROM the registry.
+ *
+ * The first version listed deployment vars only, so adding a Foundry-served
+ * model — which carries its own endpoint and key — silently left it
+ * unavailable, and the pin test failed against correct code. A fixture that
+ * enumerates by hand goes stale the moment the thing it describes grows.
+ */
+function configureEveryRegistryModel(): void {
+  for (const spec of MODEL_REGISTRY) {
+    if (spec.deploymentEnvVar) process.env[spec.deploymentEnvVar] = "deployment-name";
+    if (spec.endpointEnvVar) process.env[spec.endpointEnvVar] = "https://example.services.ai.azure.com/models";
+    if (spec.apiKeyEnvVar) process.env[spec.apiKeyEnvVar] = "k";
+  }
+}
+
 function task(over: Record<string, unknown> = {}) {
   return {
     id: "task-router-1",
@@ -95,9 +116,7 @@ describe("the executor actually routes through the real router", () => {
   it("selects a real registered model and logs the decision", async () => {
     // Not a mock's return value: an id that exists in MODEL_REGISTRY.
     for (const [k, v] of Object.entries(AZURE_ENV)) process.env[k] = v;
-    for (const spec of MODEL_REGISTRY) {
-      if (spec.deploymentEnvVar) process.env[spec.deploymentEnvVar] = "deployment-name";
-    }
+    configureEveryRegistryModel();
 
     await runAgentTask(task(), {
       dispatch: jest.fn().mockResolvedValue(ranStep()) as never,
@@ -115,9 +134,7 @@ describe("the executor actually routes through the real router", () => {
     // id never reaches task_completed, "which model did this work" is
     // unanswerable however good the router is.
     for (const [k, v] of Object.entries(AZURE_ENV)) process.env[k] = v;
-    for (const spec of MODEL_REGISTRY) {
-      if (spec.deploymentEnvVar) process.env[spec.deploymentEnvVar] = "deployment-name";
-    }
+    configureEveryRegistryModel();
 
     await runAgentTask(task(), {
       dispatch: jest.fn().mockResolvedValue(ranStep()) as never,
@@ -131,9 +148,7 @@ describe("the executor actually routes through the real router", () => {
 
   it("honours an agent pin end to end, not just in the router's own unit test", async () => {
     for (const [k, v] of Object.entries(AZURE_ENV)) process.env[k] = v;
-    for (const spec of MODEL_REGISTRY) {
-      if (spec.deploymentEnvVar) process.env[spec.deploymentEnvVar] = "deployment-name";
-    }
+    configureEveryRegistryModel();
     const pinned = MODEL_REGISTRY.find((m) => m.provider === "azure" && m.capabilityTier !== "small");
     if (!pinned) return;
 
@@ -152,9 +167,7 @@ describe("the executor actually routes through the real router", () => {
     // The honest path: the pin could not be honoured, and the report says which
     // one we degraded away from rather than silently using something else.
     for (const [k, v] of Object.entries(AZURE_ENV)) process.env[k] = v;
-    for (const spec of MODEL_REGISTRY) {
-      if (spec.deploymentEnvVar) process.env[spec.deploymentEnvVar] = "deployment-name";
-    }
+    configureEveryRegistryModel();
 
     await runAgentTask(task(), {
       dispatch: jest.fn().mockResolvedValue(ranStep()) as never,
@@ -187,9 +200,7 @@ describe("the executor actually routes through the real router", () => {
     // up as an empty column there, which looks like "no activity" rather than
     // like a bug.
     for (const [k, v] of Object.entries(AZURE_ENV)) process.env[k] = v;
-    for (const spec of MODEL_REGISTRY) {
-      if (spec.deploymentEnvVar) process.env[spec.deploymentEnvVar] = "deployment-name";
-    }
+    configureEveryRegistryModel();
 
     await runAgentTask(task(), {
       dispatch: jest.fn().mockResolvedValue(ranStep()) as never,
