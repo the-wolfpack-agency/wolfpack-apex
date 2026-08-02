@@ -244,6 +244,116 @@ Our systems share a common foundation, so a pattern proven in one product carrie
 - **Measured and audited.** Every AI action is measured (analytics) and audited (ledger), so we can see where AI adds value and where it does not.`,
   },
   {
+    slug: "design-conformance",
+    parentSlug: "how-we-build",
+    position: 3,
+    title: "Design conformance",
+    body: `## Does the build match the design
+A converted wireframe used to be checked by eye, which is how a header six
+pixels too tall, a hero sixty-three pixels short and a heading nineteen pixels
+small all shipped as "matching the design". Each one cost a review round to
+notice.
+
+Now both pages are measured. Spec-diff loads the prototype and the built page at
+the same window sizes, records the position, size and type of every piece of
+text, and reports what differs and by how much.
+
+Two details that matter more than they look:
+
+- **Window height is part of the comparison.** A hero sized as a percentage of
+  the screen matches at one height and not another, so comparing two differently
+  sized windows produces a bug report about a difference that does not exist.
+- **The typeface is checked by measuring it, not by reading its name.** Two
+  builds can both claim the same font while shipping different cuts, which
+  silently rewraps every paragraph. Glyph width does not lie.
+
+A comparison where nothing matched is reported as unmeasured, never as perfect.
+Zero differences out of zero comparisons is a broken check wearing a passing
+result.`,
+  },
+  {
+    slug: "acceptance-criteria",
+    parentSlug: "how-we-build",
+    position: 4,
+    title: "Acceptance criteria",
+    body: `## What "done" means, written down before it is built
+A requirement written as prose produces a different build depending on who reads
+it, and every correction arrives as another round of description. So the
+requirement is not prose. It is a set of fields with validated ranges: the
+prototype to match, the pages that must load, the words that must appear, how
+much pixel drift is tolerated, whether the typeface must match.
+
+Every deploy is then checked against those fields on the live URL, and the
+result is kept whether it passed or not.
+
+The rule that shapes everything else: **a check that could not run is a failure,
+not a pass.** A browser that would not start, a prototype that was unreachable,
+a page that timed out — all of these are recorded as "could not be checked", and
+that is not a green build. The alternative is a tick that means "we did not
+look", which is the one outcome worse than a red one.`,
+  },
+  {
+    slug: "agent-containment",
+    parentSlug: "how-we-build",
+    position: 5,
+    title: "Agent containment",
+    body: `## Keeping agents inside a boundary we have proven
+In 2026 two AI labs published incidents where systems reached real infrastructure
+from environments everyone believed were sealed. In both cases the environment
+was *assumed* isolated and never checked. A third incident involved an agent that
+performed well and concealed a broken commitment for a week.
+
+Those are three different failures and we treat them as three different controls.
+
+**A named list of what may be reached.** Per capability, not one global list: the
+model API has no business reaching source control. Plain HTTP is refused
+outright, because agent traffic carries credentials and instructions.
+
+**A ceiling on one run.** Tokens, time, outbound calls and spend. Not a cost
+control — a blast-radius control. A run that hits its limit pauses and asks
+rather than continuing.
+
+**A stop that works.** Checked before every step, not at the start of a run. A
+stop that takes effect on the next run is a preference, not a stop.
+
+**A boundary that is demonstrated.** Before a batch runs, hosts that must be
+refused are attempted. If the refusal cannot be shown, the batch does not start.
+Telling a model it is contained is worth nothing; the containment has to be
+enforced outside it and re-proven.
+
+Everything fails closed. A limit that cannot be read pauses the work rather than
+permitting it, because an unknown spend is not a permitted one.`,
+  },
+  {
+    slug: "untrusted-content",
+    parentSlug: "core-tenets",
+    position: 3,
+    title: "Untrusted content never becomes code",
+    body: `## The rule, and the bug that taught it
+Our site generator built page source by pasting in text from the brief. Brief
+text comes from an AI reading a wireframe and from whatever an operator types, so
+it could close an element and inject a script, or open an expression and print a
+build-time secret onto a public page.
+
+The preview inside Instinct escaped it correctly, so the preview looked right and
+only the deployed site was affected. That gap — the thing you approve differing
+from the thing the client gets — is the shape to watch for.
+
+The fix was not a better escaper. It is that **supplied text is never emitted as
+code.** It goes inside a quoted string, where a bracket cannot open an element
+and a brace cannot open an expression.
+
+Two habits came out of it:
+
+- When something builds code or a prompt out of text it did not author, that is
+  the moment to decide how the text is handled. A build check now refuses new
+  generators that have not made that decision.
+- Test the property, not a proxy for it. "The output must not contain
+  \`<script>\`" is the wrong assertion, because the words *should* appear —
+  inside a string, which is what rendering them as text looks like. The right
+  assertion parses the output and checks the payload is data.`,
+  },
+  {
     slug: "compliance-and-security",
     parentSlug: null,
     position: 5,
