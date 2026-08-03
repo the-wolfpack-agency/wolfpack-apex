@@ -1,20 +1,25 @@
 /**
  * @jest-environment jsdom
  *
- * /hr page — EmployeeEditor edit + delete flow.
+ * /hr page: the roster list's edit + delete flow, through the real page.
  *
  * Covers:
- *   - Edit button reveals inline form pre-filled with the row's values
- *   - Save calls PUT /api/people/employees/[id] via fetchWithRefresh + refetches
+ *   - Edit button reveals an inline form pre-filled with the row's values
+ *   - Save calls PUT /api/people/employees/[id] via fetchWithRefresh
  *   - Delete confirm-cancel skips the network call
  *   - Delete confirm-accept calls DELETE /api/people/employees/[id]
+ *   - Deleting the HR record of somebody who still has access does NOT remove
+ *     them from the list, because they can still sign in
+ *
+ * The list is served by /api/people/roster now. It used to be
+ * /api/people/employees, which showed only the records somebody typed in by
+ * hand, so a teammate who accepted an invite had access and appeared nowhere.
  */
 
 import "@testing-library/jest-dom";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-// Stub all heavy tab children so only the EmployeesTab + EmployeeEditor
-// code path is exercised.
+// Stub all heavy tab children so only the roster code path is exercised.
 jest.mock("@/components/people/OverviewTab", () => ({
   OverviewTab: () => <div data-testid="overview-tab-stub" />,
 }));
@@ -41,24 +46,61 @@ jest.mock("@/lib/client-auth", () => ({
   authHeaders: () => ({}),
 }));
 
-const SEED = [
-  {
-    id: "emp-1",
-    full_name: "Alice",
+interface Row {
+  key: string;
+  name: string;
+  email: string | null;
+  role_title: string | null;
+  department: string | null;
+  employee_id: string | null;
+  employee_status: string | null;
+  member_id: string | null;
+  account_role: string | null;
+  invite_id: string | null;
+  access: string;
+  last_login: string | null;
+  m365_connected: boolean;
+}
+
+const row = (o: Partial<Row> & { key: string; name: string }): Row => ({
+  email: null,
+  role_title: null,
+  department: null,
+  employee_id: null,
+  employee_status: null,
+  member_id: null,
+  account_role: null,
+  invite_id: null,
+  access: "none",
+  last_login: null,
+  m365_connected: false,
+  ...o,
+});
+
+/** Alice has an employee record only; Bob is there so deletions are visible. */
+const SEED: Row[] = [
+  row({
+    key: "alice@example.com",
+    name: "Alice",
     email: "alice@example.com",
     role_title: "Eng",
     department: "Platform",
-    status: "active",
-  },
-  {
-    id: "emp-2",
-    full_name: "Bob",
+    employee_id: "emp-1",
+    employee_status: "active",
+  }),
+  row({
+    key: "bob@example.com",
+    name: "Bob",
     email: "bob@example.com",
     role_title: "PM",
     department: "Product",
-    status: "active",
-  },
+    employee_id: "emp-2",
+    employee_status: "active",
+  }),
 ];
+
+/** The roster the server would return, mutated by DELETE so refetch is honest. */
+let roster: Row[] = [];
 
 beforeAll(() => {
   Object.defineProperty(window, "localStorage", {
@@ -74,16 +116,28 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  roster = SEED.map((r) => ({ ...r }));
   mockFetchWithRefresh.mockReset();
-  mockFetchWithRefresh.mockImplementation((url: string) => {
-    if (typeof url === "string" && url === "/api/people/employees") {
+  mockFetchWithRefresh.mockImplementation((url: string, init?: { method?: string }) => {
+    if (url === "/api/people/roster") {
       return Promise.resolve({
         ok: true,
         status: 200,
-        json: () => Promise.resolve({ employees: SEED }),
+        json: () => Promise.resolve({ roster, can_manage_access: true }),
       } as unknown as Response);
     }
-    // PUT / DELETE / anything else → benign 200
+    /* Model what the server actually does on DELETE, so the refetch after it
+       reflects reality rather than replaying the original list. */
+    if (init?.method === "DELETE") {
+      const id = url.split("/").pop();
+      roster = roster
+        .map((r) =>
+          r.employee_id === id
+            ? { ...r, employee_id: null, employee_status: null, role_title: null, department: null }
+            : r,
+        )
+        .filter((r) => r.employee_id !== null || r.member_id !== null);
+    }
     return Promise.resolve({
       ok: true,
       status: 200,
@@ -102,6 +156,17 @@ async function renderPage() {
     expect(screen.getByText(/Alice/)).toBeInTheDocument();
   });
 }
+
+test("the list comes from the roster endpoint, so account-only people appear", async () => {
+  roster = [row({ key: "m@example.com", name: "Invited Only", email: "m@example.com", member_id: "m1", access: "active" })];
+  const mod = await import("@/app/(dashboard)/hr/page");
+  const Page = mod.default;
+  await act(async () => {
+    render(<Page />);
+  });
+  expect(await screen.findByText("Invited Only")).toBeInTheDocument();
+  expect(mockFetchWithRefresh).toHaveBeenCalledWith("/api/people/roster");
+});
 
 test("Edit button reveals inline form pre-filled with employee values", async () => {
   await renderPage();
@@ -153,16 +218,14 @@ test("Delete confirm-cancel does NOT call the network", async () => {
     });
     expect(confirmSpy).toHaveBeenCalled();
     await Promise.resolve();
-    const deleteCall = mockFetchWithRefresh.mock.calls.find(
-      (c) => c[1]?.method === "DELETE",
-    );
+    const deleteCall = mockFetchWithRefresh.mock.calls.find((c) => c[1]?.method === "DELETE");
     expect(deleteCall).toBeUndefined();
   } finally {
     confirmSpy.mockRestore();
   }
 });
 
-test("Delete confirm-accept calls DELETE + removes row optimistically", async () => {
+test("Delete confirm-accept calls DELETE + drops the row", async () => {
   await renderPage();
   const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
   try {
@@ -171,17 +234,56 @@ test("Delete confirm-accept calls DELETE + removes row optimistically", async ()
     });
     await waitFor(() => {
       const deleteCall = mockFetchWithRefresh.mock.calls.find(
-        (c) =>
-          c[1]?.method === "DELETE" &&
-          c[0] === "/api/people/employees/emp-1",
+        (c) => c[1]?.method === "DELETE" && c[0] === "/api/people/employees/emp-1",
       );
       expect(deleteCall).toBeDefined();
     });
     await waitFor(() => {
-      expect(screen.queryByTestId("employee-editor-row-emp-1")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("roster-row-alice@example.com")).not.toBeInTheDocument();
     });
     // Bob still there
-    expect(screen.getByTestId("employee-editor-row-emp-2")).toBeInTheDocument();
+    expect(screen.getByTestId("roster-row-bob@example.com")).toBeInTheDocument();
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("deleting the HR record of somebody with access keeps them listed", async () => {
+  /* They can still sign in. Dropping them from the list is how a leaver becomes
+     invisible while their credentials keep working, which is the failure this
+     whole page was rebuilt to prevent. */
+  roster = [
+    row({
+      key: "carol@example.com",
+      name: "Carol",
+      email: "carol@example.com",
+      employee_id: "emp-9",
+      employee_status: "active",
+      member_id: "m9",
+      account_role: "ops",
+      access: "active",
+    }),
+  ];
+  const mod = await import("@/app/(dashboard)/hr/page");
+  const Page = mod.default;
+  await act(async () => {
+    render(<Page />);
+  });
+  await screen.findByText("Carol");
+
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("employee-delete-btn-emp-9"));
+    });
+    await waitFor(() => {
+      expect(
+        mockFetchWithRefresh.mock.calls.some((c) => c[1]?.method === "DELETE"),
+      ).toBe(true);
+    });
+    // Still on the roster, still shown as having access.
+    expect(await screen.findByText("Carol")).toBeInTheDocument();
+    expect(screen.getByTestId("roster-access-carol@example.com")).toHaveTextContent("Has access");
   } finally {
     confirmSpy.mockRestore();
   }

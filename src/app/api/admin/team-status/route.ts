@@ -17,29 +17,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
-import { safeQuery } from "@/lib/db";
-
-interface MemberRow {
-  id: string;
-  email: string;
-  name: string;
-  role: string;
-  is_active: boolean;
-  created_at: string;
-  last_login: string | null;
-  has_password: boolean;
-  m365_connected: boolean;
-}
-
-interface InviteRow {
-  id: string;
-  email: string;
-  role: string;
-  status: string;
-  invited_by: string;
-  created_at: string;
-  expires_at: string | null;
-}
+import { listTeamMembers, listPendingInvites, pendingInvitesFor } from "@/lib/team/directory";
 
 const RECENT_LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 min
 const RECENTLY_ONBOARDED_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 h
@@ -48,43 +26,16 @@ export async function GET(req: NextRequest) {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
 
-  const memberRes = await safeQuery<MemberRow>(
-    /* LEFT JOIN instinct_ms_tokens so the row carries an
-       `m365_connected` flag. A teammate is "connected to M365" when
-       they have at least one un-expired token row — proves they
-       completed the Microsoft OAuth flow + the tokens still refresh. */
-    `SELECT m.id, m.email, m.name, m.role, m.is_active,
-            m.created_at::text AS created_at,
-            m.last_login::text AS last_login,
-            (m.password_hash IS NOT NULL AND LENGTH(m.password_hash) > 0) AS has_password,
-            EXISTS (
-              SELECT 1 FROM instinct_ms_tokens t
-              WHERE LOWER(t.user_email) = LOWER(m.email)
-                AND t.expires_at IS NOT NULL
-            ) AS m365_connected
-     FROM instinct_team_members m
-     ORDER BY COALESCE(m.last_login, m.created_at) DESC`,
-  );
+  const workspaceId = auth.user.workspaceId;
+  const memberRead = await listTeamMembers(workspaceId);
+  const inviteRead = await listPendingInvites(workspaceId);
 
-  const inviteRes = await safeQuery<InviteRow>(
-    `SELECT id, email, role, status, invited_by,
-            created_at::text AS created_at, expires_at::text AS expires_at
-     FROM instinct_invites
-     WHERE status = 'pending'
-     ORDER BY created_at DESC`,
-  );
-
-  if (memberRes.fromCache && process.env.DATABASE_URL) {
-    return NextResponse.json(
-      { error: "Database temporarily unavailable." },
-      { status: 503 },
-    );
+  if (memberRead.degraded || inviteRead.degraded) {
+    return NextResponse.json({ error: "Database temporarily unavailable." }, { status: 503 });
   }
 
   const now = Date.now();
-  const memberEmails = new Set(memberRes.rows.map((m) => m.email.toLowerCase()));
-
-  const members = memberRes.rows.map((m) => {
+  const members = memberRead.rows.map((m) => {
     const lastLoginMs = m.last_login ? Date.parse(m.last_login) : 0;
     const createdMs = Date.parse(m.created_at);
     return {
@@ -111,17 +62,15 @@ export async function GET(req: NextRequest) {
      "sent, not accepted" state. Filter out invites for already-
      existing members (they signed in via MS OAuth without using the
      invite link). */
-  const pendingInvites = inviteRes.rows
-    .filter((i) => !memberEmails.has(i.email.toLowerCase()))
-    .map((i) => ({
-      id: i.id,
-      email: i.email,
-      role: i.role,
-      invited_by: i.invited_by,
-      created_at: i.created_at,
-      expires_at: i.expires_at,
-      hours_pending: Math.round((now - Date.parse(i.created_at)) / (60 * 60 * 1000)),
-    }));
+  const pendingInvites = pendingInvitesFor(inviteRead.rows, memberRead.rows).map((i) => ({
+    id: i.id,
+    email: i.email,
+    role: i.role,
+    invited_by: i.invited_by,
+    created_at: i.created_at,
+    expires_at: i.expires_at,
+    hours_pending: Math.round((now - Date.parse(i.created_at)) / (60 * 60 * 1000)),
+  }));
 
   const summary = {
     total_members: members.length,
