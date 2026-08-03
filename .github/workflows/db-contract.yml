@@ -1,0 +1,82 @@
+# Run the SQL against a real Postgres.
+#
+# WHY THIS WORKFLOW EXISTS
+#
+# On 2026-08-03 every new invitee saw "An account already exists for this email."
+# and could not create an account. A client was turned away. The cause was an
+# `ON CONFLICT ON CONSTRAINT <name>` clause naming a unique INDEX on an
+# expression, which Postgres can never treat as a table constraint.
+#
+# Every check in this repo passed. lint, tsc, ~13k unit tests, next build, and
+# the deployed-URL smoke were all green, because the clause is valid TypeScript
+# and a valid-looking string, and the unit tests mock `query` -- so they asserted
+# that we sent the text we intended to send, which was the thing that was wrong.
+# No job in this repo had ever run SQL against a database.
+#
+# This one does. A statement that references a constraint, column, index or
+# table that does not exist fails here, and here is the only place it can fail
+# before a user meets it.
+#
+# Tests named *.db.test.ts opt in: they skip without TEST_DATABASE_URL, so a
+# local `npm test` is unchanged and this job is where they actually run.
+name: DB contract
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  db-contract:
+    name: SQL against a real Postgres
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # Pin the major to the version production runs on. A clause can be legal
+        # in one major and not another, and this check is worthless if the
+        # server disagrees with the one that will parse it for real.
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: instinct_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run the database contract tests
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/instinct_test
+        run: npx jest --testPathPatterns "\.db\.test\.ts$" --runInBand
+
+      - name: Fail if the suite silently skipped
+        # The failure mode this whole job exists to prevent is a check that
+        # looks green while asserting nothing. If TEST_DATABASE_URL ever stops
+        # reaching the tests they would all skip and the job would still pass,
+        # which is exactly how the invite e2e sat dormant for months.
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/instinct_test
+        run: |
+          set -euo pipefail
+          npx jest --testPathPatterns "\.db\.test\.ts$" --runInBand --json --outputFile=db-results.json >/dev/null 2>&1 || true
+          PASSED=$(node -e "console.log(require('./db-results.json').numPassedTests)")
+          echo "database-backed assertions that ran: $PASSED"
+          if [ "$PASSED" -lt 1 ]; then
+            echo "::error::No database-backed tests ran. They skip without TEST_DATABASE_URL, so this job was asserting nothing."
+            exit 1
+          fi
