@@ -14,6 +14,24 @@ import { trackEvent } from "@/lib/analytics";
 import { randomUUID } from "crypto";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
+/**
+ * Is this write failure a genuine duplicate email?
+ *
+ * Matching on the index NAME is what turned a broken ON CONFLICT clause into
+ * "An account already exists for this email." for people who had none.
+ * Postgres puts that name in BOTH messages:
+ *
+ *   duplicate key value violates unique constraint "uq_..._email_lower"
+ *   constraint "uq_..._email_lower" for table "..." does not exist
+ *
+ * so the name alone cannot tell them apart. Only the first is a real collision;
+ * the second is a broken statement and must surface as the failure it is.
+ */
+export function isDuplicateEmailError(message: string): boolean {
+  if (/does not exist/i.test(message)) return false;
+  return /duplicate key|violates unique constraint/i.test(message);
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   if (!body || !body.token || !body.password) {
@@ -117,13 +135,32 @@ export async function POST(req: NextRequest) {
 
      Returns the resolved row's id (existing or new) so the response
      stays useful. */
+  /*
+   * ON CONFLICT (LOWER(email)), not ON CONSTRAINT.
+   *
+   * uq_instinct_team_members_email_lower is a unique INDEX on an expression
+   * (migration 128), and Postgres only allows a table CONSTRAINT on plain
+   * columns, so it can never be one. Naming it after ON CONFLICT ON CONSTRAINT
+   * therefore raised
+   *
+   *   constraint "uq_instinct_team_members_email_lower" ... does not exist
+   *
+   * on EVERY accept, whether or not a row actually collided.
+   *
+   * That error message contains the index name, and the duplicate-email
+   * fallback below used to match on that name, so a broken clause surfaced as
+   * "An account already exists for this email." to people who had no account.
+   * A client was turned away by it.
+   *
+   * The expression form targets the index itself, which is what was intended.
+   */
   let memberId = newMemberId;
   try {
     const upsert = await writeQuery<{ id: string }>(
       `INSERT INTO instinct_team_members
          (id, email, name, role, password_hash, is_active, workspace_id)
        VALUES ($1, $2, $3, $4, $5, true, $6)
-       ON CONFLICT ON CONSTRAINT uq_instinct_team_members_email_lower
+       ON CONFLICT (LOWER(email))
        DO UPDATE SET
          role = EXCLUDED.role,
          password_hash = EXCLUDED.password_hash,
@@ -161,11 +198,7 @@ export async function POST(req: NextRequest) {
        constraint — that exact bug bit us at Jorge's invite).
        Different surface: tell the operator to try forgot-password
        instead of re-accepting. */
-    const dupEmail =
-      wqe?.code === "db_error" &&
-      /uq_instinct_team_members_email_lower|duplicate key|unique constraint/i.test(
-        wqe.message,
-      );
+    const dupEmail = wqe?.code === "db_error" && isDuplicateEmailError(wqe.message);
     if (dupEmail) {
       return NextResponse.json(
         {
