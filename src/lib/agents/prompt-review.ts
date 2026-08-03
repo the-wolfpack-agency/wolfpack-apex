@@ -44,7 +44,8 @@ export type Dimension =
   | "output-shape"
   | "sequencing"
   | "blocking-input"
-  | "decision-owner";
+  | "decision-owner"
+  | "reporting-cadence";
 
 export interface Finding {
   dimension: Dimension;
@@ -136,6 +137,21 @@ const RULES: Rule[] = [
     ),
   },
   {
+    dimension: "reporting-cadence",
+    missing: "when to come back to you",
+    ask: "Should I come back only once the whole thing passes, or check in at each step?",
+    cost: "Unstated, the default is to report every step, and a task that takes eight attempts is reported eight times. Each report reads as a claim of completion, so a run of real progress feels like a run of failures. Naming the stopping condition turns the same work into one answer.",
+    // Added after a session that took more than twenty exchanges. There WAS a
+    // done-condition (a green check) and it still went badly, because the brief
+    // never said whether to surface partial states. done-condition is what
+    // finished means; this is whether to speak before reaching it. They are
+    // different facts and only one of them was ever given.
+    satisfied: has(
+      /\b(come back|check in|report back|only when|once (?:it|they|everything|all)|keep going until|don't stop|do not stop|update me|let me know when|when (?:it(?:'s| is)|everything|all)\b.{0,20}\b(green|pass|done|working))\b/i,
+      /\bno (?:more )?(?:iterations?|back and forth|round trips?)\b/i,
+    ),
+  },
+  {
     dimension: "decision-owner",
     missing: "what to do when the work hits something only you can decide",
     ask: "If this runs into a judgement that is yours rather than mine (a brand choice, a client commitment, a spend), should I stop and ask, or proceed on a stated assumption?",
@@ -212,10 +228,22 @@ export function reviewPrompt(text: string): PromptReview {
   const multipart = partCount(trimmed) > 1;
 
   const judgement = JUDGEMENT_TERRITORY.test(trimmed);
+  // Only worth asking of work that is LIKELY TO TAKE SEVERAL ATTEMPTS: something
+  // already failing, or a brief with enough parts that partial reports pile up.
+  //
+  // The first version triggered on "test" and "verify" too, which flagged both
+  // of the complete briefs in the test suite. Every good brief says how it will
+  // be verified, so keying on that punished exactly the habit worth having. A
+  // cadence only needs agreeing when there is a real chance of coming back more
+  // than once.
+  const iterative =
+    multipart ||
+    /\b(failing|failed|fails|broken|flaky|still (?:not|red)|red|regression|keeps? \w+ing|again|CI\b)/i.test(trimmed);
 
   const findings = RULES.filter((r) => {
     if (r.dimension === "sequencing" && !multipart) return false;
     if (r.dimension === "decision-owner" && !judgement) return false;
+    if (r.dimension === "reporting-cadence" && !iterative) return false;
     return !r.satisfied(trimmed);
   }).map(({ satisfied: _satisfied, ...f }) => f);
 

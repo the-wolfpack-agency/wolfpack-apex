@@ -122,6 +122,30 @@ describe("who decides, asked only where a decision is likely", () => {
   });
 });
 
+describe("when to come back, asked only where several attempts are likely", () => {
+  // Added after a session that ran past twenty exchanges. There WAS a
+  // done-condition and it still went badly, because the brief never said
+  // whether to surface partial states. Every partial report read as a claim of
+  // completion, so real progress felt like repeated failure.
+  it("asks a brief about something already failing", () => {
+    expect(dims("The spec check is failing, please fix it")).toContain("reporting-cadence");
+    expect(dims("CI is red again")).toContain("reporting-cadence");
+  });
+
+  it("does NOT ask a one-shot brief that merely says how it will be verified", () => {
+    // The first version triggered on "test" and "verify", which flagged every
+    // well-written brief. Keying on verification punishes the habit worth
+    // having.
+    expect(dims("Add a probe to /admin/ai-router. Verify by pressing the button.")).not.toContain("reporting-cadence");
+    expect(dims("Fix the login button and test it")).not.toContain("reporting-cadence");
+  });
+
+  it("stops asking once the brief says when to come back", () => {
+    expect(dims("The check is failing. Only come back when everything passes.")).not.toContain("reporting-cadence");
+    expect(dims("CI is red, fix it, and check in at each step.")).not.toContain("reporting-cadence");
+  });
+});
+
 describe("what it hands back", () => {
   it("appends questions instead of rewriting the brief", () => {
     // Rewriting would mean inventing the answers, and a confident wrong
