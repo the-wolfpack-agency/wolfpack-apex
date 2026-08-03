@@ -2,22 +2,22 @@
 
 import { fetchWithRefresh } from "@/lib/client-auth";
 
-import { useEffect, useState } from "react";
-import { authHeaders, jsonHeaders } from "./auth";
+import { useState } from "react";
+import { jsonHeaders } from "./auth";
 import InviteMemberDialog from "@/components/team/InviteMemberDialog";
 
-interface Employee {
-  id: string;
-  full_name: string;
-  email: string | null;
-  role_title: string | null;
-  department: string | null;
-  start_date: string | null;
-  status: string;
-}
-
-export function EmployeesTab() {
-  const [employees, setEmployees] = useState<Employee[]>([]);
+/**
+ * The Add / Invite controls for the Employees tab.
+ *
+ * It deliberately holds no list. RosterList below it owns that, because the
+ * roster is everyone in the workspace and this component only knew about
+ * `apex_employees`. A header reading "Employees (2)" above a list of five
+ * people is the same wrong count the page was rebuilt to stop reporting.
+ *
+ * `onChanged` tells the page something was added so the roster refetches;
+ * without it a newly added employee would not appear until a reload.
+ */
+export function EmployeesTab({ onChanged }: { onChanged?: () => void } = {}) {
   const [showForm, setShowForm] = useState(false);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
   const [name, setName] = useState("");
@@ -25,16 +25,6 @@ export function EmployeesTab() {
   const [title, setTitle] = useState("");
   const [dept, setDept] = useState("");
   const [error, setError] = useState<string | null>(null);
-
-  async function load() {
-    const r = await fetchWithRefresh("/api/people/employees", { headers: authHeaders() });
-    if (!r.ok) return;
-    const data = await r.json();
-    setEmployees(data.employees ?? []);
-  }
-  useEffect(() => {
-    load();
-  }, []);
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -54,13 +44,13 @@ export function EmployeesTab() {
     setEmail("");
     setTitle("");
     setDept("");
-    await load();
+    onChanged?.();
   }
 
   return (
     <div data-tab="employees">
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1rem", gap: "0.5rem", flexWrap: "wrap" }}>
-        <h3 style={{ margin: 0, fontSize: "1.05rem" }}>Employees ({employees.length})</h3>
+        <h3 style={{ margin: 0, fontSize: "1.05rem" }}>Employees</h3>
         {!showForm && (
           <div style={{ display: "flex", gap: "0.5rem" }}>
             <button
@@ -81,7 +71,13 @@ export function EmployeesTab() {
 
       <InviteMemberDialog
         open={showInviteDialog}
-        onClose={() => setShowInviteDialog(false)}
+        onClose={() => {
+          setShowInviteDialog(false);
+          /* An invite creates a pending row, so the roster changes even though
+             nothing was added here. Without this the teammate you just invited
+             stays invisible until a reload, which is the whole complaint. */
+          onChanged?.();
+        }}
       />
 
       {showForm && (
