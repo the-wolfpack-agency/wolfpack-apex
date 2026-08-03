@@ -1,5 +1,5 @@
 /**
- * generate-release-notes.ts — the release-notes pipeline.
+ * generate-release-notes.ts: the release-notes pipeline.
  *
  * Reads git commits since the last release, turns them into plain-English
  * feature breakdowns (what changed + how to use it), writes a release row via

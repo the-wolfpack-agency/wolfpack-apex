@@ -140,8 +140,14 @@ describe("what it shows", () => {
     expect(screen.getByTestId("router-reasons")).toHaveTextContent("the cheapest model that met the requirement");
   });
 
-  it("names the missing variable for a model that is not configured", async () => {
-    // "Unavailable" sends someone digging. The variable name is the fix.
+  it("does not list a model the platform cannot reach", async () => {
+    // This asserted the opposite until 2026-08-02. The panel used to name the
+    // missing variable for every unconfigured model, on the reasoning that
+    // "Unavailable" sends someone digging. In practice the unconfigured rows
+    // were the OpenAI-hosted twins of Azure models that ARE configured, so the
+    // panel read as seven models when four are reachable, and each twin carried
+    // a price nothing would ever be billed at. A panel titled "models this
+    // platform can reach" should list the ones it can reach.
     respond(
       insights({
         models: [
@@ -159,8 +165,10 @@ describe("what it shows", () => {
       }),
     );
     render(<Page />);
-    expect(await screen.findByTestId("router-models")).toHaveTextContent("AZURE_OPENAI_CHAT_DEPLOYMENT is not set");
-    expect(screen.getByTestId("router-models")).toHaveTextContent("Not configured");
+    const list = await screen.findByTestId("router-models");
+    expect(list).not.toHaveTextContent("AZURE_OPENAI_CHAT_DEPLOYMENT is not set");
+    expect(list).not.toHaveTextContent("Not configured");
+    expect(list.querySelectorAll("li")).toHaveLength(0);
   });
 
   it("says availability is not editable here, and why", async () => {
@@ -236,5 +244,26 @@ describe("testing whether a model actually answers", () => {
     render(<Page />);
     fireEvent.click(await screen.findByTestId("router-probe-run"));
     expect(await screen.findByTestId("router-probe-error")).toHaveTextContent(/HTTP 500/);
+  });
+});
+
+describe("the model list shows only what the platform can reach", () => {
+  it("hides models that are not configured", async () => {
+    // Reported from production: the panel listed seven models when four are
+    // reachable. The unconfigured three were the OpenAI-hosted twins of Azure
+    // models that ARE configured, carrying prices nothing would be billed at.
+    respond(
+      insights({
+        models: [
+          { modelId: "azure-gpt-4o-mini", provider: "azure", tier: "small", contextWindow: 128000, inputPricePer1kUsd: 0.00015, outputPricePer1kUsd: 0.0006, available: true, blockedBy: null },
+          { modelId: "gpt-4o-mini", provider: "openai", tier: "small", contextWindow: 128000, inputPricePer1kUsd: 0.00015, outputPricePer1kUsd: 0.0006, available: false, blockedBy: "OPENAI_API_KEY is not set" },
+        ],
+      }),
+    );
+    render(<Page />);
+    const list = await screen.findByTestId("router-models");
+    expect(list).toHaveTextContent("azure-gpt-4o-mini");
+    expect(list).not.toHaveTextContent("OPENAI_API_KEY is not set");
+    expect(list.querySelectorAll("li")).toHaveLength(1);
   });
 });

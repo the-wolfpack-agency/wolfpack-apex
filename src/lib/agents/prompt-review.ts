@@ -43,7 +43,9 @@ export type Dimension =
   | "reuse"
   | "output-shape"
   | "sequencing"
-  | "blocking-input";
+  | "blocking-input"
+  | "decision-owner"
+  | "reporting-cadence";
 
 export interface Finding {
   dimension: Dimension;
@@ -135,6 +137,36 @@ const RULES: Rule[] = [
     ),
   },
   {
+    dimension: "reporting-cadence",
+    missing: "when to come back to you",
+    ask: "Should I come back only once the whole thing passes, or check in at each step?",
+    cost: "Unstated, the default is to report every step, and a task that takes eight attempts is reported eight times. Each report reads as a claim of completion, so a run of real progress feels like a run of failures. Naming the stopping condition turns the same work into one answer.",
+    // Added after a session that took more than twenty exchanges. There WAS a
+    // done-condition (a green check) and it still went badly, because the brief
+    // never said whether to surface partial states. done-condition is what
+    // finished means; this is whether to speak before reaching it. They are
+    // different facts and only one of them was ever given.
+    satisfied: has(
+      /\b(come back|check in|report back|only when|once (?:it|they|everything|all)|keep going until|don't stop|do not stop|update me|let me know when|when (?:it(?:'s| is)|everything|all)\b.{0,20}\b(green|pass|done|working))\b/i,
+      /\bno (?:more )?(?:iterations?|back and forth|round trips?)\b/i,
+    ),
+  },
+  {
+    dimension: "decision-owner",
+    missing: "what to do when the work hits something only you can decide",
+    ask: "If this runs into a judgement that is yours rather than mine (a brand choice, a client commitment, a spend), should I stop and ask, or proceed on a stated assumption?",
+    cost: "This is the one gap engineering cannot close by trying harder. A task that ends at a decision looks exactly like a task that failed, so it gets retried instead of escalated, and the retries are the expensive part.",
+    // Added after a real loop: a check stayed red because a font cut is a brand
+    // decision that changes public-site typography. Three rounds went into
+    // treating it as a defect. `blocking-input` below is about a credential or
+    // a variable, which is a thing to FETCH; this is about authority, which is
+    // a thing to ASK FOR, and no amount of access substitutes for it.
+    satisfied: has(
+      /\b(stop and ask|ask me|check with me|come back to me|my call|your call|decide|decision|approve|approval|sign.?off|assume|assumption|proceed without)\b/i,
+      /\bif (?:you(?:'re| are)? )?(?:un)?(?:sure|certain|blocked)\b/i,
+    ),
+  },
+  {
     dimension: "blocking-input",
     missing: "what it needs from you that it cannot get itself",
     ask: "Is there a credential, an environment variable or an approval this needs, and where does it come from?",
@@ -150,6 +182,22 @@ const RULES: Rule[] = [
     ),
   },
 ];
+
+/**
+ * Does this brief plausibly run into a judgement that is not the engineer's?
+ *
+ * Asking every brief who decides would be the checker inventing work, which is
+ * the failure mode the whole file exists to avoid: "fix the failing test" has no
+ * decision in it. But a brief that touches design, brand, client-facing copy or
+ * money almost always does, and that is where a task quietly stalls - the work
+ * reaches the judgement, cannot make it, and gets retried instead of escalated.
+ *
+ * Keyword-based and therefore approximate. It is deliberately tuned to stay
+ * quiet: a false negative costs one question that was not asked, a false
+ * positive costs the reviewer its credibility on every brief after it.
+ */
+const JUDGEMENT_TERRITORY =
+  /\b(design|designer|brand|branding|font|typeface|typography|colou?r|logo|copy|wording|naming|name it|look and feel|layout|client|customer|price|pricing|spend|budget|cost|contract|legal|terms|policy|ready for|sign.?off|approve)\b/i;
 
 /** A brief with a single ask does not need a sequencing plan, and asking for one
  *  would be the checker inventing work. Counted from the shapes people actually
@@ -179,8 +227,23 @@ export function reviewPrompt(text: string): PromptReview {
 
   const multipart = partCount(trimmed) > 1;
 
+  const judgement = JUDGEMENT_TERRITORY.test(trimmed);
+  // Only worth asking of work that is LIKELY TO TAKE SEVERAL ATTEMPTS: something
+  // already failing, or a brief with enough parts that partial reports pile up.
+  //
+  // The first version triggered on "test" and "verify" too, which flagged both
+  // of the complete briefs in the test suite. Every good brief says how it will
+  // be verified, so keying on that punished exactly the habit worth having. A
+  // cadence only needs agreeing when there is a real chance of coming back more
+  // than once.
+  const iterative =
+    multipart ||
+    /\b(failing|failed|fails|broken|flaky|still (?:not|red)|red|regression|keeps? \w+ing|again|CI\b)/i.test(trimmed);
+
   const findings = RULES.filter((r) => {
     if (r.dimension === "sequencing" && !multipart) return false;
+    if (r.dimension === "decision-owner" && !judgement) return false;
+    if (r.dimension === "reporting-cadence" && !iterative) return false;
     return !r.satisfied(trimmed);
   }).map(({ satisfied: _satisfied, ...f }) => f);
 

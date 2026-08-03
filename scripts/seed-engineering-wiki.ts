@@ -288,7 +288,7 @@ result is kept whether it passed or not.
 
 The rule that shapes everything else: **a check that could not run is a failure,
 not a pass.** A browser that would not start, a prototype that was unreachable,
-a page that timed out — all of these are recorded as "could not be checked", and
+a page that timed out. All of these are recorded as "could not be checked", and
 that is not a green build. The alternative is a tick that means "we did not
 look", which is the one outcome worse than a red one.`,
   },
@@ -300,7 +300,7 @@ look", which is the one outcome worse than a red one.`,
     body: `## Why there is a router at all
 Every AI feature has to pick a model before it can do anything. If each feature picks its own, three things follow: the same work costs different amounts depending on which feature does it, nobody can say what the platform spends, and swapping a model means editing every place that named one.
 
-The router is the single place that choice happens. A feature says what it needs — a capability tier and, where it can, a rough size — and the router returns a specific model and a recorded reason.
+The router is the single place that choice happens. A feature says what it needs, meaning a capability tier and, where it can, a rough size, and the router returns a specific model and a recorded reason.
 
 ## What a client gets from it
 A client can plug in their own model, or use ours. Either way the request goes through the same gate.
@@ -308,13 +308,13 @@ A client can plug in their own model, or use ours. Either way the request goes t
 That is the point. Our safety controls only mean something if they hold for a model we did not build and cannot inspect. A client's own model running through the same containment, the same egress allowlist and the same audit trail is how the claim stays tested rather than asserted.
 
 ## Capability tier and cost posture are two different questions
-- **Capability tier** — how much the task actually needs: small, large, or reasoning.
-- **Cost posture** — how much you are willing to pay for it: cheap, standard, premium.
+- **Capability tier**: how much the task actually needs, meaning small, large, or reasoning.
+- **Cost posture**: how much you are willing to pay for it, meaning cheap, standard, or premium.
 
 Keeping them apart matters. A cheap posture cannot silently downgrade a task that genuinely needs a capable model, and a premium posture does not spend more on work that a small model does perfectly well.
 
 ## Available does not mean working
-The router page lists which models the platform can reach. Until recently that list meant one thing only: the environment variables are filled in. A deployment name with a typo, a deleted deployment, a rotated key and a working model all looked identical — all green.
+The router page lists which models the platform can reach. Until recently that list meant one thing only: the environment variables are filled in. A deployment name with a typo, a deleted deployment, a rotated key and a working model all looked identical, every one of them green.
 
 **Test each model** on the router page settles it. It sends a one-token request to every configured model and reports which ones answered. A rate limit counts as answering, because it proves the model is there. The provider's response is never shown back, since a rejection message can echo the key that was rejected.
 
@@ -331,7 +331,7 @@ An agent with no router is a fixed bet on one vendor: no cost control, no way to
 Together they answer the question a client actually asks before adopting AI: *what stops this from doing something we cannot undo, and what stops it from costing whatever it likes?* The gate answers the first. The router answers the second. Every decision from both is recorded, so the answer is evidence rather than a promise.
 
 ## What it means for testing our own models
-Because the router is the single choice point, it is also the only place that can compare models fairly: same task, same gate, same accounting. As more models are configured, that turns into a straight readout of which one is more accurate, cheaper and safer for a given kind of work — measured on real tasks rather than on a vendor's benchmark.
+Because the router is the single choice point, it is also the only place that can compare models fairly: same task, same gate, same accounting. As more models are configured, that turns into a straight readout of which one is more accurate, cheaper and safer for a given kind of work, measured on real tasks rather than on a vendor's benchmark.
 
 ## Where to look
 - **Model router** page under the admin area: what was chosen, why, what it is estimated to have cost, and which models are reachable.
@@ -376,7 +376,7 @@ model API has no business reaching source control. Plain HTTP is refused
 outright, because agent traffic carries credentials and instructions.
 
 **A ceiling on one run.** Tokens, time, outbound calls and spend. Not a cost
-control — a blast-radius control. A run that hits its limit pauses and asks
+control. It is a blast-radius control. A run that hits its limit pauses and asks
 rather than continuing.
 
 **A stop that works.** Checked before every step, not at the start of a run. A
@@ -402,8 +402,8 @@ it could close an element and inject a script, or open an expression and print a
 build-time secret onto a public page.
 
 The preview inside Instinct escaped it correctly, so the preview looked right and
-only the deployed site was affected. That gap — the thing you approve differing
-from the thing the client gets — is the shape to watch for.
+only the deployed site was affected. That gap, where the thing you approve
+differs from the thing the client gets, is the shape to watch for.
 
 The fix was not a better escaper. It is that **supplied text is never emitted as
 code.** It goes inside a quoted string, where a bracket cannot open an element
@@ -415,7 +415,7 @@ Two habits came out of it:
   the moment to decide how the text is handled. A build check now refuses new
   generators that have not made that decision.
 - Test the property, not a proxy for it. "The output must not contain
-  \`<script>\`" is the wrong assertion, because the words *should* appear —
+  \`<script>\`" is the wrong assertion, because the words *should* appear,
   inside a string, which is what rendering them as text looks like. The right
   assertion parses the output and checks the payload is data.`,
   },

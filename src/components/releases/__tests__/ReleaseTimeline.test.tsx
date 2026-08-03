@@ -91,3 +91,58 @@ test("Products view lists creation milestones and hides the month tabs", () => {
   expect(screen.getByText("Instinct")).toBeInTheDocument(); // milestone product name
   expect(screen.queryByTestId("month-tab-6")).not.toBeInTheDocument();
 });
+
+/**
+ * The headline number and the snapshot it comes from must agree.
+ *
+ * Reported from production: the tile read ~1,802,656 while the snapshot
+ * published the same day read 1,828,902. The tile was summing creation
+ * milestones, which are frozen at each product's first commit and never move.
+ * Two different numbers for the same thing on one screen is worse than either
+ * being wrong, because the reader stops trusting both.
+ */
+const SNAPSHOT = rel({
+  id: "s1",
+  version: "loc-snapshot-2026-08-02",
+  title: "Codebase snapshot: 1,828,902 lines",
+  released_on: "2026-08-02",
+  entries: [
+    { title: "AgenticQA", description: "", how_to_use: "", area: "AgenticQA", category: "milestone", loc: 698251 },
+    { title: "Instinct", description: "", how_to_use: "", area: "Instinct", category: "milestone", loc: 641537 },
+  ],
+});
+
+test("the lines-of-code tile equals the newest snapshot, not the frozen milestones", () => {
+  render(<ReleaseTimeline releases={[MILESTONE, SNAPSHOT]} />);
+  // 698,251 + 641,537, NOT the milestone's 50,000.
+  expect(screen.getByText("1,339,788")).toBeInTheDocument();
+  expect(screen.queryByText(/50,000/)).not.toBeInTheDocument();
+});
+
+test("an exact snapshot is not prefixed with a tilde", () => {
+  // The tilde is what invited the mismatch to look like rounding.
+  render(<ReleaseTimeline releases={[MILESTONE, SNAPSHOT]} />);
+  expect(screen.queryByText("~1,339,788")).not.toBeInTheDocument();
+});
+
+test("the newest snapshot wins when there are several", () => {
+  const older = rel({
+    id: "s0",
+    version: "loc-snapshot-2026-07-01",
+    released_on: "2026-07-01",
+    entries: [{ title: "x", description: "", how_to_use: "", area: "Instinct", category: "milestone", loc: 111 }],
+  });
+  render(<ReleaseTimeline releases={[older, SNAPSHOT]} />);
+  expect(screen.getByText("1,339,788")).toBeInTheDocument();
+});
+
+test("without any snapshot it still falls back to the creation milestones", () => {
+  render(<ReleaseTimeline releases={[MILESTONE]} />);
+  expect(screen.getByText("~50,000")).toBeInTheDocument();
+});
+
+test("snapshot rows are not counted as shipped features", () => {
+  // Otherwise measuring the codebase would report seven things shipped.
+  const { container } = render(<ReleaseTimeline releases={[SNAPSHOT]} />);
+  expect(container.textContent).not.toMatch(/\b2\s+FEATURES/i);
+});
