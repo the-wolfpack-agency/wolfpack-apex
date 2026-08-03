@@ -1475,6 +1475,9 @@ export type InstinctEventType =
   | "site.image_gen_dismissed"
   // People (HR) - benefits, employees, onboarding, insights
   | "hr.employee_added"
+  | "hr.roster_viewed"
+  | "team.access_revoked"
+  | "team.access_restored"
   // HR employee edit/delete - dotted namespace per the 2026-04 edit/delete
   // product launch. Paired with the legacy `hr.employee_updated` /
   // `hr.employee_removed` events for backwards compat.
