@@ -45,6 +45,11 @@ const KNOWN_DORMANT: Record<string, string> = {
     "the 2026-08-03 invite outage in the first CI run. Needs a disposable address, e.g. " +
     "invite-smoke@thewolfpack.agency, added as a repo secret. Note it creates a real member " +
     "row wherever it points, so it wants a preview/scratch database, not production.",
+  ROSTER_SMOKE_TARGET_EMAIL:
+    "ACTION NEEDED. Gates the access round-trip half of tests/e2e/hr-roster-access.spec.ts. " +
+    "Mid-test the target account cannot sign in, so it needs a disposable account, not a real " +
+    "teammate. The read-only half of that spec runs without it. Caught by this guardrail on " +
+    "the very next PR after it was written, which is the point of it.",
   RESET_SMOKE_EMAIL:
     "ACTION NEEDED. Gates tests/e2e/password-reset-flow.spec.ts. Same shape of gap as the " +
     "invite flow: password reset is an auth path nobody has ever exercised end to end in CI.",
