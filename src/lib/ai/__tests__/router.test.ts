@@ -557,3 +557,90 @@ describe("router — savings are measured, not asserted", () => {
     expect(meta.routing_reason).toBe("trivial_turn");
   });
 });
+
+/**
+ * The credential gate runs at the chokepoint.
+ *
+ * Wired here rather than in the assistant so every surface inherits it. A
+ * guardrail that one call site has to remember to use is the guardrail that
+ * was missing — which is exactly what happened: redaction.ts existed for this
+ * and only the OGIAM agent path ever called it.
+ */
+const GATE_STRIPE_KEY = ["sk", "live", "51H8xQ2eZvKYlo2CkqZ7Xn4bTgHJk9mNpQr"].join("_");
+const GATE_AWS_KEY = "AKIA" + "IOSFODNN7EXAMPLE";
+
+describe("router — outbound credential gate", () => {
+  beforeEach(() => {
+    mockMessagesCreate.mockResolvedValue({
+      content: [{ type: "text", text: "ok" }],
+      model: "claude-haiku-4-5",
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+  });
+
+  test("a pasted key never reaches the provider", async () => {
+    await getAIClient().complete({
+      messages: [
+        { role: "user", content: `my key is ${GATE_STRIPE_KEY}` },
+      ],
+      max_tokens: 10,
+      model_tier: "cheap",
+      metadata: { feature: "assistant_chat", user_id: "u1", user_role: "admin" },
+    });
+
+    const sent = JSON.stringify(mockMessagesCreate.mock.calls[0][0]);
+    expect(sent).not.toContain(GATE_STRIPE_KEY);
+  });
+
+  test("a credential in the SYSTEM prompt is caught too", async () => {
+    /* Attachment text and brain passages are folded into the system prompt, so
+       a key inside an uploaded document arrives there rather than in the user's
+       message. Gating only user turns would miss the likeliest path. */
+    await getAIClient().complete({
+      messages: [{ role: "user", content: "look at the attachment" }],
+      system: `Attachment: ${GATE_AWS_KEY} is the access key`,
+      max_tokens: 10,
+      model_tier: "cheap",
+      metadata: { feature: "assistant_chat" },
+    });
+    const sent = JSON.stringify(mockMessagesCreate.mock.calls[0][0]);
+    expect(sent).not.toContain(GATE_AWS_KEY);
+  });
+
+  test("an email is NOT stripped — the directory is the product", async () => {
+    await getAIClient().complete({
+      messages: [{ role: "user", content: "what is jorge@wolfpack.example.com's role?" }],
+      max_tokens: 10,
+      model_tier: "cheap",
+      metadata: { feature: "assistant_chat" },
+    });
+    const sent = JSON.stringify(mockMessagesCreate.mock.calls[0][0]);
+    expect(sent).toContain("jorge@wolfpack.example.com");
+  });
+
+  test("a redaction is reported with kinds and counts, never the value", async () => {
+    await getAIClient().complete({
+      messages: [{ role: "user", content: `key ${GATE_STRIPE_KEY}` }],
+      max_tokens: 10,
+      model_tier: "cheap",
+      metadata: { feature: "assistant_chat", user_id: "u1", user_role: "admin" },
+    });
+
+    const ev = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.prompt_redacted");
+    expect(ev).toBeDefined();
+    expect(ev![3]).toEqual(
+      expect.objectContaining({ feature: "assistant_chat", redacted_count: 1, kinds: "api_key" }),
+    );
+    expect(JSON.stringify(ev![3])).not.toContain(GATE_STRIPE_KEY);
+  });
+
+  test("a clean prompt reports nothing", async () => {
+    await getAIClient().complete({
+      messages: [{ role: "user", content: "what are my meetings today?" }],
+      max_tokens: 10,
+      model_tier: "cheap",
+      metadata: { feature: "assistant_chat" },
+    });
+    expect(mockTrackEvent.mock.calls.filter((c) => c[0] === "ai.prompt_redacted")).toHaveLength(0);
+  });
+});

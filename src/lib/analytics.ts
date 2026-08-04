@@ -450,6 +450,9 @@ export type InstinctEventType =
   /* One per attachment per turn, including the ones we could not read.
      status tells the brain WHICH formats people bring and which fail, so
      the next format to support is a query rather than a guess. */
+  /* A prompt left with a credential or financial identifier removed. Carries
+     placeholders and counts only, never the value. */
+  | "ai.prompt_redacted"
   | "assistant.attachment_read"
   /* Fired when an attachment routes the turn past every zero-token fast
      path straight to the model. Lets us price what image reading costs. */
