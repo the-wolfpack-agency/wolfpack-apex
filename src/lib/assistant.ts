@@ -620,6 +620,11 @@ export async function chat(
      instead of a hard-coded default. Optional — local dev / non-
      Vercel deployments pass nothing and downstream tools degrade. */
   geo?: import("@/lib/assistant/tools/types").VercelGeo,
+  /* Text read out of the file(s) attached to THIS message, already rendered as
+     a prompt block by buildAttachmentContext(). When present it means the user
+     is asking about something in front of them, which changes how this turn is
+     routed — see the guards below. */
+  attachmentBlock?: string,
 ): Promise<AssistantResponse> {
   /* workflow_id correlates every analytics event fired during this
    * single chat() turn (tool dispatch, page-facts hit, brain hit,
@@ -887,7 +892,26 @@ export async function chat(
   // cached answer was generated from the same exact question (so any
   // date markers in the question already constrained the original
   // answer's freshness window).
-  const orgCacheHit = await findOrgQACacheHit(message);
+  /* Every zero-token fast path below answers from something OTHER than the
+     attachment: a cached answer to a similar question, the page-facts registry,
+     the knowledge base, analytics, transcripts, the brain. All of them are
+     right when the question stands alone, and all of them are wrong when the
+     user has just attached a file and asked about it.
+     
+     This is what produced the reported behaviour. "look at the screen shot"
+     with a screenshot attached was answered from three OLDER screenshots the
+     brain had indexed, and a message about adding a show-password toggle came
+     back as a list of 22 CRM contacts. The turn never reached the model with
+     the attachment in hand, because it never reached the model at all. */
+  const hasAttachment = Boolean(attachmentBlock && attachmentBlock.trim());
+  if (hasAttachment) {
+    trackEvent("assistant.attachment_routed_to_ai", userId, userRole, {
+      module: "assistant",
+      chars: attachmentBlock!.length,
+    });
+  }
+
+  const orgCacheHit = hasAttachment ? null : await findOrgQACacheHit(message);
   if (orgCacheHit) {
     trackEvent("assistant.org_qa_cache_hit", userId, userRole, {
       module: "assistant",
@@ -944,7 +968,7 @@ export async function chat(
       module: "assistant",
     });
   }
-  const pageFactsMatch = pageFactsBypass ? null : matchPageFacts(message);
+  const pageFactsMatch = pageFactsBypass || hasAttachment ? null : matchPageFacts(message);
   if (pageFactsMatch && pageFactsMatch.confidence >= 0.6) {
     const answer = formatPageFactsAnswer(pageFactsMatch.page);
     trackEvent("assistant.page_facts_hit", userId, userRole, {
@@ -990,7 +1014,7 @@ export async function chat(
       module: "assistant",
     });
   }
-  const knowledgeResult = bypassCache ? null : await tryKnowledgeBase(message);
+  const knowledgeResult = bypassCache || hasAttachment ? null : await tryKnowledgeBase(message);
   if (knowledgeResult) {
     trackEvent("knowledge.answer_found", userId, userRole, {
       source: "knowledge_cache",
@@ -1023,7 +1047,7 @@ export async function chat(
   }
 
   // --- Priority 2: Analytics data ---
-  const analyticsResult = await tryAnalyticsQuery(message, userId, userRole);
+  const analyticsResult = hasAttachment ? null : await tryAnalyticsQuery(message, userId, userRole);
   if (analyticsResult) {
     trackEvent("knowledge.answer_found", userId, userRole, {
       source: "analytics",
@@ -1048,7 +1072,7 @@ export async function chat(
   }
 
   // --- Priority 3: Meeting transcripts (zero-token, from Plaud ingestion) ---
-  const meetingResult = await tryMeetingTranscripts(message);
+  const meetingResult = hasAttachment ? null : await tryMeetingTranscripts(message);
   if (meetingResult) {
     trackEvent("knowledge.answer_found", userId, userRole, {
       source: "meeting_transcripts",
@@ -1084,7 +1108,10 @@ export async function chat(
     userRole,
     convId,
   );
-  if (brainResult) {
+  /* Brain CONTEXT is still gathered and passed to the model below — a
+     screenshot plus company knowledge is a better answer than either alone.
+     Only its zero-token short-circuit is suppressed. */
+  if (brainResult && !hasAttachment) {
     trackEvent("knowledge.answer_found", userId, userRole, {
       source: "brain",
       tokens_used: brainResult.tokensUsed,
@@ -1136,7 +1163,16 @@ export async function chat(
     workflow_id: workflowId,
   });
 
-  const aiResult = await callAI(message, history, userMemory, userId, userRole, pageContext, brainContext);
+  const aiResult = await callAI(
+    message,
+    history,
+    userMemory,
+    userId,
+    userRole,
+    pageContext,
+    brainContext,
+    attachmentBlock,
+  );
   if (aiResult) {
     trackEvent("system.ai_call_made", userId, userRole, {
       module: "assistant",
@@ -2037,6 +2073,9 @@ async function callAI(
   userRole: string,
   pageContext?: string,
   brainContext?: BrainContext,
+  /* Text extracted from the file(s) attached to THIS message. Highest-priority
+     grounding: it is what the user is literally pointing at. */
+  attachmentBlock?: string,
 ): Promise<{ content: string; tokensUsed: number } | null> {
   /* Use the AI router (src/lib/ai/router.ts) so this works whether prod
      is configured for Anthropic OR Azure OpenAI. The previous direct-
@@ -2099,7 +2138,10 @@ async function callAI(
       brainBlock = lines.join("\n");
     }
 
-    const systemPrompt = [factsBlock, brainBlock, contextBlock, baseSystemPrompt]
+    /* Attachment first. When somebody says "look at the screenshot", the file
+       in front of them outranks anything retrieval found, and putting it last
+       is how the model ended up answering from three older screenshots. */
+    const systemPrompt = [attachmentBlock, factsBlock, brainBlock, contextBlock, baseSystemPrompt]
       .filter((s) => s && s.trim().length > 0)
       .join("\n");
 

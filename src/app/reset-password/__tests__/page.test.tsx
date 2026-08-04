@@ -109,3 +109,53 @@ describe("ResetPasswordPage", () => {
     expect(mockPush).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Show password.
+ *
+ * Requested 2026-08-04: "we need to add a show password, so people can see the
+ * match or what they are creating." Both fields were masked, so somebody
+ * choosing a new password typed it twice blind and learned it did not match
+ * only after submitting.
+ */
+describe("ResetPasswordPage — show password", () => {
+  test("both fields start masked", () => {
+    render(<ResetPasswordPage />);
+    expect(screen.getByTestId("reset-password-input")).toHaveAttribute("type", "password");
+    expect(screen.getByTestId("reset-password-confirm")).toHaveAttribute("type", "password");
+  });
+
+  test("the toggle is off by default — revealing is the deliberate act", () => {
+    render(<ResetPasswordPage />);
+    expect(screen.getByTestId("reset-password-show")).not.toBeChecked();
+  });
+
+  test("toggling reveals BOTH fields, which is what makes the match checkable", () => {
+    render(<ResetPasswordPage />);
+    fireEvent.click(screen.getByTestId("reset-password-show"));
+    expect(screen.getByTestId("reset-password-input")).toHaveAttribute("type", "text");
+    expect(screen.getByTestId("reset-password-confirm")).toHaveAttribute("type", "text");
+  });
+
+  test("toggling back re-masks both", () => {
+    render(<ResetPasswordPage />);
+    const toggle = screen.getByTestId("reset-password-show");
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("reset-password-input")).toHaveAttribute("type", "password");
+    expect(screen.getByTestId("reset-password-confirm")).toHaveAttribute("type", "password");
+  });
+
+  test("revealing does not disturb what was typed", () => {
+    render(<ResetPasswordPage />);
+    const pw = screen.getByTestId("reset-password-input");
+    fireEvent.change(pw, { target: { value: "correct-horse" } });
+    fireEvent.click(screen.getByTestId("reset-password-show"));
+    expect(screen.getByTestId("reset-password-input")).toHaveValue("correct-horse");
+  });
+
+  test("it is labelled, so it is reachable without sight", () => {
+    render(<ResetPasswordPage />);
+    expect(screen.getByLabelText(/show password/i)).toBeInTheDocument();
+  });
+});

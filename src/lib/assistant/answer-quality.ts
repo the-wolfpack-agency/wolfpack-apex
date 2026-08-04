@@ -242,6 +242,49 @@ const COMMON_NON_NAMES = new Set([
   "file", "files", "folder", "folders", "page", "pages",
 ]);
 
+/** Words that are capitalized ONLY because a sentence starts with them.
+ *
+ *  WHY THIS IS A LIST AND NOT A GUESS
+ *
+ *  A capital letter carries information mid-sentence and none at all at the
+ *  start of one. `SENTENCE_STARTERS` above already knew that, but held only
+ *  prepositions and conjunctions, so "However." was read as somebody's name and
+ *  the reader was told the answer "mentions 1 unfamiliar name(s): However."
+ *
+ *  Adding "however" alone would have left "Therefore", "Additionally",
+ *  "Unfortunately" and every other discourse marker to be reported one bug at a
+ *  time. This is the closed class instead: conjunctive adverbs, pronouns,
+ *  determiners, modals and auxiliaries. It is a fixed set in English, so unlike
+ *  the open-ended lists above it does not need topping up as content changes.
+ *
+ *  Applied ONLY at a sentence boundary. "However" mid-sentence would still be
+ *  flagged, which is correct — that capital was a choice. */
+const SENTENCE_INITIAL_COMMON_WORDS = new Set([
+  // conjunctive adverbs / discourse markers — the reported bug
+  "however", "therefore", "moreover", "furthermore", "additionally",
+  "meanwhile", "nevertheless", "nonetheless", "otherwise", "consequently",
+  "similarly", "likewise", "instead", "overall", "finally", "then", "thus",
+  "hence", "also", "still", "yet", "besides", "accordingly", "regardless",
+  "unfortunately", "fortunately", "importantly", "notably", "specifically",
+  "generally", "typically", "usually", "often", "sometimes", "currently",
+  "recently", "originally", "essentially", "basically", "ideally", "briefly",
+  // ordinals used to sequence a list
+  "first", "second", "third", "fourth", "fifth", "next", "lastly",
+  // pronouns and determiners
+  "this", "that", "these", "those", "there", "here", "it", "its", "they",
+  "their", "them", "we", "our", "us", "you", "your", "he", "him", "his",
+  "she", "hers", "who", "whom", "whose", "which", "what", "each", "every",
+  "either", "neither", "both", "all", "any", "some", "most", "many", "few",
+  "several", "another", "other", "such", "no", "none", "nothing", "something",
+  // modals and auxiliaries
+  "can", "could", "may", "might", "must", "shall", "should", "will", "would",
+  "do", "does", "did", "is", "are", "was", "were", "be", "been", "being",
+  "has", "have", "had", "am",
+  // common openers in generated prose
+  "please", "note", "based", "using", "given", "once", "unless", "although",
+  "though", "because", "however", "why", "how", "where", "whether", "yes", "no",
+]);
+
 /** Multi-word phrases that look like proper nouns but are actually
  *  job titles, role names, or common business-document headers. */
 const COMMON_NON_NAME_PHRASES = new Set([
@@ -269,7 +312,25 @@ export function validateEntities(
   let m: RegExpExecArray | null;
   PROPER_NAME_RE.lastIndex = 0;
   while ((m = PROPER_NAME_RE.exec(answer))) {
-    const phrase = m[1].toLowerCase().trim();
+    /* Is this match the first word of a sentence? Look back past whitespace
+       for a terminator, a colon, a newline or a list bullet. Start-of-string
+       counts too. A capital in that position says nothing about the word. */
+    const before = answer.slice(0, m.index);
+    const atSentenceStart = /(^|[.!?:;]|\n|^\s*[-*\u2022])\s*$/.test(before);
+
+    let phrase = m[1].toLowerCase().trim();
+
+    if (atSentenceStart) {
+      const parts = phrase.split(/\s+/);
+      if (SENTENCE_INITIAL_COMMON_WORDS.has(parts[0])) {
+        /* Drop the positional capital and judge what actually follows.
+           "However" disappears entirely; "However Jorge" is still tested as
+           "Jorge", so a real name after a discourse marker is not lost. */
+        if (parts.length === 1) continue;
+        phrase = parts.slice(1).join(" ");
+        m[1] = m[1].split(/\s+/).slice(1).join(" ");
+      }
+    }
     if (ALLOWED_PROPER_NOUNS.has(phrase)) continue;
     if (COMMON_NON_NAMES.has(phrase)) continue;
     if (COMMON_NON_NAME_PHRASES.has(phrase)) continue;

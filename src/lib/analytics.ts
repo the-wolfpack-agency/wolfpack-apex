@@ -447,6 +447,13 @@ export type InstinctEventType =
   | "dashboard.quick_action_clicked"
   // Assistant
   | "assistant.file_attached"
+  /* One per attachment per turn, including the ones we could not read.
+     status tells the brain WHICH formats people bring and which fail, so
+     the next format to support is a query rather than a guess. */
+  | "assistant.attachment_read"
+  /* Fired when an attachment routes the turn past every zero-token fast
+     path straight to the model. Lets us price what image reading costs. */
+  | "assistant.attachment_routed_to_ai"
   | "assistant.doc_quality_checked"
   | "assistant.doc_rejected"
   | "assistant.doc_ingested"

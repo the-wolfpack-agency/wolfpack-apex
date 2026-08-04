@@ -466,3 +466,70 @@ describe("validateCitations", () => {
     expect(r.cleanAnswer).toBe("Note here.");
   });
 });
+
+/**
+ * Sentence-initial capitals are not names.
+ *
+ * Reported 2026-08-04: the assistant appended
+ *   "Note: this answer may need a second look. answer mentions 1 unfamiliar
+ *    name(s): However."
+ * to an ordinary reply. "However" begins a sentence, so it is capitalised by
+ * position, and the proper-name regex read it as somebody the org does not know.
+ *
+ * That undermines the warning itself: a reader who sees it fire on "However"
+ * learns to ignore it, including the times it is right about a hallucinated
+ * person.
+ */
+describe("validateEntities — sentence-initial capitals", () => {
+  const KNOWN = ["Jorge Colon", "Max Fuerst"];
+
+  test("does not flag 'However' at the start of a sentence — the report", () => {
+    const answer =
+      "I cannot view screenshots directly. However, if you describe the data I can help.";
+    expect(validateEntities(answer, KNOWN)).toBeNull();
+  });
+
+  test.each([
+    "Therefore, the invite was resent.",
+    "Additionally, the report is attached.",
+    "Unfortunately, that request could not be completed.",
+    "Meanwhile, the sync is still running.",
+    "Nevertheless, the deploy succeeded.",
+    "Please review the attached summary.",
+    "This covers the whole quarter.",
+    "Based on the numbers, revenue is up.",
+    "Finally, the migration completed.",
+  ])("does not flag the opener in %j", (answer) => {
+    expect(validateEntities(answer, KNOWN)).toBeNull();
+  });
+
+  test("a real name after a discourse marker is still checked", () => {
+    /* Dropping the positional capital must not swallow what follows it. */
+    const flag = validateEntities("However Bartholomew disagreed.", KNOWN);
+    expect(flag).not.toBeNull();
+    expect(flag?.reason).toContain("Bartholomew");
+  });
+
+  test("a known name after a discourse marker stays quiet", () => {
+    expect(validateEntities("However Jorge disagreed.", KNOWN)).toBeNull();
+  });
+
+  test("the same word mid-sentence is still flagged", () => {
+    /* Mid-sentence the capital was a choice, so it still carries signal. */
+    const flag = validateEntities("The deal closed with Winchester today.", KNOWN);
+    expect(flag).not.toBeNull();
+    expect(flag?.reason).toContain("Winchester");
+  });
+
+  test("an unfamiliar name opening a sentence is NOT excused", () => {
+    /* The fix must not make the whole check toothless: only closed-class
+       English words are dropped, never an arbitrary capitalised word. */
+    const flag = validateEntities("Bartholomew approved the invoice.", KNOWN);
+    expect(flag).not.toBeNull();
+    expect(flag?.reason).toContain("Bartholomew");
+  });
+
+  test("a bullet list opener is treated as a sentence start", () => {
+    expect(validateEntities("- However, the totals differ.", KNOWN)).toBeNull();
+  });
+});
