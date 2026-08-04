@@ -265,8 +265,10 @@ describe("router — failover", () => {
       metadata: { feature: "failover.azure.5xx" },
     });
     expect(out.provider_used).toBe("anthropic");
-    expect(mockTrackEvent).toHaveBeenCalledTimes(1);
-    const payload = mockTrackEvent.mock.calls[0][3] as Record<string, unknown>;
+    /* A completion now emits BOTH ai.completion and ai.model_selected, so
+       assert the one this test is about by name rather than by total. */
+    expect(mockTrackEvent.mock.calls.filter((c) => c[0] === "ai.completion")).toHaveLength(1);
+    const payload = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.completion")![3] as Record<string, unknown>;
     expect(payload.fallback_used).toBe(true);
   });
 
@@ -356,9 +358,11 @@ describe("router — analytics event shape", () => {
       sensitivity: "public",
       metadata: { feature: "analytics.shape", user_id: "u-1", user_role: "operator" },
     });
-    expect(mockTrackEvent).toHaveBeenCalledTimes(1);
+    /* A completion now emits BOTH ai.completion and ai.model_selected, so
+       assert the one this test is about by name rather than by total. */
+    expect(mockTrackEvent.mock.calls.filter((c) => c[0] === "ai.completion")).toHaveLength(1);
     const [eventName, userId, userRole, metadata] =
-      mockTrackEvent.mock.calls[0];
+      mockTrackEvent.mock.calls.find((c) => c[0] === "ai.completion")!;
     expect(eventName).toBe("ai.completion");
     expect(userId).toBe("u-1");
     expect(userRole).toBe("operator");
@@ -385,7 +389,7 @@ describe("router — analytics event shape", () => {
       model_tier: "standard",
       metadata: { feature: "no.user" },
     });
-    const [, userId, userRole] = mockTrackEvent.mock.calls[0];
+    const [, userId, userRole] = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.completion")!;
     expect(userId).toBe("system");
     expect(userRole).toBe("system");
   });
@@ -396,5 +400,160 @@ describe("router — singleton", () => {
     const a = getAIClient();
     const b = getAIClient();
     expect(a).toBe(b);
+  });
+});
+
+/**
+ * Routing decisions are RECORDED, and savings are measured against a real
+ * counterfactual.
+ *
+ * /admin/ai-router is built entirely from ai.model_selected. Until 2026-08-04
+ * only the agent task executor emitted it, so every other AI call in the
+ * platform — the assistant above all — made a selection through the bridge and
+ * threw it away. The page presented itself as the router's view while reporting
+ * on a small slice of traffic.
+ */
+describe("router — records the decision it made", () => {
+  function anthropicOk() {
+    mockMessagesCreate.mockResolvedValue({
+      content: [{ type: "text", text: "ok" }],
+      model: "claude-haiku-4-5",
+      usage: { input_tokens: 1000, output_tokens: 500 },
+    });
+  }
+
+  test("a completion emits ai.model_selected, attributed to the caller", async () => {
+    anthropicOk();
+    await getAIClient().complete({
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 10,
+      model_tier: "cheap",
+      metadata: {
+        feature: "assistant_chat",
+        user_id: "u1",
+        user_role: "admin",
+        workspace_id: "ws1",
+        routing_reason: "trivial_turn",
+      },
+    });
+
+    const selected = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.model_selected");
+    expect(selected).toBeDefined();
+    expect(selected![1]).toBe("u1");
+    expect(selected![2]).toBe("admin");
+    expect(selected![3]).toEqual(
+      expect.objectContaining({
+        feature: "assistant_chat",
+        workspace_id: "ws1",
+        requested_tier: "cheap",
+        routing_reason: "trivial_turn",
+        // Keeps these countable apart from the executor's own rows.
+        source: "execution_router",
+      }),
+    );
+  });
+
+  test("the recorded decision carries the reason the page renders", async () => {
+    anthropicOk();
+    await getAIClient().complete({
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 10,
+      model_tier: "standard",
+      metadata: { feature: "f" },
+    });
+    const selected = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.model_selected");
+    expect(selected![3]).toEqual(
+      expect.objectContaining({ model_id: expect.any(String), reason: expect.any(String) }),
+    );
+  });
+
+  test("exactly one selection is recorded per completion", async () => {
+    anthropicOk();
+    await getAIClient().complete({
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 10,
+      model_tier: "cheap",
+      metadata: { feature: "f" },
+    });
+    const n = mockTrackEvent.mock.calls.filter((c) => c[0] === "ai.model_selected").length;
+    expect(n).toBe(1);
+  });
+
+  test("a failed call records no selection — an unspent decision is not a cost", async () => {
+    mockMessagesCreate.mockRejectedValue(new Error("boom"));
+    await expect(
+      getAIClient().complete({
+        messages: [{ role: "user", content: "hi" }],
+        max_tokens: 10,
+        model_tier: "cheap",
+        metadata: { feature: "f" },
+      }),
+    ).rejects.toThrow();
+    expect(mockTrackEvent.mock.calls.filter((c) => c[0] === "ai.model_selected")).toHaveLength(0);
+  });
+});
+
+describe("router — savings are measured, not asserted", () => {
+  beforeEach(() => {
+    mockMessagesCreate.mockResolvedValue({
+      content: [{ type: "text", text: "ok" }],
+      model: "claude-haiku-4-5",
+      usage: { input_tokens: 1000, output_tokens: 500 },
+    });
+  });
+
+  test("a baseline_tier records what the OLD behaviour would have cost", async () => {
+    await getAIClient().complete({
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 10,
+      model_tier: "cheap",
+      metadata: { feature: "assistant_chat", baseline_tier: "standard" },
+    });
+
+    const completion = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.completion");
+    const meta = completion![3];
+    expect(meta.baseline_tier).toBe("standard");
+    expect(typeof meta.baseline_model_id).toBe("string");
+    expect(typeof meta.baseline_cost_usd).toBe("number");
+    /* The whole point: savings is a subtraction over real rows, so a cheaper
+       model cannot be confused with lower usage. */
+    expect(meta.savings_usd).toBeCloseTo(meta.baseline_cost_usd - meta.routed_cost_usd, 10);
+    /* Cheap can never cost more than standard. Equal is legitimate when the
+       deployment exposes one model for both tiers. */
+    expect(meta.baseline_cost_usd).toBeGreaterThanOrEqual(meta.routed_cost_usd);
+  });
+
+  test("routing at the baseline tier yields no phantom saving", async () => {
+    await getAIClient().complete({
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 10,
+      model_tier: "standard",
+      metadata: { feature: "assistant_chat", baseline_tier: "standard" },
+    });
+    const meta = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.completion")![3];
+    expect(meta.savings_usd).toBeCloseTo(0, 6);
+  });
+
+  test("call sites without a baseline are unchanged — no invented fields", async () => {
+    await getAIClient().complete({
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 10,
+      model_tier: "cheap",
+      metadata: { feature: "other_surface" },
+    });
+    const meta = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.completion")![3];
+    expect(meta.baseline_cost_usd).toBeUndefined();
+    expect(meta.savings_usd).toBeUndefined();
+  });
+
+  test("the routing reason rides on the completion too, so cost joins to cause", async () => {
+    await getAIClient().complete({
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 10,
+      model_tier: "cheap",
+      metadata: { feature: "assistant_chat", routing_reason: "trivial_turn" },
+    });
+    const meta = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.completion")![3];
+    expect(meta.routing_reason).toBe("trivial_turn");
   });
 });

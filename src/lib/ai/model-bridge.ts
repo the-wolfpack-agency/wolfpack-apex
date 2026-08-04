@@ -37,6 +37,7 @@
  * this makes a call fail that would otherwise have succeeded.
  */
 import { selectModel } from "@/lib/ai/models/router";
+import type { ModelSelection } from "@/lib/ai/models/types";
 import { isClientModel } from "@/lib/ai/models/client-models";
 import type { ModelSpec, CapabilityTier } from "@/lib/ai/models/types";
 import type { AIModelTier, AIProvider } from "./types";
@@ -67,6 +68,10 @@ export interface ProviderLookup {
 }
 
 export interface BridgedChoice {
+  /** The full selection, so the caller can RECORD why this model was chosen.
+   *  Returning only the spec threw the reason away, which is why every
+   *  assistant call made a routing decision that never reached the page. */
+  selection: ModelSelection;
   spec: ModelSpec;
   provider: AIProvider;
 }
@@ -105,5 +110,5 @@ export function bridgeSelection(
   if (!provider) return null;
   if (!provider.supportsTier(tier)) return null;
 
-  return { spec: decision.model, provider };
+  return { selection: decision, spec: decision.model, provider };
 }

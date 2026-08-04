@@ -32,6 +32,10 @@ function ResetPasswordForm() {
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  /* One toggle for BOTH fields. The point of showing the password here is
+     checking that the two match, which two independent toggles make harder
+     rather than easier. */
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -104,7 +108,7 @@ function ResetPasswordForm() {
             </label>
             <input
               id="password"
-              type="password"
+              type={showPassword ? "text" : "password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -127,7 +131,7 @@ function ResetPasswordForm() {
             </label>
             <input
               id="confirm"
-              type="password"
+              type={showPassword ? "text" : "password"}
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               required
@@ -143,6 +147,29 @@ function ResetPasswordForm() {
               placeholder="Re-enter your password"
             />
           </div>
+
+          {/* Requested 2026-08-04: "we need to add a show password, so people
+              can see the match or what they are creating". Both fields are
+              masked, so somebody choosing a new password is typing it twice
+              blind and finding out it did not match only after submitting.
+
+              A checkbox rather than an eye icon: it is reachable by keyboard
+              and by a screen reader without an aria-label nobody maintains,
+              and it reads the same on a phone. Defaults to hidden — revealing
+              is the deliberate act. */}
+          <label
+            className="flex cursor-pointer items-center gap-2 text-sm select-none"
+            style={{ color: "var(--wp-text-dim)" }}
+          >
+            <input
+              type="checkbox"
+              checked={showPassword}
+              onChange={(e) => setShowPassword(e.target.checked)}
+              data-testid="reset-password-show"
+              className="h-4 w-4 cursor-pointer"
+            />
+            Show password
+          </label>
 
           {error && (
             <div

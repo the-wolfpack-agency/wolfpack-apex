@@ -26,7 +26,8 @@
  */
 
 import { trackEvent } from "@/lib/analytics";
-import { bridgeSelection } from "./model-bridge";
+import { bridgeSelection, capabilityTierFor } from "./model-bridge";
+import { selectModel, logModelSelection } from "@/lib/ai/models";
 import { applyConstitutionToRequest } from "@/lib/constitution";
 import { getObsClient } from "@/lib/obs";
 
@@ -329,8 +330,59 @@ class RouterClient implements AIClient {
       }
     }
 
+    /* Record the routing decision.
+     *
+     * /admin/ai-router is built entirely from ai.model_selected, and until now
+     * only the agent task executor emitted it. Every other AI call in the
+     * platform — the assistant most of all — made a selection through the
+     * bridge above and then threw it away, so that page reported on a small
+     * slice of traffic while presenting itself as the router's view.
+     *
+     * Emitted after the call succeeds, matching the executor: a decision that
+     * never spent tokens is not a decision worth costing. */
+    /* Record a selection for EVERY completion, not only the ones the bridge
+       could act on.
+       
+       bridgeSelection returns null whenever selection had no real choice or
+       named a provider this deployment cannot reach. Logging only the non-null
+       case would have left exactly those calls invisible on /admin/ai-router —
+       the ones where routing is doing least, which is precisely what an
+       operator needs to see. `governed` records whether the decision actually
+       drove the provider, so the page can distinguish "chose this" from
+       "would have chosen this". */
+    const recorded = bridged?.selection ?? safeSelect(cReq.model_tier);
+    if (recorded) {
+      logModelSelection(recorded, {
+        userId: cReq.metadata?.user_id ?? "system",
+        userRole: cReq.metadata?.user_role ?? "system",
+        extra: {
+          feature: cReq.metadata?.feature ?? "unknown",
+          workspace_id: cReq.metadata?.workspace_id ?? "default",
+          requested_tier: cReq.model_tier,
+          /* Distinguishes these from the executor's own rows, which carry
+             task_id, so the two paths stay countable apart. */
+          source: "execution_router",
+          /* False means selection expressed a preference the deployment could
+             not honour, and the provider was picked by the environment. */
+          governed: bridged !== null,
+          ...(cReq.metadata?.routing_reason
+            ? { routing_reason: cReq.metadata.routing_reason }
+            : {}),
+        },
+      });
+    }
+
     emitCompletionEvent(cReq, response, fallbackUsed, bridged?.spec.id);
     return response;
+  }
+}
+
+/** selectModel, but never throws into a completion path. */
+function safeSelect(tier: AICompleteRequest["model_tier"]) {
+  try {
+    return selectModel({ requiredTier: capabilityTierFor(tier) });
+  } catch {
+    return null;
   }
 }
 
@@ -358,6 +410,37 @@ function emitCompletionEvent(
     latency_ms: response.latency_ms,
     fallback_used: fallbackUsed,
   };
+  /* What this turn WOULD have cost at the tier this call site used to send
+     unconditionally, priced on the tokens it actually used. Savings is then a
+     subtraction over real rows rather than a claim: without this, a cheaper
+     model looks like lower spend and nobody can prove it was not just lower
+     usage. Best effort — a pricing lookup must never fail a completion. */
+  if (req.metadata?.baseline_tier) {
+    try {
+      const baseline = selectModel({
+        requiredTier: capabilityTierFor(req.metadata.baseline_tier),
+      });
+      const actual = selectModel({ requiredTier: capabilityTierFor(req.model_tier) });
+      const price = (m: { inputPricePer1kUsd: number; outputPricePer1kUsd: number }) =>
+        (response.input_tokens / 1000) * m.inputPricePer1kUsd +
+        (response.output_tokens / 1000) * m.outputPricePer1kUsd;
+
+      /* Both sides priced off the SAME list, on the SAME tokens.
+         Subtracting the provider's billed cost_usd from a registry-priced
+         baseline would compare two different price lists and manufacture a
+         saving (or hide one) purely from which catalogue was consulted. */
+      const baselineCost = price(baseline.model);
+      const routedCost = price(actual.model);
+      metadata.baseline_tier = req.metadata.baseline_tier;
+      metadata.baseline_model_id = baseline.model.id;
+      metadata.baseline_cost_usd = baselineCost;
+      metadata.routed_cost_usd = routedCost;
+      metadata.savings_usd = baselineCost - routedCost;
+    } catch {
+      /* no baseline recorded; the completion still stands */
+    }
+  }
+  if (req.metadata?.routing_reason) metadata.routing_reason = req.metadata.routing_reason;
   if (req.sensitivity) metadata.sensitivity = req.sensitivity;
   metadata.constitution_applied = !!req.apply_constitution;
   trackEvent("ai.completion", userId, userRole, metadata);

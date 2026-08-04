@@ -17,6 +17,7 @@ import {
   type RelatedPage,
 } from "@/lib/assistant/related-pages";
 import { readVercelGeo } from "@/lib/assistant/vercel-geo";
+import { buildAttachmentContext } from "@/lib/assistant/attachment-context";
 
 /**
  * POST /api/assistant -- Send a message, rate, or archive.
@@ -127,6 +128,20 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    /* Read whatever the user attached to THIS message.
+     *
+     * `fileContents` has always arrived here complete with the image's base64
+     * and was used for exactly two things: the quality gate above and an
+     * analytics event. Nothing ever passed it to the model, which is why the
+     * assistant answered "I cannot view screenshots or attachments directly"
+     * while `ocrImage()` had been reading screenshots for brain ingest all
+     * along. Images go through that same Azure call; text is used directly. */
+    const attachmentContext = await buildAttachmentContext(fileContents, {
+      userId: user.id,
+      userRole: user.role,
+    });
+    const hasAttachment = attachmentContext.block.length > 0;
+
     // Token-free fast path: try the deterministic tool router before
     // burning any AI tokens on RAG / LLM generation.
     const intentMatch = classifyIntent(message);
@@ -134,7 +149,11 @@ export async function POST(req: NextRequest) {
       intent: intentMatch.intent,
       confidence: intentMatch.confidence,
     });
-    if (intentMatch.intent !== "unknown") {
+    /* An attachment means the question is about the file, so the deterministic
+       router must not answer it. Screenshot 3 of the bug report is this exact
+       failure: "we need to add a show password, so people can see the match"
+       came back as "Found 22 contacts in the CRM". */
+    if (intentMatch.intent !== "unknown" && !hasAttachment) {
       const toolAnswer = await tryToolAnswer(message, {
         // MS token lookup keys on connected_by = Instinct user id, NOT email.
         // Passing email here made getValidToken return null → empty calendar
@@ -214,7 +233,16 @@ export async function POST(req: NextRequest) {
        default. Empty object on local dev / non-Vercel deployments;
        tools degrade gracefully when fields are absent. */
     const geo = readVercelGeo(req.headers);
-    const result = await chat(message, user.id, user.role, conversationId, pageContext, user.workspaceId, geo);
+    const result = await chat(
+      message,
+      user.id,
+      user.role,
+      conversationId,
+      pageContext,
+      user.workspaceId,
+      geo,
+      attachmentContext.block || undefined,
+    );
 
     // Include gate results (warnings) alongside the response
     const response: Record<string, unknown> = { ...result };

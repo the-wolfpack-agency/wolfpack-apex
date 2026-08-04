@@ -191,9 +191,14 @@ describe("router - workspace budget enforcement", () => {
 
     expect(out.provider_used).toBe("anthropic");
     expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
-    // only ai.completion, never ai.request_blocked_over_budget
-    expect(mockTrackEvent).toHaveBeenCalledTimes(1);
-    expect(mockTrackEvent.mock.calls[0][0]).toBe("ai.completion");
+    /* The point of this assertion is that the call was NOT blocked. Asserting
+       it by total event count made it brittle: a completion now also records
+       its routing decision (ai.model_selected) for /admin/ai-router. Name the
+       events instead — it says what this test means and cannot be broken by an
+       unrelated event being added. */
+    const names = mockTrackEvent.mock.calls.map((c) => c[0]);
+    expect(names).toContain("ai.completion");
+    expect(names).not.toContain("ai.request_blocked_over_budget");
   });
 
   it("PROCEEDS when policy exists but monthly_budget_usd is null (no enforcement)", async () => {
