@@ -126,8 +126,20 @@ const IBAN_RE =
  * Each branch is anchored and has a fixed prefix + minimum length so the
  * engine can fail-fast without backtracking.
  */
+/* Provider-signature prefixes plus two generic shapes.
+ *
+ * The underscore-delimited Stripe/GitHub-app forms were missing: the generic
+ * [A-Za-z0-9+/]{40,} arm cannot span an underscore, and the body after
+ * `sk_live_` is typically ~33 characters, so a live Stripe secret key passed
+ * through untouched. Those are the highest-harm thing anyone pastes into a
+ * chat box by accident.
+ *
+ * Every arm is a fixed prefix followed by one bounded character class — linear,
+ * no nested quantifiers, so the module's ReDoS guarantee holds. Prefix-anchored
+ * rather than shape-guessed, which is what keeps precision high enough that
+ * nobody turns the gate off. */
 const API_KEY_RE =
-  /\b(?:sk-[A-Za-z0-9\-_]{20,}|ghp_[A-Za-z0-9]{36,}|xoxb-[A-Za-z0-9\-]{40,}|[A-Fa-f0-9]{32,}|[A-Za-z0-9+/]{40,}={0,2})\b/g;
+  /\b(?:sk-[A-Za-z0-9\-_]{20,}|(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,}|xox[bapsr]-[A-Za-z0-9\-]{10,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9\-_]{35}|[A-Fa-f0-9]{32,}|[A-Za-z0-9+/]{40,}={0,2})\b/g;
 
 /* ------------------------------------------------------------------ */
 /* Luhn validation                                                     */
@@ -228,6 +240,9 @@ function placeholderFor(
 function redactFieldWithContext(
   bounded: string,
   ctx: RedactionContext,
+  /* Which kinds to act on. Undefined means all of them, which is what every
+     existing caller gets. */
+  kinds?: ReadonlySet<RedactionKind>,
 ): { text: string; fieldHits: RedactionHit[]; redacted: boolean } {
   type Span = {
     start: number;
@@ -238,6 +253,7 @@ function redactFieldWithContext(
   const spans: Span[] = [];
 
   for (const { kind, re, validate } of PATTERNS) {
+    if (kinds && !kinds.has(kind)) continue;
     re.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = re.exec(bounded)) !== null) {
@@ -301,7 +317,10 @@ function redactFieldWithContext(
  * coreference: the same raw value always maps to the same label within
  * one call.
  */
-export function redactText(input: string): RedactionResult {
+export function redactText(
+  input: string,
+  kinds?: ReadonlySet<RedactionKind>,
+): RedactionResult {
   if (!input) return { text: input, hits: [], redacted: false };
 
   const bounded =
@@ -310,7 +329,7 @@ export function redactText(input: string): RedactionResult {
       : input;
 
   const ctx = createContext();
-  const { text, fieldHits, redacted } = redactFieldWithContext(bounded, ctx);
+  const { text, fieldHits, redacted } = redactFieldWithContext(bounded, ctx, kinds);
   return { text, hits: fieldHits, redacted };
 }
 
@@ -337,6 +356,9 @@ export function redactMessages(
   messages: { role: string; content: string }[],
   system: string | undefined,
   sensitivity: "public" | "pii" | "phi" | undefined,
+  /* Restrict redaction to these kinds. Undefined means all of them, which is
+     what every caller predating this parameter gets. */
+  kinds?: ReadonlySet<RedactionKind>,
 ): {
   messages: { role: string; content: string }[];
   system: string | undefined;
@@ -363,7 +385,7 @@ export function redactMessages(
       system.length > MAX_REDACTION_INPUT_LEN
         ? system.slice(0, MAX_REDACTION_INPUT_LEN)
         : system;
-    redactedSystem = redactFieldWithContext(bounded, ctx).text;
+    redactedSystem = redactFieldWithContext(bounded, ctx, kinds).text;
   } else {
     redactedSystem = undefined;
   }
@@ -374,7 +396,7 @@ export function redactMessages(
       msg.content.length > MAX_REDACTION_INPUT_LEN
         ? msg.content.slice(0, MAX_REDACTION_INPUT_LEN)
         : msg.content;
-    const { text } = redactFieldWithContext(bounded, ctx);
+    const { text } = redactFieldWithContext(bounded, ctx, kinds);
     return { role: msg.role, content: text };
   });
 
@@ -386,3 +408,31 @@ export function redactMessages(
     count: hits.length,
   };
 }
+
+
+/**
+ * Kinds that have no legitimate reason to reach a model, ever.
+ *
+ * WHY THIS IS A SUBSET AND NOT "EVERYTHING"
+ *
+ * Instinct is an internal agency OS. "What is Jorge's email?", "call the
+ * Monmouth concierge", "who is on the Porsche account" are the product working
+ * as intended, and the directory is a core feature. Redacting email, phone and
+ * IP would not harden the assistant, it would break it — and a guardrail that
+ * breaks the tool gets switched off, which leaves you with neither.
+ *
+ * A credential, an SSN, a card number or an IBAN is different: there is no
+ * question a person can ask this product where sending one to a third-party
+ * model is the right answer. Those are almost always pasted by accident, into
+ * a chat box, as part of a log or a document dump. That is the realistic
+ * incident here, and this is the class that stops it.
+ *
+ * Callers who genuinely need the full set (the OGIAM ledger, agent actions)
+ * keep passing nothing and keep getting everything.
+ */
+export const NEVER_SEND_KINDS: ReadonlySet<RedactionKind> = new Set([
+  "api_key",
+  "ssn",
+  "credit_card",
+  "iban",
+]);

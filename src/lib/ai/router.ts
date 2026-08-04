@@ -29,6 +29,7 @@ import { trackEvent } from "@/lib/analytics";
 import { bridgeSelection, capabilityTierFor } from "./model-bridge";
 import { selectModel, logModelSelection } from "@/lib/ai/models";
 import { applyConstitutionToRequest } from "@/lib/constitution";
+import { redactMessages, NEVER_SEND_KINDS } from "./redaction";
 import { getObsClient } from "@/lib/obs";
 
 import { AnthropicProvider } from "./anthropic-provider";
@@ -251,7 +252,49 @@ class RouterClient implements AIClient {
     // Constitution to the system prompt here, so every constitution-governed
     // surface (assistant + OGIAM agents) inherits the same rules regardless of
     // which model version answers. No-op for the other call sites.
-    const cReq = applyConstitutionToRequest(req);
+    const cReq0 = applyConstitutionToRequest(req);
+
+    /* Credential / financial-identifier gate, at the last point before the
+     * prompt leaves this process.
+     *
+     * redaction.ts was written for exactly this ("before they leave the process
+     * boundary to an LLM provider") and only the OGIAM agent path ever called
+     * it. The assistant — where a person can paste anything into a chat box —
+     * had no gate at all.
+     *
+     * Applied HERE rather than in the assistant so every surface inherits it:
+     * chat, agents, drafting, anything that completes. A guardrail one call
+     * site remembers to use is the guardrail that was missing.
+     *
+     * Scoped to NEVER_SEND_KINDS. Email and phone are the product's subject
+     * matter and are deliberately untouched — see the note on that constant. */
+    const gated = redactMessages(
+      cReq0.messages,
+      cReq0.system,
+      cReq0.sensitivity,
+      NEVER_SEND_KINDS,
+    );
+    const cReq =
+      gated.count > 0
+        ? { ...cReq0, messages: gated.messages as typeof cReq0.messages, system: gated.system }
+        : cReq0;
+
+    if (gated.count > 0) {
+      /* What was found, never the value itself — hits carry placeholders only.
+         Which kinds people paste, and from which surface, is exactly the signal
+         that says where to put a warning in the UI. */
+      trackEvent(
+        "ai.prompt_redacted",
+        cReq.metadata?.user_id ?? "system",
+        cReq.metadata?.user_role ?? "system",
+        {
+          feature: cReq.metadata?.feature ?? "unknown",
+          workspace_id: cReq.metadata?.workspace_id ?? "default",
+          redacted_count: gated.count,
+          kinds: [...new Set(gated.hits.map((h) => h.kind))].sort().join(","),
+        },
+      );
+    }
 
     // Resolved once and reused, so the provider we call and the model id we
     // report come from the SAME decision rather than two independent ones.
