@@ -43,6 +43,7 @@ import {
   getToolByName,
 } from "@/lib/assistant/tools";
 import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
+import { selectAssistantTier } from "@/lib/assistant/model-tier";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -2161,12 +2162,24 @@ async function callAI(
 
     const start = Date.now();
 
+    /* What this turn actually needs. Previously hardcoded to "standard", which
+       meant a one-word greeting and a multi-step question with three
+       screenshots attached declared the same capability floor — so the model
+       registry had exactly one reachable band and the routing infrastructure
+       could not express anything. Deterministic and ambiguity resolves upward,
+       so a wrong guess costs a saving, never an answer. */
+    const tierChoice = selectAssistantTier({
+      message,
+      attachmentBlock,
+      historyLength: aiMessages.length,
+    });
+
     const client = getAIClient();
     const aiResponse = await client.complete({
       messages: aiMessages,
       system: systemPrompt,
       max_tokens: 2048,
-      model_tier: "standard",
+      model_tier: tierChoice.tier,
       latency_target: "real_time",
       // Govern the assistant's answers with the OGIAM Agent Constitution. The
       // router prepends it to `system` at the chokepoint.
@@ -2175,6 +2188,11 @@ async function callAI(
         feature: "assistant_chat",
         user_id: userId,
         user_role: userRole,
+        routing_reason: tierChoice.reason,
+        /* "standard" is exactly what this call site sent unconditionally
+           before, so the router can price the counterfactual and savings
+           becomes a subtraction over real rows. */
+        baseline_tier: "standard",
       },
     });
 
@@ -2188,6 +2206,8 @@ async function callAI(
       latency_ms: latencyMs,
       model: aiResponse.model_used,
       provider: aiResponse.provider_used,
+      tier: tierChoice.tier,
+      tier_reason: tierChoice.reason,
       module: "assistant",
     });
 
