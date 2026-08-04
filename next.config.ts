@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 import path from "node:path";
 
 const nextConfig: NextConfig = {
@@ -15,4 +16,19 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["unpdf", "@react-pdf/renderer"],
 };
 
-export default nextConfig;
+/* Source-map upload only when a token is present.
+ *
+ * Wrapping unconditionally makes every build — local, CI, a contributor's
+ * machine — depend on Sentry credentials it has no reason to hold, and a build
+ * that fails on a missing telemetry secret is a worse outcome than unreadable
+ * stack traces. With the token set (Vercel production), maps upload and traces
+ * resolve to real file names instead of minified chunk offsets.
+ *
+ * Mirrors wolfpack-auto's config so both products behave identically. */
+export default process.env.SENTRY_AUTH_TOKEN
+  ? withSentryConfig(nextConfig, {
+      silent: true,
+      org: process.env.SENTRY_ORG,
+      project: process.env.SENTRY_PROJECT,
+    })
+  : nextConfig;
