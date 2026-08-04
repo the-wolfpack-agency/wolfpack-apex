@@ -29,6 +29,14 @@ export interface AICompleteRequestMetadata {
    *  (v_ai_cost_daily) and per-workspace routing policy. Falls back to
    *  "default" in the gateway when a call site omits it. */
   workspace_id?: string;
+  /** Why the caller asked for this tier, e.g. "trivial_turn". Recorded on the
+   *  selection so an operator can tell a deliberate downgrade from a bug. */
+  routing_reason?: string;
+  /** The tier this call site used to send unconditionally. Present only where
+   *  per-turn routing replaced a hardcoded tier, and used to price what the
+   *  old behaviour WOULD have cost for the same tokens — so "savings" is
+   *  measured against a real counterfactual rather than asserted. */
+  baseline_tier?: AIModelTier;
 }
 
 export interface AICompleteRequest {
