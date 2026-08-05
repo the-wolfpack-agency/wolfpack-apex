@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import BriefReviewPanel from "@/components/BriefReviewPanel";
 import {
   authHeaders as canonicalAuthHeaders,
   jsonHeaders as canonicalJsonHeaders,
@@ -443,6 +444,22 @@ export default function ToolsPage() {
               </tbody>
             </table>
           )}
+        </div>
+
+        {/* ── Brief reviewer ─────────────────────────────────────────
+            Moved here from the Agent fleet page on 2026-08-05. It sat there
+            from 2026-08-02 and was run ZERO times in three days, on a page
+            viewed 114 times, while 217,744 other events were recorded — nobody
+            writes a brief on a fleet roster, and the page promises everything
+            is gated and logged while this deliberately is not.
+
+            Tools is where the comparable utilities live and get used
+            (accessibility 17 runs, visual diff 16, pdf 18), and this is the
+            same shape: paste something, get a deterministic verdict, nothing
+            stored. The same check also runs automatically when a brief reaches
+            an agent, at POST /api/admin/agents/[id]/tasks. ───────────────── */}
+        <div style={cardStyle}>
+          <BriefReviewPanel />
         </div>
 
         {/* ── Card 4: Accessibility ─────────────────────────────── */}
