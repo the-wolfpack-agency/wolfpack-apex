@@ -23,7 +23,6 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import BriefReviewPanel from "@/components/BriefReviewPanel";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -432,7 +431,6 @@ export default function AgentsPage() {
       {/* Sits above the roster because it belongs BEFORE the work: this is where
           briefs get written, and a check that only runs afterwards is a
           retrospective rather than a saving. */}
-      <BriefReviewPanel />
 
       {/* Fleet overview metrics row. Every tile maps a field the roster already
           carries, no invented metrics. */}
