@@ -81,6 +81,13 @@ const RULES: Rule[] = [
     satisfied: has(
       /\b(verif|accept|prove|proof|assert|confirm)\w*\b/i,
       /\bhow (?:I|we|you)('| a)?ll? know\b/i,
+      /* "you will know it worked when ..." is the same statement without the
+         leading "how", and it is the phrasing people reach for most. Missing it
+         made the rule fire on briefs that named their acceptance check
+         explicitly — the precise failure the reviewer must not have, because a
+         checker that flags a complete brief is one nobody reads. Caught by a
+         test written against a deliberately complete brief. */
+      /\b(?:you|we|i)(?:'ll| will)? know (?:it|this|that)?\s*(?:worked|works|is done)\b/i,
       /\b(test|tests|tested|coverage|e2e|end.to.end)\b/i,
       /\bdefinition of done\b/i,
     ),
@@ -179,6 +186,12 @@ const RULES: Rule[] = [
       // firing on a fact it was given.
       /\b(?:already|are|is) (?:set|configured|provisioned|in place)\b/i,
       /\bI(?:'ll| will) (?:provide|set|configure|add)\b/i,
+      /* The past tense of the line above. The rule already accepted the future
+         ("I will provide a key") and the state ("the keys are already set") and
+         missed the tense people actually use once they have done it ("I have set
+         DATABASE_URL already"). Same class of miss this rule was narrowed for
+         once before: the checker firing on a fact it had been given. */
+      /\b(?:I|we)(?:'ve| have) (?:set|configured|provisioned|added)\b/i,
     ),
   },
 ];
