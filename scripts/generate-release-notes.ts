@@ -11,9 +11,17 @@
  *
  * Usage:
  *   npm run release:notes -- [--since=<git-ref>] [--version=<label>]
- *                            [--title=<title>] [--dry-run] [--no-email]
+ *                            [--title=<title>] [--repo=<path>]
+ *                            [--dry-run] [--no-email]
  *
  *   --since     git ref to diff from (default: last tag, else last 40 commits)
+ *   --repo      read commits from ANOTHER repo. /releases is the org-wide
+ *               changelog, and most weeks the work ships in a sibling repo
+ *               (porsche-weekend, beyond, auto), so the generator cannot be
+ *               limited to the repo it happens to live in.
+ *   --entries   path to a JSON array of curated entries, used INSTEAD of the
+ *               AI grouping. Same shape as ReleaseEntry:
+ *               [{ title, description, how_to_use, category, area }]
  *   --version   release version/label (default: today, YYYY-MM-DD)
  *   --title     release title (default: "Release <version>")
  *   --dry-run   print the release JSON; do not write or email
@@ -21,8 +29,9 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
-import { createRelease, type ReleaseEntry } from "@/lib/releases";
+import { createRelease, formatDiffStat, type DiffStat, type ReleaseEntry } from "@/lib/releases";
 import { isGraphMailConfigured, sendViaGraph } from "@/lib/mail/send-via-graph";
 import { safeQuery } from "@/lib/db";
 
@@ -30,6 +39,8 @@ interface Args {
   since?: string;
   version: string;
   title?: string;
+  repo?: string;
+  entriesFile?: string;
   dryRun: boolean;
   email: boolean;
 }
@@ -43,6 +54,8 @@ function parseArgs(argv: string[]): Args {
     since: get("since"),
     version,
     title: get("title"),
+    repo: get("repo"),
+    entriesFile: get("entries"),
     dryRun: argv.includes("--dry-run"),
     email: !argv.includes("--no-email"),
   };
@@ -58,29 +71,35 @@ function parseArgs(argv: string[]): Args {
  * behind it: git takes a list perfectly well, and execFileSync with no shell
  * means the argument cannot be anything except an argument.
  */
-function git(args: string[]): string {
-  return execFileSync("git", args, { encoding: "utf8" }).trim();
+function git(args: string[], repo?: string): string {
+  return execFileSync("git", args, { encoding: "utf8", cwd: repo || process.cwd() }).trim();
+}
+
+/**
+ * The revision range, as an argument list.
+ *
+ * Shared by the log and the diffstat so the two can never describe different
+ * spans of work: a summary that counts one range's commits and another range's
+ * lines is worse than no numbers at all.
+ */
+function revRange(since: string | undefined, repo: string | undefined): string[] {
+  if (since) return [`${since}..HEAD`];
+  try {
+    const lastTag = git(["describe", "--tags", "--abbrev=0"], repo);
+    if (lastTag) return [`${lastTag}..HEAD`];
+  } catch {
+    /* no tags in this repo */
+  }
+  return [];
 }
 
 /** Commit subjects since `since` (or the last tag, or the last 40 commits). */
-function commitsSince(since?: string): string[] {
-  let range = "";
+function commitsSince(since?: string, repo?: string): string[] {
   try {
-    if (since) {
-      range = `${since}..HEAD`;
-    } else {
-      const lastTag = (() => {
-        try {
-          return git(["describe", "--tags", "--abbrev=0"]);
-        } catch {
-          return "";
-        }
-      })();
-      range = lastTag ? `${lastTag}..HEAD` : "";
-    }
+    const range = revRange(since, repo);
     // The range is one argument, or absent. Splitting it into the arg list is
     // what keeps a revision a revision.
-    const raw = git(["log", ...(range ? [range] : ["-n", "40"]), "--pretty=%s"]);
+    const raw = git(["log", ...(range.length ? range : ["-n", "40"]), "--pretty=%s"], repo);
     return raw
       .split("\n")
       .map((s) => s.trim())
@@ -90,6 +109,80 @@ function commitsSince(since?: string): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * How much actually changed, over the same range as the commit list.
+ *
+ * `--shortstat` rather than parsing a full diff: it is one line, it is stable
+ * across git versions, and it costs nothing on a large range. Lock files and
+ * generated bundles are excluded because a dependency bump that rewrites
+ * package-lock.json reports tens of thousands of lines and drowns the real
+ * number, which is the one a person is actually asking for.
+ */
+function diffStat(since: string | undefined, repo: string | undefined, commits: number): DiffStat {
+  const empty: DiffStat = { commits, files: 0, insertions: 0, deletions: 0 };
+  try {
+    const range = revRange(since, repo);
+    if (!range.length) return empty;
+    const raw = git(
+      [
+        "diff",
+        "--shortstat",
+        ...range,
+        "--",
+        ".",
+        ":(exclude)*package-lock.json",
+        ":(exclude)*pnpm-lock.yaml",
+        ":(exclude)*yarn.lock",
+        ":(exclude)*.min.js",
+        ":(exclude)*.map",
+      ],
+      repo,
+    );
+    const n = (re: RegExp) => Number(re.exec(raw)?.[1] ?? 0);
+    return {
+      commits,
+      files: n(/(\d+) files? changed/),
+      insertions: n(/(\d+) insertions?\(\+\)/),
+      deletions: n(/(\d+) deletions?\(-\)/),
+    };
+  } catch {
+    return empty;
+  }
+}
+
+/**
+ * Curated entries from a file, validated rather than trusted.
+ *
+ * Exits on a bad file instead of publishing a partial release: this writes to
+ * the changelog the whole team reads, and a silently-empty release is harder to
+ * notice than a script that refused to run.
+ */
+function readEntriesFile(path: string): { summary: string; entries: ReleaseEntry[] } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch (err) {
+    console.error(`[release-notes] could not read --entries=${path}: ${(err as Error).message}`);
+    process.exit(1);
+  }
+  // Either a bare array, or {summary, entries} when the release wants a lede.
+  const obj = (Array.isArray(parsed) ? { entries: parsed } : parsed) as {
+    summary?: unknown;
+    entries?: unknown;
+  };
+  if (!Array.isArray(obj?.entries) || obj.entries.length === 0) {
+    console.error(`[release-notes] --entries=${path} must be a non-empty array, or {summary, entries}.`);
+    process.exit(1);
+  }
+  const entries = obj.entries as ReleaseEntry[];
+  const bad = entries.findIndex((e) => !e || typeof e.title !== "string" || !e.title.trim());
+  if (bad > -1) {
+    console.error(`[release-notes] --entries=${path}: entry ${bad} has no title.`);
+    process.exit(1);
+  }
+  return { summary: typeof obj.summary === "string" ? obj.summary : "", entries };
 }
 
 /** Strip ```json fences the model sometimes adds. */
@@ -199,10 +292,38 @@ async function emailTeam(version: string, title: string, summary: string, entrie
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  const commits = commitsSince(args.since);
-  console.log(`[release-notes] ${commits.length} commit(s) since ${args.since ?? "last tag"}.`);
+  if (args.repo) {
+    // Fail loudly rather than silently describing THIS repo's commits as the
+    // other one's, which is a wrong changelog that looks entirely plausible.
+    try {
+      git(["rev-parse", "--git-dir"], args.repo);
+    } catch {
+      console.error(`[release-notes] --repo=${args.repo} is not a git repository.`);
+      process.exit(1);
+    }
+  }
+  const commits = commitsSince(args.since, args.repo);
+  const stats = diffStat(args.since, args.repo, commits.length);
+  console.log(
+    `[release-notes] ${commits.length} commit(s) since ${args.since ?? "last tag"}` +
+      `${args.repo ? ` in ${args.repo}` : ""}. ${formatDiffStat(stats)}`,
+  );
 
-  const { summary, entries } = await generate(commits);
+  /* Curated entries win over the AI grouping.
+   *
+   * The AI step needs a provider key, and the deterministic fallback is one
+   * entry per commit with no description: for a 112-commit release that is a
+   * wall of commit subjects on a page written for a non-technical team, which
+   * is worse than the wall of nothing it replaced. --entries lets the release
+   * be written properly and still go out through this same path, so it gets
+   * the same stats, the same createRelease() and the same email. */
+  const generated = args.entriesFile ? readEntriesFile(args.entriesFile) : await generate(commits);
+  const entries = generated.entries;
+  /* The size of the release goes in the summary rather than a new column: it
+     is the line people ask for ("what shipped, how much"), the timeline already
+     renders the summary, and a schema change to carry four integers that are
+     only ever read as one sentence would be the wrong trade. */
+  const summary = `${generated.summary} ${formatDiffStat(stats)}`.trim();
   const title = args.title || `Release ${args.version}`;
 
   const payload = { version: args.version, title, summary, entries };

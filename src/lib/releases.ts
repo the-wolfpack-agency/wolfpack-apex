@@ -147,3 +147,23 @@ export async function createRelease(input: CreateReleaseInput): Promise<Release>
   );
   return mapRow(rows[0]);
 }
+
+/** How much changed in a release, as counted by the release-notes pipeline. */
+export interface DiffStat {
+  commits: number;
+  files: number;
+  insertions: number;
+  deletions: number;
+}
+
+/** The one line a person actually reads when they ask "what shipped?". */
+export function formatDiffStat(s: DiffStat): string {
+  if (!s.files) return `${s.commits} commit${s.commits === 1 ? "" : "s"}.`;
+  const n = (v: number) => v.toLocaleString("en-US");
+  return (
+    `${n(s.commits)} commit${s.commits === 1 ? "" : "s"}, ` +
+    `${n(s.files)} file${s.files === 1 ? "" : "s"} changed, ` +
+    `${n(s.insertions)} line${s.insertions === 1 ? "" : "s"} added and ` +
+    `${n(s.deletions)} removed.`
+  );
+}
