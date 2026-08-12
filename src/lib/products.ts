@@ -161,10 +161,12 @@ export const PRODUCTS: Product[] = [
     url: "https://weekendwithporsche.com",
     tagline: "A Weekend with Porsche, run end to end",
     summary:
-      "The Porsche Extended Ownership Experience pairs a branded owner experience (an extended drive plus a curated program) with an Experience OS that lets Porsche Centers run it themselves: inviting guests, managing their journey, sending communications, and seeing results. It is currently a private preview for Porsche.",
+      "The Porsche Extended Ownership Experience pairs a branded owner experience (an extended drive plus a curated program) with an Experience OS that lets Porsche Centers run it themselves: inviting guests, managing their journey, sending communications, and seeing results. It takes its guest list straight from the booking export Porsche's own event platform produces, so a Center never retypes a booking. It is currently a private preview for Porsche.",
     highlights: [
       "The Porsche-branded 'A Weekend with Porsche' guest experience",
       "A dealer Experience OS: guest intake, journeys, communications, resources, and analytics",
+      "Imports the Porsche Partner Network booking export as downloaded, keeping the booked window and party",
+      "A six-stage journey checklist per guest, recorded in one place and shared across every screen",
       "Lets each Porsche Center run its own program with its own guests",
     ],
     audience: "Porsche and its Centers",
