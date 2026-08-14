@@ -84,8 +84,12 @@ export function renderMarkdown(md: string): string {
       const bodyRows: string[][] = [];
       while (i < lines.length && /^\|(.+)\|\s*$/.test(lines[i])) bodyRows.push(cells(lines[i++]));
       out.push(
-        `<table><thead><tr>${head.map((c) => `<th>${inline(esc(c))}</th>`).join("")}</tr></thead>` +
-          `<tbody>${bodyRows.map((r) => `<tr>${r.map((c) => `<td>${inline(esc(c))}</td>`).join("")}</tr>`).join("")}</tbody></table>`,
+        /* Wrapped so a wide table scrolls inside its own box instead of being
+           squeezed by the column it sits in. Squeezed, a short cell like
+           "planned" stacked one letter per line and the last column was cut
+           off at the pane edge. Reported 2026-08-14. */
+        `<div class="wiki-table"><table><thead><tr>${head.map((c) => `<th>${inline(esc(c))}</th>`).join("")}</tr></thead>` +
+          `<tbody>${bodyRows.map((r) => `<tr>${r.map((c) => `<td>${inline(esc(c))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`,
       );
       continue;
     }

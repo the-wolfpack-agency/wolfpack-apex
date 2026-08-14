@@ -266,20 +266,41 @@ export default function EngineeringWiki({ pages }: EngineeringWikiProps) {
           padding: 0.2rem 0 0.2rem 1rem;
           color: var(--wp-text-muted, #9aa0aa);
         }
+        /* A table scrolls inside its own box rather than being squeezed by the
+           content column. Without this the browser shrank every column to fit,
+           which stacked "planned" one letter per line and still clipped the
+           last column at the pane edge. */
+        .wiki-md .wiki-table {
+          overflow-x: auto;
+          margin: 0.8rem 0 1.2rem;
+        }
         .wiki-md table {
           border-collapse: collapse;
-          margin: 0.8rem 0;
+          margin: 0;
           width: 100%;
+          /* Enough that each column gets its natural width; past this the box
+             scrolls instead of the columns collapsing. */
+          min-width: 560px;
         }
         .wiki-md th, .wiki-md td {
           border: 1px solid var(--wp-dark-border, rgba(255,255,255,0.12));
-          padding: 0.45rem 0.65rem;
+          padding: 0.5rem 0.7rem;
           text-align: left;
+          vertical-align: top;
           font-size: 0.88rem;
+          line-height: 1.45;
         }
         .wiki-md th {
           background: var(--wp-dark-surface, rgba(255,255,255,0.05));
           font-weight: 700;
+          /* A heading is short by definition: never stack it. */
+          white-space: nowrap;
+        }
+        /* A one-word status must not wrap. Applies to any cell whose whole
+           content is a single short word, which is what a state column is. */
+        .wiki-md td:nth-child(2):not(:last-child) {
+          white-space: nowrap;
+          width: 1%;
         }
       `}</style>
 
