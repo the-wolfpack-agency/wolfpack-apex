@@ -509,9 +509,15 @@ Every tool on the client's side writes into the same store the builder's side re
 ];
 
 async function main(): Promise<void> {
+  /* SKIP, do not fail, when there is no database.
+     This runs as part of vercel-build so that wiki content authored in the repo
+     actually reaches the site. A build in an environment without a database
+     (a local `next build`, a preview without the var) must not break because a
+     content seed had nothing to write to. A real seed failure still throws
+     below and fails the build, which is the case worth stopping for. */
   if (!process.env.DATABASE_URL) {
-    console.error("[seed-engineering] DATABASE_URL not set.");
-    process.exit(1);
+    console.warn("[seed-engineering] DATABASE_URL not set. Skipping the wiki seed.");
+    return;
   }
   let n = 0;
   for (const p of PAGES) {
