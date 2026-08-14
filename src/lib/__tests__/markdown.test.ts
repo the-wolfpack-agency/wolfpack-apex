@@ -34,6 +34,16 @@ describe("renderMarkdown", () => {
     expect(rel).not.toContain("target=");
   });
 
+  it("wraps every table in a scroll box", () => {
+    /* Without it the browser squeezes the columns to fit the content pane: a
+       one-word status cell like "planned" stacked one letter per line and the
+       last column was clipped at the pane edge. Reported 2026-08-14 on the CS
+       layer page, where the state column is one short word by design. */
+    const html = renderMarkdown("| Tool | State | What it is for |\n| --- | --- | --- |\n| Switcher | live | Opens a workspace |");
+    expect(html).toContain('<div class="wiki-table"><table>');
+    expect(html).toContain("</table></div>");
+  });
+
   it("renders a table", () => {
     const html = renderMarkdown("| A | B |\n| - | - |\n| 1 | 2 |");
     expect(html).toContain("<table>");
