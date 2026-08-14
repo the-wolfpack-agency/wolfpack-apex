@@ -439,6 +439,73 @@ We build for enterprise trust from day one.
 - **Crypto-agile** and quantum-migration-ready signing.
 - A public security-posture page documents the current stance.`,
   },
+  {
+    slug: "customer-success",
+    parentSlug: null,
+    position: 6,
+    title: "Customer success",
+    body: `## The gap this closes
+In most software companies the person who feels a problem and the person who can fix it never meet. A client hits something confusing, tells their customer success manager, who writes a ticket, which a product manager triages, which reaches an engineer weeks later stripped of the detail that mattered. By the time it is fixed, nobody tells the client. The client learns that reporting things is pointless, so they stop, and the company concludes there are no problems.
+
+That chain has four handoffs and loses information at each one. Our answer is not a better ticketing process. It is to remove the handoffs.
+
+## What we build instead
+**The client reports inside the product they are using, and the builder reads it in the same system.** No inbox in between, no re-typing, no summary of a summary. The report already knows who sent it, which organisation they belong to, and what screen they were on, because the product knows.
+
+**The builder can stand where the client stands.** A support context points our session at one client's workspace, so we see exactly what they see instead of asking them to describe it. It is bounded, recorded and shown on screen the whole time it is open.
+
+**We measure resistance, not just usage.** Counting page views tells you what worked. What we want is where people got stuck: the path that gets abandoned, the control nobody finds, the step that takes three attempts.
+
+## Why this is more effective
+- **Fidelity.** The report arrives with its context attached rather than as somebody's recollection of a phone call.
+- **Latency.** The loop is client to builder to shipped, not client to CSM to ticket to sprint to release.
+- **Honesty.** When the feedback path is one click and the reply is a fix they can see, clients keep reporting. Silence stops being ambiguous.
+- **Scale.** It is the same layer for every client and every organisation, so the eleventh client costs no more customer-success process than the first.
+
+## A prime example: A Weekend with Porsche
+The dealer workspace is where this layer is being proved. Its Porsche Centers report from inside the product, their program leads see the whole rollout without asking anybody for a status update, and we can open any Center's workspace to help them, on the record.
+
+It is a live client program, not a demonstration. What we learn there becomes the layer every other product gets.
+
+## What is next
+This is a direction, not a finished platform. The tools that exist today are listed in **The CS layer**, along with the ones we have not built yet, marked as such.`,
+  },
+  {
+    slug: "cs-layer",
+    parentSlug: "customer-success",
+    position: 0,
+    title: "The CS layer",
+    body: `## What the layer is
+A set of tools split by who is holding them. The builder's side is for seeing and fixing; the client's side is for reporting and understanding. They read and write the same data, which is what makes the loop close rather than fork.
+
+Each item below is marked **live** where it is in production today in A Weekend with Porsche, or **planned** where it is not built yet. The distinction matters: a roadmap presented as a product is exactly the sort of thing this layer exists to stop.
+
+## Our side (super-admin)
+| Tool | State | What it is for |
+|---|---|---|
+| Object-level analytics dashboard | planned | Usage at the level of the thing being used (a guest record, a checklist, a template) rather than the page it sits on. |
+| Broken user paths | planned | Journeys that start and do not finish, surfaced automatically rather than discovered in a call. |
+| Areas of resistance | planned | Where people hesitate, retry or abandon. The signal that a screen is wrong before anybody complains about it. |
+| Email template tester | live | Sends the real client template to yourself, so what you check is what they receive. The link it carries is inert and cannot be redeemed. |
+| Multi-org switcher with header banner | live | Open one organisation's workspace to help them. Recorded on entry and exit, shown in a banner for as long as it is open, and it expires by itself. |
+
+## The client's side
+### Admins and program leads
+| Tool | State | What it is for |
+|---|---|---|
+| Full-program analytics | live | Every group beneath them, rolled up, plus a per-group breakdown so a lead can name a specific example rather than quote an average. |
+| Direct support form | live | A form inside the product that reaches us by email and lands in one queue. It never asks who they are or which organisation: the session knows. |
+| Feedback page | live | For the smaller things that are not worth a support request but are worth saying. |
+
+### Everyone below admin level
+| Tool | State | What it is for |
+|---|---|---|
+| Analytics for their own group | live | The same page, scoped by the database to what is theirs. Not a different build, and not a permission that can be talked around. |
+| Feedback page | live | The people who hit a problem most are the ones doing the work, so the feedback path is not an admin privilege. |
+
+## The one rule
+Every tool on the client's side writes into the same store the builder's side reads. There is no separate customer-success database, no export step and no reconciliation, because two systems that describe the same client always end up disagreeing about them.`,
+  },
 ];
 
 async function main(): Promise<void> {

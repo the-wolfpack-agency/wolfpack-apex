@@ -15,6 +15,7 @@ import type { ReactNode } from "react";
 import type { WikiPage, WikiPageNode } from "@/lib/engineering-tree";
 import { buildTree } from "@/lib/engineering-tree";
 import AgenticQAPipeline from "./AgenticQAPipeline";
+import CustomerSuccessLoop from "./CustomerSuccessLoop";
 
 /**
  * Curated visual diagrams keyed by page slug. A page can pair a hand-built,
@@ -23,6 +24,7 @@ import AgenticQAPipeline from "./AgenticQAPipeline";
  */
 const PAGE_DIAGRAMS: Record<string, ReactNode> = {
   "testing-and-quality": <AgenticQAPipeline />,
+  "customer-success": <CustomerSuccessLoop />,
 };
 
 interface EngineeringWikiProps {
