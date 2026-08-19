@@ -152,11 +152,34 @@ describe("summarizeProtection", () => {
     expect(p.kinds[0]).toEqual({ kind: "api_key", count: 2 });
   });
 
+  test("what a model quoted BACK is counted apart from what a question carried", () => {
+    const p = summarizeProtection(
+      [{ redacted_count: "1", kinds: "api_key" }],
+      50,
+      [{ redacted_count: "2", kinds: "api_key,credit_card" }],
+    );
+    expect(p.itemsWithheld).toBe(1);
+    expect(p.itemsWithheldFromAnswers).toBe(2);
+    // Both directions share one kind list: "an API key was involved" is the
+    // fact worth reading, and two lists of the same words help nobody.
+    expect(p.kinds.map((k) => k.kind).sort()).toEqual(["api_key", "credit_card"]);
+    expect(p.callsWithFindings).toBe(2);
+  });
+
   test("no findings is a clean result, not a missing one", () => {
     /* The good outcome, and it must read as such: the check ran on every call
        and found nothing that should not leave. */
     const p = summarizeProtection([], 80);
-    expect(p).toEqual({ callsChecked: 80, callsWithFindings: 0, itemsWithheld: 0, kinds: [] });
+    expect(p).toEqual({
+      callsChecked: 80,
+      callsWithFindings: 0,
+      itemsWithheld: 0,
+      /* The return path counts separately: an answer that quoted a credential
+         is a different event from a question that carried one, and they have
+         different fixes. */
+      itemsWithheldFromAnswers: 0,
+      kinds: [],
+    });
   });
 
   test("an unparseable count does not corrupt the total", () => {

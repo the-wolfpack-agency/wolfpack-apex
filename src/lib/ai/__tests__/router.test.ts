@@ -659,7 +659,7 @@ describe("router — outbound credential gate", () => {
  * Same function, same kinds, both directions, so the two can never disagree
  * about what a credential looks like.
  */
-describe("router — what comes back is checked too", () => {
+describe("router: what comes back is checked too", () => {
   it("a key quoted in the answer never reaches the caller", async () => {
     const leaked = "Sure, the key is sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd and it works.";
     mockMessagesCreate.mockResolvedValueOnce(fakeOk(leaked));

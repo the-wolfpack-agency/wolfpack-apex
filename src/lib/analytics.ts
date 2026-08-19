@@ -456,7 +456,7 @@ export type InstinctEventType =
   /* The return path. A model can quote a credential it was given in the
      conversation, an attachment or a retrieved document, and that reply is
      rendered and stored. Same gate, same kinds, both directions. Metadata:
-     { feature, workspace_id, model, redacted_count, kinds } — kinds only,
+     { feature, workspace_id, model, redacted_count, kinds }: kinds only,
      never a value. */
   | "ai.response_redacted"
   | "assistant.attachment_read"
