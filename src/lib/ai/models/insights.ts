@@ -67,6 +67,8 @@ export interface ModelAvailability {
 }
 
 export interface RouterInsights {
+  /** What the router kept from leaving, and how much traffic it checked. */
+  protection?: ProtectionSummary;
   /** Measured spend across every completed call in the window. */
   actualCostUsd?: number;
   actualCalls?: number;
@@ -321,10 +323,88 @@ export function summarizeActuals(rows: ActualRow[]): Map<string, ActualSpend> {
   return byModel;
 }
 
+/**
+ * WHAT THE ROUTER KEPT IN, and how much of the traffic it checked.
+ *
+ * The router redacts credentials and financial identifiers at the last point
+ * before a prompt leaves this process, on EVERY completion, whichever model
+ * answers and whoever wrote the call site. That has been true for a while and
+ * has never been shown anywhere, which is the same failure as the cost: the
+ * evidence existed and nothing read it.
+ *
+ * TWO NUMBERS, and the first is the durable one.
+ *
+ * COVERAGE is the claim worth making to a client: every call was checked, to
+ * every model, including ones we do not control. It stays true on a quiet week.
+ *
+ * INTERVENTIONS is the proof it is not decorative, and it is deliberately the
+ * second number. A low count means people pasted few secrets, which is good
+ * news that a "blocked: 3" headline would read as a weak product.
+ */
+interface RedactionRow extends Record<string, unknown> {
+  redacted_count: string | null;
+  kinds: string | null;
+}
+
+export interface ProtectionSummary {
+  /** Completions that ran, every one of which passed the gate BOTH ways. */
+  callsChecked: number;
+  /** Calls where something was found and withheld, in either direction. */
+  callsWithFindings: number;
+  /** Individual values replaced before the prompt left this process. */
+  itemsWithheld: number;
+  /** Values replaced in a model's ANSWER before it was shown or stored. A
+   *  model can quote a credential it was handed in the conversation, an
+   *  attachment or a retrieved document; that reply is rendered and kept. */
+  itemsWithheldFromAnswers: number;
+  /** Which kinds, most common first. Never a value: the gate stores
+   *  placeholders only, by design, so this cannot leak what it caught. */
+  kinds: { kind: string; count: number }[];
+}
+
+export function summarizeProtection(
+  rows: RedactionRow[],
+  callsChecked: number,
+  answerRows: RedactionRow[] = [],
+): ProtectionSummary {
+  const byKind = new Map<string, number>();
+  const count = (list: RedactionRow[]): number => {
+    let total = 0;
+    for (const row of list) {
+      const n = Number(row.redacted_count);
+      total += Number.isFinite(n) ? n : 0;
+      for (const kind of (row.kinds ?? "").split(",").filter(Boolean)) {
+        byKind.set(kind, (byKind.get(kind) ?? 0) + 1);
+      }
+    }
+    return total;
+  };
+
+  /* Both directions share one kind breakdown on purpose: "an API key was
+     involved" is the fact worth reading, and splitting it into two lists of
+     the same words makes the panel longer without making it clearer. The two
+     COUNTS stay separate, because leaving and returning are different events
+     with different fixes. */
+  const itemsWithheld = count(rows);
+  const itemsWithheldFromAnswers = count(answerRows);
+
+  return {
+    callsChecked,
+    callsWithFindings: rows.length + answerRows.length,
+    itemsWithheld,
+    itemsWithheldFromAnswers,
+    kinds: [...byKind.entries()]
+      .map(([kind, count]) => ({ kind, count }))
+      .sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind)),
+  };
+}
+
 export async function getRouterInsights(days = 30): Promise<RouterInsights> {
   const models = modelAvailability();
   let rows: DecisionRow[] = [];
   let actualRows: ActualRow[] = [];
+  let redactionRows: RedactionRow[] = [];
+  let answerRedactionRows: RedactionRow[] = [];
 
   if (process.env.DATABASE_URL) {
     try {
@@ -376,6 +456,36 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
     } catch {
       /* Same posture: no actuals is a smaller answer, not a broken page. */
     }
+
+    try {
+      const result = await query<RedactionRow>(
+        `SELECT metadata->>'redacted_count' AS redacted_count,
+                metadata->>'kinds'          AS kinds
+           FROM instinct_events
+          WHERE event_type = 'ai.prompt_redacted'
+            AND timestamp > NOW() - INTERVAL '1 day' * $1
+          LIMIT 20000`,
+        [days],
+      );
+      redactionRows = result.rows;
+    } catch {
+      /* Same posture again. */
+    }
+
+    try {
+      const result = await query<RedactionRow>(
+        `SELECT metadata->>'redacted_count' AS redacted_count,
+                metadata->>'kinds'          AS kinds
+           FROM instinct_events
+          WHERE event_type = 'ai.response_redacted'
+            AND timestamp > NOW() - INTERVAL '1 day' * $1
+          LIMIT 20000`,
+        [days],
+      );
+      answerRedactionRows = result.rows;
+    } catch {
+      /* Same posture again. */
+    }
   }
 
   const s = summarizeDecisions(rows);
@@ -404,6 +514,11 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
     outputTokens += a.outputTokens;
   }
 
+  /* Coverage is measured against the calls that actually ran, not against
+     selections: a selection that never completed sent nothing, so counting it
+     as "checked" would inflate the claim with traffic that never existed. */
+  const protection = summarizeProtection(redactionRows, actualCalls, answerRedactionRows);
+
   const withActuals = { ...s, usage, actualCostUsd, actualCalls, inputTokens, outputTokens };
-  return { days, models, ...withActuals, headline: describeInsights(withActuals) };
+  return { days, models, ...withActuals, protection, headline: describeInsights(withActuals) };
 }
