@@ -43,7 +43,7 @@ import {
   getToolByName,
 } from "@/lib/assistant/tools";
 import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
-import { selectAssistantTier, parseTierDirective } from "@/lib/assistant/model-tier";
+import { selectAssistantTier, parseTierDirective, type TierDirective } from "@/lib/assistant/model-tier";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -715,6 +715,16 @@ export async function chat(
     topics: topics.join(","),
   });
 
+  /* THE DIRECTIVE IS AN INSTRUCTION TO US, NOT PART OF THE QUESTION.
+     Parsed and removed here, at the top of the turn, rather than inside
+     callAI. Everything below matches on the text: a leading "/cheap" made
+     "/cheap what is the weather in NYC today?" miss the weather tool, whose
+     pattern is anchored, and the question then fell through to a keyword
+     branch. Stripping it only before the prompt would have left every
+     deterministic matcher looking at a message the user did not write. */
+  const tierOverride = parseTierDirective(message);
+  if (tierOverride) message = tierOverride.cleaned;
+
   // --- Priority -3: Confirm / cancel a pending action ---
   // The user's previous turn dispatched an action tool, the dispatcher
   // returned needs_confirmation, and we persisted a pending row. If
@@ -1173,6 +1183,7 @@ export async function chat(
     pageContext,
     brainContext,
     attachmentBlock,
+    tierOverride,
   );
   if (aiResult) {
     trackEvent("system.ai_call_made", userId, userRole, {
@@ -2077,6 +2088,10 @@ async function callAI(
   /* Text extracted from the file(s) attached to THIS message. Highest-priority
      grounding: it is what the user is literally pointing at. */
   attachmentBlock?: string,
+  /* A tier the user asked for by name. Passed in rather than parsed here: the
+     directive is removed from the message at the top of the turn, so by the
+     time it reaches this function there is nothing left to find. */
+  tierOverride?: TierDirective | null,
 ): Promise<{ content: string; tokensUsed: number } | null> {
   /* Use the AI router (src/lib/ai/router.ts) so this works whether prod
      is configured for Anthropic OR Azure OpenAI. The previous direct-
@@ -2154,11 +2169,9 @@ async function callAI(
         content: m.content,
       }));
 
-    /* Parsed before the prompt is built: the directive is an instruction to
-       US, not part of the question, and left in it the model answers about the
-       word "/cheap" instead of what was asked. */
-    const directive = parseTierDirective(message);
-    const asked = directive ? directive.cleaned : message;
+    /* Already stripped at the top of the turn, so `message` is what was asked. */
+    const directive = tierOverride ?? null;
+    const asked = message;
 
     const currentContent = pageContext
       ? `[Context: ${pageContext}]\n\n${asked}`
