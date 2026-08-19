@@ -283,6 +283,16 @@ const SENTENCE_INITIAL_COMMON_WORDS = new Set([
   // common openers in generated prose
   "please", "note", "based", "using", "given", "once", "unless", "although",
   "though", "because", "however", "why", "how", "where", "whether", "yes", "no",
+  /* Conversational and adjectival openers. "Ready to help with anything you
+     need." reported "Ready" as somebody's name on 2026-08-19, the same shape as
+     the earlier "However." report. A short reply is mostly sentence starts, so
+     these fire disproportionately on exactly the small talk a user tries
+     first. */
+  "ready", "happy", "glad", "sure", "sorry", "thanks", "thank", "hello", "hi",
+  "welcome", "good", "great", "nice", "perfect", "absolutely", "certainly",
+  "of", "as", "at", "by", "for", "from", "in", "on", "to", "with", "without",
+  "let", "here", "looks", "seems", "sounds", "feel", "hope", "just", "only",
+  "new", "old", "more", "less", "best", "better", "worse", "same", "different",
 ]);
 
 /** Multi-word phrases that look like proper nouns but are actually
@@ -318,7 +328,11 @@ export function validateEntities(
     const before = answer.slice(0, m.index);
     const atSentenceStart = /(^|[.!?:;]|\n|^\s*[-*\u2022])\s*$/.test(before);
 
-    let phrase = m[1].toLowerCase().trim();
+    /* Strip an English contraction before any lookup. "What's" reached the
+       reader as an unfamiliar name because the list holds "what" and the
+       apostrophe made it a different string. Every entry in every list above
+       would need a possessive twin otherwise. */
+    let phrase = m[1].toLowerCase().trim().replace(/[\u2019']\s*(s|re|ll|ve|t|d|m)\b/g, "");
 
     if (atSentenceStart) {
       const parts = phrase.split(/\s+/);
