@@ -2243,11 +2243,25 @@ async function callAI(
        registry had exactly one reachable band and the routing infrastructure
        could not express anything. Deterministic and ambiguity resolves upward,
        so a wrong guess costs a saving, never an answer. */
-    const tierChoice = selectAssistantTier({
-      message,
-      attachmentBlock,
-      historyLength: aiMessages.length,
-    });
+    /* AN OVERRIDE IS OBEYED HERE, not inferred back out of the message.
+       selectAssistantTier parses "/cheap" itself, and that worked only while
+       the directive was still in the text. Stripping it at the top of the turn
+       (so anchored tool patterns could match) severed the only channel it had:
+       by the time it ran, the message was clean, so it INFERRED a tier from
+       the question and the override was silently dropped.
+
+       Reported 2026-08-19: "/cheap is today's weather high or lower than 25
+       years ago?" ran at standard, because the question reads like a
+       comparison. My own fix caused it, and the badge then reported the
+       inferred tier as "as asked", which is the worse half: a false statement
+       made confidently. */
+    const tierChoice = tierOverride
+      ? { tier: tierOverride.tier, reason: "user_override" as const }
+      : selectAssistantTier({
+          message,
+          attachmentBlock,
+          historyLength: aiMessages.length,
+        });
 
     const client = getAIClient();
     const aiResponse = await client.complete({
@@ -2297,7 +2311,10 @@ async function callAI(
       tokensUsed,
       model: aiResponse.model_used ?? undefined,
       provider: aiResponse.provider_used ?? undefined,
-      tierRequested: directive ? tierChoice.tier : undefined,
+      /* The tier ASKED FOR, not the tier chosen. They are the same now that an
+         override is honoured, and the field must mean what its name says or it
+         will drift apart from the truth again the next time these differ. */
+      tierRequested: tierOverride?.tier,
     };
   } catch (err) {
     /* NoProviderAvailableError = router has no configured provider

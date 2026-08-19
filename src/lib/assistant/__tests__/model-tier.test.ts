@@ -251,3 +251,48 @@ describe("a pinned tier must not change which tool answers", () => {
     expect(weatherTool.matchIntent(directive!.cleaned)).toEqual({ location: "NYC" });
   });
 });
+
+/**
+ * The override has to survive the strip.
+ *
+ * Reported 2026-08-19: "/cheap is today's weather high or lower than 25 years
+ * ago?" ran at STANDARD, and the badge said "standard tier, as asked".
+ *
+ * My own regression, and an instructive one. selectAssistantTier parses the
+ * directive itself, which worked while "/cheap" was still in the text. Moving
+ * the strip to the top of the turn, so anchored tool patterns could match, cut
+ * the only channel it had: by then the message was clean, so it inferred a tier
+ * from the question and the override vanished. Two changes that are each
+ * correct alone, and wrong together.
+ *
+ * These pin the contract as it must now hold: whatever the reader pinned wins,
+ * INDEPENDENTLY of what the cleaned text looks like.
+ */
+describe("a pinned tier survives having been removed from the message", () => {
+  test("the reported question: cheap wins over a comparison that reads as reasoning", () => {
+    const raw = "/cheap is today's weather high or lower than 25 years ago?";
+    const directive = parseTierDirective(raw);
+    expect(directive?.tier).toBe("cheap");
+
+    /* The cleaned text alone infers something else entirely, which is exactly
+       why the tier can never be re-derived from it after the strip. */
+    const inferred = selectAssistantTier({ message: directive!.cleaned });
+    expect(inferred.tier).not.toBe("cheap");
+  });
+
+  test("the cleaned message is what the model reads, directive removed", () => {
+    const directive = parseTierDirective("/cheap is today's weather high or lower than 25 years ago?");
+    expect(directive?.cleaned).toBe("is today's weather high or lower than 25 years ago?");
+    expect(directive?.cleaned).not.toMatch(/cheap/);
+  });
+
+  test("every pinned tier is carried, not just the cheap one", () => {
+    for (const [raw, tier] of [
+      ["/cheap why did revenue drop?", "cheap"],
+      ["/premium hello", "premium"],
+      ["/standard analyse the quarter", "standard"],
+    ] as const) {
+      expect(parseTierDirective(raw)?.tier).toBe(tier);
+    }
+  });
+});
