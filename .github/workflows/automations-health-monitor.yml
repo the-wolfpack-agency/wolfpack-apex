@@ -1,6 +1,6 @@
 name: Automations · Health monitor
 
-# Runs every hour against PROD. Catches regressions before any real
+# Runs every four hours against PROD. Catches regressions before any real
 # user does. Two layers:
 #
 #   1. POLL PROBE     — POSTs the cron secret and asserts HTTP 200
@@ -21,7 +21,13 @@ name: Automations · Health monitor
 
 on:
   schedule:
-    - cron: "5 * * * *" # every hour at :05
+    # Every FOUR hours, not every hour. 720 runs a month against a $10 org
+    # Actions budget was the single largest scheduled consumer, and this monitor
+    # watches for a regression rather than racing one: four hours is well inside
+    # the window in which anybody would act on the alert anyway. Throttled
+    # 2026-08-11 when the org hit 100% of its budget during a launch week.
+    # Raise it back if a real incident is ever missed because of this gap.
+    - cron: "5 */4 * * *"
   workflow_dispatch: {}
 
 permissions:
