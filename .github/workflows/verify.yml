@@ -42,6 +42,7 @@ concurrency:
 jobs:
   lint-types:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup Node
@@ -59,6 +60,7 @@ jobs:
 
   unit:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -91,6 +93,7 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup Node
@@ -100,7 +103,20 @@ jobs:
           cache: "npm"
       - name: Install deps
         run: npm ci
+      # The browsers are ~150MB and identical between runs, so downloading them
+      # every time is both slow and the single most likely thing to hang. Cached
+      # exactly as agenticqa-full-pipeline.yml already does it, rather than a
+      # second way of doing the same thing.
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: playwright-${{ runner.os }}-
       - name: Install Playwright browsers
+        # A download that stalls must fail in minutes, not hold the PR for
+        # hours. This is the step that hung on 2026-08-19.
+        timeout-minutes: 10
         run: npx playwright install --with-deps chromium
       - name: Run verify (e2e)
         env:
@@ -134,6 +150,7 @@ jobs:
   # Single aggregate status context: green only when every leg above passed.
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [lint-types, unit, e2e]
     steps:
       - name: All verify legs passed
