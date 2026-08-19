@@ -30,6 +30,13 @@ function insights(over: Record<string, unknown> = {}) {
     totalDecisions: 4,
     estimatedCostUsd: 0.12,
     decisionsWithoutEstimate: 0,
+    /* Measured spend, from ai.completion. The page leads with this: an
+       estimate is computed before the answer exists and cannot know how long
+       it will be, while this is what the provider billed. */
+    actualCalls: 4,
+    actualCostUsd: 0.0431,
+    inputTokens: 3200,
+    outputTokens: 1100,
     usage: [
       { modelId: "gpt-4o-mini", provider: "azure", tier: "small", decisions: 4, estimated: 4, estimatedCostUsd: 0.12, fallbacks: 0 },
     ],
@@ -71,33 +78,55 @@ describe("auth", () => {
 });
 
 describe("money", () => {
-  it("labels the cost as an estimate, never as billed", async () => {
-    // Someone will reconcile this against an invoice. If it does not say
-    // "estimated", they will find it wrong and stop trusting the surface.
+  it("leads with what was actually spent, not with an estimate", async () => {
+    /* This tile used to read "Estimated cost / List price, not billed",
+       computed from a token guess made BEFORE the answer existed. Someone
+       reconciling against an invoice deserves the billed figure, which the
+       provider reports on every completion and which the page never read. */
     respond(insights());
     render(<Page />);
-    expect(await screen.findByTestId("router-metric-cost")).toHaveTextContent(/estimated/i);
-    expect(screen.getByTestId("router-metric-cost")).toHaveTextContent(/not billed/i);
+    const tile = await screen.findByTestId("router-metric-spend");
+    expect(tile).toHaveTextContent("$0.04");
+    expect(tile).toHaveTextContent(/Total spent/i);
+    // And it says where the number comes from, so it can be trusted.
+    expect(tile).toHaveTextContent(/billed by the provider/i);
+    expect(tile).not.toHaveTextContent(/estimate/i);
   });
 
-  it("says when decisions carried no estimate, so the total is read correctly", async () => {
+  it("shows the output tokens, which is the work the money bought", async () => {
+    respond(insights());
+    render(<Page />);
+    const tile = await screen.findByTestId("router-metric-tokens");
+    expect(tile).toHaveTextContent("1,100");
+    expect(tile).toHaveTextContent("3,200 in");
+  });
+
+  it("with nothing completed, says spend cannot be measured", async () => {
+    /* The only case where the estimate gap still matters: no completions
+       recorded at all, which is a worse problem than a missing estimate. */
+    respond(insights({ actualCalls: 0, actualCostUsd: 0, decisionsWithoutEstimate: 3 }));
+    render(<Page />);
+    expect(await screen.findByTestId("router-estimate-caveat")).toHaveTextContent(
+      /spend cannot be measured/i,
+    );
+  });
+
+  it("does not apologise about estimates when spend was measured", async () => {
     respond(insights({ decisionsWithoutEstimate: 3 }));
-    render(<Page />);
-    expect(await screen.findByTestId("router-estimate-caveat")).toHaveTextContent(/understates the real total/i);
-  });
-
-  it("does not show the caveat when every decision was estimated", async () => {
-    respond(insights());
     render(<Page />);
     await screen.findByTestId("router-headline");
     expect(screen.queryByTestId("router-estimate-caveat")).not.toBeInTheDocument();
   });
 
-  it("shows a sub-cent estimate at enough precision to be meaningful", async () => {
-    // $0.00 for real spend reads as free, which is a different claim.
-    respond(insights({ estimatedCostUsd: 0.0012 }));
+  it("shows sub-cent spend at enough precision to be meaningful", async () => {
+    /* $0.00 against real spend reads as free, which is a different claim. The
+       property matters MORE now than when it guarded the estimate: measured
+       spend on a cheap tier is routinely sub-cent, so rounding it to two
+       places would show $0.00 on a page whose whole purpose is proving the
+       router saves money. */
+    respond(insights({ actualCostUsd: 0.0012 }));
     render(<Page />);
-    expect(await screen.findByTestId("router-metric-cost")).toHaveTextContent("$0.0012");
+    expect(await screen.findByTestId("router-metric-spend")).toHaveTextContent("$0.0012");
   });
 });
 

@@ -62,6 +62,18 @@ function normalize(raw: unknown): RouterInsights | null {
     models: b.models,
     smallTierShare: typeof b.smallTierShare === "number" ? b.smallTierShare : null,
     headline: typeof b.headline === "string" ? b.headline : "",
+    /* MEASURED SPEND, and it must be listed HERE or it does not exist.
+       This function rebuilds the payload field by field, so a field the API
+       started returning but this list does not name is silently dropped. That
+       is what happened to the actuals: the query was fixed, the API returned
+       them, and the page kept rendering as though there were none. A
+       whitelist is the right shape for surviving version skew, and this is its
+       one cost: adding a field means adding it in two places. Optional on
+       purpose, so a payload from an older deploy still renders. */
+    ...(typeof b.actualCostUsd === "number" ? { actualCostUsd: b.actualCostUsd } : {}),
+    ...(typeof b.actualCalls === "number" ? { actualCalls: b.actualCalls } : {}),
+    ...(typeof b.inputTokens === "number" ? { inputTokens: b.inputTokens } : {}),
+    ...(typeof b.outputTokens === "number" ? { outputTokens: b.outputTokens } : {}),
   };
 }
 
@@ -158,11 +170,29 @@ export default function AiRouterPage() {
             </p>
             <ConsoleGrid minColWidth={180}>
               <MetricTile value={data.totalDecisions} label="Routing decisions" testId="router-metric-decisions" />
+              {/* WHAT IT ACTUALLY COST, as the headline number.
+                  This tile showed "Estimated cost / List price, not billed",
+                  computed from a token guess made BEFORE the answer existed,
+                  and it read $0.0012 against real spend it never looked at.
+                  ai.completion carries the provider's own billed figure for
+                  every call; that is what a router is judged on, so that is
+                  what the tile shows. The estimate stays available below for
+                  the calls that never completed. */}
               <MetricTile
-                display={usd(data.estimatedCostUsd)}
-                label="Estimated cost"
-                kicker="List price, not billed"
-                testId="router-metric-cost"
+                display={usd(data.actualCostUsd ?? 0)}
+                label="Total spent"
+                kicker={
+                  data.actualCalls
+                    ? `${data.actualCalls} completed call${data.actualCalls === 1 ? "" : "s"}, billed by the provider`
+                    : "No completed calls recorded"
+                }
+                testId="router-metric-spend"
+              />
+              <MetricTile
+                display={(data.outputTokens ?? 0).toLocaleString()}
+                label="Output tokens"
+                kicker={`${(data.inputTokens ?? 0).toLocaleString()} in`}
+                testId="router-metric-tokens"
               />
               <MetricTile
                 display={data.smallTierShare === null ? "n/a" : `${Math.round(data.smallTierShare * 100)}%`}
@@ -171,10 +201,16 @@ export default function AiRouterPage() {
               />
               <MetricTile value={data.fallbacks} label="Fell back" kicker="Preferred model unavailable" testId="router-metric-fallbacks" />
             </ConsoleGrid>
-            {data.decisionsWithoutEstimate > 0 && (
+            {/* The caveat now only appears when there is genuinely nothing
+                measured, which means completions are not being recorded: a
+                different and worse problem than a missing estimate. When spend
+                IS measured, the old sentence apologised for a number nobody
+                was being shown any more. */}
+            {!data.actualCalls && data.decisionsWithoutEstimate > 0 && (
               <p style={notice} data-testid="router-estimate-caveat">
+                No completed calls have been recorded, so spend cannot be measured.{" "}
                 {data.decisionsWithoutEstimate} decision{data.decisionsWithoutEstimate === 1 ? "" : "s"} carried no cost
-                estimate, so the figure above understates the real total.
+                estimate either.
               </p>
             )}
           </>
