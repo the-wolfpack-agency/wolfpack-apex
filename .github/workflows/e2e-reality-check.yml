@@ -83,6 +83,12 @@ jobs:
         run: npx playwright install chromium
       - name: Install OS libraries for Chromium
         if: steps.cfg.outputs.configured == 'true'
+      - name: Install Playwright browser
+        if: steps.cfg.outputs.configured == 'true'
+        timeout-minutes: 8
+        run: npx playwright install chromium
+      - name: Install OS libraries for Chromium
+        if: steps.cfg.outputs.configured == 'true'
         timeout-minutes: 6
         run: |
           npx playwright install-deps chromium \
