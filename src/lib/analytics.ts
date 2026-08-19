@@ -1120,8 +1120,14 @@ export type InstinctEventType =
   //                                    reason? }
   //   assistant.fx_executed        { base, success, cache_hit?,
   //                                    reason? }
+  //   assistant.news_search_executed { topic, item_count, feeds_reachable?,
+  //                                    success, cache_hit? }
+  //     `topic` is what the reader asked about, lowercased. It is the field
+  //     the learning loop needs: what people ask the web for, and how often
+  //     the curated feeds had nothing, is the evidence for which feeds to add.
   | "assistant.weather_executed"
   | "assistant.headlines_executed"
+  | "assistant.news_search_executed"
   | "assistant.fx_executed"
   // Search-results widget - user clicked "Search again" after toggling
   // one or more source checkboxes off. Stub event today (the chat

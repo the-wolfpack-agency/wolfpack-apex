@@ -154,6 +154,15 @@ import "./weather";
 import "./headlines";
 import "./fx";
 
+/* news_search — "the latest article about X", answered from public publisher
+ * feeds. Registered HERE, beside headlines, and for the same reason: its intent
+ * is anchored and specific, and Universal Search below would otherwise swallow
+ * anything phrased as a search. It must come AFTER ./headlines because "top
+ * headlines" (no topic) belongs to that tool, while "headlines about SpaceX"
+ * belongs to this one; the two regexes are disjoint on whether a subject is
+ * present, and registration order settles it either way. */
+import "./news-search";
+
 /* Upload-to-Brain tool — opens the dedicated drag/drop widget that
  * pushes files into the user's Brain via /api/brain/upload (filter
  * gate + existing ingest pipeline). Registered BEFORE the universal

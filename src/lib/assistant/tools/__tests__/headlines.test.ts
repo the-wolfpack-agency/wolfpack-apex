@@ -114,7 +114,14 @@ describe("headlines handler", () => {
     const r = await headlinesTool.handler({}, CTX);
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    expect(r.message).toMatch(/ECONNREFUSED/);
+    /* This asserted the provider's raw text ("ECONNREFUSED") reached the
+       message. The shared feed reader catches the throw and reports null, so
+       that detail is no longer carried: a deliberate trade of one line of
+       diagnostic text for one parser instead of two. What must NOT be lost is
+       that this is reported as a failure at all, and which feed failed, so
+       that is what is asserted now. The analytics reason is unchanged. */
+    expect(r.message).toMatch(/external_api_failed/);
+    expect(r.message).toMatch(/BBC News/);
   });
 
   test("cache hit: second call skips network", async () => {

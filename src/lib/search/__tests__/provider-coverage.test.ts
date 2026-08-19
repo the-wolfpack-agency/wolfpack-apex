@@ -66,6 +66,8 @@ export const SEARCH_PROVIDER_EXEMPT_TOOLS: Record<string, string> = {
   "create-message-form-tool.ts": "form trigger (mutation, not searchable)",
   "create-okr-form-tool.ts": "form trigger (mutation, not searchable)",
   "create-task-form-tool.ts": "form trigger (mutation, not searchable)",
+  "news-search.ts":
+    "live public news feeds, not an indexable workspace surface — Universal Search covers our own data",
   "clarify-widget-tool.ts":
     "did-you-mean chip widget for typo'd queries; a disambiguation surface, not a searchable index",
   "cross-tool-insights-widget-tool.ts":
