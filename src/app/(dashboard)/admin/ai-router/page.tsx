@@ -40,6 +40,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getInstinctUser, fetchWithRefresh } from "@/lib/client-auth";
 import { GlassPanel, MetricTile, SectionHeader, StatusPill, ConsoleGrid } from "@/components/console";
+import RouterFlow from "@/components/admin/RouterFlow";
 import type { RouterInsights } from "@/lib/ai/models/insights";
 import type { ProbeReport } from "@/lib/ai/models/probe";
 
@@ -135,6 +136,12 @@ export default function AiRouterPage() {
         </GlassPanel>
       )}
 
+      {/* WHAT THE NUMBERS BELOW ARE ABOUT. The page reported decisions, models
+          and costs to a reader with no way of knowing what a decision was. */}
+      <GlassPanel title="How a question gets to a model" subtitle="The path every message takes">
+        <RouterFlow />
+      </GlassPanel>
+
       <GlassPanel title="Activity" subtitle={data ? `Last ${data.days} days` : undefined}>
         {loading ? (
           <p style={dim} data-testid="router-loading">
@@ -184,11 +191,29 @@ export default function AiRouterPage() {
                   <StatusPill status={String(u.tier)} size="sm" />
                   <span style={dim}>{u.provider}</span>
                 </div>
+                {/* MEASURED FIRST, ESTIMATED ONLY AS A FALLBACK.
+                    This read "$0.00 estimated (12 without an estimate)", which
+                    apologised for a number instead of reporting the one we
+                    had: ai.completion has carried the provider's own tokens
+                    and cost all along and was never read here. An estimate
+                    made before the answer exists cannot know how long the
+                    answer will be; the measured figure does not have to
+                    guess. */}
                 <p style={{ ...dim, margin: "0.3rem 0 0" }}>
-                  {u.decisions} call{u.decisions === 1 ? "" : "s"}, {usd(u.estimatedCostUsd)} estimated
-                  {u.estimated < u.decisions ? ` (${u.decisions - u.estimated} without an estimate)` : ""}
+                  {u.actualCalls
+                    ? `${u.actualCalls} call${u.actualCalls === 1 ? "" : "s"} completed, ${usd(u.actualCostUsd ?? 0)} spent`
+                    : `${u.decisions} selection${u.decisions === 1 ? "" : "s"}, no completed call recorded`}
+                  {u.outputTokens
+                    ? `, ${(u.inputTokens ?? 0).toLocaleString()} in / ${u.outputTokens.toLocaleString()} out`
+                    : ""}
                   {u.fallbacks > 0 ? `, ${u.fallbacks} after a fallback` : ""}.
                 </p>
+                {u.actualCalls && u.decisions > u.actualCalls ? (
+                  <p style={{ ...dim, margin: "0.15rem 0 0", fontSize: "0.75rem" }}>
+                    Chosen {u.decisions} times; {u.decisions - u.actualCalls} of those never
+                    completed a call, so they cost nothing.
+                  </p>
+                ) : null}
               </li>
             ))}
           </ul>

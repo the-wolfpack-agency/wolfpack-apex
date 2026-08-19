@@ -38,6 +38,13 @@ export interface ModelUsage {
   estimatedCostUsd: number;
   /** Times this model was chosen after a pin could not be honoured. */
   fallbacks: number;
+  /* MEASURED, not estimated: taken from ai.completion, which carries the
+     provider's own numbers for calls that actually ran. Absent when this model
+     was selected but never completed a call in the window. */
+  actualCalls?: number;
+  actualCostUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export interface ReasonCount {
@@ -60,6 +67,11 @@ export interface ModelAvailability {
 }
 
 export interface RouterInsights {
+  /** Measured spend across every completed call in the window. */
+  actualCostUsd?: number;
+  actualCalls?: number;
+  inputTokens?: number;
+  outputTokens?: number;
   days: number;
   totalDecisions: number;
   /** Sum over decisions that carried an estimate. Never billed cost. */
@@ -210,6 +222,9 @@ export function describeInsights(s: {
   smallTierShare: number | null;
   fallbacks: number;
   decisionsWithoutEstimate: number;
+  actualCalls?: number;
+  actualCostUsd?: number;
+  outputTokens?: number;
 }): string {
   if (s.totalDecisions === 0) {
     return "No routing decisions have been recorded yet, so there is nothing to measure.";
@@ -221,8 +236,23 @@ export function describeInsights(s: {
   if (s.fallbacks > 0) {
     parts.push(`${s.fallbacks} fell back because a preferred model was unavailable`);
   }
-  if (s.decisionsWithoutEstimate > 0) {
-    parts.push(`${s.decisionsWithoutEstimate} carried no cost estimate, so the total below understates the true figure`);
+  /* LEAD WITH THE MEASURED NUMBER when there is one. The old sentence said
+     "N carried no cost estimate, so the total below understates the true
+     figure", which was true and unhelpful: it apologised for a number instead
+     of reporting the one we actually had. */
+  if (s.actualCalls && s.actualCalls > 0) {
+    const spend = (s.actualCostUsd ?? 0).toFixed(2);
+    parts.push(`${s.actualCalls} call${s.actualCalls === 1 ? "" : "s"} completed and cost $${spend} in measured spend`);
+    if (s.outputTokens) {
+      parts.push(`${s.outputTokens.toLocaleString()} output tokens generated`);
+    }
+  } else if (s.decisionsWithoutEstimate > 0) {
+    /* No measured spend at all is the only case where the estimate gap still
+       matters, and it means completions are not being recorded, which is a
+       different and worse problem than a missing estimate. */
+    parts.push(
+      `no completed calls recorded, so spend cannot be measured (${s.decisionsWithoutEstimate} decision${s.decisionsWithoutEstimate === 1 ? "" : "s"} had no estimate either)`,
+    );
   }
   return `${parts.join(", ")}.`;
 }
@@ -235,9 +265,66 @@ export function describeInsights(s: {
  * the more actionable half. A failed read yields zero decisions, which the
  * headline reports as "nothing recorded" rather than as "nothing happened".
  */
+/**
+ * WHAT A TURN ACTUALLY COST, as opposed to what we guessed before making it.
+ *
+ * Reported 2026-08-19: "17 decisions carried no cost estimate, so the figure
+ * above understates the real total ... we aren't even counting our output".
+ *
+ * The estimate is optional by construction: `withEstimate` only prices a
+ * selection when the CALLER passed token counts, and the assistant path passes
+ * none, because before a model has answered nobody knows how long the answer
+ * will be. So the selection event legitimately has no estimate, and no amount
+ * of guessing at selection time would make that number true.
+ *
+ * The real figure was already being recorded and was simply never read.
+ * `ai.completion` carries the provider's own input_tokens, output_tokens and
+ * cost_usd for every call that completed. That is measured spend, not an
+ * estimate, and it is what a router is judged on.
+ *
+ * Joined by model id, so a model with actual spend reports actual spend, and a
+ * selection that never completed (an error, a timeout) is still counted as a
+ * decision and honestly reported as having cost nothing measurable.
+ */
+interface ActualRow extends Record<string, unknown> {
+  model: string | null;
+  cost_usd: string | null;
+  input_tokens: string | null;
+  output_tokens: string | null;
+}
+
+export interface ActualSpend {
+  calls: number;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export function summarizeActuals(rows: ActualRow[]): Map<string, ActualSpend> {
+  const byModel = new Map<string, ActualSpend>();
+  for (const row of rows) {
+    if (!row.model) continue;
+    const entry =
+      byModel.get(row.model) ?? { calls: 0, costUsd: 0, inputTokens: 0, outputTokens: 0 };
+    entry.calls += 1;
+    /* A value that will not parse is missing, never zero: a provider that
+       stopped reporting cost must not read as a free call. */
+    const num = (v: string | null) => {
+      const n = v === null ? Number.NaN : Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+    entry.costUsd += num(row.cost_usd);
+    entry.inputTokens += num(row.input_tokens);
+    entry.outputTokens += num(row.output_tokens);
+    byModel.set(row.model, entry);
+  }
+  return byModel;
+}
+
 export async function getRouterInsights(days = 30): Promise<RouterInsights> {
   const models = modelAvailability();
   let rows: DecisionRow[] = [];
+  let actualRows: ActualRow[] = [];
 
   if (process.env.DATABASE_URL) {
     try {
@@ -259,8 +346,46 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
     } catch {
       /* A panel must not take the page down. Zero decisions, reported as such. */
     }
+
+    try {
+      const result = await query<ActualRow>(
+        `SELECT metadata->>'model'         AS model,
+                metadata->>'cost_usd'      AS cost_usd,
+                metadata->>'input_tokens'  AS input_tokens,
+                metadata->>'output_tokens' AS output_tokens
+           FROM instinct_events
+          WHERE event_type = 'ai.completion'
+            AND timestamp > NOW() - INTERVAL '1 day' * $1
+          ORDER BY timestamp DESC
+          LIMIT 20000`,
+        [days],
+      );
+      actualRows = result.rows;
+    } catch {
+      /* Same posture: no actuals is a smaller answer, not a broken page. */
+    }
   }
 
   const s = summarizeDecisions(rows);
-  return { days, models, ...s, headline: describeInsights(s) };
+  const actuals = summarizeActuals(actualRows);
+
+  /* Actual spend is attached per model and totalled separately from the
+     estimate, so the two are never added together or mistaken for each other. */
+  const usage = s.usage.map((u) => {
+    const a = actuals.get(u.modelId);
+    return a ? { ...u, actualCalls: a.calls, actualCostUsd: a.costUsd, inputTokens: a.inputTokens, outputTokens: a.outputTokens } : u;
+  });
+  let actualCostUsd = 0;
+  let actualCalls = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  for (const a of actuals.values()) {
+    actualCostUsd += a.costUsd;
+    actualCalls += a.calls;
+    inputTokens += a.inputTokens;
+    outputTokens += a.outputTokens;
+  }
+
+  const withActuals = { ...s, usage, actualCostUsd, actualCalls, inputTokens, outputTokens };
+  return { days, models, ...withActuals, headline: describeInsights(withActuals) };
 }
