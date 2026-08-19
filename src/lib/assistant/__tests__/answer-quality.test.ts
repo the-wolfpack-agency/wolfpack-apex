@@ -533,3 +533,45 @@ describe("validateEntities — sentence-initial capitals", () => {
     expect(validateEntities("- However, the totals differ.", KNOWN)).toBeNull();
   });
 });
+
+describe("validateEntities — the openers reported on 2026-08-19", () => {
+  /* A user typed "what is up?" and was told the answer "mentions 2 unfamiliar
+     name(s): Ready, What's." The reply was correct; the warning above it was
+     not, and a hedge over a right answer is worse than no hedge at all. */
+  const KNOWN_PEOPLE = ["Jorge Colon", "Alicia Zulker"];
+
+  test("the exact reply that was flagged is now clean", () => {
+    expect(
+      validateEntities("Ready to help with anything you need. What's the task?", KNOWN_PEOPLE),
+    ).toBeNull();
+  });
+
+  test("a contraction is not a name, whichever apostrophe is used", () => {
+    // "What's" reached the reader because the list holds "what" and the
+    // apostrophe made it a different string.
+    expect(validateEntities("What's next on the list?", KNOWN_PEOPLE)).toBeNull();
+    expect(validateEntities("What’s next on the list?", KNOWN_PEOPLE)).toBeNull();
+    expect(validateEntities("They're ready. It'll be fine.", KNOWN_PEOPLE)).toBeNull();
+  });
+
+  test("small talk, which is what people try first, produces no warning", () => {
+    for (const answer of [
+      "Happy to help. Let me know what you need.",
+      "Sure thing. Here is the summary.",
+      "Good morning. Nothing is overdue today.",
+      "Thanks for confirming. Sounds like a plan.",
+    ]) {
+      // Named in the array so a failure says which answer broke.
+      expect([answer, validateEntities(answer, KNOWN_PEOPLE)]).toEqual([answer, null]);
+    }
+  });
+
+  test("but an invented name still gets flagged, including at a sentence start", () => {
+    /* The check keeps its teeth. This is the line the fix must not cross:
+       silencing the warning entirely would be worse than the false positives,
+       because inventing a colleague is the failure it exists to catch. */
+    const flag = validateEntities("Bartholomew approved the invoice.", KNOWN_PEOPLE);
+    expect(flag).not.toBeNull();
+    expect(flag?.reason).toContain("Bartholomew");
+  });
+});
