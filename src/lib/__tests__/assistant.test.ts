@@ -933,7 +933,7 @@ describe("context grounding via getRelevantContext", () => {
     const req = mockAIComplete.mock.calls[0][0];
     expect(req.system).toContain(groundingBlock);
     /* Base assistant prompt must still be present. */
-    expect(req.system).toContain("Wolfpack Assistant");
+    expect(req.system).toContain("OGIAM Assistant");
   });
 
   test("AI call still fires with unchanged system prompt when getRelevantContext throws", async () => {
@@ -958,7 +958,7 @@ describe("context grounding via getRelevantContext", () => {
     const req = mockAIComplete.mock.calls[0][0];
     /* No grounding header was prepended. */
     expect(req.system).not.toContain("Internal context");
-    expect(req.system).toContain("Wolfpack Assistant");
+    expect(req.system).toContain("OGIAM Assistant");
   });
 });
 

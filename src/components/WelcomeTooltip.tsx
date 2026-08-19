@@ -126,7 +126,7 @@ export default function WelcomeTooltip() {
           className="text-sm font-semibold"
           style={{ color: "var(--wp-gold, #eab308)" }}
         >
-          Meet the Wolfpack Assistant
+          Meet the OGIAM Assistant
         </h3>
         <button
           type="button"

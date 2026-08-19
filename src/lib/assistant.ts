@@ -43,7 +43,7 @@ import {
   getToolByName,
 } from "@/lib/assistant/tools";
 import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
-import { selectAssistantTier, parseTierDirective } from "@/lib/assistant/model-tier";
+import { selectAssistantTier, parseTierDirective, type TierDirective } from "@/lib/assistant/model-tier";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,6 +87,15 @@ export interface AssistantResponse {
   response: string;
   source: AssistantSource;
   tokensUsed: number;
+  /** Which model produced an AI answer, rendered beside "AI generated" rather
+   *  than written into the answer text. Absent for zero-token answers, which
+   *  no model produced. */
+  model?: string;
+  provider?: string;
+  /** Present only when the reader pinned a tier ("/cheap", "use the best
+   *  model"). The badge shows the model on every AI answer; this is what lets
+   *  the UI mark that this one was asked for rather than chosen. */
+  tierRequested?: string;
   conversationId: string;
   messageId?: string;
   /** Source attributions surfaced to the UI. Empty array when the answer
@@ -715,6 +724,16 @@ export async function chat(
     topics: topics.join(","),
   });
 
+  /* THE DIRECTIVE IS AN INSTRUCTION TO US, NOT PART OF THE QUESTION.
+     Parsed and removed here, at the top of the turn, rather than inside
+     callAI. Everything below matches on the text: a leading "/cheap" made
+     "/cheap what is the weather in NYC today?" miss the weather tool, whose
+     pattern is anchored, and the question then fell through to a keyword
+     branch. Stripping it only before the prompt would have left every
+     deterministic matcher looking at a message the user did not write. */
+  const tierOverride = parseTierDirective(message);
+  if (tierOverride) message = tierOverride.cleaned;
+
   // --- Priority -3: Confirm / cancel a pending action ---
   // The user's previous turn dispatched an action tool, the dispatcher
   // returned needs_confirmation, and we persisted a pending row. If
@@ -1173,6 +1192,7 @@ export async function chat(
     pageContext,
     brainContext,
     attachmentBlock,
+    tierOverride,
   );
   if (aiResult) {
     trackEvent("system.ai_call_made", userId, userRole, {
@@ -1288,6 +1308,9 @@ export async function chat(
         messageId: msgId,
         workflowId,
         fallbackChips,
+        model: aiResult.model,
+        provider: aiResult.provider,
+        tierRequested: aiResult.tierRequested,
       };
     }
 
@@ -1295,6 +1318,9 @@ export async function chat(
       response: safeContent,
       source: "ai",
       tokensUsed: aiResult.tokensUsed,
+      model: aiResult.model,
+      provider: aiResult.provider,
+      tierRequested: aiResult.tierRequested,
       conversationId: convId,
       messageId: msgId,
       workflowId,
@@ -2073,7 +2099,7 @@ function buildSystemPrompt(
   conversationSummary?: string,
 ): string {
   const parts: string[] = [
-    "You are the Wolfpack Assistant. You have deep knowledge of the wolfpack-auto dealer platform (Next.js 15, PostgreSQL, 215+ API routes, 55 migrations, 110+ tables). Answer questions directly and specifically. Never use em dashes. Use plain, professional language.",
+    "You are the OGIAM Assistant. You have deep knowledge of the wolfpack-auto dealer platform (Next.js 15, PostgreSQL, 215+ API routes, 55 migrations, 110+ tables). Answer questions directly and specifically. Never use em dashes. Use plain, professional language.",
   ];
 
   parts.push(`The user's role is: ${userRole}.`);
@@ -2108,7 +2134,21 @@ async function callAI(
   /* Text extracted from the file(s) attached to THIS message. Highest-priority
      grounding: it is what the user is literally pointing at. */
   attachmentBlock?: string,
-): Promise<{ content: string; tokensUsed: number } | null> {
+  /* A tier the user asked for by name. Passed in rather than parsed here: the
+     directive is removed from the message at the top of the turn, so by the
+     time it reaches this function there is nothing left to find. */
+  tierOverride?: TierDirective | null,
+): Promise<{
+  content: string;
+  tokensUsed: number;
+  /** Which model produced the answer, for the badge row beside "AI generated". */
+  model?: string;
+  provider?: string;
+  /** Set only when the reader pinned a tier by name. Every turn has a model;
+   *  naming it on every turn is noise, and the reader who asked for a specific
+   *  one is the reader who needs to see it. */
+  tierRequested?: string;
+} | null> {
   /* Use the AI router (src/lib/ai/router.ts) so this works whether prod
      is configured for Anthropic OR Azure OpenAI. The previous direct-
      fetch-to-Anthropic path required ANTHROPIC_API_KEY, which is NOT
@@ -2185,11 +2225,9 @@ async function callAI(
         content: m.content,
       }));
 
-    /* Parsed before the prompt is built: the directive is an instruction to
-       US, not part of the question, and left in it the model answers about the
-       word "/cheap" instead of what was asked. */
-    const directive = parseTierDirective(message);
-    const asked = directive ? directive.cleaned : message;
+    /* Already stripped at the top of the turn, so `message` is what was asked. */
+    const directive = tierOverride ?? null;
+    const asked = message;
 
     const currentContent = pageContext
       ? `[Context: ${pageContext}]\n\n${asked}`
@@ -2234,17 +2272,13 @@ async function callAI(
     });
 
     const latencyMs = Date.now() - start;
-    /* NAME THE MODEL WHEN, AND ONLY WHEN, ONE WAS ASKED FOR.
-       Somebody who pins a tier is either proving the router reaches a given
-       model or deliberately trading quality for cost, and both need the answer
-       to say which model produced it. On every other turn this would be noise
-       above every reply, which is the shape of the hedging note that had to be
-       removed this morning. */
-    const content = directive
-      ? `${aiResponse.content}\n\n_Answered by ${aiResponse.model_used ?? "an unnamed model"}` +
-        `${aiResponse.provider_used ? ` via ${aiResponse.provider_used}` : ""}` +
-        ` (${tierChoice.tier} tier, as requested)._`
-      : aiResponse.content;
+    /* WHICH MODEL ANSWERED IS METADATA, NOT PROSE.
+       This appended "_Answered by gpt-4o-mini via azure-openai_" to the text
+       itself. It read as part of the reply, it copied out with the reply, and
+       it landed inside the same block as the answer-quality note. It belongs in
+       the row where "AI generated" and the token count already are, so it is
+       returned as a field and rendered there. Reported 2026-08-19. */
+    const content = aiResponse.content;
     const tokensUsed = aiResponse.input_tokens + aiResponse.output_tokens;
 
     trackEvent("client.doc_generated", userId, userRole, {
@@ -2258,7 +2292,13 @@ async function callAI(
       module: "assistant",
     });
 
-    return { content, tokensUsed };
+    return {
+      content,
+      tokensUsed,
+      model: aiResponse.model_used ?? undefined,
+      provider: aiResponse.provider_used ?? undefined,
+      tierRequested: directive ? tierChoice.tier : undefined,
+    };
   } catch (err) {
     /* NoProviderAvailableError = router has no configured provider
        (neither ANTHROPIC_API_KEY nor AZURE_OPENAI_API_KEY set). Falling

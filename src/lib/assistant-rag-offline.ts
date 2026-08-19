@@ -67,6 +67,16 @@ export interface AssistantRagResult {
    *  styled vendor badge alongside "Zero tokens". Undefined for non-
    *  connector answers. */
   connector_source?: string;
+  /** Which model produced an AI answer, and via which provider. The chat UI
+   *  renders these beside "AI generated". They must be forwarded HERE as well
+   *  as by the route: this wrapper is the path 99% of sends take, and a field
+   *  the server returns but the wrapper drops simply never reaches the screen.
+   *  That is how the connector badge shipped broken in May, and it is why the
+   *  model badge is asserted by an end-to-end render rather than a unit test. */
+  model?: string;
+  provider?: string;
+  /** Set when the reader pinned a tier by name ("/cheap"). */
+  tier_requested?: string;
   /** Related Instinct pages the answer touches — passes through from
    *  the server so chip rows render on the offline-RAG path too. */
   related_pages?: Array<Record<string, unknown>>;
@@ -210,6 +220,10 @@ export async function queryAssistantWithCache(
           widget?: unknown;
           workflowId?: string;
           fallbackChips?: string[];
+          /* Model attribution, forwarded to the badge row. */
+          model?: string;
+          provider?: string;
+          tierRequested?: string;
         };
 
         const answer = data.response ?? "";
@@ -257,6 +271,10 @@ export async function queryAssistantWithCache(
           ...(typeof data.connectorSource === "string" && data.connectorSource
             ? { connector_source: data.connectorSource }
             : {}),
+          /* Model attribution for the badge row. */
+          ...(typeof data.model === "string" ? { model: data.model } : {}),
+          ...(typeof data.provider === "string" ? { provider: data.provider } : {}),
+          ...(typeof data.tierRequested === "string" ? { tier_requested: data.tierRequested } : {}),
           ...(Array.isArray(data.relatedPages) && data.relatedPages.length > 0
             ? { related_pages: data.relatedPages }
             : {}),

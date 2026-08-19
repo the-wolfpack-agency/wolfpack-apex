@@ -57,7 +57,7 @@ describe("<WelcomeTooltip />", () => {
       expect(screen.getByTestId("welcome-tooltip")).toBeInTheDocument();
     });
     // Headline + both beats (Assistant + Knowledge) must be present.
-    expect(screen.getByText(/Meet the Wolfpack Assistant/i)).toBeInTheDocument();
+    expect(screen.getByText(/Meet the OGIAM Assistant/i)).toBeInTheDocument();
     expect(screen.getByText(/sparkle button in the bottom-right/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Knowledge/i).length).toBeGreaterThan(0);
     expect(screen.getByTestId("welcome-tooltip-knowledge-cta")).toHaveAttribute(

@@ -2,7 +2,7 @@
  * GET /api/usage — caller's lifetime + 30-day token usage.
  *
  * Sources:
- *   * instinct_messages.tokens_used  — Wolfpack Assistant chat path.
+ *   * instinct_messages.tokens_used  — OGIAM Assistant chat path.
  *     The assistant's `source` column tells us whether each answer
  *     came from AI generation, a cache, or a tool. We count:
  *       - source='ai'                                 → ai_calls
@@ -18,7 +18,7 @@
  * hits (zero tokens) are counted separately as `cache_hits`.
  *
  * Bug fix 2026-06-01: previously this route counted ai_calls + cache_hits
- * only from `instinct_events`. The Wolfpack Assistant writes to
+ * only from `instinct_events`. The OGIAM Assistant writes to
  * `instinct_messages` (NOT `instinct_events`) so the counters stayed
  * stuck at 0 while tokens_used accumulated — the Settings card read
  * "10,605 tokens • 0 AI calls". Now both stores feed both counters.

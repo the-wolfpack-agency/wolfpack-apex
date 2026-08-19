@@ -67,6 +67,15 @@ interface Message {
    *  (salesforce, hubspot, github, …). Rendered as a styled badge. */
   connectorSource?: string;
   tokensUsed: number;
+  /** Which model produced an AI answer. Rendered in the badge row beside
+   *  "AI generated", NOT written into the answer text: it is metadata about
+   *  the reply, and inside the text it copies out with the reply and reads as
+   *  something the assistant said. Reported 2026-08-19. */
+  model?: string;
+  provider?: string;
+  /** Set when the reader pinned a tier ("/cheap"). Turns the badge from "this
+   *  is what answered" into "this is what you asked for, and it did". */
+  tierRequested?: string;
   timestamp: string;
   rating?: number;
   attachments?: AttachedFile[];
@@ -856,6 +865,10 @@ export default function InstinctChat({
                (which is 99% of message sends — the fix that was missing
                since the badge feature shipped on 2026-05-16). */
             connectorSource: result.connector_source,
+            /* Which model answered, for the badge row beside "AI generated". */
+            model: result.model,
+            provider: result.provider,
+            tierRequested: result.tier_requested,
             relatedPages: result.related_pages as RelatedPage[] | undefined,
             /* Chat-action form spec — when present, the message bubble
                renders ChatActionForm inline so the user fills required
@@ -1062,6 +1075,9 @@ export default function InstinctChat({
             ? (data.fallbackChips as string[])
             : undefined,
         tokensUsed: data.tokensUsed,
+        model: typeof data.model === "string" ? data.model : undefined,
+        provider: typeof data.provider === "string" ? data.provider : undefined,
+        tierRequested: typeof data.tierRequested === "string" ? data.tierRequested : undefined,
         timestamp: new Date().toISOString(),
         relatedPages: Array.isArray(data.relatedPages) ? data.relatedPages : undefined,
         sources: Array.isArray(data.sources) ? data.sources : undefined,
@@ -1513,13 +1529,13 @@ export default function InstinctChat({
               className={`${position === "floating" ? "text-sm" : "text-base sm:text-lg"} font-bold truncate min-w-0`}
               style={{ color: "var(--wp-gold, #eab308)" }}
             >
-              Wolfpack Assistant
+              OGIAM Assistant
             </h1>
 
             <div className="flex-1" />
 
             {/* Header action buttons. On mobile we collapse to icon-only
-                (sm:inline label) so "Wolfpack Assistant" doesn't truncate
+                (sm:inline label) so "OGIAM Assistant" doesn't truncate
                 to "Wol…". Touch targets stay ≥ 32px via px-2 + py-1.5 on
                 the icon-only form. aria-label is set on both forms. */}
             <button
@@ -1964,6 +1980,34 @@ export default function InstinctChat({
                           }}
                         >
                           Zero tokens
+                        </span>
+                      )}
+
+                      {/* WHICH MODEL ANSWERED.
+                          Beside "AI generated" and the token count, because all
+                          three are facts about the call rather than part of the
+                          reply. This used to be appended to the answer text,
+                          where it copied out with the answer and read as
+                          something the assistant had said.
+                          When a tier was asked for by name it says so, which is
+                          how somebody proving the router reaches a given model
+                          can see that it did. */}
+                      {showSource && msg.source === "ai" && msg.model && (
+                        <span
+                          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium"
+                          style={{
+                            background: "var(--wp-text-muted, #6b7280)20",
+                            color: "var(--wp-text-muted, #9ca3af)",
+                          }}
+                          title={
+                            msg.tierRequested
+                              ? `${msg.model}${msg.provider ? ` via ${msg.provider}` : ""} — you asked for the ${msg.tierRequested} tier`
+                              : `${msg.model}${msg.provider ? ` via ${msg.provider}` : ""}`
+                          }
+                          data-testid="assistant-model-badge"
+                        >
+                          {msg.model}
+                          {msg.tierRequested ? ` · ${msg.tierRequested} tier, as asked` : ""}
                         </span>
                       )}
 
