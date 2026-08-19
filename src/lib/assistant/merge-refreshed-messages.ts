@@ -18,6 +18,11 @@ export interface MergeableMessage {
   role: string;
   content: string;
   widget?: unknown;
+  /* Which model answered. Live-only: the send returns it, the stored row does
+     not carry it, so a snapshot taken seconds later has nothing to put here. */
+  model?: string;
+  provider?: string;
+  tierRequested?: string;
 }
 
 export function mergeRefreshedMessages<T extends MergeableMessage>(
@@ -60,10 +65,29 @@ export function mergeRefreshedMessages<T extends MergeableMessage>(
        WIDGET keeps the earlier rule, deliberately the other way round: a widget
        is derived data the server may hydrate better, so a snapshot widget wins
        and the local one only fills a gap. */
+    /* MODEL ATTRIBUTION IS LIVE-ONLY, so the snapshot cannot supply it.
+       Reported 2026-08-19: "the model name displayed for a bit then
+       disappeared". Same mechanism as the answers that vanished, one field
+       along: the send returns which model produced the reply, nothing stores
+       it, and the background refresh then replaced the local row with a server
+       row that had no such field. The badge blinked out a few seconds after
+       arriving.
+
+       So it is carried over on an id match, exactly like content. A local
+       value only ever fills a gap here: if the server ever does start
+       returning one, the server's wins, which is the right precedence for the
+       day the field becomes persisted. */
     return {
       ...m,
       ...(local.content ? { content: local.content } : {}),
       ...(m.widget ? {} : local.widget ? { widget: local.widget } : {}),
+      ...(m.model ? {} : local.model ? { model: local.model } : {}),
+      ...(m.provider ? {} : local.provider ? { provider: local.provider } : {}),
+      ...(m.tierRequested
+        ? {}
+        : local.tierRequested
+          ? { tierRequested: local.tierRequested }
+          : {}),
     };
   });
 }

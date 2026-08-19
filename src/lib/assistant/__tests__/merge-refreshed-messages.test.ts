@@ -117,3 +117,64 @@ describe("the answer on screen is not rewritten under the reader", () => {
     expect(merged.map((m) => m.content)).toEqual(["first", "second, from the server"]);
   });
 });
+
+/**
+ * Reported 2026-08-19: "the model name displayed for a bit then disappeared."
+ *
+ * The same mechanism as the answers that vanished, one field along. Which model
+ * produced a reply is returned by the send and is not stored on the message
+ * row, so a snapshot taken seconds later has no such field, and the merge
+ * replaced the local row with it. The badge blinked out after arriving.
+ */
+describe("model attribution survives a background refresh", () => {
+  test("a snapshot with no model does not erase the one on screen", () => {
+    const local = [
+      { id: "m1", role: "user", content: "what is up" },
+      {
+        id: "m2",
+        role: "assistant",
+        content: "Not much.",
+        model: "gpt-4o-mini",
+        provider: "azure-openai",
+        tierRequested: "cheap",
+      },
+    ];
+    const remote = [
+      { id: "m1", role: "user", content: "what is up" },
+      { id: "m2", role: "assistant", content: "Not much." },
+    ];
+
+    const merged = mergeRefreshedMessages(local, remote);
+    expect(merged).toHaveLength(2);
+    expect(merged[1]).toMatchObject({
+      model: "gpt-4o-mini",
+      provider: "azure-openai",
+      tierRequested: "cheap",
+    });
+  });
+
+  test("if the server ever does carry one, the server's wins", () => {
+    /* The precedence that matters on the day this field becomes persisted:
+       the stored value is the record, and the local copy only fills a gap. */
+    const merged = mergeRefreshedMessages(
+      [{ id: "m2", role: "assistant", content: "a", model: "stale-model" }],
+      [{ id: "m2", role: "assistant", content: "a", model: "gpt-4o" }],
+    );
+    expect(merged[0].model).toBe("gpt-4o");
+  });
+
+  test("a turn with no model is left without one, rather than inventing it", () => {
+    /* Typed with the optional field present so the assertion is about the
+       VALUE being absent, not about the property being unknown to TypeScript. */
+    const merged = mergeRefreshedMessages<{
+      id: string;
+      role: string;
+      content: string;
+      model?: string;
+    }>(
+      [{ id: "m2", role: "assistant", content: "zero token answer" }],
+      [{ id: "m2", role: "assistant", content: "zero token answer" }],
+    );
+    expect(merged[0].model).toBeUndefined();
+  });
+});
