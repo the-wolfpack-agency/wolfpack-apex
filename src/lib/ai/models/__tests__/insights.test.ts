@@ -46,16 +46,24 @@ describe("a decision with no cost estimate", () => {
     expect(s.estimatedCostUsd).toBe(0);
   });
 
-  it("says in the headline that the total understates the real figure", () => {
-    // Otherwise someone reads a total that silently excluded half the calls.
+  it("with no completed calls, says spend cannot be measured", () => {
+    /* This asserted the headline warned that the estimate "understates the real
+       figure". The warning was true and useless: it apologised for a number
+       instead of reporting the one we had. ai.completion carries the
+       provider's own cost for every call that ran, and the headline now reads
+       that instead (see insights-actuals.test.ts).
+
+       No completed calls at all is the one case where the estimate gap still
+       matters, and it means completions are not being recorded, which is a
+       different and worse problem than a missing estimate. */
     const line = describeInsights({
       totalDecisions: 10,
       smallTierShare: 0.5,
       fallbacks: 0,
       decisionsWithoutEstimate: 4,
     });
-    expect(line).toMatch(/4 carried no cost estimate/);
-    expect(line).toMatch(/understates/);
+    expect(line).toMatch(/no completed calls recorded/);
+    expect(line).toMatch(/4 decisions had no estimate either/);
   });
 });
 

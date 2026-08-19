@@ -1,0 +1,89 @@
+/**
+ * What the router page reports as spend.
+ *
+ * Reported 2026-08-19: "The page is showing 'without an estimate' which shows
+ * we aren't even counting our output ... azure-gpt-4o-mini 12 calls, $0.00
+ * estimated (12 without an estimate)".
+ *
+ * The estimate is optional by construction: a selection is priced only when the
+ * caller passes token counts, and the assistant cannot, because before a model
+ * answers nobody knows how long the answer will be. No amount of guessing at
+ * selection time makes that number true.
+ *
+ * The real figure was already recorded and never read. `ai.completion` carries
+ * the provider's own input_tokens, output_tokens and cost_usd for every call
+ * that ran. These tests pin that it is what the page reports, and that a
+ * selection which never completed is still counted as a decision rather than
+ * being quietly dropped or reported as free.
+ */
+import { summarizeActuals, describeInsights } from "@/lib/ai/models/insights";
+
+const row = (model: string, cost: string | null, inTok: string, outTok: string) => ({
+  model,
+  cost_usd: cost,
+  input_tokens: inTok,
+  output_tokens: outTok,
+});
+
+describe("summarizeActuals", () => {
+  test("adds up real calls, real cost and real tokens per model", () => {
+    const out = summarizeActuals([
+      row("azure-gpt-4o-mini", "0.0021", "900", "300"),
+      row("azure-gpt-4o-mini", "0.0019", "800", "250"),
+      row("azure-deepseek-v3", "0.0400", "1200", "900"),
+    ]);
+    expect(out.get("azure-gpt-4o-mini")).toEqual({
+      calls: 2,
+      costUsd: 0.004,
+      inputTokens: 1700,
+      outputTokens: 550,
+    });
+    expect(out.get("azure-deepseek-v3")?.calls).toBe(1);
+  });
+
+  test("a row with no model is ignored rather than counted as an empty one", () => {
+    expect(summarizeActuals([{ model: null, cost_usd: "1", input_tokens: "1", output_tokens: "1" }]).size).toBe(0);
+  });
+
+  test("an unparseable cost does not corrupt the total", () => {
+    /* A provider that stops reporting cost must not turn the total into NaN,
+       which would render as "$NaN" on the page. */
+    const out = summarizeActuals([row("m", null, "10", "5"), row("m", "0.5", "10", "5")]);
+    expect(out.get("m")?.costUsd).toBe(0.5);
+    expect(out.get("m")?.calls).toBe(2);
+  });
+});
+
+describe("the headline sentence", () => {
+  test("reports MEASURED spend when there is any", () => {
+    const line = describeInsights({
+      totalDecisions: 29,
+      smallTierShare: 0.9,
+      fallbacks: 0,
+      decisionsWithoutEstimate: 17,
+      actualCalls: 12,
+      actualCostUsd: 0.0431,
+      outputTokens: 5400,
+    });
+    expect(line).toContain("12 calls completed and cost $0.04 in measured spend");
+    expect(line).toContain("5,400 output tokens generated");
+    // The apology is gone: we have the real number, so we say the real number.
+    expect(line).not.toContain("understates");
+  });
+
+  test("says so plainly when NOTHING completed, which is a worse problem", () => {
+    const line = describeInsights({
+      totalDecisions: 5,
+      smallTierShare: null,
+      fallbacks: 0,
+      decisionsWithoutEstimate: 5,
+    });
+    expect(line).toContain("no completed calls recorded");
+  });
+
+  test("nothing recorded at all is not dressed up as activity", () => {
+    expect(
+      describeInsights({ totalDecisions: 0, smallTierShare: null, fallbacks: 0, decisionsWithoutEstimate: 0 }),
+    ).toContain("nothing to measure");
+  });
+});
