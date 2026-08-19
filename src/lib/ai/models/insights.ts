@@ -349,7 +349,19 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
 
     try {
       const result = await query<ActualRow>(
-        `SELECT metadata->>'model'         AS model,
+        /* JOIN ON THE REGISTRY ID, NOT THE PROVIDER'S NAME.
+           `metadata->>'model'` is response.model_used, which for Azure is the
+           DEPLOYMENT name ("gpt-4o-mini"), while a selection records the
+           registry id ("azure-gpt-4o-mini"). Joining those two matched
+           nothing, so every model reported "no completed call recorded" while
+           the calls were sitting right there. Reported 2026-08-19, and my own
+           bug: I joined two identifiers without checking they were the same
+           vocabulary.
+
+           `selected_model_id` is the registry id, recorded on the completion
+           event for exactly this reason. It falls back to the provider name so
+           a row that predates that field still counts toward the totals. */
+        `SELECT COALESCE(metadata->>'selected_model_id', metadata->>'model') AS model,
                 metadata->>'cost_usd'      AS cost_usd,
                 metadata->>'input_tokens'  AS input_tokens,
                 metadata->>'output_tokens' AS output_tokens
@@ -375,6 +387,12 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
     const a = actuals.get(u.modelId);
     return a ? { ...u, actualCalls: a.calls, actualCostUsd: a.costUsd, inputTokens: a.inputTokens, outputTokens: a.outputTokens } : u;
   });
+  /* THE TOTAL IS OVER EVERY COMPLETED CALL, matched to a model or not.
+     Summing only the rows that joined would understate spend the moment an
+     identifier does not line up, which is the failure being fixed here: money
+     was spent either way, and a total that quietly drops some of it is the
+     same lie in a smaller font. Per-model attribution can be incomplete; the
+     headline figure cannot. */
   let actualCostUsd = 0;
   let actualCalls = 0;
   let inputTokens = 0;

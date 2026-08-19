@@ -87,3 +87,38 @@ describe("the headline sentence", () => {
     ).toContain("nothing to measure");
   });
 });
+
+/**
+ * Reported 2026-08-19: every model on the page read "no completed call
+ * recorded", while calls were plainly being made.
+ *
+ * My bug, and a specific one: I joined the selection event to the completion
+ * event on two identifiers that are not the same vocabulary. A selection
+ * records the REGISTRY id ("azure-gpt-4o-mini"); a completion records
+ * response.model_used, which for Azure is the DEPLOYMENT name ("gpt-4o-mini").
+ * Nothing matched, so every row reported zero calls.
+ *
+ * The completion event already carries `selected_model_id`, the registry id,
+ * recorded so the two routers are joinable. The query reads that first.
+ */
+describe("actual spend joins to the model that was selected", () => {
+  test("a registry id matches, so the calls are attributed", () => {
+    const out = summarizeActuals([
+      { model: "azure-gpt-4o-mini", cost_usd: "0.002", input_tokens: "900", output_tokens: "300" },
+    ]);
+    expect(out.get("azure-gpt-4o-mini")?.calls).toBe(1);
+  });
+
+  test("a deployment name does NOT masquerade as a registry id", () => {
+    /* The pre-fix shape: the row exists, carries real money, and simply does
+       not belong to "azure-gpt-4o-mini". It must not be silently credited to
+       it, and it must not vanish either: the caller totals every row. */
+    const out = summarizeActuals([
+      { model: "gpt-4o-mini", cost_usd: "0.002", input_tokens: "900", output_tokens: "300" },
+    ]);
+    expect(out.get("azure-gpt-4o-mini")).toBeUndefined();
+    expect(out.get("gpt-4o-mini")?.costUsd).toBe(0.002);
+    // Whatever it is called, the spend is still counted somewhere.
+    expect([...out.values()].reduce((sum, a) => sum + a.costUsd, 0)).toBe(0.002);
+  });
+});
