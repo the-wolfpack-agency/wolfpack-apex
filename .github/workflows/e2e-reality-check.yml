@@ -75,8 +75,10 @@ jobs:
       # stop the apt half from being fatal. On 2026-08-19 the runner's apt
       # mirror stopped answering and the equivalent step in verify.yml burned
       # its whole timeout on retries with every browser already installed.
+      # Cache-gated, which is the contract reality-check-workflow.test.ts pins:
+      # on a hit the binaries are already on disk and there is nothing to fetch.
       - name: Install Playwright browser
-        if: steps.cfg.outputs.configured == 'true'
+        if: steps.cfg.outputs.configured == 'true' && steps.pw-cache.outputs.cache-hit != 'true'
         timeout-minutes: 8
         run: npx playwright install chromium
       - name: Install OS libraries for Chromium
