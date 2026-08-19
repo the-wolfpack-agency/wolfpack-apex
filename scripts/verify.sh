@@ -128,6 +128,9 @@ if [ "${VERIFY_SKIP_BRANCH:-0}" != "1" ] && [ "${CI:-}" != "true" ]; then
 fi
 
 stage_enabled lint      && run_stage "lint"       npm run lint
+# Structural, and costs milliseconds: an unbounded CI job is a six-hour hang
+# waiting to happen, and the only symptom is a check that never finishes.
+stage_enabled lint      && run_stage "ci-timeouts" npm run ci:check-timeouts
 stage_enabled typecheck && run_stage "typecheck"  npx tsc --noEmit
 stage_enabled unit      && run_stage "unit-tests" run_unit_tests
 
