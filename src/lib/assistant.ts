@@ -43,7 +43,7 @@ import {
   getToolByName,
 } from "@/lib/assistant/tools";
 import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
-import { selectAssistantTier } from "@/lib/assistant/model-tier";
+import { selectAssistantTier, parseTierDirective } from "@/lib/assistant/model-tier";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -2154,9 +2154,15 @@ async function callAI(
         content: m.content,
       }));
 
+    /* Parsed before the prompt is built: the directive is an instruction to
+       US, not part of the question, and left in it the model answers about the
+       word "/cheap" instead of what was asked. */
+    const directive = parseTierDirective(message);
+    const asked = directive ? directive.cleaned : message;
+
     const currentContent = pageContext
-      ? `[Context: ${pageContext}]\n\n${message}`
-      : message;
+      ? `[Context: ${pageContext}]\n\n${asked}`
+      : asked;
 
     aiMessages.push({ role: "user", content: currentContent });
 
@@ -2197,7 +2203,17 @@ async function callAI(
     });
 
     const latencyMs = Date.now() - start;
-    const content = aiResponse.content;
+    /* NAME THE MODEL WHEN, AND ONLY WHEN, ONE WAS ASKED FOR.
+       Somebody who pins a tier is either proving the router reaches a given
+       model or deliberately trading quality for cost, and both need the answer
+       to say which model produced it. On every other turn this would be noise
+       above every reply, which is the shape of the hedging note that had to be
+       removed this morning. */
+    const content = directive
+      ? `${aiResponse.content}\n\n_Answered by ${aiResponse.model_used ?? "an unnamed model"}` +
+        `${aiResponse.provider_used ? ` via ${aiResponse.provider_used}` : ""}` +
+        ` (${tierChoice.tier} tier, as requested)._`
+      : aiResponse.content;
     const tokensUsed = aiResponse.input_tokens + aiResponse.output_tokens;
 
     trackEvent("client.doc_generated", userId, userRole, {

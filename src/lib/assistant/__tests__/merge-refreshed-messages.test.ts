@@ -85,3 +85,35 @@ describe("mergeRefreshedMessages", () => {
     expect(merged).toEqual(remote);
   });
 });
+
+describe("the answer on screen is not rewritten under the reader", () => {
+  /* Reported 2026-08-19: a correct reply was replaced, seconds after it
+     arrived, by the stored version with a hedging note prepended. The row was
+     never dropped, so it read as the answer disappearing. */
+  it("keeps the local content when the snapshot has rewritten the same turn", () => {
+    const prev = [{ id: "m1", role: "assistant", content: "Ready to help. What's the task?" }];
+    const remote = [
+      {
+        id: "m1",
+        role: "assistant",
+        content: "_Note: this answer may need a second look._\n\nReady to help. What's the task?",
+      },
+    ];
+    const merged = mergeRefreshedMessages(prev, remote);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].content).toBe("Ready to help. What's the task?");
+  });
+
+  it("still takes the server's row for a turn the client never had", () => {
+    // The fix must not make a refresh useless: a turn from another tab or a
+    // slow save still arrives.
+    const merged = mergeRefreshedMessages(
+      [{ id: "m1", role: "assistant", content: "first" }],
+      [
+        { id: "m1", role: "assistant", content: "first" },
+        { id: "m2", role: "assistant", content: "second, from the server" },
+      ],
+    );
+    expect(merged.map((m) => m.content)).toEqual(["first", "second, from the server"]);
+  });
+});
