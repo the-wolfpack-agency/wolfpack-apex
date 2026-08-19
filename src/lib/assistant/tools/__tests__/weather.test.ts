@@ -296,3 +296,42 @@ describe("weather handler — IP geo fallback", () => {
     expect(r.answer).not.toMatch(/London/);
   });
 });
+
+/**
+ * Reported 2026-08-19: "what is the weather in NYC today?" never reached this
+ * tool. It accepted "what's the weather" but not "what is the weather", and
+ * allowed nothing after the city, so a trailing "today" was enough to miss.
+ * The question fell through to a keyword branch and came back as usage
+ * statistics, which is what the operator saw.
+ *
+ * The last block is the reason the pattern stays anchored: a sentence that
+ * mentions the weather is not a request for a forecast.
+ */
+describe("how people actually ask for the weather", () => {
+  test.each([
+    ["what is the weather in NYC today?", "NYC"],
+    ["what's the weather in NYC today", "NYC"],
+    ["what is the weather in San Francisco", "San Francisco"],
+    ["how's the weather in London right now?", "London"],
+    ["what is the weather like in Boston tomorrow", "Boston"],
+    ["weather in Austin", "Austin"],
+  ])("%j asks about %j", (q, city) => {
+    expect(match(q)).toEqual({ location: city });
+  });
+
+  test.each(["weather", "what is the weather today?", "what's the weather right now"])(
+    "%j asks about wherever the reader is",
+    (q) => {
+      // Empty string is the "no city given, use their location" sentinel.
+      expect(match(q)).toEqual({ location: "" });
+    },
+  );
+
+  test.each([
+    "the weather delayed the launch",
+    "did the weather affect the Henderson handover",
+    "write an email about the weather policy",
+  ])("%j is not a forecast request", (q) => {
+    expect(match(q)).toBeNull();
+  });
+});

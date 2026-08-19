@@ -1672,20 +1672,51 @@ async function tryKnowledgeBase(message: string): Promise<KnowledgeMatch | null>
 // Priority 2: Analytics query
 // ---------------------------------------------------------------------------
 
-const ANALYTICS_KEYWORDS = [
-  "how many", "count", "total", "average", "events", "usage",
-  "analytics", "stats", "statistics", "popular", "most used",
-  "last week", "today", "yesterday", "trending", "activity",
-];
+/**
+ * WHEN A QUESTION IS ACTUALLY ABOUT USAGE DATA.
+ *
+ * Reported 2026-08-19: "what is the weather in NYC today?" answered with the
+ * top ten event types from the last seven days, using zero tokens. The list was
+ * a plain `.includes()` over these words, and "today" was one of them: any
+ * question containing a time word was intercepted here, before the model was
+ * ever asked. "What is on my calendar today", "did anything break yesterday",
+ * "what happened last week" all had the same fate.
+ *
+ * Substring matching made it worse than the list looks. "count" is inside
+ * "account", so "how do I change my account?" was an analytics question. So was
+ * anything containing "total" inside "totally".
+ *
+ * TWO CLASSES NOW, and a time word is never enough on its own.
+ *
+ *   STRONG  - the question is unambiguously about usage data. Fires alone.
+ *   COUNTING - asks for a quantity. Fires only alongside a subject worth
+ *              counting, because "how many people are coming" is not this.
+ *
+ * Both are matched on WORD BOUNDARIES. Ambiguity resolves to "not analytics":
+ * a missed analytics question costs one model call, while a wrong hit answers
+ * a completely different question and looks broken, which is what happened.
+ */
+const ANALYTICS_STRONG_RE =
+  /\b(analytics|stats|statistics|usage|most[- ]used|most popular|top events|event counts?|trending)\b/i;
+
+/** Asking for a quantity. Needs a subject from the line below to count. */
+const ANALYTICS_COUNTING_RE = /\b(how many|how much|count of|number of|total number)\b/i;
+
+/** What makes a quantity question one about THIS SYSTEM's usage. */
+const ANALYTICS_SUBJECT_RE =
+  /\b(events?|logins?|sign[- ]?ins?|queries|questions asked|page views?|actions?|activity)\b/i;
+
+export function isAnalyticsQuestion(message: string): boolean {
+  if (ANALYTICS_STRONG_RE.test(message)) return true;
+  return ANALYTICS_COUNTING_RE.test(message) && ANALYTICS_SUBJECT_RE.test(message);
+}
 
 async function tryAnalyticsQuery(
   message: string,
   userId: string,
   userRole: string,
 ): Promise<string | null> {
-  const msgLower = message.toLowerCase();
-  const isAnalyticsQuestion = ANALYTICS_KEYWORDS.some((kw) => msgLower.includes(kw));
-  if (!isAnalyticsQuestion) return null;
+  if (!isAnalyticsQuestion(message)) return null;
 
   try {
     const result = await safeQuery<{ event_type: string; count: number }>(

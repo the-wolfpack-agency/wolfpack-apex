@@ -35,8 +35,22 @@ import type { WidgetSpec } from "@/lib/assistant/widgets/types";
 const FETCH_TIMEOUT_MS = 5000;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
+/**
+ * How somebody actually asks for the weather.
+ *
+ * Reported 2026-08-19: "what is the weather in NYC today?" did not reach this
+ * tool. The pattern accepted "what's the weather" but not "what is the
+ * weather", and nothing after the city, so the trailing "today" alone was
+ * enough to miss. The question then fell through to a keyword branch further
+ * up the pipeline and was answered with usage statistics.
+ *
+ * STILL ANCHORED, deliberately. This tool answers a whole question, not a
+ * sentence that happens to mention weather: "the weather delayed the launch"
+ * must not trigger a forecast. What is widened is the phrasing of the question
+ * itself, not the freedom to appear anywhere in one.
+ */
 const INTENT_RE =
-  /^\s*(?:what'?s\s+the\s+)?weather(?:\s+(?:in|for|at)\s+(.+?))?\??\s*$/i;
+  /^\s*(?:(?:what|what'?s|how|how'?s)(?:\s+(?:is|are))?\s+(?:the\s+)?)?weather(?:\s+like)?(?:\s+(?:in|for|at)\s+(.+?))?(?:\s+(?:today|tonight|tomorrow|right\s+now|now|currently))?\s*\??\s*$/i;
 
 const ParamSchema = z.object({
   /**
