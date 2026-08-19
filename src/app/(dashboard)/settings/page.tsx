@@ -1288,7 +1288,7 @@ export default function SettingsPage() {
               className="text-xs"
               style={{ color: "var(--wp-text-muted)" }}
             >
-              Cache hits cost zero tokens. The Wolfpack Assistant routes
+              Cache hits cost zero tokens. The OGIAM Assistant routes
               calendar, meeting, goal, and financial questions through
               deterministic tools first — those also cost zero tokens.
             </p>
@@ -1482,7 +1482,7 @@ export default function SettingsPage() {
               </p>
             )}
             <p className="text-xs" style={{ color: "var(--wp-text-muted)" }}>
-              Meeting recordings from Plaud are ingested into the team knowledge base. Every team member can browse them on the Meetings page, and the Wolfpack Assistant can answer questions about meeting content with zero AI tokens.
+              Meeting recordings from Plaud are ingested into the team knowledge base. Every team member can browse them on the Meetings page, and the OGIAM Assistant can answer questions about meeting content with zero AI tokens.
             </p>
             <button
               onClick={disconnectPlaud}

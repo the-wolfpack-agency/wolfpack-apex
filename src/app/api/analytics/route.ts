@@ -95,7 +95,7 @@ function bucketEvents(eventCounts: Record<string, number>): ActivityBucket[] {
   const buckets: Record<string, ActivityBucket> = {
     questions: {
       label: "Questions asked",
-      description: "Times the team asked the Wolfpack Assistant a question",
+      description: "Times the team asked the OGIAM Assistant a question",
       count: 0,
       events: ["knowledge.question_asked"],
     },

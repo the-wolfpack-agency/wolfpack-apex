@@ -102,7 +102,7 @@ test("History header button is in the DOM", async () => {
 });
 
 test("History button sits to the LEFT of Suggestions in the header", async () => {
-  /* Nick's placement: "to the right of the Wolfpack Assistant text
+  /* Nick's placement: "to the right of the OGIAM Assistant text
    * and left of the ? button". This pin keeps that order stable. */
   const InstinctChat = await importComponent();
   await act(async () => {

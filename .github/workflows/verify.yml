@@ -103,21 +103,36 @@ jobs:
           cache: "npm"
       - name: Install deps
         run: npm ci
-      # The browsers are ~150MB and identical between runs, so downloading them
-      # every time is both slow and the single most likely thing to hang. Cached
-      # exactly as agenticqa-full-pipeline.yml already does it, rather than a
-      # second way of doing the same thing.
       - name: Cache Playwright browsers
+        id: pw-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
           restore-keys: playwright-${{ runner.os }}-
+      # BROWSER BINARIES AND OS LIBRARIES ARE TWO DIFFERENT PROBLEMS, and
+      # `--with-deps` did both in one step. The browsers come from the cache in
+      # seconds; the libraries come from apt as root, and on 2026-08-19 the
+      # runner's Azure apt mirror stopped answering, so the step spent its whole
+      # ten minutes on `Ign:` retries and timed out with every browser already
+      # in place. Split, the flaky half cannot hold the reliable half hostage.
       - name: Install Playwright browsers
-        # A download that stalls must fail in minutes, not hold the PR for
-        # hours. This is the step that hung on 2026-08-19.
-        timeout-minutes: 10
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 8
+        run: npx playwright install chromium
+      # Only on a cache miss: the libraries change with the runner image, not
+      # with our lockfile, and a warm cache means this runner has run these
+      # tests before. Bounded, retried once, and a failure is a WARNING rather
+      # than a stop: GitHub's ubuntu images already ship what chromium needs, so
+      # the honest test of whether they are missing is the browser failing to
+      # launch in the next step, which says so in one line. An apt mirror having
+      # a bad afternoon is not a reason to block every pull request.
+      - name: Install OS libraries for Chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 6
+        run: |
+          npx playwright install-deps chromium \
+            || (echo "retrying once" && sleep 15 && npx playwright install-deps chromium) \
+            || echo "::warning::playwright install-deps failed (apt mirror). Continuing: the GitHub runner image ships these libraries, and a genuinely missing one surfaces as a browser launch failure in the next step."
       - name: Run verify (e2e)
         env:
           CI: "true"

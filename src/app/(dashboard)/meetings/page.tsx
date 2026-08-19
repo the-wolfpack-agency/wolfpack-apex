@@ -4,7 +4,7 @@
  * Meetings page — browse ingested Plaud transcripts.
  *
  * Org-shared list view (every team member sees every meeting). Click
- * a row to expand the full transcript inline. The Wolfpack Assistant
+ * a row to expand the full transcript inline. The OGIAM Assistant
  * also draws on this same data via its Priority 3 retrieval, so the
  * Meetings page is the human-facing window onto the same store the
  * Assistant uses behind the scenes.
@@ -149,7 +149,7 @@ export default function MeetingsPage() {
       <div>
         <h1 className="text-2xl font-bold" style={{ color: "var(--wp-gold)" }}>Meetings</h1>
         {/* Tab strip — top-level switch between the two ingest sources.
-            Both feed the Wolfpack Assistant; same data store, different
+            Both feed the OGIAM Assistant; same data store, different
             inputs. */}
         <nav
           className="flex items-center gap-1 mt-3 border-b"

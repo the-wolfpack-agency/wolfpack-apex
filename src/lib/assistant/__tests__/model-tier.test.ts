@@ -229,3 +229,25 @@ describe("selectAssistantTier — an explicit override beats every rule", () => 
     ).toBe("user_override");
   });
 });
+
+/**
+ * Why the directive is stripped at the TOP of the turn, not just before the
+ * prompt.
+ *
+ * Reported 2026-08-19: "/cheap what is the weather in NYC today?" came back
+ * with usage statistics. Everything ahead of the model matches on the text of
+ * the message, and a leading "/cheap" is text: an anchored tool pattern cannot
+ * match past it. Removing it only before the prompt would leave every
+ * deterministic matcher reading a message the user never wrote.
+ */
+describe("a pinned tier must not change which tool answers", () => {
+  test("the raw message misses the matcher, the cleaned one hits it", async () => {
+    const { weatherTool } = await import("@/lib/assistant/tools/weather");
+    const raw = "/cheap weather in NYC";
+    // The bug, stated: with the directive left in, nothing matches.
+    expect(weatherTool.matchIntent(raw)).toBeNull();
+    const directive = parseTierDirective(raw);
+    expect(directive?.tier).toBe("cheap");
+    expect(weatherTool.matchIntent(directive!.cleaned)).toEqual({ location: "NYC" });
+  });
+});

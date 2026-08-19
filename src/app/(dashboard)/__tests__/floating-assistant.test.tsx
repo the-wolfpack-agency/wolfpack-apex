@@ -95,7 +95,7 @@ describe("floating FAB — closed state is unobtrusive, open works, analytics fi
     expect(fab).toBeInTheDocument();
     // Sidebar / header elements must NOT render while the FAB is
     // collapsed — they'd block the page underneath.
-    expect(screen.queryByText(/Wolfpack Assistant/i)).toBeNull();
+    expect(screen.queryByText(/OGIAM Assistant/i)).toBeNull();
   });
 
   it("floating panel uses dvh so it shrinks when the mobile keyboard opens", () => {
@@ -146,14 +146,14 @@ describe("floating FAB — closed state is unobtrusive, open works, analytics fi
     });
     // Panel header appears.
     await waitFor(() => {
-      expect(screen.getByText(/Wolfpack Assistant/i)).toBeInTheDocument();
+      expect(screen.getByText(/OGIAM Assistant/i)).toBeInTheDocument();
     });
   });
 
   it("does NOT auto-focus the input on mobile open — keyboard would cover it", async () => {
     // Regression: opening the FAB on iPhone triggered the on-screen
     // keyboard, which then covered the very textarea we just focused.
-    // Users saw "Wolfpack Assistant" + welcome card but no input.
+    // Users saw "OGIAM Assistant" + welcome card but no input.
     // Fix: skip auto-focus on coarse-pointer / narrow-viewport devices.
     // Simulate a touch device via matchMedia + innerWidth.
     const origMatchMedia = window.matchMedia;
@@ -176,7 +176,7 @@ describe("floating FAB — closed state is unobtrusive, open works, analytics fi
         fireEvent.click(screen.getByTestId("floating-assistant-fab"));
       });
       await waitFor(() => {
-        expect(screen.getByText(/Wolfpack Assistant/i)).toBeInTheDocument();
+        expect(screen.getByText(/OGIAM Assistant/i)).toBeInTheDocument();
       });
       const textarea = screen.getByPlaceholderText(/Ask anything/i);
       expect(document.activeElement).not.toBe(textarea);
@@ -199,7 +199,7 @@ describe("floating FAB — closed state is unobtrusive, open works, analytics fi
       fireEvent.click(screen.getByTestId("floating-assistant-fab"));
     });
     await waitFor(() => {
-      expect(screen.getByText(/Wolfpack Assistant/i)).toBeInTheDocument();
+      expect(screen.getByText(/OGIAM Assistant/i)).toBeInTheDocument();
     });
     const collapse = screen.getByTestId("floating-assistant-collapse");
     expect(collapse).toBeInTheDocument();
@@ -209,7 +209,7 @@ describe("floating FAB — closed state is unobtrusive, open works, analytics fi
     });
     // Back to the bubble: panel header gone, FAB visible again.
     await waitFor(() => {
-      expect(screen.queryByText(/Wolfpack Assistant/i)).toBeNull();
+      expect(screen.queryByText(/OGIAM Assistant/i)).toBeNull();
     });
     expect(screen.getByTestId("floating-assistant-fab")).toBeInTheDocument();
   });
@@ -224,7 +224,7 @@ describe("floating FAB — closed state is unobtrusive, open works, analytics fi
       fireEvent.click(screen.getByTestId("floating-assistant-fab"));
     });
     await waitFor(() => {
-      expect(screen.getByText(/Wolfpack Assistant/i)).toBeInTheDocument();
+      expect(screen.getByText(/OGIAM Assistant/i)).toBeInTheDocument();
     });
     for (const testId of [
       "assistant-history-button",

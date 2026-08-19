@@ -133,7 +133,7 @@ export default function AnalyticsPage() {
             No activity yet
           </p>
           <p className="text-sm mt-2" style={{ color: "var(--wp-text-dim)" }}>
-            The system is connected but the team hasn&apos;t generated any tracked activity in the last 7 days. Ask the Wolfpack Assistant a question, generate a doc, or connect an integration on the Settings page to start filling this in.
+            The system is connected but the team hasn&apos;t generated any tracked activity in the last 7 days. Ask the OGIAM Assistant a question, generate a doc, or connect an integration on the Settings page to start filling this in.
           </p>
           <a
             href="/settings"
