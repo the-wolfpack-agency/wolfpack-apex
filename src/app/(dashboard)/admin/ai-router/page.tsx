@@ -41,6 +41,7 @@ import { useRouter } from "next/navigation";
 import { getInstinctUser, fetchWithRefresh } from "@/lib/client-auth";
 import { GlassPanel, MetricTile, SectionHeader, StatusPill, ConsoleGrid } from "@/components/console";
 import RouterFlow from "@/components/admin/RouterFlow";
+import RouterExplainer from "@/components/admin/RouterExplainer";
 import type { RouterInsights } from "@/lib/ai/models/insights";
 import type { ProbeReport } from "@/lib/ai/models/probe";
 
@@ -70,6 +71,7 @@ function normalize(raw: unknown): RouterInsights | null {
        whitelist is the right shape for surviving version skew, and this is its
        one cost: adding a field means adding it in two places. Optional on
        purpose, so a payload from an older deploy still renders. */
+    ...(b.protection && typeof b.protection === "object" ? { protection: b.protection } : {}),
     ...(typeof b.actualCostUsd === "number" ? { actualCostUsd: b.actualCostUsd } : {}),
     ...(typeof b.actualCalls === "number" ? { actualCalls: b.actualCalls } : {}),
     ...(typeof b.inputTokens === "number" ? { inputTokens: b.inputTokens } : {}),
@@ -148,11 +150,59 @@ export default function AiRouterPage() {
         </GlassPanel>
       )}
 
+      {/* FOR SOMEBODY WHO HAS TO EXPLAIN THIS TO A CLIENT, and therefore
+          first on the page: the numbers below mean nothing to a reader who
+          does not yet know what the router is for. Every claim in it is
+          something the product does today and can be shown on this page. */}
+      <GlassPanel
+        title="What this does, in plain words"
+        subtitle="Written to be repeated in a meeting. Each claim says where to point if somebody asks you to prove it."
+      >
+        <RouterExplainer />
+      </GlassPanel>
+
       {/* WHAT THE NUMBERS BELOW ARE ABOUT. The page reported decisions, models
           and costs to a reader with no way of knowing what a decision was. */}
       <GlassPanel title="How a question gets to a model" subtitle="The path every message takes">
         <RouterFlow />
       </GlassPanel>
+
+      {/* WHAT WAS KEPT IN. Coverage first, findings second, deliberately: a
+          client is buying "nothing leaves unchecked", and a low findings count
+          means people pasted few secrets, which is good news that a
+          "blocked: 3" headline would read as a weak product. */}
+      {data?.protection ? (
+        <GlassPanel
+          title="What the router kept in"
+          subtitle="Credentials and financial identifiers are found and replaced before a question leaves us, on every call, whichever model answers."
+        >
+          <ConsoleGrid>
+            <MetricTile
+              value={data.protection.callsChecked}
+              label="Calls checked"
+              kicker="Every completion, no exceptions"
+              testId="router-metric-checked"
+            />
+            <MetricTile
+              value={data.protection.itemsWithheld}
+              label="Items withheld"
+              kicker={`across ${data.protection.callsWithFindings} call${data.protection.callsWithFindings === 1 ? "" : "s"}`}
+              testId="router-metric-withheld"
+            />
+          </ConsoleGrid>
+          {data.protection.kinds.length > 0 ? (
+            <p style={notice} data-testid="router-protection-kinds">
+              Found: {data.protection.kinds.map((k) => `${k.kind.replace(/_/g, " ")} (${k.count})`).join(", ")}.
+              The gate stores what KIND was found and never the value, so this list cannot leak what it caught.
+            </p>
+          ) : (
+            <p style={notice} data-testid="router-protection-clean">
+              Nothing had to be withheld in this window. That is the good outcome: the check ran on every
+              call and found nothing that should not leave.
+            </p>
+          )}
+        </GlassPanel>
+      ) : null}
 
       <GlassPanel title="Activity" subtitle={data ? `Last ${data.days} days` : undefined}>
         {loading ? (

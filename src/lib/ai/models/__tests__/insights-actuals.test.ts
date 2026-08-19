@@ -16,7 +16,7 @@
  * selection which never completed is still counted as a decision rather than
  * being quietly dropped or reported as free.
  */
-import { summarizeActuals, describeInsights } from "@/lib/ai/models/insights";
+import { summarizeActuals, describeInsights, summarizeProtection } from "@/lib/ai/models/insights";
 
 const row = (model: string, cost: string | null, inTok: string, outTok: string) => ({
   model,
@@ -120,5 +120,56 @@ describe("actual spend joins to the model that was selected", () => {
     expect(out.get("gpt-4o-mini")?.costUsd).toBe(0.002);
     // Whatever it is called, the spend is still counted somewhere.
     expect([...out.values()].reduce((sum, a) => sum + a.costUsd, 0)).toBe(0.002);
+  });
+});
+
+/**
+ * What the router kept in.
+ *
+ * The gate has redacted credentials and financial identifiers at the last point
+ * before a prompt leaves this process for a long time, on every completion,
+ * whichever model answers. It has never been shown anywhere: the same failure
+ * as the cost, where the evidence existed and nothing read it.
+ *
+ * The ordering of the two numbers is the design. Coverage is the claim a client
+ * is buying and it stays true on a quiet week; findings are the proof it is not
+ * decorative. A "blocked: 3" headline would read as a weak product when it
+ * actually means people pasted few secrets.
+ */
+describe("summarizeProtection", () => {
+  test("counts calls with findings and the items withheld", () => {
+    const p = summarizeProtection(
+      [
+        { redacted_count: "2", kinds: "api_key,ssn" },
+        { redacted_count: "1", kinds: "api_key" },
+      ],
+      120,
+    );
+    expect(p.callsChecked).toBe(120);
+    expect(p.callsWithFindings).toBe(2);
+    expect(p.itemsWithheld).toBe(3);
+    // Most common kind first, so the panel names the real risk first.
+    expect(p.kinds[0]).toEqual({ kind: "api_key", count: 2 });
+  });
+
+  test("no findings is a clean result, not a missing one", () => {
+    /* The good outcome, and it must read as such: the check ran on every call
+       and found nothing that should not leave. */
+    const p = summarizeProtection([], 80);
+    expect(p).toEqual({ callsChecked: 80, callsWithFindings: 0, itemsWithheld: 0, kinds: [] });
+  });
+
+  test("an unparseable count does not corrupt the total", () => {
+    const p = summarizeProtection([{ redacted_count: null, kinds: "api_key" }], 5);
+    expect(p.itemsWithheld).toBe(0);
+    expect(p.callsWithFindings).toBe(1);
+  });
+
+  test("only the KIND is ever summarised, which is all the gate stores", () => {
+    /* The gate replaces values with placeholders and records kinds, by design,
+       so this panel cannot leak what it caught even if somebody wanted it to. */
+    const p = summarizeProtection([{ redacted_count: "1", kinds: "credit_card" }], 1);
+    expect(JSON.stringify(p)).not.toMatch(/\d{4}/);
+    expect(p.kinds).toEqual([{ kind: "credit_card", count: 1 }]);
   });
 });
