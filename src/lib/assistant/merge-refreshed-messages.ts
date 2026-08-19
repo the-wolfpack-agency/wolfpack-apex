@@ -38,13 +38,32 @@ export function mergeRefreshedMessages<T extends MergeableMessage>(
   // still missing from the snapshot (the in-flight or not-yet-persisted turn).
   const merged: T[] = [...remote, ...localMissing];
 
-  // Preserve a locally-set widget on an identified assistant row when the
-  // snapshot would otherwise drop it (widgets are derived client-side and
-  // may not be hydrated on every snapshot path).
+  /* KEEP WHAT THE READER IS ALREADY READING.
+   *
+   * When a snapshot row and a local row share an id they are the same turn, and
+   * the local copy is the one the send returned and the one on screen. Taking
+   * the server's copy wholesale let post-processing rewrite an answer under the
+   * reader: on 2026-08-19 a correct reply was silently replaced, seconds after
+   * it arrived, by the stored version with a hedging note prepended. To the
+   * user that is the answer disappearing.
+   *
+   * So an id match keeps the local content and widget, and takes only the
+   * fields the server can know better. The server row still wins for any turn
+   * the client never had. */
   return merged.map((m) => {
-    if (m.role !== "assistant" || !m.id || m.widget) return m;
+    if (m.role !== "assistant" || !m.id) return m;
     const local = prev.find((p) => p.id === m.id);
-    if (local?.widget) return { ...m, widget: local.widget };
-    return m;
+    if (!local) return m;
+    /* CONTENT prefers the local copy: it is what the send returned and what is
+       on screen, and the server's copy may carry post-processing the reader
+       never asked for.
+       WIDGET keeps the earlier rule, deliberately the other way round: a widget
+       is derived data the server may hydrate better, so a snapshot widget wins
+       and the local one only fills a gap. */
+    return {
+      ...m,
+      ...(local.content ? { content: local.content } : {}),
+      ...(m.widget ? {} : local.widget ? { widget: local.widget } : {}),
+    };
   });
 }

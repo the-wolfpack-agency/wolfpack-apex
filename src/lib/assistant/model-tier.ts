@@ -89,10 +89,60 @@ export interface TierInput {
  * short message that asks a hard question ("why did revenue drop?") is not
  * mistaken for a trivial one on length alone.
  */
+/**
+ * An explicit instruction to use a particular tier.
+ *
+ * WHY AN OVERRIDE EXISTS AT ALL
+ *
+ * Every rule below infers what a turn needs, which is right for normal use and
+ * useless for two jobs: proving the router actually reaches each model, and
+ * saying "I do not care how good this is, use the cheapest thing" and meaning
+ * it. Inference cannot express either, because the whole point is to overrule
+ * the inference.
+ *
+ * The directive is REMOVED from the message before the model sees it. Leaving
+ * "/cheap" in the prompt makes the model answer about the word.
+ *
+ * UPWARD ONLY BY ACCIDENT, NEVER SILENTLY. An override is honoured exactly as
+ * asked, including down. That is deliberate: a person who types "use the
+ * cheapest model" and gets a premium answer has been ignored, and an override
+ * nobody can trust is worse than none.
+ */
+export interface TierDirective {
+  tier: AIModelTier;
+  /** The message with the directive taken out. */
+  cleaned: string;
+}
+
+const DIRECTIVES: { re: RegExp; tier: AIModelTier }[] = [
+  /* Slash form first: unambiguous, and what somebody testing will reach for. */
+  { re: /(^|\s)\/(cheap|cheapest|small)\b/i, tier: "cheap" },
+  { re: /(^|\s)\/(standard|normal|mid)\b/i, tier: "standard" },
+  { re: /(^|\s)\/(premium|best|large|reasoning)\b/i, tier: "premium" },
+  /* Plain English, because not everybody knows the slash form exists. */
+  { re: /\buse (?:the )?(?:cheapest|smallest|lowest[- ]cost)(?: model)?\b/i, tier: "cheap" },
+  { re: /\buse (?:the )?(?:standard|normal|default)(?: model)?\b/i, tier: "standard" },
+  { re: /\buse (?:the )?(?:best|premium|largest|strongest)(?: model)?\b/i, tier: "premium" },
+];
+
+export function parseTierDirective(message: string): TierDirective | null {
+  for (const { re, tier } of DIRECTIVES) {
+    if (re.test(message)) {
+      return { tier, cleaned: message.replace(re, " ").replace(/\s{2,}/g, " ").trim() };
+    }
+  }
+  return null;
+}
+
 export function selectAssistantTier(input: TierInput): TierChoice {
   const message = (input.message ?? "").trim();
   const attachmentChars = input.attachmentBlock?.length ?? 0;
   const history = input.historyLength ?? 0;
+
+  /* An explicit instruction beats every inference below, in both directions.
+     Checked first so nothing else can quietly overrule what was asked for. */
+  const directive = parseTierDirective(message);
+  if (directive) return { tier: directive.tier, reason: "user_override" };
 
   /* --- Upgrades. Anything that genuinely needs more capability. --- */
 
