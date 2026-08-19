@@ -347,31 +347,52 @@ interface RedactionRow extends Record<string, unknown> {
 }
 
 export interface ProtectionSummary {
-  /** Completions that ran, every one of which passed the gate. */
+  /** Completions that ran, every one of which passed the gate BOTH ways. */
   callsChecked: number;
-  /** Calls where something was found and withheld. */
+  /** Calls where something was found and withheld, in either direction. */
   callsWithFindings: number;
   /** Individual values replaced before the prompt left this process. */
   itemsWithheld: number;
+  /** Values replaced in a model's ANSWER before it was shown or stored. A
+   *  model can quote a credential it was handed in the conversation, an
+   *  attachment or a retrieved document; that reply is rendered and kept. */
+  itemsWithheldFromAnswers: number;
   /** Which kinds, most common first. Never a value: the gate stores
    *  placeholders only, by design, so this cannot leak what it caught. */
   kinds: { kind: string; count: number }[];
 }
 
-export function summarizeProtection(rows: RedactionRow[], callsChecked: number): ProtectionSummary {
-  let itemsWithheld = 0;
+export function summarizeProtection(
+  rows: RedactionRow[],
+  callsChecked: number,
+  answerRows: RedactionRow[] = [],
+): ProtectionSummary {
   const byKind = new Map<string, number>();
-  for (const row of rows) {
-    const n = Number(row.redacted_count);
-    itemsWithheld += Number.isFinite(n) ? n : 0;
-    for (const kind of (row.kinds ?? "").split(",").filter(Boolean)) {
-      byKind.set(kind, (byKind.get(kind) ?? 0) + 1);
+  const count = (list: RedactionRow[]): number => {
+    let total = 0;
+    for (const row of list) {
+      const n = Number(row.redacted_count);
+      total += Number.isFinite(n) ? n : 0;
+      for (const kind of (row.kinds ?? "").split(",").filter(Boolean)) {
+        byKind.set(kind, (byKind.get(kind) ?? 0) + 1);
+      }
     }
-  }
+    return total;
+  };
+
+  /* Both directions share one kind breakdown on purpose: "an API key was
+     involved" is the fact worth reading, and splitting it into two lists of
+     the same words makes the panel longer without making it clearer. The two
+     COUNTS stay separate, because leaving and returning are different events
+     with different fixes. */
+  const itemsWithheld = count(rows);
+  const itemsWithheldFromAnswers = count(answerRows);
+
   return {
     callsChecked,
-    callsWithFindings: rows.length,
+    callsWithFindings: rows.length + answerRows.length,
     itemsWithheld,
+    itemsWithheldFromAnswers,
     kinds: [...byKind.entries()]
       .map(([kind, count]) => ({ kind, count }))
       .sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind)),
@@ -383,6 +404,7 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
   let rows: DecisionRow[] = [];
   let actualRows: ActualRow[] = [];
   let redactionRows: RedactionRow[] = [];
+  let answerRedactionRows: RedactionRow[] = [];
 
   if (process.env.DATABASE_URL) {
     try {
@@ -449,6 +471,21 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
     } catch {
       /* Same posture again. */
     }
+
+    try {
+      const result = await query<RedactionRow>(
+        `SELECT metadata->>'redacted_count' AS redacted_count,
+                metadata->>'kinds'          AS kinds
+           FROM instinct_events
+          WHERE event_type = 'ai.response_redacted'
+            AND timestamp > NOW() - INTERVAL '1 day' * $1
+          LIMIT 20000`,
+        [days],
+      );
+      answerRedactionRows = result.rows;
+    } catch {
+      /* Same posture again. */
+    }
   }
 
   const s = summarizeDecisions(rows);
@@ -480,7 +517,7 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
   /* Coverage is measured against the calls that actually ran, not against
      selections: a selection that never completed sent nothing, so counting it
      as "checked" would inflate the claim with traffic that never existed. */
-  const protection = summarizeProtection(redactionRows, actualCalls);
+  const protection = summarizeProtection(redactionRows, actualCalls, answerRedactionRows);
 
   const withActuals = { ...s, usage, actualCostUsd, actualCalls, inputTokens, outputTokens };
   return { days, models, ...withActuals, protection, headline: describeInsights(withActuals) };

@@ -29,7 +29,7 @@ import { trackEvent } from "@/lib/analytics";
 import { bridgeSelection, capabilityTierFor } from "./model-bridge";
 import { selectModel, logModelSelection } from "@/lib/ai/models";
 import { applyConstitutionToRequest } from "@/lib/constitution";
-import { redactMessages, NEVER_SEND_KINDS } from "./redaction";
+import { redactMessages, redactText, NEVER_SEND_KINDS } from "./redaction";
 import { getObsClient } from "@/lib/obs";
 
 import { AnthropicProvider } from "./anthropic-provider";
@@ -413,6 +413,48 @@ class RouterClient implements AIClient {
             : {}),
         },
       });
+    }
+
+    /* THE RETURN PATH, at the same chokepoint as the outbound one.
+     *
+     * The gate above stops a credential LEAVING. Nothing checked what came
+     * BACK, and a model can put one in an answer without inventing it: the
+     * conversation, a pasted log, an attached file, or a retrieved document
+     * can all carry a key that the model then quotes in its reply. That reply
+     * is rendered, stored on the message row, and read by everyone in the
+     * workspace, so a secret that was handled carefully on the way out
+     * reappears in permanent, shared text on the way in.
+     *
+     * Same function, same kinds, both directions. Reusing redactText rather
+     * than writing a second matcher means the two directions cannot disagree
+     * about what a credential looks like, which is the failure mode of every
+     * scanner that gets implemented twice.
+     *
+     * DEGRADES, NEVER FAILS: a redaction problem must not turn a completed
+     * answer into an error, so anything unexpected leaves the response as it
+     * was rather than losing it. */
+    try {
+      const outbound = redactText(response.content, NEVER_SEND_KINDS);
+      if (outbound.redacted && outbound.hits.length > 0) {
+        response = { ...response, content: outbound.text };
+        trackEvent(
+          "ai.response_redacted",
+          cReq.metadata?.user_id ?? "system",
+          cReq.metadata?.user_role ?? "system",
+          {
+            feature: cReq.metadata?.feature ?? "unknown",
+            workspace_id: cReq.metadata?.workspace_id ?? "default",
+            model: response.model_used,
+            redacted_count: outbound.hits.length,
+            /* The kind only. Placeholders travel, values never do, which is
+               what lets this be reported on a page at all. */
+            kinds: [...new Set(outbound.hits.map((h) => h.kind))].sort().join(","),
+          },
+        );
+      }
+    } catch {
+      /* An answer the reader has waited for is worth more than a redaction
+         pass that threw. The outbound gate already ran. */
     }
 
     emitCompletionEvent(cReq, response, fallbackUsed, bridged?.spec.id);

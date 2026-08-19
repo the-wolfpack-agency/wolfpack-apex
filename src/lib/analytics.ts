@@ -453,6 +453,12 @@ export type InstinctEventType =
   /* A prompt left with a credential or financial identifier removed. Carries
      placeholders and counts only, never the value. */
   | "ai.prompt_redacted"
+  /* The return path. A model can quote a credential it was given in the
+     conversation, an attachment or a retrieved document, and that reply is
+     rendered and stored. Same gate, same kinds, both directions. Metadata:
+     { feature, workspace_id, model, redacted_count, kinds } — kinds only,
+     never a value. */
+  | "ai.response_redacted"
   | "assistant.attachment_read"
   /* Fired when an attachment routes the turn past every zero-token fast
      path straight to the model. Lets us price what image reading costs. */

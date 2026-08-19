@@ -174,7 +174,7 @@ export default function AiRouterPage() {
       {data?.protection ? (
         <GlassPanel
           title="What the router kept in"
-          subtitle="Credentials and financial identifiers are found and replaced before a question leaves us, on every call, whichever model answers."
+          subtitle="Credentials and financial identifiers are found and replaced before a question leaves us, and again before an answer is shown or stored. Every call, both directions, whichever model answers."
         >
           <ConsoleGrid>
             <MetricTile
@@ -185,9 +185,20 @@ export default function AiRouterPage() {
             />
             <MetricTile
               value={data.protection.itemsWithheld}
-              label="Items withheld"
-              kicker={`across ${data.protection.callsWithFindings} call${data.protection.callsWithFindings === 1 ? "" : "s"}`}
+              label="Withheld on the way out"
+              kicker="Never reached the model"
               testId="router-metric-withheld"
+            />
+            {/* The return path. A model can quote a credential it was handed
+                in the conversation, an attachment or a retrieved document, and
+                that answer is rendered and stored on the message row. Counted
+                separately from the outbound figure because leaving and coming
+                back are different events with different fixes. */}
+            <MetricTile
+              value={data.protection.itemsWithheldFromAnswers ?? 0}
+              label="Withheld on the way back"
+              kicker="Never reached the screen"
+              testId="router-metric-withheld-in"
             />
           </ConsoleGrid>
           {data.protection.kinds.length > 0 ? (

@@ -28,10 +28,10 @@ const CLAIMS: Claim[] = [
     proof: "The activity below counts the questions that did reach a model. It is a fraction of what people ask.",
   },
   {
-    headline: "Nothing leaves without being checked",
+    headline: "Nothing leaves without being checked, and nothing comes back unchecked",
     plain:
-      "Every question that does go to a model passes one gate first. Passwords, keys, card and account numbers are found and replaced before the message leaves us, so the model never receives them and neither does the company that runs it.",
-    proof: "The protection panel shows how many calls were checked, and what was withheld.",
+      "Every question that does go to a model passes a gate first: passwords, keys, card and account numbers are found and replaced before the message leaves us, so the model never receives them and neither does the company that runs it. The answer is checked the same way on the way back, because a model can repeat something it was shown, and an answer gets saved and read by the whole team.",
+    proof: "The protection panel counts both directions: withheld on the way out, and withheld on the way back.",
   },
   {
     headline: "The same rules apply to every model, including ones we did not build",

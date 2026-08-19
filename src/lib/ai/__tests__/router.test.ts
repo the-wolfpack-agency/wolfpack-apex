@@ -644,3 +644,67 @@ describe("router — outbound credential gate", () => {
     expect(mockTrackEvent.mock.calls.filter((c) => c[0] === "ai.prompt_redacted")).toHaveLength(0);
   });
 });
+
+/**
+ * The return path.
+ *
+ * The gate has always stopped a credential LEAVING. Nothing checked what came
+ * BACK, and a model does not have to invent one to return it: the
+ * conversation, a pasted log, an attachment or a retrieved document can all
+ * carry a key that the model then quotes in its answer. That answer is
+ * rendered, saved on the message row, and read by everyone in the workspace,
+ * so a secret handled carefully on the way out reappears in permanent shared
+ * text on the way in.
+ *
+ * Same function, same kinds, both directions, so the two can never disagree
+ * about what a credential looks like.
+ */
+describe("router — what comes back is checked too", () => {
+  it("a key quoted in the answer never reaches the caller", async () => {
+    const leaked = "Sure, the key is sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd and it works.";
+    mockMessagesCreate.mockResolvedValueOnce(fakeOk(leaked));
+
+    const res = await getAIClient().complete({
+      messages: [{ role: "user", content: "what was that key" }],
+      max_tokens: 50,
+      model_tier: "standard",
+      metadata: { feature: "test.response_gate" },
+    });
+
+    /* The value is gone and the sentence survives: a redaction that destroyed
+       the answer would just be a different way of losing the reply. */
+    expect(res.content).not.toContain("sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd");
+    expect(res.content).toContain("Sure, the key is");
+    expect(res.content).toContain("and it works.");
+  });
+
+  it("records WHAT KIND was caught, never the value", async () => {
+    mockMessagesCreate.mockResolvedValueOnce(
+      fakeOk("your key is sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd"),
+    );
+    await getAIClient().complete({
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 50,
+      model_tier: "standard",
+      metadata: { feature: "test.response_gate" },
+    });
+
+    const call = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.response_redacted");
+    expect(call).toBeDefined();
+    expect(call?.[3]).toEqual(expect.objectContaining({ redacted_count: 1 }));
+    /* The whole reason this is safe to display on an admin page. */
+    expect(JSON.stringify(call?.[3])).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+  });
+
+  it("an ordinary answer is untouched and records nothing", async () => {
+    mockMessagesCreate.mockResolvedValueOnce(fakeOk("The meeting is at four."));
+    const res = await getAIClient().complete({
+      messages: [{ role: "user", content: "when" }],
+      max_tokens: 50,
+      model_tier: "standard",
+      metadata: { feature: "test.response_gate" },
+    });
+    expect(res.content).toBe("The meeting is at four.");
+    expect(mockTrackEvent.mock.calls.filter((c) => c[0] === "ai.response_redacted")).toHaveLength(0);
+  });
+});
