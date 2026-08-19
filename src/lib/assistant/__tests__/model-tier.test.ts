@@ -8,7 +8,7 @@
  * The property that matters most is the LAST test: ambiguity resolves upward.
  * A wrong guess must cost a saving, never an answer.
  */
-import { selectAssistantTier } from "../model-tier";
+import { selectAssistantTier, parseTierDirective } from "../model-tier";
 
 describe("selectAssistantTier — downgrades", () => {
   test.each(["hi", "Hey", "thanks", "Thank you", "ok", "got it", "perfect", "bye"])(
@@ -140,5 +140,92 @@ describe("selectAssistantTier — safety", () => {
     for (const message of hard) {
       expect(selectAssistantTier({ message }).tier).not.toBe("cheap");
     }
+  });
+});
+
+/**
+ * The explicit override.
+ *
+ * Two jobs inference cannot do: proving the router actually reaches each model,
+ * and saying "use the cheapest thing, I mean it". Both are the operator
+ * overruling the rules above, so the only properties worth asserting are that
+ * the instruction is obeyed EXACTLY, in both directions, and that it never
+ * survives into the text the model reads.
+ */
+describe("parseTierDirective", () => {
+  test.each([
+    ["/cheap", "cheap"],
+    ["/cheapest", "cheap"],
+    ["/small", "cheap"],
+    ["/standard", "standard"],
+    ["/normal", "standard"],
+    ["/mid", "standard"],
+    ["/premium", "premium"],
+    ["/best", "premium"],
+    ["/reasoning", "premium"],
+  ])("the slash form %s pins the %s tier", (token, tier) => {
+    expect(parseTierDirective(token)?.tier).toBe(tier);
+  });
+
+  test.each([
+    ["use the cheapest model", "cheap"],
+    ["use the smallest model", "cheap"],
+    ["use the default model", "standard"],
+    ["use the best model", "premium"],
+  ])("the plain-English form %j pins the %s tier", (phrase, tier) => {
+    expect(parseTierDirective(phrase)?.tier).toBe(tier);
+  });
+
+  test("the directive is taken out of the message the model reads", () => {
+    const d = parseTierDirective("/cheap what are my meetings today");
+    expect(d?.cleaned).toBe("what are my meetings today");
+    // Wherever it sits, and without leaving a double space behind it.
+    expect(parseTierDirective("summarise this thread /premium")?.cleaned).toBe(
+      "summarise this thread",
+    );
+    expect(parseTierDirective("draft /standard an update")?.cleaned).toBe("draft an update");
+  });
+
+  test("a message with no directive is left completely alone", () => {
+    expect(parseTierDirective("what are my meetings today")).toBeNull();
+  });
+
+  /* The costly false positive is the other way round: a turn that merely
+     mentions cost being silently routed to a small model. */
+  test.each([
+    "which flights are cheapest",
+    "the client wants the premium package",
+    "/cheapskate is not a directive",
+    "our standard rate is in the proposal",
+    "compare the small and large plans",
+  ])("%j is not a directive", (message) => {
+    expect(parseTierDirective(message)).toBeNull();
+  });
+});
+
+describe("selectAssistantTier — an explicit override beats every rule", () => {
+  test("downward, even for a question the rules would send to premium", () => {
+    // "why ..." is a reasoning_request, the strongest upgrade there is.
+    const asked = selectAssistantTier({ message: "why did revenue drop last quarter? /cheap" });
+    expect(asked).toEqual({ tier: "cheap", reason: "user_override" });
+    // Proving the rule it overruled was really there.
+    expect(selectAssistantTier({ message: "why did revenue drop last quarter?" }).tier).toBe(
+      "premium",
+    );
+  });
+
+  test("upward, even for a turn the rules would call trivial", () => {
+    expect(selectAssistantTier({ message: "thanks /premium" })).toEqual({
+      tier: "premium",
+      reason: "user_override",
+    });
+    expect(selectAssistantTier({ message: "thanks" }).tier).toBe("cheap");
+  });
+
+  test("an override wins over a heavy attachment too, so nothing is quietly ignored", () => {
+    expect(
+      selectAssistantTier({ message: "/cheap what is this", attachmentBlock: "x".repeat(4000) })
+        .reason,
+    ).toBe("user_override");
   });
 });
