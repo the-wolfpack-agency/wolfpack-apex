@@ -88,6 +88,16 @@ export interface AICompleteRequest {
    * expensive one, so the caller has to ask for the expensive half by name.
    */
   verify?: boolean | "deep";
+  /**
+   * Send this call to a named provider, whatever selection would prefer.
+   *
+   * Exists for the independent judge: the whole point of choosing a different
+   * family is undone if the check then goes wherever routing normally sends it.
+   * Gates are unaffected, because they run after this and on every call.
+   * Ignored when the named provider is absent or cannot serve the tier, so a
+   * stale pin degrades to normal routing rather than to a failure.
+   */
+  provider_pin?: string;
 }
 
 export interface AICompleteResponse {

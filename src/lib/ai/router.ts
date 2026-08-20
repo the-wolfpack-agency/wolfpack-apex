@@ -56,7 +56,10 @@ import { recordRouterCall } from "./audit-record-writer";
 import { mayServe, zeroRetentionProviders, RetentionPolicyError } from "./retention";
 import { mayProcessHere, regionOfModel, ResidencyPolicyError } from "./residency";
 import { verifyAnswer, shouldEscalate } from "./verification";
-import { judgeAnswer, type JudgeResult } from "./judge";
+import { judgeAnswer, type JudgeResult, unjudged } from "./judge";
+import { chooseIndependentJudge, type JudgeCandidate } from "./judge-selection";
+import { MODEL_REGISTRY, isModelAvailable } from "@/lib/ai/models/registry";
+import { ANTHROPIC_TIER_TO_MODEL } from "./anthropic-provider";
 
 interface ProviderRegistry {
   anthropic: AIProvider;
@@ -114,6 +117,16 @@ function pickPrimary(
   req: AICompleteRequest,
   registry: ProviderRegistry,
 ): AIProvider {
+  /* A per-request pin beats every other rule, because the only caller that
+     sets one has already decided WHICH provider must answer and why. Ignored
+     when that provider is missing or cannot serve the tier, so a stale pin
+     degrades to normal routing instead of failing the call. */
+  if (req.provider_pin) {
+    const all = [registry.anthropic, registry.azure, ...registry.compatible];
+    const pinned = all.find((p) => p.name === req.provider_pin);
+    if (pinned && pinned.supportsTier(req.model_tier)) return pinned;
+  }
+
   const override = readPrimaryOverride();
 
   // Ask the SELECTION router first, unless an operator pinned a provider.
@@ -754,28 +767,53 @@ class RouterClient implements AIClient {
        * and the budget: the judge cannot see a credential the answer could not,
        * and it cannot spend past a ceiling the workspace has already hit. */
       let judged: JudgeResult | null = null;
+      let judgeChoice: ReturnType<typeof chooseIndependentJudge> | null = null;
       if (req.verify === "deep" && verdict.sufficient && question) {
-        judged = await judgeAnswer(
-          { question, answer: response.content },
-          async ({ system, prompt, maxTokens }) => {
-            const r = await this.complete({
-              messages: [{ role: "user", content: prompt }],
-              system,
-              max_tokens: maxTokens,
-              model_tier: escalateTo ?? cReq.model_tier,
-              /* verify:false on the judge's own call. A judge judged by a judge
-                 is a bill with no upper bound. */
-              verify: false,
-              sensitivity: cReq.sensitivity,
-              ...(cReq.residency ? { residency: cReq.residency } : {}),
-              metadata: {
-                ...cReq.metadata,
-                feature: `${cReq.metadata?.feature ?? "unknown"}.judge`,
-              },
-            });
-            return r.content;
-          },
+        /* THE CHECK MUST COME FROM A DIFFERENT FAMILY.
+         *
+         * Escalating a tier within whatever provider already answered means, on
+         * an estate served by one vendor, a Claude answer judged by Claude.
+         * That is not independence, it is the same training distribution
+         * marking its own homework, and it fails by agreeing.
+         *
+         * Candidates are offered in the order the router would prefer them, so
+         * the cheapest independent lineage wins. If none exists, the answer is
+         * recorded as UNCHECKED rather than checked by a sibling: a reassuring
+         * audit row that means nothing is worse than an honest gap, because a
+         * gap gets fixed and a false reassurance gets cited. */
+        judgeChoice = chooseIndependentJudge(
+          { provider: response.provider_used, model: bridged?.spec.id ?? response.model_used },
+          judgeCandidates(this.registry, escalateTo ?? cReq.model_tier),
         );
+
+        judged = judgeChoice.candidate
+          ? await judgeAnswer(
+              { question, answer: response.content },
+              async ({ system, prompt, maxTokens }) => {
+                const r = await this.complete({
+                  messages: [{ role: "user", content: prompt }],
+                  system,
+                  max_tokens: maxTokens,
+                  model_tier: escalateTo ?? cReq.model_tier,
+                  /* verify:false on the judge's own call. A judge judged by a
+                     judge is a bill with no upper bound. */
+                  verify: false,
+                  sensitivity: cReq.sensitivity,
+                  ...(cReq.residency ? { residency: cReq.residency } : {}),
+                  metadata: {
+                    ...cReq.metadata,
+                    feature: `${cReq.metadata?.feature ?? "unknown"}.judge`,
+                  },
+                  provider_pin: judgeChoice!.candidate!.provider,
+                });
+                return r.content;
+              },
+            )
+          : unjudged(
+              judgeChoice.reason === "author_lineage_unknown"
+                ? "No independent check: the family of the answering model is not recognised."
+                : "No independent check: every configured model shares a family with the one that answered.",
+            );
         trackEvent(
           "ai.answer_judged",
           cReq.metadata?.user_id ?? "system",
@@ -786,6 +824,11 @@ class RouterClient implements AIClient {
             model: response.model_used,
             sound: judged.sound,
             verdict: judged.verdict,
+            /* The claim an auditor can test. "Checked" says nothing; "checked
+               by a different family, and here are both" can be argued with. */
+            author_lineage: judgeChoice?.authorLineage ?? "unknown",
+            judge_lineage: judgeChoice?.judgeLineage ?? "none",
+            independence: judgeChoice?.reason ?? "not_attempted",
             /* "Checked and fine" and "could not be checked" both ship the
                answer, and only one of them is evidence. */
             judged: judged.judged,
@@ -944,3 +987,51 @@ export function _buildAIClientWithBudgetDepsForTests(deps: {
 }
 
 export { BudgetExceededError, NoProviderAvailableError };
+
+
+/**
+ * Providers that could check an answer, cheapest first.
+ *
+ * BUILT FROM PROVIDERS THAT ACTUALLY EXIST HERE, paired with the model each
+ * would really use. An earlier version read candidates straight out of the
+ * model registry, which lists families this deployment has no provider for
+ * (OpenAI direct) and names providers differently from the registry ("azure"
+ * against "azure-openai"). Both produce a candidate that passes the
+ * independence check and then cannot be pinned, so the judge would quietly run
+ * on whatever routing preferred: exactly the sibling review this is meant to
+ * prevent, with a row claiming otherwise.
+ *
+ * The model matters as much as the provider, because lineage is a fact about
+ * the model: azure-gpt-4o and gpt-4o are the same weights through different
+ * doors.
+ */
+function judgeCandidates(
+  registry: ProviderRegistry,
+  tier: AICompleteRequest["model_tier"],
+): JudgeCandidate[] {
+  const out: JudgeCandidate[] = [];
+
+  if (registry.anthropic.supportsTier(tier)) {
+    out.push({ provider: registry.anthropic.name, model: ANTHROPIC_TIER_TO_MODEL[tier] });
+  }
+
+  if (registry.azure.supportsTier(tier)) {
+    /* The Azure entry for this capability tier, so the judge's lineage is read
+       from the model rather than guessed from the reseller. */
+    const wanted = capabilityTierFor(tier);
+    const spec = MODEL_REGISTRY.find(
+      (m) => m.provider === "azure" && m.capabilityTier === wanted && isModelAvailable(m),
+    );
+    out.push({ provider: registry.azure.name, model: spec?.id });
+  }
+
+  for (const p of registry.compatible) {
+    if (!p.supportsTier(tier)) continue;
+    out.push({
+      provider: p.name,
+      model: (p as { modelFor?: (t: AICompleteRequest["model_tier"]) => string | undefined }).modelFor?.(tier),
+    });
+  }
+
+  return out;
+}

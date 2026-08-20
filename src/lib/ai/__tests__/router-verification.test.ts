@@ -173,6 +173,47 @@ describe("router verification — what it records", () => {
  * quiet.
  */
 describe("router verification — the model judge", () => {
+  /* AN INDEPENDENT FAMILY HAS TO EXIST FOR ANY OF THIS TO HAPPEN.
+     Anthropic answers and Azure judges: azure-gpt-4o is the openai lineage, so
+     it is a genuine outside check on a Claude answer. Without this the whole
+     block would assert on a judge that correctly refuses to run, which is what
+     it did the first time this suite met the independence rule. */
+  const originalFetch = global.fetch;
+  beforeEach(() => {
+    process.env.AZURE_OPENAI_ENDPOINT = "https://example.openai.azure.com";
+    process.env.AZURE_OPENAI_API_KEY = "azure-key";
+    process.env.AZURE_OPENAI_DEPLOYMENT_CHEAP = "gpt-4o-mini";
+    process.env.AZURE_OPENAI_DEPLOYMENT_STANDARD = "gpt-4o";
+    // Anthropic must stay the AUTHOR, or there is nothing for Azure to check.
+    process.env.AI_PROVIDER_PRIMARY = "anthropic";
+    _resetAIClientForTests(null);
+  });
+  afterEach(() => {
+    global.fetch = originalFetch;
+    delete process.env.AZURE_OPENAI_ENDPOINT;
+    delete process.env.AZURE_OPENAI_API_KEY;
+    delete process.env.AZURE_OPENAI_DEPLOYMENT_CHEAP;
+    delete process.env.AZURE_OPENAI_DEPLOYMENT_STANDARD;
+    delete process.env.AI_PROVIDER_PRIMARY;
+  });
+
+  /** The judge's reply, served by Azure rather than by the answering family. */
+  function judgeReplies(text: string) {
+    const f = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({
+        choices: [{ message: { role: "assistant", content: text } }],
+        usage: { prompt_tokens: 20, completion_tokens: 8 },
+        model: "gpt-4o",
+      }),
+      text: async () => "",
+    });
+    global.fetch = f as unknown as typeof fetch;
+    return f;
+  }
+
   it("does not run for verify: true, only for deep", async () => {
     /* Two settings, not one. The free rules must never quietly buy a call. */
     mockMessagesCreate.mockResolvedValue(reply("The invoice total is $4,200."));
@@ -194,13 +235,13 @@ describe("router verification — the model judge", () => {
   });
 
   it("judges a rule-clean answer, and ships it when the judge agrees", async () => {
-    mockMessagesCreate
-      .mockResolvedValueOnce(reply("The invoice total is $4,200."))
-      .mockResolvedValueOnce(reply("VERDICT: sound REASON: answers directly"));
+    mockMessagesCreate.mockResolvedValue(reply("The invoice total is $4,200."));
+    const judge = judgeReplies("VERDICT: sound REASON: answers directly");
     const res = await getAIClient().complete(request({ verify: "deep" }));
     expect(res.content).toBe("The invoice total is $4,200.");
-    // Original plus judge. No escalation, because the judge found nothing.
-    expect(mockMessagesCreate).toHaveBeenCalledTimes(2);
+    // One answer from Anthropic, one verdict from Azure, no escalation.
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
+    expect(judge).toHaveBeenCalledTimes(1);
     const ev = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.answer_judged");
     expect(ev?.[3]).toMatchObject({ sound: true, verdict: "sound", judged: true });
   });
@@ -210,18 +251,17 @@ describe("router verification — the model judge", () => {
        wrong passes every rule. */
     mockMessagesCreate
       .mockResolvedValueOnce(reply("The invoice total is $4,200."))
-      .mockResolvedValueOnce(reply("VERDICT: unsupported REASON: no source for that figure"))
       .mockResolvedValueOnce(reply("The invoice total is $3,100, per invoice 88."));
+    judgeReplies("VERDICT: unsupported REASON: no source for that figure");
     const res = await getAIClient().complete(request({ verify: "deep" }));
     expect(res.content).toBe("The invoice total is $3,100, per invoice 88.");
-    expect(mockMessagesCreate).toHaveBeenCalledTimes(3);
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(2);
   });
 
   it("ships the answer when the judge cannot be read, and says it was unjudged", async () => {
     // A judge that breaks answers is worse than no judge.
-    mockMessagesCreate
-      .mockResolvedValueOnce(reply("The invoice total is $4,200."))
-      .mockResolvedValueOnce(reply("hmm, seems fine to me"));
+    mockMessagesCreate.mockResolvedValue(reply("The invoice total is $4,200."));
+    judgeReplies("hmm, seems fine to me");
     const res = await getAIClient().complete(request({ verify: "deep" }));
     expect(res.content).toBe("The invoice total is $4,200.");
     const ev = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.answer_judged");
@@ -229,9 +269,8 @@ describe("router verification — the model judge", () => {
   });
 
   it("ships the answer when the judge call throws", async () => {
-    mockMessagesCreate
-      .mockResolvedValueOnce(reply("The invoice total is $4,200."))
-      .mockRejectedValueOnce(new Error("provider down"));
+    mockMessagesCreate.mockResolvedValue(reply("The invoice total is $4,200."));
+    global.fetch = jest.fn().mockRejectedValue(new Error("provider down")) as unknown as typeof fetch;
     const res = await getAIClient().complete(request({ verify: "deep" }));
     expect(res.content).toBe("The invoice total is $4,200.");
   });
@@ -239,31 +278,90 @@ describe("router verification — the model judge", () => {
   it("marks the judge's own spend so it is separable from the answer's", async () => {
     /* Without this the judge looks like ordinary traffic and the true cost of
        deep verification cannot be measured against what it saves. */
-    mockMessagesCreate
-      .mockResolvedValueOnce(reply("The invoice total is $4,200."))
-      .mockResolvedValueOnce(reply("VERDICT: sound REASON: fine"));
+    mockMessagesCreate.mockResolvedValue(reply("The invoice total is $4,200."));
+    judgeReplies("VERDICT: sound REASON: fine");
     await getAIClient().complete(request({ verify: "deep" }));
     const completions = mockTrackEvent.mock.calls.filter((c) => c[0] === "ai.completion");
     expect(completions.some((c) => String(c[3].feature).endsWith(".judge"))).toBe(true);
   });
 
-  it("judges with a better model than the one being judged", async () => {
-    /* A small model marking its own homework is the weakest configuration of
-       this idea, and the one you get by default if nobody chooses. */
-    mockMessagesCreate
-      .mockResolvedValueOnce(reply("The invoice total is $4,200."))
-      .mockResolvedValueOnce(reply("VERDICT: sound REASON: fine"));
+  it("judges with a DIFFERENT FAMILY, not merely a different model", async () => {
+    /* A bigger sibling is still a sibling. What makes a check worth its cost
+       is that it does not share the blind spots of the thing it is checking. */
+    mockMessagesCreate.mockResolvedValue(reply("The invoice total is $4,200."));
+    judgeReplies("VERDICT: sound REASON: fine");
     await getAIClient().complete(request({ verify: "deep" }));
-    const first = mockMessagesCreate.mock.calls[0][0].model;
-    const judge = mockMessagesCreate.mock.calls[1][0].model;
-    expect(judge).not.toBe(first);
+    const ev = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.answer_judged");
+    expect(ev?.[3]).toMatchObject({
+      independence: "independent",
+      author_lineage: "anthropic",
+      judge_lineage: "openai",
+      judged: true,
+    });
   });
 
   it("does not judge a judge", async () => {
     // A judge judged by a judge is a bill with no upper bound.
-    mockMessagesCreate.mockResolvedValue(reply("VERDICT: sound REASON: fine"));
+    mockMessagesCreate.mockResolvedValue(reply("The invoice total is $4,200."));
+    judgeReplies("VERDICT: sound REASON: fine");
     await getAIClient().complete(request({ verify: "deep" }));
     const judged = mockTrackEvent.mock.calls.filter((c) => c[0] === "ai.answer_judged");
     expect(judged).toHaveLength(1);
+  });
+});
+
+
+/**
+ * The judge must come from a different family.
+ *
+ * The failure being guarded is silent agreement: a sibling checking its own
+ * family's work, passing it, and leaving a row that says "checked". On an
+ * estate served by one vendor that is what the previous version did on every
+ * call, so the assertions here are mostly that NO judging happened.
+ */
+describe("router verification — independence of the judge", () => {
+  it("does not judge at all when every model shares the answering family", async () => {
+    /* Anthropic only, which is this test file's environment. A Claude answer
+       has no independent checker here, and a sibling check recorded as a check
+       is worse than an honest gap. */
+    mockMessagesCreate.mockResolvedValue(reply("The invoice total is $4,200."));
+    const res = await getAIClient().complete(request({ verify: "deep" }));
+
+    expect(res.content).toBe("The invoice total is $4,200.");
+    // One call: the answer. No second call was bought to hear itself agree.
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
+
+    const ev = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.answer_judged");
+    expect(ev?.[3]).toMatchObject({
+      judged: false,
+      independence: "no_independent_lineage_configured",
+      author_lineage: "anthropic",
+      judge_lineage: "none",
+    });
+  });
+
+  it("still ships the answer when no independent judge exists", async () => {
+    // An absent checker must never cost the reader their answer.
+    mockMessagesCreate.mockResolvedValue(reply("The invoice total is $4,200."));
+    const res = await getAIClient().complete(request({ verify: "deep" }));
+    expect(res.content).toBe("The invoice total is $4,200.");
+  });
+
+  it("does not escalate on the strength of a check that never happened", async () => {
+    /* unjudged() reports sound:true precisely so an absent judge cannot
+       trigger a paid retry. */
+    mockMessagesCreate.mockResolvedValue(reply("The invoice total is $4,200."));
+    await getAIClient().complete(request({ verify: "deep" }));
+    const verified = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.answer_verified");
+    expect(verified?.[3]).toMatchObject({ escalated: false });
+  });
+
+  it("records both families, so the claim can be checked rather than believed", async () => {
+    mockMessagesCreate.mockResolvedValue(reply("The invoice total is $4,200."));
+    await getAIClient().complete(request({ verify: "deep" }));
+    const ev = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.answer_judged");
+    // "Checked" says nothing. Naming both sides is what an auditor can test.
+    expect(ev?.[3]).toHaveProperty("author_lineage");
+    expect(ev?.[3]).toHaveProperty("judge_lineage");
   });
 });
