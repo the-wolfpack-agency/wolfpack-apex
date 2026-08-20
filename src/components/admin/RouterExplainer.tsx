@@ -16,7 +16,12 @@
 interface Claim {
   headline: string;
   plain: string;
-  /** How you would prove it if asked in the room. */
+  /**
+   * The panel on THIS page that proves the claim, written as an instruction to
+   * the reader. Originally labelled "Where to point", which readers took as
+   * a direction to point at something physical rather than "here is your
+   * evidence" (reported 2026-08-20).
+   */
   proof: string;
 }
 
@@ -25,31 +30,31 @@ const CLAIMS: Claim[] = [
     headline: "Most questions never reach an AI model at all",
     plain:
       "Your calendar, mail, records and documents are read directly. If the answer is already in your own systems, that is where it comes from: no model, no cost, and nothing sent outside.",
-    proof: "The activity below counts the questions that did reach a model. It is a fraction of what people ask.",
+    proof: "Scroll to Activity. It counts only the questions that did reach a model, which is a fraction of what people ask.",
   },
   {
     headline: "Nothing leaves without being checked, and nothing comes back unchecked",
     plain:
       "Every question that does go to a model passes a gate first: passwords, keys, card and account numbers are found and replaced before the message leaves us, so the model never receives them and neither does the company that runs it. The answer is checked the same way on the way back, because a model can repeat something it was shown, and an answer gets saved and read by the whole team.",
-    proof: "The protection panel counts both directions: withheld on the way out, and withheld on the way back.",
+    proof: "Scroll to “What the router kept in”. It counts both directions: withheld on the way out, and withheld on the way back.",
   },
   {
     headline: "The same rules apply to every model, including ones we did not build",
     plain:
       "The gate sits between your data and whichever model answers. Swapping a model, adding a cheaper one, or trying a new provider changes nothing about what is allowed to leave, because the check happens on our side of the line.",
-    proof: "The models list below shows several providers. All of them are behind the same gate.",
+    proof: "Scroll to the models list. It names several providers, and every one of them sits behind the same gate.",
   },
   {
     headline: "The cheapest model that can do the job gets the job",
     plain:
       "Simple questions go to small, inexpensive models. Hard ones go to larger models. That decision is made by fixed rules rather than by another AI, so it is the same every time and can be explained afterwards.",
-    proof: "The reasons panel names why each model was chosen, in plain words.",
+    proof: "Scroll to the reasons panel. It names why each model was chosen, in plain words.",
   },
   {
     headline: "Every answer's real cost is recorded",
     plain:
       "Not an estimate: the amount the provider billed, per answer, per model. That is what makes the saving from choosing a smaller model a fact rather than a claim.",
-    proof: "Total spent, above, and the per-model figures below it.",
+    proof: "Scroll to Activity. Total spent is the measured amount billed, and “Which models were used” breaks it down per model.",
   },
 ];
 
@@ -89,7 +94,7 @@ export default function RouterExplainer() {
         <div className="rx-claim" key={c.headline}>
           <p className="rx-head">{c.headline}</p>
           <p className="rx-plain">{c.plain}</p>
-          <p className="rx-proof">Where to point: {c.proof}</p>
+          <p className="rx-proof">Proof on this page: {c.proof}</p>
         </div>
       ))}
     </div>

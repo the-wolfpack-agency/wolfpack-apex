@@ -203,20 +203,29 @@ export default function AiRouterPage() {
         </GlassPanel>
       )}
 
-      {/* FOR SOMEBODY WHO HAS TO EXPLAIN THIS TO A CLIENT, and therefore
-          first on the page: the numbers below mean nothing to a reader who
-          does not yet know what the router is for. Every claim in it is
-          something the product does today and can be shown on this page. */}
+      {/* FOR SOMEBODY WHO HAS TO EXPLAIN THIS TO A CLIENT. Kept first on the
+          page because the numbers below mean nothing to a reader who does not
+          yet know what the router is for, but FOLDED (2026-08-20): the people
+          who open this page daily already know, and two explanations in full
+          pushed the analytics below the fold on a laptop. Shut, both are one
+          line each and the spend is visible on arrival. */}
       <GlassPanel
+        collapsible
         title="What this does, in plain words"
-        subtitle="Written to be repeated in a meeting. Each claim says where to point if somebody asks you to prove it."
+        subtitle="Read this before explaining the router to a client. Five claims, each with the panel on this page that proves it."
+        testId="router-explainer-panel"
       >
         <RouterExplainer />
       </GlassPanel>
 
       {/* WHAT THE NUMBERS BELOW ARE ABOUT. The page reported decisions, models
           and costs to a reader with no way of knowing what a decision was. */}
-      <GlassPanel title="How a question gets to a model" subtitle="The path every message takes">
+      <GlassPanel
+        collapsible
+        title="How a question gets to a model"
+        subtitle="The path every message takes, from typed question to recorded cost."
+        testId="router-flow-panel"
+      >
         <RouterFlow />
       </GlassPanel>
 
