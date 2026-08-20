@@ -16,6 +16,10 @@ const mockVerifyChain = jest.fn();
 jest.mock("@/lib/audit-log", () => ({
   queryAuditLog: (...args: unknown[]) => mockQueryAuditLog(...args),
   verifyChain: (...args: unknown[]) => mockVerifyChain(...args),
+  /* The export's manifest states the genesis value so an auditor can start the
+     walk. Real constant, not a stub: a wrong one here would let a wrong one
+     ship. */
+  GENESIS_HASH: "0".repeat(64),
 }));
 
 const mockGetUser = jest.fn();
@@ -163,21 +167,35 @@ describe("GET /api/admin/audit-log/export", () => {
 
   it("returns NDJSON with correct content-type and one JSON object per line", async () => {
     mockGetUser.mockReturnValueOnce(ADMIN);
-    mockQueryAuditLog.mockResolvedValueOnce({
+    mockQueryAuditLog.mockResolvedValue({
       entries: [
         { id: "a", seq: 2, action: "x" },
         { id: "b", seq: 1, action: "y" },
       ],
       nextCursor: undefined,
     });
+    mockVerifyChain.mockResolvedValue({ valid: true, checkedCount: 2 });
     const res = await EXPORT(makeReq("/api/admin/audit-log/export", { auth: "Bearer t" }));
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/x-ndjson");
     const text = await res.text();
     const lines = text.trim().split("\n");
-    expect(lines).toHaveLength(2);
-    expect(JSON.parse(lines[0]).id).toBe("a");
-    expect(JSON.parse(lines[1]).id).toBe("b");
+
+    /* A MANIFEST LINE, then the rows. The rows always carried entry_hash and
+       prev_hash and nothing said what to do with them: no algorithm, no
+       canonicalisation, no genesis value, and no statement of whether the
+       chain verified. A hash somebody cannot reproduce is decoration. */
+    expect(lines).toHaveLength(3);
+    const manifest = JSON.parse(lines[0]);
+    expect(manifest.document).toBe("instinct-audit-export");
+    expect(manifest.chain.algorithm).toMatch(/sha256/);
+    expect(manifest.chain.canonicalisation).toMatch(/sorted/i);
+    /* The verdict travels IN the file: an export that omitted a failing chain
+       would be worse than none, because it would look clean. */
+    expect(manifest.chain.verified_at_export).toBeDefined();
+
+    expect(JSON.parse(lines[1]).id).toBe("a");
+    expect(JSON.parse(lines[2]).id).toBe("b");
   });
 
   it("emits system.audit_log_export", async () => {

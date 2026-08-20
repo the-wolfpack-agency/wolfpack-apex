@@ -51,6 +51,7 @@ import {
   type WorkspaceAIPolicy,
 } from "./workspace-policy";
 import { governTier, CEILING_MULTIPLE, type BudgetDecision } from "./budget";
+import { recordRouterCall } from "./audit-record-writer";
 
 interface ProviderRegistry {
   anthropic: AIProvider;
@@ -491,10 +492,13 @@ class RouterClient implements AIClient {
      * DEGRADES, NEVER FAILS: a redaction problem must not turn a completed
      * answer into an error, so anything unexpected leaves the response as it
      * was rather than losing it. */
+    const inboundWithheld: { count: number; kinds: string[] } = { count: 0, kinds: [] };
     try {
       const outbound = redactText(response.content, NEVER_SEND_KINDS);
       if (outbound.redacted && outbound.hits.length > 0) {
         response = { ...response, content: outbound.text };
+        inboundWithheld.count = outbound.hits.length;
+        inboundWithheld.kinds = [...new Set(outbound.hits.map((h) => h.kind))];
         trackEvent(
           "ai.response_redacted",
           cReq.metadata?.user_id ?? "system",
@@ -516,6 +520,38 @@ class RouterClient implements AIClient {
     }
 
     emitCompletionEvent(cReq, response, fallbackUsed, bridged?.spec.id);
+
+    /* THE COMPLIANCE RECORD, distinct from the analytics event above.
+     *
+     * Analytics is observability: counts that answer "how is this behaving".
+     * This is evidence: append-only, hash-chained and reproducible, so a
+     * regulated client asking what left their tenancy gets an answer they can
+     * verify rather than a dashboard they have to trust.
+     *
+     * Written last, after the call is complete, so a row exists only for a
+     * call that actually happened. Never blocks and never throws: an audit
+     * failure must not turn a finished answer into an error, and recordAudit
+     * already fails closed by reporting rather than by rejecting. */
+    void recordRouterCall({
+      workspaceId: cReq.metadata?.workspace_id ?? "default",
+      userId: cReq.metadata?.user_id ?? "system",
+      feature: cReq.metadata?.feature ?? "unknown",
+      model: bridged?.spec.id ?? response.model_used,
+      provider: response.provider_used,
+      requestedTier: req.model_tier,
+      servedTier: cReq.model_tier,
+      inputTokens: response.input_tokens,
+      outputTokens: response.output_tokens,
+      costUsd: response.cost_usd,
+      withheldOutbound: gated.count,
+      withheldInbound: inboundWithheld.count,
+      withheldKinds: [
+        ...new Set([...gated.hits.map((h) => h.kind), ...inboundWithheld.kinds]),
+      ],
+      injectionAttempts: 0,
+      ...(budget.state === "ok" ? {} : { budgetState: budget.state }),
+    });
+
     return response;
   }
 }
