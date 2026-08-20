@@ -499,3 +499,25 @@ a:hover { color: var(--wp-gold-hover); }
   .wp-count-up { animation: none !important; opacity: 1 !important; transform: none !important; }
   .wp-scanline::after { animation: none !important; opacity: 0 !important; }
 }
+
+/* Collapsible GlassPanel (console kit).
+   Safari still paints a triangle for summary unless the pseudo-element is
+   hidden explicitly, which would sit beside our own chevron. */
+[data-collapsible="true"] > [data-testid="glass-panel-header"]::-webkit-details-marker {
+  display: none;
+}
+[data-collapsible="true"] > [data-testid="glass-panel-header"]::marker {
+  content: "";
+}
+[data-collapsible="true"] > [data-testid="glass-panel-header"]:focus-visible {
+  outline: 2px solid var(--wp-gold, #d4a017);
+  outline-offset: -2px;
+}
+[data-collapsible="true"][open] > [data-testid="glass-panel-header"] [data-testid="glass-panel-chevron"] {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-testid="glass-panel-chevron"] {
+    transition: none;
+  }
+}

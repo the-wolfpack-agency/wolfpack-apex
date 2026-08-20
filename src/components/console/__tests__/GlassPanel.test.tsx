@@ -126,3 +126,58 @@ describe("GlassPanel", () => {
     });
   });
 });
+
+/**
+ * Collapsible mode (2026-08-20).
+ *
+ * Added because two explanation panels pushed the router page's analytics
+ * below the fold. The risk of folding is content that becomes unreachable, so
+ * these assert the fold OPENS and that the header still carries the title
+ * while shut.
+ */
+describe("GlassPanel collapsible", () => {
+  it("is a details element, shut, with the body still in the document", () => {
+    render(
+      <GlassPanel collapsible title="What this does" testId="p">
+        <p>the long explanation</p>
+      </GlassPanel>,
+    );
+    const panel = screen.getByTestId("p");
+    expect(panel.tagName).toBe("DETAILS");
+    expect((panel as HTMLDetailsElement).open).toBe(false);
+    // Title readable while shut, or folding hid the feature entirely.
+    expect(screen.getByText("What this does")).toBeInTheDocument();
+    expect(screen.getByTestId("glass-panel-header").tagName).toBe("SUMMARY");
+  });
+
+  it("opens on arrival when asked to", () => {
+    render(
+      <GlassPanel collapsible defaultOpen title="Shown" testId="p">
+        <p>body</p>
+      </GlassPanel>,
+    );
+    expect((screen.getByTestId("p") as HTMLDetailsElement).open).toBe(true);
+  });
+
+  it("stays a section, with a header, when not collapsible", () => {
+    render(
+      <GlassPanel title="Plain" testId="p">
+        <p>body</p>
+      </GlassPanel>,
+    );
+    expect(screen.getByTestId("p").tagName).toBe("SECTION");
+    expect(screen.getByTestId("glass-panel-header").tagName).toBe("HEADER");
+    expect(screen.queryByTestId("glass-panel-chevron")).toBeNull();
+  });
+
+  it("does not fold when there is no header to click", () => {
+    // A fold whose control does not exist is content that is simply gone.
+    render(
+      <GlassPanel collapsible testId="p">
+        <p>body</p>
+      </GlassPanel>,
+    );
+    expect(screen.getByTestId("p").tagName).toBe("SECTION");
+    expect(screen.getByText("body")).toBeInTheDocument();
+  });
+});

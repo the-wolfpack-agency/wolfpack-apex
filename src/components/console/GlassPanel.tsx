@@ -34,6 +34,16 @@ export interface GlassPanelProps {
   style?: CSSProperties;
   /** Body padding. Defaults to comfortable 16px; pass 0 for flush content. */
   padded?: boolean;
+  /**
+   * Fold the body away behind the header, which becomes the control that opens
+   * it. For panels that explain rather than report: a reader who already knows
+   * what the page is should not scroll past an explanation to reach the
+   * numbers, and a reader who does not should still find it in the obvious
+   * place rather than in a manual.
+   */
+  collapsible?: boolean;
+  /** Only meaningful with `collapsible`. Default false: shut on arrival. */
+  defaultOpen?: boolean;
   testId?: string;
   children?: ReactNode;
 }
@@ -46,6 +56,8 @@ export function GlassPanel({
   className,
   style,
   padded = true,
+  collapsible = false,
+  defaultOpen = false,
   testId,
   children,
 }: GlassPanelProps) {
@@ -58,20 +70,35 @@ export function GlassPanel({
   const merged = ["wp-glass", glowClass, className].filter(Boolean).join(" ");
   const hasHeader = title != null || subtitle != null || actions != null;
 
+  /* A collapsible panel is a <details>, not a div with a click handler: it
+     folds with JavaScript disabled, the header is focusable and space-toggles
+     for free, and in-page find still reaches the text inside it. A header is
+     required, because a fold whose control is invisible is content that is
+     simply gone. */
+  const folding = collapsible && hasHeader;
+  const Root = folding ? "details" : "section";
+  const HeaderTag = folding ? "summary" : "header";
+
   return (
-    <section
+    <Root
+      {...(folding ? { open: defaultOpen } : {})}
       data-testid={testId ?? "glass-panel"}
       data-glow={glow}
+      data-collapsible={folding ? "true" : undefined}
       className={merged}
       // Contain the panel: it must never be the source of horizontal overflow,
       // even if a child tries to be wider than the column it sits in.
       style={{ minWidth: 0, maxWidth: "100%", overflowWrap: "anywhere", ...style }}
     >
       {hasHeader && (
-        <header
+        <HeaderTag
           data-testid="glass-panel-header"
           style={{
             display: "flex",
+            /* Replace the native marker so the row keeps its own layout; the
+               chevron below is the affordance instead. */
+            listStyle: folding ? "none" : undefined,
+            cursor: folding ? "pointer" : undefined,
             alignItems: "flex-start",
             justifyContent: "space-between",
             gap: 12,
@@ -82,6 +109,23 @@ export function GlassPanel({
             borderBottom: "1px solid var(--wp-dark-border, #242a36)",
           }}
         >
+          <div style={{ minWidth: 0, overflowWrap: "anywhere", display: "flex", gap: 8 }}>
+            {folding && (
+              <span
+                aria-hidden="true"
+                data-testid="glass-panel-chevron"
+                style={{
+                  flex: "none",
+                  marginTop: 3,
+                  fontSize: 10,
+                  lineHeight: 1,
+                  color: "var(--wp-text-muted, #929cad)",
+                  transition: "transform 140ms ease",
+                }}
+              >
+                &#9654;
+              </span>
+            )}
           <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
             {title != null && (
               <div
@@ -107,6 +151,7 @@ export function GlassPanel({
               </div>
             )}
           </div>
+          </div>
           {actions != null && (
             <div
               data-testid="glass-panel-actions"
@@ -123,7 +168,7 @@ export function GlassPanel({
               {actions}
             </div>
           )}
-        </header>
+        </HeaderTag>
       )}
       <div
         data-testid="glass-panel-body"
@@ -137,7 +182,7 @@ export function GlassPanel({
       >
         {children}
       </div>
-    </section>
+    </Root>
   );
 }
 
