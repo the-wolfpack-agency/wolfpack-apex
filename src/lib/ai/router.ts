@@ -55,6 +55,7 @@ import { recordRouterCall } from "./audit-record-writer";
 import { mayServe, zeroRetentionProviders, RetentionPolicyError } from "./retention";
 import { mayProcessHere, regionOfModel, ResidencyPolicyError } from "./residency";
 import { verifyAnswer, shouldEscalate } from "./verification";
+import { judgeAnswer, type JudgeResult } from "./judge";
 
 interface ProviderRegistry {
   anthropic: AIProvider;
@@ -717,8 +718,63 @@ class RouterClient implements AIClient {
      * returned. A verified answer is better than the first one; the first one
      * is much better than an error. */
     if (req.verify) {
-      const verdict = verifyAnswer({ answer: response.content, question: lastUserText(cReq) });
+      const question = lastUserText(cReq);
+      const verdict = verifyAnswer({ answer: response.content, question });
       const escalateTo = betterTier(cReq.model_tier);
+
+      /* THE CHECK RULES CANNOT MAKE, and only when the caller paid for it.
+       *
+       * Asked only if the free rules found nothing: an answer already known to
+       * be truncated does not need a model's opinion on whether it is sound,
+       * and asking anyway is a second call bought for no new information.
+       *
+       * The judge is one tier ABOVE the model being judged where possible. A
+       * small model marking its own homework is the weakest configuration of
+       * this idea, and it is the one you get by default if nobody chooses.
+       *
+       * It runs through this same router, so it inherits redaction, residency
+       * and the budget: the judge cannot see a credential the answer could not,
+       * and it cannot spend past a ceiling the workspace has already hit. */
+      let judged: JudgeResult | null = null;
+      if (req.verify === "deep" && verdict.sufficient && question) {
+        judged = await judgeAnswer(
+          { question, answer: response.content },
+          async ({ system, prompt, maxTokens }) => {
+            const r = await this.complete({
+              messages: [{ role: "user", content: prompt }],
+              system,
+              max_tokens: maxTokens,
+              model_tier: escalateTo ?? cReq.model_tier,
+              /* verify:false on the judge's own call. A judge judged by a judge
+                 is a bill with no upper bound. */
+              verify: false,
+              sensitivity: cReq.sensitivity,
+              ...(cReq.residency ? { residency: cReq.residency } : {}),
+              metadata: {
+                ...cReq.metadata,
+                feature: `${cReq.metadata?.feature ?? "unknown"}.judge`,
+              },
+            });
+            return r.content;
+          },
+        );
+        trackEvent(
+          "ai.answer_judged",
+          cReq.metadata?.user_id ?? "system",
+          cReq.metadata?.user_role ?? "system",
+          {
+            feature: cReq.metadata?.feature ?? "unknown",
+            workspace_id: cReq.metadata?.workspace_id ?? "default",
+            model: response.model_used,
+            sound: judged.sound,
+            verdict: judged.verdict,
+            /* "Checked and fine" and "could not be checked" both ship the
+               answer, and only one of them is evidence. */
+            judged: judged.judged,
+          },
+        );
+      }
+
       trackEvent(
         "ai.answer_verified",
         cReq.metadata?.user_id ?? "system",
@@ -732,10 +788,10 @@ class RouterClient implements AIClient {
           /* Recorded even when nothing was escalated, because "the cheap model
              was fine" is the finding that justifies routing cheap at all, and
              it is invisible if only failures are counted. */
-          escalated: Boolean(escalateTo) && shouldEscalate(verdict),
+          escalated: Boolean(escalateTo) && (shouldEscalate(verdict) || judged?.sound === false),
         },
       );
-      if (escalateTo && shouldEscalate(verdict)) {
+      if (escalateTo && (shouldEscalate(verdict) || judged?.sound === false)) {
         try {
           const retried = await this.complete({
             ...req,

@@ -77,8 +77,17 @@ export interface AICompleteRequest {
    * pays for one cheap call and zero retries. Only the request the cheap model
    * fluffed pays twice, which is what a router with no verification would have
    * spent anyway while returning the worse answer.
+   *
+   * `true` runs the free rules only. `"deep"` additionally asks a model whether
+   * the answer is SOUND, which rules cannot judge: a confident wrong answer
+   * passes every rule because it reads perfectly.
+   *
+   * Two settings and not one, deliberately. The rules are free and instant; the
+   * judge is a second call on every verified request, whether or not it finds
+   * anything. Conflating them is how a cheap feature quietly becomes an
+   * expensive one, so the caller has to ask for the expensive half by name.
    */
-  verify?: boolean;
+  verify?: boolean | "deep";
 }
 
 export interface AICompleteResponse {

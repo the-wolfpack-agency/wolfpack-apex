@@ -162,3 +162,108 @@ describe("router verification — what it records", () => {
     expect(completions.some((c) => String(c[3].feature).endsWith(".escalated"))).toBe(true);
   });
 });
+
+
+/**
+ * The judge at the chokepoint.
+ *
+ * The expensive mistake here is not a missed bad answer, it is the judge
+ * running when nobody asked for it. It is a second call on EVERY verified
+ * request, whether or not it finds anything, so most of these assert it stayed
+ * quiet.
+ */
+describe("router verification — the model judge", () => {
+  it("does not run for verify: true, only for deep", async () => {
+    /* Two settings, not one. The free rules must never quietly buy a call. */
+    mockMessagesCreate.mockResolvedValue(reply("The invoice total is $4,200."));
+    await getAIClient().complete(request({ verify: true }));
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
+    expect(mockTrackEvent.mock.calls.some((c) => c[0] === "ai.answer_judged")).toBe(false);
+  });
+
+  it("does not run when the free rules already failed the answer", async () => {
+    /* An answer known to be truncated does not need a model's opinion on
+       whether it is sound: that is a call bought for no new information. */
+    mockMessagesCreate
+      .mockResolvedValueOnce(reply("I'll get back to you shortly."))
+      .mockResolvedValueOnce(reply("The invoice total is $4,200."));
+    await getAIClient().complete(request({ verify: "deep" }));
+    expect(mockTrackEvent.mock.calls.some((c) => c[0] === "ai.answer_judged")).toBe(false);
+    // One original call plus one escalation. No judge call in between.
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it("judges a rule-clean answer, and ships it when the judge agrees", async () => {
+    mockMessagesCreate
+      .mockResolvedValueOnce(reply("The invoice total is $4,200."))
+      .mockResolvedValueOnce(reply("VERDICT: sound REASON: answers directly"));
+    const res = await getAIClient().complete(request({ verify: "deep" }));
+    expect(res.content).toBe("The invoice total is $4,200.");
+    // Original plus judge. No escalation, because the judge found nothing.
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(2);
+    const ev = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.answer_judged");
+    expect(ev?.[3]).toMatchObject({ sound: true, verdict: "sound", judged: true });
+  });
+
+  it("escalates when the judge finds a problem a rule could not see", async () => {
+    /* THE POINT OF THE STAGE: a confident answer that reads perfectly and is
+       wrong passes every rule. */
+    mockMessagesCreate
+      .mockResolvedValueOnce(reply("The invoice total is $4,200."))
+      .mockResolvedValueOnce(reply("VERDICT: unsupported REASON: no source for that figure"))
+      .mockResolvedValueOnce(reply("The invoice total is $3,100, per invoice 88."));
+    const res = await getAIClient().complete(request({ verify: "deep" }));
+    expect(res.content).toBe("The invoice total is $3,100, per invoice 88.");
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(3);
+  });
+
+  it("ships the answer when the judge cannot be read, and says it was unjudged", async () => {
+    // A judge that breaks answers is worse than no judge.
+    mockMessagesCreate
+      .mockResolvedValueOnce(reply("The invoice total is $4,200."))
+      .mockResolvedValueOnce(reply("hmm, seems fine to me"));
+    const res = await getAIClient().complete(request({ verify: "deep" }));
+    expect(res.content).toBe("The invoice total is $4,200.");
+    const ev = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.answer_judged");
+    expect(ev?.[3]).toMatchObject({ sound: true, judged: false });
+  });
+
+  it("ships the answer when the judge call throws", async () => {
+    mockMessagesCreate
+      .mockResolvedValueOnce(reply("The invoice total is $4,200."))
+      .mockRejectedValueOnce(new Error("provider down"));
+    const res = await getAIClient().complete(request({ verify: "deep" }));
+    expect(res.content).toBe("The invoice total is $4,200.");
+  });
+
+  it("marks the judge's own spend so it is separable from the answer's", async () => {
+    /* Without this the judge looks like ordinary traffic and the true cost of
+       deep verification cannot be measured against what it saves. */
+    mockMessagesCreate
+      .mockResolvedValueOnce(reply("The invoice total is $4,200."))
+      .mockResolvedValueOnce(reply("VERDICT: sound REASON: fine"));
+    await getAIClient().complete(request({ verify: "deep" }));
+    const completions = mockTrackEvent.mock.calls.filter((c) => c[0] === "ai.completion");
+    expect(completions.some((c) => String(c[3].feature).endsWith(".judge"))).toBe(true);
+  });
+
+  it("judges with a better model than the one being judged", async () => {
+    /* A small model marking its own homework is the weakest configuration of
+       this idea, and the one you get by default if nobody chooses. */
+    mockMessagesCreate
+      .mockResolvedValueOnce(reply("The invoice total is $4,200."))
+      .mockResolvedValueOnce(reply("VERDICT: sound REASON: fine"));
+    await getAIClient().complete(request({ verify: "deep" }));
+    const first = mockMessagesCreate.mock.calls[0][0].model;
+    const judge = mockMessagesCreate.mock.calls[1][0].model;
+    expect(judge).not.toBe(first);
+  });
+
+  it("does not judge a judge", async () => {
+    // A judge judged by a judge is a bill with no upper bound.
+    mockMessagesCreate.mockResolvedValue(reply("VERDICT: sound REASON: fine"));
+    await getAIClient().complete(request({ verify: "deep" }));
+    const judged = mockTrackEvent.mock.calls.filter((c) => c[0] === "ai.answer_judged");
+    expect(judged).toHaveLength(1);
+  });
+});
