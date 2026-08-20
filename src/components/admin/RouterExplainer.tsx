@@ -45,6 +45,13 @@ const CLAIMS: Claim[] = [
     proof: "Scroll to the models list. It names several providers, and every one of them sits behind the same gate.",
   },
   {
+    headline: "Where a question may be answered is part of the question",
+    plain:
+      "A request can say which parts of the world its data may be processed in, and anything that cannot be placed inside one of them is refused. That is set per request rather than once in a settings screen, so the same team can send an ordinary question to the cheapest model anywhere and still refuse to let an employee record leave Europe, in the same minute, with nothing reconfigured. A model whose location nobody has recorded counts as a refusal, because the answer that ends badly is the one that begins with we assumed.",
+    proof:
+      "Scroll to the models list. Each model says the region it runs in, or says plainly that nobody has declared one.",
+  },
+  {
     headline: "The cheapest model that can do the job gets the job",
     plain:
       "Simple questions go to small, inexpensive models. Hard ones go to larger models. That decision is made by fixed rules rather than by another AI, so it is the same every time and can be explained afterwards.",
