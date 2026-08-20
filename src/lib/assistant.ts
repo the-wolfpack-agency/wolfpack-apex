@@ -44,6 +44,7 @@ import {
 } from "@/lib/assistant/tools";
 import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
 import { selectAssistantTier, parseTierDirective, type TierDirective } from "@/lib/assistant/model-tier";
+import { fenceUntrusted, type PromptPart } from "@/lib/ai/provenance";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -2210,10 +2211,58 @@ async function callAI(
       brainBlock = lines.join("\n");
     }
 
-    /* Attachment first. When somebody says "look at the screenshot", the file
-       in front of them outranks anything retrieval found, and putting it last
-       is how the model ended up answering from three older screenshots. */
-    const systemPrompt = [attachmentBlock, factsBlock, brainBlock, contextBlock, baseSystemPrompt]
+    /* CONTENT WE FETCHED IS DATA, AND SITS INSIDE A FENCE.
+     *
+     * The attachment text and the retrieved passages used to be concatenated
+     * straight into the SYSTEM prompt, which is the most trusted position in
+     * the entire request: the place our own instructions live. A supplier's PDF
+     * or a retrieved document that contains "ignore previous instructions" was
+     * therefore delivered to the model as though we had written it.
+     *
+     * Neither is our words. Both are content fetched on the user's behalf, so
+     * both are quarantined by provenance (see lib/ai/provenance.ts) and
+     * announced to the model as data to read rather than directions to follow.
+     *
+     * OUR instructions about that data stay OUTSIDE the fence: the citation
+     * format is genuinely ours, and burying it inside a block the model is told
+     * not to obey would break citations to fix an injection. */
+    const untrusted: PromptPart[] = [];
+    if (attachmentBlock && attachmentBlock.trim()) {
+      untrusted.push({ provenance: "attachment", label: "attached file", text: attachmentBlock });
+    }
+    if (brainContext && brainContext.hits.length > 0) {
+      for (const h of brainContext.hits.slice(0, 5)) {
+        untrusted.push({
+          provenance: "retrieved",
+          label: h.document_filename,
+          text: `[ref:${h.document_id}] ${h.content.slice(0, 400).replace(/\s+/g, " ").trim()}`,
+        });
+      }
+    }
+    const fenced = fenceUntrusted(untrusted);
+
+    if (fenced.attempts.length > 0) {
+      /* Somebody's document tried to give the assistant orders. The fence
+         already made it inert; this is so a person finds out, because a
+         supplier PDF that does this is worth a conversation. Never the text
+         itself: a report that quotes the payload delivers it again. */
+      trackEvent("ai.injection_attempt_blocked", userId, userRole, {
+        module: "assistant",
+        attempts: fenced.attempts.length,
+        sources: [...new Set(fenced.attempts.map((a) => a.provenance))].sort().join(","),
+      });
+    }
+
+    /* Citation instructions only: the passages themselves are in the fence. */
+    const citationRules =
+      brainContext && brainContext.hits.length > 0
+        ? [
+            "CITATION FORMAT: When you reference any quarantined passage above, you MUST include its exact [ref:<id>] marker inline. DO NOT write 'Source: <filename>' or any other format.",
+            "Never invent a [ref:] you have not been given.",
+          ].join("\n")
+        : "";
+
+    const systemPrompt = [fenced.text, citationRules, factsBlock, contextBlock, baseSystemPrompt]
       .filter((s) => s && s.trim().length > 0)
       .join("\n");
 

@@ -459,6 +459,12 @@ export type InstinctEventType =
      { feature, workspace_id, model, redacted_count, kinds }: kinds only,
      never a value. */
   | "ai.response_redacted"
+  /* A document we fetched tried to instruct the assistant. The fence had
+     already made it inert; this exists so a person finds out, because a
+     supplier PDF that does this is worth a conversation. Metadata:
+     { module, attempts, sources }: never the text, which would deliver the
+     payload a second time to whoever reads the report. */
+  | "ai.injection_attempt_blocked"
   | "assistant.attachment_read"
   /* Fired when an attachment routes the turn past every zero-token fast
      path straight to the model. Lets us price what image reading costs. */
