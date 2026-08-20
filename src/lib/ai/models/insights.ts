@@ -28,6 +28,7 @@ import { query } from "@/lib/db";
 import { MODEL_REGISTRY, isModelAvailable } from "./registry";
 import type { CapabilityTier, ModelProvider } from "./types";
 import { regionOfModel, modelRegionEnvVar } from "@/lib/ai/residency";
+import { allModelVersions } from "./version-store";
 
 export interface ModelUsage {
   modelId: string;
@@ -78,6 +79,20 @@ export interface ModelAvailability {
   regionEnvVar: string;
 }
 
+/** One model's version history, as the page shows it. */
+export interface ModelVersionSummary {
+  modelId: string;
+  /** The version serving now. */
+  currentVersion: string;
+  /** What it replaced, when anything. Null on a model seen only once. */
+  previousVersion: string | null;
+  /** When the current version first answered a call here. */
+  changedAt: string | null;
+  /** Distinct versions seen behind this id. 1 means it has never moved. */
+  versionsSeen: number;
+  callsOnCurrent: number;
+}
+
 export interface RouterInsights {
   /** What the router kept from leaving, and how much traffic it checked. */
   protection?: ProtectionSummary;
@@ -99,6 +114,9 @@ export interface RouterInsights {
   /** Share of decisions served by the cheapest tier. The efficiency headline. */
   smallTierShare: number | null;
   headline: string;
+  /** WHICH WEIGHTS HAVE ANSWERED, and when that changed. Optional so a payload
+   *  from an older deploy still renders. */
+  versions?: ModelVersionSummary[];
 }
 
 /** Reason codes are stable machine strings; these are for people. */
@@ -536,5 +554,68 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
   const protection = summarizeProtection(redactionRows, actualCalls, answerRedactionRows);
 
   const withActuals = { ...s, usage, actualCostUsd, actualCalls, inputTokens, outputTokens };
-  return { days, models, ...withActuals, protection, headline: describeInsights(withActuals) };
+  /* WHICH WEIGHTS HAVE ANSWERED. Read last and defensively: a model-version
+     panel is worth having and is not worth taking the page down for. */
+  let versions: ModelVersionSummary[] = [];
+  try {
+    versions = summariseVersions(await allModelVersions());
+  } catch {
+    /* Same posture as every other panel here. */
+  }
+
+  return {
+    days,
+    models,
+    ...withActuals,
+    protection,
+    ...(versions.length > 0 ? { versions } : {}),
+    headline: describeInsights(withActuals),
+  };
+}
+
+
+/**
+ * Collapse the version history into one row per model.
+ *
+ * Pure, so what the page claims about a provider changing weights can be tested
+ * without a database. The rows arrive most-recent-first per model, which is the
+ * order allModelVersions() returns.
+ */
+export function summariseVersions(
+  rows: Array<{
+    modelId: string;
+    servedVersion: string;
+    firstSeenAt: string;
+    callCount: number;
+    current: boolean;
+  }>,
+): ModelVersionSummary[] {
+  const byModel = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const list = byModel.get(row.modelId) ?? [];
+    list.push(row);
+    byModel.set(row.modelId, list);
+  }
+
+  const out: ModelVersionSummary[] = [];
+  for (const [modelId, list] of byModel) {
+    const current = list.find((r) => r.current) ?? list[0];
+    if (!current) continue;
+    const others = list.filter((r) => r !== current);
+    out.push({
+      modelId,
+      currentVersion: current.servedVersion,
+      /* The one it replaced, which is the most recently seen of the rest. The
+         list is already in that order, so no second sort is needed and no
+         second opinion about recency can creep in. */
+      previousVersion: others[0]?.servedVersion ?? null,
+      /* When the CURRENT version first answered here. Not when the provider
+         shipped it, which we cannot know, and saying so would be a claim about
+         somebody else's release process. */
+      changedAt: others.length > 0 ? current.firstSeenAt : null,
+      versionsSeen: list.length,
+      callsOnCurrent: current.callCount,
+    });
+  }
+  return out.sort((a, b) => b.versionsSeen - a.versionsSeen || a.modelId.localeCompare(b.modelId));
 }

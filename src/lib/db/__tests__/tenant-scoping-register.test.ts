@@ -51,6 +51,25 @@ const MIGRATIONS = join(__dirname, "..", "..", "..", "db", "migrations");
  * The count is the number to drive down; the names are so a reviewer can see
  * WHICH ones without running anything.
  */
+/**
+ * Tables that are global BY DESIGN, and are therefore not debt.
+ *
+ * Kept apart from NO_WORKSPACE_COLUMN, which is a backlog with a count that may
+ * only fall. Putting a deliberately global table on that list forces the count
+ * UP, and a ratchet that gets raised for good reasons is one that will be
+ * raised for bad ones too, until the number stops meaning anything.
+ *
+ * The bar for this list is that per-workspace rows would be WRONG, not merely
+ * unnecessary: two tenants must not be able to hold different beliefs about the
+ * same external fact.
+ */
+const GLOBAL_BY_DESIGN: readonly string[] = [
+  /* A model version is a fact about the PROVIDER, identical for every tenant.
+     Two tenants disagreeing about what OpenAI shipped is not a disagreement
+     that can be true. */
+  "ai_model_versions",
+];
+
 const NO_WORKSPACE_COLUMN: readonly string[] = [
   "apex_benefit_documents",
   "apex_benefit_plans",
@@ -237,7 +256,9 @@ describe("every table declares whether it is tenant-scoped", () => {
   });
 
   it("has no NEW table without a workspace_id column", () => {
-    const added = unscoped.filter((t) => !NO_WORKSPACE_COLUMN.includes(t));
+    const added = unscoped.filter(
+      (t) => !NO_WORKSPACE_COLUMN.includes(t) && !GLOBAL_BY_DESIGN.includes(t),
+    );
     expect({
       hint: "A new table needs workspace_id to be safe when a second company runs this platform. If it is genuinely global reference data, add it to NO_WORKSPACE_COLUMN on purpose.",
       added,
@@ -254,8 +275,19 @@ describe("every table declares whether it is tenant-scoped", () => {
 
   it("records the debt as a number, so the direction is visible", () => {
     // Update deliberately, downward. This is the metric that says whether
-    // Instinct is ready to be run by someone else.
+    // Instinct is ready to be run by someone else. Tables that are global by
+    // design are counted separately, so this number only ever moves for the
+    // reason it was created to track.
     expect(NO_WORKSPACE_COLUMN.length).toBe(149);
+  });
+
+  it("does not let the by-design list become a second backlog", () => {
+    /* The escape hatch has to stay small enough to read in one go, or it turns
+       into the thing it was built to keep honest. */
+    expect(GLOBAL_BY_DESIGN.length).toBeLessThanOrEqual(5);
+    for (const table of GLOBAL_BY_DESIGN) {
+      expect(NO_WORKSPACE_COLUMN).not.toContain(table);
+    }
   });
 
   it("keeps the tables that ARE scoped scoped", () => {

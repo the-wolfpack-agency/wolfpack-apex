@@ -76,6 +76,7 @@ function normalize(raw: unknown): RouterInsights | null {
     ...(typeof b.actualCalls === "number" ? { actualCalls: b.actualCalls } : {}),
     ...(typeof b.inputTokens === "number" ? { inputTokens: b.inputTokens } : {}),
     ...(typeof b.outputTokens === "number" ? { outputTokens: b.outputTokens } : {}),
+    ...(Array.isArray(b.versions) ? { versions: b.versions } : {}),
   };
 }
 
@@ -339,6 +340,52 @@ export default function AiRouterPage() {
           </>
         )}
       </GlassPanel>
+
+
+      {/* WHAT THE PROVIDER CHANGED UNDERNEATH YOU.
+          Every other panel on this page keys on a model id, and an id is a name
+          whose meaning the provider can change without telling anybody:
+          "gpt-4o" has meant several different sets of weights. This is the only
+          panel that reports the thing itself rather than the name, which makes
+          it the one that explains why answers changed on a week nobody
+          deployed. */}
+      {data?.versions && data.versions.length > 0 ? (
+        <GlassPanel
+          title="Which weights actually answered"
+          subtitle="A model name is not a version. This is what the provider reported serving, and when that changed."
+        >
+          <ul style={list} data-testid="router-versions">
+            {data.versions.map((v) => (
+              <li key={v.modelId} style={row}>
+                <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
+                  <strong>{v.modelId}</strong>
+                  <StatusPill
+                    status={v.versionsSeen > 1 ? "changed" : "steady"}
+                    label={v.versionsSeen > 1 ? `${v.versionsSeen} versions seen` : "unchanged"}
+                    tone={v.versionsSeen > 1 ? "warning" : "success"}
+                    size="sm"
+                  />
+                </div>
+                <p style={{ ...dim, margin: "0.3rem 0 0", fontSize: "0.85rem" }}>
+                  Serving {v.currentVersion} ({v.callsOnCurrent.toLocaleString()} calls)
+                </p>
+                {v.previousVersion ? (
+                  <p
+                    style={{ ...dim, margin: "0.2rem 0 0", fontSize: "0.85rem" }}
+                    data-testid="router-version-change"
+                  >
+                    {/* First seen HERE, not shipped: we cannot know a provider's
+                        release date, and saying so would be a claim about
+                        somebody else's process. */}
+                    Replaced {v.previousVersion}
+                    {v.changedAt ? `, first seen here ${new Date(v.changedAt).toLocaleDateString()}` : ""}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </GlassPanel>
+      ) : null}
 
       {data && data.usage.length > 0 && (
         <GlassPanel title="Which models were used">
