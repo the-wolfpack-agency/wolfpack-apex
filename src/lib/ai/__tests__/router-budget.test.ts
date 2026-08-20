@@ -88,12 +88,49 @@ afterAll(() => {
   global.fetch = originalFetch;
 });
 
+/**
+ * The gate used to refuse the moment spend passed the cap. That is what
+ * OpenRouter's 402 does, and it is the wrong shape: a hard cap does not arrive
+ * when the finance team is looking, it arrives while somebody is mid-sentence
+ * to a client. Caps then get set high enough never to fire, or somebody raises
+ * them in a hurry, and either way the control is theatre.
+ *
+ * Capability degrades before service is refused. These tests were rewritten to
+ * the new contract rather than deleted, because the OLD assertion (nothing is
+ * charged, the provider is never called) still has to hold at the ceiling.
+ */
 describe("router - workspace budget enforcement", () => {
-  it("REFUSES the call when the workspace is over budget; provider not called", async () => {
+  it("keeps answering over the cap, from a smaller model, and charges no premium call", async () => {
+    const loadPolicy = jest.fn().mockResolvedValue(policy({ monthly_budget_usd: 100 }));
+    const monthSpend = jest.fn().mockResolvedValue(150);
+    const client = _buildAIClientWithBudgetDepsForTests({ loadPolicy, monthSpend });
+    mockMessagesCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "still working" }],
+      usage: { input_tokens: 10, output_tokens: 5 },
+      model: "claude-haiku-4-5",
+    });
+
+    const res = await client.complete({
+      messages: [{ role: "user", content: "x" }],
+      max_tokens: 10,
+      model_tier: "premium",
+      metadata: { feature: "budget.over", workspace_id: "ws_client" },
+    });
+
+    /* The person keeps working. That is the whole difference from a 402. */
+    expect(res.content).toBe("still working");
+    /* And they were served by the cheapest model, so the bill stops climbing
+       at the same rate: the premium model was never asked. */
+    expect(mockMessagesCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "claude-haiku-4-5" }),
+    );
+  });
+
+  it("REFUSES only at the ceiling, where a budget has become a malfunction", async () => {
     const loadPolicy = jest
       .fn()
       .mockResolvedValue(policy({ monthly_budget_usd: 100 }));
-    const monthSpend = jest.fn().mockResolvedValue(150);
+    const monthSpend = jest.fn().mockResolvedValue(200);
     const client = _buildAIClientWithBudgetDepsForTests({
       loadPolicy,
       monthSpend,
@@ -116,7 +153,7 @@ describe("router - workspace budget enforcement", () => {
     const loadPolicy = jest
       .fn()
       .mockResolvedValue(policy({ monthly_budget_usd: 100 }));
-    const monthSpend = jest.fn().mockResolvedValue(150.5);
+    const monthSpend = jest.fn().mockResolvedValue(250.5); // past the ceiling: a block, not a degrade
     const client = _buildAIClientWithBudgetDepsForTests({
       loadPolicy,
       monthSpend,
@@ -143,7 +180,7 @@ describe("router - workspace budget enforcement", () => {
     expect(userRole).toBe("operator");
     expect(meta).toEqual({
       workspace_id: "ws_client",
-      month_spend_usd: 150.5,
+      month_spend_usd: 250.5,
       budget_usd: 100,
       feature: "budget.event",
     });
@@ -152,7 +189,7 @@ describe("router - workspace budget enforcement", () => {
   it("BudgetExceededError carries details + a 402 status hint", async () => {
     const client = _buildAIClientWithBudgetDepsForTests({
       loadPolicy: jest.fn().mockResolvedValue(policy({ monthly_budget_usd: 50 })),
-      monthSpend: jest.fn().mockResolvedValue(75),
+      monthSpend: jest.fn().mockResolvedValue(750), // past the ceiling
     });
     const err: unknown = await client
       .complete({
@@ -168,7 +205,7 @@ describe("router - workspace budget enforcement", () => {
     expect(budgetErr.status).toBe(402);
     expect(budgetErr.details).toEqual({
       workspace_id: "ws_client",
-      month_spend_usd: 75,
+      month_spend_usd: 750,
       budget_usd: 50,
       feature: "budget.details",
     });
