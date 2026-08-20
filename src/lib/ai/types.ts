@@ -64,6 +64,21 @@ export interface AICompleteRequest {
    * declared. See src/lib/ai/residency.ts.
    */
   residency?: string[];
+  /**
+   * Check the answer before returning it, and retry once on a better model if
+   * a rule says it fell short.
+   *
+   * OFF BY DEFAULT, and that is a cost decision rather than caution. Checking
+   * is free (the rules are pure functions) but the retry is not, so a caller
+   * turns this on where a thin answer costs more than a second call: drafting,
+   * client-facing text, anything a person will act on without reading twice.
+   *
+   * The saving argument depends on this being CONDITIONAL. An ordinary request
+   * pays for one cheap call and zero retries. Only the request the cheap model
+   * fluffed pays twice, which is what a router with no verification would have
+   * spent anyway while returning the worse answer.
+   */
+  verify?: boolean;
 }
 
 export interface AICompleteResponse {
