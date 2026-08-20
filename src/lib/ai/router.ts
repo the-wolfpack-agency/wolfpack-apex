@@ -52,6 +52,7 @@ import {
 } from "./workspace-policy";
 import { governTier, CEILING_MULTIPLE, type BudgetDecision } from "./budget";
 import { recordRouterCall } from "./audit-record-writer";
+import { mayServe, zeroRetentionProviders, RetentionPolicyError } from "./retention";
 
 interface ProviderRegistry {
   anthropic: AIProvider;
@@ -77,6 +78,23 @@ function readPrimaryOverride(): PrimaryOverride {
 
 function isAnthropicConfigured(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY);
+}
+
+/**
+ * The provider that WILL serve this request, by name.
+ *
+ * Resolved through pickPrimary so the retention gate judges the provider that
+ * is actually about to be called rather than a guess at it. Never throws: a
+ * registry that cannot name a provider returns "unknown", which no
+ * zero-retention list contains, so the gate refuses. Failing closed on an
+ * unanswerable question is the correct direction here.
+ */
+function primaryProviderName(registry: ProviderRegistry, req: AICompleteRequest): string {
+  try {
+    return pickPrimary(req, registry).name;
+  } catch {
+    return "unknown";
+  }
 }
 
 function pickPrimary(
@@ -312,6 +330,74 @@ class RouterClient implements AIClient {
     // surface (assistant + OGIAM agents) inherits the same rules regardless of
     // which model version answers. No-op for the other call sites.
     const cReq0 = applyConstitutionToRequest(governed);
+
+    /* SENSITIVE DATA MAY ONLY GO WHERE WE HAVE AN AGREEMENT.
+     *
+     * The request already declares its sensitivity; until now that only
+     * decided how hard to redact. It now also decides WHO may answer: a
+     * request carrying personal or health data may only be served by a
+     * provider under a zero-retention agreement (AI_ZERO_RETENTION_PROVIDERS).
+     *
+     * Checked here, after the provider is resolved and before a single byte
+     * leaves, and it FAILS CLOSED. Everywhere else in this router degrading
+     * gracefully is the right instinct; here it would mean sending a medical
+     * record to a provider that keeps prompts because somebody had not
+     * finished the configuration. */
+    const trustedProviders = zeroRetentionProviders();
+    const retention = mayServe({
+      sensitivity: cReq0.sensitivity,
+      provider: primaryProviderName(this.registry, cReq0),
+      trusted: trustedProviders,
+    });
+
+    /* ENFORCEMENT IS OPT-IN, AND THAT IS NOT A WEAKENING.
+     *
+     * The rule in retention.ts says an unconfigured estate trusts nobody, which
+     * is correct. Enforcing that the moment this deploys would refuse every
+     * live request carrying personal or health data, on an estate where nobody
+     * has yet been asked which providers are under an agreement. That is not a
+     * control, it is an outage with a principled explanation.
+     *
+     * So the gate turns on when somebody names the trusted providers. Until
+     * then every restricted request is recorded as UNPROTECTED, once per call,
+     * because the honest state of the world is "we do not yet enforce this"
+     * and it should be visible rather than assumed. */
+    if (retention.reason === "none_configured") {
+      trackEvent(
+        "ai.retention_unenforced",
+        cReq0.metadata?.user_id ?? "system",
+        cReq0.metadata?.user_role ?? "system",
+        {
+          feature: cReq0.metadata?.feature ?? "unknown",
+          workspace_id: cReq0.metadata?.workspace_id ?? "default",
+          sensitivity: String(cReq0.sensitivity),
+          provider: primaryProviderName(this.registry, cReq0),
+        },
+      );
+    } else if (!retention.allowed) {
+      trackEvent(
+        "ai.request_blocked_retention",
+        cReq0.metadata?.user_id ?? "system",
+        cReq0.metadata?.user_role ?? "system",
+        {
+          feature: cReq0.metadata?.feature ?? "unknown",
+          workspace_id: cReq0.metadata?.workspace_id ?? "default",
+          sensitivity: String(cReq0.sensitivity),
+          reason: retention.reason,
+        },
+      );
+      /* Reaching here means providers ARE named and this one is not among
+         them, which is the only refusal case: the unconfigured estate took the
+         branch above. */
+      throw new RetentionPolicyError(
+        "This request carries sensitive data and the available provider is not under a zero-retention agreement.",
+        {
+          sensitivity: String(cReq0.sensitivity),
+          provider: primaryProviderName(this.registry, cReq0),
+          reason: retention.reason,
+        },
+      );
+    }
 
     /* Credential / financial-identifier gate, at the last point before the
      * prompt leaves this process.
