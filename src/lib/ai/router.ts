@@ -54,6 +54,8 @@ import { governTier, CEILING_MULTIPLE, type BudgetDecision } from "./budget";
 import { recordRouterCall } from "./audit-record-writer";
 import { mayServe, zeroRetentionProviders, RetentionPolicyError } from "./retention";
 import { mayProcessHere, regionOfModel, ResidencyPolicyError } from "./residency";
+import { verifyAnswer, shouldEscalate } from "./verification";
+import { judgeAnswer, type JudgeResult } from "./judge";
 
 interface ProviderRegistry {
   anthropic: AIProvider;
@@ -693,8 +695,140 @@ class RouterClient implements AIClient {
       ...(residencyRecord ? { residency: residencyRecord } : {}),
     });
 
+    /* ONE RETRY, ON A BETTER MODEL, ONLY WHEN A RULE SAYS IT IS WORTH PAYING.
+     *
+     * Opt-in per request. The checking itself is free (pure rules over the text
+     * that came back) and runs only when a caller asked for it, so no existing
+     * call site changes shape or cost.
+     *
+     * The whole cost argument rests on this staying CONDITIONAL. An ordinary
+     * request pays for one cheap call and no retry. A request the cheap model
+     * fluffed pays for two, which is what an unverified router would have spent
+     * anyway while returning the worse answer.
+     *
+     * Deliberately ONE retry, not a loop. A model that failed twice is not
+     * going to be talked round by a third attempt, and a loop here is an
+     * unbounded bill attached to a single user action.
+     *
+     * A refusal is NOT escalated. A model declining is very often the system
+     * working, and paying a larger model to overrule it is the opposite of a
+     * safety feature. See verification.ts.
+     *
+     * DEGRADES, NEVER FAILS: if the retry throws, the original answer is
+     * returned. A verified answer is better than the first one; the first one
+     * is much better than an error. */
+    if (req.verify) {
+      const question = lastUserText(cReq);
+      const verdict = verifyAnswer({ answer: response.content, question });
+      const escalateTo = betterTier(cReq.model_tier);
+
+      /* THE CHECK RULES CANNOT MAKE, and only when the caller paid for it.
+       *
+       * Asked only if the free rules found nothing: an answer already known to
+       * be truncated does not need a model's opinion on whether it is sound,
+       * and asking anyway is a second call bought for no new information.
+       *
+       * The judge is one tier ABOVE the model being judged where possible. A
+       * small model marking its own homework is the weakest configuration of
+       * this idea, and it is the one you get by default if nobody chooses.
+       *
+       * It runs through this same router, so it inherits redaction, residency
+       * and the budget: the judge cannot see a credential the answer could not,
+       * and it cannot spend past a ceiling the workspace has already hit. */
+      let judged: JudgeResult | null = null;
+      if (req.verify === "deep" && verdict.sufficient && question) {
+        judged = await judgeAnswer(
+          { question, answer: response.content },
+          async ({ system, prompt, maxTokens }) => {
+            const r = await this.complete({
+              messages: [{ role: "user", content: prompt }],
+              system,
+              max_tokens: maxTokens,
+              model_tier: escalateTo ?? cReq.model_tier,
+              /* verify:false on the judge's own call. A judge judged by a judge
+                 is a bill with no upper bound. */
+              verify: false,
+              sensitivity: cReq.sensitivity,
+              ...(cReq.residency ? { residency: cReq.residency } : {}),
+              metadata: {
+                ...cReq.metadata,
+                feature: `${cReq.metadata?.feature ?? "unknown"}.judge`,
+              },
+            });
+            return r.content;
+          },
+        );
+        trackEvent(
+          "ai.answer_judged",
+          cReq.metadata?.user_id ?? "system",
+          cReq.metadata?.user_role ?? "system",
+          {
+            feature: cReq.metadata?.feature ?? "unknown",
+            workspace_id: cReq.metadata?.workspace_id ?? "default",
+            model: response.model_used,
+            sound: judged.sound,
+            verdict: judged.verdict,
+            /* "Checked and fine" and "could not be checked" both ship the
+               answer, and only one of them is evidence. */
+            judged: judged.judged,
+          },
+        );
+      }
+
+      trackEvent(
+        "ai.answer_verified",
+        cReq.metadata?.user_id ?? "system",
+        cReq.metadata?.user_role ?? "system",
+        {
+          feature: cReq.metadata?.feature ?? "unknown",
+          workspace_id: cReq.metadata?.workspace_id ?? "default",
+          model: response.model_used,
+          sufficient: verdict.sufficient,
+          flags: verdict.flags.join(","),
+          /* Recorded even when nothing was escalated, because "the cheap model
+             was fine" is the finding that justifies routing cheap at all, and
+             it is invisible if only failures are counted. */
+          escalated: Boolean(escalateTo) && (shouldEscalate(verdict) || judged?.sound === false),
+        },
+      );
+      if (escalateTo && (shouldEscalate(verdict) || judged?.sound === false)) {
+        try {
+          const retried = await this.complete({
+            ...req,
+            model_tier: escalateTo,
+            /* verify:false on the retry. The escalation already happened; a
+               second check could only trigger a third call this design has
+               deliberately ruled out. */
+            verify: false,
+            metadata: { ...req.metadata, feature: `${req.metadata?.feature ?? "unknown"}.escalated` },
+          });
+          return retried;
+        } catch {
+          /* Keep the answer we have. */
+        }
+      }
+    }
+
     return response;
   }
+}
+
+/** The next tier up, or null at the top. Escalation is one step, never a leap
+ *  to the most expensive model available: the failure being fixed is usually a
+ *  small model being small, not a hard problem needing the best model made. */
+function betterTier(tier: AICompleteRequest["model_tier"]): AICompleteRequest["model_tier"] | null {
+  if (tier === "cheap") return "standard";
+  if (tier === "standard") return "premium";
+  return null;
+}
+
+/** The last thing the user actually said, for the verifier's context. */
+function lastUserText(req: AICompleteRequest): string | undefined {
+  for (let i = req.messages.length - 1; i >= 0; i--) {
+    const m = req.messages[i];
+    if (m.role === "user" && typeof m.content === "string") return m.content;
+  }
+  return undefined;
 }
 
 /** selectModel, but never throws into a completion path. */
