@@ -37,6 +37,7 @@ import {
   AzureOpenAIProvider,
   isAzureConfigured,
 } from "./azure-openai-provider";
+import { buildCompatibleProviders } from "./openai-compatible-provider";
 import type {
   AIClient,
   AICompleteRequest,
@@ -60,22 +61,31 @@ import { judgeAnswer, type JudgeResult } from "./judge";
 interface ProviderRegistry {
   anthropic: AIProvider;
   azure: AIProvider;
+  /* Providers that speak the OpenAI chat-completions shape, added by
+     configuration rather than code. Empty on a deployment that has configured
+     none, which is every deployment until somebody opts in. */
+  compatible: AIProvider[];
 }
 
 function buildRegistry(): ProviderRegistry {
   return {
     anthropic: new AnthropicProvider(),
     azure: new AzureOpenAIProvider(),
+    compatible: buildCompatibleProviders(),
   };
 }
 
-type PrimaryOverride = "anthropic" | "azure-openai" | "auto";
+type PrimaryOverride = "anthropic" | "azure-openai" | "auto" | (string & {});
 
 function readPrimaryOverride(): PrimaryOverride {
   const raw = process.env.AI_PROVIDER_PRIMARY;
   if (raw === "anthropic" || raw === "azure-openai" || raw === "auto") {
     return raw;
   }
+  /* A configured compatible provider may be pinned by its own id. Anything
+     unrecognised still falls through to "auto", so a typo degrades to the
+     normal behaviour rather than to an outage. */
+  if (raw && buildCompatibleProviders().some((p) => p.name === raw)) return raw;
   return "auto";
 }
 
@@ -120,6 +130,14 @@ function pickPrimary(
     const bridged = bridgeSelection(req.model_tier, registry);
     if (bridged) return bridged.provider;
   }
+
+  /* A compatible provider serves only when pinned by name. Deliberately not
+     part of automatic selection: these are added by configuration, so an
+     unnoticed environment variable could otherwise silently move production
+     traffic onto a model nobody reviewed. Pinning is a decision somebody
+     makes; a default is one that makes itself. */
+  const pinned = registry.compatible.find((p) => p.name === override);
+  if (pinned && pinned.supportsTier(req.model_tier)) return pinned;
 
   if (override === "azure-openai" && registry.azure.supportsTier(req.model_tier)) {
     return registry.azure;
