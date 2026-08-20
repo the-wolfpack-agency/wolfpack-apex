@@ -11,7 +11,10 @@ import {
 } from "../registry";
 import type { CapabilityTier, ModelProvider } from "../types";
 
-const VALID_PROVIDERS: ModelProvider[] = ["openai", "azure"];
+/* Every provider the gateway can serve. "anthropic" joined when the registry
+   started describing the Claude models anthropic-provider.ts had been calling
+   all along, which is what let selection compare them on price. */
+const VALID_PROVIDERS: ModelProvider[] = ["openai", "azure", "anthropic"];
 const VALID_TIERS: CapabilityTier[] = ["small", "large", "reasoning"];
 
 /** Build a hermetic env object typed as ProcessEnv for injection. */

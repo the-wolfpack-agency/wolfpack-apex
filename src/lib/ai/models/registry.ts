@@ -21,6 +21,7 @@
  */
 
 import type { CapabilityTier, ModelSpec } from "./types";
+import { ANTHROPIC_TIER_PRICING } from "@/lib/ai/anthropic-provider";
 
 /* ----------------------------------------------------------------------------
  * Named price constants, USD per 1k tokens. Grouped by model family so a
@@ -142,6 +143,47 @@ export const MODEL_REGISTRY: readonly ModelSpec[] = Object.freeze([
     inputPricePer1kUsd: O4_MINI_INPUT_PER_1K,
     outputPricePer1kUsd: O4_MINI_OUTPUT_PER_1K,
   },
+
+  // --- Anthropic -----------------------------------------------------------
+  //
+  // ABSENT UNTIL NOW, WHICH WAS A CORRECTNESS BUG AND NOT ONLY A GAP.
+  //
+  // The gateway has called Claude all along: anthropic-provider.ts maps every
+  // tier to a model and bills against its own price table. The SELECTION
+  // registry had no Anthropic entries, so `cheapest at tier` compared Azure and
+  // OpenAI to each other and never to Claude. On a deployment where Anthropic
+  // is the only configured provider, selection had nothing to choose and the
+  // /admin/ai-router page reported decisions over a catalogue that excluded the
+  // model actually answering.
+  //
+  // PRICED FROM THE PROVIDER'S OWN TABLE, converted per-million to per-thousand
+  // at the point of use. Retyping the numbers here is how a registry price and
+  // a billed price drift apart, and the whole value of this catalogue is that
+  // the two agree.
+  {
+    id: "claude-haiku-4-5",
+    provider: "anthropic",
+    capabilityTier: "small",
+    contextWindow: WINDOW_200K,
+    inputPricePer1kUsd: ANTHROPIC_TIER_PRICING.cheap.input_per_mtok / 1000,
+    outputPricePer1kUsd: ANTHROPIC_TIER_PRICING.cheap.output_per_mtok / 1000,
+  },
+  {
+    id: "claude-sonnet-4-6",
+    provider: "anthropic",
+    capabilityTier: "large",
+    contextWindow: WINDOW_200K,
+    inputPricePer1kUsd: ANTHROPIC_TIER_PRICING.standard.input_per_mtok / 1000,
+    outputPricePer1kUsd: ANTHROPIC_TIER_PRICING.standard.output_per_mtok / 1000,
+  },
+  {
+    id: "claude-opus-4-7",
+    provider: "anthropic",
+    capabilityTier: "reasoning",
+    contextWindow: WINDOW_200K,
+    inputPricePer1kUsd: ANTHROPIC_TIER_PRICING.premium.input_per_mtok / 1000,
+    outputPricePer1kUsd: ANTHROPIC_TIER_PRICING.premium.output_per_mtok / 1000,
+  },
 ]);
 
 /** Ordinal for capability tiers so "small < large < reasoning" is comparable. */
@@ -178,6 +220,10 @@ export function isModelAvailable(
   switch (spec.provider) {
     case "openai":
       return hasValue(env.OPENAI_API_KEY);
+    /* One key, no per-model deployment names: Anthropic addresses models by
+       their canonical id, so the key is the whole question. */
+    case "anthropic":
+      return hasValue(env.ANTHROPIC_API_KEY);
     case "azure": {
       // A Foundry-served model carries its own endpoint and key. Checking the
       // classic AZURE_OPENAI_* pair for it would report DeepSeek as

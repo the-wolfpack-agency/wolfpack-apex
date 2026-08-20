@@ -254,6 +254,13 @@ describe("router — failover", () => {
     // fix; adding a test hostname to a production allowlist would not be.
     process.env.AZURE_OPENAI_ENDPOINT = "https://test-resource.openai.azure.com";
     process.env.AZURE_OPENAI_API_KEY = "akey";
+    /* A deployment name is part of "Azure is configured": Azure addresses a
+       model by per-resource deployment name, so an endpoint and key alone
+       describe a resource that cannot serve. Without this the test passed for
+       the wrong reason, because selection had no reachable candidate at all
+       rather than because it preferred Azure. */
+    process.env.AZURE_OPENAI_DEPLOYMENT_CHEAP = "gpt-4o-mini-dep";
+    process.env.AZURE_OPENAI_DEPLOYMENT_STANDARD = "gpt-4o-dep";
     _resetAIClientForTests(null);
     mockFetch.mockResolvedValueOnce(azureFail(503, "azure down"));
     mockMessagesCreate.mockResolvedValueOnce(fakeOk("from-anth"));
@@ -275,6 +282,13 @@ describe("router — failover", () => {
   it("both providers fail: throws and emits no analytics event", async () => {
     process.env.AZURE_OPENAI_ENDPOINT = "https://test-resource.openai.azure.com";
     process.env.AZURE_OPENAI_API_KEY = "akey";
+    /* A deployment name is part of "Azure is configured": Azure addresses a
+       model by per-resource deployment name, so an endpoint and key alone
+       describe a resource that cannot serve. Without this the test passed for
+       the wrong reason, because selection had no reachable candidate at all
+       rather than because it preferred Azure. */
+    process.env.AZURE_OPENAI_DEPLOYMENT_CHEAP = "gpt-4o-mini-dep";
+    process.env.AZURE_OPENAI_DEPLOYMENT_STANDARD = "gpt-4o-dep";
     _resetAIClientForTests(null);
     mockFetch.mockResolvedValueOnce(azureFail(503, "azure down"));
     mockMessagesCreate.mockRejectedValueOnce(
@@ -299,6 +313,24 @@ describe("router — Azure as primary when configured", () => {
   it("Azure is primary for ALL traffic when AZURE env vars are set", async () => {
     process.env.AZURE_OPENAI_ENDPOINT = "https://test-resource.openai.azure.com";
     process.env.AZURE_OPENAI_API_KEY = "akey";
+    /* A deployment name is part of "Azure is configured": Azure addresses a
+       model by per-resource deployment name, so an endpoint and key alone
+       describe a resource that cannot serve. Without this the test passed for
+       the wrong reason, because selection had no reachable candidate at all
+       rather than because it preferred Azure. */
+    process.env.AZURE_OPENAI_DEPLOYMENT_CHEAP = "gpt-4o-mini-dep";
+    process.env.AZURE_OPENAI_DEPLOYMENT_STANDARD = "gpt-4o-dep";
+    /* THE DEPLOYMENT NAME IS PART OF "AZURE IS CONFIGURED".
+       Azure addresses a model by per-resource deployment name, so an endpoint
+       and a key alone describe a resource that cannot serve anything. The test
+       set only those two and passed for a reason that stopped being true the
+       moment the registry gained a reachable Anthropic model: selection had no
+       candidate at all, fell through to the env-based primary, and looked like
+       a preference for Azure when it was an absence of alternatives.
+       With a deployment named, Azure is genuinely reachable and genuinely
+       cheapest, and the invariant this test is about holds on its own merits. */
+    process.env.AZURE_OPENAI_DEPLOYMENT_CHEAP = "gpt-4o-mini-dep";
+    process.env.AZURE_OPENAI_DEPLOYMENT_STANDARD = "gpt-4o-dep";
     _resetAIClientForTests(null);
     mockFetch.mockResolvedValueOnce(azureOk("ok"));
     const out = await getAIClient().complete({
@@ -329,6 +361,13 @@ describe("router — Azure as primary when configured", () => {
   it("AI_PROVIDER_PRIMARY=anthropic forces Anthropic primary even when Azure configured", async () => {
     process.env.AZURE_OPENAI_ENDPOINT = "https://test-resource.openai.azure.com";
     process.env.AZURE_OPENAI_API_KEY = "akey";
+    /* A deployment name is part of "Azure is configured": Azure addresses a
+       model by per-resource deployment name, so an endpoint and key alone
+       describe a resource that cannot serve. Without this the test passed for
+       the wrong reason, because selection had no reachable candidate at all
+       rather than because it preferred Azure. */
+    process.env.AZURE_OPENAI_DEPLOYMENT_CHEAP = "gpt-4o-mini-dep";
+    process.env.AZURE_OPENAI_DEPLOYMENT_STANDARD = "gpt-4o-dep";
     process.env.AI_PROVIDER_PRIMARY = "anthropic";
     _resetAIClientForTests(null);
     mockMessagesCreate.mockResolvedValueOnce(fakeOk("anth-pinned"));

@@ -15,7 +15,15 @@
  */
 
 /** Where a model is served from. Mirrors the two launch providers. */
-export type ModelProvider = "openai" | "azure";
+/**
+ * Who serves a model.
+ *
+ * "anthropic" was missing while anthropic-provider.ts served traffic through
+ * it, so the selection registry could not describe the models the gateway was
+ * actually calling. Adding it is what lets `cheapest at tier` compare Claude
+ * against the rest instead of ignoring a whole provider.
+ */
+export type ModelProvider = "openai" | "azure" | "anthropic";
 
 /**
  * Capability tier, ordered small < large < reasoning.
