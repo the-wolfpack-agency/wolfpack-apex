@@ -2855,6 +2855,18 @@ export type InstinctEventType =
   // its monthly_budget_usd cap (the cap was defined but previously unenforced).
   // { workspace_id, month_spend_usd, budget_usd, feature }
   | "ai.request_blocked_over_budget"
+  /* Sensitive data had nowhere safe to go: the request declared pii or phi and
+     no provider under a zero-retention agreement was available, so it was
+     refused rather than sent. Metadata: { feature, workspace_id, sensitivity,
+     reason }. The reason distinguishes "nobody is configured" from "this
+     provider is not trusted", which need different fixes. */
+  | "ai.request_blocked_retention"
+  /* A request carrying personal or health data was served while NOBODY has
+     been named as a zero-retention provider, so the guarantee is not being
+     enforced. Recorded per call rather than assumed, because "we do not
+     enforce this yet" is a fact somebody should be able to see in data before
+     a client asks. Metadata: { feature, workspace_id, sensitivity, provider }. */
+  | "ai.retention_unenforced"
   /* A workspace near or over its AI budget was served by a SMALLER model
      rather than refused. Recorded so a degraded answer is never invisible:
      somebody comparing this week's answers with last week's should find the
