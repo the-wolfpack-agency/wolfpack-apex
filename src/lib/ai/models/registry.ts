@@ -215,7 +215,11 @@ export function listModels(): readonly ModelSpec[] {
  */
 export function isModelAvailable(
   spec: ModelSpec,
-  env: NodeJS.ProcessEnv = process.env,
+  /* A plain record, not NodeJS.ProcessEnv: this repo declares required keys on
+     ProcessEnv, so a caller holding a narrower environment (a test, or the
+     insights reader) could not pass it without inventing values. process.env
+     still satisfies this. */
+  env: Record<string, string | undefined> = process.env,
 ): boolean {
   switch (spec.provider) {
     case "openai":

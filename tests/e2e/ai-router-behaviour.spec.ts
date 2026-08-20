@@ -53,7 +53,8 @@ const INSIGHTS = {
   ],
   fallbacks: 1,
   models: [
-    { modelId: "gpt-4o-mini", provider: "azure", tier: "small", contextWindow: 128000, inputPricePer1kUsd: 0.00015, outputPricePer1kUsd: 0.0006, available: true, blockedBy: null },
+    { modelId: "gpt-4o-mini", provider: "azure", tier: "small", contextWindow: 128000, inputPricePer1kUsd: 0.00015, outputPricePer1kUsd: 0.0006, available: true, blockedBy: null, servedIn: "eu", regionEnvVar: "AI_MODEL_REGION_GPT_4O_MINI" },
+    { modelId: "azure-gpt-4o", provider: "azure", tier: "large", contextWindow: 128000, inputPricePer1kUsd: 0.0025, outputPricePer1kUsd: 0.01, available: true, blockedBy: null, servedIn: "unknown", regionEnvVar: "AI_MODEL_REGION_AZURE_GPT_4O" },
     { modelId: "o1-preview", provider: "openai", tier: "reasoning", contextWindow: 128000, inputPricePer1kUsd: 0.015, outputPricePer1kUsd: 0.06, available: false, blockedBy: "OPENAI_API_KEY is not set" },
   ],
   smallTierShare: 0.75,
@@ -256,5 +257,36 @@ test.describe("the explanations are folded away from the numbers", () => {
     await page.getByTestId("router-explainer-panel").locator("summary").click();
     await expect(page.getByTestId("router-explainer")).toBeVisible();
     await expect(page.getByText(/Where to point:/)).toHaveCount(0);
+  });
+});
+
+
+/**
+ * Where each model runs, on the page.
+ *
+ * An undeclared region silently changes behaviour: a request that requires a
+ * region is REFUSED by a model in that state. If the page does not say which
+ * models are in it, the refusal arrives with no visible cause, and the person
+ * debugging it has to read source to learn the environment variable exists.
+ */
+test.describe("the page says where each model runs", () => {
+  test("names the region for a declared model", async ({ page }) => {
+    await openRouter(page, INSIGHTS);
+    await expect(page.getByTestId("router-models")).toContainText("Runs in EU");
+  });
+
+  test("names the variable to set when a region is undeclared", async ({ page }) => {
+    /* "Not declared" alone sends somebody digging. The variable name IS the
+       fix, the same courtesy the blocked-by line already pays. */
+    await openRouter(page, INSIGHTS);
+    const models = page.getByTestId("router-models");
+    await expect(models).toContainText("Region not declared");
+    await expect(models).toContainText("AI_MODEL_REGION_AZURE_GPT_4O");
+  });
+
+  test("never claims a region for a model that has none", async ({ page }) => {
+    // "Runs in UNKNOWN" would read as a place. It is the absence of one.
+    await openRouter(page, INSIGHTS);
+    await expect(page.getByTestId("router-models")).not.toContainText("Runs in UNKNOWN");
   });
 });

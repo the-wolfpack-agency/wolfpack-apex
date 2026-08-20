@@ -95,3 +95,66 @@ describe("what an auditor actually asks", () => {
     expect(buildRouterAuditEntry(facts({ injectionAttempts: 2 })).afterState.injection_attempts).toBe(2);
   });
 });
+
+/**
+ * Residency in the row.
+ *
+ * The single fact in an AI audit that cannot be reconstructed afterwards.
+ * Tokens and cost survive on a provider invoice; nothing outside this record
+ * says which region answered a given request, so if it is not written here it
+ * is not knowable later at any price.
+ */
+describe("buildRouterAuditEntry — residency", () => {
+  const base = {
+    workspaceId: "w1",
+    userId: "u1",
+    feature: "test",
+    model: "gpt-4o-mini",
+    provider: "azure",
+    requestedTier: "cheap" as const,
+    servedTier: "cheap" as const,
+    inputTokens: 10,
+    outputTokens: 5,
+    costUsd: 0.001,
+    withheldOutbound: 0,
+    withheldInbound: 0,
+    withheldKinds: [],
+    injectionAttempts: 0,
+  };
+
+  it("states the region served and the requirement it satisfied", () => {
+    const entry = buildRouterAuditEntry({
+      ...base,
+      residency: { required: ["eu", "uk"], servedIn: "eu" },
+    });
+    expect(entry.afterState.residency_served_in).toBe("eu");
+    expect(entry.afterState.residency_required).toEqual(["eu", "uk"]);
+  });
+
+  it("sorts the requirement so identical policies hash identically", () => {
+    /* This row is hash-chained. Two calls under the same policy must produce
+       the same bytes, or the chain records a difference that is only argument
+       order. */
+    const a = buildRouterAuditEntry({ ...base, residency: { required: ["uk", "eu"], servedIn: "eu" } });
+    const b = buildRouterAuditEntry({ ...base, residency: { required: ["eu", "uk"], servedIn: "eu" } });
+    expect(a.afterState.residency_required).toEqual(b.afterState.residency_required);
+  });
+
+  it("omits the fields entirely when no requirement was declared", () => {
+    /* Presence of the field IS the statement that residency applied. An empty
+       string or a null would read as "checked, found nothing", which is a
+       different and untrue claim. */
+    const entry = buildRouterAuditEntry(base);
+    expect(entry.afterState).not.toHaveProperty("residency_required");
+    expect(entry.afterState).not.toHaveProperty("residency_served_in");
+  });
+
+  it("still carries no content", () => {
+    const entry = buildRouterAuditEntry({
+      ...base,
+      residency: { required: ["eu"], servedIn: "eu" },
+    });
+    expect(entry.afterState.contains_content).toBe(false);
+    expect(JSON.stringify(entry)).not.toContain("hello");
+  });
+});

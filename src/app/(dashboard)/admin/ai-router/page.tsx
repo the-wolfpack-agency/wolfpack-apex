@@ -463,6 +463,23 @@ export default function AiRouterPage() {
                   ${m.inputPricePer1kUsd}/1k in, ${m.outputPricePer1kUsd}/1k out
                   {m.blockedBy ? ` — ${m.blockedBy}` : ""}
                 </p>
+                {/* WHERE IT RUNS, and what to do when nobody has said.
+                    An undeclared region is not cosmetic: a request that
+                    requires a region is REFUSED by a model in this state, so
+                    the difference between this line reading "eu" and reading
+                    "not declared" is the difference between a working estate
+                    and a puzzling one. Naming the variable is the same
+                    courtesy the blocked-by line already pays. */}
+                <p
+                  style={{ ...dim, margin: "0.2rem 0 0", fontSize: "0.85rem" }}
+                  data-testid="router-model-region"
+                >
+                  {m.servedIn && m.servedIn !== "unknown" ? (
+                    <>Runs in {m.servedIn.toUpperCase()}</>
+                  ) : (
+                    <>Region not declared. Set {m.regionEnvVar} to allow requests that require one.</>
+                  )}
+                </p>
                 </li>
               ))}
           </ul>
