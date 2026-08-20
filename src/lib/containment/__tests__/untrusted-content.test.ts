@@ -64,6 +64,8 @@ const UNAUDITED_GENERATORS: readonly string[] = [
  * each records the evidence rather than a verdict.
  */
 const AUDITED: Readonly<Record<string, string>> = {
+  "lib/ai/provenance.ts":
+    "SAFE, and the interpolation is the point: this file EXISTS to wrap untrusted text in a fence, so it necessarily builds markup around text from outside. Two breakouts are possible and both are closed and tested. The body has every <untrusted> tag replaced before it is placed, so content cannot close its own fence and write outside it; the test counts the closing tags and asserts one. The label is stripped of < > and \" and truncated, so it cannot end its attribute; the test feeds it a label crafted to open a second tag and asserts only one exists. Emitting as a JSON string literal is not available here: the model has to READ this, so it has to be text.",
   "lib/markdown.ts":
     "SAFE, verified by running it: escaping happens before inline formatting, so a quote in a link target arrives as &quot; and stays inside the attribute value. Hypothesised an attribute breakout, tested it, and was wrong.",
   "lib/mail/send-invite.ts": "FIXED: href was raw while the same URL was escaped for display. Not exploitable (base is env, not a request header) but the inconsistency was the tell.",
