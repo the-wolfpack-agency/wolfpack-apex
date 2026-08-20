@@ -440,6 +440,45 @@ We build for enterprise trust from day one.
 - A public security-posture page documents the current stance.`,
   },
   {
+    slug: "model-router",
+    parentSlug: null,
+    position: 7,
+    title: "Model router",
+    body: `## What it is
+One place every AI call in the platform passes through. It decides which model answers, checks what leaves and what comes back, records what the call actually cost, and writes a record nobody can alter afterwards.
+
+The reason it is one place and not a helper each feature calls is simple: a guardrail that a call site has to remember to use is the guardrail that was missing. Adding a new AI feature means asking for a capability, not choosing a vendor, and the feature inherits every check without knowing they exist.
+
+## What happens to a question, in order
+1. **Most questions stop here.** Calendar, mail, records and documents are read directly. If the answer is already in your own systems, that is where it comes from: no model, no cost, nothing sent outside.
+2. **The budget is checked.** A workspace over its monthly ceiling is refused before anything is dispatched, so nothing is charged. Approaching the ceiling downgrades the tier rather than stopping the work.
+3. **Sensitive data is matched to a provider.** A request carrying personal or health data may only be served by a provider under a zero-retention agreement.
+4. **Regional requirements are enforced.** A request that declares where its data may be processed is refused by any model that cannot be placed inside one of those regions, including a model whose region nobody has declared.
+5. **The message is cleaned on the way out.** Passwords, keys, card and account numbers are found and replaced before the message leaves this process, so the model never receives them and neither does the company running it.
+6. **A model is chosen.** The cheapest model that meets the requirement, decided by fixed rules rather than by another AI.
+7. **The answer is cleaned on the way back.** The same check runs inbound, because a model can repeat something it was shown, and an answer gets saved and read by the whole team.
+8. **What happened is recorded.** The billed cost, the model, the counts of what was withheld in each direction, and the region that served, in a tamper-evident row that carries no content.
+
+## Things that are true and worth saying out loud
+- **Cost is measured, not estimated.** The figure on the admin page is what the provider billed for that answer. An estimate formed before the answer exists cannot know how long the answer will be.
+- **The gates fail closed.** A request that cannot be served safely is refused rather than sent anyway. This is the one place in the router where degrading gracefully would be the wrong instinct.
+- **Model choice is explainable.** Every decision carries a reason code that renders in plain words, so "why did this use the expensive model" has an answer that does not require reading code.
+- **The rules do not know which model is behind them.** Swapping a provider, adding a cheaper model, or trying a new one changes nothing about what is allowed to leave.
+
+## How the controls are configured
+Regions and retention are facts about **our agreements and our deployment**, not properties of a model, so both are environment configuration rather than constants in source. The same model id is served from Sweden on one resource and Iowa on another, and the same provider retains prompts for thirty days on one contract and zero on another.
+
+- \`AI_ZERO_RETENTION_PROVIDERS\` names the providers trusted with personal or health data. It defaults to empty, and empty means nobody is trusted yet.
+- \`AI_PROVIDER_REGION_<PROVIDER>\` declares where a provider runs. \`AI_MODEL_REGION_<MODEL_ID>\` overrides it for one model, because a mixed estate is the normal one.
+- Both are read at call time, so a change takes effect on the next request rather than the next deploy. A contract ending is not an occasion to wait for a release.
+
+## Where to see it
+**Admin, Model router.** The page shows what the router kept in, what it spent, which models were used and why, and which models the platform can reach with the region each one runs in. Two folded panels at the top explain the product in plain words for anyone who has to present it.
+
+## Adding a model
+Edit the registry in one place: id, provider, capability tier, context window, and price per thousand tokens. Availability is gated on the environment variables that model needs, never hard-coded, so a model appears when it is genuinely reachable and disappears when its key is removed. Nothing at any call site changes.`,
+  },
+  {
     slug: "customer-success",
     parentSlug: null,
     position: 6,

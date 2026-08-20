@@ -51,6 +51,7 @@ describe("RouterExplainer", () => {
       (el) => el.textContent ?? "",
     );
     const PANELS = [
+      "models list",
       "Activity",
       "What the router kept in",
       "models list",
@@ -61,6 +62,13 @@ describe("RouterExplainer", () => {
       (text) => !PANELS.some((panel) => text.includes(panel)),
     );
     expect(unanchored).toEqual([]);
+  });
+
+  test("says residency is per request, which is the whole difference from a settings screen", () => {
+    /* The competing claim is an account-wide region toggle. If this copy does
+       not say "per request" it is describing their product, not ours. */
+    render(<RouterExplainer />);
+    expect(screen.getByText(/per request rather than once in a settings screen/i)).toBeInTheDocument();
   });
 
   test("avoids the vocabulary that needs its own explanation", () => {

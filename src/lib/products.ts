@@ -76,6 +76,30 @@ export const PRODUCTS: Product[] = [
     status: "live",
   },
   {
+    id: "model-router",
+    name: "Model Router",
+    area: "Instinct",
+    tagline: "The layer between your company and every AI model",
+    summary:
+      "Most of the market is teaching people how to build models. The Model Router removes the layers between a business and the models that already exist. Every AI call in the platform goes through one place that decides which model answers, checks what leaves and what comes back, records what it actually cost, and writes an entry nobody can alter afterwards. Swapping a provider, adding a cheaper model, or trying a new one changes none of the rules, because the checks happen on our side of the line rather than the vendor's.",
+    highlights: [
+      "The cheapest model that can do the job gets the job, decided by fixed rules rather than by another AI, so the same question routes the same way every time and the reason can be read in plain words afterwards",
+      "Passwords, keys, card and account numbers are found and replaced before a question leaves, and again before an answer is shown or stored, because a model can repeat what it was shown and an answer gets read by the whole team",
+      "Cost is the amount the provider billed, per answer, per model, not an estimate made before the answer existed",
+      "Sensitive data goes only to providers under a zero-retention agreement, and data carrying a regional requirement is refused by any model that cannot be placed inside that region, including one whose region nobody declared",
+      "Every call writes a tamper-evident record of what happened, carrying counts and kinds but never the content it is auditing",
+    ],
+    audience:
+      "Any company putting AI in front of its own data, and any team that will be asked to prove where a record was processed",
+    potentialUses: [
+      "Drops in front of an existing AI feature without changing it: the call site asks for a capability, not a vendor",
+      "The redaction and residency gates are model-agnostic, so a client can adopt a new provider without a new safety review",
+      "The audit trail is the evidence half of a compliance answer, which is usually the half a settings screen cannot give",
+      "The cost record makes 'we moved this workload to a smaller model and saved X' a subtraction over real rows rather than a claim",
+    ],
+    status: "live",
+  },
+  {
     id: "auto",
     name: "Auto",
     area: "Auto",
