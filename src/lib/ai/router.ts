@@ -59,6 +59,7 @@ import { verifyAnswer, shouldEscalate } from "./verification";
 import { judgeAnswer, type JudgeResult, unjudged } from "./judge";
 import { chooseIndependentJudge, type JudgeCandidate } from "./judge-selection";
 import { MODEL_REGISTRY, isModelAvailable } from "@/lib/ai/models/registry";
+import { recordServedVersion } from "@/lib/ai/models/version-store";
 import { ANTHROPIC_TIER_TO_MODEL } from "./anthropic-provider";
 
 interface ProviderRegistry {
@@ -705,6 +706,19 @@ class RouterClient implements AIClient {
      * call that actually happened. Never blocks and never throws: an audit
      * failure must not turn a finished answer into an error, and recordAudit
      * already fails closed by reporting rather than by rejecting. */
+    /* WHICH WEIGHTS ANSWERED. Fire and forget, after the response is settled:
+       every gate here keys on a model id, and an id is a name whose meaning the
+       provider can change without telling anybody. Recording what actually
+       served is what makes a later regression explainable rather than a
+       mystery about when things got worse. */
+    void recordServedVersion({
+      modelId: bridged?.spec.id ?? response.model_used,
+      servedVersion: response.model_used,
+      provider: response.provider_used,
+      workspaceId: cReq.metadata?.workspace_id,
+      feature: cReq.metadata?.feature,
+    }).catch(() => undefined);
+
     void recordRouterCall({
       workspaceId: cReq.metadata?.workspace_id ?? "default",
       userId: cReq.metadata?.user_id ?? "system",
