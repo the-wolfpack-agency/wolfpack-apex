@@ -54,6 +54,16 @@ export interface AICompleteRequest {
    * completions are never bloated; the assistant + OGIAM agent surfaces set it.
    */
   apply_constitution?: boolean;
+  /**
+   * Regions this request's data may be processed in, lowercase (e.g. ["eu"]).
+   *
+   * Omitted means no requirement, which is the honest default: most questions
+   * genuinely have none, and inventing one for them would turn a control into
+   * an outage. When present the router refuses any model it cannot place
+   * inside one of these regions, INCLUDING a model whose region nobody has
+   * declared. See src/lib/ai/residency.ts.
+   */
+  residency?: string[];
 }
 
 export interface AICompleteResponse {

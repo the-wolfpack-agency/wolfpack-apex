@@ -27,6 +27,7 @@
 import { query } from "@/lib/db";
 import { MODEL_REGISTRY, isModelAvailable } from "./registry";
 import type { CapabilityTier, ModelProvider } from "./types";
+import { regionOfModel, modelRegionEnvVar } from "@/lib/ai/residency";
 
 export interface ModelUsage {
   modelId: string;
@@ -64,6 +65,17 @@ export interface ModelAvailability {
   available: boolean;
   /** Why it is unavailable, naming the missing configuration. */
   blockedBy: string | null;
+  /**
+   * The region this model is declared to run in, or "unknown".
+   *
+   * Surfaced because an undeclared region is not a cosmetic gap: a request
+   * that requires a region is REFUSED by a model in this state, so this column
+   * is the difference between a working estate and a puzzling one. Naming the
+   * env var that would fix it is the same courtesy `blockedBy` already pays.
+   */
+  servedIn: string;
+  /** The env var that would declare it, for the ones that have not been. */
+  regionEnvVar: string;
 }
 
 export interface RouterInsights {
@@ -112,7 +124,9 @@ export function describeReason(reason: string): string {
  * today if its key was removed — both matter and neither is visible in the
  * event stream.
  */
-export function modelAvailability(env: NodeJS.ProcessEnv = process.env): ModelAvailability[] {
+export function modelAvailability(
+  env: Record<string, string | undefined> = process.env,
+): ModelAvailability[] {
   return MODEL_REGISTRY.map((spec) => {
     const available = isModelAvailable(spec, env);
     let blockedBy: string | null = null;
@@ -132,6 +146,8 @@ export function modelAvailability(env: NodeJS.ProcessEnv = process.env): ModelAv
       outputPricePer1kUsd: spec.outputPricePer1kUsd,
       available,
       blockedBy,
+      servedIn: regionOfModel({ modelId: spec.id, provider: spec.provider }, env),
+      regionEnvVar: modelRegionEnvVar(spec.id),
     };
   }).sort((a, b) => Number(b.available) - Number(a.available) || a.modelId.localeCompare(b.modelId));
 }

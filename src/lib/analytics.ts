@@ -2861,6 +2861,7 @@ export type InstinctEventType =
      reason }. The reason distinguishes "nobody is configured" from "this
      provider is not trusted", which need different fixes. */
   | "ai.request_blocked_retention"
+  | "ai.request_blocked_residency"
   /* A request carrying personal or health data was served while NOBODY has
      been named as a zero-retention provider, so the guarantee is not being
      enforced. Recorded per call rather than assumed, because "we do not

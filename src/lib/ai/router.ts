@@ -53,6 +53,7 @@ import {
 import { governTier, CEILING_MULTIPLE, type BudgetDecision } from "./budget";
 import { recordRouterCall } from "./audit-record-writer";
 import { mayServe, zeroRetentionProviders, RetentionPolicyError } from "./retention";
+import { mayProcessHere, regionOfModel, ResidencyPolicyError } from "./residency";
 
 interface ProviderRegistry {
   anthropic: AIProvider;
@@ -445,6 +446,59 @@ class RouterClient implements AIClient {
     // report come from the SAME decision rather than two independent ones.
     const bridged = readPrimaryOverride() === "auto" ? bridgeSelection(cReq.model_tier, this.registry) : null;
     const primary = pickPrimary(cReq, this.registry);
+
+    /* WHERE THIS DATA MAY BE PROCESSED.
+     *
+     * Judged here rather than beside the retention gate because this is the
+     * first point where the MODEL is known, and region is a property of a
+     * deployment, not of a provider: one Azure resource in Sweden and one in
+     * Iowa is an ordinary estate, and a provider-wide answer would be
+     * confidently wrong about half of it. Nothing has been dispatched yet.
+     *
+     * Unlike retention, this gate needs no opt-in and has no unenforced state.
+     * It only acts on requests that DECLARE a requirement, so an estate that
+     * has never thought about residency is unaffected, and one that has is
+     * protected the moment a caller says so. Silence is not consent here: a
+     * declared requirement against an undeclared region is refused, because
+     * "we did not know where it ran" is the answer that ends badly. */
+    let residencyRecord: { required: string[]; servedIn: string } | undefined;
+    if (cReq.residency && cReq.residency.length > 0) {
+      const modelId = bridged?.spec.id ?? primary.name;
+      const servedIn = regionOfModel({ modelId, provider: primary.name });
+      const residency = mayProcessHere({ required: cReq.residency, servedIn });
+      if (!residency.allowed) {
+        trackEvent(
+          "ai.request_blocked_residency",
+          cReq.metadata?.user_id ?? "system",
+          cReq.metadata?.user_role ?? "system",
+          {
+            feature: cReq.metadata?.feature ?? "unknown",
+            workspace_id: cReq.metadata?.workspace_id ?? "default",
+            required: residency.required.join(","),
+            served_in: residency.servedIn,
+            provider: primary.name,
+            model: modelId,
+            reason: residency.reason,
+          },
+        );
+        throw new ResidencyPolicyError(
+          residency.reason === "region_undeclared"
+            ? "This request may only be processed in specific regions, and the region of the available model has not been declared."
+            : "This request may only be processed in specific regions, and no available model runs in one of them.",
+          {
+            required: residency.required,
+            servedIn: residency.servedIn,
+            provider: primary.name,
+            reason: residency.reason,
+          },
+        );
+      }
+      /* Recorded from the SAME verdict that allowed the call, never
+         recomputed later: a second read of the environment could disagree
+         with the one that made the decision, and the row would then attest
+         to something that never happened. */
+      residencyRecord = { required: residency.required, servedIn: residency.servedIn };
+    }
     const obs = getObsClient();
     let response: AICompleteResponse;
     let fallbackUsed = false;
@@ -636,6 +690,7 @@ class RouterClient implements AIClient {
       ],
       injectionAttempts: 0,
       ...(budget.state === "ok" ? {} : { budgetState: budget.state }),
+      ...(residencyRecord ? { residency: residencyRecord } : {}),
     });
 
     return response;

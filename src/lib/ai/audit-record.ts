@@ -63,6 +63,16 @@ export interface RouterAuditFacts {
   injectionAttempts: number;
   /** Present when the budget governor changed or refused the call. */
   budgetState?: "approaching" | "over" | "stopped";
+  /**
+   * WHERE this call was processed, and what the request required.
+   *
+   * The single most valuable field in this row for an audit, and the one that
+   * cannot be reconstructed afterwards: cost and tokens survive in a provider
+   * invoice, but nothing outside this record says which region answered a
+   * given request. Omitted when the request declared no requirement, so the
+   * presence of the field is itself the statement that residency applied.
+   */
+  residency?: { required: string[]; servedIn: string };
 }
 
 export const ROUTER_AUDIT_ACTION = "ai.call.completed";
@@ -102,6 +112,15 @@ export function buildRouterAuditEntry(facts: RouterAuditFacts): {
       withheld_kinds: [...facts.withheldKinds].sort(),
       injection_attempts: facts.injectionAttempts,
       ...(facts.budgetState ? { budget_state: facts.budgetState } : {}),
+      /* Named region, and the requirement it satisfied. An auditor asking
+         "where was this record processed" gets an answer from the row rather
+         than from somebody's memory of the configuration at the time. */
+      ...(facts.residency
+        ? {
+            residency_required: [...facts.residency.required].sort(),
+            residency_served_in: facts.residency.servedIn,
+          }
+        : {}),
       /* Stated in the row itself, because the person reading an export a year
          from now will not have read this file. */
       contains_content: false,
