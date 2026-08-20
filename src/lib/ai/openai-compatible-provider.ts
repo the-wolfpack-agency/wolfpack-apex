@@ -158,6 +158,12 @@ export class OpenAICompatibleProvider implements AIProvider {
     return Boolean(this.config.models[tier]);
   }
 
+  /** The model this provider would use for a tier, so a caller can judge its
+   *  lineage before deciding whether it is an independent checker. */
+  modelFor(tier: AIModelTier): string | undefined {
+    return this.config.models[tier];
+  }
+
   async complete(req: AICompleteRequest): Promise<AICompleteResponse> {
     const model = this.config.models[req.model_tier];
     if (!model) {
