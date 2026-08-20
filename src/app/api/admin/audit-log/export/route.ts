@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
-import { queryAuditLog } from "@/lib/audit-log";
+import { queryAuditLog, verifyChain, GENESIS_HASH } from "@/lib/audit-log";
 import { trackEvent } from "@/lib/analytics";
 import { effectiveCapabilitiesFor } from "@/lib/auth/require-capability";
 import type { Capability } from "@/lib/auth/capabilities";
@@ -46,6 +46,36 @@ async function checkAuth(req: NextRequest) {
     // ignore
   }
   return { ok: false as const, response: NextResponse.json({ error: "forbidden" }, { status: 403 }) };
+}
+
+/**
+ * The first and last seq in the exported slice.
+ *
+ * Verification is scoped to what the file contains: verifying the WHOLE chain
+ * would report a break in a range the reader was never given, which is a
+ * different document's problem and reads as this one's.
+ */
+async function exportedSeqRange(
+  filter: Parameters<typeof queryAuditLog>[0],
+): Promise<{ from: number; to: number } | null> {
+  const first = await queryAuditLog({ ...filter, limit: 1 });
+  if (first.entries.length === 0) return null;
+  const seqs = first.entries.map((e) => e.seq);
+  let cursor = first.nextCursor;
+  let last = seqs[seqs.length - 1];
+  /* Walk to the end using the same pagination the export uses, so the range
+     matches the rows exactly rather than approximately. */
+  let guard = 0;
+  while (cursor && guard < 500) {
+    const page = await queryAuditLog({ ...filter, cursor });
+    if (page.entries.length === 0) break;
+    last = page.entries[page.entries.length - 1].seq;
+    cursor = page.nextCursor;
+    guard += 1;
+  }
+  const from = Math.min(seqs[0], last);
+  const to = Math.max(seqs[0], last);
+  return { from, to };
 }
 
 export async function GET(req: NextRequest) {
@@ -89,7 +119,38 @@ export async function GET(req: NextRequest) {
     cursor = page.nextCursor;
   } while (cursor && totalEmitted < 50_000); // hard safety cap
 
-  const body = lines.join("\n") + (lines.length > 0 ? "\n" : "");
+  /* A MANIFEST LINE, FIRST, so the file can be checked without asking us.
+   *
+   * The rows already carry entry_hash and prev_hash, which is everything an
+   * auditor needs to walk the chain, and nothing said what to DO with them: no
+   * algorithm, no canonicalisation, no genesis value, and no statement of
+   * whether the chain verified at the moment of export. A hash somebody cannot
+   * reproduce is decoration.
+   *
+   * The verdict travels IN the file deliberately. An export that omitted a
+   * failing chain would be worse than no export, because it would look clean.
+   *
+   * NDJSON, so this is one more line rather than a new shape: a consumer that
+   * reads rows and ignores unknown objects is unaffected, and one that cares
+   * checks `document`. */
+  const seqs = lines.length > 0 ? await exportedSeqRange(filter) : null;
+  const verification = seqs ? await verifyChain(seqs.from, seqs.to) : { valid: true, checkedCount: 0 };
+  const manifest = {
+    document: "instinct-audit-export",
+    generated_at: new Date().toISOString(),
+    row_count: totalEmitted,
+    truncated: totalEmitted >= 50_000,
+    chain: {
+      algorithm: "sha256(prev_hash || canonical_json(entry_without_hashes))",
+      canonicalisation: "JSON with object keys sorted, no insignificant whitespace",
+      genesis_hash: GENESIS_HASH,
+      /* Verified over exactly the range in this file, at the time it was
+         produced. A later verdict says nothing about this document. */
+      verified_at_export: verification,
+    },
+  };
+
+  const body = [JSON.stringify(manifest), ...lines].join("\n") + "\n";
 
   trackEvent("system.audit_log_export", user.id, user.role, {
     exported_count: totalEmitted,
