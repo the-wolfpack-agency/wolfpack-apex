@@ -88,6 +88,11 @@ export default function AiRouterPage() {
   const [error, setError] = useState<string | null>(null);
   const [probe, setProbe] = useState<ProbeReport | null>(null);
   const [probing, setProbing] = useState(false);
+  /* WHEN these numbers were read, and a way to read them again. A page of
+     counters with no timestamp cannot be told apart from a page that has
+     stopped updating, which is exactly how this one was read. */
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [probeError, setProbeError] = useState<string | null>(null);
 
   // Deliberately a click and not an effect. A probe is a real inference call
@@ -110,8 +115,13 @@ export default function AiRouterPage() {
   }, []);
 
   const load = useCallback(async () => {
+    setRefreshing(true);
     try {
-      const res = await fetchWithRefresh("/api/admin/ai-router");
+      /* cache: "no-store" as well as the response header. The header stops the
+         browser reusing a stored copy; this stops it from being written in the
+         first place, and the two together are what makes a refresh mean
+         refresh. */
+      const res = await fetchWithRefresh("/api/admin/ai-router", { cache: "no-store" });
       if (!res.ok) {
         setError(`Could not load the router (HTTP ${res.status}).`);
         return;
@@ -121,6 +131,8 @@ export default function AiRouterPage() {
       setError("Could not reach the router.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
+      setLoadedAt(new Date());
     }
   }, []);
 
@@ -141,6 +153,47 @@ export default function AiRouterPage() {
         title="Model router"
         subtitle="Which models this platform can use, which one it chose for each call, and why."
       />
+
+      {/* WHEN THIS WAS READ, AND A WAY TO READ IT AGAIN.
+          Reported 2026-08-19: "this doesn't seem to update". Counters with no
+          timestamp cannot be told apart from counters that have stopped, and
+          the only way to get new ones was a full page load. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.75rem",
+          flexWrap: "wrap",
+          marginTop: "-0.5rem",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={refreshing}
+          data-testid="router-refresh"
+          style={{
+            border: "1px solid var(--wp-dark-border, rgba(255,255,255,0.14))",
+            background: "transparent",
+            color: "var(--wp-text, #e8eaed)",
+            borderRadius: "8px",
+            padding: "0.35rem 0.8rem",
+            fontSize: "0.8rem",
+            cursor: refreshing ? "default" : "pointer",
+            opacity: refreshing ? 0.6 : 1,
+          }}
+        >
+          {refreshing ? "Reading..." : "Refresh"}
+        </button>
+        {loadedAt ? (
+          <span
+            style={{ fontSize: "0.76rem", color: "var(--wp-text-muted, #9aa0aa)" }}
+            data-testid="router-loaded-at"
+          >
+            Read at {loadedAt.toLocaleTimeString()}
+          </span>
+        ) : null}
+      </div>
 
       {error && (
         <GlassPanel>

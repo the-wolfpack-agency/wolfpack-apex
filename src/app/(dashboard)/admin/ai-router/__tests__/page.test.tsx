@@ -130,6 +130,49 @@ describe("money", () => {
   });
 });
 
+/**
+ * Reported 2026-08-19: "this doesn't seem to update".
+ *
+ * Two causes, and the page could only fix one of them. The route had no cache
+ * headers, so a browser could serve its own stored copy back; and the page
+ * fetched once on mount, so the only way to get new numbers was a full reload.
+ * Counters with no timestamp cannot be told apart from counters that stopped.
+ */
+describe("freshness", () => {
+  it("asks the browser not to reuse a stored copy", async () => {
+    respond(insights());
+    render(<Page />);
+    await screen.findByTestId("router-headline");
+    const [, init] = mockFetch.mock.calls.find(
+      (c) => String(c[0]).includes("/api/admin/ai-router") && !String(c[0]).includes("probe"),
+    ) as [string, RequestInit | undefined];
+    expect(init?.cache).toBe("no-store");
+  });
+
+  it("says when it read the numbers", async () => {
+    respond(insights());
+    render(<Page />);
+    expect(await screen.findByTestId("router-loaded-at")).toHaveTextContent(/Read at /);
+  });
+
+  it("reads them again on request, without a page reload", async () => {
+    respond(insights());
+    render(<Page />);
+    await screen.findByTestId("router-headline");
+    const before = mockFetch.mock.calls.filter((c) =>
+      String(c[0]).includes("/api/admin/ai-router") && !String(c[0]).includes("probe"),
+    ).length;
+
+    fireEvent.click(screen.getByTestId("router-refresh"));
+
+    await screen.findByTestId("router-loaded-at");
+    const after = mockFetch.mock.calls.filter((c) =>
+      String(c[0]).includes("/api/admin/ai-router") && !String(c[0]).includes("probe"),
+    ).length;
+    expect(after).toBeGreaterThan(before);
+  });
+});
+
 describe("absence", () => {
   it("does not present an unreadable router as an idle one", async () => {
     respond({ nonsense: true });

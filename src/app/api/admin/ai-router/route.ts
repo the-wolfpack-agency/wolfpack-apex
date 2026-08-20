@@ -17,6 +17,16 @@ import { getRouterInsights } from "@/lib/ai/models/insights";
 
 export const runtime = "nodejs";
 
+/* NEVER CACHED, at either end.
+ *
+ * Reported 2026-08-19: "this doesn't seem to update". The route reads recent
+ * events, so a cached copy is not a stale nicety, it is a page that says the
+ * router did nothing while it is busy. force-dynamic keeps the framework from
+ * treating it as static, and the no-store header keeps the BROWSER from
+ * serving its own copy back on the next visit, which is the half a server-side
+ * setting cannot reach. */
+export const dynamic = "force-dynamic";
+
 /** Clamped so a caller cannot ask for an unbounded scan of the event table. */
 const MAX_DAYS = 180;
 const DEFAULT_DAYS = 30;
@@ -28,5 +38,8 @@ export async function GET(req: NextRequest) {
   const raw = Number(req.nextUrl.searchParams.get("days"));
   const days = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), MAX_DAYS) : DEFAULT_DAYS;
 
-  return NextResponse.json(await getRouterInsights(days), { status: 200 });
+  return NextResponse.json(await getRouterInsights(days), {
+    status: 200,
+    headers: { "Cache-Control": "no-store, max-age=0" },
+  });
 }
