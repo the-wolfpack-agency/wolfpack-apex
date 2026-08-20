@@ -96,14 +96,21 @@ jobs:
             || echo "::warning::playwright install-deps failed (apt mirror). Continuing: a genuinely missing library surfaces as a browser launch failure in the next step."
 
       # HARD GATES — one parallel invocation; must pass on PR + push. A parity
-      # regression blocks the merge. Both specs are read-only page renders, so
-      # --workers=2 is safe and roughly halves the wall time.
+      # regression blocks the merge. All three specs are read-only page renders,
+      # so --workers=2 is safe and roughly halves the wall time.
+      #
+      # ai-router-behaviour was added on 2026-08-20 after being found red for
+      # weeks: it stubs every response so it needs no credentials, which was
+      # written into its header as the reason it could run everywhere, and then
+      # it was never listed in a workflow. Five of its assertions had been
+      # obsoleted by #279 and nothing said so. A spec no job runs is not a test.
       - name: Reality-check gates (preview parity + dashboard quick-actions)
         if: steps.cfg.outputs.configured == 'true'
         run: >-
           npx playwright test
           tests/e2e/sites-preview-reality-check.spec.ts
           tests/e2e/dashboard-quick-actions.spec.ts
+          tests/e2e/ai-router-behaviour.spec.ts
           --config=playwright.config.ts --workers=2 --reporter=github
 
       # SOFT SPECS — one invocation, push-to-main ONLY (off the PR critical path).
