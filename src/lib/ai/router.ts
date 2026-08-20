@@ -50,6 +50,7 @@ import {
   monthSpendUsd,
   type WorkspaceAIPolicy,
 } from "./workspace-policy";
+import { governTier, CEILING_MULTIPLE, type BudgetDecision } from "./budget";
 
 interface ProviderRegistry {
   anthropic: AIProvider;
@@ -198,19 +199,69 @@ function defaultBudgetDeps(): BudgetDeps {
 async function checkBudget(
   req: AICompleteRequest,
   deps: BudgetDeps,
-): Promise<void> {
+): Promise<BudgetDecision> {
+  const passthrough: BudgetDecision = {
+    state: "ok",
+    tier: req.model_tier,
+    stop: false,
+    reason: "no_cap",
+    notice: null,
+    fraction: null,
+  };
+
   const workspaceId = req.metadata?.workspace_id;
   // No workspace attribution -> behave exactly as before (no enforcement).
-  if (!workspaceId || workspaceId.trim() === "") return;
+  if (!workspaceId || workspaceId.trim() === "") return passthrough;
 
   const policy = await deps.loadPolicy(workspaceId);
   // No policy or no budget set -> no enforcement, no regression.
-  if (!policy || policy.monthly_budget_usd === null) return;
+  if (!policy || policy.monthly_budget_usd === null) return passthrough;
 
   const spend = await deps.monthSpend(workspaceId);
-  if (!isOverBudget(policy, spend)) return;
+
+  /* A GOVERNOR, NOT A WALL.
+   *
+   * This used to throw the moment spend passed the cap, which is what
+   * OpenRouter's 402 does and what I argued against before noticing we did it
+   * too. A hard cap does not arrive when the finance team is looking; it
+   * arrives while somebody is mid-sentence to a client. So caps get set high
+   * enough never to fire, or somebody raises them in a hurry. Either way the
+   * control is theatre.
+   *
+   * Capability now degrades before service is refused: near the cap a premium
+   * question is served by a standard model, over it by the cheapest one, and
+   * only a workspace at twice its cap is stopped, because that is a
+   * malfunction rather than a budget. See lib/ai/budget.ts. */
+  const decision = governTier({
+    spentUsd: spend,
+    capUsd: policy.monthly_budget_usd,
+    requestedTier: req.model_tier,
+  });
 
   const feature = req.metadata?.feature ?? "unknown";
+
+  if (decision.state === "approaching" || decision.state === "over") {
+    /* Recorded so a degraded answer is never invisible: somebody comparing
+       this week's answers with last week's deserves to find the reason in
+       data rather than guess at it. */
+    trackEvent(
+      "ai.budget_degraded",
+      req.metadata?.user_id ?? "system",
+      req.metadata?.user_role ?? "system",
+      {
+        workspace_id: workspaceId,
+        month_spend_usd: spend,
+        budget_usd: policy.monthly_budget_usd,
+        requested_tier: req.model_tier,
+        served_tier: decision.tier,
+        state: decision.state,
+        feature,
+      },
+    );
+    return decision;
+  }
+
+  if (!decision.stop) return decision;
   // Tie into the registered analytics event so the learning loop + cost
   // dashboard see every block (fire-and-forget, never blocks the refusal).
   trackEvent(
@@ -226,7 +277,7 @@ async function checkBudget(
   );
 
   throw new BudgetExceededError(
-    `Workspace ${workspaceId} is over its monthly AI budget ($${spend.toFixed(2)} of $${policy.monthly_budget_usd}).`,
+    `Workspace ${workspaceId} has reached ${CEILING_MULTIPLE} times its monthly AI budget ($${spend.toFixed(2)} of $${policy.monthly_budget_usd}) and is paused.`,
     {
       workspace_id: workspaceId,
       month_spend_usd: spend,
@@ -243,16 +294,23 @@ class RouterClient implements AIClient {
   ) {}
 
   async complete(req: AICompleteRequest): Promise<AICompleteResponse> {
-    // Hard budget gate BEFORE any provider dispatch. Throws
-    // BudgetExceededError (a graceful, typed refusal - no model is charged)
-    // when the workspace is confirmed over budget.
-    await checkBudget(req, this.budgetDeps);
+    /* Budget governor BEFORE any provider dispatch. It clamps the tier as a
+       workspace approaches its cap, and throws BudgetExceededError (a typed
+       refusal, no model charged) only at the ceiling. */
+    const budget = await checkBudget(req, this.budgetDeps);
+
+    /* The clamped tier is applied HERE, once, so everything downstream, the
+       selection router, the bridge, the completion event and the cost figures,
+       all describe the call that was actually made. Threading a "requested"
+       tier alongside a "served" one would give two answers to one question. */
+    const governed: AICompleteRequest =
+      budget.tier === req.model_tier ? req : { ...req, model_tier: budget.tier };
 
     // Governance chokepoint: when the caller opted in, prepend the OGIAM Agent
     // Constitution to the system prompt here, so every constitution-governed
     // surface (assistant + OGIAM agents) inherits the same rules regardless of
     // which model version answers. No-op for the other call sites.
-    const cReq0 = applyConstitutionToRequest(req);
+    const cReq0 = applyConstitutionToRequest(governed);
 
     /* Credential / financial-identifier gate, at the last point before the
      * prompt leaves this process.

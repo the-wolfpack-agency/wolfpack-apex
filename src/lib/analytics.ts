@@ -2855,6 +2855,13 @@ export type InstinctEventType =
   // its monthly_budget_usd cap (the cap was defined but previously unenforced).
   // { workspace_id, month_spend_usd, budget_usd, feature }
   | "ai.request_blocked_over_budget"
+  /* A workspace near or over its AI budget was served by a SMALLER model
+     rather than refused. Recorded so a degraded answer is never invisible:
+     somebody comparing this week's answers with last week's should find the
+     reason in data rather than guess at it. Metadata: { workspace_id,
+     month_spend_usd, budget_usd, requested_tier, served_tier, state,
+     feature }. */
+  | "ai.budget_degraded"
   // Per-client GitHub App credential resolution (replaces the shared PAT for
   // client repos). { workspace_id, installation_id } / removed { workspace_id }
   | "platform.github_installation_linked"
