@@ -35,6 +35,21 @@ describe("matching what somebody typed", () => {
     expect(matchRoutine("what is the weather")).toBeNull();
   });
 
+  /* js/polynomial-redos, found by CodeQL on this function. It reads whatever
+     somebody typed, so a quantifier anchored at the end of the string was
+     reachable input. The scan that replaced it is linear; this fails by
+     timing out if a regex ever comes back. */
+  it("does not slow down on a long run of punctuation", () => {
+    const start = Date.now();
+    expect(matchRoutine(`run my morning${"!".repeat(50_000)}`)).toBeNull();
+    expect(matchRoutine("!".repeat(50_000))).toBeNull();
+    expect(Date.now() - start).toBeLessThan(250);
+  });
+
+  it("ignores a message far longer than any command", () => {
+    expect(matchRoutine("run my morning".padEnd(500, " "))).toBeNull();
+  });
+
   it("finds a routine by id", () => {
     expect(routineById("weekly_review")?.command).toBe("weekly review");
     expect(routineById("nope")).toBeNull();

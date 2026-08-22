@@ -187,11 +187,26 @@ export function routineById(id: string): Routine | null {
  * uninvited is far worse than one that did not recognise its own name.
  */
 export function matchRoutine(message: string): Routine | null {
-  const text = message
-    .trim()
-    .toLowerCase()
-    .replace(/^(?:please\s+|can\s+you\s+|could\s+you\s+)+/, "")
-    .replace(/[.!?]+$/, "")
-    .trim();
+  /* BOUNDED, AND SCANNED RATHER THAN PATTERN-MATCHED.
+     The longest command here is under thirty characters, so anything longer
+     cannot be one and there is nothing to gain by examining it. Trailing
+     punctuation is then stripped by walking backwards instead of with
+     /[.!?]+$/: a quantifier anchored at the end backtracks across a string of
+     repeated punctuation, which CodeQL flagged as polynomial (js/polynomial-
+     redos) and which is reachable here because this reads whatever somebody
+     typed. A scan is linear and does the same job. */
+  if (message.length > 120) return null;
+
+  let text = message.trim().toLowerCase();
+  for (const prefix of ["please ", "can you ", "could you "]) {
+    while (text.startsWith(prefix)) text = text.slice(prefix.length).trimStart();
+  }
+
+  let end = text.length;
+  while (end > 0 && (text[end - 1] === "." || text[end - 1] === "!" || text[end - 1] === "?")) {
+    end -= 1;
+  }
+  text = text.slice(0, end).trim();
+
   return BUILT_IN_ROUTINES.find((r) => text === r.command) ?? null;
 }
