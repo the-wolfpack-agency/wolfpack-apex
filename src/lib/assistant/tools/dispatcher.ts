@@ -26,7 +26,7 @@ import { createPendingApproval } from "@/lib/agents/approvals/store";
 import { notify } from "@/lib/notifications/in-app";
 import type { OgiamDecision } from "@/lib/ogiam/types";
 import { canInvokeTool } from "./gate";
-import { getTools } from "./registry";
+import { getTools, getToolByName } from "./registry";
 import type {
   ToolContext,
   ToolDef,
@@ -119,6 +119,78 @@ function safeMatchIntent<P>(
   } catch {
     return null;
   }
+}
+
+/**
+ * Run ONE named tool with explicit parameters, through the same pipeline a
+ * chat message takes.
+ *
+ * WHY THIS EXISTS, AND WHY IT IS NOT A SECOND PATH
+ *
+ * tryDispatchTool starts from a sentence and guesses which tool was meant. A
+ * routine (src/lib/assistant/routines) already knows: its steps name a tool and
+ * carry validated parameters, and re-phrasing them back into English so the
+ * intent regexes could re-derive the answer would be a guess inserted between
+ * two certainties -- and the wrong tool would run.
+ *
+ * So this skips the MATCHING and nothing else. Validation, the OGIAM decision,
+ * the capability gate, confirmation for mutations, the ledger, the approval
+ * queue and the analytics are all runOneTool, unchanged and shared. A routine
+ * therefore cannot do anything its owner could not do one message at a time,
+ * which is the property that lets chains be governed by the controls that
+ * already exist rather than by new ones written alongside them.
+ *
+ * Returns null for an unknown tool name so a stale saved routine degrades to a
+ * reported failure instead of throwing inside a run.
+ */
+export async function dispatchToolByName(
+  name: string,
+  params: unknown,
+  ctx: ToolContext,
+): Promise<ToolDispatchResult | null> {
+  const tool = getToolByName(name);
+  if (!tool) return null;
+
+  /* The same two principal rules the matching path enforces. A routine must not
+     become the way an agent reaches a human-only tool, or a human reaches an
+     agent-only one. */
+  if (ctx.agentPrincipal && tool.humanOnly) return null;
+  if (!ctx.agentPrincipal && tool.agentOnly) return null;
+
+  const started = Date.now();
+  const result = await runOneTool(tool, params, ctx);
+  const durationMs = Date.now() - started;
+
+  const wid = ctx.workflowId;
+  trackEvent("assistant.tool_invoked", ctx.userId, ctx.userRole, {
+    tool: tool.name,
+    success: result.ok,
+    code: result.ok ? "ok" : result.code,
+    duration_ms: durationMs,
+    /* Distinguishes a step of a chain from somebody typing, so the learning
+       loop can tell which tools are used because they were CHOSEN and which
+       are used because a routine includes them. */
+    source: "routine",
+    ...(wid ? { workflow_id: wid } : {}),
+  });
+  if (!result.ok) {
+    trackEvent("assistant.tool_failed", ctx.userId, ctx.userRole, {
+      tool: tool.name,
+      code: result.code,
+      message: result.message.slice(0, 200),
+      source: "routine",
+      ...(wid ? { workflow_id: wid } : {}),
+    });
+  } else {
+    trackEvent("assistant.tool_succeeded", ctx.userId, ctx.userRole, {
+      tool: tool.name,
+      duration_ms: durationMs,
+      source: "routine",
+      ...(wid ? { workflow_id: wid } : {}),
+    });
+  }
+
+  return { tool: tool.name, result, durationMs };
 }
 
 async function runOneTool<P, R>(
