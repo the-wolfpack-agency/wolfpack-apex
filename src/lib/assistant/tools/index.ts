@@ -46,6 +46,7 @@ import "./execute-agent-widget-tool";
    the old "no contact match in the CRM" message. */
 import "./who-is-tool";
 import "./templates-tool";
+import "./edit-routine-tool";
 import "./schedule-routine-tool";
 import "./platform-scan-tool";
 import "./plan-my-day-tool";
