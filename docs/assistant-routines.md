@@ -1,0 +1,240 @@
+# Routines: chaining the day's tech work into one command
+
+## The observation this is built on
+
+There is a ceiling on how much software any one person touches in a day. A
+person opens mail, reads a thread, checks a calendar, writes a doc, pings a
+colleague, files a ticket, and closes the laptop. That is not a big list. It is
+the same short list, in a slightly different order, five days a week.
+
+What makes it feel big is not the number of actions. It is that every action
+lives in a different tool, so the person is the integration layer: they carry
+context out of one window and retype it into the next.
+
+A routine is that carrying done for them. Not more software. The same actions
+they already perform, executed the way they would perform them, chained.
+
+## What already exists, and what does not
+
+Nearly all of the parts are built. The missing piece is small and specific.
+
+| Part | Status |
+|---|---|
+| 46 registered tools (mail, calendar, GitHub, financials, CRM, Brain, Teams) | built |
+| Capability gate per tool (`tools/gate.ts`) | built |
+| OGIAM authorisation on every action (`ogiam/authorize`) | built |
+| Hash-chained action ledger (`ogiam/ledger`) | built |
+| Human approval queue with TTL (`agents/approvals/store`) | built |
+| In-app notification on state change (`notifications/in-app`) | built |
+| Write tools shaped as `create_*_form` — a human confirms before anything lands | built |
+| **Anything that runs more than one tool per message** | **missing** |
+
+The dispatcher returns "the result of the FIRST tool whose intent matches" and
+stops. Every chain in this document is blocked on that one sentence, and on
+nothing else.
+
+## The design
+
+A **routine** is an ordered list of steps with a name. A step is one of three
+things, and the third is the one that matters.
+
+1. **A tool step.** Run a registered tool with parameters, some of which may
+   reference an earlier step's output.
+2. **A model step.** Ask the model to produce something from what the earlier
+   steps returned — a summary, a draft, a recommendation. Passes through the
+   router, so it inherits redaction, residency, the budget and the content
+   policy shipped in #300.
+3. **A human step.** Stop. Show what has been produced. Wait.
+
+### The human step is the product
+
+The temptation is to build a system that does the whole chain unattended and
+reports at the end. That is the wrong shape for work a person is accountable
+for, and it is also the less valuable one.
+
+A routine that pauses is doing something no dashboard does: it records the
+handoff. When the chain stops at "review these three drafts" and resumes
+eleven minutes later, the ledger has a fact nobody had before — the exact
+boundary between what the tech did and what the person did, and how long the
+person's part took.
+
+Do that for a month and the questions change from opinion to arithmetic:
+
+- Which step do people always edit? That tool's output is wrong; fix the tool.
+- Which step do people always approve unchanged? That step does not need a
+  human, and removing the pause gives them the minutes back.
+- Which routine gets abandoned halfway? Something in the middle of it is
+  worse than doing it by hand.
+
+That is the audit chain between human and tech activity: not a log of what the
+software did, but a measurement of where the person is still the integration
+layer, ranked by how much it is costing them.
+
+### Data flow between steps
+
+Each step's result is put in a named slot. A later step refers to a slot rather
+than re-fetching. `{{inbox}}` in step three means "what step one returned".
+
+This is deliberately dumb — string substitution into validated tool params,
+not a scripting language. A routine anyone can read is one an operator will
+trust; the moment it needs branching and loops it has stopped being a
+description of somebody's morning and become a program with no test suite.
+
+### Where the governance already lands
+
+Nothing here needs a new permission model. Every step dispatches through the
+existing pipeline, so a routine can never do something its owner could not do
+one message at a time: the capability gate still runs per tool, OGIAM still
+authorises each action, the ledger still records each outcome, and every write
+tool still stops for confirmation. A routine is a faster path through the same
+gates, never a way around them.
+
+---
+
+# The catalogue
+
+Every prompt below maps to a tool that exists today. Where a step has no tool
+yet, it is marked **[GAP]** with what would need building — those are proposals,
+not capabilities, and no routine should be sold on them until they are built.
+
+## Anyone: the morning
+
+| # | Prompt | Tool |
+|---|---|---|
+| 1 | "What came in overnight?" | `search_mail` |
+| 2 | "What's on today?" | `calendar_widget` |
+| 3 | "Prep me for my 10am." | `meeting_prep` |
+| 4 | "What's waiting on me?" | `task_list_widget` |
+| 5 | "What did the team say I'd do?" | `get_goals` |
+
+**Chained — `run my morning`:**
+
+```
+search_mail(since: yesterday)        -> inbox
+calendar_widget(day: today)          -> agenda
+meeting_prep(for: first(agenda))     -> brief
+task_list_widget(assigned_to: me)    -> tasks
+model: "Given {{inbox}}, {{agenda}}, {{tasks}}, what are the three things
+        that actually matter today, and what is safe to ignore?"
+HUMAN: read, adjust the three
+```
+
+The value is not the summary. It is that steps 1-4 happened before the person
+sat down, and the only thing asked of them is the judgement in step 5.
+
+## Anyone: mail to done
+
+| # | Prompt | Tool |
+|---|---|---|
+| 1 | "Show me unanswered threads from this week." | `search_mail` |
+| 2 | "Who is this person?" | `who_is` |
+| 3 | "What did we agree with them last time?" | `search` (Brain) |
+| 4 | "Draft a reply." | `create_email_form` |
+| 5 | "Log the follow-up." | `create_task_form` |
+
+**Chained — `clear my inbox`:**
+
+```
+search_mail(unanswered: true, since: monday)  -> threads
+for each thread:
+  who_is(sender)                              -> person
+  search(thread.subject)                      -> history
+  model: draft a reply using {{person}} + {{history}}
+  create_email_form(draft)                    -> HUMAN CONFIRMS EACH
+create_task_form(follow_ups)                  -> HUMAN CONFIRMS
+```
+
+Every send stops for a human. The chain writes the draft; it never presses
+send. That is not a limitation to be lifted later — it is the reason a person
+will let it near their mailbox at all.
+
+## Engineer: the state of everything
+
+| # | Prompt | Tool |
+|---|---|---|
+| 1 | "What PRs are open?" | `search_github_pull_requests` |
+| 2 | "What issues are assigned to me?" | `search_github_issues` |
+| 3 | "Is CI green?" | `recent_workflow_runs` |
+| 4 | "What's deployed?" | `vercel_deployments_widget` |
+| 5 | "Scan the products for problems." | **[GAP]** — platform-scan exists in `src/lib/platform-scan` but is not exposed as a tool |
+| 6 | "Tell the team it's ready for review." | `create_message_form` |
+
+**Chained — `where do things stand`:**
+
+```
+search_github_pull_requests(state: open)   -> prs
+recent_workflow_runs(status: failure)      -> red
+vercel_deployments_widget()                -> deploys
+search_github_issues(assignee: me)         -> mine
+model: "What is blocked, what is waiting on a human, and what order
+        should I do it in?"
+HUMAN: accept or reorder
+create_message_form(to: team, body: what's ready)   -> HUMAN CONFIRMS
+```
+
+**Chained — `email to feature`:**
+
+```
+search_mail(from: client, since: last week)  -> requests
+model: extract each distinct ask
+create_feature_form(each)                    -> HUMAN CONFIRMS EACH
+```
+
+This is the shape most worth building first. It is the one that today costs a
+person twenty minutes of reading and retyping, and produces a record of where
+the request came from, which nobody currently keeps.
+
+## Leadership: the week
+
+| # | Prompt | Tool |
+|---|---|---|
+| 1 | "How are we tracking against the OKRs?" | `get_goals` |
+| 2 | "What's the revenue position?" | `get_financials_metric` |
+| 3 | "What's happening across the tools?" | `cross_tool_insights_widget` |
+| 4 | "What did the team ship?" | `search_github_pull_requests` |
+| 5 | "Produce the update." | **[GAP]** — no document generator |
+| 6 | "Put it in a deck." | **[GAP]** — no deck generator |
+
+**Chained — `weekly review`:**
+
+```
+get_goals()                        -> okrs
+get_financials_metric(revenue)     -> money
+cross_tool_insights_widget()       -> signals
+search_github_pull_requests(merged, since: monday) -> shipped
+model: "Where are we ahead, where are we behind, and what changed
+        this week that the numbers do not explain?"
+HUMAN: correct the narrative
+[GAP] render to a document
+```
+
+The gap at the end is real and worth naming plainly: today this chain produces
+an excellent answer in a chat window that somebody then copies into a slide.
+That copy is exactly the manual carrying this whole design exists to remove.
+
+## The gaps, ranked by how often they block a chain
+
+1. **The chain runner itself.** Nothing above works without it.
+2. **A document/report step.** Ends three of the routines here.
+3. **`platform_scan` as a tool.** The engine exists; it is not reachable from
+   the assistant.
+4. **A deck step.** Asked for explicitly; the largest build of the four and the
+   easiest to do badly.
+
+---
+
+# The single command
+
+Once a routine is saved, it is one line:
+
+```
+run my morning
+clear my inbox
+where do things stand
+weekly review
+```
+
+A routine is created the way it is used — the assistant offers to save a
+sequence somebody has just performed by hand, rather than asking them to author
+one in a builder. Nobody sits down to design a workflow. They do notice, on the
+fourth Monday, that they have done the same six things again.
