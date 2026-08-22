@@ -238,3 +238,84 @@ A routine is created the way it is used — the assistant offers to save a
 sequence somebody has just performed by hand, rather than asking them to author
 one in a builder. Nobody sits down to design a workflow. They do notice, on the
 fourth Monday, that they have done the same six things again.
+
+---
+
+# Demoing this before a client has connected anything
+
+A demo has to show the chain working end to end, and a chain that reads from
+nothing has nothing to show. The instinct is to build demo tools. That is the
+wrong layer, and it would leave a pile of code that gets deleted the day a real
+client connects.
+
+## Build a demo CONNECTOR, not demo tools
+
+Every connector-backed tool already goes through one interface (`Connector` in
+`src/lib/assistant/connectors/types.ts`) and one resolver
+(`resolve-connector.ts`). A fixture-backed connector that implements that
+interface is picked up by all of it for free:
+
+`search_external_records`, `filter_external_records`,
+`aggregate_external_records`, `get_external_record`, `get_related_records`,
+`create_external_record`, `update_external_record`, `who_is`, and the CRM form
+executor — nine surfaces, no new tool code, and every routine in this document
+runs against it.
+
+The same shape already exists three times for real vendors (`hubspot`,
+`salesforce`, `quickbooks` in `vendor-presets.ts`), so this is a fourth
+instance of a proven pattern rather than a new mechanism.
+
+### The dataset, for a corporate auto client
+
+Object types matching the vocabulary those tools already speak:
+
+| Object type | What it holds | Which prompts it lights up |
+|---|---|---|
+| `dealer` | Centres: region, group, contacts, performance | "how is the southwest region tracking" |
+| `contact` | Customers and dealer staff | `who_is`, "who owns this account" |
+| `deal` | Enquiry through delivery, with stage and value | "what's in the pipeline this month" |
+| `vehicle` | Stock: VIN, model, status, location | "what do we have in stock" |
+| `ticket` | Service and support cases, with SLA state | "what's escalated and breaching" |
+| `activity` | Calls, visits, test drives | "what happened with this customer" |
+
+That set is chosen so the **cross-object** questions work, because those are
+the ones no single vendor tool answers today and the ones that make the chain
+look inevitable: "which dealers have deals stalled at finance for more than a
+week, and do they have the stock to close them?"
+
+### Rules for the fixture data
+
+- **Invented entities only.** No real dealer, group, or person. A demo dataset
+  that mixes in real names is one screenshot away from being a client's data in
+  someone else's pitch.
+- **Isolated to a demo workspace.** The connector reports `isConfigured()` false
+  everywhere else, so demo records can never appear beside a client's real ones.
+- **Visibly demo.** Labelled in the UI, not merely known to be fake by the
+  person presenting.
+- **Internally consistent.** Dates, stages and totals that survive arithmetic,
+  because the first thing a sharp prospect does is add up a column.
+
+## Ticketing and the rest
+
+Ticketing needs no new tool either — it needs a preset. Zendesk, Jira and
+ServiceNow are REST APIs with the same auth-header-and-paths shape the existing
+three presets describe, so each is a table entry rather than a feature.
+
+The DMS is further along than the rest: `dms_inventory_widget` already drives a
+real dealer site through a headless browser, which means live inventory in a
+demo without integrating CDK or Tekion first.
+
+## The auto routine this unlocks
+
+```
+search_external_records(ticket, sla_breaching)      -> at_risk
+get_related_records(each -> contact, vehicle)       -> context
+search_external_records(vehicle, in_stock, match)   -> options
+model: "Which of these can be resolved today, and with what?"
+HUMAN: pick
+create_message_form(to: dealer, body: the plan)     -> HUMAN CONFIRMS
+create_task_form(the rest)                          -> HUMAN CONFIRMS
+```
+
+Six tools, two confirmations, one command — and every step is a thing somebody
+at that client already does by hand, in a different window each time.
