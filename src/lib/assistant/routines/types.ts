@@ -136,4 +136,14 @@ export interface RoutineRun {
   /** Total time spent WAITING FOR A PERSON. The number that turns "this
    *  routine feels slow" into "step four costs eleven minutes a day". */
   humanMs: number;
+  /**
+   * When the run stopped at a human step, as a millisecond timestamp.
+   *
+   * Persisted rather than derived: it is the only record of when the handoff
+   * happened, and the whole human-cost measurement is the difference between
+   * this and the moment the person came back. Null on a run that is not
+   * waiting, so "we are not waiting on anybody" is a value rather than an
+   * absence to be inferred.
+   */
+  pausedAt?: number | null;
 }
