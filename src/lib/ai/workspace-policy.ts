@@ -32,6 +32,15 @@ export interface WorkspaceAIPolicy {
   provider_override: ProviderOverride;
   /** null means no budget limit */
   monthly_budget_usd: number | null;
+  /**
+   * Which CONTENT policy this workspace's answers are held to, distinct from
+   * the routing policy above: that one decides which model answers and what it
+   * may cost, this one decides what the answer is allowed to say.
+   *
+   * null means the deployment default (the baseline set). A workspace never
+   * has "no policy" -- see src/lib/ai/policy.ts.
+   */
+  content_policy_profile?: string | null;
 }
 
 export interface ResolvedPolicy {
@@ -94,10 +103,11 @@ export function resolvePolicy(
  * Load policy from the workspace_ai_policy table.
  *
  * Table shape (created by a separate migration stream):
- *   workspace_id       text  PRIMARY KEY
- *   max_tier           text  NULL
- *   provider_override  text  NULL
- *   monthly_budget_usd numeric NULL
+ *   workspace_id           text  PRIMARY KEY
+ *   max_tier               text  NULL
+ *   provider_override      text  NULL
+ *   monthly_budget_usd     numeric NULL
+ *   content_policy_profile text  NULL  (migration 231)
  *
  * Returns null when:
  *   - workspaceId is empty / whitespace
@@ -119,7 +129,15 @@ export async function loadWorkspacePolicy(
 
   try {
     const result = await queryFn(
-      "SELECT workspace_id, max_tier, provider_override, monthly_budget_usd FROM workspace_ai_policy WHERE workspace_id = $1 LIMIT 1",
+      /* THE WHOLE ROW, not a column list, and deliberately.
+         A named column that does not exist yet makes this query THROW, and
+         this function catches and returns null, which reads downstream as
+         "this workspace has no budget cap". So naming a new column here would
+         quietly disable every spend limit in the window between a deploy and
+         its migration -- the one failure this loader's fail-open posture turns
+         from an error into an invisible one. The table is a single-row PK
+         lookup, so selecting it whole costs nothing and cannot go stale. */
+      "SELECT * FROM workspace_ai_policy WHERE workspace_id = $1 LIMIT 1",
       [workspaceId],
     );
     return result.rows[0] ?? null;

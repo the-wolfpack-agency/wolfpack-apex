@@ -459,6 +459,13 @@ export type InstinctEventType =
      { feature, workspace_id, model, redacted_count, kinds }: kinds only,
      never a value. */
   | "ai.response_redacted"
+  /* An answer the content policy would not let through as written. Redaction
+     (above) finds shapes; this finds MEANING -- a quoted finance rate, a price
+     guarantee, a warranty decision, an invented discount -- and withholds or
+     escalates it. Metadata: { feature, workspace_id, model, action, profile,
+     rules, rule_count }: RULE IDS ONLY. Storing the sentence would keep a
+     permanent copy of exactly the text we decided nobody should read. */
+  | "ai.policy_refused"
   /* A document we fetched tried to instruct the assistant. The fence had
      already made it inert; this exists so a person finds out, because a
      supplier PDF that does this is worth a conversation. Metadata:

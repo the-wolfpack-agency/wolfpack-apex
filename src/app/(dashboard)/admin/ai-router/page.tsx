@@ -72,6 +72,7 @@ function normalize(raw: unknown): RouterInsights | null {
        one cost: adding a field means adding it in two places. Optional on
        purpose, so a payload from an older deploy still renders. */
     ...(b.protection && typeof b.protection === "object" ? { protection: b.protection } : {}),
+    ...(b.refusals && typeof b.refusals === "object" ? { refusals: b.refusals } : {}),
     ...(typeof b.actualCostUsd === "number" ? { actualCostUsd: b.actualCostUsd } : {}),
     ...(typeof b.actualCalls === "number" ? { actualCalls: b.actualCalls } : {}),
     ...(typeof b.inputTokens === "number" ? { inputTokens: b.inputTokens } : {}),
@@ -275,6 +276,66 @@ export default function AiRouterPage() {
               call and found nothing that should not leave.
             </p>
           )}
+        </GlassPanel>
+      ) : null}
+
+      {/* WHAT THE ROUTER WOULD NOT LET THROUGH, and why.
+          The panel above is about VALUES: a card number, a key. This one is
+          about CLAIMS -- a quoted finance rate, a price guarantee, a warranty
+          decision -- which carry no redactable token and are the ones a client
+          is actually held to. Each row names the rule, so a client can read
+          the reasoning and argue with it rather than trusting a count. */}
+      {data?.refusals ? (
+        <GlassPanel
+          title="What the router would not let through"
+          subtitle="Answers are checked for claims the business cannot stand behind before anyone reads them. Deterministic rules, set per tenant, applied whichever model answered."
+        >
+          <ConsoleGrid>
+            <MetricTile
+              value={data.refusals.blocked}
+              label="Withheld"
+              kicker="A claim we cannot be held to"
+              testId="router-metric-blocked"
+            />
+            <MetricTile
+              value={data.refusals.escalated}
+              label="Sent to a person"
+              kicker="A question we are not the right party to answer"
+              testId="router-metric-escalated"
+            />
+            <MetricTile
+              value={data.refusals.redacted}
+              label="Trimmed"
+              kicker="The claim removed, the answer kept"
+              testId="router-metric-trimmed"
+            />
+          </ConsoleGrid>
+          {data.refusals.rules.length > 0 ? (
+            <ul style={ruleList} data-testid="router-refusal-rules">
+              {data.refusals.rules.map((r) => (
+                <li key={r.rule} style={ruleItem}>
+                  <span style={ruleHead}>
+                    {r.title} <span style={ruleCount}>{r.count}</span>
+                  </span>
+                  {/* The REASON, not the sentence that tripped it. A client
+                      reading this is deciding whether the rule is right, and
+                      the blocked text is the one thing we deliberately never
+                      kept. */}
+                  <span style={ruleWhy}>{r.why}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p style={notice} data-testid="router-refusal-clean">
+              Nothing had to be held back in this window. The check ran on every answer and found no claim
+              the business could not stand behind.
+            </p>
+          )}
+          {data.refusals.profiles.length > 0 ? (
+            <p style={notice} data-testid="router-refusal-profiles">
+              Rule set in force: {data.refusals.profiles.join(", ")}.
+            </p>
+          ) : null}
         </GlassPanel>
       ) : null}
 
@@ -551,6 +612,42 @@ const button: React.CSSProperties = {
   padding: "0.5rem 0.9rem",
   cursor: "pointer",
   fontSize: "0.9rem",
+};
+/* The refusal list. Built from the same tokens as `list`/`row` above rather
+   than new colours: this panel is evidence in a console, not a callout. */
+const ruleList: React.CSSProperties = {
+  listStyle: "none",
+  padding: 0,
+  margin: "0.9rem 0 0",
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.55rem",
+};
+const ruleItem: React.CSSProperties = {
+  border: "1px solid var(--wp-border, rgba(255,255,255,0.1))",
+  borderRadius: "0.6rem",
+  padding: "0.65rem 0.8rem",
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.25rem",
+};
+const ruleHead: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "0.75rem",
+  fontSize: "0.95rem",
+  color: "var(--wp-text, #fff)",
+};
+const ruleCount: React.CSSProperties = {
+  fontVariantNumeric: "tabular-nums",
+  color: "var(--wp-text-dim)",
+  fontSize: "0.85rem",
+};
+const ruleWhy: React.CSSProperties = {
+  fontSize: "0.85rem",
+  lineHeight: 1.5,
+  color: "var(--wp-text-dim)",
 };
 const notice: React.CSSProperties = {
   marginTop: "0.9rem",

@@ -30,6 +30,12 @@ import { bridgeSelection, capabilityTierFor } from "./model-bridge";
 import { selectModel, logModelSelection } from "@/lib/ai/models";
 import { applyConstitutionToRequest } from "@/lib/constitution";
 import { redactMessages, redactText, NEVER_SEND_KINDS } from "./redaction";
+import {
+  applyPolicy,
+  policyFor,
+  isWithheld,
+  type PolicyVerdict,
+} from "./policy";
 import { getObsClient } from "@/lib/obs";
 
 import { AnthropicProvider } from "./anthropic-provider";
@@ -53,8 +59,16 @@ import {
 } from "./workspace-policy";
 import { governTier, CEILING_MULTIPLE, type BudgetDecision } from "./budget";
 import { recordRouterCall } from "./audit-record-writer";
-import { mayServe, zeroRetentionProviders, RetentionPolicyError } from "./retention";
-import { mayProcessHere, regionOfModel, ResidencyPolicyError } from "./residency";
+import {
+  mayServe,
+  zeroRetentionProviders,
+  RetentionPolicyError,
+} from "./retention";
+import {
+  mayProcessHere,
+  regionOfModel,
+  ResidencyPolicyError,
+} from "./residency";
 import { verifyAnswer, shouldEscalate } from "./verification";
 import { judgeAnswer, type JudgeResult, unjudged } from "./judge";
 import { chooseIndependentJudge, type JudgeCandidate } from "./judge-selection";
@@ -106,7 +120,10 @@ function isAnthropicConfigured(): boolean {
  * zero-retention list contains, so the gate refuses. Failing closed on an
  * unanswerable question is the correct direction here.
  */
-function primaryProviderName(registry: ProviderRegistry, req: AICompleteRequest): string {
+function primaryProviderName(
+  registry: ProviderRegistry,
+  req: AICompleteRequest,
+): string {
   try {
     return pickPrimary(req, registry).name;
   } catch {
@@ -153,16 +170,16 @@ function pickPrimary(
   const pinned = registry.compatible.find((p) => p.name === override);
   if (pinned && pinned.supportsTier(req.model_tier)) return pinned;
 
-  if (override === "azure-openai" && registry.azure.supportsTier(req.model_tier)) {
+  if (
+    override === "azure-openai" &&
+    registry.azure.supportsTier(req.model_tier)
+  ) {
     return registry.azure;
   }
   if (override === "anthropic") {
     return registry.anthropic;
   }
-  if (
-    isAzureConfigured() &&
-    registry.azure.supportsTier(req.model_tier)
-  ) {
+  if (isAzureConfigured() && registry.azure.supportsTier(req.model_tier)) {
     return registry.azure;
   }
   return registry.anthropic;
@@ -174,10 +191,7 @@ function pickFallback(
   req: AICompleteRequest,
 ): AIProvider | null {
   if (primary === registry.anthropic) {
-    if (
-      isAzureConfigured() &&
-      registry.azure.supportsTier(req.model_tier)
-    ) {
+    if (isAzureConfigured() && registry.azure.supportsTier(req.model_tier)) {
       return registry.azure;
     }
     return null;
@@ -253,6 +267,10 @@ function defaultBudgetDeps(): BudgetDeps {
 async function checkBudget(
   req: AICompleteRequest,
   deps: BudgetDeps,
+  /* Loaded ONCE by the caller and passed down, because the content-policy gate
+     needs the same row. Two reads of a single-row table per AI call would be
+     two chances for them to disagree about the same workspace. */
+  preloaded: WorkspaceAIPolicy | null,
 ): Promise<BudgetDecision> {
   const passthrough: BudgetDecision = {
     state: "ok",
@@ -267,7 +285,7 @@ async function checkBudget(
   // No workspace attribution -> behave exactly as before (no enforcement).
   if (!workspaceId || workspaceId.trim() === "") return passthrough;
 
-  const policy = await deps.loadPolicy(workspaceId);
+  const policy = preloaded;
   // No policy or no budget set -> no enforcement, no regression.
   if (!policy || policy.monthly_budget_usd === null) return passthrough;
 
@@ -351,14 +369,34 @@ class RouterClient implements AIClient {
     /* Budget governor BEFORE any provider dispatch. It clamps the tier as a
        workspace approaches its cap, and throws BudgetExceededError (a typed
        refusal, no model charged) only at the ceiling. */
-    const budget = await checkBudget(req, this.budgetDeps);
+    /* ONE READ OF THE WORKSPACE'S POLICY ROW, serving both gates below: what
+       this call may COST (the budget governor) and what its answer may SAY
+       (the content policy). Fails open to null exactly as before. */
+    const wsId = req.metadata?.workspace_id?.trim() ?? "";
+    /* FAILS OPEN, LOUDLY IN NEITHER DIRECTION. loadWorkspacePolicy swallows its
+       own errors today, but the deps wrapper around it does a dynamic import
+       and a query, and either can throw. Without this catch an unreachable
+       database would stop being a lost cost-cap and start being a failed AI
+       call for every workspace at once. */
+    let wsPolicy: WorkspaceAIPolicy | null = null;
+    if (wsId) {
+      try {
+        wsPolicy = await this.budgetDeps.loadPolicy(wsId);
+      } catch {
+        wsPolicy = null;
+      }
+    }
+
+    const budget = await checkBudget(req, this.budgetDeps, wsPolicy);
 
     /* The clamped tier is applied HERE, once, so everything downstream, the
        selection router, the bridge, the completion event and the cost figures,
        all describe the call that was actually made. Threading a "requested"
        tier alongside a "served" one would give two answers to one question. */
     const governed: AICompleteRequest =
-      budget.tier === req.model_tier ? req : { ...req, model_tier: budget.tier };
+      budget.tier === req.model_tier
+        ? req
+        : { ...req, model_tier: budget.tier };
 
     // Governance chokepoint: when the caller opted in, prepend the OGIAM Agent
     // Constitution to the system prompt here, so every constitution-governed
@@ -456,7 +494,11 @@ class RouterClient implements AIClient {
     );
     const cReq =
       gated.count > 0
-        ? { ...cReq0, messages: gated.messages as typeof cReq0.messages, system: gated.system }
+        ? {
+            ...cReq0,
+            messages: gated.messages as typeof cReq0.messages,
+            system: gated.system,
+          }
         : cReq0;
 
     if (gated.count > 0) {
@@ -478,7 +520,10 @@ class RouterClient implements AIClient {
 
     // Resolved once and reused, so the provider we call and the model id we
     // report come from the SAME decision rather than two independent ones.
-    const bridged = readPrimaryOverride() === "auto" ? bridgeSelection(cReq.model_tier, this.registry) : null;
+    const bridged =
+      readPrimaryOverride() === "auto"
+        ? bridgeSelection(cReq.model_tier, this.registry)
+        : null;
     const primary = pickPrimary(cReq, this.registry);
 
     /* WHERE THIS DATA MAY BE PROCESSED.
@@ -531,7 +576,10 @@ class RouterClient implements AIClient {
          recomputed later: a second read of the environment could disagree
          with the one that made the decision, and the row would then attest
          to something that never happened. */
-      residencyRecord = { required: residency.required, servedIn: residency.servedIn };
+      residencyRecord = {
+        required: residency.required,
+        servedIn: residency.servedIn,
+      };
     }
     const obs = getObsClient();
     let response: AICompleteResponse;
@@ -666,7 +714,10 @@ class RouterClient implements AIClient {
      * DEGRADES, NEVER FAILS: a redaction problem must not turn a completed
      * answer into an error, so anything unexpected leaves the response as it
      * was rather than losing it. */
-    const inboundWithheld: { count: number; kinds: string[] } = { count: 0, kinds: [] };
+    const inboundWithheld: { count: number; kinds: string[] } = {
+      count: 0,
+      kinds: [],
+    };
     try {
       const outbound = redactText(response.content, NEVER_SEND_KINDS);
       if (outbound.redacted && outbound.hits.length > 0) {
@@ -684,13 +735,79 @@ class RouterClient implements AIClient {
             redacted_count: outbound.hits.length,
             /* The kind only. Placeholders travel, values never do, which is
                what lets this be reported on a page at all. */
-            kinds: [...new Set(outbound.hits.map((h) => h.kind))].sort().join(","),
+            kinds: [...new Set(outbound.hits.map((h) => h.kind))]
+              .sort()
+              .join(","),
           },
         );
       }
     } catch {
       /* An answer the reader has waited for is worth more than a redaction
          pass that threw. The outbound gate already ran. */
+    }
+
+    /* THE SECOND GATE: what the answer SAYS, not what it contains.
+     *
+     * Redaction above is exhaustive about shapes and blind to meaning. It will
+     * not touch "you'll qualify for 2.9% APR", "that's covered under your
+     * warranty" or "yes, it's in stock, I'll hold one for you", because none of
+     * those contains a redactable token -- and every one of them is a
+     * commitment the CLIENT is held to, made by a model that cannot be.
+     *
+     * So the router is the layer between the model and the reader here too:
+     * deterministic rules, per tenant, reviewable in a diff. See policy.ts for
+     * why this is rules and not a classifier.
+     *
+     * WITHHOLDING REPLACES THE ANSWER, IT DOES NOT THROW. A caller that gets an
+     * exception has to handle a failure; a caller that gets a short, true
+     * sentence just renders it. The refusal is still a completed call: it was
+     * paid for, it is recorded, and the reader is told plainly that something
+     * was held back rather than being handed silence.
+     *
+     * DEGRADES, NEVER FAILS, same posture as the block above: a policy pass
+     * that throws leaves the answer exactly as it was. A gate that can take an
+     * answer down is a gate an operator switches off. */
+    let policyVerdict: PolicyVerdict | null = null;
+    /* The judge's verdict ABOUT an answer is not an answer. Skipping it here,
+       rather than inside the try, keeps "we chose not to gate this" separate
+       from "the gate failed and we degraded". */
+    if (!cReq.metadata?.internal_check) {
+      try {
+        const rules = policyFor(
+          wsPolicy?.content_policy_profile ??
+            process.env.AI_CONTENT_POLICY_PROFILE,
+        );
+        const verdict = applyPolicy(response.content, "response", rules);
+        if (verdict.action !== "allow") {
+          policyVerdict = verdict;
+          response = { ...response, content: verdict.text };
+          trackEvent(
+            "ai.policy_refused",
+            cReq.metadata?.user_id ?? "system",
+            cReq.metadata?.user_role ?? "system",
+            {
+              feature: cReq.metadata?.feature ?? "unknown",
+              workspace_id: cReq.metadata?.workspace_id ?? "default",
+              model: response.model_used,
+              action: verdict.action,
+              profile:
+                wsPolicy?.content_policy_profile ??
+                process.env.AI_CONTENT_POLICY_PROFILE ??
+                "baseline",
+              /* Rule ids only. The panel explains a refusal from the RULE, never
+               by replaying what the model said: a store of blocked sentences
+               is a store of exactly the text we decided nobody should read. */
+              rules: verdict.findings
+                .map((f) => f.ruleId)
+                .sort()
+                .join(","),
+              rule_count: verdict.findings.length,
+            },
+          );
+        }
+      } catch {
+        /* See above. An unusable policy pass costs coverage, never answers. */
+      }
     }
 
     emitCompletionEvent(cReq, response, fallbackUsed, bridged?.spec.id);
@@ -733,11 +850,26 @@ class RouterClient implements AIClient {
       withheldOutbound: gated.count,
       withheldInbound: inboundWithheld.count,
       withheldKinds: [
-        ...new Set([...gated.hits.map((h) => h.kind), ...inboundWithheld.kinds]),
+        ...new Set([
+          ...gated.hits.map((h) => h.kind),
+          ...inboundWithheld.kinds,
+        ]),
       ],
       injectionAttempts: 0,
       ...(budget.state === "ok" ? {} : { budgetState: budget.state }),
       ...(residencyRecord ? { residency: residencyRecord } : {}),
+      ...(policyVerdict && policyVerdict.action !== "allow"
+        ? {
+            policy: {
+              action: policyVerdict.action,
+              rules: policyVerdict.findings.map((f) => f.ruleId),
+              profile:
+                wsPolicy?.content_policy_profile ??
+                process.env.AI_CONTENT_POLICY_PROFILE ??
+                "baseline",
+            },
+          }
+        : {}),
     });
 
     /* ONE RETRY, ON A BETTER MODEL, ONLY WHEN A RULE SAYS IT IS WORTH PAYING.
@@ -796,7 +928,10 @@ class RouterClient implements AIClient {
          * audit row that means nothing is worse than an honest gap, because a
          * gap gets fixed and a false reassurance gets cited. */
         judgeChoice = chooseIndependentJudge(
-          { provider: response.provider_used, model: bridged?.spec.id ?? response.model_used },
+          {
+            provider: response.provider_used,
+            model: bridged?.spec.id ?? response.model_used,
+          },
           judgeCandidates(this.registry, escalateTo ?? cReq.model_tier),
         );
 
@@ -817,6 +952,9 @@ class RouterClient implements AIClient {
                   metadata: {
                     ...cReq.metadata,
                     feature: `${cReq.metadata?.feature ?? "unknown"}.judge`,
+                    /* The judge reports ON claims; it does not make them. See
+                       AICompleteRequestMetadata.internal_check. */
+                    internal_check: true,
                   },
                   provider_pin: judgeChoice!.candidate!.provider,
                 });
@@ -863,7 +1001,9 @@ class RouterClient implements AIClient {
           /* Recorded even when nothing was escalated, because "the cheap model
              was fine" is the finding that justifies routing cheap at all, and
              it is invisible if only failures are counted. */
-          escalated: Boolean(escalateTo) && (shouldEscalate(verdict) || judged?.sound === false),
+          escalated:
+            Boolean(escalateTo) &&
+            (shouldEscalate(verdict) || judged?.sound === false),
         },
       );
       if (escalateTo && (shouldEscalate(verdict) || judged?.sound === false)) {
@@ -875,7 +1015,10 @@ class RouterClient implements AIClient {
                second check could only trigger a third call this design has
                deliberately ruled out. */
             verify: false,
-            metadata: { ...req.metadata, feature: `${req.metadata?.feature ?? "unknown"}.escalated` },
+            metadata: {
+              ...req.metadata,
+              feature: `${req.metadata?.feature ?? "unknown"}.escalated`,
+            },
           });
           return retried;
         } catch {
@@ -891,7 +1034,9 @@ class RouterClient implements AIClient {
 /** The next tier up, or null at the top. Escalation is one step, never a leap
  *  to the most expensive model available: the failure being fixed is usually a
  *  small model being small, not a hard problem needing the best model made. */
-function betterTier(tier: AICompleteRequest["model_tier"]): AICompleteRequest["model_tier"] | null {
+function betterTier(
+  tier: AICompleteRequest["model_tier"],
+): AICompleteRequest["model_tier"] | null {
   if (tier === "cheap") return "standard";
   if (tier === "standard") return "premium";
   return null;
@@ -949,8 +1094,13 @@ function emitCompletionEvent(
       const baseline = selectModel({
         requiredTier: capabilityTierFor(req.metadata.baseline_tier),
       });
-      const actual = selectModel({ requiredTier: capabilityTierFor(req.model_tier) });
-      const price = (m: { inputPricePer1kUsd: number; outputPricePer1kUsd: number }) =>
+      const actual = selectModel({
+        requiredTier: capabilityTierFor(req.model_tier),
+      });
+      const price = (m: {
+        inputPricePer1kUsd: number;
+        outputPricePer1kUsd: number;
+      }) =>
         (response.input_tokens / 1000) * m.inputPricePer1kUsd +
         (response.output_tokens / 1000) * m.outputPricePer1kUsd;
 
@@ -969,7 +1119,8 @@ function emitCompletionEvent(
       /* no baseline recorded; the completion still stands */
     }
   }
-  if (req.metadata?.routing_reason) metadata.routing_reason = req.metadata.routing_reason;
+  if (req.metadata?.routing_reason)
+    metadata.routing_reason = req.metadata.routing_reason;
   if (req.sensitivity) metadata.sensitivity = req.sensitivity;
   metadata.constitution_applied = !!req.apply_constitution;
   trackEvent("ai.completion", userId, userRole, metadata);
@@ -1002,7 +1153,6 @@ export function _buildAIClientWithBudgetDepsForTests(deps: {
 
 export { BudgetExceededError, NoProviderAvailableError };
 
-
 /**
  * Providers that could check an answer, cheapest first.
  *
@@ -1026,7 +1176,10 @@ function judgeCandidates(
   const out: JudgeCandidate[] = [];
 
   if (registry.anthropic.supportsTier(tier)) {
-    out.push({ provider: registry.anthropic.name, model: ANTHROPIC_TIER_TO_MODEL[tier] });
+    out.push({
+      provider: registry.anthropic.name,
+      model: ANTHROPIC_TIER_TO_MODEL[tier],
+    });
   }
 
   if (registry.azure.supportsTier(tier)) {
@@ -1034,7 +1187,10 @@ function judgeCandidates(
        from the model rather than guessed from the reseller. */
     const wanted = capabilityTierFor(tier);
     const spec = MODEL_REGISTRY.find(
-      (m) => m.provider === "azure" && m.capabilityTier === wanted && isModelAvailable(m),
+      (m) =>
+        m.provider === "azure" &&
+        m.capabilityTier === wanted &&
+        isModelAvailable(m),
     );
     out.push({ provider: registry.azure.name, model: spec?.id });
   }
@@ -1043,7 +1199,11 @@ function judgeCandidates(
     if (!p.supportsTier(tier)) continue;
     out.push({
       provider: p.name,
-      model: (p as { modelFor?: (t: AICompleteRequest["model_tier"]) => string | undefined }).modelFor?.(tier),
+      model: (
+        p as {
+          modelFor?: (t: AICompleteRequest["model_tier"]) => string | undefined;
+        }
+      ).modelFor?.(tier),
     });
   }
 
