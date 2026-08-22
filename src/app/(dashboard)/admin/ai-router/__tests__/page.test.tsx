@@ -339,3 +339,63 @@ describe("the model list shows only what the platform can reach", () => {
     expect(list.querySelectorAll("li")).toHaveLength(1);
   });
 });
+
+describe("what the router would not let through", () => {
+  const refusals = (over: Record<string, unknown> = {}) => ({
+    total: 3,
+    blocked: 2,
+    escalated: 1,
+    redacted: 0,
+    rules: [
+      {
+        rule: "price_guarantee",
+        title: "Promised a price",
+        why: "Pricing changes by location and by day. A guarantee made in chat is a commitment nobody in the business authorised.",
+        count: 2,
+      },
+      {
+        rule: "warranty_coverage",
+        title: "Decided a warranty question",
+        why: "Whether a repair is covered is a decision the brand makes on the facts of the car.",
+        count: 1,
+      },
+    ],
+    profiles: ["automotive"],
+    ...over,
+  });
+
+  it("names the rule and the reasoning, not just a count", async () => {
+    /* A client reading this panel is deciding whether the RULE is right. A
+       number alone gives them nothing to agree or disagree with. */
+    respond(insights({ refusals: refusals() }));
+    render(<Page />);
+    const list = await screen.findByTestId("router-refusal-rules");
+    expect(list).toHaveTextContent("Promised a price");
+    expect(list).toHaveTextContent(/commitment nobody in the business authorised/i);
+    expect(screen.getByTestId("router-metric-blocked")).toHaveTextContent("2");
+    expect(screen.getByTestId("router-metric-escalated")).toHaveTextContent("1");
+  });
+
+  it("says which rule set is in force", async () => {
+    respond(insights({ refusals: refusals() }));
+    render(<Page />);
+    expect(await screen.findByTestId("router-refusal-profiles")).toHaveTextContent("automotive");
+  });
+
+  it("still renders on a clean window, because a silent panel reads as switched off", async () => {
+    respond(insights({ refusals: refusals({ total: 0, blocked: 0, escalated: 0, rules: [], profiles: [] }) }));
+    render(<Page />);
+    expect(await screen.findByTestId("router-refusal-clean")).toBeInTheDocument();
+    expect(screen.queryByTestId("router-refusal-rules")).not.toBeInTheDocument();
+  });
+
+  it("survives a payload from a deploy that did not have the gate", async () => {
+    /* Version skew is a real minute-long window, not a hypothetical: the panel
+       must be absent, and the rest of the page must render. */
+    respond(insights());
+    render(<Page />);
+    expect(await screen.findByTestId("router-metric-spend")).toBeInTheDocument();
+    expect(screen.queryByTestId("router-refusal-rules")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("router-refusal-clean")).not.toBeInTheDocument();
+  });
+});

@@ -25,6 +25,7 @@
  * as zero. Zero would drag an average down and quietly understate cost.
  */
 import { query } from "@/lib/db";
+import { POLICY_PROFILES } from "@/lib/ai/policy";
 import { MODEL_REGISTRY, isModelAvailable } from "./registry";
 import type { CapabilityTier, ModelProvider } from "./types";
 import { regionOfModel, modelRegionEnvVar } from "@/lib/ai/residency";
@@ -96,6 +97,9 @@ export interface ModelVersionSummary {
 export interface RouterInsights {
   /** What the router kept from leaving, and how much traffic it checked. */
   protection?: ProtectionSummary;
+  /** What the router would not let an answer SAY, and why. Optional so a
+   *  payload from an older deploy still renders. */
+  refusals?: RefusalSummary;
   /** Measured spend across every completed call in the window. */
   actualCostUsd?: number;
   actualCalls?: number;
@@ -433,12 +437,93 @@ export function summarizeProtection(
   };
 }
 
+interface RefusalRow extends Record<string, unknown> {
+  action: string | null;
+  rules: string | null;
+  profile: string | null;
+}
+
+export interface RefusalSummary {
+  /** Answers the policy would not pass through as written. */
+  total: number;
+  /** Withheld outright: a claim the business cannot be held to. */
+  blocked: number;
+  /** Withheld and handed to a person: a question we are not the right party
+   *  to answer. Counted apart from blocked because the follow-up differs. */
+  escalated: number;
+  /** Part of the answer removed, the rest delivered. */
+  redacted: number;
+  /** Which rule fired, most often first. Rule ids only, never a sentence. */
+  rules: { rule: string; title: string; why: string; count: number }[];
+  /** The rule sets in play across the window, for a deployment serving more
+   *  than one kind of tenant. */
+  profiles: string[];
+}
+
+/** Every rule the deployment knows, by id, for turning a stored id into a
+ *  sentence a client can read. Built once from the profiles themselves so a
+ *  new rule never needs a second registration here. */
+const RULES_BY_ID = new Map(
+  Object.values(POLICY_PROFILES)
+    .flat()
+    .map((r) => [r.id, r] as const),
+);
+
+/**
+ * Turn refusal events into the panel's answer to "what did you stop, and why".
+ *
+ * Reads rule IDS and resolves them to their current wording at read time
+ * rather than reading a stored sentence. Editing a rule's explanation then
+ * fixes every past refusal that cited it, and no copy of a blocked answer is
+ * ever kept to be resolved from.
+ */
+export function summarizeRefusals(rows: RefusalRow[]): RefusalSummary {
+  const byRule = new Map<string, number>();
+  const profiles = new Set<string>();
+  let blocked = 0;
+  let escalated = 0;
+  let redacted = 0;
+
+  for (const row of rows) {
+    if (row.action === "block") blocked += 1;
+    else if (row.action === "escalate") escalated += 1;
+    else if (row.action === "redact") redacted += 1;
+    if (row.profile) profiles.add(row.profile);
+    for (const rule of (row.rules ?? "").split(",").filter(Boolean)) {
+      byRule.set(rule, (byRule.get(rule) ?? 0) + 1);
+    }
+  }
+
+  return {
+    total: rows.length,
+    blocked,
+    escalated,
+    redacted,
+    rules: [...byRule.entries()]
+      .map(([rule, count]) => {
+        const known = RULES_BY_ID.get(rule);
+        return {
+          rule,
+          /* A rule id that is no longer in any profile still has to render:
+             the events are permanent and the rule sets are not. Saying so is
+             better than dropping the row or printing a bare identifier. */
+          title: known?.title ?? rule.replace(/_/g, " "),
+          why: known?.why ?? "This rule is no longer part of any active policy.",
+          count,
+        };
+      })
+      .sort((a, b) => b.count - a.count || a.rule.localeCompare(b.rule)),
+    profiles: [...profiles].sort(),
+  };
+}
+
 export async function getRouterInsights(days = 30): Promise<RouterInsights> {
   const models = modelAvailability();
   let rows: DecisionRow[] = [];
   let actualRows: ActualRow[] = [];
   let redactionRows: RedactionRow[] = [];
   let answerRedactionRows: RedactionRow[] = [];
+  let refusalRows: RefusalRow[] = [];
 
   if (process.env.DATABASE_URL) {
     try {
@@ -520,6 +605,22 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
     } catch {
       /* Same posture again. */
     }
+
+    try {
+      const result = await query<RefusalRow>(
+        `SELECT metadata->>'action'  AS action,
+                metadata->>'rules'   AS rules,
+                metadata->>'profile' AS profile
+           FROM instinct_events
+          WHERE event_type = 'ai.policy_refused'
+            AND timestamp > NOW() - INTERVAL '1 day' * $1
+          LIMIT 20000`,
+        [days],
+      );
+      refusalRows = result.rows;
+    } catch {
+      /* Same posture again. */
+    }
   }
 
   const s = summarizeDecisions(rows);
@@ -552,6 +653,7 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
      selections: a selection that never completed sent nothing, so counting it
      as "checked" would inflate the claim with traffic that never existed. */
   const protection = summarizeProtection(redactionRows, actualCalls, answerRedactionRows);
+  const refusals = summarizeRefusals(refusalRows);
 
   const withActuals = { ...s, usage, actualCostUsd, actualCalls, inputTokens, outputTokens };
   /* WHICH WEIGHTS HAVE ANSWERED. Read last and defensively: a model-version
@@ -568,6 +670,10 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
     models,
     ...withActuals,
     protection,
+    /* Always present, including when it is all zeroes: "the gate ran and
+       refused nothing" is a finding, and a panel that disappears on a clean
+       window is indistinguishable from a feature that is switched off. */
+    refusals,
     ...(versions.length > 0 ? { versions } : {}),
     headline: describeInsights(withActuals),
   };

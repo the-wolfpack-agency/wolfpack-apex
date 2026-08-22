@@ -73,6 +73,16 @@ export interface RouterAuditFacts {
    * presence of the field is itself the statement that residency applied.
    */
   residency?: { required: string[]; servedIn: string };
+  /**
+   * What the content policy did to this answer, present only when it did
+   * something. Its ABSENCE is the statement that the answer went out as the
+   * model wrote it, which is why this is optional rather than a row of zeroes.
+   *
+   * Rule ids, never the sentence. An audit trail of blocked claims that quoted
+   * them back would be a durable, exportable archive of precisely the text the
+   * gate exists to withhold.
+   */
+  policy?: { action: "redact" | "block" | "escalate"; rules: string[]; profile: string };
 }
 
 export const ROUTER_AUDIT_ACTION = "ai.call.completed";
@@ -119,6 +129,17 @@ export function buildRouterAuditEntry(facts: RouterAuditFacts): {
         ? {
             residency_required: [...facts.residency.required].sort(),
             residency_served_in: facts.residency.servedIn,
+          }
+        : {}),
+      /* WHAT WAS REFUSED AND WHY, by rule id.
+         The claim this makes for a client is "your model was not allowed to
+         promise that", and it is only worth anything if the row names the rule
+         that decided, so an auditor can read the rule and disagree with it. */
+      ...(facts.policy
+        ? {
+            policy_action: facts.policy.action,
+            policy_rules: [...facts.policy.rules].sort(),
+            policy_profile: facts.policy.profile,
           }
         : {}),
       /* Stated in the row itself, because the person reading an export a year

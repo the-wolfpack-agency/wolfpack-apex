@@ -37,6 +37,19 @@ export interface AICompleteRequestMetadata {
    *  old behaviour WOULD have cost for the same tokens — so "savings" is
    *  measured against a real counterfactual rather than asserted. */
   baseline_tier?: AIModelTier;
+  /**
+   * This call is the router talking to itself, not to a person.
+   *
+   * The content policy (src/lib/ai/policy.ts) reads a model's answer and
+   * withholds claims a business cannot be held to. That is right for an answer
+   * somebody will READ, and wrong for the judge's verdict about one: a judge
+   * reporting "the answer guarantees a price" is doing its job, and gating it
+   * would withhold the finding instead of the claim.
+   *
+   * Set ONLY by the router on its own sub-calls. Never a way for a feature to
+   * opt out of the gate: redaction, residency and the budget all still apply.
+   */
+  internal_check?: boolean;
 }
 
 export interface AICompleteRequest {
