@@ -1,0 +1,236 @@
+/**
+ * Turning somebody's description of their day into a plan.
+ *
+ * ONE BOUNDARY CARRIES THIS WHOLE FEATURE: the model proposes and the registry
+ * decides. A model naming a plausible-sounding tool would produce a chain that
+ * fails at step three in front of the person who just explained their job, and
+ * they would not come back.
+ *
+ * So most of these tests are about what happens when the model is WRONG, which
+ * is the case that will actually occur.
+ */
+import {
+  mapDay,
+  draftRoutine,
+  renderPlan,
+  parseExtraction,
+  buildExtractionPrompt,
+  type DescribedStep,
+} from "../day-plan";
+import type { ToolDef } from "@/lib/assistant/tools/types";
+
+/** A stand-in registry, so these tests do not move when the real one does. */
+const tool = (name: string, capability = "*"): ToolDef<unknown, unknown> =>
+  ({
+    name,
+    description: `Do the ${name} thing. Second sentence that should not be shown.`,
+    capability,
+    paramSchema: { safeParse: () => ({ success: true, data: {} }) },
+    handler: async () => ({ ok: true, data: {}, answer: "" }),
+  }) as unknown as ToolDef<unknown, unknown>;
+
+const TOOLS = [tool("search_mail"), tool("calendar_widget"), tool("get_financials_metric", "cto")];
+
+const step = (over: Partial<DescribedStep> = {}): DescribedStep => ({
+  text: "Read my email",
+  tool: "search_mail",
+  humanOnly: false,
+  ...over,
+});
+
+describe("the model proposes, the registry decides", () => {
+  it("keeps a step whose tool actually exists", () => {
+    const plan = mapDay([step()], TOOLS, "cto");
+    expect(plan.steps[0]).toMatchObject({ kind: "tool", tool: "search_mail" });
+    expect(plan.covered).toBe(1);
+  });
+
+  it("turns an INVENTED tool name into a gap rather than a step", () => {
+    /* The failure this exists to prevent: a chain that dies at step three in
+       front of somebody who just described their job. */
+    const plan = mapDay([step({ tool: "send_slack_message" })], TOOLS, "cto");
+    expect(plan.steps[0]).toEqual({
+      kind: "gap",
+      text: "Read my email",
+      reason: "no_tool",
+    });
+    expect(plan.covered).toBe(0);
+  });
+
+  it("turns a tool this role cannot run into a gap, not a promise", () => {
+    /* Proposing a chain somebody is not allowed to run is worse than proposing
+       a shorter one. */
+    const plan = mapDay([step({ text: "Check revenue", tool: "get_financials_metric" })], TOOLS, "sales");
+    expect(plan.steps[0]).toMatchObject({ kind: "gap", reason: "not_permitted" });
+  });
+
+  it("keeps that same step for a role that can run it", () => {
+    const plan = mapDay([step({ text: "Check revenue", tool: "get_financials_metric" })], TOOLS, "cto");
+    expect(plan.steps[0]).toMatchObject({ kind: "tool", tool: "get_financials_metric" });
+  });
+
+  it("treats a step with no tool as the person's own work", () => {
+    const plan = mapDay([step({ text: "Rehearse the pitch", tool: null })], TOOLS, "cto");
+    expect(plan.steps[0]).toEqual({ kind: "human", text: "Rehearse the pitch" });
+    expect(plan.humanOnly).toBe(1);
+  });
+
+  it("honours humanOnly even when a tool was also named", () => {
+    /* Erring toward "a person does this" is always safe. Erring the other way
+       hands their work to software that should not have it. */
+    const plan = mapDay([step({ humanOnly: true })], TOOLS, "cto");
+    expect(plan.steps[0].kind).toBe("human");
+  });
+
+  it("drops empty steps rather than rendering blank lines", () => {
+    expect(mapDay([step({ text: "   " })], TOOLS, "cto").steps).toEqual([]);
+  });
+});
+
+describe("the chain it offers to build", () => {
+  const plan = (steps: DescribedStep[]) => mapDay(steps, TOOLS, "cto");
+
+  it("builds a routine from the steps that can actually run", () => {
+    const r = draftRoutine(
+      plan([step(), step({ text: "Check the calendar", tool: "calendar_widget" })]),
+      "d",
+      "run my day",
+    );
+    expect(r!.steps.map((s) => s.kind)).toEqual(["tool", "tool"]);
+  });
+
+  it("NEVER puts a gap in the chain", () => {
+    /* A routine with a hole in it stops halfway and leaves the person worse off
+       than before they described their day. */
+    const r = draftRoutine(
+      plan([
+        step(),
+        step({ text: "Post to the intranet", tool: "nonexistent_tool" }),
+        step({ text: "Check the calendar", tool: "calendar_widget" }),
+      ]),
+      "d",
+      "run my day",
+    );
+    expect(r!.steps).toHaveLength(2);
+    expect(JSON.stringify(r)).not.toContain("intranet");
+  });
+
+  it("marks their own work as work, not as a checkpoint on ours", () => {
+    /* These come from somebody describing their own job. Recording them as
+       reviews would count their real work as a pause worth deleting. */
+    const r = draftRoutine(
+      plan([step(), step({ text: "Call the client", tool: null }), step({ text: "Check the calendar", tool: "calendar_widget" })]),
+      "d",
+      "run my day",
+    );
+    const human = r!.steps.find((s) => s.kind === "human");
+    expect(human).toMatchObject({ action: "do" });
+  });
+
+  it("carries no invented parameters", () => {
+    /* A guessed parameter is a wrong action taken confidently. They come from
+       the person confirming the chain. */
+    const r = draftRoutine(plan([step(), step({ text: "Check the calendar", tool: "calendar_widget" })]), "d", "c");
+    for (const s of r!.steps) {
+      if (s.kind === "tool") expect(s.params).toEqual({});
+    }
+  });
+
+  it("offers nothing when there is only one thing to chain", () => {
+    /* A chain of one is a longer way to do what they already do. */
+    expect(draftRoutine(plan([step()]), "d", "c")).toBeNull();
+    expect(draftRoutine(plan([step({ tool: null })]), "d", "c")).toBeNull();
+  });
+});
+
+describe("saying it back to them", () => {
+  it("leads every line with their words, not ours", () => {
+    const out = renderPlan(mapDay([step({ text: "Trawl the overnight email" })], TOOLS, "cto"), false);
+    expect(out).toContain("**Trawl the overnight email**");
+  });
+
+  it("describes their own steps as theirs rather than as a shortfall", () => {
+    const out = renderPlan(mapDay([step({ text: "Rehearse", tool: null })], TOOLS, "cto"), false);
+    expect(out).toMatch(/yours\. No tool should be doing this one/i);
+    expect(out).not.toMatch(/unsupported|not covered|missing/i);
+  });
+
+  it("states the gaps instead of quietly leaving them out", () => {
+    /* A plan that omits what it cannot do reads as full coverage, and they find
+       out at the worst possible moment. */
+    const out = renderPlan(mapDay([step({ tool: "made_up" })], TOOLS, "cto"), false);
+    expect(out).toMatch(/nothing here does this yet/i);
+    expect(out).toMatch(/left it out rather than building a chain that stops halfway/i);
+  });
+
+  it("distinguishes a permission gap from a missing tool", () => {
+    const out = renderPlan(
+      mapDay([step({ text: "Check revenue", tool: "get_financials_metric" })], TOOLS, "sales"),
+      false,
+    );
+    expect(out).toMatch(/your role cannot run it/i);
+  });
+
+  it("offers the chain only when there is one to offer", () => {
+    const two = mapDay([step(), step({ text: "Calendar", tool: "calendar_widget" })], TOOLS, "cto");
+    expect(renderPlan(two, true)).toMatch(/chain the parts I can do into one command/i);
+    expect(renderPlan(two, false)).not.toMatch(/chain the parts/i);
+  });
+
+  it("says something useful when nothing could be read out of the description", () => {
+    const out = renderPlan(mapDay([], TOOLS, "cto"), false);
+    expect(out).toMatch(/one thing at a time/i);
+  });
+});
+
+describe("reading what the model sent back", () => {
+  it("parses a clean reply", () => {
+    const out = parseExtraction('{"steps":[{"text":"Read email","tool":"search_mail","humanOnly":false}]}');
+    expect(out).toEqual([{ text: "Read email", tool: "search_mail", humanOnly: false }]);
+  });
+
+  it("finds the JSON inside prose, because models wrap things", () => {
+    /* Losing somebody's whole description over a stray sentence would be the
+       worst possible first impression of the product. */
+    const out = parseExtraction('Sure! Here you go:\n{"steps":[{"text":"A","tool":null,"humanOnly":true}]}\nHope that helps.');
+    expect(out).toHaveLength(1);
+  });
+
+  it("returns nothing rather than throwing on rubbish", () => {
+    for (const bad of ["", "not json at all", "{", '{"steps":"nope"}', "{}"]) {
+      expect(parseExtraction(bad)).toEqual([]);
+    }
+  });
+
+  it('treats the literal string "null" as no tool', () => {
+    expect(parseExtraction('{"steps":[{"text":"A","tool":"null"}]}')[0].tool).toBeNull();
+  });
+
+  it("caps the number of steps, so one description cannot become a wall", () => {
+    const many = { steps: Array.from({ length: 40 }, (_, i) => ({ text: `Step ${i}`, tool: null })) };
+    expect(parseExtraction(JSON.stringify(many))).toHaveLength(12);
+  });
+
+  it("drops entries with no text", () => {
+    expect(parseExtraction('{"steps":[{"text":"","tool":null},{"text":"Real","tool":null}]}')).toHaveLength(1);
+  });
+});
+
+describe("what we ask the model", () => {
+  it("tells it never to invent a name, and to prefer a person when unsure", () => {
+    const prompt = buildExtractionPrompt("I read email then call clients", TOOLS);
+    expect(prompt).toMatch(/Never invent a name/i);
+    expect(prompt).toMatch(/When unsure, use null/i);
+  });
+
+  it("lists only the tools it is allowed to choose from", () => {
+    const prompt = buildExtractionPrompt("x", [tool("search_mail")]);
+    expect(prompt).toContain("search_mail");
+    expect(prompt).not.toContain("calendar_widget");
+  });
+
+  it("shows one sentence per tool, so a long registry stays readable", () => {
+    const prompt = buildExtractionPrompt("x", TOOLS);
+    expect(prompt).not.toContain("Second sentence that should not be shown");
+  });
+});

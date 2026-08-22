@@ -1,0 +1,273 @@
+/**
+ * Turning "here is what I do on a Monday" into a play by play.
+ *
+ * THE ENTRY POINT TO EVERYTHING ELSE
+ *
+ * Routines exist, tools exist, and the person who would benefit most has no
+ * idea either is there. Asking them to browse a tool list is asking them to
+ * translate their own job into our vocabulary, which is the work we are
+ * supposed to be doing for them.
+ *
+ * So they describe their day in their own words, and this says back: here is
+ * what happens, here is the part software can already do, here is the part only
+ * you can do, and here is where there is nothing yet. Then it offers to chain
+ * the whole thing into one command.
+ *
+ * THE MODEL PROPOSES, THE REGISTRY DECIDES
+ *
+ * The one thing rules cannot do is turn prose into a list of discrete steps, so
+ * a model does that and nothing else. Every step it produces is then checked
+ * against the LIVE tool registry, and a tool name that does not exist becomes a
+ * GAP rather than a step.
+ *
+ * That boundary is the whole design. A model naming a plausible tool would
+ * produce a routine that fails at step three in front of the person who just
+ * told us about their job, and they would not come back. It is cheaper to say
+ * "there is nothing for that yet" than to be caught inventing.
+ *
+ * A step is also dropped to a gap when the person's ROLE cannot invoke the tool
+ * it matched. Proposing a chain somebody is not allowed to run is a worse
+ * outcome than proposing a shorter one.
+ */
+import type { ToolDef } from "@/lib/assistant/tools/types";
+import { canInvokeTool } from "@/lib/assistant/tools/gate";
+import type { Routine, RoutineStep } from "./types";
+
+/** One thing the person said they do, before we know what it maps to. */
+export interface DescribedStep {
+  /** Their words, kept, because the play by play reads back to them. */
+  text: string;
+  /** The model's guess at a registered tool, or null for "a person does this". */
+  tool: string | null;
+  /** True when the model judged this to need no software at all. */
+  humanOnly: boolean;
+}
+
+export type MappedStep =
+  | { kind: "tool"; text: string; tool: string; description: string }
+  /** Work only a person can do. Not a gap: nothing is missing. */
+  | { kind: "human"; text: string }
+  /** Software could help and we do not have it. Named honestly. */
+  | { kind: "gap"; text: string; reason: "no_tool" | "not_permitted" };
+
+export interface DayPlan {
+  steps: MappedStep[];
+  /** How much of the described day we can already carry. */
+  covered: number;
+  humanOnly: number;
+  gaps: number;
+}
+
+/**
+ * Check every described step against what actually exists.
+ *
+ * Pure, and the guard the whole feature rests on: a tool name reaches the
+ * output only if the registry has it AND this role may invoke it.
+ */
+export function mapDay(
+  described: DescribedStep[],
+  tools: ReadonlyArray<ToolDef<unknown, unknown>>,
+  role: string,
+): DayPlan {
+  const byName = new Map(tools.map((t) => [t.name, t]));
+  const steps: MappedStep[] = [];
+
+  for (const step of described) {
+    const text = step.text.trim();
+    if (!text) continue;
+
+    if (step.humanOnly || !step.tool) {
+      steps.push({ kind: "human", text });
+      continue;
+    }
+
+    const tool = byName.get(step.tool);
+    if (!tool) {
+      /* The model named something that does not exist. This is the case that
+         would otherwise become a routine failing in front of them. */
+      steps.push({ kind: "gap", text, reason: "no_tool" });
+      continue;
+    }
+    if (!canInvokeTool(role, tool.capability)) {
+      steps.push({ kind: "gap", text, reason: "not_permitted" });
+      continue;
+    }
+
+    steps.push({
+      kind: "tool",
+      text,
+      tool: tool.name,
+      description: tool.description.split(/(?<=\.)\s/)[0].replace(/\.$/, ""),
+    });
+  }
+
+  return {
+    steps,
+    covered: steps.filter((s) => s.kind === "tool").length,
+    humanOnly: steps.filter((s) => s.kind === "human").length,
+    gaps: steps.filter((s) => s.kind === "gap").length,
+  };
+}
+
+/**
+ * The chain we could build from what we can actually do.
+ *
+ * Only tool steps and human steps go in. A gap cannot be a step: a routine with
+ * a hole in it is one that stops halfway, and the person is left worse off than
+ * before they described their day.
+ *
+ * Every human step is marked "do", not "review". These come from somebody
+ * describing their own work, so they are things the person does, not
+ * checkpoints on ours. Getting that wrong would count their real work as a
+ * pause worth deleting.
+ */
+export function draftRoutine(plan: DayPlan, id: string, command: string): Routine | null {
+  const steps: RoutineStep[] = [];
+
+  for (const s of plan.steps) {
+    if (s.kind === "tool") {
+      steps.push({
+        kind: "tool",
+        tool: s.tool,
+        /* Empty, deliberately. Parameters come from the person confirming the
+           chain, not from a model's guess at what they meant, because a wrong
+           parameter is a wrong action taken confidently. */
+        params: {},
+        label: s.text.slice(0, 80),
+      });
+    } else if (s.kind === "human") {
+      steps.push({ kind: "human", label: s.text.slice(0, 80), action: "do" });
+    }
+  }
+
+  /* A chain of one is not a chain. Offering to save a single tool call as a
+     routine is offering somebody a longer way to do what they already do. */
+  if (steps.filter((s) => s.kind === "tool").length < 2) return null;
+
+  return {
+    id,
+    command,
+    description: "Saved from the day you described.",
+    audience: "anyone",
+    steps,
+  };
+}
+
+/**
+ * Say it back to them.
+ *
+ * Their words first on every line, because the whole point is that they
+ * recognise their own day. Ours second.
+ */
+export function renderPlan(plan: DayPlan, canChain: boolean): string {
+  if (plan.steps.length === 0) {
+    return "I could not pick out any distinct steps from that. Try walking me through it in order, one thing at a time.";
+  }
+
+  const lines: string[] = ["Here is your day as I understand it.", ""];
+
+  plan.steps.forEach((s, i) => {
+    const n = `${i + 1}.`;
+    if (s.kind === "tool") {
+      lines.push(`${n} **${s.text}** — I can do this now. ${s.description}.`);
+    } else if (s.kind === "human") {
+      /* Named as work rather than as a shortfall. A person reading a list of
+         their own job wants the parts only they can do described as the
+         valuable things they are, not as coverage we failed to reach. */
+      lines.push(`${n} **${s.text}** — yours. No tool should be doing this one.`);
+    } else if (s.reason === "not_permitted") {
+      lines.push(`${n} **${s.text}** — there is a tool for this, but your role cannot run it.`);
+    } else {
+      lines.push(`${n} **${s.text}** — nothing here does this yet.`);
+    }
+  });
+
+  lines.push("");
+  lines.push(
+    `${plan.covered} of ${plan.steps.length} ${plan.covered === 1 ? "step is" : "steps are"} something I can already do${
+      plan.humanOnly > 0 ? `, and ${plan.humanOnly} ${plan.humanOnly === 1 ? "is" : "are"} yours` : ""
+    }.`,
+  );
+
+  if (plan.gaps > 0) {
+    /* STATED, NOT BURIED. A plan that quietly omits what it cannot do reads as
+       full coverage, and the person finds out at the worst moment. */
+    lines.push(
+      `${plan.gaps} ${plan.gaps === 1 ? "step has" : "steps have"} nothing behind ${plan.gaps === 1 ? "it" : "them"} yet. I have left ${plan.gaps === 1 ? "it" : "them"} out rather than building a chain that stops halfway.`,
+    );
+  }
+
+  if (canChain) {
+    lines.push("");
+    lines.push(
+      "Would you like me to chain the parts I can do into one command? It would stop and hand back to you at each of your own steps.",
+    );
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * What we ask the model, and the only thing we ask it.
+ *
+ * Constrained hard: it splits prose into steps and, for each, either names a
+ * tool from a supplied list or says a person does it. Everything it returns is
+ * verified afterwards, so the prompt's job is to make verification pass often,
+ * not to be trusted.
+ */
+export function buildExtractionPrompt(
+  description: string,
+  tools: ReadonlyArray<ToolDef<unknown, unknown>>,
+): string {
+  const manifest = tools.map((t) => `${t.name}: ${t.description.split(/(?<=\.)\s/)[0]}`).join("\n");
+  return [
+    "Someone has described their working day. Break it into the distinct steps they perform, in order.",
+    "",
+    "For each step, either name ONE tool from the list below that would do it, or mark it as something only a person can do (a conversation, a decision, judgement, preparation, anything physical).",
+    "",
+    "Rules:",
+    '- Use a tool name EXACTLY as written below, or use null. Never invent a name.',
+    "- When unsure, use null. A step marked as a person's work is always safe; a wrong tool is not.",
+    "- Keep their own words for each step, shortened but not reworded.",
+    "- At most 12 steps.",
+    "",
+    "Reply with JSON only, in this shape:",
+    '{"steps":[{"text":"...","tool":"tool_name_or_null","humanOnly":false}]}',
+    "",
+    "Tools:",
+    manifest,
+    "",
+    "Their day:",
+    description,
+  ].join("\n");
+}
+
+/**
+ * Read the model's reply.
+ *
+ * Tolerant, because a model wrapping JSON in prose is ordinary rather than
+ * exceptional, and losing somebody's whole description over a stray sentence
+ * would be the worst possible first impression of the product.
+ */
+export function parseExtraction(raw: string): DescribedStep[] {
+  const text = String(raw ?? "");
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end <= start) return [];
+
+  try {
+    const parsed = JSON.parse(text.slice(start, end + 1)) as { steps?: unknown };
+    if (!Array.isArray(parsed.steps)) return [];
+    return parsed.steps
+      .filter((s): s is Record<string, unknown> => Boolean(s) && typeof s === "object")
+      .map((s) => ({
+        text: typeof s.text === "string" ? s.text.slice(0, 200) : "",
+        tool: typeof s.tool === "string" && s.tool !== "null" ? s.tool : null,
+        humanOnly: s.humanOnly === true,
+      }))
+      .filter((s) => s.text.length > 0)
+      .slice(0, 12);
+  } catch {
+    return [];
+  }
+}
