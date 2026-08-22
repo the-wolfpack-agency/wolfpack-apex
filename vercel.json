@@ -1,6 +1,7 @@
 {
   "crons": [
     { "path": "/api/support/poll", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/routine-schedules", "schedule": "*/15 * * * *" },
     { "path": "/api/cron/principles-sync", "schedule": "0 */2 * * *" },
     { "path": "/api/cron/principles-evaluate", "schedule": "15 */4 * * *" },
     { "path": "/api/cron/principles-weekly-report", "schedule": "0 8 * * 1" },

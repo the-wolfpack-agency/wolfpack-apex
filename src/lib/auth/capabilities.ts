@@ -59,6 +59,7 @@ export const CAPABILITIES = {
 
   // Releases (the /releases changelog wiki + release email)
   "releases.view": "View the releases changelog",
+  "routines.view": "See your own routines, schedules and where your time goes",
   "releases.manage": "Publish releases (generator + manual publish)",
 
   // Products (the /products catalog + current-engagements view)

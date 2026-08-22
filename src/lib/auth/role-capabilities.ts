@@ -51,6 +51,12 @@ const SELF_SERVICE: readonly Capability[] = [
   // The engineering wiki is org-wide reading: it explains how the systems work
   // to every team member. Authoring (engineering.manage) stays with CTO/CEO.
   "engineering.view",
+  // A person's own routines, schedules and human-step history. Self-service by
+  // definition: this is a page ABOUT them, built from their own runs, and
+  // gating it behind an admin capability would mean the people the feature
+  // exists for could not see it. It shows nobody else's data, so there is
+  // nothing here to withhold from the person it describes.
+  "routines.view",
 ];
 
 // ──────────────────────────────────────────────────────────────────────────
