@@ -27,11 +27,15 @@ Nearly all of the parts are built. The missing piece is small and specific.
 | Human approval queue with TTL (`agents/approvals/store`) | built |
 | In-app notification on state change (`notifications/in-app`) | built |
 | Write tools shaped as `create_*_form`, where a human confirms before anything lands | built |
-| **Anything that runs more than one tool per message** | **missing** |
+| Routine runner: chains, human checkpoints, and the timing split | built (#301) |
+| Capability discovery from the live registry | built (#302) |
+| Human steps that use no tool, done or skipped, and what that says | built (#304) |
+| Describe your day, get it mapped, keep the chain | built (#305, #306) |
 
-The dispatcher returns "the result of the FIRST tool whose intent matches" and
-stops. Every chain in this document is blocked on that one sentence, and on
-nothing else.
+The dispatcher used to return "the result of the FIRST tool whose intent
+matches" and stop, which blocked every chain in this document. It no longer
+does: routines are matched before single-tool dispatch, and the rest of this
+file describes what that made possible.
 
 ## The design
 
