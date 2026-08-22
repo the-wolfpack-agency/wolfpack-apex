@@ -114,3 +114,56 @@ export function trackRun(run: RoutineRun, userRole: string): void {
       : {}),
   });
 }
+
+export interface RunSummary {
+  runId: string;
+  routineId: string;
+  state: string;
+  startedAt: string;
+  techMs: number;
+  humanMs: number;
+  steps: number;
+  /** The step it is sitting on, when it is waiting on somebody. */
+  waitingOn: string | null;
+}
+
+/**
+ * This person's recent runs.
+ *
+ * Ordered newest first and bounded, because the value of this list is "what
+ * happened lately and what is waiting on me", and a year of history answers
+ * neither question while costing more to read.
+ */
+export async function listRecentRuns(
+  owner: { workspaceId: string; userId: string },
+  limit = 20,
+): Promise<RunSummary[]> {
+  if (!process.env.DATABASE_URL) return [];
+  try {
+    const { query } = await import("@/lib/db");
+    const { rows } = await query<Record<string, unknown>>(
+      `SELECT r.run_id, r.routine_id, r.state, r.started_at, r.tech_ms, r.human_ms,
+              COUNT(s.step_index)                                        AS steps,
+              MAX(s.label) FILTER (WHERE s.status = 'waiting')           AS waiting_on
+         FROM assistant_routine_runs r
+    LEFT JOIN assistant_routine_steps s ON s.run_id = r.run_id
+        WHERE r.workspace_id = $1 AND r.user_id = $2
+     GROUP BY r.run_id, r.routine_id, r.state, r.started_at, r.tech_ms, r.human_ms
+     ORDER BY r.started_at DESC
+        LIMIT $3`,
+      [owner.workspaceId, owner.userId, Math.min(Math.max(limit, 1), 50)],
+    );
+    return rows.map((r) => ({
+      runId: String(r.run_id),
+      routineId: String(r.routine_id),
+      state: String(r.state),
+      startedAt: new Date(String(r.started_at)).toISOString(),
+      techMs: Number(r.tech_ms) || 0,
+      humanMs: Number(r.human_ms) || 0,
+      steps: Number(r.steps) || 0,
+      waitingOn: r.waiting_on === null || r.waiting_on === undefined ? null : String(r.waiting_on),
+    }));
+  } catch {
+    return [];
+  }
+}

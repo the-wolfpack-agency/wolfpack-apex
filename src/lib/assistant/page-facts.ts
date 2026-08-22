@@ -64,6 +64,27 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["calendar", "meetings", "tasks", "notifications"],
   },
+  routines: {
+    domain: "routines",
+    route: "/routines",
+    title: "Your routines",
+    purpose:
+      "The chains you can run with one command, what runs on its own, and where your own time is going.",
+    what_you_can_do: [
+      "See every chain you can run, including the ones that ship with the product and any you have saved.",
+      "See what is waiting on you: a routine that ran, gathered what it could, and stopped at a step only you can do.",
+      "See what runs automatically, and when it next will.",
+      "Read what your own steps are telling you: which are not happening, which are habitual and expensive enough to be worth a tool, and which pauses are not earning their place.",
+      "See how much work was done for you and how much time was your own, kept as two separate numbers.",
+    ],
+    how_to: [
+      "Open Routines from the left nav.",
+      "To run one, type its command in the assistant.",
+      "To make a new one, describe your day to the assistant and say yes when it offers to chain it.",
+      "To have one meet you, say 'run my morning every weekday at 8am'.",
+    ],
+    related_pages: ["assistant", "notifications"],
+  },
   releases: {
     domain: "releases",
     route: "/releases",
