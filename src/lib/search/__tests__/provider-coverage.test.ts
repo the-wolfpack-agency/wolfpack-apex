@@ -54,6 +54,8 @@ const NON_TOOL_FILES = new Set([
  * doesn't fan into Universal Search.
  */
 export const SEARCH_PROVIDER_EXEMPT_TOOLS: Record<string, string> = {
+  "templates-tool.ts":
+    "lists pre-built workflows checked against the live registry, with no stored corpus to search",
   "schedule-routine-tool.ts":
     "creates and lists standing appointments for routines, with no corpus to search",
   "platform-scan-tool.ts":
