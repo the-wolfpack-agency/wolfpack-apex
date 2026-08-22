@@ -45,6 +45,7 @@ import "./execute-agent-widget-tool";
    answer: a literal teammate returns their roster info instead of
    the old "no contact match in the CRM" message. */
 import "./who-is-tool";
+import "./schedule-routine-tool";
 import "./platform-scan-tool";
 import "./plan-my-day-tool";
 import "./capabilities-tool";
