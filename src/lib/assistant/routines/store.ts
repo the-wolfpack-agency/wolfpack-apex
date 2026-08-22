@@ -57,12 +57,13 @@ export async function saveRun(run: RoutineRun): Promise<void> {
     for (const o of run.outcomes) {
       await query(
         `INSERT INTO assistant_routine_steps
-           (run_id, workspace_id, step_index, kind, tool, label, status, duration_ms, error)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           (run_id, workspace_id, step_index, kind, tool, label, status, duration_ms, error, human_action)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (run_id, step_index) DO UPDATE SET
-           status      = EXCLUDED.status,
-           duration_ms = EXCLUDED.duration_ms,
-           error       = EXCLUDED.error`,
+           status       = EXCLUDED.status,
+           duration_ms  = EXCLUDED.duration_ms,
+           error        = EXCLUDED.error,
+           human_action = EXCLUDED.human_action`,
         [
           run.runId,
           run.workspaceId,
@@ -76,6 +77,7 @@ export async function saveRun(run: RoutineRun): Promise<void> {
           o.status,
           o.durationMs,
           o.error ?? null,
+          o.action ?? null,
         ],
       );
     }

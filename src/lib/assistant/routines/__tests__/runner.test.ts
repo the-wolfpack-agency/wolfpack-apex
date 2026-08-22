@@ -215,7 +215,7 @@ describe("counting whose time it was", () => {
     const c = clock(10_000);
     const r = routine([{ kind: "human", label: "Check this before it goes" }]);
     const paused = await advance(r, startRun(r, WHO), deps({ now: c.now }));
-    const done = await resume(r, paused, deps({ now: () => 1 }), 10_000);
+    const done = await resume(r, paused, deps({ now: () => 1 }), { pausedAt: 10_000 });
 
     expect(done.humanMs).toBe(0);
   });
@@ -323,5 +323,74 @@ describe("what a run refuses to do twice", () => {
     ]);
     const paused = await advance(r, startRun(r, WHO), deps());
     expect(remainingSteps(r, paused)).toHaveLength(1);
+  });
+});
+
+describe("a human step somebody did not do", () => {
+  const withHuman = (action: "review" | "do") =>
+    routine([
+      { kind: "tool", tool: "a", params: {}, label: "Gathering the input" },
+      { kind: "human", label: "Rehearse the opening out loud", action },
+      { kind: "tool", tool: "b", params: {}, label: "Sending the thing" },
+    ]);
+
+  it("carries on rather than blocking until somebody ticks a box", async () => {
+    /* A routine that blocks teaches people to tick the box, and a ticked box
+       that means nothing is worse than an honest skip. */
+    const calls: string[] = [];
+    const d = deps({
+      dispatchTool: async (t) => {
+        calls.push(t);
+        return { ok: true };
+      },
+    });
+    const r = withHuman("do");
+    const paused = await advance(r, startRun(r, WHO), d);
+    const done = await resume(r, paused, d, { skipped: true });
+
+    expect(calls).toEqual(["a", "b"]);
+    expect(done.state).toBe("done");
+  });
+
+  it("records the skip on the step", async () => {
+    const d = deps();
+    const r = withHuman("do");
+    const paused = await advance(r, startRun(r, WHO), d);
+    const done = await resume(r, paused, d, { skipped: true });
+
+    expect(done.outcomes[1]).toMatchObject({ kind: "human", status: "skipped", skipped: true });
+  });
+
+  it("does not count a skipped step as time somebody spent", async () => {
+    /* Counting elapsed time on the runs where nobody did the work would make a
+       step look expensive using exactly the runs where it did not happen. */
+    const c = clock();
+    const r = withHuman("do");
+    const d = deps({ now: c.now });
+    const paused = await advance(r, startRun(r, WHO), d);
+    c.tick(10 * 60 * 1000);
+    const done = await resume(r, paused, d, { skipped: true });
+
+    expect(done.humanMs).toBe(0);
+  });
+
+  it("counts the time when they did do it", async () => {
+    const c = clock();
+    const r = withHuman("do");
+    const d = deps({ now: c.now });
+    const paused = await advance(r, startRun(r, WHO), d);
+    c.tick(4 * 60 * 1000);
+    const done = await resume(r, paused, d);
+
+    expect(done.humanMs).toBe(240_000);
+    expect(done.outcomes[1].status).toBe("ok");
+  });
+
+  it("marks an unlabelled human step as a review, not as missed work", async () => {
+    /* An ordinary checkpoint miscounted as a missed human action would put a
+       false signal into the insight this distinction exists to produce. */
+    const r = routine([{ kind: "human", label: "Check this before it goes" }]);
+    const paused = await advance(r, startRun(r, WHO), deps());
+    expect(paused.outcomes[0].action).toBe("review");
   });
 });

@@ -84,8 +84,9 @@ export async function resumeRoutine(
   run: RoutineRun,
   ctx: ToolContext,
   deps: RunnerDeps = liveDeps(ctx),
+  opts: { skipped?: boolean } = {},
 ): Promise<RoutineRun> {
-  const next = await resume(routine, run, deps);
+  const next = await resume(routine, run, deps, opts);
   await saveRun(next);
   trackRun(next, ctx.userRole);
   return next;
@@ -110,8 +111,14 @@ export function describeRun(routine: Routine, run: RoutineRun): string {
   if (run.state === "waiting_for_human") {
     const step = routine.steps[run.cursor];
     lines.push(`**${step.kind === "human" ? step.label : "Over to you"}**`);
+    /* THE REASON, when the step has one. Somebody told to rehearse at 4pm with
+       no reason attached skips it, and the skip then reads as "that step was
+       pointless" rather than "nobody said why". */
+    if (step.kind === "human" && step.why) lines.push(step.why);
     lines.push(
-      `${done.length} of ${routine.steps.length} steps done. Reply to carry on, or leave it here.`,
+      step.kind === "human" && step.action === "do"
+        ? `${done.length} of ${routine.steps.length} steps done. Tell me when it is done, or say skip. Either answer is fine and both are recorded.`
+        : `${done.length} of ${routine.steps.length} steps done. Reply to carry on, or leave it here.`,
     );
     return lines.join("\n");
   }
