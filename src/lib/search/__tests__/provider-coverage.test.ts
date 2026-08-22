@@ -54,6 +54,8 @@ const NON_TOOL_FILES = new Set([
  * doesn't fan into Universal Search.
  */
 export const SEARCH_PROVIDER_EXEMPT_TOOLS: Record<string, string> = {
+  "capabilities-tool.ts":
+    "describes the registry itself, so searching it would return the product's own menu rather than a user's data",
   "aggregate-external-records-tool.ts":
     "aggregate query (count / sum / win-rate / top-N) — not a free-text searchable surface",
   "calendar-widget-tool.ts":
