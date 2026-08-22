@@ -466,6 +466,13 @@ export type InstinctEventType =
      rules, rule_count }: RULE IDS ONLY. Storing the sentence would keep a
      permanent copy of exactly the text we decided nobody should read. */
   | "ai.policy_refused"
+  /* A routine moved: started, paused for a person, finished, or failed.
+     Carries tech_ms and human_ms separately, which is the whole point of
+     recording chains at all -- a step everybody waves through does not need a
+     pause, and a step everybody edits means the tool before it is wrong.
+     Metadata: { routine_id, run_id, workspace_id, state, steps_done, tech_ms,
+     human_ms, failed_step? }: labels only, never what a step was carrying. */
+  | "assistant.routine_advanced"
   /* A document we fetched tried to instruct the assistant. The fence had
      already made it inert; this exists so a person finds out, because a
      supplier PDF that does this is worth a conversation. Metadata:

@@ -1,0 +1,114 @@
+/**
+ * Persisting a run, for the one thing that cannot be reconstructed later.
+ *
+ * A run's steps are visible while it happens and its results are already in
+ * the chat. What is NOT recoverable afterwards is where the time went: which
+ * step the machine did in 300ms, and which step sat waiting eleven minutes for
+ * a person. See migration 232 for why those two columns are the reason this
+ * table exists.
+ *
+ * WHAT NEVER REACHES THIS FILE
+ *
+ * Slot contents. A run carries mail bodies, customer history and draft replies
+ * between its steps; a table of those is a second copy of the mailbox without
+ * any of the controls the mailbox has. Steps are recorded by label, status and
+ * duration. Not by what they were carrying.
+ *
+ * NEVER THROWS
+ *
+ * A routine that fails because its bookkeeping failed is strictly worse than
+ * one that ran and was not measured. Every function here reports and returns.
+ */
+import { query } from "@/lib/db";
+import { trackEvent } from "@/lib/analytics";
+import type { RoutineRun } from "./types";
+
+/** Write or update the run and its steps. Best effort, by design. */
+export async function saveRun(run: RoutineRun): Promise<void> {
+  try {
+    await query(
+      `INSERT INTO assistant_routine_runs
+         (run_id, routine_id, user_id, workspace_id, state, step_cursor, tech_ms, human_ms, paused_at, finished_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (run_id) DO UPDATE SET
+         state       = EXCLUDED.state,
+         step_cursor = EXCLUDED.step_cursor,
+         tech_ms     = EXCLUDED.tech_ms,
+         human_ms    = EXCLUDED.human_ms,
+         paused_at   = EXCLUDED.paused_at,
+         finished_at = EXCLUDED.finished_at`,
+      [
+        run.runId,
+        run.routineId,
+        run.userId,
+        run.workspaceId,
+        run.state,
+        run.cursor,
+        run.techMs,
+        run.humanMs,
+        run.pausedAt ? new Date(run.pausedAt) : null,
+        run.state === "done" || run.state === "failed" ? new Date() : null,
+      ],
+    );
+
+    /* Steps are rewritten rather than appended: a human step is recorded once
+       as "waiting" and again as "ok" with the wait on it, and two rows for one
+       step would double every count built on this table. */
+    for (const o of run.outcomes) {
+      await query(
+        `INSERT INTO assistant_routine_steps
+           (run_id, workspace_id, step_index, kind, tool, label, status, duration_ms, error)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (run_id, step_index) DO UPDATE SET
+           status      = EXCLUDED.status,
+           duration_ms = EXCLUDED.duration_ms,
+           error       = EXCLUDED.error`,
+        [
+          run.runId,
+          run.workspaceId,
+          o.index,
+          o.kind,
+          /* The tool name is on the routine, not the outcome; recorded as null
+             here rather than guessed, because a wrong tool name in this table
+             would send somebody hunting the wrong step. */
+          null,
+          o.label,
+          o.status,
+          o.durationMs,
+          o.error ?? null,
+        ],
+      );
+    }
+  } catch {
+    /* A run that completed and was not measured is a lost data point. A run
+       that FAILED because its bookkeeping failed is a lost morning. */
+  }
+}
+
+/** Announce a state change, so the learning loop sees chains as well as tools. */
+export function trackRun(run: RoutineRun, userRole: string): void {
+  trackEvent("assistant.routine_advanced", run.userId, userRole, {
+    routine_id: run.routineId,
+    run_id: run.runId,
+    workspace_id: run.workspaceId,
+    state: run.state,
+    steps_done: run.outcomes.filter((o) => o.status === "ok").length,
+    /* HOW MUCH OF THIS NEEDED A MODEL AT ALL.
+       The claim being made to a client is that their tools are being operated
+       from one place and the AI is used only where judgement is actually
+       required. That claim should be a measurement rather than a sentence in a
+       deck: a routine that runs six steps and calls a model once is a fact
+       these two counters can produce on demand, per routine, per week. It is
+       also the honest early-warning signal if a chain quietly drifts into
+       asking a model things a tool already knows. */
+    tool_steps: run.outcomes.filter((o) => o.kind === "tool").length,
+    model_steps: run.outcomes.filter((o) => o.kind === "model").length,
+    /* Both numbers, always, including the zeroes. A routine nobody waits on is
+       as interesting as one they do, and it only shows up as a zero. */
+    tech_ms: run.techMs,
+    human_ms: run.humanMs,
+    ...(run.state === "failed"
+      ? { failed_step: run.outcomes[run.outcomes.length - 1]?.label ?? "unknown" }
+      : {}),
+  });
+}
