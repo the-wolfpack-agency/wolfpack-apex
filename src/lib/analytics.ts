@@ -479,6 +479,12 @@ export type InstinctEventType =
      identical in a single "ran" number. Metadata: { due, ran, waiting, failed,
      deactivated }. */
   | "assistant.routine_sweep"
+  /* A saved workflow stopped working and a repair was proposed to its owner.
+     Never applied automatically: a chain that rewrites itself is one nobody can
+     reason about. Metadata: { routine_id, workspace_id, problems, kinds,
+     dropped, replaced }: which kinds break in the field makes "what to make
+     robust next" a query rather than a guess. */
+  | "assistant.routine_repair_proposed"
   /* A document we fetched tried to instruct the assistant. The fence had
      already made it inert; this exists so a person finds out, because a
      supplier PDF that does this is worth a conversation. Metadata:

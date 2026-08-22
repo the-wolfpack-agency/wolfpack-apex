@@ -26,6 +26,19 @@ import { runRoutine, describeRun } from "./index";
 import { dueSchedules, recordRun, MAX_CONSECUTIVE_FAILURES, type ScheduleRow } from "./schedule-store";
 import { describeSchedule } from "./schedule";
 import type { ToolContext } from "@/lib/assistant/tools/types";
+import { getTools } from "@/lib/assistant/tools/registry";
+import { getAIClient } from "@/lib/ai/router";
+import { savePendingAction } from "@/lib/assistant/tools/pending-actions";
+import {
+  checkRoutine,
+  buildRepairPrompt,
+  readRepair,
+  applyRepairs,
+  describeRepairs,
+  type Repair,
+  type StepProblem,
+} from "./heal";
+import type { Routine, ToolStep } from "./types";
 
 export interface SweepResult {
   due: number;
@@ -102,6 +115,22 @@ async function runOne(row: ScheduleRow, now: Date): Promise<"done" | "waiting" |
     workspaceId: row.workspaceId,
   };
 
+  /* CHECKED BEFORE IT RUNS, not after it fails.
+   *
+   * The things a chain depends on move underneath it: a tool is renamed, a
+   * parameter shape changes, a role changes. Finding that out by running at
+   * 8am on a day somebody was counting on it is the worst possible time to
+   * find out, and the check is free and deterministic.
+   *
+   * A broken routine is NOT run. Executing the half of a chain that still
+   * works produces a partial answer that looks like a whole one, which is
+   * worse than an honest "this needs a decision from you". */
+  const health = checkRoutine(routine, getTools(), ctx.userRole);
+  if (!health.ok) {
+    await proposeRepair(row, routine, health.problems, ctx);
+    return "failed";
+  }
+
   const run = await runRoutine(routine, ctx, `sched:${row.id}:${now.getTime()}`);
 
   if (run.state === "failed") {
@@ -173,4 +202,103 @@ async function notifyQuietly(input: Parameters<typeof notify>[0]): Promise<void>
   } catch {
     /* The work still happened. */
   }
+}
+
+/**
+ * Work out what would fix a broken routine, and ask its owner.
+ *
+ * The repair is never applied here. A chain that rewrites itself is a chain
+ * nobody can reason about, and the reason routines are trusted with a mailbox
+ * at all is that they do only what they say. So this proposes, through the same
+ * confirm-or-cancel path every other action uses, and the person decides.
+ *
+ * Degrades all the way down: if the model cannot be reached, the proposal is
+ * still made from what the deterministic check found, offering to remove the
+ * broken steps. Somebody woken by "your routine is broken and here is nothing"
+ * has been given a chore rather than an answer.
+ */
+async function proposeRepair(
+  row: ScheduleRow,
+  routine: Routine,
+  problems: StepProblem[],
+  ctx: ToolContext,
+): Promise<void> {
+  const tools = getTools();
+  const repairs: Repair[] = [];
+
+  for (const problem of problems) {
+    const step = routine.steps[problem.stepIndex];
+    if (!step || step.kind !== "tool") continue;
+
+    /* A permission problem is NOT repairable by swapping tools. Somebody whose
+       role changed needs that conversation, and quietly substituting a weaker
+       tool would hide a decision the business made on purpose. */
+    if (problem.kind === "not_permitted") {
+      repairs.push({
+        stepIndex: problem.stepIndex,
+        action: "drop_step",
+        reason: `Your role can no longer run ${problem.tool}, so this step would come out. If that is wrong, it is an access question rather than a routine one.`,
+      });
+      continue;
+    }
+
+    try {
+      const res = await getAIClient().complete({
+        messages: [
+          { role: "user", content: buildRepairPrompt(problem, step as ToolStep, tools) },
+        ],
+        max_tokens: 200,
+        model_tier: "cheap",
+        metadata: {
+          feature: "assistant.routine_repair",
+          user_id: ctx.userId,
+          user_role: ctx.userRole,
+          ...(ctx.workspaceId ? { workspace_id: ctx.workspaceId } : {}),
+        },
+      });
+      repairs.push(readRepair(res.content, problem, tools, ctx.userRole));
+    } catch {
+      repairs.push({
+        stepIndex: problem.stepIndex,
+        action: "drop_step",
+        reason: `${problem.detail} I could not work out a replacement, so this step would come out.`,
+      });
+    }
+  }
+
+  if (repairs.length === 0) return;
+
+  const repaired = applyRepairs(routine, repairs);
+  await savePendingAction({
+    userId: row.userId,
+    toolName: "save_routine",
+    /* The repaired routine, ready to save under the same command. Saying yes
+       replaces it; saying nothing leaves the original alone. */
+    params: { routine: repaired, workspaceId: row.workspaceId },
+    description: `Repair "${routine.command}"`,
+  }).catch(() => undefined);
+
+  trackEvent("assistant.routine_repair_proposed", row.userId, ctx.userRole, {
+    routine_id: routine.id,
+    workspace_id: row.workspaceId,
+    problems: problems.length,
+    /* Which kinds break in the field, so the next thing to make robust is a
+       query rather than a guess. */
+    kinds: [...new Set(problems.map((p) => p.kind))].sort().join(","),
+    dropped: repairs.filter((r) => r.action === "drop_step").length,
+    replaced: repairs.filter((r) => r.action === "replace_tool").length,
+  });
+
+  await notifyQuietly({
+    userId: row.userId,
+    category: "system",
+    priority: "normal",
+    title: `${routine.command} needs a decision`,
+    body: describeRepairs(routine, repairs).slice(0, 1200),
+    actionUrl: "/assistant",
+    actionLabel: "Review the fix",
+    source: "routine_repair_proposed",
+    sourceId: `${row.id}:${routine.steps.length}`,
+    dedup: true,
+  });
 }
