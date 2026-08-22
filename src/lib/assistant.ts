@@ -11,6 +11,7 @@
  */
 
 import { matchRoutine, runRoutine, describeRun } from "@/lib/assistant/routines";
+import { matchSavedRoutine } from "@/lib/assistant/routines/saved";
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
 import { queryBrain, markCited as markBrainCited } from "@/lib/brain/query";
 import { neutralizeInjection } from "@/lib/brain/security";
@@ -815,7 +816,12 @@ export async function chat(
     ...(geo ? { geo } : {}),
   };
 
-  const routine = matchRoutine(message);
+  /* Built-ins first, then anything this person saved. Ours are checked first so
+     a saved chain can never shadow a documented command, which is also why
+     saveRoutine refuses to store one that collides. */
+  const routine =
+    matchRoutine(message) ??
+    (await matchSavedRoutine({ workspaceId: workspaceId ?? "default", userId }, message));
   if (routine) {
     const run = await runRoutine(routine, toolCtx, workflowId ?? `${convId}:${Date.now()}`);
     const answer = describeRun(routine, run);
@@ -1929,6 +1935,33 @@ async function executePendingAction(
     }
     return {
       answer: `I tried to save it, but the write was refused (${result.reason}). Nothing was stored.`,
+    };
+  }
+  if (row.tool_name === "save_routine") {
+    /* The end of the loop that starts with somebody describing their Monday:
+       they were shown a plan, they said yes, and this is where the chain
+       becomes something they can type tomorrow. */
+    const p = row.params as { routine?: unknown; workspaceId?: string };
+    const { saveRoutine } = await import("@/lib/assistant/routines/saved");
+    const routine = p.routine as import("@/lib/assistant/routines/types").Routine | undefined;
+    if (!routine || !Array.isArray(routine.steps)) {
+      return { answer: "That plan is no longer in front of me, so nothing was saved. Walk me through the day again and I will rebuild it." };
+    }
+    const result = await saveRoutine(
+      { workspaceId: p.workspaceId ?? workspaceId ?? "default", userId },
+      routine,
+    );
+    if (!result.ok) {
+      return { answer: `I could not save it: ${result.reason}. Nothing was stored.` };
+    }
+    const humanSteps = routine.steps.filter((s) => s.kind === "human").length;
+    return {
+      answer: [
+        `Saved. Type **${result.command}** and I will run it.`,
+        humanSteps > 0
+          ? `It stops and hands back to you at ${humanSteps === 1 ? "one step" : `${humanSteps} steps`}, and nothing is sent or filed without you confirming it.`
+          : "Nothing is sent or filed without you confirming it.",
+      ].join(" "),
     };
   }
   if (row.tool_name === "create_external_record") {

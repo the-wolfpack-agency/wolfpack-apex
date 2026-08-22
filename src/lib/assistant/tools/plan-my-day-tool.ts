@@ -32,6 +32,7 @@ import {
   draftRoutine,
   renderPlan,
 } from "@/lib/assistant/routines/day-plan";
+import { savePendingAction } from "./pending-actions";
 import type { ToolDef, ToolResult } from "./types";
 
 const ParamSchema = z.object({
@@ -110,6 +111,25 @@ export const planMyDayTool: ToolDef<Params, PlanData> = {
     const described = parseExtraction(raw);
     const plan = mapDay(described, tools, ctx.userRole);
     const draft = draftRoutine(plan, "from_your_day", "run my day");
+
+    /* THE OFFER HAS TO LEAD SOMEWHERE.
+     *
+     * The draft is held as a pending action so the person's "yes" saves it,
+     * through the confirm-or-cancel path every other action in the product
+     * already uses. Reusing it means "no" also works, and means this cannot
+     * become a second, subtly different way to agree to something.
+     *
+     * Nothing is written yet. A plan is a description of somebody's day, and
+     * quietly keeping a routine they have not agreed to would be the product
+     * deciding for them at exactly the moment it is asking. */
+    if (draft) {
+      await savePendingAction({
+        userId: ctx.userId,
+        toolName: "save_routine",
+        params: { routine: draft, workspaceId: ctx.workspaceId ?? "default" },
+        description: `Save the chain from the day you described as "${draft.command}"`,
+      }).catch(() => undefined);
+    }
 
     trackEvent("assistant.tool_invoked", ctx.userId, ctx.userRole, {
       tool: "plan_my_day",
