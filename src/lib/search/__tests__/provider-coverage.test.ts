@@ -54,6 +54,8 @@ const NON_TOOL_FILES = new Set([
  * doesn't fan into Universal Search.
  */
 export const SEARCH_PROVIDER_EXEMPT_TOOLS: Record<string, string> = {
+  "platform-scan-tool.ts":
+    "reports counts and coverage for the workspace's own scans, with no free-text corpus to search",
   "capabilities-tool.ts":
     "describes the registry itself, so searching it would return the product's own menu rather than a user's data",
   "aggregate-external-records-tool.ts":

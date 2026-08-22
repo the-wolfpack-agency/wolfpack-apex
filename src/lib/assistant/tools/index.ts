@@ -45,6 +45,7 @@ import "./execute-agent-widget-tool";
    answer: a literal teammate returns their roster info instead of
    the old "no contact match in the CRM" message. */
 import "./who-is-tool";
+import "./platform-scan-tool";
 import "./capabilities-tool";
 /* Order matters: search_external_records claims TYPED CRM phrasings
    ("find the contact for X", "look up account X", "find
