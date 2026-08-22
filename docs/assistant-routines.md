@@ -26,7 +26,7 @@ Nearly all of the parts are built. The missing piece is small and specific.
 | Hash-chained action ledger (`ogiam/ledger`) | built |
 | Human approval queue with TTL (`agents/approvals/store`) | built |
 | In-app notification on state change (`notifications/in-app`) | built |
-| Write tools shaped as `create_*_form` — a human confirms before anything lands | built |
+| Write tools shaped as `create_*_form`, where a human confirms before anything lands | built |
 | **Anything that runs more than one tool per message** | **missing** |
 
 The dispatcher returns "the result of the FIRST tool whose intent matches" and
@@ -41,7 +41,7 @@ things, and the third is the one that matters.
 1. **A tool step.** Run a registered tool with parameters, some of which may
    reference an earlier step's output.
 2. **A model step.** Ask the model to produce something from what the earlier
-   steps returned — a summary, a draft, a recommendation. Passes through the
+   steps returned: a summary, a draft, a recommendation. Passes through the
    router, so it inherits redaction, residency, the budget and the content
    policy shipped in #300.
 3. **A human step.** Stop. Show what has been produced. Wait.
@@ -54,7 +54,7 @@ for, and it is also the less valuable one.
 
 A routine that pauses is doing something no dashboard does: it records the
 handoff. When the chain stops at "review these three drafts" and resumes
-eleven minutes later, the ledger has a fact nobody had before — the exact
+eleven minutes later, the ledger has a fact nobody had before: the exact
 boundary between what the tech did and what the person did, and how long the
 person's part took.
 
@@ -75,7 +75,7 @@ layer, ranked by how much it is costing them.
 Each step's result is put in a named slot. A later step refers to a slot rather
 than re-fetching. `{{inbox}}` in step three means "what step one returned".
 
-This is deliberately dumb — string substitution into validated tool params,
+This is deliberately dumb, being string substitution into validated tool params,
 not a scripting language. A routine anyone can read is one an operator will
 trust; the moment it needs branching and loops it has stopped being a
 description of somebody's morning and become a program with no test suite.
@@ -94,7 +94,7 @@ gates, never a way around them.
 # The catalogue
 
 Every prompt below maps to a tool that exists today. Where a step has no tool
-yet, it is marked **[GAP]** with what would need building — those are proposals,
+yet, it is marked **[GAP]** with what would need building. Those are proposals,
 not capabilities, and no routine should be sold on them until they are built.
 
 ## Anyone: the morning
@@ -107,7 +107,7 @@ not capabilities, and no routine should be sold on them until they are built.
 | 4 | "What's waiting on me?" | `task_list_widget` |
 | 5 | "What did the team say I'd do?" | `get_goals` |
 
-**Chained — `run my morning`:**
+**Chained, as `run my morning`:**
 
 ```
 search_mail(since: yesterday)        -> inbox
@@ -132,7 +132,7 @@ sat down, and the only thing asked of them is the judgement in step 5.
 | 4 | "Draft a reply." | `create_email_form` |
 | 5 | "Log the follow-up." | `create_task_form` |
 
-**Chained — `clear my inbox`:**
+**Chained, as `clear my inbox`:**
 
 ```
 search_mail(unanswered: true, since: monday)  -> threads
@@ -145,7 +145,7 @@ create_task_form(follow_ups)                  -> HUMAN CONFIRMS
 ```
 
 Every send stops for a human. The chain writes the draft; it never presses
-send. That is not a limitation to be lifted later — it is the reason a person
+send. That is not a limitation to be lifted later. It is the reason a person
 will let it near their mailbox at all.
 
 ## Engineer: the state of everything
@@ -156,10 +156,10 @@ will let it near their mailbox at all.
 | 2 | "What issues are assigned to me?" | `search_github_issues` |
 | 3 | "Is CI green?" | `recent_workflow_runs` |
 | 4 | "What's deployed?" | `vercel_deployments_widget` |
-| 5 | "Scan the products for problems." | **[GAP]** — platform-scan exists in `src/lib/platform-scan` but is not exposed as a tool |
+| 5 | "Scan the products for problems." | **[GAP]**. platform-scan exists in `src/lib/platform-scan` but is not exposed as a tool |
 | 6 | "Tell the team it's ready for review." | `create_message_form` |
 
-**Chained — `where do things stand`:**
+**Chained, as `where do things stand`:**
 
 ```
 search_github_pull_requests(state: open)   -> prs
@@ -172,7 +172,7 @@ HUMAN: accept or reorder
 create_message_form(to: team, body: what's ready)   -> HUMAN CONFIRMS
 ```
 
-**Chained — `email to feature`:**
+**Chained, as `email to feature`:**
 
 ```
 search_mail(from: client, since: last week)  -> requests
@@ -192,10 +192,10 @@ the request came from, which nobody currently keeps.
 | 2 | "What's the revenue position?" | `get_financials_metric` |
 | 3 | "What's happening across the tools?" | `cross_tool_insights_widget` |
 | 4 | "What did the team ship?" | `search_github_pull_requests` |
-| 5 | "Produce the update." | **[GAP]** — no document generator |
-| 6 | "Put it in a deck." | **[GAP]** — no deck generator |
+| 5 | "Produce the update." | **[GAP]**. No document generator |
+| 6 | "Put it in a deck." | **[GAP]**. No deck generator |
 
-**Chained — `weekly review`:**
+**Chained, as `weekly review`:**
 
 ```
 get_goals()                        -> okrs
@@ -234,7 +234,7 @@ where do things stand
 weekly review
 ```
 
-A routine is created the way it is used — the assistant offers to save a
+A routine is created the way it is used: the assistant offers to save a
 sequence somebody has just performed by hand, rather than asking them to author
 one in a builder. Nobody sits down to design a workflow. They do notice, on the
 fourth Monday, that they have done the same six things again.
@@ -258,7 +258,7 @@ interface is picked up by all of it for free:
 `search_external_records`, `filter_external_records`,
 `aggregate_external_records`, `get_external_record`, `get_related_records`,
 `create_external_record`, `update_external_record`, `who_is`, and the CRM form
-executor — nine surfaces, no new tool code, and every routine in this document
+executor. Nine surfaces, no new tool code, and every routine in this document
 runs against it.
 
 The same shape already exists three times for real vendors (`hubspot`,
@@ -297,7 +297,7 @@ week, and do they have the stock to close them?"
 
 ## Ticketing and the rest
 
-Ticketing needs no new tool either — it needs a preset. Zendesk, Jira and
+Ticketing needs no new tool either. It needs a preset. Zendesk, Jira and
 ServiceNow are REST APIs with the same auth-header-and-paths shape the existing
 three presets describe, so each is a table entry rather than a feature.
 
@@ -317,5 +317,5 @@ create_message_form(to: dealer, body: the plan)     -> HUMAN CONFIRMS
 create_task_form(the rest)                          -> HUMAN CONFIRMS
 ```
 
-Six tools, two confirmations, one command — and every step is a thing somebody
+Six tools, two confirmations, one command, and every step is a thing somebody
 at that client already does by hand, in a different window each time.
