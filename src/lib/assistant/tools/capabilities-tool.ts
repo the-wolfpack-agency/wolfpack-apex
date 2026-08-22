@@ -130,6 +130,15 @@ export const capabilitiesTool: ToolDef<Params, CapabilitiesData> = {
       lines.push(...rest.slice(0, 8));
     }
 
+    /* THE MOST USEFUL THING THEY CAN TYPE, and it is not on the list above.
+       A person reading a capability list still has to map their own job onto
+       it, which is the translation this product is supposed to do for them.
+       Saying so here costs one line and turns a menu into a conversation. */
+    lines.push("");
+    lines.push(
+      "If none of that quite matches your job, describe your day instead: tell me what you do on a Monday, in order, and I will map it onto what I can and cannot do, then offer to chain the rest into one command.",
+    );
+
     if (withheldCount > 0) {
       lines.push("");
       /* Counted, not named. Saying HOW MANY is honest about the boundary;
