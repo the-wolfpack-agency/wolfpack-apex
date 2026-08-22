@@ -73,6 +73,14 @@ describe("the answer is read from the product, not written about it", () => {
     expect(res.answer).toMatch(/without you confirming/i);
   });
 
+  it("points at describing your day, which is the most useful thing to type next", async () => {
+    /* A capability list still asks the person to map their own job onto it,
+       which is the translation the product is supposed to do for them. */
+    const res = await answerFor("cto");
+    expect(res.answer).toMatch(/describe your day/i);
+    expect(res.answer).toMatch(/chain the rest into one command/i);
+  });
+
   it("never lists itself", async () => {
     const res = await answerFor("cto");
     expect(res.answer).not.toContain("what_can_you_do");

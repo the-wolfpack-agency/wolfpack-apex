@@ -55,6 +55,53 @@ interface IntegrationStatus {
 function buildStarterCategories(): StarterCategory[] {
   return [
     {
+      /* WHOLE JOBS FIRST, above every individual capability.
+       *
+       * Everything below this category answers one question. These run several
+       * tools in order and hand back to the person at each step that is
+       * theirs. Somebody scanning this panel for the first time should meet
+       * the thing that saves them twenty minutes before they meet the weather.
+       *
+       * No `requires`: the chains degrade honestly. A step whose connector is
+       * missing reports that step as unavailable rather than failing the run,
+       * and hiding the whole category until every integration is connected
+       * would keep them invisible on exactly the days somebody is setting up.
+       *
+       * These commands are asserted against the real routine catalogue in
+       * __tests__/starter-prompts-are-real.test.ts, so a routine that is
+       * renamed or removed fails the build rather than leaving a chip that
+       * does nothing. */
+      title: "Whole jobs, in one command",
+      emoji: "⛓️",
+      prompts: [
+        {
+          text: "what can you do",
+          description:
+            "Everything your role can run, read from the live registry rather than a written page.",
+        },
+        {
+          text: "run my morning",
+          description:
+            "Your calendar, your open tasks and a brief for your next meeting, then one pass over all three. Stops for you to accept or change the priorities.",
+        },
+        {
+          text: "where do things stand",
+          description:
+            "Open PRs and issues, what is blocked and in what order. Stops for you, then opens a message to the team.",
+        },
+        {
+          text: "weekly review",
+          description:
+            "Goals, revenue position and what moved across the tools, drafted for you to correct.",
+        },
+        {
+          text: "Here's what I do on a Monday: I read the overnight email, check my calendar, prep for the client call, rehearse the opening out loud, then send the team a status note.",
+          description:
+            "Describe your own day in your own words. You get back what it can already do, what is yours alone, what has nothing behind it yet, and an offer to chain the rest into one command.",
+        },
+      ],
+    },
+    {
       /* Always-on demo category — backed by free public APIs (no auth
          required). Lives at the top of the empty state so a brand-new
          user with zero integrations connected still has something

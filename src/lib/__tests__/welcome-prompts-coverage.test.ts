@@ -32,6 +32,7 @@ jest.mock("@/lib/analytics", () => ({
 import "@/lib/assistant/tools";
 
 import { getTools } from "@/lib/assistant/tools/registry";
+import { matchRoutine } from "@/lib/assistant/routines/catalogue";
 import { welcomePromptsForRole } from "@/lib/assistant/welcome-prompts";
 import { buildStarterCategoriesForTest } from "@/components/AssistantStarterPrompts";
 
@@ -62,6 +63,21 @@ const FREE_TEXT_ALLOWLIST: Record<string, string> = {
     "free/busy check (calendar-availability) consumes this; widget surface is correct.",
 };
 
+/**
+ * ROUTINES COUNT AS A CLAIM, and are checked FIRST.
+ *
+ * When this test was written a chip could only be answered by a tool. A
+ * routine is now matched ahead of tool dispatch in chat(), so a chip reading
+ * "run my morning" is claimed, correctly, by something that is not a tool.
+ * Without this the guard would push somebody to either delete the chip or
+ * write a regex for a tool that should not exist, and both are worse than the
+ * chip.
+ */
+function claimingRoutine(prompt: string): string | null {
+  const routine = matchRoutine(prompt);
+  return routine ? `routine:${routine.id}` : null;
+}
+
 /** Try every tool's matchIntent. Returns the tool name on first hit. */
 function claimingTool(prompt: string): string | null {
   for (const t of getTools()) {
@@ -83,7 +99,7 @@ describe("welcome-prompts coverage — every chip routes to a tool", () => {
       expect(prompts.length).toBeGreaterThanOrEqual(3);
       expect(prompts.length).toBeLessThanOrEqual(6);
       for (const p of prompts) {
-        const claim = claimingTool(p.text);
+        const claim = claimingRoutine(p.text) ?? claimingTool(p.text);
         const allow = FREE_TEXT_ALLOWLIST[p.text];
         if (!claim && !allow) {
           throw new Error(
@@ -106,7 +122,7 @@ describe("AssistantStarterPrompts coverage — every chip routes to a tool", () 
     const broken: Array<{ category: string; prompt: string }> = [];
     for (const cat of cats) {
       for (const p of cat.prompts) {
-        if (claimingTool(p.text)) continue;
+        if (claimingRoutine(p.text) ?? claimingTool(p.text)) continue;
         if (FREE_TEXT_ALLOWLIST[p.text]) continue;
         broken.push({ category: cat.title, prompt: p.text });
       }
@@ -192,13 +208,13 @@ describe("required-tools coverage — every shipped tool is advertised somewhere
     const advertised = new Set<string>();
     for (const role of ROLES) {
       for (const p of welcomePromptsForRole(role as string | null)) {
-        const c = claimingTool(p.text);
+        const c = claimingRoutine(p.text) ?? claimingTool(p.text);
         if (c) advertised.add(c);
       }
     }
     for (const cat of buildStarterCategoriesForTest()) {
       for (const p of cat.prompts) {
-        const c = claimingTool(p.text);
+        const c = claimingRoutine(p.text) ?? claimingTool(p.text);
         if (c) advertised.add(c);
       }
     }
