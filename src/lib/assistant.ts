@@ -10,6 +10,7 @@
  * AI responses are cached in instinct_knowledge for future zero-token retrieval.
  */
 
+import { matchRoutine, runRoutine, describeRun } from "@/lib/assistant/routines";
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
 import { queryBrain, markCited as markBrainCited } from "@/lib/brain/query";
 import { neutralizeInjection } from "@/lib/brain/security";
@@ -782,14 +783,24 @@ export async function chat(
        and fall through. */
   }
 
-  // --- Priority -2: Deterministic tool dispatch ---
-  // Phase 1 of the agentic-executor work. Before any cache / RAG / LLM,
-  // try to match the question to a deterministic tool (see
-  // src/lib/assistant/tools/). Tools answer parameterized questions
-  // ("what do we know about X", "did <client> pay this month") by
-  // reading from a typed data source, zero LLM tokens. If no tool's
-  // intent matches, fall through to the existing priority chain.
-  const toolResult = await tryDispatchTool(message, {
+  /* --- Priority -3: A saved routine, before any single tool ---
+   *
+   * ORDER MATTERS AND IT IS NOT ARBITRARY. "run my morning" contains words
+   * that several tool intents match, so if this ran after tool dispatch the
+   * command would be swallowed by whichever tool matched first, and the person
+   * would get a calendar instead of their morning.
+   *
+   * The match is exact (see catalogue.matchRoutine): a five-step chain that
+   * fires at somebody who was asking a question is much worse than one that
+   * failed to recognise its own name.
+   *
+   * A routine costs no model tokens unless one of its own steps is a model
+   * step -- the point of the feature is that it operates the tools you already
+   * have from one place, and asks a model only where judgement is required. */
+  /* ONE CONTEXT, BOTH PATHS. A routine dispatches the same tools a message
+     does, and building the context twice is how the two quietly come to
+     disagree about which workspace the caller is in. */
+  const toolCtx = {
     userId,
     userRole,
     /* Workspace flows in from the session via the chat() arg —
@@ -802,7 +813,31 @@ export async function chat(
        location fallback when the user's message didn't capture a
        specific city — fixes the NYC-user-gets-Houston bug. */
     ...(geo ? { geo } : {}),
-  });
+  };
+
+  const routine = matchRoutine(message);
+  if (routine) {
+    const run = await runRoutine(routine, toolCtx, workflowId ?? `${convId}:${Date.now()}`);
+    const answer = describeRun(routine, run);
+    const msgId = await dbSaveMessage(convId, "assistant", answer, "tool", 0);
+    await dbUpdateConversationStats(convId, 0);
+    return {
+      response: answer,
+      source: "tool",
+      tokensUsed: 0,
+      conversationId: convId,
+      messageId: msgId,
+    };
+  }
+
+  // --- Priority -2: Deterministic tool dispatch ---
+  // Phase 1 of the agentic-executor work. Before any cache / RAG / LLM,
+  // try to match the question to a deterministic tool (see
+  // src/lib/assistant/tools/). Tools answer parameterized questions
+  // ("what do we know about X", "did <client> pay this month") by
+  // reading from a typed data source, zero LLM tokens. If no tool's
+  // intent matches, fall through to the existing priority chain.
+  const toolResult = await tryDispatchTool(message, toolCtx);
   if (toolResult && toolResult.result.ok) {
     /* Extract connector attribution from the tool's typed result data
        when present (CRM/GitHub tools all put `connector` at the top
