@@ -71,6 +71,26 @@ export interface ModelStep {
   label: string;
 }
 
+/**
+ * The two different things a person is asked for, which are not the same thing.
+ *
+ * "review" is a checkpoint on the machine's work: read this draft, accept this
+ * order, correct this narrative. The tools did something and a person decides
+ * whether it is right.
+ *
+ * "do" is work that involves no tool at all. Rehearse the pitch out loud. Ring
+ * the client rather than emailing. Walk the floor before the review. Nothing in
+ * software can perform these, and for a client-facing role they are frequently
+ * the steps that decide whether the week went well.
+ *
+ * They are separated because the INTERESTING measurement differs. A review that
+ * is always accepted unchanged is a pause worth deleting. A "do" that is always
+ * skipped is something else entirely: either it does not matter and should come
+ * out of the routine, or it matters and is quietly not happening, which is a
+ * fact about how the work is actually going that nobody currently holds.
+ */
+export type HumanAction = "review" | "do";
+
 export interface HumanStep {
   kind: "human";
   /** What the person is being asked to do. A pause with no question is just a
@@ -79,6 +99,20 @@ export interface HumanStep {
   /** Slots to put in front of them so the ask is answerable without hunting
    *  back through the run. */
   show?: SlotName[];
+  /**
+   * Which kind of ask this is. Defaults to "review", because that is what a
+   * step following tool output almost always means, and because an unmarked
+   * step should not be counted as a missed human action.
+   */
+  action?: HumanAction;
+  /**
+   * Why this step is here, in the person's terms, shown when they are asked.
+   *
+   * Optional, and worth writing for a "do": somebody told to rehearse at 4pm
+   * with no reason attached will skip it, and the skip will look like the step
+   * was pointless rather than unexplained.
+   */
+  why?: string;
 }
 
 export type RoutineStep = ToolStep | ModelStep | HumanStep;
@@ -110,6 +144,17 @@ export interface StepOutcome {
   durationMs: number;
   /** Present on a failure, in the words the person needs, not a stack. */
   error?: string;
+  /** For a human step: which kind of ask it was. */
+  action?: HumanAction;
+  /**
+   * For a human step the person SKIPPED rather than did.
+   *
+   * Recorded plainly and without penalty. A routine that punishes a skip gets
+   * one of two responses, both useless: people stop running it, or they tick
+   * the box without doing the thing. Either way the measurement dies, and the
+   * measurement is the entire point.
+   */
+  skipped?: boolean;
   /** The user-facing answer this step produced, when it produced one. */
   answer?: string;
   /** Slot written, for reading a run back without re-deriving it. */

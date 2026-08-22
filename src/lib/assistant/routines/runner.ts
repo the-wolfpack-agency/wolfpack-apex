@@ -113,6 +113,10 @@ export async function advance(
         label: step.label,
         status: "waiting",
         durationMs: 0,
+        /* Unmarked steps count as reviews. An ordinary checkpoint miscounted as
+           a missed human action would put a false signal into the very insight
+           this distinction exists to produce. */
+        action: step.action ?? "review",
       });
       return {
         ...run,
@@ -154,19 +158,29 @@ export async function resume(
   routine: Routine,
   run: RoutineRun,
   deps: RunnerDeps,
-  pausedAt?: number | null,
+  opts: { pausedAt?: number | null; skipped?: boolean } = {},
 ): Promise<RoutineRun> {
   if (run.state !== "waiting_for_human") return run;
 
-  const from = pausedAt ?? run.pausedAt ?? null;
+  const from = opts.pausedAt ?? run.pausedAt ?? null;
   const waited = from ? Math.max(0, deps.now() - from) : 0;
   const outcomes = [...run.outcomes];
   const last = outcomes[outcomes.length - 1];
   if (last && last.status === "waiting") {
     /* The human step's own duration IS the wait. Keeping it on the step rather
        than only in a total is what lets "which step do people stall on" be a
-       query instead of an investigation. */
-    outcomes[outcomes.length - 1] = { ...last, status: "ok", durationMs: waited };
+       query instead of an investigation.
+     *
+     * A SKIP IS RECORDED, NOT REFUSED. The chain carries on either way: a
+     * routine that blocks until somebody ticks a box teaches them to tick the
+     * box, and a ticked box that means nothing is worse than an honest skip.
+     * The skip is the finding. */
+    outcomes[outcomes.length - 1] = {
+      ...last,
+      status: opts.skipped ? "skipped" : "ok",
+      durationMs: waited,
+      ...(opts.skipped ? { skipped: true } : {}),
+    };
   }
 
   return advance(
@@ -176,7 +190,11 @@ export async function resume(
       state: "running",
       cursor: run.cursor + 1,
       outcomes,
-      humanMs: run.humanMs + waited,
+      /* A skipped step's wait is elapsed time, not time somebody spent on the
+         work. Counting it as human effort would inflate exactly the number
+         used to argue that a step is expensive, using the runs where nobody
+         did it. */
+      humanMs: run.humanMs + (opts.skipped ? 0 : waited),
       pausedAt: null,
     },
     deps,
