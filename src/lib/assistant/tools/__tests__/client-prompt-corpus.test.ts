@@ -57,6 +57,18 @@ const MUST_NOT_MATCH: Array<[string, string]> = [
   ["what did the technician write on the repair order?", "service work, no tool yet"],
   ["my customer is angry about a delay, what do I say?", "advice, not a lookup"],
   ["the car arrived damaged, who do I tell?", "arrived contains arr"],
+  /* The other side of widening the capability matcher. Each of these
+     carries an OBJECT, which is the whole discriminator: asking what the
+     assistant can help with is asking for the menu, asking what it can
+     help with ON THE ACKERMAN CLAIM is asking about a claim. A capability
+     tool that swallowed these would answer confidently and never say it
+     was unsure, which is a worse failure than the one it fixed. */
+  ["what can you help me with on the Ackerman claim?", "capability phrasing, real object"],
+  ["how can you help me fix this invoice", "capability phrasing, real object"],
+  ["can you help me with the warranty claim", "capability phrasing, real object"],
+  ["what do you do about a rejected claim?", "capability phrasing, real object"],
+  ["where do I start the claim from?", "capability phrasing, real object"],
+  ["what should I ask the technician?", "capability phrasing, real object"],
 ];
 
 describe("prompts a dealership types that no tool should claim", () => {
@@ -92,6 +104,20 @@ const MUST_MATCH: Array<[string, string[]]> = [
   ["what are my ideal times of day?", ["schedule_health"]],
   ["compare contacts across systems", ["compare_across_sources"]],
   ["what is in the legacy database that nobody uses?", ["dark_data"]],
+  /* THE FIRST THING ANYBODY TYPES.
+     "what can you do?" worked and "what can you actually do for me
+     today?" spent 1,483 tokens to say it had no confident answer. Five of
+     ten ordinary phrasings missed, including the two commonest. It is the
+     worst question to fail: the answer to it is the only thing standing
+     between a new user and giving up. */
+  ["what can you do?", ["what_can_you_do"]],
+  ["what can you actually do for me today?", ["what_can_you_do"]],
+  ["what can you help me with?", ["what_can_you_do"]],
+  ["how can you help?", ["what_can_you_do"]],
+  ["what should I ask you?", ["what_can_you_do"]],
+  ["where do I start?", ["what_can_you_do"]],
+  ["what are you able to do", ["what_can_you_do"]],
+  ["help", ["what_can_you_do"]],
 ];
 
 describe("prompts that must reach the tool built for them", () => {
@@ -103,20 +129,22 @@ describe("prompts that must reach the tool built for them", () => {
   });
 });
 
-describe("no tool answers for a whole domain it does not cover", () => {
-  it("does not let one tool claim more than a couple of these at once", () => {
-    /* A matcher broad enough to claim most of a corpus is not a matcher,
-       it is a catch-all, and a catch-all is how a confident wrong answer
-       gets delivered. Counted across the prompts that SHOULD land
-       somewhere, since a tool legitimately owning its own domain is the
-       point. */
-    const counts = new Map<string, number>();
-    for (const [prompt] of MUST_MATCH) {
+describe("no tool answers for a domain it does not cover", () => {
+  it("never claims a prompt that belongs to somebody else", () => {
+    /* The first version of this counted how many prompts each tool
+       claimed and complained past a threshold. That was the wrong
+       measure: the capability tool legitimately owns eight phrasings
+       BECAUSE THEY ARE ALL THE SAME QUESTION, and a count cannot tell
+       that from a catch-all.
+       What actually matters is trespass. For every prompt with a known
+       owner, any other tool claiming it is answering for a domain it does
+       not cover, and that is the failure this corpus exists to catch. */
+    const trespass: string[] = [];
+    for (const [prompt, acceptable] of MUST_MATCH) {
       for (const name of claimants(prompt)) {
-        counts.set(name, (counts.get(name) ?? 0) + 1);
+        if (!acceptable.includes(name)) trespass.push(`${name} <- "${prompt}"`);
       }
     }
-    const greedy = [...counts.entries()].filter(([, n]) => n > 4);
-    expect(greedy.map(([n, c]) => `${n} claims ${c}`)).toEqual([]);
+    expect(trespass).toEqual([]);
   });
 });
