@@ -16,6 +16,7 @@ import {
   describeRun,
   detectResumeIntent,
   resumeWaitingRoutine,
+  pendingQuestion,
 } from "@/lib/assistant/routines";
 import { matchSavedRoutine } from "@/lib/assistant/routines/saved";
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
@@ -872,6 +873,27 @@ export async function chat(
    * Until this existed the product told people "reply to carry on" and nothing
    * listened. A promise in the product's own words that nothing implements is
    * worse than not making it. */
+  /* A RUN WAITING ON A QUESTION takes the next message as its answer, whatever
+     it says. That is the opposite rule from a checkpoint pause, and correctly
+     so: a question was asked, and the reply to a question is an answer. Asking
+     somebody to also say a magic word first would be the product being obtuse
+     about something it started. */
+  const askedQuestion = await pendingQuestion(toolCtx);
+  if (askedQuestion) {
+    const answered = await resumeWaitingRoutine(toolCtx, "answer", undefined, message);
+    if (answered) {
+      const msgId = await dbSaveMessage(convId, "assistant", answered.answer, "tool", 0);
+      await dbUpdateConversationStats(convId, 0);
+      return {
+        response: answered.answer,
+        source: "tool",
+        tokensUsed: 0,
+        conversationId: convId,
+        messageId: msgId,
+      };
+    }
+  }
+
   const resumeIntent = detectResumeIntent(message);
   if (resumeIntent !== "none") {
     const resumed = await resumeWaitingRoutine(toolCtx, resumeIntent);

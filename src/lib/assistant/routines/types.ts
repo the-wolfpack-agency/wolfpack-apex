@@ -57,6 +57,25 @@ export interface ToolStep {
   tool: string;
   /** Parameters, with {{slot}} references substituted before validation. */
   params: Record<string, unknown>;
+  /**
+   * Parameters this step has to ASK FOR, as key to question.
+   *
+   * The ceiling this removes: searching mail needs to know what to search for,
+   * and listing CI runs needs a repository. There is no sensible default for
+   * either, so until now they could not be steps at all and became gaps. A
+   * chain could gather things but never look anything up.
+   *
+   * Asking is not a new mechanism. A step that needs a value pauses exactly as
+   * a human step does, the person answers in their next message, and the run
+   * carries on. The difference from a human step is only what the pause is
+   * for: one waits for somebody to DO something, this waits for them to SAY
+   * something.
+   *
+   * The question is written by whoever wrote the routine, so it can be
+   * specific ("which repository?") rather than a generic prompt for a
+   * parameter name nobody outside this codebase has heard of.
+   */
+  ask?: Record<string, string>;
   /** What the person sees while it runs. Written for them, not for a log. */
   label: string;
 }
@@ -133,6 +152,15 @@ export interface Routine {
 /** What a step did, or why it did not. */
 export type StepStatus = "ok" | "failed" | "skipped" | "waiting";
 
+/** The question a paused run is waiting on, when it is waiting for a VALUE. */
+export interface PendingAsk {
+  stepIndex: number;
+  /** The parameter being filled. */
+  key: string;
+  /** What to put in front of the person, in the routine author's words. */
+  question: string;
+}
+
 export interface StepOutcome {
   index: number;
   kind: RoutineStep["kind"];
@@ -181,6 +209,18 @@ export interface RoutineRun {
   /** Total time spent WAITING FOR A PERSON. The number that turns "this
    *  routine feels slow" into "step four costs eleven minutes a day". */
   humanMs: number;
+  /**
+   * Values the person supplied for steps that asked, keyed "stepIndex:param".
+   *
+   * PERSISTED, unlike slots, and the difference is what they contain. A slot
+   * holds whatever a tool returned: mail bodies, customer history, draft
+   * replies. An answer is a short thing somebody typed on purpose, knowing it
+   * was going into a workflow, and it has to survive between messages or the
+   * step that asked could never run.
+   */
+  answers?: Record<string, string>;
+  /** Set when the run stopped because a step needs a value. */
+  pendingAsk?: PendingAsk | null;
   /**
    * When the run stopped at a human step, as a millisecond timestamp.
    *

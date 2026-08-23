@@ -98,6 +98,7 @@ export async function advance(
   let cursor = run.cursor;
   const outcomes = [...run.outcomes];
   const slots = { ...run.slots };
+  const answers = { ...(run.answers ?? {}) };
   let techMs = run.techMs;
 
   while (cursor < routine.steps.length) {
@@ -124,26 +125,61 @@ export async function advance(
         cursor,
         outcomes,
         slots,
+        answers,
         techMs,
         pausedAt: deps.now(),
+        pendingAsk: null,
       };
     }
 
+    /* A STEP THAT NEEDS A VALUE PAUSES, exactly as a human step does.
+     *
+     * Checked before the step runs and before its parameters are validated,
+     * because a missing value is not a validation failure to report: it is a
+     * question to ask. Reported as a failure it would read as the tool being
+     * broken. */
+    if (step.kind === "tool" && step.ask) {
+      const unanswered = Object.entries(step.ask).find(
+        ([key]) => !(answers[`${cursor}:${key}`] ?? "").trim(),
+      );
+      if (unanswered) {
+        const [key, question] = unanswered;
+        outcomes.push({
+          index: cursor,
+          kind: "tool",
+          label: step.label,
+          status: "waiting",
+          durationMs: 0,
+        });
+        return {
+          ...run,
+          state: "waiting_for_human",
+          cursor,
+          outcomes,
+          slots,
+          answers,
+          techMs,
+          pausedAt: deps.now(),
+          pendingAsk: { stepIndex: cursor, key, question },
+        };
+      }
+    }
+
     const started = deps.now();
-    const outcome = await runStep(step, slots, deps);
+    const outcome = await runStep(step, slots, deps, answers, cursor);
     outcome.index = cursor;
     outcome.durationMs = Math.max(0, deps.now() - started);
     techMs += outcome.durationMs;
     outcomes.push(outcome);
 
     if (outcome.status === "failed") {
-      return { ...run, state: "failed", cursor, outcomes, slots, techMs };
+      return { ...run, state: "failed", cursor, outcomes, slots, answers, techMs };
     }
 
     cursor += 1;
   }
 
-  return { ...run, state: "done", cursor, outcomes, slots, techMs };
+  return { ...run, state: "done", cursor, outcomes, slots, answers, techMs };
 }
 
 /**
@@ -158,9 +194,37 @@ export async function resume(
   routine: Routine,
   run: RoutineRun,
   deps: RunnerDeps,
-  opts: { pausedAt?: number | null; skipped?: boolean } = {},
+  opts: { pausedAt?: number | null; skipped?: boolean; answer?: string } = {},
 ): Promise<RoutineRun> {
   if (run.state !== "waiting_for_human") return run;
+
+  /* A RUN WAITING FOR A VALUE resumes differently from one waiting for a
+     person to do something. It does not advance the cursor: the step that
+     asked has not run yet, and it is the same step that runs next, now with
+     the answer in hand. Advancing here would skip the very step the question
+     was for. */
+  if (run.pendingAsk) {
+    const answer = (opts.answer ?? "").trim();
+    if (!answer) return run;
+    const outcomes = [...run.outcomes];
+    const last = outcomes[outcomes.length - 1];
+    if (last && last.status === "waiting") outcomes.pop();
+    return advance(
+      routine,
+      {
+        ...run,
+        state: "running",
+        outcomes,
+        answers: {
+          ...(run.answers ?? {}),
+          [`${run.pendingAsk.stepIndex}:${run.pendingAsk.key}`]: answer,
+        },
+        pendingAsk: null,
+        pausedAt: null,
+      },
+      deps,
+    );
+  }
 
   const from = opts.pausedAt ?? run.pausedAt ?? null;
   const waited = from ? Math.max(0, deps.now() - from) : 0;
@@ -206,6 +270,8 @@ async function runStep(
   step: ToolStep | ModelStep,
   slots: Record<string, unknown>,
   deps: RunnerDeps,
+  answers: Record<string, string> = {},
+  stepIndex = 0,
 ): Promise<StepOutcome> {
   const base: StepOutcome = {
     index: 0,
@@ -224,7 +290,14 @@ async function runStep(
       return { ...base, answer };
     }
 
-    const params = interpolate(step.params, slots);
+    /* The person's answers win over whatever the routine carried, because the
+       whole point of asking was that the routine could not know. */
+    const supplied: Record<string, unknown> = { ...step.params };
+    for (const key of Object.keys(step.ask ?? {})) {
+      const value = answers[`${stepIndex}:${key}`];
+      if (value !== undefined) supplied[key] = value;
+    }
+    const params = interpolate(supplied, slots);
     const res = await deps.dispatchTool(step.tool, params);
     if (!res) {
       /* A routine saved against a tool that no longer exists. Named plainly,
