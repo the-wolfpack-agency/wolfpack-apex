@@ -64,6 +64,23 @@ export interface RestConnectorConfig {
   vendorPreset?: VendorPreset | null;
 }
 
+/**
+ * How long we wait for somebody else's system before giving up.
+ *
+ * There was no timeout at all, and a server that accepts the connection
+ * and never answers made the call hang indefinitely. Mocked fetch
+ * cannot show this: it always resolves. A real HTTP server that simply
+ * does not reply showed it in eight seconds.
+ *
+ * It matters most exactly where this product is aimed. A legacy system
+ * behind a flaky VPN does not usually refuse a connection, it accepts
+ * it and goes quiet, and an assistant chain waiting on it stalls with
+ * no error to report. On a serverless function it burns the whole
+ * execution budget and the user sees a blank response rather than "that
+ * system did not answer".
+ */
+export const CONNECTOR_TIMEOUT_MS = 15_000;
+
 export class RestConnector implements Connector {
   readonly name: string;
   readonly description = "Generic REST API adapter (configurable per tenant via env).";
@@ -99,6 +116,13 @@ export class RestConnector implements Connector {
   }
 
   objectTypes(): string[] {
+    /* A vendor preset is a statement about what that system actually
+       holds. The generic default map adds invoice, payment and account
+       to every connector, so before this the overlap analysis reported
+       that invoices lived in both HubSpot and Salesforce when neither
+       preset maps an invoice endpoint at all. A fabricated overlap is
+       worse than a missing one: it is the first thing a client checks. */
+    if (this.vendorPreset?.objectMap) return Object.keys(this.vendorPreset.objectMap);
     return Object.keys(this.objectMap);
   }
 
@@ -196,14 +220,22 @@ export class RestConnector implements Connector {
           Authorization: this.authHeader!,
           Accept: "application/json",
         },
+        signal: AbortSignal.timeout(CONNECTOR_TIMEOUT_MS),
       });
     } catch (err) {
       const durationMs = Date.now() - start;
       emit(this.name, "request_failed", durationMs, "network", path, shape);
+      /* A timeout and a refused connection are both "network", and they
+         mean opposite things to whoever has to fix it: one system is
+         down, the other is up and not answering. Saying which is the
+         difference between a useful message and a shrug. */
+      const timedOut = (err as Error)?.name === "TimeoutError" || (err as Error)?.name === "AbortError";
       return {
         ok: false,
         code: "network",
-        message: `connector ${this.name} network error: ${(err as Error)?.message ?? "unknown"}`,
+        message: timedOut
+          ? `${this.name} did not respond within ${CONNECTOR_TIMEOUT_MS / 1000}s`
+          : `connector ${this.name} network error: ${(err as Error)?.message ?? "unknown"}`,
         durationMs,
       };
     }
@@ -410,6 +442,7 @@ export class RestConnector implements Connector {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(CONNECTOR_TIMEOUT_MS),
       });
     } catch (err) {
       const durationMs = Date.now() - start;
